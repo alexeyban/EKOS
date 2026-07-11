@@ -370,6 +370,11 @@ mod tests {
     use tempfile::TempDir;
 
     const ECOMMERCE_SQL: &str = include_str!("../../../../tests/fixtures/ecommerce.sql");
+    /// Near-real, open-source fixture: a hand-cleaned ANSI subset of Microsoft's Northwind
+    /// sample schema (MIT-licensed; see the fixture file's header for provenance). Deeper
+    /// FK graph (13 tables) than `ecommerce.sql`, used to test structural recovery at a more
+    /// realistic scale.
+    const NORTHWIND_SQL: &str = include_str!("../../../../tests/fixtures/northwind.sql");
 
     fn make_ctx(dir: &TempDir) -> PassContext {
         use std::sync::Arc;
@@ -396,6 +401,42 @@ mod tests {
         // orders→customers, order_items→orders, order_items→products, payments→orders,
         // products→categories, categories→categories (self-ref)
         assert!(graph.relationships.len() >= 5, "expected ≥5 FK relationships, got {}", graph.relationships.len());
+    }
+
+    #[test]
+    fn northwind_structural_parse_extracts_thirteen_tables() {
+        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql");
+        assert_eq!(
+            graph.objects.len(),
+            13,
+            "northwind schema has 13 tables (Employees, Categories, Customers, Shippers, \
+             Suppliers, Orders, Products, Order Details, Region, Territories, \
+             EmployeeTerritories, CustomerDemographics, CustomerCustomerDemo)"
+        );
+    }
+
+    #[test]
+    fn northwind_structural_parse_extracts_deep_fk_graph() {
+        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql");
+        // A much deeper FK graph than ecommerce.sql's — real Northwind has 14 FK edges
+        // across its 13 tables (including Employees' self-referential ReportsTo).
+        assert!(
+            graph.relationships.len() >= 12,
+            "expected a deep FK graph (>=12 edges), got {}",
+            graph.relationships.len()
+        );
+    }
+
+    #[test]
+    fn northwind_structural_parse_finds_order_details_composite_pk_table() {
+        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql");
+        // sqlparser's ObjectName::to_string() preserves the original quote style, so a
+        // double-quoted identifier's name retains literal `"` characters.
+        let order_details = graph
+            .objects
+            .iter()
+            .find(|o| o.name.to_lowercase().replace('"', "") == "order details");
+        assert!(order_details.is_some(), "Order Details table (quoted, contains a space) must parse");
     }
 
     #[test]

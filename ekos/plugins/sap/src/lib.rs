@@ -215,8 +215,54 @@ mod tests {
         }
     }
 
+    /// Real entity sets from SAP's own public **GWSAMPLE_BASIC** demo Gateway service —
+    /// the exact reference service SAP publishes in its public OData tutorials (near-real,
+    /// open-source test data — see RFC 0012 / devlog on "near-real data" fixtures).
+    fn gwsample_basic_business_objects() -> Vec<BusinessObject> {
+        vec![
+            BusinessObject {
+                name: "BusinessPartner".into(),
+                entity_set: "BusinessPartnerSet".into(),
+                description: Some("Customers and vendors in the sample business scenario".into()),
+            },
+            BusinessObject {
+                name: "Product".into(),
+                entity_set: "ProductSet".into(),
+                description: Some("Products available for sale".into()),
+            },
+            sample_bo(),
+            BusinessObject {
+                name: "SalesOrderLineItem".into(),
+                entity_set: "SalesOrderLineItemSet".into(),
+                description: Some("Line items belonging to a sales order".into()),
+            },
+            BusinessObject {
+                name: "Contact".into(),
+                entity_set: "ContactSet".into(),
+                description: Some("Contact persons for a business partner".into()),
+            },
+        ]
+    }
+
     fn sample_org_unit() -> OrganizationalUnit {
         OrganizationalUnit { id: "1000".into(), name: "Sales EMEA".into(), parent_id: None }
+    }
+
+    /// Small real-shaped org hierarchy: a corporate root with two regional units beneath it.
+    fn sample_org_hierarchy() -> Vec<OrganizationalUnit> {
+        vec![
+            OrganizationalUnit { id: "10000000".into(), name: "Corporate".into(), parent_id: None },
+            OrganizationalUnit {
+                id: "10001000".into(),
+                name: "Sales EMEA".into(),
+                parent_id: Some("10000000".into()),
+            },
+            OrganizationalUnit {
+                id: "10002000".into(),
+                name: "Sales Americas".into(),
+                parent_id: Some("10000000".into()),
+            },
+        ]
     }
 
     #[tokio::test]
@@ -261,5 +307,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pkg1.artifacts[0].id, pkg2.artifacts[0].id);
+    }
+
+    #[tokio::test]
+    async fn gwsample_basic_landscape_emits_all_business_objects_and_org_units() {
+        let client = Arc::new(MockSapClient::new(
+            gwsample_basic_business_objects(),
+            sample_org_hierarchy(),
+        ));
+        let observer = SapObserver::new(client);
+        let ctx = ScanContext::new(".");
+        let pkg = observer.scan(&ctx).await.unwrap();
+        assert_eq!(pkg.len(), 5 + 3, "5 GWSAMPLE_BASIC entity sets + 3 org units");
+    }
+
+    #[tokio::test]
+    async fn org_hierarchy_preserves_parent_child_structure() {
+        let client =
+            Arc::new(MockSapClient::new(vec![], sample_org_hierarchy()));
+        let observer = SapObserver::new(client);
+        let ctx = ScanContext::new(".");
+        let pkg = observer.scan(&ctx).await.unwrap();
+
+        let sales_emea = pkg.artifacts.iter().find(|a| a.content.target == "10001000").unwrap();
+        assert_eq!(sales_emea.content.data["parent_id"], "10000000");
+
+        let corporate = pkg.artifacts.iter().find(|a| a.content.target == "10000000").unwrap();
+        assert!(corporate.content.data["parent_id"].is_null());
     }
 }

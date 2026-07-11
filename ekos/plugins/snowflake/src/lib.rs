@@ -183,6 +183,33 @@ mod tests {
         }
     }
 
+    /// A realistic multi-schema account: `information_schema.tables`-shaped rows spanning
+    /// two schemas and both real Snowflake object types (`TABLE`, `VIEW`) — near-real,
+    /// open-source test data (see RFC 0012 / devlog on "near-real data" fixtures).
+    fn sample_account_objects() -> Vec<SchemaObject> {
+        vec![
+            SchemaObject {
+                database: "ANALYTICS".into(),
+                schema: "RAW".into(),
+                name: "CUSTOMERS".into(),
+                object_type: "TABLE".into(),
+            },
+            SchemaObject {
+                database: "ANALYTICS".into(),
+                schema: "RAW".into(),
+                name: "PRODUCTS".into(),
+                object_type: "TABLE".into(),
+            },
+            orders_table(),
+            SchemaObject {
+                database: "ANALYTICS".into(),
+                schema: "PUBLIC".into(),
+                name: "ORDER_SUMMARY".into(),
+                object_type: "VIEW".into(),
+            },
+        ]
+    }
+
     #[tokio::test]
     async fn emits_one_artifact_per_schema_object() {
         let client = Arc::new(MockSnowflakeClient::new(vec![orders_table()]));
@@ -191,6 +218,29 @@ mod tests {
         let pkg = observer.scan(&ctx).await.unwrap();
         assert_eq!(pkg.len(), 1);
         assert_eq!(pkg.artifacts[0].content.target, "ANALYTICS.PUBLIC.ORDERS");
+    }
+
+    #[tokio::test]
+    async fn multi_schema_account_distinguishes_tables_and_views() {
+        let client = Arc::new(MockSnowflakeClient::new(sample_account_objects()));
+        let observer = SnowflakeObserver::new(client);
+        let ctx = ScanContext::new(".");
+        let pkg = observer.scan(&ctx).await.unwrap();
+        assert_eq!(pkg.len(), 4);
+
+        let view = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.target == "ANALYTICS.PUBLIC.ORDER_SUMMARY")
+            .unwrap();
+        assert_eq!(view.content.data["object_type"], "VIEW");
+
+        let raw_schema_tables: Vec<_> = pkg
+            .artifacts
+            .iter()
+            .filter(|a| a.content.data["schema"] == "RAW")
+            .collect();
+        assert_eq!(raw_schema_tables.len(), 2, "CUSTOMERS and PRODUCTS both live in the RAW schema");
     }
 
     #[tokio::test]

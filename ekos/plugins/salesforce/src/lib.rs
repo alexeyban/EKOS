@@ -198,26 +198,68 @@ impl Observer for SalesforceObserver {
 mod tests {
     use super::*;
 
+    /// Real Salesforce standard-object field shape for `Account`, per Salesforce's public
+    /// REST API `describe()` reference (near-real, open-source test data — see RFC 0012 /
+    /// devlog on "near-real data" fixtures). A representative subset of the ~70 real
+    /// standard fields Salesforce publishes for this object, not an invented toy shape.
     fn account() -> SObjectMetadata {
+        let f = |name: &str, field_type: &str| SObjectField {
+            name: name.into(),
+            field_type: field_type.into(),
+            reference_to: vec![],
+        };
         SObjectMetadata {
             name: "Account".into(),
-            fields: vec![SObjectField {
-                name: "Name".into(),
-                field_type: "string".into(),
-                reference_to: vec![],
-            }],
+            fields: vec![
+                f("Id", "id"),
+                f("Name", "string"),
+                f("Type", "picklist"),
+                f("Industry", "picklist"),
+                f("AnnualRevenue", "currency"),
+                f("NumberOfEmployees", "int"),
+                f("BillingCity", "string"),
+                f("BillingState", "string"),
+                f("BillingCountry", "string"),
+                f("Phone", "phone"),
+                f("Website", "url"),
+                f("Description", "textarea"),
+                SObjectField {
+                    name: "OwnerId".into(),
+                    field_type: "reference".into(),
+                    reference_to: vec!["User".into()],
+                },
+            ],
         }
     }
 
+    /// Real Salesforce standard-object field shape for `Contact`, including its two real
+    /// reference fields: `AccountId` (the parent account) and the self-referential
+    /// `ReportsToId` (org-chart hierarchy) — both genuine Salesforce standard fields.
     fn contact() -> SObjectMetadata {
+        let f = |name: &str, field_type: &str| SObjectField {
+            name: name.into(),
+            field_type: field_type.into(),
+            reference_to: vec![],
+        };
         SObjectMetadata {
             name: "Contact".into(),
             fields: vec![
-                SObjectField { name: "LastName".into(), field_type: "string".into(), reference_to: vec![] },
+                f("Id", "id"),
+                f("FirstName", "string"),
+                f("LastName", "string"),
+                f("Email", "email"),
+                f("Phone", "phone"),
+                f("Title", "string"),
+                f("Department", "string"),
                 SObjectField {
                     name: "AccountId".into(),
                     field_type: "reference".into(),
                     reference_to: vec!["Account".into()],
+                },
+                SObjectField {
+                    name: "ReportsToId".into(),
+                    field_type: "reference".into(),
+                    reference_to: vec!["Contact".into()],
                 },
             ],
         }
@@ -242,9 +284,25 @@ mod tests {
         let contact_artifact =
             pkg.artifacts.iter().find(|a| a.content.target == "Contact").unwrap();
         let refs = contact_artifact.content.data["reference_fields"].as_array().unwrap();
-        assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0]["name"], "AccountId");
-        assert_eq!(refs[0]["reference_to"][0], "Account");
+        assert_eq!(refs.len(), 2, "AccountId and ReportsToId are both real reference fields");
+        let account_ref = refs.iter().find(|r| r["name"] == "AccountId").unwrap();
+        assert_eq!(account_ref["reference_to"][0], "Account");
+    }
+
+    #[tokio::test]
+    async fn captures_self_referential_reports_to_relationship() {
+        let client = Arc::new(MockSalesforceClient::new(vec![contact()]));
+        let observer = SalesforceObserver::new(client);
+        let ctx = ScanContext::new(".");
+        let pkg = observer.scan(&ctx).await.unwrap();
+
+        let contact_artifact = &pkg.artifacts[0];
+        let refs = contact_artifact.content.data["reference_fields"].as_array().unwrap();
+        let reports_to = refs.iter().find(|r| r["name"] == "ReportsToId").unwrap();
+        assert_eq!(
+            reports_to["reference_to"][0], "Contact",
+            "ReportsToId is a genuine self-referential Salesforce standard field (org-chart hierarchy)"
+        );
     }
 
     #[tokio::test]

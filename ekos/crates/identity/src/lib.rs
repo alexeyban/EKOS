@@ -14,7 +14,7 @@
 
 pub mod similarity;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ekos_kir::{KirGraph, KirId, KirObject, ObjectKind};
 use serde::{Deserialize, Serialize};
@@ -122,7 +122,7 @@ impl DefaultResolver {
         let na = similarity::normalize(&a.name);
         let nb = similarity::normalize(&b.name);
         let name = similarity::jaro_winkler(&na, &nb);
-        let structural = if a.kind == b.kind { 1.0 } else { 0.0 };
+        let structural = structural_score(a, b);
         let combined = 0.7 * name + 0.3 * structural;
         SimilarityScore { name, structural, combined }
     }
@@ -226,6 +226,52 @@ impl IdentityResolver for DefaultResolver {
     }
 }
 
+// ── Structural similarity ───────────────────────────────────────────────────
+
+/// Structural similarity between two objects, used as the 30% non-name term in
+/// `DefaultResolver::score`.
+///
+/// Objects of different `ObjectKind` never match. When both objects carry a
+/// `properties["columns"]` array (as SQL-derived `KirObject`s from
+/// `parse_ddl_structural` do), structural similarity is the Jaccard overlap of
+/// their column-name sets — two tables with almost no columns in common (e.g.
+/// `Employees` vs. `EmployeeTerritories`) score near 0 here even when their
+/// names are similar, which is what keeps `DefaultResolver` from merging
+/// genuinely distinct tables that merely share a name prefix. When column data
+/// isn't available for one or both objects (e.g. hand-built `KirObject`s in
+/// tests, or non-table kinds), this falls back to the same-kind-only signal
+/// (1.0) that was this function's entire behavior before column-overlap
+/// scoring was added — so name similarity alone still drives merging in that
+/// case, exactly as before.
+fn structural_score(a: &KirObject, b: &KirObject) -> f32 {
+    if a.kind != b.kind {
+        return 0.0;
+    }
+    match (column_names(a), column_names(b)) {
+        (Some(cols_a), Some(cols_b)) if !cols_a.is_empty() && !cols_b.is_empty() => {
+            jaccard(&cols_a, &cols_b)
+        }
+        _ => 1.0,
+    }
+}
+
+fn column_names(obj: &KirObject) -> Option<HashSet<String>> {
+    let cols = obj.properties.get("columns")?.as_array()?;
+    Some(
+        cols.iter()
+            .filter_map(|c| c.get("name")?.as_str().map(|s| s.to_lowercase()))
+            .collect(),
+    )
+}
+
+fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
+    let union = a.union(b).count();
+    if union == 0 {
+        return 0.0;
+    }
+    a.intersection(b).count() as f32 / union as f32
+}
+
 // ── Union-Find ────────────────────────────────────────────────────────────────
 
 struct UnionFind {
@@ -323,6 +369,54 @@ mod tests {
         let g = make_graph(&[("orders", ObjectKind::Table), ("products", ObjectKind::Table)]);
         let result = DefaultResolver::new().resolve(&g);
         assert!(result.proposals.is_empty(), "orders and products must not merge");
+    }
+
+    fn table_with_columns(name: &str, columns: &[&str]) -> KirObject {
+        let cols: Vec<serde_json::Value> =
+            columns.iter().map(|c| serde_json::json!({"name": c, "data_type": "text"})).collect();
+        KirObject::new(name, ObjectKind::Table)
+            .with_property("columns", serde_json::Value::Array(cols))
+    }
+
+    #[test]
+    fn prefix_sharing_tables_with_disjoint_columns_do_not_merge() {
+        // Regression test: "orders" and "order_items" share a name prefix (high
+        // Jaro-Winkler score) but are genuinely different tables with almost no
+        // column overlap — must not merge. This is the false-positive merge an
+        // integration test against a real schema (Northwind: Employees vs.
+        // EmployeeTerritories, Customers vs. CustomerDemographics) caught.
+        let mut g = KirGraph::new();
+        g.add_object(table_with_columns("orders", &["id", "customer_id", "order_date"]));
+        g.add_object(table_with_columns(
+            "order_items",
+            &["id", "order_id", "product_id", "quantity"],
+        ));
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "orders and order_items share almost no columns and must not merge"
+        );
+    }
+
+    #[test]
+    fn similar_names_with_overlapping_columns_still_merge() {
+        // Real near-duplicates (same entity observed from two sources) still merge
+        // when their columns substantially overlap, not just their names.
+        let mut g = KirGraph::new();
+        g.add_object(table_with_columns(
+            "customer",
+            &["id", "name", "email", "created_at"],
+        ));
+        g.add_object(table_with_columns(
+            "customers",
+            &["id", "name", "email", "created_at"],
+        ));
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "customer/customers with identical columns should still merge"
+        );
     }
 
     #[test]

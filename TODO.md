@@ -1440,7 +1440,7 @@ These items have no single phase — they must be maintained and grown throughou
   - *Test/Validate:* `cargo bench` exits 0. CI stores benchmark results as artifacts. Any regression
     > 20% triggers a CI warning comment on the PR.
 
-- [ ] **Integration test harness (`tests/`) using real fixture data**
+- [x] **Integration test harness (`tests/`) using real fixture data**
   - *What:* `tests/fixtures/` contains: `ecommerce.sql` (Postgres schema), `sample_project/` (small
     directory tree), `sample_docs/` (Markdown files), `git_fixture/` (a small committed git repo).
     `tests/integration/` contains end-to-end tests that run the full pipeline (build → recover →
@@ -1448,6 +1448,21 @@ These items have no single phase — they must be maintained and grown throughou
   - *Output:* `tests/fixtures/`; `tests/integration/` test binaries; `cargo test --test integration` passes.
   - *Test/Validate:* `cargo test --test integration` from a clean clone with no external services
     running exits 0. Every phase's Validation section is covered by at least one integration test.
+  - *Status:* Done, with near-real open-source fixtures rather than purely synthetic ones:
+    `northwind.sql` (real 13-table Microsoft Northwind schema, MIT-licensed) added alongside
+    `ecommerce.sql`; `git_fixture/odoo_utm.bundle` (39 real commits from `odoo/odoo`'s `addons/utm`
+    module, LGPL-3.0, path-filtered via `git-filter-repo`, vendored as an offline-cloneable bundle);
+    `sample_docs/` added. 3 end-to-end tests in `tests/integration/tests/integration.rs`. This pass
+    caught and fixed two real pre-existing bugs the tiny synthetic fixtures never exercised: (1)
+    `DefaultResolver`'s name-only similarity scoring falsely merged distinct tables sharing a name
+    prefix (`orders`/`order_items`, `Employees`/`EmployeeTerritories`) — fixed by making the
+    structural-similarity term use real column-overlap when column data is available; (2)
+    `GitAnalyzerPass` read commit fields (`sha`, `author_name`, `files_changed`) at the wrong JSON
+    nesting level, so it never produced a real `CoupledWith` relationship against any actual
+    repository — fixed the indexing and tightened the two tests that had been silently passing
+    despite the bug. Scope note: covers one comprehensive end-to-end test per fixture dataset
+    through build→recover→resolve→compile→commit→query, not one test per every phase 0–14
+    validation criterion.
 
 - [ ] **Secrets management and sensitive-data policy**
   - *What:* Connectors need DB passwords and API tokens (Postgres, Salesforce, SAP). Standardise:

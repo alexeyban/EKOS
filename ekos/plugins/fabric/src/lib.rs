@@ -169,6 +169,40 @@ mod tests {
         }
     }
 
+    /// A realistic mixed-item-type workspace, matching the item `type` values Microsoft
+    /// publishes in its Fabric REST API `items` list reference docs (near-real, open-source
+    /// test data — see RFC 0012 / devlog on "near-real data" fixtures).
+    fn sample_workspace_items() -> Vec<FabricItem> {
+        let ws = "ws-1";
+        vec![
+            lakehouse(),
+            FabricItem {
+                id: "item-2".into(),
+                name: "SalesWarehouse".into(),
+                item_type: "Warehouse".into(),
+                workspace_id: ws.into(),
+            },
+            FabricItem {
+                id: "item-3".into(),
+                name: "SalesSemanticModel".into(),
+                item_type: "SemanticModel".into(),
+                workspace_id: ws.into(),
+            },
+            FabricItem {
+                id: "item-4".into(),
+                name: "MonthlySalesReport".into(),
+                item_type: "Report".into(),
+                workspace_id: ws.into(),
+            },
+            FabricItem {
+                id: "item-5".into(),
+                name: "IngestPipeline".into(),
+                item_type: "DataPipeline".into(),
+                workspace_id: ws.into(),
+            },
+        ]
+    }
+
     #[tokio::test]
     async fn emits_one_artifact_per_item() {
         let client = Arc::new(MockFabricClient::new(vec![lakehouse()]));
@@ -177,6 +211,22 @@ mod tests {
         let pkg = observer.scan(&ctx).await.unwrap();
         assert_eq!(pkg.len(), 1);
         assert_eq!(pkg.artifacts[0].content.data["item_type"], "Lakehouse");
+    }
+
+    #[tokio::test]
+    async fn mixed_workspace_emits_every_item_type() {
+        let client = Arc::new(MockFabricClient::new(sample_workspace_items()));
+        let observer = FabricObserver::new(client);
+        let ctx = ScanContext::new(".");
+        let pkg = observer.scan(&ctx).await.unwrap();
+        assert_eq!(pkg.len(), 5);
+        let types: std::collections::HashSet<_> =
+            pkg.artifacts.iter().map(|a| a.content.data["item_type"].as_str().unwrap()).collect();
+        assert!(types.contains("Lakehouse"));
+        assert!(types.contains("Warehouse"));
+        assert!(types.contains("SemanticModel"));
+        assert!(types.contains("Report"));
+        assert!(types.contains("DataPipeline"));
     }
 
     #[tokio::test]

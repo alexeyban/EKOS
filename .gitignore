@@ -1,5 +1,6 @@
 /ekos/target/
 /benchmark/target/
+/tests/integration/target/
 .ekos/
 *.db
 *.db-shm

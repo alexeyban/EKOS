@@ -1,0 +1,14 @@
+[package]
+name = "ekos-integration-tests"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ekos = { path = "../../ekos/crates/cli" }
+ekos-compiler-core = { path = "../../ekos/crates/compiler-core" }
+ekos-ledger = { path = "../../ekos/crates/ledger" }
+ekos-runtime = { path = "../../ekos/crates/runtime" }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+anyhow = "1"

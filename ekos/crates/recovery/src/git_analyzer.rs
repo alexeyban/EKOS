@@ -74,7 +74,7 @@ impl CompilerPass for GitAnalyzerPass {
 
         if let Some(ref repo_id) = self.repo_artifact_id
             && let Ok(Some(json)) = ctx.artifact_store.read(repo_id)
-            && let Some(contributors) = json["contributors"].as_array()
+            && let Some(contributors) = json["data"]["contributors"].as_array()
         {
             for c in contributors {
                 if let Some(name) = c["name"].as_str() {
@@ -120,12 +120,22 @@ impl CompilerPass for GitAnalyzerPass {
                 }
             };
 
-            let sha = json["sha"].as_str().unwrap_or("unknown").to_string();
-            let author = json["author_name"].as_str().unwrap_or("unknown").to_string();
-            let message = json["message"].as_str().unwrap_or("").to_string();
-            let date = json["date"].as_str().unwrap_or("").to_string();
+            // Commit fields live under `data` — `ObservationArtifact`'s
+            // `#[serde(flatten)]` merges `connector_name`/`target`/`data`/`input_ids`
+            // into the top-level JSON object, but `data` itself stays a nested object
+            // (flatten doesn't recurse into it). Indexing `json["sha"]` directly here
+            // was a real bug: it silently resolved to `Value::Null` for every real
+            // commit artifact, so this pass never actually read commit metadata or
+            // produced `CoupledWith` relationships against any real repository —
+            // caught by an integration test asserting on the pipeline's actual output
+            // instead of just "no error thrown."
+            let data = &json["data"];
+            let sha = data["sha"].as_str().unwrap_or("unknown").to_string();
+            let author = data["author_name"].as_str().unwrap_or("unknown").to_string();
+            let message = data["message"].as_str().unwrap_or("").to_string();
+            let date = data["date"].as_str().unwrap_or("").to_string();
 
-            let files_changed: Vec<String> = json["files_changed"]
+            let files_changed: Vec<String> = data["files_changed"]
                 .as_array()
                 .unwrap_or(&vec![])
                 .iter()
@@ -260,6 +270,17 @@ mod tests {
         artifact.id.clone()
     }
 
+    /// Read back the single `KnowledgeArtifact` this pass wrote and decode its `KirGraph`.
+    fn read_knowledge_graph(store: &FileSystemArtifactStore) -> KirGraph {
+        for id in store.list().unwrap() {
+            let json = store.read(&id).unwrap().unwrap();
+            if json["artifact_type"] == "knowledge" {
+                return serde_json::from_value(json["kir"].clone()).unwrap();
+            }
+        }
+        panic!("no knowledge artifact found in store");
+    }
+
     #[tokio::test]
     async fn git_analyzer_produces_events_per_commit() {
         let dir = TempDir::new().unwrap();
@@ -277,6 +298,23 @@ mod tests {
         pass.run(&mut ctx).await.unwrap();
 
         assert!(!ctx.diagnostics.lock().unwrap().has_errors());
+
+        // Assert the actual extracted values, not just "no error" — commit metadata
+        // must be read from the real `sha`/`author_name` fields, not silently default
+        // to "unknown".
+        let graph = read_knowledge_graph(&store);
+        assert_eq!(graph.events.len(), 2, "one event per commit artifact");
+        let shas: Vec<String> = graph
+            .events
+            .iter()
+            .map(|e| e.payload["sha"].as_str().unwrap().to_string())
+            .collect();
+        assert!(shas.contains(&"sha1abc".to_string()));
+        assert!(shas.contains(&"sha2def".to_string()));
+        assert!(
+            graph.events.iter().all(|e| e.payload["author"] != "unknown"),
+            "author must be read from the real commit data, not default to 'unknown'"
+        );
     }
 
     #[tokio::test]
@@ -296,9 +334,16 @@ mod tests {
         let mut ctx = make_ctx_with_store(&dir);
         pass.run(&mut ctx).await.unwrap();
 
-        // The KnowledgeArtifact should be in the store with CoupledWith relationships.
-        // We verify via ctx.artifact_store.list() having entries.
         assert!(!ctx.diagnostics.lock().unwrap().has_errors());
+
+        // Regression test: `files_changed` must actually be read from the commit
+        // artifact's real data, not silently resolve to an empty array — that bug
+        // meant this pass never produced a single `CoupledWith` relationship against
+        // any real repository.
+        let graph = read_knowledge_graph(&store);
+        assert_eq!(graph.relationships.len(), 1, "a.rs and b.rs co-changed 3 times (>= min_coupling 2)");
+        assert_eq!(graph.relationships[0].kind, RelationshipKind::CoupledWith);
+        assert_eq!(graph.relationships[0].properties["co_change_count"], 3);
     }
 
     #[test]
