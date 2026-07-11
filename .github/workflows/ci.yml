@@ -48,3 +48,33 @@ jobs:
       - name: Format check
         working-directory: ekos
         run: cargo fmt --check
+
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            benchmark/target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('benchmark/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-bench-
+
+      - name: Run benchmarks
+        working-directory: benchmark
+        run: cargo bench
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report
+          path: benchmark/target/criterion

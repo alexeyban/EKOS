@@ -1429,7 +1429,7 @@ These items have no single phase — they must be maintained and grown throughou
 
 ---
 
-- [ ] **Benchmark suite (`benchmark/`) — one benchmark per compiler pass**
+- [x] **Benchmark suite (`benchmark/`) — one benchmark per compiler pass**
   - *What:* Use `criterion` crate. One benchmark binary per phase-significant pass: `observation_git`,
     `sql_analyzer`, `identity_resolver`, `semantic_compiler`, `ledger_write`, `runtime_load_neighborhood`.
     Each benchmark uses a fixed fixture dataset so results are comparable across commits. Scope the

@@ -1,0 +1,47 @@
+[package]
+name = "ekos-benchmark"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ekos-kir = { path = "../ekos/crates/kir" }
+ekos-artifact = { path = "../ekos/crates/artifact" }
+ekos-compiler-core = { path = "../ekos/crates/compiler-core" }
+ekos-ledger = { path = "../ekos/crates/ledger" }
+ekos-runtime = { path = "../ekos/crates/runtime" }
+ekos-identity = { path = "../ekos/crates/identity" }
+ekos-recovery = { path = "../ekos/crates/recovery" }
+ekos-semantic = { path = "../ekos/crates/semantic" }
+ekos-plugin-git = { path = "../ekos/plugins/git" }
+ekos-observation-sdk = { path = "../ekos/crates/observation-sdk" }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+serde_json = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+
+[[bench]]
+name = "observation_git"
+harness = false
+
+[[bench]]
+name = "sql_analyzer"
+harness = false
+
+[[bench]]
+name = "identity_resolver"
+harness = false
+
+[[bench]]
+name = "semantic_compiler"
+harness = false
+
+[[bench]]
+name = "ledger_write"
+harness = false
+
+[[bench]]
+name = "runtime_load_neighborhood"
+harness = false

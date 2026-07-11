@@ -1,4 +1,5 @@
 /ekos/target/
+/benchmark/target/
 .ekos/
 *.db
 *.db-shm
