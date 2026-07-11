@@ -1,7 +1,7 @@
 //! `GitAnalyzerPass` — converts git commit observation artifacts into KIR.
 //!
 //! Produces:
-//! - `KirObject(kind=Entity)` per unique contributor
+//! - `KirObject(kind=Person)` per unique contributor
 //! - `KirEvent(kind=Modified)` per commit
 //! - `KirRelationship(kind=CoupledWith)` for files changed together in ≥2 commits
 
@@ -85,7 +85,7 @@ impl CompilerPass for GitAnalyzerPass {
                     );
                     let ev_id = graph.add_evidence(ev);
                     let mut obj =
-                        KirObject::new(name, ObjectKind::Entity).with_evidence(ev_id);
+                        KirObject::new(name, ObjectKind::Person).with_evidence(ev_id);
                     obj.id = id;
                     obj.properties.insert("role".into(), serde_json::json!("contributor"));
                     if let Some(commits) = c["commits"].as_u64() {
@@ -279,6 +279,37 @@ mod tests {
             }
         }
         panic!("no knowledge artifact found in store");
+    }
+
+    fn make_repo_artifact(contributors: &[(&str, u64)]) -> ObservationArtifact {
+        let contributors: Vec<serde_json::Value> = contributors
+            .iter()
+            .map(|(name, commits)| serde_json::json!({"name": name, "commits": commits}))
+            .collect();
+        ObservationArtifact::new("git", "repo", serde_json::json!({ "contributors": contributors }))
+    }
+
+    #[tokio::test]
+    async fn contributors_are_classified_as_person() {
+        // AD-001: contributors were reclassified from ObjectKind::Entity to the
+        // dedicated ObjectKind::Person variant.
+        let dir = TempDir::new().unwrap();
+        let store = FileSystemArtifactStore::new(dir.path().join(".ekos/artifacts"));
+        std::fs::create_dir_all(dir.path().join(".ekos/artifacts")).unwrap();
+
+        let repo = make_repo_artifact(&[("Alice", 5)]);
+        let repo_id = seed_artifact(&store, &repo);
+        let a1 = make_commit_artifact("sha1abc", "Alice", &["main.rs"]);
+        let id1 = seed_artifact(&store, &a1);
+
+        let mut pass = GitAnalyzerPass::new("repo", vec![id1], Some(repo_id));
+        let mut ctx = make_ctx_with_store(&dir);
+        pass.run(&mut ctx).await.unwrap();
+
+        let graph = read_knowledge_graph(&store);
+        let alice = graph.objects.iter().find(|o| o.name == "Alice").expect("Alice must be present");
+        assert_eq!(alice.kind, ObjectKind::Person);
+        assert_eq!(alice.properties["role"], "contributor");
     }
 
     #[tokio::test]

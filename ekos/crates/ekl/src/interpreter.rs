@@ -324,4 +324,17 @@ mod tests {
         let err = EklInterpreter::new(&rt).execute(&ast).unwrap_err();
         assert!(matches!(err, EklError::AnchorNotFound(_)));
     }
+
+    #[test]
+    fn finds_objects_of_a_newly_added_object_kind() {
+        // AD-001: demonstrates the taxonomy expansion needs zero EKL changes —
+        // `WHERE kind = 'Person'` works purely off the new ObjectKind variant's
+        // Display impl, same as any pre-existing kind.
+        let (ledger, _dir) = fixture();
+        ledger.append_object(&KirObject::new("Alice", ObjectKind::Person)).unwrap();
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Object WHERE kind = 'Person'");
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0]["name"], Value::String("Alice".into()));
+    }
 }

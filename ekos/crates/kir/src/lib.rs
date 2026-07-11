@@ -55,6 +55,19 @@ impl SourceLocation {
 }
 
 /// Classification of a KirObject.
+///
+/// Adding a variant here is safe and low-risk by construction: no code in this
+/// workspace exhaustively `match`es over `ObjectKind` (every use is either direct
+/// construction or an equality comparison), the enum is externally-tagged as a
+/// plain JSON string (`#[serde(rename_all = "PascalCase")]`) with `Custom(String)`
+/// as an untagged fallback, and EKL's `WHERE kind = '...'` predicate plus CLI
+/// display output both work automatically off the `Display` impl below — no
+/// query-language or formatting changes are needed when a variant is added here.
+/// What *is* required is wiring up a construction site somewhere (a connector or
+/// compiler pass that actually classifies something as this kind) — several
+/// variants below (e.g. `Dataset`, `Pipeline`, `Model`) exist ahead of any
+/// connector that emits them yet, same as `Directory`/`Service`/`Api` did before
+/// this taxonomy was expanded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum ObjectKind {
@@ -64,7 +77,30 @@ pub enum ObjectKind {
     Entity,
     Service,
     Api,
+    /// A constraint or policy (e.g. "orders must have a customer") — distinct
+    /// from `BusinessConcept`, a named business idea or term.
     BusinessRule,
+    /// A named business concept or term (e.g. "Customer Lifetime Value") —
+    /// distinct from `BusinessRule` (a constraint) and `Entity` (a concrete
+    /// business object like a specific customer record).
+    BusinessConcept,
+    /// A logical collection of data (warehouse schema, data product) — coarser
+    /// grained than `Table`.
+    Dataset,
+    /// A single column/field within a `Table` or `Dataset`.
+    Column,
+    /// A data or CI/CD pipeline (dbt model, ETL job, build pipeline).
+    Pipeline,
+    /// A BI dashboard or report.
+    Dashboard,
+    /// A human contributor or stakeholder (e.g. a git commit author).
+    Person,
+    /// A trained ML/AI model artifact.
+    Model,
+    /// A versioned LLM prompt template.
+    Prompt,
+    /// An autonomous AI agent definition.
+    Agent,
     Unknown,
     #[serde(untagged)]
     Custom(String),
@@ -263,6 +299,44 @@ mod tests {
         let back: KirObject = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, obj.name);
         assert_eq!(back.id, obj.id);
+    }
+
+    #[test]
+    fn object_kind_taxonomy_round_trips() {
+        // Every named ObjectKind variant must serialize to a plain PascalCase JSON
+        // string and deserialize back to the identical variant — including the
+        // ones added for AD-001 with no construction site yet.
+        let kinds = [
+            ObjectKind::File,
+            ObjectKind::Directory,
+            ObjectKind::Table,
+            ObjectKind::Entity,
+            ObjectKind::Service,
+            ObjectKind::Api,
+            ObjectKind::BusinessRule,
+            ObjectKind::BusinessConcept,
+            ObjectKind::Dataset,
+            ObjectKind::Column,
+            ObjectKind::Pipeline,
+            ObjectKind::Dashboard,
+            ObjectKind::Person,
+            ObjectKind::Model,
+            ObjectKind::Prompt,
+            ObjectKind::Agent,
+            ObjectKind::Unknown,
+        ];
+        for kind in &kinds {
+            let json = serde_json::to_string(kind).unwrap();
+            let back: ObjectKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(&back, kind, "round-trip mismatch for {kind}");
+        }
+    }
+
+    #[test]
+    fn object_kind_custom_fallback_still_works() {
+        // An unrecognized string must still fall back to Custom, not fail to parse.
+        let back: ObjectKind = serde_json::from_str("\"SomethingNotYetEnumerated\"").unwrap();
+        assert_eq!(back, ObjectKind::Custom("SomethingNotYetEnumerated".to_string()));
     }
 
     #[test]

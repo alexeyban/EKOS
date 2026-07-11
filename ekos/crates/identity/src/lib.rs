@@ -429,6 +429,17 @@ mod tests {
     }
 
     #[test]
+    fn newly_added_object_kind_participates_in_conflict_detection() {
+        // AD-001: a new ObjectKind variant (Person) is just as subject to conflict
+        // detection as any pre-existing kind — cheap insurance against an
+        // exhaustive match being added to this crate later that forgets a variant.
+        let g = make_graph(&[("alice", ObjectKind::Person), ("alice", ObjectKind::Table)]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.conflicts.len(), 1);
+        assert_eq!(result.conflicts[0].kind, ConflictKind::SameNameDifferentKind);
+    }
+
+    #[test]
     fn three_way_transitivity_single_proposal() {
         let g = make_graph(&[
             ("customer", ObjectKind::Table),
