@@ -1,0 +1,20 @@
+[package]
+name = "ekos-plugin-snowflake"
+description = "Snowflake schema observer plugin (Phase 14, scaffold — see RFC 0012)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-observation-sdk.workspace = true
+ekos-artifact.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

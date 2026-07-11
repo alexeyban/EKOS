@@ -1358,37 +1358,53 @@ with real or vendor-supplied sandbox credentials.
 
 ---
 
-- [ ] **SAP connector**
+- [~] **SAP connector**
   - *What:* Implement `plugins/sap/` using SAP OData APIs or RFC (Remote Function Call) via the
     `nwrfc` binding. Observe: business objects (BAPIs), table definitions, organizational hierarchy.
     Emit `ObservationArtifact`s per object type.
   - *Output:* `plugins/sap/` crate; integration test with SAP sandbox.
   - *Test/Validate:* Integration test: connect to SAP sandbox; assert at least one BAPI artifact
     and one organizational unit artifact are returned.
+  - *Status (RFC 0012):* Scaffolded — `SapClient` trait, OData-based `SapODataClient` (untested
+    against a live sandbox), `MockSapClient`, `SapObserver`, unit tests. RFC/`nwrfc` intentionally
+    not implemented (proprietary native SDK dependency). Live integration test still outstanding —
+    needs a real SAP sandbox credential.
 
-- [ ] **Salesforce connector**
+- [~] **Salesforce connector**
   - *What:* Implement `plugins/salesforce/` using the Salesforce REST API. Observe: sObjects schema
     (fields, types, relationships), workflow rules, custom objects. Emit one `ObservationArtifact`
     per sObject with its full field metadata.
   - *Output:* `plugins/salesforce/` crate; integration test with Salesforce developer org.
   - *Test/Validate:* Integration test: observe `Account` and `Contact` sObjects; assert field count
     matches Salesforce developer org schema; assert relationship between Account and Contact is captured.
+  - *Status (RFC 0012):* Scaffolded — `SalesforceClient` trait, `SalesforceApiClient` (untested
+    against a live org), `MockSalesforceClient`, `SalesforceObserver` (captures reference fields as
+    the relationship signal), unit tests including an Account/Contact-shaped mock case. Live
+    integration test still outstanding — needs a real developer-org credential.
 
-- [ ] **Oracle connector**
+- [~] **Oracle connector**
   - *What:* Implement `plugins/oracle/` using `oracle` crate (ODPI-C bindings). Same surface as
     Postgres connector: tables, constraints, views, stored procedures. Handle Oracle-specific types
     (VARCHAR2, NUMBER, CLOB).
   - *Output:* `plugins/oracle/` crate; integration test with Oracle XE container.
   - *Test/Validate:* Integration test: load fixture schema into Oracle XE; assert same artifact
     types and counts as equivalent Postgres fixture.
+  - *Status (RFC 0012):* Scaffolded — `OracleClient` trait, `MockOracleClient`, `OracleObserver`,
+    unit tests. `OracleDbClient` (the real driver) is a documented stub returning `NotImplemented`
+    — the `oracle`/ODPI-C crate needs native Oracle Instant Client libraries not installable here;
+    wiring a real driver and an Oracle XE integration test are still outstanding.
 
-- [ ] **Microsoft Fabric / Snowflake connector**
+- [~] **Microsoft Fabric / Snowflake connector**
   - *What:* Implement `plugins/fabric/` using Azure Fabric REST API (workspaces, lakehouses,
     datasets) and `plugins/snowflake/` using the Snowflake JDBC/ODBC REST API. Observe: schemas,
     tables, views, warehouse metadata.
   - *Output:* Two crates; integration tests with Fabric trial and Snowflake trial accounts.
   - *Test/Validate:* Integration test per platform: observe a test warehouse schema; assert table
     and view artifacts are returned.
+  - *Status (RFC 0012):* Scaffolded — `FabricClient`/`SnowflakeClient` traits, REST-based
+    `FabricApiClient`/`SnowflakeApiClient` (untested against live trial accounts), mock clients,
+    observers, unit tests. Live integration tests still outstanding — need real trial-account
+    credentials for both platforms.
 
 - [ ] **Kubernetes connector**
   - *What:* Implement `plugins/kubernetes/` using the `kube` crate. Observe: Deployments, Services,

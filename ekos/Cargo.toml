@@ -17,6 +17,11 @@ members = [
     "crates/cli",
     "plugins/file",
     "plugins/git",
+    "plugins/salesforce",
+    "plugins/sap",
+    "plugins/oracle",
+    "plugins/fabric",
+    "plugins/snowflake",
 ]
 
 [workspace.package]
