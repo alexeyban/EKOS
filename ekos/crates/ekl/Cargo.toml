@@ -1,0 +1,15 @@
+[package]
+name = "ekos-ekl"
+description = "Enterprise Knowledge Language: parser + interpreter (RFC 0010)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-runtime.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+ekos-ledger.workspace = true
+tempfile = "3"

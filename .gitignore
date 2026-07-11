@@ -1,0 +1,6 @@
+/ekos/target/
+.ekos/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store

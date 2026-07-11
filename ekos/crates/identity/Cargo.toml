@@ -1,0 +1,11 @@
+[package]
+name = "ekos-identity"
+description = "Identity resolution — merges synonymous concepts (Phase 7)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true

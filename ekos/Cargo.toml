@@ -1,0 +1,83 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/common",
+    "crates/kir",
+    "crates/artifact",
+    "crates/compiler-core",
+    "crates/compiler-sdk",
+    "crates/scheduler",
+    "crates/observation-sdk",
+    "crates/ledger",
+    "crates/runtime",
+    "crates/identity",
+    "crates/recovery",
+    "crates/ekl",
+    "crates/semantic",
+    "crates/cli",
+    "plugins/file",
+    "plugins/git",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["alexeyban"]
+license = "MIT"
+
+[workspace.dependencies]
+# Internal crates
+ekos-common    = { path = "crates/common" }
+ekos-kir       = { path = "crates/kir" }
+ekos-artifact  = { path = "crates/artifact" }
+ekos-compiler-core = { path = "crates/compiler-core" }
+ekos-ledger    = { path = "crates/ledger" }
+ekos-runtime   = { path = "crates/runtime" }
+ekos-identity  = { path = "crates/identity" }
+ekos-semantic  = { path = "crates/semantic" }
+ekos-observation-sdk = { path = "crates/observation-sdk" }
+ekos-recovery       = { path = "crates/recovery" }
+ekos-ekl       = { path = "crates/ekl" }
+
+# Async
+tokio      = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures    = "0.3"
+
+# Serialization
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml       = "0.8"
+
+# Error handling
+thiserror = "2"
+anyhow    = "1"
+
+# Logging / tracing
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# IDs
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Hashing
+sha2 = "0.10"
+hex  = "0.4"
+
+# Storage
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Filesystem
+walkdir = "2"
+
+# SQL parsing
+sqlparser = "0.53"
+
+# HTTP client (LLM API calls)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

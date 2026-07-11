@@ -1,0 +1,19 @@
+[package]
+name = "ekos-artifact"
+description = "Content-addressable artifact types (Phase 2 — stub)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-kir.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

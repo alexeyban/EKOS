@@ -1,0 +1,18 @@
+[package]
+name = "ekos-ledger"
+description = "Append-only semantic knowledge ledger (skeleton — SQLite backend)"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[dependencies]
+ekos-common.workspace = true
+ekos-kir.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true

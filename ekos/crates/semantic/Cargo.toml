@@ -1,0 +1,22 @@
+[package]
+name = "ekos-semantic"
+description = "Semantic compiler pass: KIR → Canonical Knowledge Model (Phase 8)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-kir.workspace = true
+ekos-artifact.workspace = true
+ekos-compiler-core.workspace = true
+ekos-identity.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

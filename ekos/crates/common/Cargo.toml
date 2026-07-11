@@ -1,0 +1,14 @@
+[package]
+name = "ekos-common"
+description = "Shared types and utilities for EKOS"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+hex.workspace = true

@@ -1,0 +1,8 @@
+[package]
+name = "ekos-compiler-sdk"
+description = "Public SDK for extending the compiler (Phase 1 — stub)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-compiler-core.workspace = true

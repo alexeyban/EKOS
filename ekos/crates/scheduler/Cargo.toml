@@ -1,0 +1,8 @@
+[package]
+name = "ekos-scheduler"
+description = "Re-exports scheduler types from compiler-core (Phase 1 — thin crate)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-compiler-core.workspace = true

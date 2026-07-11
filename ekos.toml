@@ -1,0 +1,21 @@
+# EKOS workspace configuration
+
+[workspace]
+root = "."
+log-level = "info"
+log-format = "pretty"  # "pretty" | "json"
+
+[observe]
+paths = ["."]
+ignore-patterns = [
+    ".ekos",
+    ".git",
+    "target",
+    "node_modules",
+    "*.lock",
+]
+
+[llm]
+# provider = "claude"
+# api-key-env = "ANTHROPIC_API_KEY"
+# model = "claude-sonnet-4-6"

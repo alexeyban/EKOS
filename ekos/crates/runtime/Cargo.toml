@@ -1,0 +1,20 @@
+[package]
+name = "ekos-runtime"
+description = "Read-only state reconstruction from the ledger"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-ledger.workspace = true
+ekos-compiler-core.workspace = true
+ekos-recovery.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tokio.workspace = true

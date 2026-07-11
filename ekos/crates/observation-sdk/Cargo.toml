@@ -1,0 +1,15 @@
+[package]
+name = "ekos-observation-sdk"
+description = "Observer trait and connector contract (Phase 3)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-artifact.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+chrono.workspace = true

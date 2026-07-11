@@ -1,0 +1,20 @@
+[package]
+name = "ekos-compiler-core"
+description = "Compiler infrastructure: PassManager, Scheduler, Diagnostics, Config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-kir.workspace = true
+ekos-artifact.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+chrono.workspace = true
