@@ -56,6 +56,16 @@ impl CompilerPass for GitAnalyzerPass {
         &self.pass_id
     }
 
+    fn cache_inputs(&self) -> Vec<String> {
+        let mut ids: Vec<String> =
+            self.commit_artifact_ids.iter().map(|id| id.to_string()).collect();
+        ids.sort();
+        if let Some(repo_id) = &self.repo_artifact_id {
+            ids.push(repo_id.to_string());
+        }
+        ids
+    }
+
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
         let mut graph = KirGraph::new();
 
@@ -95,7 +105,7 @@ impl CompilerPass for GitAnalyzerPass {
             let json = match ctx.artifact_store.read(artifact_id) {
                 Ok(Some(j)) => j,
                 Ok(None) => {
-                    ctx.diagnostics.warning(
+                    ctx.diagnostics.lock().unwrap().warning(
                         "GIT001",
                         format!("commit artifact {artifact_id} not found in store"),
                     );
@@ -103,6 +113,8 @@ impl CompilerPass for GitAnalyzerPass {
                 }
                 Err(e) => {
                     ctx.diagnostics
+                        .lock()
+                        .unwrap()
                         .warning("GIT002", format!("failed to read artifact {artifact_id}: {e}"));
                     continue;
                 }
@@ -264,7 +276,7 @@ mod tests {
         let mut ctx = make_ctx_with_store(&dir);
         pass.run(&mut ctx).await.unwrap();
 
-        assert!(!ctx.diagnostics.has_errors());
+        assert!(!ctx.diagnostics.lock().unwrap().has_errors());
     }
 
     #[tokio::test]
@@ -286,7 +298,7 @@ mod tests {
 
         // The KnowledgeArtifact should be in the store with CoupledWith relationships.
         // We verify via ctx.artifact_store.list() having entries.
-        assert!(!ctx.diagnostics.has_errors());
+        assert!(!ctx.diagnostics.lock().unwrap().has_errors());
     }
 
     #[test]

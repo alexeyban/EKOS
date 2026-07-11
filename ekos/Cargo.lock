@@ -341,8 +341,11 @@ dependencies = [
  "ekos-artifact",
  "ekos-common",
  "ekos-kir",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml",
@@ -396,6 +399,7 @@ name = "ekos-ledger"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "ekos-artifact",
  "ekos-common",
  "ekos-kir",
  "rusqlite",
@@ -414,10 +418,14 @@ dependencies = [
  "chrono",
  "ekos-artifact",
  "ekos-common",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
  "tokio",
+ "walkdir",
 ]
 
 [[package]]

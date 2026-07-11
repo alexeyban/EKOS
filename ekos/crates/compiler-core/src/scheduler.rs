@@ -13,6 +13,19 @@ pub enum FailureMode {
 pub struct PassOutcome {
     pub pass_name: String,
     pub result: Result<(), PassError>,
+    /// `true` if this pass was skipped because its cached output is still
+    /// valid (Phase 13 — `should_recompute` returned `false`).
+    pub skipped: bool,
+}
+
+impl PassOutcome {
+    pub fn ran(pass_name: String, result: Result<(), PassError>) -> Self {
+        Self { pass_name, result, skipped: false }
+    }
+
+    pub fn skipped(pass_name: String) -> Self {
+        Self { pass_name, result: Ok(()), skipped: true }
+    }
 }
 
 #[derive(Debug)]
@@ -26,7 +39,11 @@ impl ExecutionReport {
     }
 
     pub fn passes_run(&self) -> usize {
-        self.outcomes.len()
+        self.outcomes.iter().filter(|o| !o.skipped).count()
+    }
+
+    pub fn passes_skipped(&self) -> usize {
+        self.outcomes.iter().filter(|o| o.skipped).count()
     }
 
     pub fn error_count(&self) -> usize {
@@ -58,5 +75,13 @@ impl Scheduler {
         ctx: &mut crate::pass::PassContext,
     ) -> Result<ExecutionReport, crate::pass::SchedulerError> {
         self.manager.run_all(ctx, self.failure_mode).await
+    }
+
+    /// Like `run`, but executes DAG-independent passes concurrently (Phase 13).
+    pub async fn run_parallel(
+        &mut self,
+        ctx: &crate::pass::PassContext,
+    ) -> Result<ExecutionReport, crate::pass::SchedulerError> {
+        self.manager.run_all_parallel(ctx, self.failure_mode).await
     }
 }

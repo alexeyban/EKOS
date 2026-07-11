@@ -8,7 +8,7 @@ use ekos_recovery::{
 use std::{path::Path, sync::Arc};
 use walkdir::WalkDir;
 
-pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
+pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> {
     let artifact_dir = config.artifact_dir(cwd);
     let artifact_store = FileSystemArtifactStore::new(&artifact_dir);
 
@@ -92,10 +92,17 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
 
     // ── Run passes ────────────────────────────────────────────────────────
     let mut ctx = PassContext::new(Arc::new(config.clone()), cwd.to_path_buf());
-    let report = pass_manager
-        .run_all(&mut ctx, FailureMode::Collect)
-        .await
-        .map_err(|e| anyhow::anyhow!("scheduler error: {e}"))?;
+    let report = if parallel {
+        pass_manager
+            .run_all_parallel(&ctx, FailureMode::Collect)
+            .await
+            .map_err(|e| anyhow::anyhow!("scheduler error: {e}"))?
+    } else {
+        pass_manager
+            .run_all(&mut ctx, FailureMode::Collect)
+            .await
+            .map_err(|e| anyhow::anyhow!("scheduler error: {e}"))?
+    };
 
     let errors: Vec<_> = report.error_outcomes().collect();
 
@@ -103,6 +110,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  SQL files analysed: {sql_count}");
     println!("  Git commits analysed: {git_count}");
     println!("  Passes run: {}", report.passes_run());
+    if report.passes_skipped() > 0 {
+        println!("  Passes skipped (cached): {}", report.passes_skipped());
+    }
+    if parallel {
+        println!("  Mode: parallel");
+    }
     if !errors.is_empty() {
         println!("  Errors ({}):", errors.len());
         for o in &errors {
@@ -111,7 +124,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
             }
         }
     }
-    if ctx.diagnostics.has_errors() {
+    if ctx.diagnostics.lock().unwrap().has_errors() {
         anyhow::bail!("recovery completed with errors");
     }
     Ok(())

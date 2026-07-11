@@ -35,8 +35,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  Objects:       {obj_count}");
     println!("  Relationships: {rel_count}");
     println!("  CKM written:   {}", model_path.display());
-    if ctx.diagnostics.has_warnings() {
-        println!("  Warnings:      {} (check logs)", ctx.diagnostics.warning_count());
+    if ctx.diagnostics.lock().unwrap().has_warnings() {
+        println!("  Warnings:      {} (check logs)", ctx.diagnostics.lock().unwrap().warning_count());
     }
 
     Ok(())

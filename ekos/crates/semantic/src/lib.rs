@@ -284,12 +284,14 @@ impl CompilerPass for SemanticCompilerPass {
                 }
                 Err(e) => ctx
                     .diagnostics
+                    .lock()
+                    .unwrap()
                     .warning("SEM000", format!("skipping artifact {id}: {e}")),
             }
         }
 
         if ka_count == 0 {
-            ctx.diagnostics.warning(
+            ctx.diagnostics.lock().unwrap().warning(
                 "SEM000",
                 "no knowledge artifacts found — run `ekos recover` first",
             );
@@ -299,7 +301,7 @@ impl CompilerPass for SemanticCompilerPass {
         let resolution = DefaultResolver::new().resolve(&combined);
 
         for conflict in &resolution.conflicts {
-            ctx.diagnostics.warning("SEM001", conflict.description.clone());
+            ctx.diagnostics.lock().unwrap().warning("SEM001", conflict.description.clone());
         }
 
         tracing::info!(
@@ -317,7 +319,7 @@ impl CompilerPass for SemanticCompilerPass {
         // ── Validate ─────────────────────────────────────────────────────────
         let validation_errors = model.validate();
         for e in &validation_errors {
-            ctx.diagnostics.warning("SEM002", e.clone());
+            ctx.diagnostics.lock().unwrap().warning("SEM002", e.clone());
         }
 
         // ── Write to disk ─────────────────────────────────────────────────────

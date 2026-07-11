@@ -69,12 +69,19 @@ impl CompilerPass for SqlAnalyzerPass {
         &self.pass_id
     }
 
+    fn cache_inputs(&self) -> Vec<String> {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(self.sql.as_bytes());
+        vec![hex::encode(hasher.finalize())]
+    }
+
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
         // ── Structural parse ────────────────────────────────────────────────
         let mut graph = parse_ddl_structural(&self.sql, &self.source_path);
 
         if graph.objects.is_empty() {
-            ctx.diagnostics.warning(
+            ctx.diagnostics.lock().unwrap().warning(
                 "SQL001",
                 format!("no tables found in {}", self.source_path),
             );
@@ -92,14 +99,14 @@ impl CompilerPass for SqlAnalyzerPass {
         match self.llm.complete(&req).await {
             Ok(resp) => {
                 if let Err(e) = apply_llm_enrichment(&mut graph, &resp.content) {
-                    ctx.diagnostics.warning(
+                    ctx.diagnostics.lock().unwrap().warning(
                         "SQL002",
                         format!("LLM enrichment parse failed for {}: {e}", self.source_path),
                     );
                 }
             }
             Err(e) => {
-                ctx.diagnostics.warning(
+                ctx.diagnostics.lock().unwrap().warning(
                     "SQL003",
                     format!(
                         "LLM call failed for {} (structural analysis still applied): {e}",
@@ -416,7 +423,7 @@ mod tests {
         let mut pass = SqlAnalyzerPass::new("ecommerce.sql", ECOMMERCE_SQL, mock);
         let mut ctx = make_ctx(&dir);
         pass.run(&mut ctx).await.unwrap();
-        assert!(!ctx.diagnostics.has_errors(), "no errors expected with mock llm");
+        assert!(!ctx.diagnostics.lock().unwrap().has_errors(), "no errors expected with mock llm");
     }
 
     #[tokio::test]
@@ -427,7 +434,7 @@ mod tests {
         let mut ctx = make_ctx(&dir);
         // Should not return an error — bad LLM response degrades to structural-only.
         pass.run(&mut ctx).await.unwrap();
-        assert!(!ctx.diagnostics.has_errors());
+        assert!(!ctx.diagnostics.lock().unwrap().has_errors());
     }
 
     #[test]

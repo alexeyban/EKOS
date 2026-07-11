@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -25,7 +26,11 @@ enum Commands {
     /// Run observation passes and write knowledge to the ledger
     Build,
     /// Run knowledge-recovery compiler passes (SQL + Git analysis)
-    Recover,
+    Recover {
+        /// Run DAG-independent passes concurrently instead of sequentially
+        #[arg(long)]
+        parallel: bool,
+    },
     /// Resolve synonymous concepts across sources into canonical identities
     Resolve,
     /// Run the semantic compiler: KIR → Canonical Knowledge Model
@@ -58,6 +63,30 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Show what changed in the ledger between two points in time
+    Diff {
+        #[arg(long)]
+        from: DateTime<Utc>,
+        #[arg(long)]
+        to: DateTime<Utc>,
+    },
+    /// Manage ledger branches
+    Branch {
+        #[command(subcommand)]
+        subcommand: BranchCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum BranchCommands {
+    /// Create a new branch as a snapshot of the current ledger
+    Create { name: String },
+    /// List all branches
+    List,
+    /// Merge a branch's objects/relationships into the main ledger
+    Merge { name: String },
+    /// Delete a branch
+    Delete { name: String },
 }
 
 #[derive(Subcommand)]
@@ -97,7 +126,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Init => ekos::commands::init::run(&config, &cwd),
         Commands::Build => ekos::commands::build::run(&config, &cwd).await,
-        Commands::Recover => ekos::commands::recover::run(&config, &cwd).await,
+        Commands::Recover { parallel } => ekos::commands::recover::run(&config, &cwd, parallel).await,
         Commands::Resolve => ekos::commands::resolve::run(&config, &cwd),
         Commands::Compile => ekos::commands::compile::run(&config, &cwd).await,
         Commands::Commit => ekos::commands::commit::run(&config, &cwd),
@@ -119,5 +148,12 @@ async fn main() -> Result<()> {
             ekos::commands::ask::run(&config, &cwd, &question, json).await
         }
         Commands::Ekl { query, json } => ekos::commands::ekl::run(&config, &cwd, &query, json),
+        Commands::Diff { from, to } => ekos::commands::diff::run(&config, &cwd, from, to),
+        Commands::Branch { subcommand } => match subcommand {
+            BranchCommands::Create { name } => ekos::commands::branch::create(&config, &cwd, &name),
+            BranchCommands::List => ekos::commands::branch::list(&config, &cwd),
+            BranchCommands::Merge { name } => ekos::commands::branch::merge(&config, &cwd, &name),
+            BranchCommands::Delete { name } => ekos::commands::branch::delete(&config, &cwd, &name),
+        },
     }
 }

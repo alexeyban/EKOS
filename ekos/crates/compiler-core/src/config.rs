@@ -120,9 +120,19 @@ impl EkosConfig {
         self.ekos_dir(cwd).join("artifacts")
     }
 
+    /// Absolute path to the directory holding the main ledger and any branches.
+    pub fn ledger_dir(&self, cwd: &Path) -> PathBuf {
+        self.ekos_dir(cwd).join("ledger")
+    }
+
     /// Absolute path to the ledger database.
     pub fn ledger_path(&self, cwd: &Path) -> PathBuf {
-        self.ekos_dir(cwd).join("ledger").join("ledger.db")
+        self.ledger_dir(cwd).join("ledger.db")
+    }
+
+    /// Absolute path to a named branch's ledger database (Phase 13).
+    pub fn branch_ledger_path(&self, cwd: &Path, name: &str) -> PathBuf {
+        self.ledger_dir(cwd).join(format!("{name}.db"))
     }
 }
 

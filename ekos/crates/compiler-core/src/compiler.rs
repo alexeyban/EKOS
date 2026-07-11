@@ -67,13 +67,15 @@ mod tests {
 
     #[tokio::test]
     async fn zero_passes_succeeds() {
-        let mut c = Compiler::new(EkosConfig::default(), PathBuf::from("."));
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = Compiler::new(EkosConfig::default(), dir.path().to_path_buf());
         assert!(c.run().await.is_ok());
     }
 
     #[tokio::test]
     async fn noop_pass_succeeds() {
-        let mut c = Compiler::new(EkosConfig::default(), PathBuf::from("."));
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = Compiler::new(EkosConfig::default(), dir.path().to_path_buf());
         c.register_pass(Box::new(NoopPass));
         let report = c.run().await.unwrap();
         assert_eq!(report.passes_run(), 1);

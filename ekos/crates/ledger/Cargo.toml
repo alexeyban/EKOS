@@ -10,6 +10,7 @@ tempfile = "3"
 [dependencies]
 ekos-common.workspace = true
 ekos-kir.workspace = true
+ekos-artifact.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use ekos_artifact::{ArtifactStore, FileSystemArtifactStore};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 use thiserror::Error;
 
@@ -24,9 +24,15 @@ impl PassError {
 }
 
 /// Shared context threaded through every compiler pass.
+///
+/// Cheap to `Clone` — every field is an `Arc` (or a small `PathBuf`) — so
+/// concurrently scheduled passes (Phase 13 — Optimizer) can each get their own
+/// owned context while still writing into the same diagnostics sink and
+/// artifact store.
+#[derive(Clone)]
 pub struct PassContext {
     pub config: Arc<EkosConfig>,
-    pub diagnostics: DiagnosticSink,
+    pub diagnostics: Arc<Mutex<DiagnosticSink>>,
     /// Current working directory (where ekos.toml lives).
     pub cwd: std::path::PathBuf,
     /// Content-addressable artifact store passes can read/write.
@@ -39,7 +45,7 @@ impl PassContext {
         let store = Arc::new(FileSystemArtifactStore::new(artifact_dir));
         Self {
             config,
-            diagnostics: DiagnosticSink::default(),
+            diagnostics: Arc::new(Mutex::new(DiagnosticSink::default())),
             cwd,
             artifact_store: store,
         }
@@ -65,6 +71,21 @@ pub trait CompilerPass: Send + Sync {
     /// Names of passes that must complete before this one runs.
     fn dependencies(&self) -> &[&str] {
         &[]
+    }
+
+    /// Version string for this pass's logic (Phase 13 — Optimizer). Bump it
+    /// manually whenever a change to `run`'s behavior means previously cached
+    /// output should no longer be reused, even if inputs are unchanged.
+    fn version(&self) -> &str {
+        "v1"
+    }
+
+    /// Opaque identifiers for whatever this pass reads as input (e.g. a
+    /// content hash of source text, or the artifact ids it consumes) — used
+    /// for cache invalidation (Phase 13). A pass with nothing to identify
+    /// (always recomputes) can leave this empty.
+    fn cache_inputs(&self) -> Vec<String> {
+        Vec::new()
     }
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError>;
@@ -163,6 +184,11 @@ impl PassManager {
     }
 
     /// Execute all passes in dependency order, using the given failure mode.
+    ///
+    /// Before running each pass, checks `should_recompute` against a manifest
+    /// of that pass's last known `{version, config_hash, cache_inputs}`
+    /// (Phase 13 — Optimizer); if nothing has changed, the pass is skipped and
+    /// reported as `PassOutcome::skipped`.
     pub async fn run_all(
         &mut self,
         ctx: &mut PassContext,
@@ -172,6 +198,10 @@ impl PassManager {
 
         let order = self.execution_order()?;
         let mut report = ExecutionReport { outcomes: Vec::new() };
+        let manifest_dir = ctx.config.artifact_dir(&ctx.cwd).join("pass-manifests");
+        let cfg_hash = crate::cache::config_hash(
+            &serde_json::to_value(ctx.config.as_ref()).unwrap_or_default(),
+        );
 
         for name in &order {
             let pass = self
@@ -180,14 +210,140 @@ impl PassManager {
                 .find(|p| p.name() == name.as_str())
                 .expect("execution_order only contains registered pass names");
 
+            if !crate::cache::should_recompute(pass.as_ref(), &cfg_hash, &manifest_dir) {
+                tracing::info!(pass = %name, "skipping pass (cached)");
+                report.outcomes.push(PassOutcome::skipped(name.clone()));
+                continue;
+            }
+
             tracing::info!(pass = %name, "running pass");
             let result = pass.run(ctx).await;
             let failed = result.is_err();
 
-            report.outcomes.push(PassOutcome { pass_name: name.clone(), result });
+            if !failed {
+                crate::cache::record_manifest(pass.as_ref(), &cfg_hash, &manifest_dir);
+            }
+
+            report.outcomes.push(PassOutcome::ran(name.clone(), result));
 
             if failed && matches!(failure_mode, FailureMode::FailFast) {
                 break;
+            }
+        }
+
+        Ok(report)
+    }
+
+    /// Groups the dependency DAG into levels via iterated Kahn layering: level 0
+    /// is every pass with no dependencies, level 1 is every pass whose
+    /// dependencies are all in level 0, and so on. Passes within one level have
+    /// no path between them in the DAG, so they can run concurrently.
+    pub fn execution_levels(&self) -> Result<Vec<Vec<String>>, SchedulerError> {
+        let known: HashSet<&str> = self.passes.iter().map(|p| p.name()).collect();
+        for pass in &self.passes {
+            for &dep in pass.dependencies() {
+                if !known.contains(dep) {
+                    return Err(SchedulerError::UnknownDependency {
+                        pass: pass.name().to_string(),
+                        dep: dep.to_string(),
+                    });
+                }
+            }
+        }
+
+        let mut adj: HashMap<&str, Vec<&str>> =
+            self.passes.iter().map(|p| (p.name(), vec![])).collect();
+        let mut remaining: HashMap<&str, usize> =
+            self.passes.iter().map(|p| (p.name(), 0)).collect();
+        for pass in &self.passes {
+            for &dep in pass.dependencies() {
+                adj.get_mut(dep).unwrap().push(pass.name());
+                *remaining.get_mut(pass.name()).unwrap() += 1;
+            }
+        }
+
+        let mut levels: Vec<Vec<String>> = Vec::new();
+        let mut done = 0usize;
+        loop {
+            let level: Vec<&str> =
+                remaining.iter().filter(|&(_, &d)| d == 0).map(|(&n, _)| n).collect();
+            if level.is_empty() {
+                break;
+            }
+            for &n in &level {
+                remaining.remove(n);
+                done += 1;
+                for &next in adj.get(n).unwrap() {
+                    if let Some(d) = remaining.get_mut(next) {
+                        *d -= 1;
+                    }
+                }
+            }
+            let mut sorted: Vec<String> = level.into_iter().map(String::from).collect();
+            sorted.sort();
+            levels.push(sorted);
+        }
+
+        if done != self.passes.len() {
+            let placed: HashSet<&str> = levels.iter().flatten().map(|s| s.as_str()).collect();
+            let cycle_node = self
+                .passes
+                .iter()
+                .find(|p| !placed.contains(p.name()))
+                .map(|p| p.name().to_string())
+                .unwrap_or_default();
+            return Err(SchedulerError::CycleDetected(cycle_node));
+        }
+
+        Ok(levels)
+    }
+
+    /// Execute passes level-by-level, running every pass within a level
+    /// concurrently (Phase 13 — Optimizer). Each spawned pass gets its own
+    /// cloned `PassContext` — cheap, since every field is an `Arc` or small
+    /// value — so all clones still write into the same diagnostics sink and
+    /// artifact store despite each pass needing an exclusive `&mut self`.
+    pub async fn run_all_parallel(
+        &mut self,
+        ctx: &PassContext,
+        failure_mode: crate::scheduler::FailureMode,
+    ) -> Result<crate::scheduler::ExecutionReport, SchedulerError> {
+        use crate::scheduler::{ExecutionReport, FailureMode, PassOutcome};
+
+        let levels = self.execution_levels()?;
+        let mut passes = std::mem::take(&mut self.passes);
+        let mut report = ExecutionReport { outcomes: Vec::new() };
+        let mut failed_overall = false;
+
+        for level in &levels {
+            if failed_overall && matches!(failure_mode, FailureMode::FailFast) {
+                break;
+            }
+
+            let mut level_passes: Vec<(String, Box<dyn CompilerPass>)> = Vec::new();
+            for name in level {
+                if let Some(pos) = passes.iter().position(|p| p.name() == name.as_str()) {
+                    level_passes.push((name.clone(), passes.remove(pos)));
+                }
+            }
+
+            let mut handles = Vec::new();
+            for (name, mut pass) in level_passes {
+                let mut pass_ctx = ctx.clone();
+                handles.push(tokio::spawn(async move {
+                    tracing::info!(pass = %name, "running pass (parallel)");
+                    let result = pass.run(&mut pass_ctx).await;
+                    (name, result)
+                }));
+            }
+
+            for handle in handles {
+                let (name, result) = handle.await.expect("pass task panicked");
+                let failed = result.is_err();
+                report.outcomes.push(PassOutcome::ran(name, result));
+                if failed && matches!(failure_mode, FailureMode::FailFast) {
+                    failed_overall = true;
+                }
             }
         }
 
@@ -266,7 +422,8 @@ mod tests {
         pm.register(Box::new(NamedPass("ok", &[])));
 
         let config = Arc::new(EkosConfig::default());
-        let mut ctx = PassContext::new(config, std::path::PathBuf::from("."));
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = PassContext::new(config, dir.path().to_path_buf());
         let report = pm.run_all(&mut ctx, FailureMode::Collect).await.unwrap();
         assert_eq!(report.passes_run(), 2);
     }
@@ -289,9 +446,74 @@ mod tests {
         pm.register(Box::new(NamedPass("must-run-after", &["fail"])));
 
         let config = Arc::new(EkosConfig::default());
-        let mut ctx = PassContext::new(config, std::path::PathBuf::from("."));
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = PassContext::new(config, dir.path().to_path_buf());
         let report = pm.run_all(&mut ctx, FailureMode::FailFast).await.unwrap();
         assert_eq!(report.passes_run(), 1);
         assert!(report.has_errors());
+    }
+
+    #[test]
+    fn execution_levels_groups_independent_passes_together() {
+        let mut pm = PassManager::new();
+        pm.register(Box::new(NamedPass("A", &[])));
+        pm.register(Box::new(NamedPass("B", &[])));
+        pm.register(Box::new(NamedPass("C", &["A", "B"])));
+        let levels = pm.execution_levels().unwrap();
+        assert_eq!(levels.len(), 2);
+        assert_eq!(levels[0], vec!["A".to_string(), "B".to_string()]);
+        assert_eq!(levels[1], vec!["C".to_string()]);
+    }
+
+    #[test]
+    fn execution_levels_detects_cycle() {
+        let mut pm = PassManager::new();
+        pm.register(Box::new(NamedPass("A", &["B"])));
+        pm.register(Box::new(NamedPass("B", &["A"])));
+        assert!(matches!(pm.execution_levels(), Err(SchedulerError::CycleDetected(_))));
+    }
+
+    #[tokio::test]
+    async fn run_all_parallel_overlaps_independent_passes() {
+        use std::time::Instant;
+
+        struct TimedPass {
+            name: &'static str,
+            start: Arc<std::sync::Mutex<Option<Instant>>>,
+        }
+
+        #[async_trait]
+        impl CompilerPass for TimedPass {
+            fn name(&self) -> &str { self.name }
+            async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> {
+                *self.start.lock().unwrap() = Some(Instant::now());
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                Ok(())
+            }
+        }
+
+        let starts: Vec<Arc<std::sync::Mutex<Option<Instant>>>> =
+            (0..3).map(|_| Arc::new(std::sync::Mutex::new(None))).collect();
+
+        let mut pm = PassManager::new();
+        pm.register(Box::new(TimedPass { name: "p1", start: starts[0].clone() }));
+        pm.register(Box::new(TimedPass { name: "p2", start: starts[1].clone() }));
+        pm.register(Box::new(TimedPass { name: "p3", start: starts[2].clone() }));
+
+        let config = Arc::new(EkosConfig::default());
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = PassContext::new(config, dir.path().to_path_buf());
+        let report = pm.run_all_parallel(&ctx, FailureMode::Collect).await.unwrap();
+        assert_eq!(report.passes_run(), 3);
+        assert!(!report.has_errors());
+
+        let times: Vec<Instant> = starts.iter().map(|s| s.lock().unwrap().unwrap()).collect();
+        let earliest = times.iter().min().unwrap();
+        for t in &times {
+            assert!(
+                t.duration_since(*earliest).as_millis() < 100,
+                "independent passes should start within 100ms of each other"
+            );
+        }
     }
 }

@@ -1,8 +1,10 @@
 pub mod ask;
+pub mod branch;
 pub mod build;
 pub mod clean;
 pub mod commit;
 pub mod compile;
+pub mod diff;
 pub mod doctor;
 pub mod ekl;
 pub mod init;

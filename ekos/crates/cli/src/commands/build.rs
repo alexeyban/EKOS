@@ -3,12 +3,28 @@ use ekos_artifact::{ArtifactStore, FileSystemArtifactStore, IndexArtifact};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_ledger::Ledger;
-use ekos_observation_sdk::{Observer, ScanContext};
+use ekos_observation_sdk::{source_fingerprint, Observer, ScanContext};
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use std::collections::HashMap;
 use std::path::Path;
 use uuid::Uuid;
+
+/// Load the `.ekos/fingerprints.json` map of observe-path → last-seen source fingerprint.
+fn load_fingerprints(path: &Path) -> HashMap<String, String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_fingerprints(path: &Path, fingerprints: &HashMap<String, String>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(fingerprints)?)?;
+    Ok(())
+}
 
 pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let ledger_path = config.ledger_path(cwd);
@@ -26,15 +42,29 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let observers: Vec<Box<dyn Observer>> =
         vec![Box::new(FileObserver::new()), Box::new(GitObserver::new())];
 
+    let fingerprint_path = config.ekos_dir(cwd).join("fingerprints.json");
+    let mut fingerprints = load_fingerprints(&fingerprint_path);
+
     let mut total_observed = 0usize;
     let mut total_skipped = 0usize;
+    let mut connectors_rescanned = 0usize;
+    let mut connectors_skipped_cached = 0usize;
     let mut index_entries: HashMap<String, ekos_artifact::ArtifactId> = HashMap::new();
 
     for base in &observe_paths {
         let ctx = ScanContext::new(base)
             .with_ignore_patterns(config.observe.ignore_patterns.clone());
 
+        let fp = source_fingerprint(&ctx);
+        let fp_key = base.display().to_string();
+        if fingerprints.get(&fp_key) == Some(&fp.0) {
+            connectors_skipped_cached += observers.len();
+            continue;
+        }
+        fingerprints.insert(fp_key, fp.0);
+
         for observer in &observers {
+            connectors_rescanned += 1;
             let package = match observer.scan(&ctx).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -94,6 +124,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         }
     }
 
+    save_fingerprints(&fingerprint_path, &fingerprints)?;
+
     // ── Write build index (snapshot) ─────────────────────────────────────────
     let build_id = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let index = IndexArtifact::new(&build_id, index_entries);
@@ -112,6 +144,14 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         println!("  Files skipped (cached): {total_skipped}");
     }
     println!("  Total objects in ledger: {total_objects}");
+    if connectors_rescanned == 0 {
+        println!("  0 connectors re-scanned");
+    } else {
+        println!("  Connectors re-scanned: {connectors_rescanned}");
+    }
+    if connectors_skipped_cached > 0 {
+        println!("  {connectors_skipped_cached} connector(s) skipped (cached)");
+    }
     println!("  Snapshot: .ekos/snapshots/{build_id}.json");
     Ok(())
 }

@@ -1293,7 +1293,7 @@ time ekos build   # benchmark before/after parallelism
 
 ---
 
-- [ ] **Incremental compilation (re-scan changed sources only)**
+- [x] **Incremental compilation (re-scan changed sources only)**
   - *What:* Before running an `Observer`, compare the current source fingerprint (Git HEAD sha for
     git, mtimes for filesystem, schema version hash for DB) against the fingerprint stored in the
     previous `ObservationPackage`. If unchanged, skip the observation and reuse the cached artifact.
@@ -1302,7 +1302,7 @@ time ekos build   # benchmark before/after parallelism
   - *Test/Validate:* Run `ekos build` twice without changing sources; assert second run takes <10%
     of first run time and prints "0 connectors re-scanned".
 
-- [ ] **Parallel pass execution**
+- [x] **Parallel pass execution**
   - *What:* Update `Scheduler` to detect passes with no data dependency between them and execute
     them concurrently using `tokio::task::spawn`. Passes that share an output artifact (write to the
     same `ArtifactId`) must not run concurrently — the scheduler enforces this via the dependency DAG.
@@ -1310,7 +1310,7 @@ time ekos build   # benchmark before/after parallelism
   - *Test/Validate:* Run `ekos build --parallel` with three independent passes; instrument each pass
     to record start time; assert all three start times are within 100ms of each other.
 
-- [ ] **Artifact cache invalidation strategy**
+- [x] **Artifact cache invalidation strategy**
   - *What:* Define when a cached artifact is invalidated: (1) any transitive input artifact has
     changed (content-hash differs), (2) the pass that produced it has a different version, (3) the
     pass configuration has changed. Implement `fn should_recompute(pass: &dyn CompilerPass, inputs:
@@ -1319,7 +1319,7 @@ time ekos build   # benchmark before/after parallelism
   - *Test/Validate:* Change a pass's config in `ekos.toml`; assert the pass re-runs on next build
     even though its input artifacts have not changed.
 
-- [ ] **Knowledge diff (what changed between two ledger states)**
+- [x] **Knowledge diff (what changed between two ledger states)**
   - *What:* Implement `fn diff_ledger(ledger: &Ledger, from: DateTime<Utc>, to: DateTime<Utc>) ->
     LedgerDiff` where `LedgerDiff { added: Vec<LedgerEntryId>, unchanged: usize }`. (No deletion
     from append-only ledger, so "changed" means a new entry superseded an older one for the same
@@ -1328,7 +1328,7 @@ time ekos build   # benchmark before/after parallelism
   - *Test/Validate:* Write 3 objects at t1, update 1 at t2. `diff_ledger(t1, t2)` returns
     `added.len() == 1` (the updated entry) and `unchanged == 2`.
 
-- [ ] **Knowledge merge and branch**
+- [x] **Knowledge merge and branch**
   - *What:* Allow the ledger to have named "branches" (separate SQLite files at `.ekos/ledger/<branch>.db`).
     `ekos branch create <name>` copies the current ledger. `ekos branch merge <name>` appends entries
     from the branch that are not in the main ledger (by entry id). Conflicts (same object updated in

@@ -87,6 +87,63 @@ impl ScanContext {
     }
 }
 
+/// Cheap pre-scan signature for a source tree (Phase 13 — Optimizer).
+///
+/// Hashes `(relative path, size, mtime)` for every non-ignored file under
+/// `ctx.workspace_root` without reading file contents. Two scans of an unchanged
+/// tree produce the same fingerprint; any add/remove/modify changes it. Used as a
+/// pre-`Observer::scan` gate: unchanged fingerprint means the whole scan can be
+/// skipped, not just deduped after the fact like content-addressed artifacts are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fingerprint(pub String);
+
+/// Compute a `Fingerprint` for the source tree rooted at `ctx.workspace_root`.
+pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
+    use sha2::{Digest, Sha256};
+
+    let mut entries: Vec<(String, u64, u128)> = Vec::new();
+
+    for entry in walkdir::WalkDir::new(&ctx.workspace_root)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.file_type().is_dir()
+                && let Some(name) = e.file_name().to_str()
+            {
+                return !ctx.ignore_patterns.iter().any(|p| name == p.as_str());
+            }
+            true
+        })
+    {
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(rel_path) = entry.path().strip_prefix(&ctx.workspace_root) else { continue };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if ctx.is_ignored(&rel) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let mtime_nanos = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        entries.push((rel, meta.len(), mtime_nanos));
+    }
+
+    entries.sort();
+
+    let mut hasher = Sha256::new();
+    for (path, size, mtime) in &entries {
+        hasher.update(path.as_bytes());
+        hasher.update(size.to_le_bytes());
+        hasher.update(mtime.to_le_bytes());
+    }
+    Fingerprint(hex::encode(hasher.finalize()))
+}
+
 /// Metadata about a completed scan.
 #[derive(Debug, Clone)]
 pub struct PackageMeta {
@@ -165,5 +222,38 @@ mod tests {
         pkg.push(ObservationArtifact::new("test", "a", serde_json::json!({})));
         assert_eq!(pkg.len(), 1);
         assert_eq!(pkg.meta.file_count, 1);
+    }
+
+    #[test]
+    fn fingerprint_stable_across_repeated_scans() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        let ctx = ScanContext::new(dir.path());
+        let fp1 = source_fingerprint(&ctx);
+        let fp2 = source_fingerprint(&ctx);
+        assert_eq!(fp1, fp2);
+    }
+
+    #[test]
+    fn fingerprint_changes_on_new_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        let ctx = ScanContext::new(dir.path());
+        let fp1 = source_fingerprint(&ctx);
+        std::fs::write(dir.path().join("b.txt"), b"world").unwrap();
+        let fp2 = source_fingerprint(&ctx);
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn fingerprint_ignores_ignored_paths() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        let ctx = ScanContext::new(dir.path());
+        let fp1 = source_fingerprint(&ctx);
+        std::fs::create_dir_all(dir.path().join("target")).unwrap();
+        std::fs::write(dir.path().join("target").join("out.bin"), b"junk").unwrap();
+        let fp2 = source_fingerprint(&ctx);
+        assert_eq!(fp1, fp2, "changes under an ignored directory must not affect the fingerprint");
     }
 }
