@@ -1,13 +1,33 @@
 use anyhow::Result;
+use ekos_artifact::{ArtifactStore, FileSystemArtifactStore};
 use ekos_compiler_core::{pass::PassContext, scheduler::FailureMode, EkosConfig};
 use ekos_semantic::SemanticCompilerPass;
 use std::{path::Path, sync::Arc};
 
+/// Ids of every knowledge artifact currently in the store — the semantic
+/// compiler's actual inputs, declared so the Phase 13 cache invalidates when
+/// recover output changes.
+fn knowledge_artifact_ids(store: &FileSystemArtifactStore) -> Vec<String> {
+    let Ok(ids) = store.list() else { return Vec::new() };
+    ids.into_iter()
+        .filter(|id| {
+            matches!(
+                store.read(id),
+                Ok(Some(json)) if json["artifact_type"].as_str() == Some("knowledge")
+            )
+        })
+        .map(|id| id.to_string())
+        .collect()
+}
+
 pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let ckm_dir = config.ekos_dir(cwd).join("ckm");
 
+    let store = FileSystemArtifactStore::new(config.artifact_dir(cwd));
     let mut pass_manager = ekos_compiler_core::pass::PassManager::new();
-    pass_manager.register(Box::new(SemanticCompilerPass::new(&ckm_dir)));
+    pass_manager.register(Box::new(
+        SemanticCompilerPass::new(&ckm_dir).with_cache_inputs(knowledge_artifact_ids(&store)),
+    ));
 
     let mut ctx = PassContext::new(Arc::new(config.clone()), cwd.to_path_buf());
     let report = pass_manager

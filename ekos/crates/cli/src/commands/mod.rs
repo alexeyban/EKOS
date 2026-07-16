@@ -9,6 +9,7 @@ pub mod doctor;
 pub mod ekl;
 pub mod init;
 pub mod ledger;
+pub mod mcp;
 pub mod query;
 pub mod recover;
 pub mod resolve;
@@ -31,4 +32,17 @@ pub fn init_logging(config: &EkosConfig) {
     } else {
         builder.init();
     }
+}
+
+/// Logging for the MCP server: stdout carries JSON-RPC frames only, so all
+/// diagnostics must go to stderr.
+pub fn init_logging_stderr(config: &EkosConfig) {
+    let level = &config.workspace.log_level;
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_env("EKOS_LOG")
+                .unwrap_or_else(|_| level.as_str().into()),
+        )
+        .with_writer(std::io::stderr)
+        .init();
 }

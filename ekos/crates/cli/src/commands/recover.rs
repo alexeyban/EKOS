@@ -62,7 +62,10 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 }
             };
 
-            let rel = path.strip_prefix(base).unwrap_or(path);
+            // Workspace-relative, not base-relative: with multiple observe
+            // paths, two projects can hold the same base-relative SQL path
+            // (e.g. `schema.sql`), and pass names must be unique.
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
             let pass = SqlAnalyzerPass::new(
                 rel.to_string_lossy().as_ref(),
                 sql,

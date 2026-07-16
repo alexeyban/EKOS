@@ -71,6 +71,16 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 **Planned plugins:** PostgreSQL, SQL Server, Git, Confluence, Jira.
 
+### AI agent access (MCP)
+
+`ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
+server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`,
+`ekos_state`, `ekos_status`. Connect Claude Code with:
+
+```bash
+claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace
+```
+
 ## Development Process
 
 All significant architectural decisions begin as RFCs in `docs/rfcs/`. No feature is implemented until its RFC is accepted. See `CLAUDE.md` for the full mandatory development workflow.

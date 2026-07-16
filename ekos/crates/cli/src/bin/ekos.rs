@@ -75,6 +75,21 @@ enum Commands {
         #[command(subcommand)]
         subcommand: BranchCommands,
     },
+    /// Model Context Protocol server (RFC 0013)
+    Mcp {
+        #[command(subcommand)]
+        subcommand: McpCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCommands {
+    /// Serve MCP over stdio (newline-delimited JSON-RPC 2.0)
+    Serve {
+        /// Workspace directory containing .ekos/ (default: current directory)
+        #[arg(long, value_name = "DIR")]
+        workspace: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -121,7 +136,12 @@ async fn main() -> Result<()> {
     let config = ekos_compiler_core::EkosConfig::from_file_or_default(&config_path);
     let cwd = std::env::current_dir()?;
 
-    ekos::commands::init_logging(&config);
+    // The MCP server owns stdout for protocol frames; its logs go to stderr.
+    if matches!(cli.command, Commands::Mcp { .. }) {
+        ekos::commands::init_logging_stderr(&config);
+    } else {
+        ekos::commands::init_logging(&config);
+    }
 
     match cli.command {
         Commands::Init => ekos::commands::init::run(&config, &cwd),
@@ -154,6 +174,12 @@ async fn main() -> Result<()> {
             BranchCommands::List => ekos::commands::branch::list(&config, &cwd),
             BranchCommands::Merge { name } => ekos::commands::branch::merge(&config, &cwd, &name),
             BranchCommands::Delete { name } => ekos::commands::branch::delete(&config, &cwd, &name),
+        },
+        Commands::Mcp { subcommand } => match subcommand {
+            McpCommands::Serve { workspace } => {
+                let workspace = workspace.unwrap_or_else(|| cwd.clone());
+                ekos::commands::mcp::run(&config, &workspace)
+            }
         },
     }
 }

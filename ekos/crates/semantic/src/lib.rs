@@ -245,11 +245,23 @@ pub fn build_ckm(graph: &KirGraph) -> CkModel {
 /// validates the CKM, and writes it to `<output_dir>/model.json`.
 pub struct SemanticCompilerPass {
     output_dir: PathBuf,
+    /// Sorted ids of the knowledge artifacts this pass consumes — the Phase 13
+    /// cache key. Without them the pass cached on `{version, config}` alone
+    /// and silently reused a stale CKM after any recover re-run (devlog 14).
+    cache_inputs: Vec<String>,
 }
 
 impl SemanticCompilerPass {
     pub fn new(output_dir: impl Into<PathBuf>) -> Self {
-        Self { output_dir: output_dir.into() }
+        Self { output_dir: output_dir.into(), cache_inputs: Vec::new() }
+    }
+
+    /// Declare the knowledge-artifact ids this pass will consume, so the cache
+    /// invalidates when recover output changes.
+    pub fn with_cache_inputs(mut self, mut ids: Vec<String>) -> Self {
+        ids.sort();
+        self.cache_inputs = ids;
+        self
     }
 }
 
@@ -257,6 +269,10 @@ impl SemanticCompilerPass {
 impl CompilerPass for SemanticCompilerPass {
     fn name(&self) -> &str {
         "semantic-compiler"
+    }
+
+    fn cache_inputs(&self) -> Vec<String> {
+        self.cache_inputs.clone()
     }
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
@@ -353,6 +369,20 @@ mod tests {
         RelationshipKind, SourceLocation,
     };
     use tempfile::TempDir;
+
+    /// Regression (devlog 14): without declared cache inputs, the pass cached
+    /// on `{version, config}` alone and silently reused a stale CKM after a
+    /// recover re-run. The declared inputs must round-trip, sorted.
+    #[test]
+    fn cache_inputs_are_declared_and_sorted() {
+        let pass = SemanticCompilerPass::new("/tmp/out")
+            .with_cache_inputs(vec!["bbb".into(), "aaa".into()]);
+        assert_eq!(ekos_compiler_core::pass::CompilerPass::cache_inputs(&pass), vec!["aaa", "bbb"]);
+        assert!(ekos_compiler_core::pass::CompilerPass::cache_inputs(
+            &SemanticCompilerPass::new("/tmp/out")
+        )
+        .is_empty());
+    }
 
     fn two_object_graph() -> KirGraph {
         let mut g = KirGraph::new();

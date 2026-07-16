@@ -16,6 +16,7 @@ cargo clippy          # Lint
 cargo fmt             # Format
 ekos --help           # CLI entry point
 ekos init / build / clean / doctor
+ekos mcp serve --workspace <dir>   # MCP server over stdio for AI agents (RFC 0013)
 ```
 
 ## Planned Workspace Structure

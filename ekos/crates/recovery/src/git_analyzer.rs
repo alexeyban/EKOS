@@ -20,6 +20,14 @@ use uuid::Uuid;
 /// relationship is emitted. Configurable at construction time.
 const DEFAULT_MIN_COUPLING: usize = 2;
 
+/// Commits touching more than this many files are excluded from co-change
+/// coupling analysis (they still produce their `KirEvent` and authorship
+/// relationship). Bulk commits — vendoring, formatting sweeps, initial
+/// imports — carry no meaningful coupling signal, and the pair count is
+/// quadratic in files-per-commit: one 3,500-file import alone yields ~6M
+/// pairs. First hit for real scanning a 44-project workspace (devlog 14).
+const DEFAULT_MAX_COUPLING_COMMIT_FILES: usize = 50;
+
 pub struct GitAnalyzerPass {
     pass_id: String,
     /// Git commit ObservationArtifact IDs to process.
@@ -27,6 +35,7 @@ pub struct GitAnalyzerPass {
     /// Artifact IDs that are the repository metadata artifacts.
     repo_artifact_id: Option<ArtifactId>,
     min_coupling: usize,
+    max_coupling_commit_files: usize,
 }
 
 impl GitAnalyzerPass {
@@ -41,11 +50,17 @@ impl GitAnalyzerPass {
             commit_artifact_ids,
             repo_artifact_id,
             min_coupling: DEFAULT_MIN_COUPLING,
+            max_coupling_commit_files: DEFAULT_MAX_COUPLING_COMMIT_FILES,
         }
     }
 
     pub fn with_min_coupling(mut self, n: usize) -> Self {
         self.min_coupling = n;
+        self
+    }
+
+    pub fn with_max_coupling_commit_files(mut self, n: usize) -> Self {
+        self.max_coupling_commit_files = n;
         self
     }
 }
@@ -54,6 +69,12 @@ impl GitAnalyzerPass {
 impl CompilerPass for GitAnalyzerPass {
     fn name(&self) -> &str {
         &self.pass_id
+    }
+
+    // v2: bulk commits excluded from coupling analysis — bumping the version
+    // invalidates cached v1 outputs so the fix actually re-runs.
+    fn version(&self) -> &str {
+        "v2"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -170,18 +191,28 @@ impl CompilerPass for GitAnalyzerPass {
             };
             graph.events.push(event);
 
-            // Count co-changes for coupling analysis.
-            let sorted_files: Vec<String> = {
-                let mut f = files_changed.clone();
-                f.sort();
-                f
-            };
-            for i in 0..sorted_files.len() {
-                for j in (i + 1)..sorted_files.len() {
-                    let pair =
-                        (sorted_files[i].clone(), sorted_files[j].clone());
-                    *file_co_changes.entry(pair).or_insert(0) += 1;
+            // Count co-changes for coupling analysis. Bulk commits are
+            // excluded: the pair count is quadratic in files-per-commit, and
+            // a vendoring/formatting commit says nothing about coupling.
+            if files_changed.len() <= self.max_coupling_commit_files {
+                let sorted_files: Vec<String> = {
+                    let mut f = files_changed.clone();
+                    f.sort();
+                    f
+                };
+                for i in 0..sorted_files.len() {
+                    for j in (i + 1)..sorted_files.len() {
+                        let pair =
+                            (sorted_files[i].clone(), sorted_files[j].clone());
+                        *file_co_changes.entry(pair).or_insert(0) += 1;
+                    }
                 }
+            } else {
+                tracing::debug!(
+                    sha = %sha,
+                    files = files_changed.len(),
+                    "skipping bulk commit for coupling analysis"
+                );
             }
 
             // Authorship relationship: contributor → commit event.
@@ -287,6 +318,44 @@ mod tests {
             .map(|(name, commits)| serde_json::json!({"name": name, "commits": commits}))
             .collect();
         ObservationArtifact::new("git", "repo", serde_json::json!({ "contributors": contributors }))
+    }
+
+    /// Regression (devlog 14): a bulk commit must not contribute to co-change
+    /// coupling — the pair count is quadratic in files-per-commit, and one
+    /// real 3,500-file import produced ~6M `CoupledWith` relationships.
+    #[tokio::test]
+    async fn bulk_commits_are_excluded_from_coupling() {
+        let dir = TempDir::new().unwrap();
+        let ctx = make_ctx_with_store(&dir);
+        let store = FileSystemArtifactStore::new(dir.path().join(".ekos/artifacts"));
+
+        // Two identical bulk commits (11 files > threshold of 10): every pair
+        // co-changes twice, which would pass min_coupling if it were counted.
+        let bulk_files: Vec<String> = (0..11).map(|i| format!("src/file_{i}.rs")).collect();
+        let bulk_refs: Vec<&str> = bulk_files.iter().map(String::as_str).collect();
+        // Two small commits sharing the same two files: real coupling signal.
+        let ids = vec![
+            seed_artifact(&store, &make_commit_artifact("aaa", "alice", &bulk_refs)),
+            seed_artifact(&store, &make_commit_artifact("bbb", "alice", &bulk_refs)),
+            seed_artifact(&store, &make_commit_artifact("ccc", "alice", &["a.rs", "b.rs"])),
+            seed_artifact(&store, &make_commit_artifact("ddd", "alice", &["a.rs", "b.rs"])),
+        ];
+
+        let mut pass = GitAnalyzerPass::new("ws", ids, None)
+            .with_max_coupling_commit_files(10);
+        let mut ctx = ctx;
+        pass.run(&mut ctx).await.unwrap();
+
+        let graph = read_knowledge_graph(&store);
+        let coupled: Vec<_> = graph
+            .relationships
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::CoupledWith)
+            .collect();
+        // Only the small commits' single pair survives; the bulk commits'
+        // 55 pairs are excluded. All four commits still produced events.
+        assert_eq!(coupled.len(), 1, "only the small-commit pair may couple");
+        assert_eq!(graph.events.len(), 4, "bulk commits still produce events");
     }
 
     #[tokio::test]

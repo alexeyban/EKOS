@@ -98,6 +98,8 @@ pub enum SchedulerError {
     CycleDetected(String),
     #[error("pass '{pass}' declares unknown dependency '{dep}'")]
     UnknownDependency { pass: String, dep: String },
+    #[error("duplicate pass name '{0}' — pass names must be unique")]
+    DuplicatePassName(String),
 }
 
 /// Validates the pass dependency graph and returns a topological execution order.
@@ -122,8 +124,22 @@ impl PassManager {
         self.passes.len()
     }
 
+    /// Pass names key the dependency graph, the cache manifest, and the
+    /// execution report — duplicates would silently collapse graph nodes and
+    /// then surface as a bogus "cycle detected" error.
+    fn check_unique_names(&self) -> Result<(), SchedulerError> {
+        let mut seen: HashSet<&str> = HashSet::with_capacity(self.passes.len());
+        for pass in &self.passes {
+            if !seen.insert(pass.name()) {
+                return Err(SchedulerError::DuplicatePassName(pass.name().to_string()));
+            }
+        }
+        Ok(())
+    }
+
     /// Returns pass names in a valid topological execution order.
     pub fn execution_order(&self) -> Result<Vec<String>, SchedulerError> {
+        self.check_unique_names()?;
         let known: HashSet<&str> = self.passes.iter().map(|p| p.name()).collect();
 
         // Validate that all declared dependencies actually exist.
@@ -239,6 +255,7 @@ impl PassManager {
     /// dependencies are all in level 0, and so on. Passes within one level have
     /// no path between them in the DAG, so they can run concurrently.
     pub fn execution_levels(&self) -> Result<Vec<Vec<String>>, SchedulerError> {
+        self.check_unique_names()?;
         let known: HashSet<&str> = self.passes.iter().map(|p| p.name()).collect();
         for pass in &self.passes {
             for &dep in pass.dependencies() {
@@ -397,6 +414,25 @@ mod tests {
         assert!(matches!(
             pm.execution_order(),
             Err(SchedulerError::UnknownDependency { .. })
+        ));
+    }
+
+    /// Regression: duplicate pass names used to collapse into one graph node
+    /// and surface as `CycleDetected("")` — first hit by `ekos recover` over a
+    /// multi-project workspace where two projects held the same relative SQL
+    /// path. They must be diagnosed as duplicates, in both scheduling modes.
+    #[test]
+    fn duplicate_pass_names_are_diagnosed_not_reported_as_cycle() {
+        let mut pm = PassManager::new();
+        pm.register(Box::new(NamedPass("sql-analyzer:schema.sql", &[])));
+        pm.register(Box::new(NamedPass("sql-analyzer:schema.sql", &[])));
+        assert!(matches!(
+            pm.execution_order(),
+            Err(SchedulerError::DuplicatePassName(name)) if name == "sql-analyzer:schema.sql"
+        ));
+        assert!(matches!(
+            pm.execution_levels(),
+            Err(SchedulerError::DuplicatePassName(_))
         ));
     }
 
