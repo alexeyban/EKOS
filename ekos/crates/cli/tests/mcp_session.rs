@@ -182,4 +182,57 @@ async fn claude_code_session_over_mcp() {
         !search["matches"].as_array().unwrap().is_empty(),
         "full-text search must find the orders concept"
     );
+
+    // ── Turn 6: impact analysis — "what breaks if customers changes?" ────────
+    let customers_id = tables["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "customers")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let impact = call_tool(
+        &config,
+        dir,
+        6,
+        "ekos_dependents",
+        serde_json::json!({ "id": customers_id }),
+    );
+    assert_eq!(impact["target"]["name"], "customers");
+    let dependent_names: Vec<&str> = impact["dependents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["name"].as_str())
+        .collect();
+    assert!(
+        dependent_names.contains(&"orders"),
+        "orders holds an FK into customers, so it must appear as a dependent, got {dependent_names:?}"
+    );
+
+    // ── Turn 7: "what changed?" — the whole build lands inside the window ────
+    let diff = call_tool(
+        &config,
+        dir,
+        7,
+        "ekos_diff",
+        serde_json::json!({ "from": "2020-01-01T00:00:00Z" }),
+    );
+    assert!(
+        diff["changed_total"].as_u64().unwrap() >= 2,
+        "the freshly committed tables must appear as changes"
+    );
+    let changed_names: Vec<&str> = diff["changed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c["name"].as_str())
+        .collect();
+    assert!(
+        changed_names.contains(&"orders") && changed_names.contains(&"customers"),
+        "diff must resolve changed ids to readable names, got {changed_names:?}"
+    );
 }

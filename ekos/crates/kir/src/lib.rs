@@ -132,6 +132,18 @@ pub enum RelationshipKind {
     Custom(String),
 }
 
+/// Same contract as `ObjectKind`'s `Display`: the single source of truth for
+/// how a relationship kind renders anywhere a human or agent sees it
+/// (CLI output, MCP tool results).
+impl std::fmt::Display for RelationshipKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Custom(s) => write!(f, "{s}"),
+            other => write!(f, "{other:?}"),
+        }
+    }
+}
+
 /// The identity of a concept in the enterprise (table, entity, service, rule…).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KirObject {

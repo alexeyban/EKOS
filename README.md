@@ -75,7 +75,8 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
 server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`,
-`ekos_state`, `ekos_status`. Connect Claude Code with:
+`ekos_state`, `ekos_dependents` (impact analysis), `ekos_diff` (what changed since T),
+`ekos_status`. Connect Claude Code with:
 
 ```bash
 claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace

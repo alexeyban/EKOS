@@ -126,6 +126,13 @@ impl<'a> Runtime<'a> {
         Ok(self.ledger.all_relationships()?)
     }
 
+    /// All relationships touching `id`, in either direction (RFC 0013 —
+    /// `ekos_dependents` impact analysis). Callers filter by `to == id` for
+    /// incoming edges (dependents) or `from == id` for dependencies.
+    pub fn relationships_for(&self, id: &KirId) -> Result<Vec<KirRelationship>, RuntimeError> {
+        Ok(self.ledger.relationships_for(id)?)
+    }
+
     // ── Historical queries ────────────────────────────────────────────────────
 
     /// Reconstruct the state of an object as it existed at or before `at`.
@@ -180,6 +187,26 @@ mod tests {
         let (ledger, _dir) = temp_ledger();
         let rt = Runtime::new(&ledger);
         assert!(rt.load_object(&KirId::new()).unwrap().is_none());
+    }
+
+    #[test]
+    fn relationships_for_returns_both_directions() {
+        let (ledger, _dir) = temp_ledger();
+        let orders = obj("orders");
+        let customers = obj("customers");
+        let items = obj("order_items");
+        for o in [&orders, &customers, &items] {
+            ledger.append_object(o).unwrap();
+        }
+        // orders → customers (outgoing) and order_items → orders (incoming).
+        ledger.append_relationship(&fk(orders.id, customers.id)).unwrap();
+        ledger.append_relationship(&fk(items.id, orders.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let rels = rt.relationships_for(&orders.id).unwrap();
+        assert_eq!(rels.len(), 2, "both directions must be returned");
+        assert!(rels.iter().any(|r| r.to == orders.id && r.from == items.id));
+        assert!(rels.iter().any(|r| r.from == orders.id && r.to == customers.id));
     }
 
     #[test]

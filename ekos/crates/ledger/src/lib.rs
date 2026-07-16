@@ -487,6 +487,9 @@ pub struct LedgerEntryId(pub i64);
 pub struct LedgerDiff {
     /// Object/relationship versions written in `(from, to]`.
     pub added: Vec<LedgerEntryId>,
+    /// Unique logical ids (object/relationship `KirId`s as strings) touched in
+    /// the window — resolvable via `get_object`/`get_relationship` for display.
+    pub touched: Vec<String>,
     /// Currently-tracked objects/relationships not touched in that window.
     pub unchanged: usize,
 }
@@ -504,7 +507,10 @@ pub fn diff_ledger(
     let total_tracked = ledger.object_count()? + ledger.relationship_count()?;
     let unchanged = total_tracked.saturating_sub(touched_ids.len());
 
-    Ok(LedgerDiff { added: versions.into_iter().map(|(id, _)| id).collect(), unchanged })
+    let mut touched: Vec<String> = touched_ids.into_iter().collect();
+    touched.sort();
+
+    Ok(LedgerDiff { added: versions.into_iter().map(|(id, _)| id).collect(), touched, unchanged })
 }
 
 // ── Knowledge merge (Phase 13 — Optimizer) ─────────────────────────────────

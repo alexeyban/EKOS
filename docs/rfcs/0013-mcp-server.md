@@ -49,7 +49,15 @@ directory. `mcp serve` therefore takes `--workspace <DIR>` (default: cwd) and re
 | `ekos_ekl` | `ekl_parse` + `EklInterpreter::execute` | `query: string` |
 | `ekos_neighborhood` | `Runtime::load_neighborhood` | `id: string`, `depth?: integer` (default 1) |
 | `ekos_state` | `Runtime::reconstruct_state(_at)` | `id: string`, `at?: string` (RFC 3339) |
+| `ekos_dependents` | `Runtime::relationships_for` (split by direction) | `id: string` |
+| `ekos_diff` | `diff_ledger`, touched ids resolved to names (≤200 listed) | `from: string` (RFC 3339), `to?: string` (default now) |
 | `ekos_status` | `Ledger` entry/object/relationship counts | — |
+
+`ekos_dependents` answers impact analysis ("what breaks if this changes?"): incoming edges are
+`dependents`, outgoing edges `dependencies`, each resolved to name/kind with the relationship's
+properties. `ekos_diff` answers "what knowledge changed since T?" over the append-only ledger —
+the two scenarios agents actually run that no code-navigation MCP can serve (added after the
+Serena comparison, devlog 15).
 
 Tool results are JSON serialized into a single `text` content block. Tool-level failures
 (bad EKL syntax, unknown id, missing ledger) return `isError: true` with the message in the
