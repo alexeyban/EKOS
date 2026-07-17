@@ -20,11 +20,19 @@ pub struct PassOutcome {
 
 impl PassOutcome {
     pub fn ran(pass_name: String, result: Result<(), PassError>) -> Self {
-        Self { pass_name, result, skipped: false }
+        Self {
+            pass_name,
+            result,
+            skipped: false,
+        }
     }
 
     pub fn skipped(pass_name: String) -> Self {
-        Self { pass_name, result: Ok(()), skipped: true }
+        Self {
+            pass_name,
+            result: Ok(()),
+            skipped: true,
+        }
     }
 }
 
@@ -63,7 +71,10 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub fn new(failure_mode: FailureMode) -> Self {
-        Self { failure_mode, manager: crate::pass::PassManager::new() }
+        Self {
+            failure_mode,
+            manager: crate::pass::PassManager::new(),
+        }
     }
 
     pub fn register(&mut self, pass: Box<dyn crate::pass::CompilerPass>) {

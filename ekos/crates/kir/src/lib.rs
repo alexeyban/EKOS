@@ -46,11 +46,19 @@ pub struct SourceLocation {
 
 impl SourceLocation {
     pub fn file(path: impl Into<String>) -> Self {
-        Self { path: path.into(), line: None, column: None }
+        Self {
+            path: path.into(),
+            line: None,
+            column: None,
+        }
     }
 
     pub fn at(path: impl Into<String>, line: u32) -> Self {
-        Self { path: path.into(), line: Some(line), column: None }
+        Self {
+            path: path.into(),
+            line: Some(line),
+            column: None,
+        }
     }
 }
 
@@ -348,7 +356,10 @@ mod tests {
     fn object_kind_custom_fallback_still_works() {
         // An unrecognized string must still fall back to Custom, not fail to parse.
         let back: ObjectKind = serde_json::from_str("\"SomethingNotYetEnumerated\"").unwrap();
-        assert_eq!(back, ObjectKind::Custom("SomethingNotYetEnumerated".to_string()));
+        assert_eq!(
+            back,
+            ObjectKind::Custom("SomethingNotYetEnumerated".to_string())
+        );
     }
 
     #[test]
@@ -378,8 +389,11 @@ mod tests {
         let mut g = KirGraph::new();
 
         let ev_id = g.add_evidence(
-            KirEvidence::new(SourceLocation::at("schema.sql", 3), "FOREIGN KEY (customer_id) REFERENCES customers(id)")
-                .with_confidence(0.99),
+            KirEvidence::new(
+                SourceLocation::at("schema.sql", 3),
+                "FOREIGN KEY (customer_id) REFERENCES customers(id)",
+            )
+            .with_confidence(0.99),
         );
 
         let customer_id = g.add_object(
@@ -388,14 +402,14 @@ mod tests {
                 .with_evidence(ev_id),
         );
 
-        let order_id = g.add_object(
-            KirObject::new("orders", ObjectKind::Table)
-                .with_evidence(ev_id),
-        );
+        let order_id =
+            g.add_object(KirObject::new("orders", ObjectKind::Table).with_evidence(ev_id));
 
-        g.add_relationship(
-            KirRelationship::new(RelationshipKind::ForeignKey, order_id, customer_id),
-        );
+        g.add_relationship(KirRelationship::new(
+            RelationshipKind::ForeignKey,
+            order_id,
+            customer_id,
+        ));
 
         g.events.push(KirEvent {
             id: KirId::new(),

@@ -72,7 +72,11 @@ impl<'a> Runtime<'a> {
             }
 
             for rel in self.ledger.relationships_for(&current_id)? {
-                let neighbour_id = if rel.from == current_id { rel.to } else { rel.from };
+                let neighbour_id = if rel.from == current_id {
+                    rel.to
+                } else {
+                    rel.from
+                };
 
                 // Avoid duplicate relationships.
                 if !graph.relationships.iter().any(|r| r.id == rel.id) {
@@ -108,7 +112,11 @@ impl<'a> Runtime<'a> {
             }
         }
 
-        Ok(Some(ObjectState { object, relationships, evidence }))
+        Ok(Some(ObjectState {
+            object,
+            relationships,
+            evidence,
+        }))
     }
 
     /// Full-text search over object names and kinds. Returns ranked `(id, name)` matches.
@@ -156,7 +164,11 @@ impl<'a> Runtime<'a> {
             }
         }
 
-        Ok(Some(ObjectState { object, relationships, evidence }))
+        Ok(Some(ObjectState {
+            object,
+            relationships,
+            evidence,
+        }))
     }
 }
 
@@ -164,7 +176,9 @@ impl<'a> Runtime<'a> {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use ekos_kir::{KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation};
+    use ekos_kir::{
+        KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
+    };
     use tempfile::TempDir;
 
     fn temp_ledger() -> (Ledger, TempDir) {
@@ -175,7 +189,9 @@ mod tests {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    fn obj(name: &str) -> KirObject { KirObject::new(name, ObjectKind::Table) }
+    fn obj(name: &str) -> KirObject {
+        KirObject::new(name, ObjectKind::Table)
+    }
     fn fk(from: KirId, to: KirId) -> KirRelationship {
         KirRelationship::new(RelationshipKind::ForeignKey, from, to)
     }
@@ -199,14 +215,21 @@ mod tests {
             ledger.append_object(o).unwrap();
         }
         // orders → customers (outgoing) and order_items → orders (incoming).
-        ledger.append_relationship(&fk(orders.id, customers.id)).unwrap();
-        ledger.append_relationship(&fk(items.id, orders.id)).unwrap();
+        ledger
+            .append_relationship(&fk(orders.id, customers.id))
+            .unwrap();
+        ledger
+            .append_relationship(&fk(items.id, orders.id))
+            .unwrap();
 
         let rt = Runtime::new(&ledger);
         let rels = rt.relationships_for(&orders.id).unwrap();
         assert_eq!(rels.len(), 2, "both directions must be returned");
         assert!(rels.iter().any(|r| r.to == orders.id && r.from == items.id));
-        assert!(rels.iter().any(|r| r.from == orders.id && r.to == customers.id));
+        assert!(
+            rels.iter()
+                .any(|r| r.from == orders.id && r.to == customers.id)
+        );
     }
 
     #[test]
@@ -358,8 +381,12 @@ mod tests {
     #[test]
     fn list_relationships_returns_every_relationship() {
         let (ledger, _dir) = temp_ledger();
-        ledger.append_relationship(&fk(KirId::new(), KirId::new())).unwrap();
-        ledger.append_relationship(&fk(KirId::new(), KirId::new())).unwrap();
+        ledger
+            .append_relationship(&fk(KirId::new(), KirId::new()))
+            .unwrap();
+        ledger
+            .append_relationship(&fk(KirId::new(), KirId::new()))
+            .unwrap();
 
         let rt = Runtime::new(&ledger);
         assert_eq!(rt.list_relationships().unwrap().len(), 2);

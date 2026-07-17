@@ -9,6 +9,8 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("corrupt artifact store: {0}")]
+    Corrupt(String),
 }
 
 /// Abstract artifact storage backend.
@@ -41,7 +43,9 @@ impl FileSystemArtifactStore {
     }
 
     fn artifact_path(&self, id: &ArtifactId) -> PathBuf {
-        self.root.join(id.prefix()).join(format!("{}.json", id.as_str()))
+        self.root
+            .join(id.prefix())
+            .join(format!("{}.json", id.as_str()))
     }
 }
 
@@ -52,7 +56,9 @@ impl ArtifactStore for FileSystemArtifactStore {
             return Ok(false);
         }
         std::fs::create_dir_all(path.parent().unwrap())?;
-        let json = serde_json::to_string_pretty(artifact)?;
+        // RFC 0015: compact JSON — artifacts are machine-read, and the id is
+        // derived from canonical content, not file bytes.
+        let json = serde_json::to_string(artifact)?;
         std::fs::write(&path, json.as_bytes())?;
         Ok(true)
     }
@@ -124,7 +130,10 @@ mod tests {
         let value = serde_json::json!({"x": 1});
 
         assert!(store.write(&id, &value).unwrap());
-        assert!(!store.write(&id, &value).unwrap(), "second write must be cache hit");
+        assert!(
+            !store.write(&id, &value).unwrap(),
+            "second write must be cache hit"
+        );
     }
 
     #[test]
@@ -141,7 +150,10 @@ mod tests {
         let id = ArtifactId("ab1234".repeat(10) + "abcd"); // starts with "ab"
         store.write(&id, &serde_json::json!({})).unwrap();
         let expected = dir.path().join("ab").join(format!("{}.json", id.as_str()));
-        assert!(expected.exists(), "artifact must be at <prefix>/<full-id>.json");
+        assert!(
+            expected.exists(),
+            "artifact must be at <prefix>/<full-id>.json"
+        );
     }
 
     #[test]

@@ -68,7 +68,10 @@ pub struct MockLlmProvider {
 
 impl MockLlmProvider {
     pub fn new(response: impl Into<String>) -> Self {
-        Self { model: "mock-v1".into(), response: response.into() }
+        Self {
+            model: "mock-v1".into(),
+            response: response.into(),
+        }
     }
 }
 

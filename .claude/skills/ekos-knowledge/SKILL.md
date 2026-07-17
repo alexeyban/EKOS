@@ -89,11 +89,23 @@ FIND <Object|Relationship>
   or an unknown id is feedback to adjust the call, not a reason to abandon
   the tool.
 
-## This machine's setup
+## Resolving paths — variables, not hardcoded locations
 
-The `ekos` MCP server is registered at user scope and serves the workspace at
-`/home/legion/PycharmProjects` (44 projects; config in `ekos.toml` there,
-ledger in `.ekos/ledger/ledger.db`). The binary lives at
-`/home/legion/PycharmProjects/EKOS/ekos/target/release/ekos` — rebuild with
-`cargo build --release -p ekos` from `/home/legion/PycharmProjects/EKOS/ekos`
-after changing EKOS itself.
+The `ekos` MCP server is registered at user scope and serves the workspace
+root; the ledger lives in `.ekos/ledger/ledger.db` under that root. Resolve
+every path from these variables (each falls back to a discoverable default):
+
+```sh
+# Estate root: nearest ancestor directory containing ekos.toml + .ekos/
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(d=$PWD; while [ "$d" != / ] && [ ! -f "$d/ekos.toml" ]; do d=$(dirname "$d"); done; echo "$d")}"
+# The EKOS source checkout (a project inside the estate)
+EKOS_ROOT="${EKOS_ROOT:-$WORKSPACE_ROOT/EKOS}"
+# The CLI binary: PATH install wins, else the release build in the checkout
+EKOS_BIN="${EKOS_BIN:-$(command -v ekos || echo "$EKOS_ROOT/ekos/target/release/ekos")}"
+```
+
+Rebuild after changing EKOS itself:
+
+```sh
+cd "$EKOS_ROOT/ekos" && cargo build --release -p ekos
+```

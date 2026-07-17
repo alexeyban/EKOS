@@ -25,13 +25,23 @@ pub struct WorkspaceConfig {
     pub log_format: String,
 }
 
-fn default_root() -> PathBuf { PathBuf::from(".") }
-fn default_log_level() -> String { "info".into() }
-fn default_log_format() -> String { "pretty".into() }
+fn default_root() -> PathBuf {
+    PathBuf::from(".")
+}
+fn default_log_level() -> String {
+    "info".into()
+}
+fn default_log_format() -> String {
+    "pretty".into()
+}
 
 impl Default for WorkspaceConfig {
     fn default() -> Self {
-        Self { root: default_root(), log_level: default_log_level(), log_format: default_log_format() }
+        Self {
+            root: default_root(),
+            log_level: default_log_level(),
+            log_format: default_log_format(),
+        }
     }
 }
 
@@ -53,7 +63,10 @@ pub struct ObserveConfig {
 
 impl Default for ObserveConfig {
     fn default() -> Self {
-        Self { paths: Vec::new(), ignore_patterns: default_ignore_patterns() }
+        Self {
+            paths: Vec::new(),
+            ignore_patterns: default_ignore_patterns(),
+        }
     }
 }
 
@@ -91,8 +104,8 @@ impl EkosConfig {
     pub fn from_file(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("cannot read {}: {}", path.display(), e))?;
-        let config: Self = toml::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("invalid ekos.toml: {}", e))?;
+        let config: Self =
+            toml::from_str(&content).map_err(|e| anyhow::anyhow!("invalid ekos.toml: {}", e))?;
         Ok(config)
     }
 

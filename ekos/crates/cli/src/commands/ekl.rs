@@ -1,6 +1,6 @@
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
-use ekos_ekl::{ekl_parse, interpreter::default_returns, EklInterpreter};
+use ekos_ekl::{EklInterpreter, ekl_parse, interpreter::default_returns};
 use ekos_ledger::Ledger;
 use ekos_runtime::Runtime;
 use std::path::Path;
@@ -18,7 +18,10 @@ pub fn run(config: &EkosConfig, cwd: &Path, query: &str, json: bool) -> Result<(
 
     let ledger_path = config.ledger_path(cwd);
     let ledger = Ledger::open(&ledger_path).map_err(|e| {
-        anyhow::anyhow!("cannot open ledger at {}: {e}\nRun `ekos build` first.", ledger_path.display())
+        anyhow::anyhow!(
+            "cannot open ledger at {}: {e}\nRun `ekos build` first.",
+            ledger_path.display()
+        )
     })?;
     let runtime = Runtime::new(&ledger);
     let interpreter = EklInterpreter::new(&runtime);
@@ -36,7 +39,11 @@ pub fn run(config: &EkosConfig, cwd: &Path, query: &str, json: bool) -> Result<(
         return Ok(());
     }
 
-    let columns = if ast.returns.is_empty() { default_returns(&ast.entity) } else { ast.returns.clone() };
+    let columns = if ast.returns.is_empty() {
+        default_returns(&ast.entity)
+    } else {
+        ast.returns.clone()
+    };
 
     if result.rows.is_empty() {
         println!("0 rows.");

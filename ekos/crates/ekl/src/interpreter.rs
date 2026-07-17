@@ -28,8 +28,14 @@ pub struct EklResult {
 /// Default projected columns when a query omits `RETURN`.
 pub fn default_returns(entity: &Entity) -> Vec<String> {
     match entity {
-        Entity::Object => ["id", "name", "kind"].iter().map(|s| s.to_string()).collect(),
-        Entity::Relationship => ["id", "kind", "from", "to"].iter().map(|s| s.to_string()).collect(),
+        Entity::Object => ["id", "name", "kind"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        Entity::Relationship => ["id", "kind", "from", "to"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
     }
 }
 
@@ -52,7 +58,11 @@ impl<'a> EklInterpreter<'a> {
             rows.sort_by(|a, b| compare_rows(a, b, field, *order));
         }
 
-        let returns = if ast.returns.is_empty() { default_returns(&ast.entity) } else { ast.returns.clone() };
+        let returns = if ast.returns.is_empty() {
+            default_returns(&ast.entity)
+        } else {
+            ast.returns.clone()
+        };
         let mut rows: Vec<Row> = rows.iter().map(|row| project(row, &returns)).collect();
 
         if let Some(limit) = ast.limit {
@@ -64,10 +74,18 @@ impl<'a> EklInterpreter<'a> {
 
     fn candidate_rows(&self, ast: &EklAst) -> Result<Vec<Row>, EklError> {
         match (&ast.entity, &ast.from) {
-            (Entity::Object, None) => Ok(self.runtime.list_objects()?.iter().map(object_row).collect()),
-            (Entity::Relationship, None) => {
-                Ok(self.runtime.list_relationships()?.iter().map(relationship_row).collect())
-            }
+            (Entity::Object, None) => Ok(self
+                .runtime
+                .list_objects()?
+                .iter()
+                .map(object_row)
+                .collect()),
+            (Entity::Relationship, None) => Ok(self
+                .runtime
+                .list_relationships()?
+                .iter()
+                .map(relationship_row)
+                .collect()),
             (Entity::Object, Some(name)) => {
                 let anchor = self.resolve_anchor(name)?;
                 let graph = self.runtime.load_neighborhood(&anchor, 1)?;
@@ -98,9 +116,17 @@ fn object_row(obj: &KirObject) -> Row {
     row.insert("kind".into(), Value::String(obj.kind.to_string()));
     row.insert(
         "evidence".into(),
-        Value::Array(obj.evidence.iter().map(|id| Value::String(id.to_string())).collect()),
+        Value::Array(
+            obj.evidence
+                .iter()
+                .map(|id| Value::String(id.to_string()))
+                .collect(),
+        ),
     );
-    row.insert("created_at".into(), Value::String(obj.created_at.to_rfc3339()));
+    row.insert(
+        "created_at".into(),
+        Value::String(obj.created_at.to_rfc3339()),
+    );
     row
 }
 
@@ -110,12 +136,18 @@ fn relationship_row(rel: &KirRelationship) -> Row {
     row.insert("kind".into(), Value::String(format!("{:?}", rel.kind)));
     row.insert("from".into(), Value::String(rel.from.to_string()));
     row.insert("to".into(), Value::String(rel.to.to_string()));
-    row.insert("created_at".into(), Value::String(rel.created_at.to_rfc3339()));
+    row.insert(
+        "created_at".into(),
+        Value::String(rel.created_at.to_rfc3339()),
+    );
     row
 }
 
 fn project(row: &Row, returns: &[String]) -> Row {
-    returns.iter().map(|f| (f.clone(), row.get(f).cloned().unwrap_or(Value::Null))).collect()
+    returns
+        .iter()
+        .map(|f| (f.clone(), row.get(f).cloned().unwrap_or(Value::Null)))
+        .collect()
 }
 
 /// String rendering of a `Value` for text-based predicate comparisons.
@@ -163,13 +195,17 @@ fn value_eq(v: &Value, lit: &Literal) -> bool {
 /// non-numeric fields evaluate to `false` rather than erroring (RFC 0010 v0
 /// simplification).
 fn eval_predicate(row: &Row, pred: &Predicate) -> bool {
-    let Some(v) = row.get(&pred.field) else { return false };
+    let Some(v) = row.get(&pred.field) else {
+        return false;
+    };
     match pred.op {
         Op::Eq => value_eq(v, &pred.value),
         Op::Ne => !value_eq(v, &pred.value),
         Op::Contains => value_to_string(v).contains(&literal_to_string(&pred.value)),
         Op::Gt | Op::Lt | Op::Ge | Op::Le => {
-            let (Some(a), Some(b)) = (value_as_f64(v), literal_as_f64(&pred.value)) else { return false };
+            let (Some(a), Some(b)) = (value_as_f64(v), literal_as_f64(&pred.value)) else {
+                return false;
+            };
             match pred.op {
                 Op::Gt => a > b,
                 Op::Lt => a < b,
@@ -183,15 +219,20 @@ fn eval_predicate(row: &Row, pred: &Predicate) -> bool {
 
 fn compare_rows(a: &Row, b: &Row, field: &str, order: Order) -> Ordering {
     let ordering = match (a.get(field), b.get(field)) {
-        (Some(Value::Number(x)), Some(Value::Number(y))) => {
-            x.as_f64().partial_cmp(&y.as_f64()).unwrap_or(Ordering::Equal)
-        }
+        (Some(Value::Number(x)), Some(Value::Number(y))) => x
+            .as_f64()
+            .partial_cmp(&y.as_f64())
+            .unwrap_or(Ordering::Equal),
         (Some(x), Some(y)) => value_to_string(x).cmp(&value_to_string(y)),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     };
-    if order == Order::Desc { ordering.reverse() } else { ordering }
+    if order == Order::Desc {
+        ordering.reverse()
+    } else {
+        ordering
+    }
 }
 
 #[cfg(test)]
@@ -215,10 +256,18 @@ mod tests {
         ledger.append_object(&customers).unwrap();
         ledger.append_object(&order_items).unwrap();
         ledger
-            .append_relationship(&KirRelationship::new(RelationshipKind::ForeignKey, orders_id, customers.id))
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::ForeignKey,
+                orders_id,
+                customers.id,
+            ))
             .unwrap();
         ledger
-            .append_relationship(&KirRelationship::new(RelationshipKind::ForeignKey, orders_id, order_items.id))
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::ForeignKey,
+                orders_id,
+                order_items.id,
+            ))
             .unwrap();
 
         (ledger, dir)
@@ -269,7 +318,10 @@ mod tests {
     fn example_5_order_by_and_limit() {
         let (ledger, _dir) = fixture();
         let rt = Runtime::new(&ledger);
-        let result = run(&rt, "FIND Object WHERE kind = 'Table' ORDER BY name LIMIT 1");
+        let result = run(
+            &rt,
+            "FIND Object WHERE kind = 'Table' ORDER BY name LIMIT 1",
+        );
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0]["name"], Value::String("customers".into()));
     }
@@ -286,7 +338,10 @@ mod tests {
     fn example_7_relationships_from_anchor() {
         let (ledger, _dir) = fixture();
         let rt = Runtime::new(&ledger);
-        let result = run(&rt, "FIND Relationship WHERE kind = 'ForeignKey' FROM 'orders'");
+        let result = run(
+            &rt,
+            "FIND Relationship WHERE kind = 'ForeignKey' FROM 'orders'",
+        );
         assert_eq!(result.rows.len(), 2);
     }
 
@@ -310,7 +365,10 @@ mod tests {
     fn example_10_return_projection_with_limit() {
         let (ledger, _dir) = fixture();
         let rt = Runtime::new(&ledger);
-        let result = run(&rt, "FIND Relationship WHERE kind = 'ForeignKey' RETURN from, to LIMIT 1");
+        let result = run(
+            &rt,
+            "FIND Relationship WHERE kind = 'ForeignKey' RETURN from, to LIMIT 1",
+        );
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0].len(), 2);
         assert!(result.rows[0].contains_key("from") && result.rows[0].contains_key("to"));
@@ -331,7 +389,9 @@ mod tests {
         // `WHERE kind = 'Person'` works purely off the new ObjectKind variant's
         // Display impl, same as any pre-existing kind.
         let (ledger, _dir) = fixture();
-        ledger.append_object(&KirObject::new("Alice", ObjectKind::Person)).unwrap();
+        ledger
+            .append_object(&KirObject::new("Alice", ObjectKind::Person))
+            .unwrap();
         let rt = Runtime::new(&ledger);
         let result = run(&rt, "FIND Object WHERE kind = 'Person'");
         assert_eq!(result.rows.len(), 1);

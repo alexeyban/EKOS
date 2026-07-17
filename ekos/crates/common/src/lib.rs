@@ -1,3 +1,5 @@
+pub mod compress;
+
 use sha2::{Digest, Sha256};
 
 /// SHA-256 content hash used to address artifacts and ledger entries.

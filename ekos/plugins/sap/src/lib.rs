@@ -9,7 +9,7 @@
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
-use ekos_observation_sdk::{ObserveError, ObservationPackage, Observer, ScanContext};
+use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -130,7 +130,10 @@ pub struct MockSapClient {
 
 impl MockSapClient {
     pub fn new(business_objects: Vec<BusinessObject>, org_units: Vec<OrganizationalUnit>) -> Self {
-        Self { business_objects, org_units }
+        Self {
+            business_objects,
+            org_units,
+        }
     }
 }
 
@@ -164,11 +167,9 @@ impl Observer for SapObserver {
     }
 
     async fn scan(&self, _ctx: &ScanContext) -> Result<ObservationPackage, ObserveError> {
-        let business_objects = self
-            .client
-            .list_business_objects()
-            .await
-            .map_err(|e| ObserveError::connector(format!("sap business object list failed: {e}")))?;
+        let business_objects = self.client.list_business_objects().await.map_err(|e| {
+            ObserveError::connector(format!("sap business object list failed: {e}"))
+        })?;
         let org_units = self
             .client
             .list_organizational_units()
@@ -245,13 +246,21 @@ mod tests {
     }
 
     fn sample_org_unit() -> OrganizationalUnit {
-        OrganizationalUnit { id: "1000".into(), name: "Sales EMEA".into(), parent_id: None }
+        OrganizationalUnit {
+            id: "1000".into(),
+            name: "Sales EMEA".into(),
+            parent_id: None,
+        }
     }
 
     /// Small real-shaped org hierarchy: a corporate root with two regional units beneath it.
     fn sample_org_hierarchy() -> Vec<OrganizationalUnit> {
         vec![
-            OrganizationalUnit { id: "10000000".into(), name: "Corporate".into(), parent_id: None },
+            OrganizationalUnit {
+                id: "10000000".into(),
+                name: "Corporate".into(),
+                parent_id: None,
+            },
             OrganizationalUnit {
                 id: "10001000".into(),
                 name: "Sales EMEA".into(),
@@ -267,7 +276,10 @@ mod tests {
 
     #[tokio::test]
     async fn emits_artifact_per_business_object_and_org_unit() {
-        let client = Arc::new(MockSapClient::new(vec![sample_bo()], vec![sample_org_unit()]));
+        let client = Arc::new(MockSapClient::new(
+            vec![sample_bo()],
+            vec![sample_org_unit()],
+        ));
         let observer = SapObserver::new(client);
         let ctx = ScanContext::new(".");
         let pkg = observer.scan(&ctx).await.unwrap();
@@ -318,21 +330,32 @@ mod tests {
         let observer = SapObserver::new(client);
         let ctx = ScanContext::new(".");
         let pkg = observer.scan(&ctx).await.unwrap();
-        assert_eq!(pkg.len(), 5 + 3, "5 GWSAMPLE_BASIC entity sets + 3 org units");
+        assert_eq!(
+            pkg.len(),
+            5 + 3,
+            "5 GWSAMPLE_BASIC entity sets + 3 org units"
+        );
     }
 
     #[tokio::test]
     async fn org_hierarchy_preserves_parent_child_structure() {
-        let client =
-            Arc::new(MockSapClient::new(vec![], sample_org_hierarchy()));
+        let client = Arc::new(MockSapClient::new(vec![], sample_org_hierarchy()));
         let observer = SapObserver::new(client);
         let ctx = ScanContext::new(".");
         let pkg = observer.scan(&ctx).await.unwrap();
 
-        let sales_emea = pkg.artifacts.iter().find(|a| a.content.target == "10001000").unwrap();
+        let sales_emea = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.target == "10001000")
+            .unwrap();
         assert_eq!(sales_emea.content.data["parent_id"], "10000000");
 
-        let corporate = pkg.artifacts.iter().find(|a| a.content.target == "10000000").unwrap();
+        let corporate = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.target == "10000000")
+            .unwrap();
         assert!(corporate.content.data["parent_id"].is_null());
     }
 }

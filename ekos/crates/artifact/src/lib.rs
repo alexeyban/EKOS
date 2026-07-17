@@ -5,6 +5,7 @@
 //! metadata (timestamps, producer names) is excluded from the hash so identical
 //! logical content always produces the same ID.
 
+pub mod pack;
 pub mod store;
 
 use chrono::{DateTime, Utc};
@@ -13,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
+pub use pack::PackArtifactStore;
 pub use store::{ArtifactStore, FileSystemArtifactStore, StoreError};
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -155,7 +157,12 @@ impl ObservationArtifact {
             input_ids: Vec::new(),
         };
         let id = compute_content_id(&content);
-        Self { id, artifact_type: ArtifactType::Observation, meta: ArtifactMeta::default(), content }
+        Self {
+            id,
+            artifact_type: ArtifactType::Observation,
+            meta: ArtifactMeta::default(),
+            content,
+        }
     }
 
     pub fn with_producer(mut self, name: impl Into<String>) -> Self {
@@ -187,9 +194,18 @@ pub struct KnowledgeArtifact {
 
 impl KnowledgeArtifact {
     pub fn new(pass_name: impl Into<String>, input_ids: Vec<ArtifactId>, kir: KirGraph) -> Self {
-        let content = KnowledgeContent { pass_name: pass_name.into(), input_ids, kir };
+        let content = KnowledgeContent {
+            pass_name: pass_name.into(),
+            input_ids,
+            kir,
+        };
         let id = compute_content_id(&content);
-        Self { id, artifact_type: ArtifactType::Knowledge, meta: ArtifactMeta::default(), content }
+        Self {
+            id,
+            artifact_type: ArtifactType::Knowledge,
+            meta: ArtifactMeta::default(),
+            content,
+        }
     }
 }
 
@@ -218,9 +234,17 @@ pub struct EvidenceArtifact {
 
 impl EvidenceArtifact {
     pub fn new(source_artifact_id: ArtifactId, evidence: KirEvidence) -> Self {
-        let content = EvidenceContent { source_artifact_id, evidence };
+        let content = EvidenceContent {
+            source_artifact_id,
+            evidence,
+        };
         let id = compute_content_id(&content);
-        Self { id, artifact_type: ArtifactType::Evidence, meta: ArtifactMeta::default(), content }
+        Self {
+            id,
+            artifact_type: ArtifactType::Evidence,
+            meta: ArtifactMeta::default(),
+            content,
+        }
     }
 }
 
@@ -255,9 +279,17 @@ pub struct DiagnosticArtifact {
 
 impl DiagnosticArtifact {
     pub fn new(build_id: impl Into<String>, records: Vec<DiagnosticRecord>) -> Self {
-        let content = DiagnosticContent { build_id: build_id.into(), records };
+        let content = DiagnosticContent {
+            build_id: build_id.into(),
+            records,
+        };
         let id = compute_content_id(&content);
-        Self { id, artifact_type: ArtifactType::Diagnostic, meta: ArtifactMeta::default(), content }
+        Self {
+            id,
+            artifact_type: ArtifactType::Diagnostic,
+            meta: ArtifactMeta::default(),
+            content,
+        }
     }
 }
 
@@ -283,9 +315,17 @@ pub struct IndexArtifact {
 
 impl IndexArtifact {
     pub fn new(build_id: impl Into<String>, entries: HashMap<String, ArtifactId>) -> Self {
-        let content = IndexContent { build_id: build_id.into(), entries };
+        let content = IndexContent {
+            build_id: build_id.into(),
+            entries,
+        };
         let id = compute_content_id(&content);
-        Self { id, artifact_type: ArtifactType::Index, meta: ArtifactMeta::default(), content }
+        Self {
+            id,
+            artifact_type: ArtifactType::Index,
+            meta: ArtifactMeta::default(),
+            content,
+        }
     }
 }
 

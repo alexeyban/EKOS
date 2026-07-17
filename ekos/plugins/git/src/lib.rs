@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
-use ekos_observation_sdk::{ObserveError, ObservationPackage, Observer, ScanContext};
+use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use tokio::process::Command;
 
 /// Runs `git` CLI commands against the workspace root.
@@ -41,10 +41,7 @@ impl Default for GitObserver {
 // git helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-async fn git_output(
-    cwd: &std::path::Path,
-    args: &[&str],
-) -> Result<String, ObserveError> {
+async fn git_output(cwd: &std::path::Path, args: &[&str]) -> Result<String, ObserveError> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)
@@ -88,7 +85,10 @@ impl Observer for GitObserver {
         let mut pkg = ObservationPackage::new("git", &target);
 
         if !is_git_repo(root).await {
-            tracing::debug!("git observer: {} is not a git repo, skipping", root.display());
+            tracing::debug!(
+                "git observer: {} is not a git repo, skipping",
+                root.display()
+            );
             return Ok(pkg);
         }
 
@@ -99,8 +99,9 @@ impl Observer for GitObserver {
             .trim()
             .to_string();
 
-        let remotes_raw =
-            git_output(root, &["remote", "-v"]).await.unwrap_or_default();
+        let remotes_raw = git_output(root, &["remote", "-v"])
+            .await
+            .unwrap_or_default();
         let remotes: Vec<serde_json::Value> = remotes_raw
             .lines()
             .filter(|l| l.contains("(fetch)"))
@@ -113,10 +114,9 @@ impl Observer for GitObserver {
             .collect();
 
         // shortlog: "  <N>\t<Name>" per contributor
-        let shortlog =
-            git_output(root, &["shortlog", "-sn", "--no-merges", "HEAD"])
-                .await
-                .unwrap_or_default();
+        let shortlog = git_output(root, &["shortlog", "-sn", "--no-merges", "HEAD"])
+            .await
+            .unwrap_or_default();
         let contributors: Vec<serde_json::Value> = shortlog
             .lines()
             .filter_map(|l| {
@@ -132,8 +132,7 @@ impl Observer for GitObserver {
             "contributors": contributors,
         });
         pkg.push(
-            ObservationArtifact::new("git", "repo", repo_data)
-                .with_producer("ekos-plugin-git"),
+            ObservationArtifact::new("git", "repo", repo_data).with_producer("ekos-plugin-git"),
         );
 
         // ── Per-commit artifacts ──────────────────────────────────────────
@@ -160,17 +159,18 @@ impl Observer for GitObserver {
                 (parts[0], parts[1], parts[2], parts[3], parts[4]);
 
             // Collect changed files for this commit.
-            let files_raw =
-                git_output(root, &["diff-tree", "--no-commit-id", "-r", "--name-only", sha])
-                    .await
-                    .unwrap_or_default();
+            let files_raw = git_output(
+                root,
+                &["diff-tree", "--no-commit-id", "-r", "--name-only", sha],
+            )
+            .await
+            .unwrap_or_default();
             let files: Vec<&str> = files_raw.lines().collect();
 
             // Stat insertions/deletions.
-            let stat_raw =
-                git_output(root, &["show", "--stat", "--format=", sha])
-                    .await
-                    .unwrap_or_default();
+            let stat_raw = git_output(root, &["show", "--stat", "--format=", sha])
+                .await
+                .unwrap_or_default();
             let (insertions, deletions) = parse_stat_summary(&stat_raw);
 
             let commit_data = serde_json::json!({
@@ -185,8 +185,7 @@ impl Observer for GitObserver {
             });
 
             pkg.push(
-                ObservationArtifact::new("git", sha, commit_data)
-                    .with_producer("ekos-plugin-git"),
+                ObservationArtifact::new("git", sha, commit_data).with_producer("ekos-plugin-git"),
             );
         }
 
@@ -222,7 +221,11 @@ mod tests {
     fn make_git_repo(dir: &TempDir) {
         let d = dir.path();
         let run = |args: &[&str]| {
-            SyncCommand::new("git").args(args).current_dir(d).output().unwrap();
+            SyncCommand::new("git")
+                .args(args)
+                .current_dir(d)
+                .output()
+                .unwrap();
         };
         run(&["init", "-b", "main"]);
         run(&["config", "user.email", "test@example.com"]);
@@ -237,7 +240,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let ctx = ScanContext::new(dir.path());
         let pkg = GitObserver::new().scan(&ctx).await.unwrap();
-        assert!(pkg.is_empty(), "non-git directory should produce no artifacts");
+        assert!(
+            pkg.is_empty(),
+            "non-git directory should produce no artifacts"
+        );
     }
 
     #[tokio::test]
@@ -247,10 +253,17 @@ mod tests {
         let ctx = ScanContext::new(dir.path());
         let pkg = GitObserver::new().scan(&ctx).await.unwrap();
         // At minimum: 1 repo artifact + 1 commit artifact
-        assert!(pkg.len() >= 2, "expected repo + commit artifact, got {}", pkg.len());
+        assert!(
+            pkg.len() >= 2,
+            "expected repo + commit artifact, got {}",
+            pkg.len()
+        );
 
         let repo_artifact = pkg.artifacts.iter().find(|a| a.content.target == "repo");
-        assert!(repo_artifact.is_some(), "must have a 'repo' metadata artifact");
+        assert!(
+            repo_artifact.is_some(),
+            "must have a 'repo' metadata artifact"
+        );
         let repo_data = &repo_artifact.unwrap().content.data;
         assert_eq!(repo_data["head_branch"], "main");
     }
@@ -261,11 +274,26 @@ mod tests {
         make_git_repo(&dir);
         let ctx = ScanContext::new(dir.path());
         let obs = GitObserver::new();
-        let ids1: Vec<_> = obs.scan(&ctx).await.unwrap().artifacts.iter()
-            .map(|a| a.id.clone()).collect();
-        let ids2: Vec<_> = obs.scan(&ctx).await.unwrap().artifacts.iter()
-            .map(|a| a.id.clone()).collect();
-        assert_eq!(ids1, ids2, "same repo state must produce identical artifact IDs");
+        let ids1: Vec<_> = obs
+            .scan(&ctx)
+            .await
+            .unwrap()
+            .artifacts
+            .iter()
+            .map(|a| a.id.clone())
+            .collect();
+        let ids2: Vec<_> = obs
+            .scan(&ctx)
+            .await
+            .unwrap()
+            .artifacts
+            .iter()
+            .map(|a| a.id.clone())
+            .collect();
+        assert_eq!(
+            ids1, ids2,
+            "same repo state must produce identical artifact IDs"
+        );
     }
 
     #[test]

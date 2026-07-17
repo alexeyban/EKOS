@@ -45,3 +45,7 @@ harness = false
 [[bench]]
 name = "runtime_load_neighborhood"
 harness = false
+
+[[bench]]
+name = "storage_compaction"
+harness = false

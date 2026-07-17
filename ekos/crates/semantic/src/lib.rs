@@ -202,7 +202,9 @@ pub fn build_ckm(graph: &KirGraph) -> CkModel {
                 .filter_map(|ev_id| evidence_index.get(&ev_id.to_string()).cloned())
                 .collect();
             ev_records.sort_by(|a, b| {
-                b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal)
+                b.confidence
+                    .partial_cmp(&a.confidence)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
             let primary_description = ev_records.first().map(|e| e.fragment.clone());
             CkmObject {
@@ -236,7 +238,13 @@ pub fn build_ckm(graph: &KirGraph) -> CkModel {
         })
         .collect();
 
-    CkModel { version: 1, compiled_at: Utc::now(), objects, relationships, evidence_index }
+    CkModel {
+        version: 1,
+        compiled_at: Utc::now(),
+        objects,
+        relationships,
+        evidence_index,
+    }
 }
 
 // ── SemanticCompilerPass ───────────────────────────────────────────────────────
@@ -253,7 +261,10 @@ pub struct SemanticCompilerPass {
 
 impl SemanticCompilerPass {
     pub fn new(output_dir: impl Into<PathBuf>) -> Self {
-        Self { output_dir: output_dir.into(), cache_inputs: Vec::new() }
+        Self {
+            output_dir: output_dir.into(),
+            cache_inputs: Vec::new(),
+        }
     }
 
     /// Declare the knowledge-artifact ids this pass will consume, so the cache
@@ -317,7 +328,10 @@ impl CompilerPass for SemanticCompilerPass {
         let resolution = DefaultResolver::new().resolve(&combined);
 
         for conflict in &resolution.conflicts {
-            ctx.diagnostics.lock().unwrap().warning("SEM001", conflict.description.clone());
+            ctx.diagnostics
+                .lock()
+                .unwrap()
+                .warning("SEM001", conflict.description.clone());
         }
 
         tracing::info!(
@@ -342,11 +356,14 @@ impl CompilerPass for SemanticCompilerPass {
         std::fs::create_dir_all(&self.output_dir)
             .map_err(|e| PassError::failed(format!("cannot create ckm dir: {e}")))?;
 
-        let model_path = self.output_dir.join("model.json");
-        let json = serde_json::to_string_pretty(&model)
-            .map_err(|e| PassError::failed(format!("cannot serialize CKM: {e}")))?;
-        std::fs::write(&model_path, json.as_bytes())
+        // RFC 0015: compact JSON in a zstd frame (`model.json.zst`); a stale
+        // pre-0015 plain `model.json` must not shadow the fresh model for
+        // readers that fall back to it, so it is removed.
+        let plain_path = self.output_dir.join("model.json");
+        let model_path = ekos_common::compress::zst_sibling(&plain_path);
+        ekos_common::compress::write_json_zst(&model_path, &model)
             .map_err(|e| PassError::failed(format!("cannot write CKM: {e}")))?;
+        std::fs::remove_file(&plain_path).ok();
 
         tracing::info!(
             objects = model.objects.len(),
@@ -365,8 +382,8 @@ impl CompilerPass for SemanticCompilerPass {
 mod tests {
     use super::*;
     use ekos_kir::{
-        EventKind, KirEvent, KirEvidence, KirObject, KirRelationship, ObjectKind,
-        RelationshipKind, SourceLocation,
+        EventKind, KirEvent, KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind,
+        SourceLocation,
     };
     use tempfile::TempDir;
 
@@ -377,11 +394,16 @@ mod tests {
     fn cache_inputs_are_declared_and_sorted() {
         let pass = SemanticCompilerPass::new("/tmp/out")
             .with_cache_inputs(vec!["bbb".into(), "aaa".into()]);
-        assert_eq!(ekos_compiler_core::pass::CompilerPass::cache_inputs(&pass), vec!["aaa", "bbb"]);
-        assert!(ekos_compiler_core::pass::CompilerPass::cache_inputs(
-            &SemanticCompilerPass::new("/tmp/out")
-        )
-        .is_empty());
+        assert_eq!(
+            ekos_compiler_core::pass::CompilerPass::cache_inputs(&pass),
+            vec!["aaa", "bbb"]
+        );
+        assert!(
+            ekos_compiler_core::pass::CompilerPass::cache_inputs(&SemanticCompilerPass::new(
+                "/tmp/out"
+            ))
+            .is_empty()
+        );
     }
 
     fn two_object_graph() -> KirGraph {
@@ -390,10 +412,15 @@ mod tests {
         let ev = KirEvidence::new(SourceLocation::at("schema.sql", 1), "CREATE TABLE orders");
         let ev_id = g.add_evidence(ev);
 
-        let cust = g.add_object(KirObject::new("customers", ObjectKind::Table).with_evidence(ev_id));
+        let cust =
+            g.add_object(KirObject::new("customers", ObjectKind::Table).with_evidence(ev_id));
         let ord = g.add_object(KirObject::new("orders", ObjectKind::Table).with_evidence(ev_id));
 
-        g.add_relationship(KirRelationship::new(RelationshipKind::ForeignKey, ord, cust));
+        g.add_relationship(KirRelationship::new(
+            RelationshipKind::ForeignKey,
+            ord,
+            cust,
+        ));
 
         g
     }
@@ -412,7 +439,11 @@ mod tests {
     fn build_ckm_embeds_evidence_in_objects() {
         let graph = two_object_graph();
         let model = build_ckm(&graph);
-        let cust = model.objects.iter().find(|o| o.name == "customers").unwrap();
+        let cust = model
+            .objects
+            .iter()
+            .find(|o| o.name == "customers")
+            .unwrap();
         assert_eq!(cust.evidence.len(), 1);
         assert_eq!(cust.evidence[0].fragment, "CREATE TABLE orders");
         assert!(cust.primary_description.is_some());
@@ -456,7 +487,11 @@ mod tests {
         rel2.evidence.push(ev2);
 
         let deduped = dedup_relationships(vec![r1, rel2]);
-        assert_eq!(deduped.len(), 1, "two identical FK rels must deduplicate to one");
+        assert_eq!(
+            deduped.len(),
+            1,
+            "two identical FK rels must deduplicate to one"
+        );
         assert_eq!(deduped[0].evidence.len(), 2, "evidence must be merged");
     }
 
@@ -466,7 +501,11 @@ mod tests {
         let old = g.add_object(KirObject::new("customer", ObjectKind::Table));
         let canonical = g.add_object(KirObject::new("Customer", ObjectKind::Table));
         let other = g.add_object(KirObject::new("orders", ObjectKind::Table));
-        g.add_relationship(KirRelationship::new(RelationshipKind::ForeignKey, other, old));
+        g.add_relationship(KirRelationship::new(
+            RelationshipKind::ForeignKey,
+            other,
+            old,
+        ));
 
         let proposal = MergeProposal {
             canonical_id: canonical,
@@ -504,7 +543,11 @@ mod tests {
         };
 
         let resolved = apply_merges(g, &[proposal]);
-        assert_eq!(resolved.relationships.len(), 1, "rels must deduplicate after remap");
+        assert_eq!(
+            resolved.relationships.len(),
+            1,
+            "rels must deduplicate after remap"
+        );
     }
 
     #[test]
@@ -519,7 +562,7 @@ mod tests {
     #[tokio::test]
     async fn semantic_compiler_pass_runs_on_empty_store() {
         use ekos_artifact::FileSystemArtifactStore;
-        use ekos_compiler_core::{pass::PassContext, EkosConfig};
+        use ekos_compiler_core::{EkosConfig, pass::PassContext};
         use std::sync::Arc;
 
         let dir = TempDir::new().unwrap();
@@ -528,17 +571,19 @@ mod tests {
 
         let config = Arc::new(EkosConfig::default());
         let store = Arc::new(FileSystemArtifactStore::new(&store_dir));
-        let mut ctx = PassContext::new(config, dir.path().to_path_buf())
-            .with_artifact_store(store);
+        let mut ctx = PassContext::new(config, dir.path().to_path_buf()).with_artifact_store(store);
 
         let mut pass = SemanticCompilerPass::new(&ckm_dir);
         pass.run(&mut ctx).await.unwrap();
 
-        let model_path = ckm_dir.join("model.json");
-        assert!(model_path.exists(), "model.json must be written");
+        let model_path = ckm_dir.join("model.json.zst");
+        assert!(
+            model_path.exists(),
+            "model.json.zst must be written (RFC 0015)"
+        );
 
-        let json = std::fs::read_to_string(&model_path).unwrap();
-        let model: CkModel = serde_json::from_str(&json).unwrap();
+        let model: CkModel =
+            ekos_common::compress::read_json_auto(&ckm_dir.join("model.json")).unwrap();
         assert_eq!(model.version, 1);
         assert!(model.objects.is_empty());
     }

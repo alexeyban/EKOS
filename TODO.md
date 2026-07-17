@@ -1293,6 +1293,13 @@ time ekos build   # benchmark before/after parallelism
 
 ---
 
+- [x] **Compact storage (RFC 0015)** — dictionary-zstd ledger v2 (`ekos ledger migrate`, 99→39 MB
+  on the live estate), EKOS Pack v1 packed artifact segments (`ekos artifact repack`, 214→31 MB
+  on disk), compressed snapshots/CKM with retention, `ekos ledger status --storage` instrument,
+  `storage_compaction` bench. Devlog 17.
+- [ ] **Fact-segment engine (RFC 0016, draft)** — EAV facts, immutable segments, EAVT/AEVT/AVET
+  indexes, tantivy, mmap; replaces SQLite behind the `Ledger` API once the acceptance gate passes.
+
 - [x] **Incremental compilation (re-scan changed sources only)**
   - *What:* Before running an `Observer`, compare the current source fingerprint (Git HEAD sha for
     git, mtimes for filesystem, schema version hash for DB) against the fingerprint stored in the

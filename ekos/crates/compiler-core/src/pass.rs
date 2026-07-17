@@ -42,7 +42,17 @@ pub struct PassContext {
 impl PassContext {
     pub fn new(config: Arc<EkosConfig>, cwd: std::path::PathBuf) -> Self {
         let artifact_dir = config.artifact_dir(&cwd);
-        let store = Arc::new(FileSystemArtifactStore::new(artifact_dir));
+        // RFC 0015: packed segments by default; fall back to the loose-file
+        // layout if the segment scan fails (e.g. unreadable directory) so a
+        // damaged store degrades instead of aborting construction.
+        let store: Arc<dyn ArtifactStore> =
+            match ekos_artifact::PackArtifactStore::open(&artifact_dir) {
+                Ok(pack) => Arc::new(pack),
+                Err(e) => {
+                    tracing::warn!("pack store unavailable ({e}); using loose files");
+                    Arc::new(FileSystemArtifactStore::new(artifact_dir))
+                }
+            };
         Self {
             config,
             diagnostics: Arc::new(Mutex::new(DiagnosticSink::default())),
@@ -213,7 +223,9 @@ impl PassManager {
         use crate::scheduler::{ExecutionReport, FailureMode, PassOutcome};
 
         let order = self.execution_order()?;
-        let mut report = ExecutionReport { outcomes: Vec::new() };
+        let mut report = ExecutionReport {
+            outcomes: Vec::new(),
+        };
         let manifest_dir = ctx.config.artifact_dir(&ctx.cwd).join("pass-manifests");
         let cfg_hash = crate::cache::config_hash(
             &serde_json::to_value(ctx.config.as_ref()).unwrap_or_default(),
@@ -282,8 +294,11 @@ impl PassManager {
         let mut levels: Vec<Vec<String>> = Vec::new();
         let mut done = 0usize;
         loop {
-            let level: Vec<&str> =
-                remaining.iter().filter(|&(_, &d)| d == 0).map(|(&n, _)| n).collect();
+            let level: Vec<&str> = remaining
+                .iter()
+                .filter(|&(_, &d)| d == 0)
+                .map(|(&n, _)| n)
+                .collect();
             if level.is_empty() {
                 break;
             }
@@ -329,7 +344,9 @@ impl PassManager {
 
         let levels = self.execution_levels()?;
         let mut passes = std::mem::take(&mut self.passes);
-        let mut report = ExecutionReport { outcomes: Vec::new() };
+        let mut report = ExecutionReport {
+            outcomes: Vec::new(),
+        };
         let mut failed_overall = false;
 
         for level in &levels {
@@ -383,9 +400,15 @@ mod tests {
 
     #[async_trait]
     impl CompilerPass for NamedPass {
-        fn name(&self) -> &str { self.0 }
-        fn dependencies(&self) -> &[&str] { self.1 }
-        async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> { Ok(()) }
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn dependencies(&self) -> &[&str] {
+            self.1
+        }
+        async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -404,7 +427,10 @@ mod tests {
         let mut pm = PassManager::new();
         pm.register(Box::new(NamedPass("A", &["B"])));
         pm.register(Box::new(NamedPass("B", &["A"])));
-        assert!(matches!(pm.execution_order(), Err(SchedulerError::CycleDetected(_))));
+        assert!(matches!(
+            pm.execution_order(),
+            Err(SchedulerError::CycleDetected(_))
+        ));
     }
 
     #[test]
@@ -447,7 +473,9 @@ mod tests {
         struct FailingPass;
         #[async_trait]
         impl CompilerPass for FailingPass {
-            fn name(&self) -> &str { "fail" }
+            fn name(&self) -> &str {
+                "fail"
+            }
             async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> {
                 Err(PassError::failed("intentional"))
             }
@@ -469,7 +497,9 @@ mod tests {
         struct FailingPass;
         #[async_trait]
         impl CompilerPass for FailingPass {
-            fn name(&self) -> &str { "fail" }
+            fn name(&self) -> &str {
+                "fail"
+            }
             async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> {
                 Err(PassError::failed("intentional"))
             }
@@ -506,7 +536,10 @@ mod tests {
         let mut pm = PassManager::new();
         pm.register(Box::new(NamedPass("A", &["B"])));
         pm.register(Box::new(NamedPass("B", &["A"])));
-        assert!(matches!(pm.execution_levels(), Err(SchedulerError::CycleDetected(_))));
+        assert!(matches!(
+            pm.execution_levels(),
+            Err(SchedulerError::CycleDetected(_))
+        ));
     }
 
     #[tokio::test]
@@ -520,7 +553,9 @@ mod tests {
 
         #[async_trait]
         impl CompilerPass for TimedPass {
-            fn name(&self) -> &str { self.name }
+            fn name(&self) -> &str {
+                self.name
+            }
             async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> {
                 *self.start.lock().unwrap() = Some(Instant::now());
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -528,18 +563,31 @@ mod tests {
             }
         }
 
-        let starts: Vec<Arc<std::sync::Mutex<Option<Instant>>>> =
-            (0..3).map(|_| Arc::new(std::sync::Mutex::new(None))).collect();
+        let starts: Vec<Arc<std::sync::Mutex<Option<Instant>>>> = (0..3)
+            .map(|_| Arc::new(std::sync::Mutex::new(None)))
+            .collect();
 
         let mut pm = PassManager::new();
-        pm.register(Box::new(TimedPass { name: "p1", start: starts[0].clone() }));
-        pm.register(Box::new(TimedPass { name: "p2", start: starts[1].clone() }));
-        pm.register(Box::new(TimedPass { name: "p3", start: starts[2].clone() }));
+        pm.register(Box::new(TimedPass {
+            name: "p1",
+            start: starts[0].clone(),
+        }));
+        pm.register(Box::new(TimedPass {
+            name: "p2",
+            start: starts[1].clone(),
+        }));
+        pm.register(Box::new(TimedPass {
+            name: "p3",
+            start: starts[2].clone(),
+        }));
 
         let config = Arc::new(EkosConfig::default());
         let dir = tempfile::tempdir().unwrap();
         let ctx = PassContext::new(config, dir.path().to_path_buf());
-        let report = pm.run_all_parallel(&ctx, FailureMode::Collect).await.unwrap();
+        let report = pm
+            .run_all_parallel(&ctx, FailureMode::Collect)
+            .await
+            .unwrap();
         assert_eq!(report.passes_run(), 3);
         assert!(!report.has_errors());
 

@@ -11,7 +11,7 @@
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
-use ekos_observation_sdk::{ObserveError, ObservationPackage, Observer, ScanContext};
+use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -70,7 +70,9 @@ pub struct OracleDbClient {
 
 impl OracleDbClient {
     pub fn new(connection_string: impl Into<String>) -> Self {
-        Self { connection_string: connection_string.into() }
+        Self {
+            connection_string: connection_string.into(),
+        }
     }
 }
 
@@ -102,7 +104,11 @@ impl MockOracleClient {
         constraints: Vec<ConstraintMetadata>,
         views: Vec<ViewMetadata>,
     ) -> Self {
-        Self { tables, constraints, views }
+        Self {
+            tables,
+            constraints,
+            views,
+        }
     }
 }
 
@@ -145,11 +151,10 @@ impl Observer for OracleObserver {
             .list_tables()
             .await
             .map_err(|e| ObserveError::connector(format!("oracle table list failed: {e}")))?;
-        let constraints = self
-            .client
-            .list_constraints()
-            .await
-            .map_err(|e| ObserveError::connector(format!("oracle constraint list failed: {e}")))?;
+        let constraints =
+            self.client.list_constraints().await.map_err(|e| {
+                ObserveError::connector(format!("oracle constraint list failed: {e}"))
+            })?;
         let views = self
             .client
             .list_views()
@@ -159,8 +164,10 @@ impl Observer for OracleObserver {
         let mut pkg = ObservationPackage::new("oracle", "database");
 
         for table in &tables {
-            let table_constraints: Vec<&ConstraintMetadata> =
-                constraints.iter().filter(|c| c.table == table.name).collect();
+            let table_constraints: Vec<&ConstraintMetadata> = constraints
+                .iter()
+                .filter(|c| c.table == table.name)
+                .collect();
             let data = serde_json::json!({
                 "kind": "table",
                 "columns": table.columns,
@@ -195,7 +202,11 @@ mod tests {
         TableMetadata {
             name: "ORDERS".into(),
             columns: vec![
-                ColumnMetadata { name: "ID".into(), data_type: "NUMBER".into(), nullable: false },
+                ColumnMetadata {
+                    name: "ID".into(),
+                    data_type: "NUMBER".into(),
+                    nullable: false,
+                },
                 ColumnMetadata {
                     name: "CUSTOMER_ID".into(),
                     data_type: "NUMBER".into(),
@@ -220,7 +231,10 @@ mod tests {
         let client = Arc::new(MockOracleClient::new(
             vec![orders_table()],
             vec![fk_constraint()],
-            vec![ViewMetadata { name: "ORDER_SUMMARY".into(), definition: "SELECT ...".into() }],
+            vec![ViewMetadata {
+                name: "ORDER_SUMMARY".into(),
+                definition: "SELECT ...".into(),
+            }],
         ));
         let observer = OracleObserver::new(client);
         let ctx = ScanContext::new(".");
@@ -230,12 +244,19 @@ mod tests {
 
     #[tokio::test]
     async fn table_artifact_carries_its_constraints() {
-        let client =
-            Arc::new(MockOracleClient::new(vec![orders_table()], vec![fk_constraint()], vec![]));
+        let client = Arc::new(MockOracleClient::new(
+            vec![orders_table()],
+            vec![fk_constraint()],
+            vec![],
+        ));
         let observer = OracleObserver::new(client);
         let ctx = ScanContext::new(".");
         let pkg = observer.scan(&ctx).await.unwrap();
-        let artifact = pkg.artifacts.iter().find(|a| a.content.target == "ORDERS").unwrap();
+        let artifact = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.target == "ORDERS")
+            .unwrap();
         let constraints = artifact.content.data["constraints"].as_array().unwrap();
         assert_eq!(constraints.len(), 1);
         assert_eq!(constraints[0]["constraint_type"], "FOREIGN KEY");

@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
-use ekos_observation_sdk::{ObserveError, ObservationPackage, Observer, ScanContext};
+use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -115,7 +115,10 @@ impl SalesforceApiClient {
             })
             .collect();
 
-        Ok(SObjectMetadata { name: name.to_string(), fields })
+        Ok(SObjectMetadata {
+            name: name.to_string(),
+            fields,
+        })
     }
 }
 
@@ -175,8 +178,11 @@ impl Observer for SalesforceObserver {
         let mut pkg = ObservationPackage::new("salesforce", "org");
 
         for obj in &objects {
-            let reference_fields: Vec<&SObjectField> =
-                obj.fields.iter().filter(|f| !f.reference_to.is_empty()).collect();
+            let reference_fields: Vec<&SObjectField> = obj
+                .fields
+                .iter()
+                .filter(|f| !f.reference_to.is_empty())
+                .collect();
 
             let data = serde_json::json!({
                 "sobject": obj.name,
@@ -281,10 +287,19 @@ mod tests {
         let ctx = ScanContext::new(".");
         let pkg = observer.scan(&ctx).await.unwrap();
 
-        let contact_artifact =
-            pkg.artifacts.iter().find(|a| a.content.target == "Contact").unwrap();
-        let refs = contact_artifact.content.data["reference_fields"].as_array().unwrap();
-        assert_eq!(refs.len(), 2, "AccountId and ReportsToId are both real reference fields");
+        let contact_artifact = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.target == "Contact")
+            .unwrap();
+        let refs = contact_artifact.content.data["reference_fields"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            refs.len(),
+            2,
+            "AccountId and ReportsToId are both real reference fields"
+        );
         let account_ref = refs.iter().find(|r| r["name"] == "AccountId").unwrap();
         assert_eq!(account_ref["reference_to"][0], "Account");
     }
@@ -297,7 +312,9 @@ mod tests {
         let pkg = observer.scan(&ctx).await.unwrap();
 
         let contact_artifact = &pkg.artifacts[0];
-        let refs = contact_artifact.content.data["reference_fields"].as_array().unwrap();
+        let refs = contact_artifact.content.data["reference_fields"]
+            .as_array()
+            .unwrap();
         let reports_to = refs.iter().find(|r| r["name"] == "ReportsToId").unwrap();
         assert_eq!(
             reports_to["reference_to"][0], "Contact",

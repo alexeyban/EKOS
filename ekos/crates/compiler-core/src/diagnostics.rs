@@ -24,15 +24,30 @@ pub struct Diagnostic {
 
 impl Diagnostic {
     pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Error, code: code.into(), message: message.into(), location: None }
+        Self {
+            severity: Severity::Error,
+            code: code.into(),
+            message: message.into(),
+            location: None,
+        }
     }
 
     pub fn warning(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Warning, code: code.into(), message: message.into(), location: None }
+        Self {
+            severity: Severity::Warning,
+            code: code.into(),
+            message: message.into(),
+            location: None,
+        }
     }
 
     pub fn info(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { severity: Severity::Info, code: code.into(), message: message.into(), location: None }
+        Self {
+            severity: Severity::Info,
+            code: code.into(),
+            message: message.into(),
+            location: None,
+        }
     }
 
     pub fn at(mut self, location: SourceLocation) -> Self {
@@ -70,19 +85,28 @@ impl DiagnosticSink {
     }
 
     pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
-        self.diagnostics.iter().filter(|d| d.severity == Severity::Error)
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
     }
 
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.severity == Severity::Error)
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error)
     }
 
     pub fn warning_count(&self) -> usize {
-        self.diagnostics.iter().filter(|d| d.severity == Severity::Warning).count()
+        self.diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .count()
     }
 
     pub fn has_warnings(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.severity == Severity::Warning)
+        self.diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warning)
     }
 }
 

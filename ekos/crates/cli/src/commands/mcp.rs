@@ -11,11 +11,11 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
-use ekos_ekl::{ekl_parse, EklInterpreter};
+use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::KirId;
 use ekos_ledger::Ledger;
 use ekos_runtime::Runtime;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::Path;
 use std::str::FromStr;
@@ -44,13 +44,22 @@ pub fn run(config: &EkosConfig, workspace: &Path) -> Result<()> {
 pub fn handle_message(config: &EkosConfig, workspace: &Path, line: &str) -> Option<String> {
     let msg: Value = match serde_json::from_str(line) {
         Ok(v) => v,
-        Err(e) => return Some(error_response(Value::Null, -32700, &format!("parse error: {e}"))),
+        Err(e) => {
+            return Some(error_response(
+                Value::Null,
+                -32700,
+                &format!("parse error: {e}"),
+            ));
+        }
     };
 
     // Requests carry an `id`; notifications don't and are never answered.
     let id = msg.get("id").cloned()?;
 
-    let method = msg.get("method").and_then(Value::as_str).unwrap_or_default();
+    let method = msg
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
 
     let response = match method {
@@ -68,8 +77,7 @@ fn ok_response(id: Value, result: Value) -> String {
 }
 
 fn error_response(id: Value, code: i64, message: &str) -> String {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
-        .to_string()
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }).to_string()
 }
 
 fn initialize_result(params: &Value) -> Value {
@@ -169,8 +177,14 @@ fn tool_definitions() -> Value {
 /// missing ledger) are reported as `isError: true` results — readable by the
 /// agent — never as protocol errors.
 fn tools_call(config: &EkosConfig, workspace: &Path, params: &Value) -> Value {
-    let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
-    let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     match call_tool(config, workspace, name, &arguments) {
         Ok(result) => {
@@ -178,7 +192,9 @@ fn tools_call(config: &EkosConfig, workspace: &Path, params: &Value) -> Value {
                 .unwrap_or_else(|e| format!("serialization error: {e}"));
             json!({ "content": [{ "type": "text", "text": text }], "isError": false })
         }
-        Err(e) => json!({ "content": [{ "type": "text", "text": e.to_string() }], "isError": true }),
+        Err(e) => {
+            json!({ "content": [{ "type": "text", "text": e.to_string() }], "isError": true })
+        }
     }
 }
 
@@ -205,8 +221,9 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
         }
         "ekos_ekl" => {
             let query = required_str(args, "query")?;
-            let ast = ekl_parse(query)
-                .map_err(|e| anyhow::anyhow!("EKL parse error at column {}: {}", e.position, e.message))?;
+            let ast = ekl_parse(query).map_err(|e| {
+                anyhow::anyhow!("EKL parse error at column {}: {}", e.position, e.message)
+            })?;
             let interpreter = EklInterpreter::new(&runtime);
             let result = interpreter
                 .execute(&ast)
@@ -223,9 +240,9 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
             let id = required_id(args)?;
             let state = match args.get("at").and_then(Value::as_str) {
                 Some(at) => {
-                    let at: DateTime<Utc> = at
-                        .parse()
-                        .map_err(|e| anyhow::anyhow!("invalid `at` timestamp (want RFC 3339): {e}"))?;
+                    let at: DateTime<Utc> = at.parse().map_err(|e| {
+                        anyhow::anyhow!("invalid `at` timestamp (want RFC 3339): {e}")
+                    })?;
                     runtime.reconstruct_state_at(&id, at)?
                 }
                 None => runtime.reconstruct_state(&id)?,
@@ -285,7 +302,9 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
             const MAX_LISTED: usize = 200;
             let mut changed = Vec::new();
             for raw_id in diff.touched.iter().take(MAX_LISTED) {
-                let Ok(id) = KirId::from_str(raw_id) else { continue };
+                let Ok(id) = KirId::from_str(raw_id) else {
+                    continue;
+                };
                 if let Some(obj) = runtime.load_object(&id)? {
                     changed.push(json!({
                         "entity": "Object", "id": raw_id, "name": obj.name, "kind": obj.kind.to_string()
@@ -366,7 +385,9 @@ mod tests {
     fn unknown_method_returns_method_not_found() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
-        let resp = parse(&handle_message(&config, tmp.path(), &req(2, "resources/list", json!({}))).unwrap());
+        let resp = parse(
+            &handle_message(&config, tmp.path(), &req(2, "resources/list", json!({}))).unwrap(),
+        );
         assert_eq!(resp["error"]["code"], -32601);
     }
 
@@ -374,7 +395,8 @@ mod tests {
     fn tools_list_exposes_the_runtime_tools() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
-        let resp = parse(&handle_message(&config, tmp.path(), &req(3, "tools/list", json!({}))).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &req(3, "tools/list", json!({}))).unwrap());
         let tools = resp["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(
@@ -390,7 +412,10 @@ mod tests {
             ]
         );
         for tool in tools {
-            assert!(tool["inputSchema"]["type"] == "object", "every tool declares an object schema");
+            assert!(
+                tool["inputSchema"]["type"] == "object",
+                "every tool declares an object schema"
+            );
         }
     }
 
@@ -406,10 +431,12 @@ mod tests {
         );
         let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
         assert_eq!(resp["result"]["isError"], true);
-        assert!(resp["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("not found"));
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 
     #[test]
@@ -440,17 +467,23 @@ mod tests {
         );
         let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
         assert_eq!(resp["result"]["isError"], true);
-        assert!(resp["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("RFC 3339"));
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("RFC 3339")
+        );
     }
 
     #[test]
     fn status_works_on_a_fresh_workspace() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
-        let line = req(4, "tools/call", json!({ "name": "ekos_status", "arguments": {} }));
+        let line = req(
+            4,
+            "tools/call",
+            json!({ "name": "ekos_status", "arguments": {} }),
+        );
 
         let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
         assert_eq!(resp["result"]["isError"], false);
@@ -488,7 +521,10 @@ mod tests {
         );
 
         let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
-        assert!(resp.get("error").is_none(), "tool failures must not be JSON-RPC errors");
+        assert!(
+            resp.get("error").is_none(),
+            "tool failures must not be JSON-RPC errors"
+        );
         assert_eq!(resp["result"]["isError"], true);
     }
 
@@ -496,7 +532,11 @@ mod tests {
     fn unknown_tool_is_reported_as_tool_error() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
-        let line = req(7, "tools/call", json!({ "name": "ekos_write", "arguments": {} }));
+        let line = req(
+            7,
+            "tools/call",
+            json!({ "name": "ekos_write", "arguments": {} }),
+        );
 
         let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
         assert_eq!(resp["result"]["isError"], true);

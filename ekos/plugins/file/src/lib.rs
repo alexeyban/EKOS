@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
-use ekos_observation_sdk::{ObserveError, ObservationPackage, Observer, ScanContext};
+use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
@@ -101,8 +101,8 @@ impl Observer for FileObserver {
                 data["excerpt"] = serde_json::Value::String(excerpt);
             }
 
-            let artifact = ObservationArtifact::new("file", &rel_path, data)
-                .with_producer("ekos-plugin-file");
+            let artifact =
+                ObservationArtifact::new("file", &rel_path, data).with_producer("ekos-plugin-file");
 
             pkg.push(artifact);
         }
@@ -154,13 +154,28 @@ mod tests {
         })
         .await;
 
-        let note = pkg.artifacts.iter().find(|a| a.content.target == "note.md").unwrap();
+        let note = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.target == "note.md")
+            .unwrap();
         let excerpt = note.content.data["excerpt"].as_str().unwrap();
         assert!(excerpt.starts_with("# Title"), "excerpt keeps the opening");
-        assert_eq!(excerpt.chars().count(), EXCERPT_MAX_CHARS, "excerpt is capped");
+        assert_eq!(
+            excerpt.chars().count(),
+            EXCERPT_MAX_CHARS,
+            "excerpt is capped"
+        );
 
-        let blob = pkg.artifacts.iter().find(|a| a.content.target == "blob.bin").unwrap();
-        assert!(blob.content.data.get("excerpt").is_none(), "binary files carry no excerpt");
+        let blob = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.target == "blob.bin")
+            .unwrap();
+        assert!(
+            blob.content.data.get("excerpt").is_none(),
+            "binary files carry no excerpt"
+        );
     }
 
     #[tokio::test]
@@ -182,7 +197,10 @@ mod tests {
         let obs = FileObserver::new();
         let pkg1 = obs.scan(&ctx).await.unwrap();
         let pkg2 = obs.scan(&ctx).await.unwrap();
-        assert_eq!(pkg1.artifacts[0].id, pkg2.artifacts[0].id, "same file must yield same artifact ID");
+        assert_eq!(
+            pkg1.artifacts[0].id, pkg2.artifacts[0].id,
+            "same file must yield same artifact ID"
+        );
     }
 
     #[tokio::test]
@@ -195,7 +213,10 @@ mod tests {
         let id1 = obs.scan(&ctx).await.unwrap().artifacts[0].id.clone();
         std::fs::write(&path, b"version 2").unwrap();
         let id2 = obs.scan(&ctx).await.unwrap().artifacts[0].id.clone();
-        assert_ne!(id1, id2, "different file content must yield different artifact ID");
+        assert_ne!(
+            id1, id2,
+            "different file content must yield different artifact ID"
+        );
     }
 
     #[tokio::test]

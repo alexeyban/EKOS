@@ -10,11 +10,19 @@ struct Check {
 
 impl Check {
     fn ok(label: &'static str, detail: impl Into<String>) -> Self {
-        Self { label, ok: true, detail: detail.into() }
+        Self {
+            label,
+            ok: true,
+            detail: detail.into(),
+        }
     }
 
     fn fail(label: &'static str, detail: impl Into<String>) -> Self {
-        Self { label, ok: false, detail: detail.into() }
+        Self {
+            label,
+            ok: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -62,10 +70,16 @@ pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
     let artifact_dir = config.artifact_dir(cwd);
     if artifact_dir.exists() {
         let writable = std::fs::write(artifact_dir.join(".probe"), b"")
-            .map(|_| { std::fs::remove_file(artifact_dir.join(".probe")).ok(); true })
+            .map(|_| {
+                std::fs::remove_file(artifact_dir.join(".probe")).ok();
+                true
+            })
             .unwrap_or(false);
         if writable {
-            checks.push(Check::ok("Artifact cache", artifact_dir.display().to_string()));
+            checks.push(Check::ok(
+                "Artifact cache",
+                artifact_dir.display().to_string(),
+            ));
         } else {
             checks.push(Check::fail("Artifact cache", "not writable"));
         }
@@ -75,7 +89,11 @@ pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
 
     // LLM config
     if let Some(ref provider) = config.llm.provider {
-        let key_var = config.llm.api_key_env.as_deref().unwrap_or("ANTHROPIC_API_KEY");
+        let key_var = config
+            .llm
+            .api_key_env
+            .as_deref()
+            .unwrap_or("ANTHROPIC_API_KEY");
         if std::env::var(key_var).is_ok() {
             checks.push(Check::ok(
                 "LLM provider",
@@ -88,7 +106,10 @@ pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
             ));
         }
     } else {
-        checks.push(Check::ok("LLM provider", "not configured (required for Phase 6+)"));
+        checks.push(Check::ok(
+            "LLM provider",
+            "not configured (required for Phase 6+)",
+        ));
     }
 
     println!("EKOS Doctor");

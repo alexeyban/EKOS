@@ -83,8 +83,16 @@ pub struct AiRuntime<'a> {
 }
 
 impl<'a> AiRuntime<'a> {
-    pub fn new(runtime: &'a Runtime<'a>, llm: Arc<dyn LlmProvider>, config: AiRuntimeConfig) -> Self {
-        Self { runtime, llm, config }
+    pub fn new(
+        runtime: &'a Runtime<'a>,
+        llm: Arc<dyn LlmProvider>,
+        config: AiRuntimeConfig,
+    ) -> Self {
+        Self {
+            runtime,
+            llm,
+            config,
+        }
     }
 
     pub async fn ask(&self, question: &str) -> Result<AiAnswer, AiError> {
@@ -109,7 +117,11 @@ impl<'a> AiRuntime<'a> {
         let (answer, evidence_refs, diagnostics) =
             extract_citations(&resp.content, &known_evidence);
 
-        Ok(AiAnswer { answer, evidence_refs, diagnostics })
+        Ok(AiAnswer {
+            answer,
+            evidence_refs,
+            diagnostics,
+        })
     }
 
     /// Retrieve top-ranked object matches, expand each into its neighbourhood,
@@ -126,7 +138,9 @@ impl<'a> AiRuntime<'a> {
         let mut ids: Vec<KirId> = Vec::new();
         let mut seen: HashSet<KirId> = HashSet::new();
         for id in &top {
-            let graph = self.runtime.load_neighborhood(id, self.config.neighborhood_depth)?;
+            let graph = self
+                .runtime
+                .load_neighborhood(id, self.config.neighborhood_depth)?;
             for obj in graph.objects {
                 if seen.insert(obj.id) {
                     ids.push(obj.id);
@@ -176,7 +190,9 @@ fn extract_citations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ekos_kir::{KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation};
+    use ekos_kir::{
+        KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
+    };
     use ekos_ledger::Ledger;
     use ekos_recovery::MockLlmProvider;
     use tempfile::TempDir;
@@ -199,7 +215,11 @@ mod tests {
         ledger.append_object(&orders).unwrap();
         ledger.append_object(&customers).unwrap();
         ledger
-            .append_relationship(&KirRelationship::new(RelationshipKind::ForeignKey, orders_id, customers.id))
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::ForeignKey,
+                orders_id,
+                customers.id,
+            ))
             .unwrap();
 
         (orders_id, ev_id)

@@ -6,8 +6,7 @@ use ekos_runtime::Runtime;
 use std::{path::Path, str::FromStr};
 
 pub fn object(config: &EkosConfig, cwd: &Path, id_str: &str, format: &str) -> Result<()> {
-    let id = KirId::from_str(id_str)
-        .map_err(|_| anyhow::anyhow!("invalid object id: {id_str}"))?;
+    let id = KirId::from_str(id_str).map_err(|_| anyhow::anyhow!("invalid object id: {id_str}"))?;
 
     let ledger = open_ledger(config, cwd)?;
     let obj = ledger.get_object(&id)?;
@@ -74,8 +73,7 @@ pub fn find(config: &EkosConfig, cwd: &Path, query: &str) -> Result<()> {
 }
 
 pub fn neighbourhood(config: &EkosConfig, cwd: &Path, id_str: &str, depth: u32) -> Result<()> {
-    let id = KirId::from_str(id_str)
-        .map_err(|_| anyhow::anyhow!("invalid object id: {id_str}"))?;
+    let id = KirId::from_str(id_str).map_err(|_| anyhow::anyhow!("invalid object id: {id_str}"))?;
 
     let ledger = open_ledger(config, cwd)?;
     let rt = Runtime::new(&ledger);
@@ -112,6 +110,10 @@ pub fn neighbourhood(config: &EkosConfig, cwd: &Path, id_str: &str, depth: u32) 
 
 fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Ledger> {
     let path = config.ledger_path(cwd);
-    Ledger::open(&path)
-        .map_err(|e| anyhow::anyhow!("cannot open ledger at {}: {e}\nRun `ekos build` first.", path.display()))
+    Ledger::open(&path).map_err(|e| {
+        anyhow::anyhow!(
+            "cannot open ledger at {}: {e}\nRun `ekos build` first.",
+            path.display()
+        )
+    })
 }

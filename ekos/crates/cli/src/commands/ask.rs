@@ -6,7 +6,11 @@ use ekos_runtime::{AiRuntime, AiRuntimeConfig, Runtime};
 use std::{path::Path, sync::Arc};
 
 pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, json: bool) -> Result<()> {
-    let key_env = config.llm.api_key_env.as_deref().unwrap_or("ANTHROPIC_API_KEY");
+    let key_env = config
+        .llm
+        .api_key_env
+        .as_deref()
+        .unwrap_or("ANTHROPIC_API_KEY");
     let ai_config = ai_config(config);
 
     let llm: Arc<dyn LlmProvider> = match std::env::var(key_env) {
@@ -21,7 +25,10 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, json: bool) ->
 
     let ledger_path = config.ledger_path(cwd);
     let ledger = Ledger::open(&ledger_path).map_err(|e| {
-        anyhow::anyhow!("cannot open ledger at {}: {e}\nRun `ekos build` first.", ledger_path.display())
+        anyhow::anyhow!(
+            "cannot open ledger at {}: {e}\nRun `ekos build` first.",
+            ledger_path.display()
+        )
     })?;
     let runtime = Runtime::new(&ledger);
     let ai = AiRuntime::new(&runtime, llm, ai_config);
@@ -39,7 +46,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, json: bool) ->
         println!("\nSources:");
         for id in &answer.evidence_refs {
             if let Some(ev) = ledger.get_evidence(id)? {
-                println!("  [{:.0}%] {} — \"{}\"", ev.confidence * 100.0, ev.location.path, ev.fragment);
+                println!(
+                    "  [{:.0}%] {} — \"{}\"",
+                    ev.confidence * 100.0,
+                    ev.location.path,
+                    ev.fragment
+                );
             }
         }
     }
@@ -56,8 +68,15 @@ fn ai_config(config: &EkosConfig) -> AiRuntimeConfig {
     AiRuntimeConfig {
         model: config.ai.model.clone().unwrap_or(default.model),
         max_matches: config.ai.max_matches.unwrap_or(default.max_matches),
-        neighborhood_depth: config.ai.neighborhood_depth.unwrap_or(default.neighborhood_depth),
+        neighborhood_depth: config
+            .ai
+            .neighborhood_depth
+            .unwrap_or(default.neighborhood_depth),
         max_tokens: config.ai.max_tokens.unwrap_or(default.max_tokens),
-        system_prompt: config.ai.system_prompt.clone().unwrap_or(default.system_prompt),
+        system_prompt: config
+            .ai
+            .system_prompt
+            .clone()
+            .unwrap_or(default.system_prompt),
     }
 }

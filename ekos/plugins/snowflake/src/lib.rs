@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
-use ekos_observation_sdk::{ObserveError, ObservationPackage, Observer, ScanContext};
+use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -65,7 +65,10 @@ impl SnowflakeApiClient {
     }
 
     async fn run_statement(&self, sql: &str) -> Result<serde_json::Value, SnowflakeClientError> {
-        let url = format!("{}/api/v2/statements", self.account_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/api/v2/statements",
+            self.account_url.trim_end_matches('/')
+        );
         let resp = self
             .http
             .post(&url)
@@ -145,11 +148,10 @@ impl Observer for SnowflakeObserver {
     }
 
     async fn scan(&self, _ctx: &ScanContext) -> Result<ObservationPackage, ObserveError> {
-        let objects = self
-            .client
-            .list_schema_objects()
-            .await
-            .map_err(|e| ObserveError::connector(format!("snowflake schema list failed: {e}")))?;
+        let objects =
+            self.client.list_schema_objects().await.map_err(|e| {
+                ObserveError::connector(format!("snowflake schema list failed: {e}"))
+            })?;
 
         let mut pkg = ObservationPackage::new("snowflake", "account");
 
@@ -240,7 +242,11 @@ mod tests {
             .iter()
             .filter(|a| a.content.data["schema"] == "RAW")
             .collect();
-        assert_eq!(raw_schema_tables.len(), 2, "CUSTOMERS and PRODUCTS both live in the RAW schema");
+        assert_eq!(
+            raw_schema_tables.len(),
+            2,
+            "CUSTOMERS and PRODUCTS both live in the RAW schema"
+        );
     }
 
     #[tokio::test]

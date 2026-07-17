@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
-use ekos_observation_sdk::{ObserveError, ObservationPackage, Observer, ScanContext};
+use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -64,7 +64,12 @@ impl FabricApiClient {
         workspace_id: &str,
     ) -> Result<Vec<FabricItem>, FabricClientError> {
         let url = format!("{}/workspaces/{workspace_id}/items", self.base_url);
-        let resp = self.http.get(&url).bearer_auth(&self.access_token).send().await?;
+        let resp = self
+            .http
+            .get(&url)
+            .bearer_auth(&self.access_token)
+            .send()
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -148,7 +153,8 @@ impl Observer for FabricObserver {
             });
             let target = format!("{}/{}", item.workspace_id, item.name);
             pkg.push(
-                ObservationArtifact::new("fabric", &target, data).with_producer("ekos-plugin-fabric"),
+                ObservationArtifact::new("fabric", &target, data)
+                    .with_producer("ekos-plugin-fabric"),
             );
         }
 
@@ -220,8 +226,11 @@ mod tests {
         let ctx = ScanContext::new(".");
         let pkg = observer.scan(&ctx).await.unwrap();
         assert_eq!(pkg.len(), 5);
-        let types: std::collections::HashSet<_> =
-            pkg.artifacts.iter().map(|a| a.content.data["item_type"].as_str().unwrap()).collect();
+        let types: std::collections::HashSet<_> = pkg
+            .artifacts
+            .iter()
+            .map(|a| a.content.data["item_type"].as_str().unwrap())
+            .collect();
         assert!(types.contains("Lakehouse"));
         assert!(types.contains("Warehouse"));
         assert!(types.contains("SemanticModel"));

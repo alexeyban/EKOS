@@ -80,6 +80,17 @@ enum Commands {
         #[command(subcommand)]
         subcommand: McpCommands,
     },
+    /// Artifact store management (RFC 0015)
+    Artifact {
+        #[command(subcommand)]
+        subcommand: ArtifactCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ArtifactCommands {
+    /// Migrate loose artifact files into packed segments
+    Repack,
 }
 
 #[derive(Subcommand)]
@@ -107,7 +118,13 @@ enum BranchCommands {
 #[derive(Subcommand)]
 enum LedgerCommands {
     /// Show ledger entry count and object count
-    Status,
+    Status {
+        /// Also report per-component storage sizes (RFC 0015)
+        #[arg(long)]
+        storage: bool,
+    },
+    /// Migrate the ledger to the v2 compact format (RFC 0015)
+    Migrate,
 }
 
 #[derive(Subcommand)]
@@ -132,7 +149,21 @@ enum QueryCommands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let config_path = cli.config.unwrap_or_else(|| PathBuf::from("ekos.toml"));
+    // The MCP server is spawned by agent hosts from arbitrary directories, so
+    // its workspace (and the config inside it) may arrive via environment
+    // variables instead of flags: EKOS_WORKSPACE, EKOS_CONFIG.
+    let env_workspace = std::env::var_os("EKOS_WORKSPACE").map(PathBuf::from);
+    let config_path = cli
+        .config
+        .or_else(|| std::env::var_os("EKOS_CONFIG").map(PathBuf::from))
+        .or_else(|| {
+            if matches!(cli.command, Commands::Mcp { .. }) {
+                env_workspace.as_ref().map(|w| w.join("ekos.toml"))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| PathBuf::from("ekos.toml"));
     let config = ekos_compiler_core::EkosConfig::from_file_or_default(&config_path);
     let cwd = std::env::current_dir()?;
 
@@ -146,12 +177,17 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Init => ekos::commands::init::run(&config, &cwd),
         Commands::Build => ekos::commands::build::run(&config, &cwd).await,
-        Commands::Recover { parallel } => ekos::commands::recover::run(&config, &cwd, parallel).await,
+        Commands::Recover { parallel } => {
+            ekos::commands::recover::run(&config, &cwd, parallel).await
+        }
         Commands::Resolve => ekos::commands::resolve::run(&config, &cwd),
         Commands::Compile => ekos::commands::compile::run(&config, &cwd).await,
         Commands::Commit => ekos::commands::commit::run(&config, &cwd),
         Commands::Ledger { subcommand } => match subcommand {
-            LedgerCommands::Status => ekos::commands::ledger::status(&config, &cwd),
+            LedgerCommands::Status { storage } => {
+                ekos::commands::ledger::status(&config, &cwd, storage)
+            }
+            LedgerCommands::Migrate => ekos::commands::ledger::migrate(&config, &cwd),
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor => ekos::commands::doctor::run(&config, &cwd, &config_path),
@@ -177,9 +213,12 @@ async fn main() -> Result<()> {
         },
         Commands::Mcp { subcommand } => match subcommand {
             McpCommands::Serve { workspace } => {
-                let workspace = workspace.unwrap_or_else(|| cwd.clone());
+                let workspace = workspace.or(env_workspace).unwrap_or_else(|| cwd.clone());
                 ekos::commands::mcp::run(&config, &workspace)
             }
+        },
+        Commands::Artifact { subcommand } => match subcommand {
+            ArtifactCommands::Repack => ekos::commands::artifact::repack(&config, &cwd),
         },
     }
 }

@@ -29,7 +29,9 @@ fn manifest_path(manifest_dir: &Path, pass_name: &str) -> std::path::PathBuf {
 /// SHA-256 of the canonical JSON of a config value — used as the
 /// `config_hash` half of a pass's recomputation identity.
 pub fn config_hash(value: &serde_json::Value) -> String {
-    ekos_artifact::ArtifactId::compute(value).as_str().to_string()
+    ekos_artifact::ArtifactId::compute(value)
+        .as_str()
+        .to_string()
 }
 
 /// Should this pass re-run, or is its previously cached output still valid?
@@ -39,8 +41,12 @@ pub fn config_hash(value: &serde_json::Value) -> String {
 /// time this pass ran successfully.
 pub fn should_recompute(pass: &dyn CompilerPass, config_hash: &str, manifest_dir: &Path) -> bool {
     let path = manifest_path(manifest_dir, pass.name());
-    let Ok(raw) = std::fs::read_to_string(&path) else { return true };
-    let Ok(manifest) = serde_json::from_str::<PassManifest>(&raw) else { return true };
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return true;
+    };
+    let Ok(manifest) = serde_json::from_str::<PassManifest>(&raw) else {
+        return true;
+    };
 
     manifest.version != pass.version()
         || manifest.config_hash != config_hash
@@ -93,14 +99,22 @@ mod tests {
     #[test]
     fn no_manifest_means_recompute() {
         let dir = tempfile::tempdir().unwrap();
-        let pass = StubPass { name: "p", version: "v1", inputs: vec!["a".into()] };
+        let pass = StubPass {
+            name: "p",
+            version: "v1",
+            inputs: vec!["a".into()],
+        };
         assert!(should_recompute(&pass, "cfg1", dir.path()));
     }
 
     #[test]
     fn unchanged_identity_skips_recompute() {
         let dir = tempfile::tempdir().unwrap();
-        let pass = StubPass { name: "p", version: "v1", inputs: vec!["a".into()] };
+        let pass = StubPass {
+            name: "p",
+            version: "v1",
+            inputs: vec!["a".into()],
+        };
         record_manifest(&pass, "cfg1", dir.path());
         assert!(!should_recompute(&pass, "cfg1", dir.path()));
     }
@@ -108,7 +122,11 @@ mod tests {
     #[test]
     fn changed_config_hash_forces_recompute() {
         let dir = tempfile::tempdir().unwrap();
-        let pass = StubPass { name: "p", version: "v1", inputs: vec!["a".into()] };
+        let pass = StubPass {
+            name: "p",
+            version: "v1",
+            inputs: vec!["a".into()],
+        };
         record_manifest(&pass, "cfg1", dir.path());
         assert!(should_recompute(&pass, "cfg2", dir.path()));
     }
@@ -116,18 +134,34 @@ mod tests {
     #[test]
     fn changed_inputs_forces_recompute() {
         let dir = tempfile::tempdir().unwrap();
-        let pass = StubPass { name: "p", version: "v1", inputs: vec!["a".into()] };
+        let pass = StubPass {
+            name: "p",
+            version: "v1",
+            inputs: vec!["a".into()],
+        };
         record_manifest(&pass, "cfg1", dir.path());
-        let changed = StubPass { name: "p", version: "v1", inputs: vec!["b".into()] };
+        let changed = StubPass {
+            name: "p",
+            version: "v1",
+            inputs: vec!["b".into()],
+        };
         assert!(should_recompute(&changed, "cfg1", dir.path()));
     }
 
     #[test]
     fn changed_version_forces_recompute() {
         let dir = tempfile::tempdir().unwrap();
-        let pass = StubPass { name: "p", version: "v1", inputs: vec!["a".into()] };
+        let pass = StubPass {
+            name: "p",
+            version: "v1",
+            inputs: vec!["a".into()],
+        };
         record_manifest(&pass, "cfg1", dir.path());
-        let bumped = StubPass { name: "p", version: "v2", inputs: vec!["a".into()] };
+        let bumped = StubPass {
+            name: "p",
+            version: "v2",
+            inputs: vec!["a".into()],
+        };
         assert!(should_recompute(&bumped, "cfg1", dir.path()));
     }
 }

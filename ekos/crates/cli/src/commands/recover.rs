@@ -1,16 +1,21 @@
 use anyhow::Result;
-use ekos_artifact::{ArtifactId, ArtifactStore, FileSystemArtifactStore};
-use ekos_compiler_core::{pass::PassContext, scheduler::FailureMode, EkosConfig};
+use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
+use ekos_compiler_core::{EkosConfig, pass::PassContext, scheduler::FailureMode};
 use ekos_recovery::{
-    anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
-    GitAnalyzerPass, MockLlmProvider, SqlAnalyzerPass,
+    GitAnalyzerPass, MockLlmProvider, SqlAnalyzerPass, anthropic::AnthropicProvider,
+    cache::CachedLlmProvider, llm::LlmProvider,
 };
 use std::{path::Path, sync::Arc};
 use walkdir::WalkDir;
 
 pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> {
     let artifact_dir = config.artifact_dir(cwd);
-    let artifact_store = FileSystemArtifactStore::new(&artifact_dir);
+    // Shared with the pass context below — two pack stores over the same
+    // segments would go stale on each other's appends (RFC 0015).
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(
+        PackArtifactStore::open(&artifact_dir)
+            .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?,
+    );
 
     // ── LLM provider selection ────────────────────────────────────────────
     let llm: Arc<dyn LlmProvider> = build_llm_provider(config, &artifact_dir);
@@ -66,22 +71,21 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             // paths, two projects can hold the same base-relative SQL path
             // (e.g. `schema.sql`), and pass names must be unique.
             let rel = path.strip_prefix(cwd).unwrap_or(path);
-            let pass = SqlAnalyzerPass::new(
-                rel.to_string_lossy().as_ref(),
-                sql,
-                llm.clone(),
-            );
+            let pass = SqlAnalyzerPass::new(rel.to_string_lossy().as_ref(), sql, llm.clone());
             pass_manager.register(Box::new(pass));
             sql_count += 1;
         }
     }
 
     // ── Git commit artifacts ─────────────────────────────────────────────
-    let (commit_ids, repo_id) = collect_git_artifact_ids(&artifact_store);
+    let (commit_ids, repo_id) = collect_git_artifact_ids(&*artifact_store);
     let git_count = commit_ids.len();
     if !commit_ids.is_empty() {
         let git_pass = GitAnalyzerPass::new(
-            cwd.file_name().unwrap_or_default().to_string_lossy().as_ref(),
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
             commit_ids,
             repo_id,
         );
@@ -94,7 +98,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
 
     // ── Run passes ────────────────────────────────────────────────────────
-    let mut ctx = PassContext::new(Arc::new(config.clone()), cwd.to_path_buf());
+    let mut ctx = PassContext::new(Arc::new(config.clone()), cwd.to_path_buf())
+        .with_artifact_store(artifact_store);
     let report = if parallel {
         pass_manager
             .run_all_parallel(&ctx, FailureMode::Collect)
@@ -134,9 +139,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
 }
 
 /// Collect ArtifactIds for all git commit and repo artifacts currently in the store.
-fn collect_git_artifact_ids(
-    store: &FileSystemArtifactStore,
-) -> (Vec<ArtifactId>, Option<ArtifactId>) {
+fn collect_git_artifact_ids(store: &dyn ArtifactStore) -> (Vec<ArtifactId>, Option<ArtifactId>) {
     let all_ids = match store.list() {
         Ok(ids) => ids,
         Err(_) => return (vec![], None),
@@ -163,11 +166,11 @@ fn collect_git_artifact_ids(
 }
 
 /// Choose LLM provider: Anthropic with cache if API key present, mock otherwise.
-fn build_llm_provider(
-    config: &EkosConfig,
-    artifact_dir: &Path,
-) -> Arc<dyn LlmProvider> {
-    let cache_dir = artifact_dir.parent().unwrap_or(artifact_dir).join("llm-cache");
+fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
+    let cache_dir = artifact_dir
+        .parent()
+        .unwrap_or(artifact_dir)
+        .join("llm-cache");
     std::fs::create_dir_all(&cache_dir).ok();
 
     let key_env = config
