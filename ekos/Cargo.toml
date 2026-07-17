@@ -78,6 +78,7 @@ hex  = "0.4"
 # Storage
 rusqlite = { version = "0.32", features = ["bundled"] }
 zstd     = "0.13"
+tantivy  = "0.22"
 
 # Filesystem
 walkdir = "2"

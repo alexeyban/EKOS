@@ -14,9 +14,10 @@
 //!   reads serve from that state. The Phase 3 on-disk runs and the Phase 6
 //!   mmap path take over when the backends are swapped — correctness first,
 //!   the I/O plumbing after parity is proven.
-//! - `find_objects` is a deliberately simple tokenizer + scorer emulating
-//!   the FTS5 semantics the suite pins (AND terms, `*` prefix, name 10× /
-//!   kind 4× / content 1×). Tantivy replaces it in Phase 5.
+//! - `find_objects` is tantivy (Phase 5, `crate::search`): BM25 with the
+//!   RFC 0014 semantics the suite pins (AND terms, `*` prefix, name 10× /
+//!   kind 4× / content 1× boosts), buffered upserts group-committing on
+//!   the first query after a write.
 //! - Entity typing (object / relationship / evidence / event) derives from
 //!   payload shape (`from`+`to`, `fragment`, `subject`) — deterministic, and
 //!   exactly the information the SQLite `entry_type` column carries.
@@ -34,6 +35,7 @@ use uuid::Uuid;
 
 use crate::fact::{AttrId, Fact, FactOp, FactValue, TxId, decompose, diff, reconstruct};
 use crate::index::IndexEntry;
+use crate::search::SearchIndex;
 use crate::segment::{SegmentError, SegmentStore};
 use crate::{
     LedgerDiff, LedgerEntryId, LedgerError, MergeConflict, MergeReport, content_signature,
@@ -88,6 +90,9 @@ struct Inner {
     rel_index: HashMap<Uuid, HashSet<Uuid>>,
     /// (tx, wall_time_us) per committed batch, tx-ordered — the time→tx map.
     batch_times: Vec<(TxId, i64)>,
+    /// Tantivy object search (RFC 0016 Phase 5). Upserts buffer on append
+    /// and group-commit lazily on the first query.
+    search: SearchIndex,
 }
 
 /// The fact-segment ledger — RFC 0016's replacement for the SQLite backend,
@@ -102,15 +107,20 @@ impl FactLedger {
     /// replay its committed batches into serving state.
     pub fn open(root: &Path) -> Result<Self, LedgerError> {
         let store = SegmentStore::open(root)?;
+        let (search, search_marker) = SearchIndex::open(&root.join("search"))?;
         let mut inner = Inner {
             store,
             entities: HashMap::new(),
             rel_index: HashMap::new(),
             batch_times: Vec::new(),
+            search,
         };
         let batches = inner.store.batches()?;
+        // Entities the search index hasn't seen (committed after its marker).
+        let mut stale: HashSet<Uuid> = HashSet::new();
         for batch in &batches {
             inner.batch_times.push((batch.tx, batch.wall_time_us));
+            let unseen = search_marker.is_none_or(|m| batch.tx > m);
             for (op, fact) in &batch.ops {
                 inner
                     .entities
@@ -118,17 +128,25 @@ impl FactLedger {
                     .or_default()
                     .entries
                     .push(IndexEntry::from_fact(fact, batch.tx, *op));
+                if unseen {
+                    stale.insert(fact.entity);
+                }
             }
         }
         // Derive kind, signature, and the relationship reverse index from
-        // each entity's current state.
+        // each entity's current state; catch the search index up on the way.
         let ids: Vec<Uuid> = inner.entities.keys().copied().collect();
         for id in ids {
             let payload = inner.reconstruct_current(id)?;
             if let Some(payload) = payload {
                 inner.note_entity(id, &payload);
+                if stale.contains(&id) && kind_of_payload(&payload) == EntityKind::Object {
+                    inner.index_object(id, &payload);
+                }
             }
         }
+        let last_tx = inner.batch_times.last().map(|(t, _)| *t);
+        inner.search.commit(last_tx)?;
         Ok(Self {
             inner: Mutex::new(inner),
             root: root.to_path_buf(),
@@ -190,6 +208,9 @@ impl FactLedger {
         }
         state.current_sig = Some(sig);
         inner.note_entity(entity, &payload);
+        if kind_of_payload(&payload) == EntityKind::Object {
+            inner.index_object(entity, &payload);
+        }
         Ok(true)
     }
 
@@ -319,67 +340,22 @@ impl FactLedger {
         Ok(out)
     }
 
-    // ── Search (FTS5-compatible semantics; tantivy in Phase 5) ────────────
+    // ── Search (tantivy, RFC 0016 Phase 5) ────────────────────────────────
 
-    /// Ranked search over object names, kinds, and content excerpts.
+    /// Ranked BM25 search over object names, kinds, and content excerpts.
     /// Terms are ANDed; a trailing `*` prefix-matches a token; name hits
-    /// outrank kind hits outrank content hits (10/4/1, as RFC 0014 tuned).
+    /// outrank kind hits outrank content hits (10/4/1 boosts, as RFC 0014
+    /// tuned). Buffered upserts group-commit here — read-your-writes without
+    /// per-append commit cost.
     pub fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
-        let terms: Vec<(String, bool)> = query
-            .split(|c: char| !(c.is_alphanumeric() || c == '*'))
-            .filter(|t| !t.is_empty())
-            .map(|t| match t.strip_suffix('*') {
-                Some(stem) => (stem.to_lowercase(), true),
-                None => (t.trim_matches('*').to_lowercase(), false),
-            })
-            .filter(|(t, _)| !t.is_empty())
-            .collect();
-        if terms.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut scored = Vec::new();
-        for obj in self.all_objects()? {
-            let name_tokens = tokenize(&obj.name);
-            let kind_tokens = tokenize(&obj.kind.to_string());
-            let content_tokens = obj
-                .properties
-                .get("excerpt")
-                .and_then(|v| v.as_str())
-                .map(tokenize)
-                .unwrap_or_default();
-
-            let mut score = 0.0f64;
-            let mut all_matched = true;
-            for (term, prefix) in &terms {
-                let hit = |tokens: &[String]| {
-                    tokens.iter().any(|tok| {
-                        if *prefix {
-                            tok.starts_with(term.as_str())
-                        } else {
-                            tok == term
-                        }
-                    })
-                };
-                let term_score = if hit(&name_tokens) {
-                    10.0
-                } else if hit(&kind_tokens) {
-                    4.0
-                } else if hit(&content_tokens) {
-                    1.0
-                } else {
-                    all_matched = false;
-                    break;
-                };
-                score += term_score;
-            }
-            if all_matched {
-                scored.push((score, obj.id, obj.name));
-            }
-        }
-        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(50);
-        Ok(scored.into_iter().map(|(_, id, name)| (id, name)).collect())
+        let mut inner = self.inner.lock().unwrap();
+        let last_tx = inner.batch_times.last().map(|(t, _)| *t);
+        inner.search.commit(last_tx)?;
+        let hits = inner.search.query(query, 50)?;
+        Ok(hits
+            .into_iter()
+            .map(|(id, name)| (KirId(id), name))
+            .collect())
     }
 
     // ── Counters ──────────────────────────────────────────────────────────
@@ -416,7 +392,10 @@ impl FactLedger {
     /// branch operation. O(1) manifest sharing arrives with the backend
     /// swap; for parity this is a verified file copy of sealed state.
     pub fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        // Flush buffered search upserts so the copy is self-consistent.
+        let last_tx = inner.batch_times.last().map(|(t, _)| *t);
+        inner.search.commit(last_tx)?;
         copy_dir(&self.root, dest)?;
         drop(inner);
         FactLedger::open(dest).map(|_| ())
@@ -600,6 +579,24 @@ impl Inner {
         }
     }
 
+    /// Buffer this object's current state into the tantivy index.
+    fn index_object(&mut self, entity: Uuid, payload: &serde_json::Value) {
+        let name = payload
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let kind = payload
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let content = payload
+            .get("properties")
+            .and_then(|p| p.get("excerpt"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        self.search.upsert(entity, name, kind, content);
+    }
+
     /// The greatest tx whose batch wall time is ≤ `at` (RFC 0016 §2).
     fn tx_at(&self, at: DateTime<Utc>) -> Option<TxId> {
         let at_us = at.timestamp_micros();
@@ -609,13 +606,6 @@ impl Inner {
             .find(|(_, w)| *w <= at_us)
             .map(|(t, _)| *t)
     }
-}
-
-fn tokenize(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .map(str::to_lowercase)
-        .collect()
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -931,6 +921,41 @@ mod tests {
         assert_eq!(ledger.get_object(&obj.id).unwrap().unwrap().name, "orders");
         assert_eq!(ledger.relationships_for(&obj.id).unwrap().len(), 1);
         assert_eq!(ledger.find_objects("zebra").unwrap().len(), 1);
+    }
+
+    /// The search index is derived: deleting its directory and reopening
+    /// rebuilds it from segments with nothing lost (RFC 0016 Phase 5).
+    #[test]
+    fn search_index_rebuilds_after_deletion() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let note = KirObject::new("note.md", ObjectKind::File).with_property(
+            "excerpt",
+            serde_json::json!("the caribou migration dataset"),
+        );
+        {
+            let ledger = FactLedger::open(&path).unwrap();
+            ledger.append_object(&note).unwrap();
+            assert_eq!(ledger.find_objects("caribou").unwrap().len(), 1);
+        }
+        std::fs::remove_dir_all(path.join("search")).unwrap();
+
+        let ledger = FactLedger::open(&path).unwrap();
+        let hits = ledger.find_objects("caribou").unwrap();
+        assert_eq!(hits.len(), 1, "index must rebuild from segment truth");
+        assert_eq!(hits[0].1, "note.md");
+
+        // And the marker-based catch-up path: write while open, reopen, search.
+        ledger
+            .append_object(
+                &KirObject::new("more.md", ObjectKind::File)
+                    .with_property("excerpt", serde_json::json!("narwhal sightings log")),
+            )
+            .unwrap();
+        drop(ledger);
+        let ledger = FactLedger::open(&path).unwrap();
+        assert_eq!(ledger.find_objects("narwhal").unwrap().len(), 1);
+        assert_eq!(ledger.find_objects("caribou").unwrap().len(), 1);
     }
 
     /// The acceptance gate in miniature: the same corpus written to both

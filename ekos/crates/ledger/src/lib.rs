@@ -1,6 +1,7 @@
 pub mod fact;
 pub mod fact_ledger;
 pub mod index;
+pub mod search;
 pub mod segment;
 
 pub use fact_ledger::FactLedger;
