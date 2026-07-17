@@ -19,7 +19,8 @@ fn build_indexes(dir: &std::path::Path) -> (FactIndexes, AttributeRegistry, Vec<
             format!("src/module_{}/file_{i}.rs", i % 40),
             ObjectKind::File,
         )
-        .with_property("size_bytes", serde_json::json!(i));
+        .with_property("size_bytes", serde_json::json!(i))
+        .with_evidence(ekos_kir::KirId(uuid::Uuid::from_u128(i as u128)));
         ids.push(obj.id.0);
         let facts = decompose(obj.id.0, &serde_json::to_value(&obj).unwrap(), &mut reg).unwrap();
         entries.extend(
@@ -28,7 +29,7 @@ fn build_indexes(dir: &std::path::Path) -> (FactIndexes, AttributeRegistry, Vec<
                 .map(|f| IndexEntry::from_fact(f, TxId(i as u64), FactOp::Assert)),
         );
     }
-    let mut idx = FactIndexes::open(dir).unwrap();
+    let mut idx = FactIndexes::open(dir).unwrap().0;
     idx.add_runs("bench", &entries).unwrap();
     for order in SortOrder::ALL {
         idx.merge_runs(order).unwrap();
@@ -39,7 +40,7 @@ fn build_indexes(dir: &std::path::Path) -> (FactIndexes, AttributeRegistry, Vec<
 fn bench_index_runs(c: &mut Criterion) {
     let dir = tempfile::tempdir().unwrap();
     let (idx, mut reg, ids) = build_indexes(dir.path());
-    let name_attr = reg.intern("name");
+    let evidence_attr = reg.intern("evidence");
 
     c.bench_function("index_eavt_entity_scan", |b| {
         let mut i = 0usize;
@@ -55,11 +56,12 @@ fn bench_index_runs(c: &mut Criterion) {
         });
     });
 
-    c.bench_function("index_avet_name_lookup", |b| {
+    // AVET indexes ref values only (RFC 0016 §7) — bench the graph hop.
+    c.bench_function("index_avet_ref_lookup", |b| {
         b.iter(|| {
             idx.scan(&ScanPrefix::AttrValue {
-                attr: name_attr,
-                value: FactValue::String("src/module_7/file_2887.rs".into()),
+                attr: evidence_attr,
+                value: FactValue::Ref(uuid::Uuid::from_u128(2_887)),
             })
             .unwrap()
         });
