@@ -91,9 +91,9 @@ FIND <Object|Relationship>
 
 ## This machine's setup
 
-The `ekos` MCP server is registered at user scope and serves the workspace at
-`/home/legion/PycharmProjects` (44 projects; config in `ekos.toml` there,
-ledger in `.ekos/ledger/ledger.db`). The binary lives at
-`/home/legion/PycharmProjects/EKOS/ekos/target/release/ekos` — rebuild with
-`cargo build --release -p ekos` from `/home/legion/PycharmProjects/EKOS/ekos`
-after changing EKOS itself.
+The `ekos` MCP server is registered at user scope and serves the workspace root. Use a workspace-root variable rather than a hardcoded absolute path. The ledger lives in `.ekos/ledger/ledger.db` under that root.
+
+Set the EKOS binary via an environment variable, for example `EKOS_BIN`, and invoke it from the workspace root. Rebuild the binary with:
+
+```sh
+cd "$WORKSPACE_ROOT/ekos" && cargo build --release -p ekos
