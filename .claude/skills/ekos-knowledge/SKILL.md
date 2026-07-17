@@ -24,7 +24,7 @@ about *what exists* rather than *what a specific line of code does*.
 
 | You need | Tool | Notes |
 |---|---|---|
-| An entry point from free text | `ekos_search` | FTS over object names/kinds; trailing `*` = prefix search |
+| An entry point from free text | `ekos_search` | FTS over names, kinds, and content excerpts, relevance-ranked; use 2–3 keywords (ANDed), trailing `*` = prefix |
 | A precise, filterable listing | `ekos_ekl` | EKL query language — see cheat sheet below |
 | What's connected to an object | `ekos_neighborhood` | BFS `depth` hops from an id |
 | Impact: "what breaks if X changes?" | `ekos_dependents` | Incoming edges = `dependents`, outgoing = `dependencies` |

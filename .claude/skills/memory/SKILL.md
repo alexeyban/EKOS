@@ -26,10 +26,11 @@ session produces knowledge a future session would otherwise re-earn.**
 Re-reading whole files burns context on content you don't need. Search first,
 read second, and only what the search pointed at:
 
-1. `ekos_search "<2–3 topic keywords>"` — finds files and notes by name
-   across every project. **Use multiple terms** (`"mcp stdio jsonrpc"`, not
-   `"mcp"`): results cap at 20, and single common words get drowned by
-   project files before memory notes surface.
+1. `ekos_search "<2–3 topic keywords>"` — searches names **and content
+   excerpts** (first ~600 chars of every text file), ranked by relevance
+   with name matches first. Use keywords, not questions: terms are ANDed,
+   so `"stale CKM"` works and `"have I seen a stale CKM before"` returns
+   nothing. Prefer 2–3 specific terms over one common word.
 2. To list memory notes directly, use their name markers via EKL:
    `FIND Object WHERE name CONTAINS '--lesson--'` (likewise `--decision--`,
    `--approach--`, `--session--`, `--reading--`, or a `<project>--` prefix).

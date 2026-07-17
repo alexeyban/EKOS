@@ -90,7 +90,7 @@ fn tool_definitions() -> Value {
     json!([
         {
             "name": "ekos_search",
-            "description": "Full-text search over compiled knowledge objects (names and kinds) in the EKOS ledger. Returns matching object ids and names; feed an id to ekos_state or ekos_neighborhood for detail.",
+            "description": "Full-text search over compiled knowledge objects — names, kinds, and content excerpts — ranked by relevance (name matches first). Use 2-3 keywords, not natural-language questions. Returns matching object ids and names; feed an id to ekos_state or ekos_neighborhood for detail.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

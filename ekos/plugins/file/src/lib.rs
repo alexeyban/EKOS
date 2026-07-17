@@ -90,11 +90,16 @@ impl Observer for FileObserver {
                 hex::encode(h.finalize())
             };
 
-            let data = serde_json::json!({
+            let mut data = serde_json::json!({
                 "path": rel_path,
                 "size_bytes": size_bytes,
                 "content_sha256": content_sha256,
             });
+            // RFC 0014: for text files, the opening excerpt is an observation
+            // fact — it feeds the ledger's content FTS. Binary files get none.
+            if let Some(excerpt) = text_excerpt(&content) {
+                data["excerpt"] = serde_json::Value::String(excerpt);
+            }
 
             let artifact = ObservationArtifact::new("file", &rel_path, data)
                 .with_producer("ekos-plugin-file");
@@ -104,6 +109,21 @@ impl Observer for FileObserver {
 
         Ok(pkg)
     }
+}
+
+/// Cap on the excerpt captured from text files (RFC 0014). 600 chars covers
+/// headings and preamble — where a document says what it is — without
+/// bloating the FTS index with entire file bodies.
+const EXCERPT_MAX_CHARS: usize = 600;
+
+/// The opening excerpt of a text file, or `None` for binary content.
+/// Truncates on a char boundary so the result is always valid UTF-8.
+fn text_excerpt(content: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(content).ok()?;
+    if text.is_empty() {
+        return None;
+    }
+    Some(text.chars().take(EXCERPT_MAX_CHARS).collect())
 }
 
 #[cfg(test)]
@@ -123,6 +143,24 @@ mod tests {
     async fn empty_dir_produces_no_artifacts() {
         let pkg = scan_temp(|_| {}).await;
         assert!(pkg.is_empty());
+    }
+
+    #[tokio::test]
+    async fn text_files_carry_an_excerpt_binary_files_do_not() {
+        let long_text = "# Title\n".to_string() + &"x".repeat(2000);
+        let pkg = scan_temp(move |dir| {
+            std::fs::write(dir.path().join("note.md"), long_text.as_bytes()).unwrap();
+            std::fs::write(dir.path().join("blob.bin"), [0xff, 0xfe, 0x00, 0x9f]).unwrap();
+        })
+        .await;
+
+        let note = pkg.artifacts.iter().find(|a| a.content.target == "note.md").unwrap();
+        let excerpt = note.content.data["excerpt"].as_str().unwrap();
+        assert!(excerpt.starts_with("# Title"), "excerpt keeps the opening");
+        assert_eq!(excerpt.chars().count(), EXCERPT_MAX_CHARS, "excerpt is capped");
+
+        let blob = pkg.artifacts.iter().find(|a| a.content.target == "blob.bin").unwrap();
+        assert!(blob.content.data.get("excerpt").is_none(), "binary files carry no excerpt");
     }
 
     #[tokio::test]

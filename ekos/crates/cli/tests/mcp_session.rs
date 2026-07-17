@@ -235,4 +235,24 @@ async fn claude_code_session_over_mcp() {
         changed_names.contains(&"orders") && changed_names.contains(&"customers"),
         "diff must resolve changed ids to readable names, got {changed_names:?}"
     );
+
+    // ── Turn 8: content search (RFC 0014) — the README body, not its name ────
+    let content_hit = call_tool(
+        &config,
+        dir,
+        8,
+        "ekos_search",
+        serde_json::json!({ "query": "Shop Service" }),
+    );
+    let hit_names: Vec<&str> = content_hit["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        hit_names.contains(&"README.md"),
+        "the phrase lives in README.md's body, not its filename — content \
+         indexing must surface it, got {hit_names:?}"
+    );
 }

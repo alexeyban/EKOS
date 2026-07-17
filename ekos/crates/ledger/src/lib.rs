@@ -76,6 +76,7 @@ impl Ledger {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         let ledger = Self { conn };
         ledger.init_schema()?;
+        ledger.migrate_fts_v2()?;
         Ok(ledger)
     }
 
@@ -97,7 +98,7 @@ impl Ledger {
                 entry_rowid  INTEGER NOT NULL
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS object_fts
-                USING fts5(object_id UNINDEXED, name, kind);
+                USING fts5(object_id UNINDEXED, name, kind, content);
 
             CREATE TABLE IF NOT EXISTS current_relationships (
                 rel_id       TEXT PRIMARY KEY,
@@ -110,6 +111,55 @@ impl Ledger {
             CREATE INDEX IF NOT EXISTS idx_rel_to   ON current_relationships(to_id);
             ",
         )
+    }
+
+    /// RFC 0014 migration: pre-content-column FTS tables are dropped,
+    /// recreated with the v2 schema, and repopulated from current objects.
+    /// The FTS table is a derived index — rebuilding it loses nothing.
+    fn migrate_fts_v2(&self) -> Result<(), LedgerError> {
+        let has_content: bool = {
+            let mut stmt = self.conn.prepare("PRAGMA table_info(object_fts)")?;
+            let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut found = false;
+            for col in cols {
+                if col? == "content" {
+                    found = true;
+                }
+            }
+            found
+        };
+        if has_content {
+            return Ok(());
+        }
+
+        tracing::info!("migrating object_fts to v2 (content column, RFC 0014)");
+        self.conn.execute_batch(
+            "BEGIN;
+             DROP TABLE object_fts;
+             CREATE VIRTUAL TABLE object_fts
+                 USING fts5(object_id UNINDEXED, name, kind, content);
+             COMMIT;",
+        )?;
+        for obj in self.all_objects()? {
+            self.index_object_fts(&obj)?;
+        }
+        Ok(())
+    }
+
+    /// (Re)index one object into FTS: name, kind, and — RFC 0014 — its
+    /// `properties["excerpt"]` as searchable content.
+    fn index_object_fts(&self, obj: &KirObject) -> Result<(), LedgerError> {
+        let content = obj
+            .properties
+            .get("excerpt")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        self.conn.execute(
+            "INSERT OR REPLACE INTO object_fts (object_id, name, kind, content)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![obj.id.to_string(), obj.name, obj.kind.to_string(), content],
+        )?;
+        Ok(())
     }
 
     // ── Append methods ────────────────────────────────────────────────────────
@@ -172,10 +222,7 @@ impl Ledger {
             "INSERT OR REPLACE INTO current_objects (object_id, entry_rowid) VALUES (?1, ?2)",
             params![obj.id.to_string(), rowid],
         )?;
-        self.conn.execute(
-            "INSERT OR REPLACE INTO object_fts (object_id, name, kind) VALUES (?1, ?2, ?3)",
-            params![obj.id.to_string(), obj.name, obj.kind.to_string()],
-        )?;
+        self.index_object_fts(obj)?;
 
         Ok(is_new)
     }
@@ -373,7 +420,9 @@ impl Ledger {
 
     // ── Full-text search ──────────────────────────────────────────────────────
 
-    /// Full-text search over object names and kinds.
+    /// Full-text search over object names, kinds, and content excerpts
+    /// (RFC 0014), ranked by bm25 relevance: name matches weigh 10×, kind 4×,
+    /// content 1× — a name hit always outranks a body mention.
     ///
     /// The query is matched as-is when it looks like a simple FTS5 term (e.g. a
     /// prefix query like `order*`), but any query containing characters FTS5
@@ -391,7 +440,10 @@ impl Ledger {
         };
 
         let mut stmt = self.conn.prepare(
-            "SELECT object_id, name FROM object_fts WHERE object_fts MATCH ?1 LIMIT 20",
+            // bm25 weights are positional per column: object_id (unindexed,
+            // never matches), name, kind, content.
+            "SELECT object_id, name FROM object_fts WHERE object_fts MATCH ?1
+             ORDER BY bm25(object_fts, 0.0, 10.0, 4.0, 1.0) LIMIT 50",
         )?;
         let rows = stmt.query_map(params![match_expr], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -665,6 +717,69 @@ mod tests {
         ledger.append_object(&KirObject::new("customers", ObjectKind::Table)).unwrap();
         // Hyphens are FTS5 query-syntax operators; must not error, just find nothing.
         assert!(ledger.find_objects("zzz-nonexistent").unwrap().is_empty());
+    }
+
+    /// RFC 0014: content excerpts are searchable even when the name says
+    /// nothing about the topic.
+    #[test]
+    fn fts_finds_objects_by_content_excerpt() {
+        let (ledger, _dir) = temp_ledger();
+        let note = KirObject::new("note-17.md", ObjectKind::File).with_property(
+            "excerpt",
+            serde_json::json!("Lesson: coupling analysis is quadratic per commit"),
+        );
+        ledger.append_object(&note).unwrap();
+
+        let results = ledger.find_objects("quadratic").unwrap();
+        assert_eq!(results.len(), 1, "body keyword must match via content column");
+        assert_eq!(results[0].1, "note-17.md");
+    }
+
+    /// RFC 0014: a name hit outranks a content-only mention.
+    #[test]
+    fn fts_ranks_name_matches_above_content_matches() {
+        let (ledger, _dir) = temp_ledger();
+        let mention = KirObject::new("random-notes.md", ObjectKind::File)
+            .with_property("excerpt", serde_json::json!("this mentions orders in passing"));
+        ledger.append_object(&mention).unwrap();
+        ledger.append_object(&KirObject::new("orders", ObjectKind::Table)).unwrap();
+
+        let results = ledger.find_objects("orders").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1, "orders", "name match must rank first");
+    }
+
+    /// RFC 0014 migration: a ledger created with the v1 (name, kind) FTS
+    /// schema reopens with the content column and stays searchable.
+    #[test]
+    fn fts_v1_schema_migrates_and_stays_searchable() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.db");
+
+        {
+            let ledger = Ledger::open(&path).unwrap();
+            ledger.append_object(&KirObject::new("customers", ObjectKind::Table)).unwrap();
+            // Downgrade the FTS table to the pre-RFC-0014 shape.
+            ledger
+                .conn
+                .execute_batch(
+                    "DROP TABLE object_fts;
+                     CREATE VIRTUAL TABLE object_fts
+                         USING fts5(object_id UNINDEXED, name, kind);
+                     INSERT INTO object_fts (object_id, name, kind)
+                         SELECT object_id, 'customers', 'Table' FROM current_objects;",
+                )
+                .unwrap();
+        }
+
+        let reopened = Ledger::open(&path).unwrap();
+        let results = reopened.find_objects("customers").unwrap();
+        assert_eq!(results.len(), 1, "v1 index must be rebuilt, not lost");
+        // And the migrated table accepts content-bearing writes.
+        let note = KirObject::new("n.md", ObjectKind::File)
+            .with_property("excerpt", serde_json::json!("migration smoke keyword zebra"));
+        reopened.append_object(&note).unwrap();
+        assert_eq!(reopened.find_objects("zebra").unwrap().len(), 1);
     }
 
     #[test]

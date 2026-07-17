@@ -109,6 +109,14 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
                             serde_json::Value::String(artifact.id.to_string()),
                         )
                         .with_evidence(ev_id);
+                    // RFC 0014: the excerpt rides on the object so the ledger
+                    // can index file *content*, not just names.
+                    if let Some(excerpt) = artifact.content.data["excerpt"].as_str() {
+                        obj = obj.with_property(
+                            "excerpt",
+                            serde_json::Value::String(excerpt.to_string()),
+                        );
+                    }
                     obj.id = obj_id;
 
                     ledger.append_evidence(&ev)?;
