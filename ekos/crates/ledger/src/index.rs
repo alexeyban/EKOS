@@ -8,7 +8,7 @@
 //! |------|-----|---------|
 //! | EAVT | (entity, attr, pos, tx) | an entity's facts → object reconstruction, `object_at` |
 //! | AEVT | (attr, entity, pos, tx) | all entities carrying an attribute → `WHERE kind = …` |
-//! | AVET | (attr, value, entity, pos, tx) | entities by attribute *value* → name lookup, graph hops |
+//! | AVET | (attr, value, entity, pos, tx) | entities by attribute *value* — **ref values only** (graph hops); scalar lookups ride AEVT or tantivy |
 //!
 //! Reads issue **prefix ranged scans**: the key prefix (an entity, an
 //! attribute, an attribute+value) selects a contiguous key range, blocks
@@ -24,10 +24,12 @@
 //! scans are supported for every value type; *numeric range* scans are a
 //! documented non-goal of v1 (numbers order by their lexical form).
 //!
-//! Run files are blocks of zstd-compressed entries plus a block directory
-//! (first/last key per block) and a fixed footer. Explicit prefix/delta
-//! encoding inside blocks is deferred until measurements demand it — zstd
-//! already collapses the shared key prefixes of sorted entries.
+//! Run files are blocks (zstd level 19) plus a block directory (first/last
+//! key per block) and a fixed footer. Format v2 (RFC 0016 §7): blocks store
+//! **explicit prefix-delta-encoded keys** and compact binary entries, and
+//! only EAVT bodies carry values — reconstruction needs them; AEVT/AVET
+//! reads consume the entity id (the AVET value lives in the key), so their
+//! bodies are slim and their hydrated scan results carry `FactValue::Null`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -41,7 +43,9 @@ use crate::segment::{Batch, SegmentError};
 
 /// Entries per zstd block inside a run file.
 const BLOCK_ENTRIES: usize = 512;
-const RUN_MAGIC: u32 = 0x454B_4952; // "EKIR"
+const RUN_MAGIC: u32 = 0x454B_4953; // "EKIS" — format v2: explicit prefix-delta keys, slim projections
+/// Run blocks are written once at seal/merge time — spend effort there.
+const RUN_ZSTD_LEVEL: i32 = 19;
 
 /// The three covering sort orders (RFC 0016 §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -244,34 +248,69 @@ struct RunDirectory {
     blocks: Vec<BlockMeta>,
 }
 
-/// Write one immutable run file from entries (sorted internally).
+/// Whether a sort order stores values in run bodies. Only EAVT is covering —
+/// reconstruction needs values. AEVT/AVET reads consume the *entity* (the
+/// AVET value lives in the key), so their bodies are slim (RFC 0016 §7);
+/// their hydrated scan results carry `FactValue::Null`.
+fn stores_values(order: SortOrder) -> bool {
+    matches!(order, SortOrder::Eavt)
+}
+
+/// A raw run record: the (explicit) sort key plus the entry, whose value may
+/// be dropped for slim orders.
+type RawRecord = (Vec<u8>, IndexEntry);
+
+fn project(order: SortOrder, mut e: IndexEntry) -> Option<RawRecord> {
+    // AVET exists for value → entity lookups, and the only value-shaped
+    // lookup any read path issues is the graph hop (`from`/`to` = Ref).
+    // Indexing scalar/composite values would put 600-char excerpts *inside
+    // keys* (RFC 0016 §7 measurement: ~20 MB of AVET on the live estate for
+    // zero reads). Scalar value queries go through AEVT + filter or tantivy.
+    if matches!(order, SortOrder::Avet) && !matches!(e.value, FactValue::Ref(_)) {
+        return None;
+    }
+    let key = encode_key(order, &e);
+    if !stores_values(order) {
+        e.value = FactValue::Null;
+    }
+    Some((key, e))
+}
+
+/// Write one immutable run file from entries (sorted and projected
+/// internally per the order's storage rule).
 pub fn write_run(
     path: &Path,
     order: SortOrder,
-    mut entries: Vec<IndexEntry>,
+    entries: Vec<IndexEntry>,
 ) -> Result<(), SegmentError> {
-    entries.sort_by_key(|e| encode_key(order, e));
+    let mut raws: Vec<RawRecord> = entries
+        .into_iter()
+        .filter_map(|e| project(order, e))
+        .collect();
+    raws.sort_by(|a, b| a.0.cmp(&b.0));
+    write_run_raw(path, order, &raws)
+}
 
+fn write_run_raw(path: &Path, order: SortOrder, raws: &[RawRecord]) -> Result<(), SegmentError> {
     let mut file = File::create(path)?;
     let mut blocks = Vec::new();
     let mut offset = 0u64;
-    for chunk in entries.chunks(BLOCK_ENTRIES) {
-        let json = serde_json::to_vec(chunk)?;
-        let body = zstd::encode_all(&json[..], ekos_common::compress::ZSTD_LEVEL)?;
+    for chunk in raws.chunks(BLOCK_ENTRIES) {
+        let body = zstd::encode_all(&encode_block(order, chunk)?[..], RUN_ZSTD_LEVEL)?;
         file.write_all(&body)?;
         blocks.push(BlockMeta {
             offset,
             len: body.len() as u32,
             count: chunk.len() as u32,
-            first_key: hex::encode(encode_key(order, &chunk[0])),
-            last_key: hex::encode(encode_key(order, chunk.last().unwrap())),
+            first_key: hex::encode(&chunk[0].0),
+            last_key: hex::encode(&chunk.last().unwrap().0),
         });
         offset += body.len() as u64;
     }
 
     let dir = RunDirectory {
         order,
-        entry_count: entries.len() as u64,
+        entry_count: raws.len() as u64,
         blocks,
     };
     let dir_json = serde_json::to_vec(&dir)?;
@@ -282,6 +321,102 @@ pub fn write_run(
     file.write_all(&RUN_MAGIC.to_le_bytes())?;
     file.sync_all()?;
     Ok(())
+}
+
+// ── Binary block codec: prefix-delta keys + compact entries ────────────────
+
+fn encode_block(order: SortOrder, chunk: &[RawRecord]) -> Result<Vec<u8>, SegmentError> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
+    let mut prev: &[u8] = &[];
+    for (key, e) in chunk {
+        let shared = prev
+            .iter()
+            .zip(key.iter())
+            .take_while(|(a, b)| a == b)
+            .count()
+            .min(u16::MAX as usize);
+        let suffix = &key[shared..];
+        out.extend_from_slice(&(shared as u16).to_le_bytes());
+        out.extend_from_slice(&(suffix.len() as u16).to_le_bytes());
+        out.extend_from_slice(suffix);
+        prev = key;
+
+        out.extend_from_slice(e.entity.as_bytes());
+        out.extend_from_slice(&e.attr.0.to_le_bytes());
+        match e.pos {
+            None => out.push(0),
+            Some(p) => {
+                out.push(1);
+                out.extend_from_slice(&p.to_le_bytes());
+            }
+        }
+        out.extend_from_slice(&e.tx.0.to_le_bytes());
+        out.push(matches!(e.op, FactOp::Retract) as u8);
+        if stores_values(order) {
+            let v = serde_json::to_vec(&e.value)?;
+            out.extend_from_slice(&(v.len() as u32).to_le_bytes());
+            out.extend_from_slice(&v);
+        }
+    }
+    Ok(out)
+}
+
+fn decode_block(order: SortOrder, bytes: &[u8]) -> Result<Vec<RawRecord>, SegmentError> {
+    fn corrupt(m: &str) -> SegmentError {
+        SegmentError::Corrupt(format!("run block: {m}"))
+    }
+    let mut at = 0usize;
+    let mut take = |n: usize| -> Result<&[u8], SegmentError> {
+        let end = at.checked_add(n).ok_or_else(|| corrupt("overflow"))?;
+        let s = bytes.get(at..end).ok_or_else(|| corrupt("truncated"))?;
+        at = end;
+        Ok(s)
+    };
+    let count = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+    let mut out = Vec::with_capacity(count.min(1 << 20));
+    let mut prev: Vec<u8> = Vec::new();
+    for _ in 0..count {
+        let shared = u16::from_le_bytes(take(2)?.try_into().unwrap()) as usize;
+        let suffix_len = u16::from_le_bytes(take(2)?.try_into().unwrap()) as usize;
+        if shared > prev.len() {
+            return Err(corrupt("bad shared prefix"));
+        }
+        let mut key = prev[..shared].to_vec();
+        key.extend_from_slice(take(suffix_len)?);
+        prev = key.clone();
+
+        let entity = Uuid::from_slice(take(16)?).map_err(|_| corrupt("bad uuid"))?;
+        let attr = AttrId(u32::from_le_bytes(take(4)?.try_into().unwrap()));
+        let pos = match take(1)?[0] {
+            0 => None,
+            _ => Some(u32::from_le_bytes(take(4)?.try_into().unwrap())),
+        };
+        let tx = TxId(u64::from_le_bytes(take(8)?.try_into().unwrap()));
+        let op = if take(1)?[0] == 1 {
+            FactOp::Retract
+        } else {
+            FactOp::Assert
+        };
+        let value = if stores_values(order) {
+            let vlen = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+            serde_json::from_slice(take(vlen)?)?
+        } else {
+            FactValue::Null
+        };
+        out.push((
+            key,
+            IndexEntry {
+                entity,
+                attr,
+                pos,
+                tx,
+                op,
+                value,
+            },
+        ));
+    }
+    Ok(out)
 }
 
 /// An open run file: block directory in memory, blocks read on demand.
@@ -332,17 +467,19 @@ impl IndexRun {
         self.dir.entry_count
     }
 
-    fn read_block(&self, meta: &BlockMeta) -> Result<Vec<IndexEntry>, SegmentError> {
+    fn read_block_raw(&self, meta: &BlockMeta) -> Result<Vec<RawRecord>, SegmentError> {
         let mut file = File::open(&self.path)?;
         let mut body = vec![0u8; meta.len as usize];
         file.seek(SeekFrom::Start(meta.offset))?;
         file.read_exact(&mut body)?;
-        let json = zstd::decode_all(&body[..])?;
-        Ok(serde_json::from_slice(&json)?)
+        let bytes = zstd::decode_all(&body[..])?;
+        decode_block(self.dir.order, &bytes)
     }
 
-    /// All entries whose key starts with `prefix`, in key order. Blocks whose
-    /// key span cannot intersect the prefix range are never read.
+    /// All entries whose (stored) key starts with `prefix`, in key order.
+    /// Blocks whose key span cannot intersect the prefix range are never
+    /// read. Slim orders hydrate with `FactValue::Null` (see
+    /// [`stores_values`]).
     fn scan(&self, prefix: &[u8]) -> Result<Vec<IndexEntry>, SegmentError> {
         // Hex encoding is order-preserving, so string comparison over the
         // directory's hex keys equals byte-key comparison.
@@ -359,8 +496,8 @@ impl IndexRun {
             {
                 break;
             }
-            for entry in self.read_block(meta)? {
-                if in_prefix(&encode_key(self.dir.order, &entry), prefix) {
+            for (key, entry) in self.read_block_raw(meta)? {
+                if in_prefix(&key, prefix) {
                     out.push(entry);
                 }
             }
@@ -368,13 +505,18 @@ impl IndexRun {
         Ok(out)
     }
 
-    /// Every entry in the run, in key order.
-    pub fn all(&self) -> Result<Vec<IndexEntry>, SegmentError> {
+    /// Every raw record in the run, in key order (merge input).
+    fn all_raw(&self) -> Result<Vec<RawRecord>, SegmentError> {
         let mut out = Vec::with_capacity(self.dir.entry_count as usize);
         for meta in &self.dir.blocks {
-            out.extend(self.read_block(meta)?);
+            out.extend(self.read_block_raw(meta)?);
         }
         Ok(out)
+    }
+
+    /// Every entry in the run, in key order.
+    pub fn all(&self) -> Result<Vec<IndexEntry>, SegmentError> {
+        Ok(self.all_raw()?.into_iter().map(|(_, e)| e).collect())
     }
 }
 
@@ -390,9 +532,14 @@ pub struct FactIndexes {
 
 impl FactIndexes {
     /// Open all run files present under `dir` (created if missing).
-    pub fn open(dir: impl Into<PathBuf>) -> Result<Self, SegmentError> {
+    /// Returns the index set plus a `clean` flag: `false` means one or more
+    /// run files were unreadable (e.g. an older format after an upgrade) and
+    /// were deleted — the caller must rebuild from segment truth (runs are
+    /// derived, so nothing is lost).
+    pub fn open(dir: impl Into<PathBuf>) -> Result<(Self, bool), SegmentError> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
+        let mut clean = true;
         let mut runs: HashMap<SortOrder, Vec<IndexRun>> = HashMap::new();
         let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)?
             .flatten()
@@ -401,10 +548,19 @@ impl FactIndexes {
             .collect();
         paths.sort();
         for path in paths {
-            let run = IndexRun::open(&path)?;
-            runs.entry(run.order()).or_default().push(run);
+            match IndexRun::open(&path) {
+                Ok(run) => runs.entry(run.order()).or_default().push(run),
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        "unreadable index run ({e}); deleting — derived data, will rebuild"
+                    );
+                    let _ = std::fs::remove_file(&path);
+                    clean = false;
+                }
+            }
         }
-        Ok(Self { dir, runs })
+        Ok((Self { dir, runs }, clean))
     }
 
     /// Index one batch group (typically: one sealed segment) as a new run in
@@ -451,13 +607,14 @@ impl FactIndexes {
             self.runs.insert(order, runs);
             return Ok(());
         }
-        let mut entries = Vec::new();
+        let mut raws = Vec::new();
         for run in &runs {
-            entries.extend(run.all()?);
+            raws.extend(run.all_raw()?);
         }
+        raws.sort_by(|a, b| a.0.cmp(&b.0));
         let merged_path = self.dir.join(format!("{}-merged.run", order.prefix()));
         let tmp = self.dir.join(format!("{}-merged.run.tmp", order.prefix()));
-        write_run(&tmp, order, entries)?;
+        write_run_raw(&tmp, order, &raws)?;
         for run in &runs {
             let _ = std::fs::remove_file(&run.path);
         }
@@ -506,7 +663,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let (store, _reg, ids) = store_with_objects(dir.path(), &["orders", "customers"]);
 
-        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap();
+        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap().0;
         idx.add_runs("000000", &entries_from_batches(&store.batches().unwrap()))
             .unwrap();
 
@@ -526,35 +683,49 @@ mod tests {
     }
 
     #[test]
-    fn avet_scan_finds_entity_by_value() {
+    fn avet_scan_finds_entity_by_ref_value() {
         let dir = tempdir().unwrap();
         let (store, mut reg, ids) = store_with_objects(dir.path(), &["orders", "customers"]);
 
-        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap();
+        // A relationship provides the ref-valued facts AVET exists for.
+        let rel = ekos_kir::KirRelationship::new(
+            ekos_kir::RelationshipKind::ForeignKey,
+            ekos_kir::KirId(ids[0]),
+            ekos_kir::KirId(ids[1]),
+        );
+        let mut store = store;
+        let facts = decompose(rel.id.0, &serde_json::to_value(&rel).unwrap(), &mut reg)
+            .unwrap()
+            .into_iter()
+            .map(|f| (FactOp::Assert, f))
+            .collect();
+        store.append(facts, 99).unwrap();
+
+        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap().0;
         idx.add_runs("000000", &entries_from_batches(&store.batches().unwrap()))
             .unwrap();
 
-        let name_attr = reg.intern("name");
+        // Graph hop: who points at ids[1]?
+        let to_attr = reg.intern("to");
         let hits = idx
+            .scan(&ScanPrefix::AttrValue {
+                attr: to_attr,
+                value: FactValue::Ref(ids[1]),
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entity, rel.id.0);
+
+        // Scalar values are deliberately NOT in AVET (RFC 0016 §7):
+        // name lookups go through AEVT/tantivy.
+        let name_attr = reg.intern("name");
+        let none = idx
             .scan(&ScanPrefix::AttrValue {
                 attr: name_attr,
                 value: FactValue::String("orders".into()),
             })
             .unwrap();
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].entity, ids[0]);
-
-        // A value that is a strict prefix of another must not match it.
-        let none = idx
-            .scan(&ScanPrefix::AttrValue {
-                attr: name_attr,
-                value: FactValue::String("order".into()),
-            })
-            .unwrap();
-        assert!(
-            none.is_empty(),
-            "exact-value scan must not prefix-match 'orders'"
-        );
+        assert!(none.is_empty(), "scalar values are not AVET-indexed");
     }
 
     #[test]
@@ -562,7 +733,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let (store, mut reg, ids) = store_with_objects(dir.path(), &["a", "b", "c"]);
 
-        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap();
+        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap().0;
         idx.add_runs("000000", &entries_from_batches(&store.batches().unwrap()))
             .unwrap();
 
@@ -581,7 +752,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let (mut store, mut reg, ids) = store_with_objects(dir.path(), &["orders"]);
 
-        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap();
+        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap().0;
         idx.add_runs("000000", &entries_from_batches(&store.batches().unwrap()))
             .unwrap();
 
@@ -643,7 +814,7 @@ mod tests {
         check(&idx);
 
         // And reopening from disk sees the merged runs.
-        let idx = FactIndexes::open(dir.path().join("indexes")).unwrap();
+        let idx = FactIndexes::open(dir.path().join("indexes")).unwrap().0;
         check(&idx);
     }
 
@@ -653,7 +824,7 @@ mod tests {
         let (store, _reg, ids) = store_with_objects(dir.path(), &["orders", "customers"]);
         let batches = store.batches().unwrap();
 
-        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap();
+        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap().0;
         idx.add_runs("000000", &entries_from_batches(&batches))
             .unwrap();
         let before = idx
@@ -664,7 +835,7 @@ mod tests {
             .unwrap();
 
         // Blow the directory away and rebuild — nothing lost (derived data).
-        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap();
+        let mut idx = FactIndexes::open(dir.path().join("indexes")).unwrap().0;
         idx.build_from_batches(&batches).unwrap();
         let after = idx
             .scan(&ScanPrefix::Entity {
@@ -677,40 +848,50 @@ mod tests {
 
     #[test]
     fn value_keys_with_embedded_zeros_and_prefixes_stay_ordered() {
-        let entity = Uuid::new_v4();
         let attr = AttrId(1);
-        let mk = |s: &str| IndexEntry {
-            entity,
+        let mk = |v: FactValue, n: u128| IndexEntry {
+            entity: Uuid::from_u128(n),
             attr,
             pos: None,
             tx: TxId(0),
             op: FactOp::Assert,
-            value: FactValue::String(s.into()),
+            value: v,
         };
-        // "ab" < "ab\0" < "abc" must hold in encoded key order.
-        let a = encode_key(SortOrder::Avet, &mk("ab"));
-        let b = encode_key(SortOrder::Avet, &mk("ab\0"));
-        let c = encode_key(SortOrder::Avet, &mk("abc"));
+        // The escaped-terminator encoding must keep tuple order for
+        // variable-length value keys: "ab" < "ab\0" < "abc".
+        let a = encode_key(SortOrder::Avet, &mk(FactValue::String("ab".into()), 1));
+        let b = encode_key(SortOrder::Avet, &mk(FactValue::String("ab\0".into()), 2));
+        let c = encode_key(SortOrder::Avet, &mk(FactValue::String("abc".into()), 3));
         assert!(a < b, "terminator must sort before escaped zero");
         assert!(b < c, "escaped zero must sort before larger byte");
 
-        // And a scan for "ab" matches neither of the others.
+        // Runs index only ref values; an exact ref lookup hits exactly one.
         let dir = tempdir().unwrap();
         let path = dir.path().join("avet-t.run");
+        let target = Uuid::from_u128(77);
         write_run(
             &path,
             SortOrder::Avet,
-            vec![mk("ab"), mk("ab\0"), mk("abc")],
+            vec![
+                mk(FactValue::Ref(target), 1),
+                mk(FactValue::Ref(Uuid::from_u128(78)), 2),
+                mk(FactValue::String("not indexed".into()), 3),
+            ],
         )
         .unwrap();
         let run = IndexRun::open(&path).unwrap();
-        let prefix = ScanPrefix::AttrValue {
-            attr,
-            value: FactValue::String("ab".into()),
-        };
-        let hits = run.scan(&prefix.bytes()).unwrap();
+        assert_eq!(run.entry_count(), 2, "scalar entry projected out");
+        let hits = run
+            .scan(
+                &ScanPrefix::AttrValue {
+                    attr,
+                    value: FactValue::Ref(target),
+                }
+                .bytes(),
+            )
+            .unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].value, FactValue::String("ab".into()));
+        assert_eq!(hits[0].entity, Uuid::from_u128(1));
     }
 
     #[test]

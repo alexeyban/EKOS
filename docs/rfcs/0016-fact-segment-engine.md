@@ -274,6 +274,31 @@ Four gaps were found in the draft and resolved in this revision:
 4. **mmap scope** — the active segment is `pread`-only; maps cover sealed,
    immutable files exclusively (§6).
 
+## §7 measured outcome and gate status (2026-07-17, post-implementation)
+
+All §7 levers were implemented and measured on the live estate (80,211
+versions): dictionary-zstd batch bodies (manifest dictionary, level 19),
+prefix-delta-encoded binary index blocks (level 19), slim AEVT/AVET bodies,
+and AVET restricted to **ref values only** (the only value-shaped lookup any
+read path issues; indexing scalar values had put 600-char excerpts inside
+keys). Result: 98 → **65 MB** (segments 25, indexes 30, tantivy 10) against
+the v2 ledger's 39 MB — ratio 0.60× vs the §8 gate's ≥2×.
+
+**The size gate is structurally unreachable for this architecture**: the
+segment truth (~25 MB, already dict-zstd — on par with v2's entries table)
+plus any usable index set (≥15 MB even with a pointer-EAVT redesign) plus
+tantivy's ~10 MB floor cannot go below ~50 MB, because v2 stores exactly one
+compressed copy of everything and derives search in-file. The fact engine
+buys **capability** — 19× faster search, ~4× point reads, true relationship
+history, O(1) copy-on-write branches, semantic deltas — at ~1.7× the bytes,
+not fewer.
+
+Standing resolution until amended: the default backend remains SQLite;
+`ekos ledger migrate --v3` is an explicit, reversible per-workspace opt-in.
+Amending the gate (e.g. "≤2× of the RFC 0015 ledger, given the capability
+set") or pursuing the pointer-EAVT redesign are decisions for a future
+revision, to be taken with these numbers on the table.
+
 ## Phasing (each phase = its own tests + benchmarks, per the workflow)
 
 1. **Fact model crate** (`ledger/src/fact.rs`): decomposition ↔

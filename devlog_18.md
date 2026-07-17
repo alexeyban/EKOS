@@ -54,6 +54,22 @@ explicit, reversible opt-in (delete `facts/` to roll back); auto-detection
 flips only migrated workspaces. §7 compression is the single outstanding
 item before the flip can be reconsidered.
 
+## §7 follow-up (same day)
+
+Implemented all prescribed compression levers: dictionary-zstd batch bodies,
+prefix-delta binary index blocks (level 19), slim AEVT/AVET projections, and
+AVET restricted to ref values (scalar values had put 600-char excerpts
+*inside keys* — ~20 MB of index for zero reads). Estate result: 98 → 82 →
+**65 MB** (segments 25 / indexes 30 / tantivy 10) vs v2's 39 MB — gate still
+unmet at 0.60×, and now provably *structurally* unmeetable: one compressed
+copy of truth + any index + tantivy ≥ ~50 MB. Verdict recorded in the RFC:
+the fact engine trades ~1.7× bytes for 19× search, 4× point reads, true
+history, and O(1) branches; the flip awaits a gate amendment or a
+pointer-EAVT redesign. An ignored estate-scale gate test
+(`crates/ledger/tests/estate_migration.rs`, path via
+`target/estate-v2-path.txt`) makes the measurement reproducible with one
+cargo command.
+
 ## Knowledge Captured
 
 - **A "covering index ×3 sort orders" triples your values.** EAVT needs

@@ -1300,9 +1300,11 @@ time ekos build   # benchmark before/after parallelism
 - [~] **Fact-segment engine (RFC 0016, accepted 2026-07-17)** — Phases 1–6 implemented (fact
   model, segments+watermark, EAVT/AEVT/AVET runs, API parity, tantivy, mmap) plus
   `ekos ledger migrate --v3` and the `KnowledgeStore` backend seam with auto-detection.
-  Acceptance gate (devlog 18): functional criteria PASS on the real estate; storage FAILS
-  (98 MB vs ≤20 MB — index runs store full values ×3 orders). Default stays SQLite; flip
-  blocked on RFC §7 compression: dict-zstd batches, prefix/delta blocks, slim projections.
+  Acceptance gate (devlog 18): functional criteria PASS on the real estate. §7 compression
+  fully implemented (dict-zstd batches, prefix-delta binary blocks, slim projections,
+  ref-only AVET): 98 → 65 MB — the ≥2× size gate is structurally unreachable (truth +
+  indexes + tantivy floor ≈ 50 MB vs v2's 39 MB). Default stays SQLite; fact engine is
+  explicit opt-in. Open decision: amend the gate (capability-per-byte) or pointer-EAVT.
 
 - [x] **Incremental compilation (re-scan changed sources only)**
   - *What:* Before running an `Observer`, compare the current source fingerprint (Git HEAD sha for

@@ -1546,8 +1546,24 @@ pub fn migrate_to_v3(v2_path: &Path, dest: &Path) -> Result<MigrateV3Report, Led
     let bytes_before = std::fs::metadata(v2_path)?.len();
 
     let facts = FactLedger::open(dest)?;
+
+    // §7: train the batch-body dictionary on this ledger's own payload
+    // corpus (shared vocabulary with the fact ops the frames will carry).
+    let rows = src.export_versions()?;
+    let samples: Vec<Vec<u8>> = rows
+        .iter()
+        .take(DICT_SAMPLE_LIMIT)
+        .map(|r| serde_json::to_vec(&r.payload))
+        .collect::<Result<_, _>>()?;
+    if samples.len() >= DICT_MIN_SAMPLES
+        && let Ok(dict) = zstd::dict::from_samples(&samples, DICT_MAX_BYTES)
+    {
+        facts.set_segment_dictionary(dict)?;
+    }
+    drop(samples);
+
     let mut versions = 0usize;
-    for row in src.export_versions()? {
+    for row in rows {
         let Ok(entity) = row.id.parse::<uuid::Uuid>() else {
             return Err(LedgerError::Corrupt(format!(
                 "entry id {} is not a UUID — cannot migrate",

@@ -106,11 +106,22 @@ impl FactLedger {
     /// seal → run-flush path without writing megabytes).
     pub fn open_with_seal_threshold(root: &Path, seal_bytes: u64) -> Result<Self, LedgerError> {
         let store = SegmentStore::open_with_seal_threshold(root, seal_bytes)?;
-        let runs = FactIndexes::open(root.join("indexes"))?;
-        let runs_marker = std::fs::read_to_string(root.join("indexes/last_tx"))
+        let (mut runs, runs_clean) = FactIndexes::open(root.join("indexes"))?;
+        let mut runs_marker = std::fs::read_to_string(root.join("indexes/last_tx"))
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
             .map(TxId);
+        if !runs_clean {
+            // Self-heal: some runs were unreadable (format upgrade). Runs are
+            // derived — drop them all and rebuild via the memtable path.
+            for order in crate::index::SortOrder::ALL {
+                let _ = runs.merge_runs(order); // no-op ≤1 run; normalizes state
+            }
+            let _ = std::fs::remove_dir_all(root.join("indexes"));
+            let (fresh, _) = FactIndexes::open(root.join("indexes"))?;
+            runs = fresh;
+            runs_marker = None;
+        }
         let (search, search_marker) = SearchIndex::open(&root.join("search"))?;
 
         let mut inner = Inner {
@@ -188,6 +199,17 @@ impl FactLedger {
     /// Current content signature of an entity (migration verification).
     pub(crate) fn current_signature(&self, entity: Uuid) -> Result<Option<String>, LedgerError> {
         self.inner.lock().unwrap().current_sig(entity)
+    }
+
+    /// Install the segment-body compression dictionary (RFC 0016 §7);
+    /// migration calls this on the empty store before the first append.
+    pub(crate) fn set_segment_dictionary(&self, bytes: Vec<u8>) -> Result<(), LedgerError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .store
+            .set_dictionary(bytes)
+            .map_err(Into::into)
     }
 
     /// Seal the active segment and flush indexes — called at the end of a

@@ -52,7 +52,7 @@ use map::MappedSegment;
 /// Active segment seals at this size (RFC 0016 §3).
 pub const SEGMENT_SEAL_BYTES: u64 = 8 * 1024 * 1024;
 /// Batch frame format version.
-const FRAME_VERSION: u8 = 1;
+const FRAME_VERSION: u8 = 2; // v2: body carries a dictionary-version byte
 /// Fixed frame header past the length field: version + tx + wall_time_us.
 const FRAME_HEADER: usize = 1 + 8 + 8;
 
@@ -94,6 +94,10 @@ pub struct Manifest {
     pub sealed: Vec<SealedSegment>,
     /// Attribute interner shared by every fact in the store (append-only).
     pub attributes: AttributeRegistry,
+    /// Version of the batch-body compression dictionary in `dict.bin`
+    /// (RFC 0016 §7); `None` → frames use dictionary byte 0 (plain zstd).
+    #[serde(default)]
+    pub dict_version: Option<u8>,
 }
 
 /// Committed-length watermark for the active segment.
@@ -113,6 +117,25 @@ pub struct SegmentStore {
     active: File,
     next_tx: u64,
     seal_bytes: u64,
+    dict: Option<SegDict>,
+}
+
+/// Prepared batch-body compression dictionary (RFC 0016 §7).
+struct SegDict {
+    version: u8,
+    enc: zstd::dict::EncoderDictionary<'static>,
+    dec: zstd::dict::DecoderDictionary<'static>,
+}
+
+/// Batch bodies are written once; spend compression effort there.
+const BODY_ZSTD_LEVEL: i32 = 19;
+
+fn build_dict(version: u8, bytes: &[u8]) -> SegDict {
+    SegDict {
+        version,
+        enc: zstd::dict::EncoderDictionary::copy(bytes, BODY_ZSTD_LEVEL),
+        dec: zstd::dict::DecoderDictionary::copy(bytes),
+    }
 }
 
 impl SegmentStore {
@@ -133,6 +156,10 @@ impl SegmentStore {
         std::fs::create_dir_all(root.join("segments"))?;
 
         let manifest = load_manifest(&root)?;
+        let dict = match manifest.dict_version {
+            Some(v) => Some(build_dict(v, &std::fs::read(root.join("dict.bin"))?)),
+            None => None,
+        };
         let active_seq = manifest.sealed.last().map(|s| s.seq + 1).unwrap_or(0);
 
         let head_path = root.join("HEAD");
@@ -161,7 +188,7 @@ impl SegmentStore {
         // mapped (it is the one file that grows and can be truncated here).
         let mut bytes = Vec::new();
         active.read_to_end(&mut bytes)?;
-        let (valid_len, batches) = scan_slice(&bytes);
+        let (valid_len, batches) = scan_slice(&bytes, dict.as_ref());
         if valid_len < active.metadata()?.len() {
             tracing::warn!(
                 segment = active_seq,
@@ -189,7 +216,24 @@ impl SegmentStore {
             active,
             next_tx,
             seal_bytes,
+            dict,
         })
+    }
+
+    /// Install the batch-body compression dictionary (RFC 0016 §7). Must be
+    /// called on an empty store — before the first batch — so every frame in
+    /// the store decodes with one dictionary generation.
+    pub fn set_dictionary(&mut self, bytes: Vec<u8>) -> Result<(), SegmentError> {
+        if self.head.committed_len != 0 || !self.manifest.sealed.is_empty() {
+            return Err(SegmentError::Corrupt(
+                "dictionary must be installed before any batch is written".into(),
+            ));
+        }
+        std::fs::write(self.root.join("dict.bin"), &bytes)?;
+        self.manifest.dict_version = Some(1);
+        save_manifest(&self.root, &self.manifest)?;
+        self.dict = Some(build_dict(1, &bytes));
+        Ok(())
     }
 
     /// Commit one batch: assign the next `tx`, append the frame, fsync,
@@ -215,7 +259,7 @@ impl SegmentStore {
             wall_time_us,
             ops,
         };
-        let frame = encode_frame(&batch)?;
+        let frame = self.encode_frame(&batch)?;
 
         self.active.write_all(&frame)?;
         self.active.sync_all()?;
@@ -301,7 +345,7 @@ impl SegmentStore {
                 continue;
             }
             let map = MappedSegment::open(&segment_path(&self.root, sealed.seq), sealed.len)?;
-            let (valid, batches) = scan_batches_filtered(map.bytes(), &keep);
+            let (valid, batches) = scan_batches_filtered(map.bytes(), &keep, self.dict.as_ref());
             if valid != sealed.len {
                 return Err(SegmentError::Corrupt(format!(
                     "sealed segment {} has invalid frames at offset {valid}",
@@ -346,7 +390,7 @@ impl SegmentStore {
 
     fn active_batches(&self, keep: &dyn Fn(TxId) -> bool) -> Result<Vec<Batch>, SegmentError> {
         let bytes = self.read_active_committed()?;
-        let (_, batches) = scan_batches_filtered(&bytes, keep);
+        let (_, batches) = scan_batches_filtered(&bytes, keep, self.dict.as_ref());
         Ok(batches)
     }
 
@@ -393,22 +437,38 @@ impl SegmentStore {
 
 // ── Frame codec ─────────────────────────────────────────────────────────────
 
-fn encode_frame(batch: &Batch) -> Result<Vec<u8>, SegmentError> {
-    let json = serde_json::to_vec(&batch.ops)?;
-    let mut encoder =
-        zstd::stream::write::Encoder::new(Vec::new(), ekos_common::compress::ZSTD_LEVEL)?;
-    encoder.include_checksum(true)?;
-    encoder.write_all(&json)?;
-    let body = encoder.finish()?;
+impl SegmentStore {
+    fn encode_frame(&self, batch: &Batch) -> Result<Vec<u8>, SegmentError> {
+        let json = serde_json::to_vec(&batch.ops)?;
+        let (dict_byte, body) = match &self.dict {
+            Some(d) => {
+                let mut enc =
+                    zstd::stream::write::Encoder::with_prepared_dictionary(Vec::new(), &d.enc)?;
+                enc.include_checksum(true)?;
+                enc.write_all(&json)?;
+                (d.version, enc.finish()?)
+            }
+            None => {
+                let mut enc = zstd::stream::write::Encoder::new(
+                    Vec::new(),
+                    ekos_common::compress::ZSTD_LEVEL,
+                )?;
+                enc.include_checksum(true)?;
+                enc.write_all(&json)?;
+                (0u8, enc.finish()?)
+            }
+        };
 
-    let frame_len = (FRAME_HEADER + body.len()) as u32;
-    let mut frame = Vec::with_capacity(4 + frame_len as usize);
-    frame.extend_from_slice(&frame_len.to_le_bytes());
-    frame.push(FRAME_VERSION);
-    frame.extend_from_slice(&batch.tx.0.to_le_bytes());
-    frame.extend_from_slice(&batch.wall_time_us.to_le_bytes());
-    frame.extend_from_slice(&body);
-    Ok(frame)
+        let frame_len = (FRAME_HEADER + 1 + body.len()) as u32;
+        let mut frame = Vec::with_capacity(4 + frame_len as usize);
+        frame.extend_from_slice(&frame_len.to_le_bytes());
+        frame.push(FRAME_VERSION);
+        frame.extend_from_slice(&batch.tx.0.to_le_bytes());
+        frame.extend_from_slice(&batch.wall_time_us.to_le_bytes());
+        frame.push(dict_byte);
+        frame.extend_from_slice(&body);
+        Ok(frame)
+    }
 }
 
 /// Walk frame boundaries in `bytes`, calling `visit(frame)` for each valid
@@ -434,20 +494,24 @@ fn walk_frames(bytes: &[u8], mut visit: impl FnMut(&[u8]) -> bool) -> u64 {
 }
 
 /// Decode every valid frame from the start of `bytes`.
-fn scan_slice(bytes: &[u8]) -> (u64, Vec<Batch>) {
-    scan_batches_filtered(bytes, &|_| true)
+fn scan_slice(bytes: &[u8], dict: Option<&SegDict>) -> (u64, Vec<Batch>) {
+    scan_batches_filtered(bytes, &|_| true, dict)
 }
 
 /// Decode frames, decompressing bodies only for batches `keep` selects —
 /// header validation still walks every frame.
-fn scan_batches_filtered(bytes: &[u8], keep: &dyn Fn(TxId) -> bool) -> (u64, Vec<Batch>) {
+fn scan_batches_filtered(
+    bytes: &[u8],
+    keep: &dyn Fn(TxId) -> bool,
+    dict: Option<&SegDict>,
+) -> (u64, Vec<Batch>) {
     let mut batches = Vec::new();
     let valid = walk_frames(bytes, |frame| {
         let Some((tx, _)) = decode_header(frame) else {
             return false;
         };
         if keep(tx) {
-            match decode_frame(frame) {
+            match decode_frame(frame, dict) {
                 Some(batch) => batches.push(batch),
                 None => return false,
             }
@@ -479,21 +543,30 @@ fn decode_header(frame: &[u8]) -> Option<(TxId, i64)> {
     Some((TxId(tx), wall_time_us))
 }
 
-fn decode_frame(frame: &[u8]) -> Option<Batch> {
-    if frame.len() < FRAME_HEADER || frame[0] != FRAME_VERSION {
-        return None;
-    }
-    let tx = u64::from_le_bytes(frame[1..9].try_into().ok()?);
-    let wall_time_us = i64::from_le_bytes(frame[9..17].try_into().ok()?);
+fn decode_frame(frame: &[u8], dict: Option<&SegDict>) -> Option<Batch> {
+    let (tx, wall_time_us) = decode_header(frame)?;
+    let body = frame.get(FRAME_HEADER..)?;
+    let (&dict_byte, compressed) = body.split_first()?;
 
     let mut json = Vec::new();
-    zstd::stream::read::Decoder::new(&frame[FRAME_HEADER..])
-        .ok()?
-        .read_to_end(&mut json)
-        .ok()?;
+    match (dict_byte, dict) {
+        (0, _) => {
+            zstd::stream::read::Decoder::new(compressed)
+                .ok()?
+                .read_to_end(&mut json)
+                .ok()?;
+        }
+        (v, Some(d)) if v == d.version => {
+            zstd::stream::read::Decoder::with_prepared_dictionary(compressed, &d.dec)
+                .ok()?
+                .read_to_end(&mut json)
+                .ok()?;
+        }
+        _ => return None, // unknown dictionary generation
+    }
     let ops: Vec<(FactOp, Fact)> = serde_json::from_slice(&json).ok()?;
     Some(Batch {
-        tx: TxId(tx),
+        tx: TxId(tx.0),
         wall_time_us,
         ops,
     })
