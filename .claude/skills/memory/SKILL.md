@@ -1,95 +1,226 @@
 ---
+
 name: memory
 description: >-
-  Global cross-project memory for Claude sessions, backed by the EKOS
-  knowledge ledger. Use this at the START of any substantial task to restore
-  context by searching the ledger instead of re-reading files, and DURING any
-  session where you learn something worth keeping — a hard-won lesson, an
-  effective approach, a decision with rationale, new material the user shared,
-  or a completed piece of work. Triggers include: the user asking "have we/I
-  done this before?", "how did I solve X?", starting work in any project under
-  /home/legion/PycharmProjects, finishing significant work, being corrected,
-  or discovering something non-obvious. This applies in EVERY project, not
-  just EKOS — the memory is shared between all projects and sessions.
----
+Global cross-project memory for Claude sessions, backed by the EKOS
+knowledge ledger. Use this at the START of any substantial task to restore
+context by searching the ledger instead of re-reading files, and DURING any
+session where you learn something worth keeping — a hard-won lesson, an
+effective approach, a decision with rationale, new material the user shared,
+or a completed piece of work.
+Triggers include: the user asking "have we/I done this before?",
+"how did I solve X?", starting work in any project under the current
+workspace root, finishing significant work, being corrected, or
+discovering something non-obvious. This applies in EVERY project,
+not just EKOS — the memory is shared between all projects and sessions.
+-----------------------------------------------------------------------
 
 # EKOS as global memory
 
-The EKOS ledger already contains a compiled index of all 44 projects — every
-file, README, CLAUDE.md, devlog, SQL schema, and git contributor — plus the
-`memory/` notes written by previous sessions. Treat it as your long-term
-memory: **read from it before re-deriving context, write to it whenever this
-session produces knowledge a future session would otherwise re-earn.**
+The EKOS ledger already contains a compiled index of all projects —
+every file, README, CLAUDE.md, devlog, SQL schema, and git contributor —
+plus the `memory/` notes written by previous sessions.
+
+Treat it as your long-term memory:
+
+**Read from it before re-deriving context, write to it whenever this
+session produces knowledge a future session would otherwise need to
+re-learn.**
+
+## Workspace variables
+
+Prefer variables instead of hardcoded paths:
+
+```bash
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-.}"
+MEMORY_DIR="${MEMORY_DIR:-$WORKSPACE_ROOT/memory}"
+EKOS_ROOT="${EKOS_ROOT:-$WORKSPACE_ROOT/EKOS}"
+EKOS_BIN="${EKOS_BIN:-$EKOS_ROOT/ekos/target/release/ekos}"
+LEDGER_DB="${LEDGER_DB:-$WORKSPACE_ROOT/.ekos/ledger/ledger.db}"
+```
 
 ## Reading: restore context from the ledger, not from files
 
-Re-reading whole files burns context on content you don't need. Search first,
-read second, and only what the search pointed at:
+Re-reading whole files burns context on content you don't need.
+Search first, read second, and only read what the search points at.
 
-1. `ekos_search "<2–3 topic keywords>"` — searches names **and content
-   excerpts** (first ~600 chars of every text file), ranked by relevance
-   with name matches first. Use keywords, not questions: terms are ANDed,
-   so `"stale CKM"` works and `"have I seen a stale CKM before"` returns
-   nothing. Prefer 2–3 specific terms over one common word.
-2. To list memory notes directly, use their name markers via EKL:
-   `FIND Object WHERE name CONTAINS '--lesson--'` (likewise `--decision--`,
-   `--approach--`, `--session--`, `--reading--`, or a `<project>--` prefix).
-   Notes are distilled by past sessions — highest signal per token, read
-   these first.
-3. `readme`, `claude.md`, `devlog` files of any project are in the ledger too —
-   search `ekos_search "devlog"` or `"<project> readme"` to locate them.
-4. **When the located names aren't enough, open the actual file** with Read
-   at the path the search returned — the ledger is the index, source files
-   are the truth. Never answer from a filename alone when content matters.
-
-## Writing: the capture cycle
-
-When any of these happen, capture it — don't wait to be asked:
-
-- you learned something non-obvious (a gotcha, an SDK quirk, a root cause)
-- an approach proved effective (or clearly failed — record that too)
-- a decision was made with rationale worth remembering
-- the user shared or you read new material worth keeping
-- a substantial piece of work completed (session summary: what + where + why)
-
-Write one file per fact to `/home/legion/PycharmProjects/memory/`:
-
-- **Filename carries the search terms** — ledger full-text search covers
-  names, not file contents, so the slug is the retrieval key:
-  `<scope>--<type>--<keyword-rich-slug>.md`
-  (scope: `global` or project name; type: `lesson` | `decision` | `approach`
-  | `session` | `reading`).
-- **Body** (a few lines is enough): the fact, why it matters, how to apply
-  it, and paths/links to the full source.
-- **Search before writing** (`ekos_search` on your keywords) — update an
-  existing note rather than creating a near-duplicate; delete notes proven
-  wrong.
-
-Don't duplicate what's already compiled: devlogs, READMEs, CLAUDE.md files
-and code are in the ledger — a note should *distill or point*, not copy.
-
-## Refresh: make it searchable, asynchronously
-
-New notes are invisible to the ledger until recompiled. After writing (batch
-several notes into one refresh; end of task is a good moment), fire and
-forget — never block the session on it:
+1. Search by keywords:
 
 ```bash
-cd /home/legion/PycharmProjects && nohup sh -c \
-  'EKOS=EKOS/ekos/target/release/ekos; $EKOS build && $EKOS recover && $EKOS compile && $EKOS commit' \
-  >> .ekos/refresh.log 2>&1 &
+ekos_search "<2-3 topic keywords>"
 ```
 
-The pipeline is incremental (unchanged projects skip via fingerprints), so a
-refresh after a few notes takes ~seconds of real work. A note you just wrote
-this session is already in your context — the refresh is for *future*
-sessions, so there is never a reason to wait for it.
+Searches names and content excerpts, ranked by relevance.
 
-## Division of labor
+Use keywords, not questions:
 
-- This skill = the estate-wide memory shared between all projects and models.
-- The `ekos-knowledge` skill covers the query tools in depth (EKL cheat
-  sheet, impact analysis, diffs) — lean on it for retrieval mechanics.
-- Symbol-level questions about code you have open stay with your native
-  file/LSP tools; the ledger answers *what exists, where, and what we learned
-  about it*.
+Good:
+
+```text
+stale CKM
+fabric deployment
+dbt snapshots
+```
+
+Bad:
+
+```text
+have I seen a stale CKM before
+```
+
+Prefer 2–3 specific terms over one common word.
+
+2. To list memory notes directly, use their markers via EKL:
+
+```sql
+FIND Object WHERE name CONTAINS '--lesson--'
+```
+
+Other markers:
+
+* `--decision--`
+* `--approach--`
+* `--session--`
+* `--reading--`
+
+These notes are distilled by previous sessions and usually provide
+the highest signal per token.
+
+3. READMEs, CLAUDE.md files, devlogs, and other project artifacts are
+   also indexed. Search for them directly:
+
+```bash
+ekos_search "devlog"
+ekos_search "readme"
+ekos_search "claude"
+```
+
+4. When filenames are insufficient, open the actual file returned by
+   the search.
+
+The ledger is the index.
+
+Source files are the truth.
+
+Never answer from filenames alone when content matters.
+
+# Writing: the capture cycle
+
+Capture knowledge whenever:
+
+* you learned something non-obvious
+* an approach proved effective
+* an approach failed in an instructive way
+* a decision was made with rationale
+* the user shared important new information
+* substantial work was completed
+
+Write one file per fact under:
+
+```bash
+$MEMORY_DIR
+```
+
+## Naming convention
+
+The filename is the retrieval key.
+
+Use:
+
+```text
+<scope>--<type>--<keywords>.md
+```
+
+Where:
+
+* scope = `global` or project name
+* type =
+
+  * `lesson`
+  * `decision`
+  * `approach`
+  * `session`
+  * `reading`
+
+Examples:
+
+```text
+global--lesson--fabric-capacity-pause.md
+ekos--decision--binary-ledger-format.md
+customerA--session--migration-phase2-summary.md
+```
+
+## Body
+
+A few lines are enough:
+
+* what happened
+* why it matters
+* how to apply it
+* references to code, files, links, tickets, or commits
+
+## Before creating a note
+
+Search first:
+
+```bash
+ekos_search "<keywords>"
+```
+
+Update existing notes instead of creating duplicates.
+
+Delete or amend notes that are no longer correct.
+
+Do not duplicate information already stored in:
+
+* code
+* README files
+* CLAUDE.md
+* devlogs
+
+Memory notes should distill knowledge, not copy source material.
+
+# Refresh: make notes searchable asynchronously
+
+New notes are invisible until the ledger is rebuilt.
+
+After writing notes, refresh asynchronously.
+
+Batch several notes together.
+
+Never block the session waiting for completion.
+
+```bash
+cd "$WORKSPACE_ROOT" && nohup sh -c '
+"$EKOS_BIN" build &&
+"$EKOS_BIN" recover &&
+"$EKOS_BIN" compile &&
+"$EKOS_BIN" commit
+' >> .ekos/refresh.log 2>&1 &
+```
+
+The pipeline is incremental.
+
+Unchanged projects are skipped through fingerprints, so refreshes
+typically complete within seconds.
+
+A note written in the current session is already available in the
+current context.
+
+Refreshing exists for future sessions only.
+
+There is never a reason to wait for it.
+
+# Division of labor
+
+* This skill provides estate-wide shared memory across all projects.
+* The `ekos-knowledge` skill provides retrieval mechanics, EKL
+  examples, impact analysis, and advanced ledger querying.
+* Symbol-level code questions should still use native file tools
+  and LSP capabilities.
+
+The ledger answers:
+
+* what exists
+* where it exists
+* what was previously learned about it
