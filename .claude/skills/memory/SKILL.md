@@ -1,5 +1,4 @@
 ---
-
 name: memory
 description: >-
 Global cross-project memory for Claude sessions, backed by the EKOS
