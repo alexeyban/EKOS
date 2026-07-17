@@ -1,4 +1,5 @@
 pub mod fact;
+pub mod index;
 pub mod segment;
 
 use chrono::{DateTime, Utc};

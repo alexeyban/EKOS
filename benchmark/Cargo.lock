@@ -378,6 +378,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -449,6 +450,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tracing",
  "uuid",

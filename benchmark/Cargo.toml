@@ -18,6 +18,7 @@ ekos-observation-sdk = { path = "../ekos/crates/observation-sdk" }
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
@@ -56,4 +57,8 @@ harness = false
 
 [[bench]]
 name = "segment_store"
+harness = false
+
+[[bench]]
+name = "index_runs"
 harness = false
