@@ -24,6 +24,9 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     }
 
     println!("Clean complete. {deleted} item(s) removed from artifact cache.");
-    println!("Ledger at {} was not modified.", config.ledger_path(cwd).display());
+    println!(
+        "Ledger at {} was not modified.",
+        config.ledger_path(cwd).display()
+    );
     Ok(())
 }

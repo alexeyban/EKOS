@@ -11,7 +11,7 @@
 Implemented `ekos mcp serve` (RFC 0013) — a Model Context Protocol server over stdio that exposes
 the read-only Runtime to AI agents — and connected the local Claude Code installation to it via
 `claude mcp add` (user scope, verified `✔ Connected` by Claude Code's own MCP handshake). Then ran
-the first real multi-project scan: a new EKOS workspace at `/home/legion/PycharmProjects` observing
+the first real multi-project scan: a new EKOS workspace at the estate root (`$WORKSPACE_ROOT`) observing
 44 project directories (~22K files, dozens of git repos). The scan exposed **three real bugs**,
 all fixed with regression tests: duplicate pass names misreported as a dependency cycle
 (`compiler-core`), a quadratic co-change blowup on bulk commits (6M `CoupledWith` relationships
@@ -61,10 +61,12 @@ MCP tools → Runtime mapping: `ekos_search` → `find_objects`, `ekos_ekl` → 
 ### Registration with Claude Code
 
 ```
+# $WORKSPACE_ROOT = estate root (dir containing ekos.toml + .ekos/);
+# the EKOS checkout lives at $WORKSPACE_ROOT/EKOS
 claude mcp add --scope user ekos -- \
-  /home/legion/PycharmProjects/EKOS/ekos/target/release/ekos \
-  --config /home/legion/PycharmProjects/ekos.toml \
-  mcp serve --workspace /home/legion/PycharmProjects
+  "$WORKSPACE_ROOT/EKOS/ekos/target/release/ekos" \
+  --config "$WORKSPACE_ROOT/ekos.toml" \
+  mcp serve --workspace "$WORKSPACE_ROOT"
 ```
 
 `claude mcp list` reports `✔ Connected` — Claude Code spawns the binary and completes a real MCP
@@ -107,12 +109,12 @@ observe paths, two projects holding the same relative path (e.g. `schema.sql`) c
 
 ---
 
-## Part 3 — Scanning `/home/legion/PycharmProjects`
+## Part 3 — Scanning the estate root
 
 ### Workspace setup
 
-- `ekos.toml` + `.ekos/` at `/home/legion/PycharmProjects` (generated; one observe path per
-  project directory).
+- `ekos.toml` + `.ekos/` at the estate root, one level above all project
+  checkouts (generated; one observe path per project directory).
 - **Per-project observe paths, not `paths = ["."]`**, for two reasons: `GitObserver` only
   analyzes a scan root that *is* a git repo (no nested-repo discovery), and per-path fingerprints
   make rebuilds incremental per project.

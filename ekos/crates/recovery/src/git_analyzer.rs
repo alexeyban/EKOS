@@ -78,8 +78,11 @@ impl CompilerPass for GitAnalyzerPass {
     }
 
     fn cache_inputs(&self) -> Vec<String> {
-        let mut ids: Vec<String> =
-            self.commit_artifact_ids.iter().map(|id| id.to_string()).collect();
+        let mut ids: Vec<String> = self
+            .commit_artifact_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect();
         ids.sort();
         if let Some(repo_id) = &self.repo_artifact_id {
             ids.push(repo_id.to_string());
@@ -105,10 +108,10 @@ impl CompilerPass for GitAnalyzerPass {
                         format!("contributor: {name}"),
                     );
                     let ev_id = graph.add_evidence(ev);
-                    let mut obj =
-                        KirObject::new(name, ObjectKind::Person).with_evidence(ev_id);
+                    let mut obj = KirObject::new(name, ObjectKind::Person).with_evidence(ev_id);
                     obj.id = id;
-                    obj.properties.insert("role".into(), serde_json::json!("contributor"));
+                    obj.properties
+                        .insert("role".into(), serde_json::json!("contributor"));
                     if let Some(commits) = c["commits"].as_u64() {
                         obj.properties
                             .insert("commit_count".into(), serde_json::json!(commits));
@@ -133,10 +136,10 @@ impl CompilerPass for GitAnalyzerPass {
                     continue;
                 }
                 Err(e) => {
-                    ctx.diagnostics
-                        .lock()
-                        .unwrap()
-                        .warning("GIT002", format!("failed to read artifact {artifact_id}: {e}"));
+                    ctx.diagnostics.lock().unwrap().warning(
+                        "GIT002",
+                        format!("failed to read artifact {artifact_id}: {e}"),
+                    );
                     continue;
                 }
             };
@@ -152,7 +155,10 @@ impl CompilerPass for GitAnalyzerPass {
             // instead of just "no error thrown."
             let data = &json["data"];
             let sha = data["sha"].as_str().unwrap_or("unknown").to_string();
-            let author = data["author_name"].as_str().unwrap_or("unknown").to_string();
+            let author = data["author_name"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string();
             let message = data["message"].as_str().unwrap_or("").to_string();
             let date = data["date"].as_str().unwrap_or("").to_string();
 
@@ -202,8 +208,7 @@ impl CompilerPass for GitAnalyzerPass {
                 };
                 for i in 0..sorted_files.len() {
                     for j in (i + 1)..sorted_files.len() {
-                        let pair =
-                            (sorted_files[i].clone(), sorted_files[j].clone());
+                        let pair = (sorted_files[i].clone(), sorted_files[j].clone());
                         *file_co_changes.entry(pair).or_insert(0) += 1;
                     }
                 }
@@ -230,7 +235,8 @@ impl CompilerPass for GitAnalyzerPass {
             let id_a = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, file_a.as_bytes()));
             let id_b = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, file_b.as_bytes()));
             let mut rel = KirRelationship::new(RelationshipKind::CoupledWith, id_a, id_b);
-            rel.properties.insert("co_change_count".into(), serde_json::json!(count));
+            rel.properties
+                .insert("co_change_count".into(), serde_json::json!(count));
             graph.add_relationship(rel);
         }
 
@@ -258,7 +264,10 @@ impl CompilerPass for GitAnalyzerPass {
 
 /// Stable UUIDv5 for a contributor, so the same name always maps to the same KirId.
 fn contributor_kir_id(name: &str) -> KirId {
-    KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("contributor:{name}").as_bytes()))
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("contributor:{name}").as_bytes(),
+    ))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -295,14 +304,20 @@ mod tests {
         PassContext::new(Arc::new(config), cwd)
     }
 
-    fn seed_artifact(store: &FileSystemArtifactStore, artifact: &ObservationArtifact) -> ArtifactId {
+    fn seed_artifact(
+        store: &FileSystemArtifactStore,
+        artifact: &ObservationArtifact,
+    ) -> ArtifactId {
         let json = serde_json::to_value(artifact).unwrap();
         store.write(&artifact.id, &json).unwrap();
         artifact.id.clone()
     }
 
-    /// Read back the single `KnowledgeArtifact` this pass wrote and decode its `KirGraph`.
-    fn read_knowledge_graph(store: &FileSystemArtifactStore) -> KirGraph {
+    /// Read back the single `KnowledgeArtifact` this pass wrote and decode its
+    /// `KirGraph`. Must read through the same store the pass wrote to — the
+    /// pass context's store is a pack store (RFC 0015), and its segments are
+    /// not visible to a plain loose-file store.
+    fn read_knowledge_graph(store: &dyn ArtifactStore) -> KirGraph {
         for id in store.list().unwrap() {
             let json = store.read(&id).unwrap().unwrap();
             if json["artifact_type"] == "knowledge" {
@@ -317,7 +332,11 @@ mod tests {
             .iter()
             .map(|(name, commits)| serde_json::json!({"name": name, "commits": commits}))
             .collect();
-        ObservationArtifact::new("git", "repo", serde_json::json!({ "contributors": contributors }))
+        ObservationArtifact::new(
+            "git",
+            "repo",
+            serde_json::json!({ "contributors": contributors }),
+        )
     }
 
     /// Regression (devlog 14): a bulk commit must not contribute to co-change
@@ -337,16 +356,21 @@ mod tests {
         let ids = vec![
             seed_artifact(&store, &make_commit_artifact("aaa", "alice", &bulk_refs)),
             seed_artifact(&store, &make_commit_artifact("bbb", "alice", &bulk_refs)),
-            seed_artifact(&store, &make_commit_artifact("ccc", "alice", &["a.rs", "b.rs"])),
-            seed_artifact(&store, &make_commit_artifact("ddd", "alice", &["a.rs", "b.rs"])),
+            seed_artifact(
+                &store,
+                &make_commit_artifact("ccc", "alice", &["a.rs", "b.rs"]),
+            ),
+            seed_artifact(
+                &store,
+                &make_commit_artifact("ddd", "alice", &["a.rs", "b.rs"]),
+            ),
         ];
 
-        let mut pass = GitAnalyzerPass::new("ws", ids, None)
-            .with_max_coupling_commit_files(10);
+        let mut pass = GitAnalyzerPass::new("ws", ids, None).with_max_coupling_commit_files(10);
         let mut ctx = ctx;
         pass.run(&mut ctx).await.unwrap();
 
-        let graph = read_knowledge_graph(&store);
+        let graph = read_knowledge_graph(ctx.artifact_store.as_ref());
         let coupled: Vec<_> = graph
             .relationships
             .iter()
@@ -375,8 +399,12 @@ mod tests {
         let mut ctx = make_ctx_with_store(&dir);
         pass.run(&mut ctx).await.unwrap();
 
-        let graph = read_knowledge_graph(&store);
-        let alice = graph.objects.iter().find(|o| o.name == "Alice").expect("Alice must be present");
+        let graph = read_knowledge_graph(ctx.artifact_store.as_ref());
+        let alice = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "Alice")
+            .expect("Alice must be present");
         assert_eq!(alice.kind, ObjectKind::Person);
         assert_eq!(alice.properties["role"], "contributor");
     }
@@ -392,8 +420,7 @@ mod tests {
         let id1 = seed_artifact(&store, &a1);
         let id2 = seed_artifact(&store, &a2);
 
-        let mut pass =
-            GitAnalyzerPass::new("test-repo", vec![id1, id2], None).with_min_coupling(1);
+        let mut pass = GitAnalyzerPass::new("test-repo", vec![id1, id2], None).with_min_coupling(1);
         let mut ctx = make_ctx_with_store(&dir);
         pass.run(&mut ctx).await.unwrap();
 
@@ -402,7 +429,7 @@ mod tests {
         // Assert the actual extracted values, not just "no error" — commit metadata
         // must be read from the real `sha`/`author_name` fields, not silently default
         // to "unknown".
-        let graph = read_knowledge_graph(&store);
+        let graph = read_knowledge_graph(ctx.artifact_store.as_ref());
         assert_eq!(graph.events.len(), 2, "one event per commit artifact");
         let shas: Vec<String> = graph
             .events
@@ -412,7 +439,10 @@ mod tests {
         assert!(shas.contains(&"sha1abc".to_string()));
         assert!(shas.contains(&"sha2def".to_string()));
         assert!(
-            graph.events.iter().all(|e| e.payload["author"] != "unknown"),
+            graph
+                .events
+                .iter()
+                .all(|e| e.payload["author"] != "unknown"),
             "author must be read from the real commit data, not default to 'unknown'"
         );
     }
@@ -440,8 +470,12 @@ mod tests {
         // artifact's real data, not silently resolve to an empty array — that bug
         // meant this pass never produced a single `CoupledWith` relationship against
         // any real repository.
-        let graph = read_knowledge_graph(&store);
-        assert_eq!(graph.relationships.len(), 1, "a.rs and b.rs co-changed 3 times (>= min_coupling 2)");
+        let graph = read_knowledge_graph(ctx.artifact_store.as_ref());
+        assert_eq!(
+            graph.relationships.len(),
+            1,
+            "a.rs and b.rs co-changed 3 times (>= min_coupling 2)"
+        );
         assert_eq!(graph.relationships[0].kind, RelationshipKind::CoupledWith);
         assert_eq!(graph.relationships[0].properties["co_change_count"], 3);
     }

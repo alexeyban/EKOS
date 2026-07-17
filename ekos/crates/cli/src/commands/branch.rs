@@ -1,17 +1,23 @@
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
-use ekos_ledger::{merge_branch, Ledger};
+use ekos_ledger::{Ledger, merge_branch};
 use std::path::Path;
 
 pub fn create(config: &EkosConfig, cwd: &Path, name: &str) -> Result<()> {
     let branch_path = config.branch_ledger_path(cwd, name);
     if branch_path.exists() {
-        anyhow::bail!("branch '{name}' already exists at {}", branch_path.display());
+        anyhow::bail!(
+            "branch '{name}' already exists at {}",
+            branch_path.display()
+        );
     }
 
     let ledger_path = config.ledger_path(cwd);
     let ledger = Ledger::open(&ledger_path).map_err(|e| {
-        anyhow::anyhow!("cannot open ledger at {}: {e}\nRun `ekos build` first.", ledger_path.display())
+        anyhow::anyhow!(
+            "cannot open ledger at {}: {e}\nRun `ekos build` first.",
+            ledger_path.display()
+        )
     })?;
 
     ledger.vacuum_into(&branch_path)?;
@@ -33,7 +39,9 @@ pub fn list(config: &EkosConfig, cwd: &Path) -> Result<()> {
         if path.extension().and_then(|e| e.to_str()) != Some("db") {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         if stem == "ledger" {
             continue; // main ledger, already printed above
         }

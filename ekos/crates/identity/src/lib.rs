@@ -93,7 +93,9 @@ pub struct ResolverConfig {
 
 impl Default for ResolverConfig {
     fn default() -> Self {
-        Self { merge_threshold: 0.85 }
+        Self {
+            merge_threshold: 0.85,
+        }
     }
 }
 
@@ -110,7 +112,9 @@ impl Default for DefaultResolver {
 
 impl DefaultResolver {
     pub fn new() -> Self {
-        Self { config: ResolverConfig::default() }
+        Self {
+            config: ResolverConfig::default(),
+        }
     }
 
     pub fn with_threshold(mut self, threshold: f32) -> Self {
@@ -124,7 +128,11 @@ impl DefaultResolver {
         let name = similarity::jaro_winkler(&na, &nb);
         let structural = structural_score(a, b);
         let combined = 0.7 * name + 0.3 * structural;
-        SimilarityScore { name, structural, combined }
+        SimilarityScore {
+            name,
+            structural,
+            combined,
+        }
     }
 }
 
@@ -132,16 +140,25 @@ impl IdentityResolver for DefaultResolver {
     fn resolve(&self, graph: &KirGraph) -> ResolutionResult {
         let objects = &graph.objects;
         let n = objects.len();
-        let mut stats = ResolutionStats { candidates_evaluated: n, ..Default::default() };
+        let mut stats = ResolutionStats {
+            candidates_evaluated: n,
+            ..Default::default()
+        };
 
         if n < 2 {
-            return ResolutionResult { stats, ..Default::default() };
+            return ResolutionResult {
+                stats,
+                ..Default::default()
+            };
         }
 
         // ── Conflict detection (all objects, cross-kind) ──────────────────────
         let mut by_norm: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, obj) in objects.iter().enumerate() {
-            by_norm.entry(similarity::normalize(&obj.name)).or_default().push(i);
+            by_norm
+                .entry(similarity::normalize(&obj.name))
+                .or_default()
+                .push(i);
         }
 
         let mut conflicts = Vec::new();
@@ -153,8 +170,10 @@ impl IdentityResolver for DefaultResolver {
             let has_kind_mismatch = indices[1..].iter().any(|&i| &objects[i].kind != first_kind);
             if has_kind_mismatch {
                 let ids: Vec<KirId> = indices.iter().map(|&i| objects[i].id).collect();
-                let kinds: Vec<String> =
-                    indices.iter().map(|&i| format!("{}", objects[i].kind)).collect();
+                let kinds: Vec<String> = indices
+                    .iter()
+                    .map(|&i| format!("{}", objects[i].kind))
+                    .collect();
                 conflicts.push(ConflictReport {
                     kind: ConflictKind::SameNameDifferentKind,
                     ids,
@@ -171,7 +190,10 @@ impl IdentityResolver for DefaultResolver {
         for (i, obj) in objects.iter().enumerate() {
             let norm = similarity::normalize(&obj.name);
             let prefix: String = norm.chars().take(3).collect();
-            blocks.entry((format!("{}", obj.kind), prefix)).or_default().push(i);
+            blocks
+                .entry((format!("{}", obj.kind), prefix))
+                .or_default()
+                .push(i);
         }
 
         // ── Pairwise scoring within blocks → Union-Find ───────────────────────
@@ -209,8 +231,10 @@ impl IdentityResolver for DefaultResolver {
                 continue;
             }
             let canonical = &objects[root];
-            let confidence =
-                members.iter().map(|&i| max_score_per_idx[i]).fold(0.0f32, f32::max);
+            let confidence = members
+                .iter()
+                .map(|&i| max_score_per_idx[i])
+                .fold(0.0f32, f32::max);
             proposals.push(MergeProposal {
                 canonical_id: canonical.id,
                 canonical_name: canonical.name.clone(),
@@ -222,7 +246,11 @@ impl IdentityResolver for DefaultResolver {
         }
 
         stats.conflicts_detected = conflicts.len();
-        ResolutionResult { proposals, conflicts, stats }
+        ResolutionResult {
+            proposals,
+            conflicts,
+            stats,
+        }
     }
 }
 
@@ -281,7 +309,10 @@ struct UnionFind {
 
 impl UnionFind {
     fn new(n: usize) -> Self {
-        Self { parent: (0..n).collect(), rank: vec![0; n] }
+        Self {
+            parent: (0..n).collect(),
+            rank: vec![0; n],
+        }
     }
 
     fn find(&mut self, x: usize) -> usize {
@@ -341,7 +372,10 @@ mod tests {
 
     #[test]
     fn exact_case_difference_proposes_merge() {
-        let g = make_graph(&[("Customer", ObjectKind::Table), ("customer", ObjectKind::Table)]);
+        let g = make_graph(&[
+            ("Customer", ObjectKind::Table),
+            ("customer", ObjectKind::Table),
+        ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.proposals.len(), 1, "expected one merge proposal");
         assert_eq!(result.proposals[0].source_ids.len(), 2);
@@ -352,28 +386,46 @@ mod tests {
     fn plural_singular_proposes_merge() {
         let g = make_graph(&[("orders", ObjectKind::Table), ("order", ObjectKind::Table)]);
         let result = DefaultResolver::new().resolve(&g);
-        assert_eq!(result.proposals.len(), 1, "expected merge of 'orders' and 'order'");
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "expected merge of 'orders' and 'order'"
+        );
         assert!(result.proposals[0].confidence > 0.85);
     }
 
     #[test]
     fn underscore_variant_proposes_merge() {
-        let g =
-            make_graph(&[("customer_table", ObjectKind::Table), ("customer", ObjectKind::Table)]);
+        let g = make_graph(&[
+            ("customer_table", ObjectKind::Table),
+            ("customer", ObjectKind::Table),
+        ]);
         let result = DefaultResolver::new().resolve(&g);
-        assert_eq!(result.proposals.len(), 1, "expected merge after suffix stripping");
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "expected merge after suffix stripping"
+        );
     }
 
     #[test]
     fn dissimilar_names_no_merge() {
-        let g = make_graph(&[("orders", ObjectKind::Table), ("products", ObjectKind::Table)]);
+        let g = make_graph(&[
+            ("orders", ObjectKind::Table),
+            ("products", ObjectKind::Table),
+        ]);
         let result = DefaultResolver::new().resolve(&g);
-        assert!(result.proposals.is_empty(), "orders and products must not merge");
+        assert!(
+            result.proposals.is_empty(),
+            "orders and products must not merge"
+        );
     }
 
     fn table_with_columns(name: &str, columns: &[&str]) -> KirObject {
-        let cols: Vec<serde_json::Value> =
-            columns.iter().map(|c| serde_json::json!({"name": c, "data_type": "text"})).collect();
+        let cols: Vec<serde_json::Value> = columns
+            .iter()
+            .map(|c| serde_json::json!({"name": c, "data_type": "text"}))
+            .collect();
         KirObject::new(name, ObjectKind::Table)
             .with_property("columns", serde_json::Value::Array(cols))
     }
@@ -386,7 +438,10 @@ mod tests {
         // integration test against a real schema (Northwind: Employees vs.
         // EmployeeTerritories, Customers vs. CustomerDemographics) caught.
         let mut g = KirGraph::new();
-        g.add_object(table_with_columns("orders", &["id", "customer_id", "order_date"]));
+        g.add_object(table_with_columns(
+            "orders",
+            &["id", "customer_id", "order_date"],
+        ));
         g.add_object(table_with_columns(
             "order_items",
             &["id", "order_id", "product_id", "quantity"],
@@ -421,11 +476,16 @@ mod tests {
 
     #[test]
     fn different_kind_same_name_conflict() {
-        let g =
-            make_graph(&[("customer", ObjectKind::Table), ("customer", ObjectKind::Entity)]);
+        let g = make_graph(&[
+            ("customer", ObjectKind::Table),
+            ("customer", ObjectKind::Entity),
+        ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.conflicts.len(), 1);
-        assert_eq!(result.conflicts[0].kind, ConflictKind::SameNameDifferentKind);
+        assert_eq!(
+            result.conflicts[0].kind,
+            ConflictKind::SameNameDifferentKind
+        );
     }
 
     #[test]
@@ -436,7 +496,10 @@ mod tests {
         let g = make_graph(&[("alice", ObjectKind::Person), ("alice", ObjectKind::Table)]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.conflicts.len(), 1);
-        assert_eq!(result.conflicts[0].kind, ConflictKind::SameNameDifferentKind);
+        assert_eq!(
+            result.conflicts[0].kind,
+            ConflictKind::SameNameDifferentKind
+        );
     }
 
     #[test]
@@ -447,7 +510,11 @@ mod tests {
             ("customer_table", ObjectKind::Table),
         ]);
         let result = DefaultResolver::new().resolve(&g);
-        assert_eq!(result.proposals.len(), 1, "all three should merge into one group");
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "all three should merge into one group"
+        );
         assert_eq!(result.proposals[0].source_ids.len(), 3);
     }
 
@@ -467,12 +534,18 @@ mod tests {
     fn custom_threshold_prevents_merge() {
         let g = make_graph(&[("orders", ObjectKind::Table), ("order", ObjectKind::Table)]);
         let result = DefaultResolver::new().with_threshold(0.999).resolve(&g);
-        assert!(result.proposals.is_empty(), "threshold 0.999 should prevent merge");
+        assert!(
+            result.proposals.is_empty(),
+            "threshold 0.999 should prevent merge"
+        );
     }
 
     #[test]
     fn result_is_serializable() {
-        let g = make_graph(&[("Customer", ObjectKind::Table), ("customer", ObjectKind::Table)]);
+        let g = make_graph(&[
+            ("Customer", ObjectKind::Table),
+            ("customer", ObjectKind::Table),
+        ]);
         let result = DefaultResolver::new().resolve(&g);
         let json = serde_json::to_string(&result).unwrap();
         let back: ResolutionResult = serde_json::from_str(&json).unwrap();

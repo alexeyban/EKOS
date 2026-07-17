@@ -1,9 +1,9 @@
 use anyhow::Result;
-use ekos_artifact::{ArtifactStore, FileSystemArtifactStore, IndexArtifact};
+use ekos_artifact::{ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_ledger::Ledger;
-use ekos_observation_sdk::{source_fingerprint, Observer, ScanContext};
+use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use std::collections::HashMap;
@@ -31,7 +31,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let ledger = Ledger::open(&ledger_path)
         .map_err(|e| anyhow::anyhow!("cannot open ledger at {}: {e}", ledger_path.display()))?;
 
-    let artifact_store = FileSystemArtifactStore::new(config.artifact_dir(cwd));
+    let artifact_store = PackArtifactStore::open(config.artifact_dir(cwd))
+        .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
 
     let observe_paths: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
         vec![cwd.to_path_buf()]
@@ -52,8 +53,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let mut index_entries: HashMap<String, ekos_artifact::ArtifactId> = HashMap::new();
 
     for base in &observe_paths {
-        let ctx = ScanContext::new(base)
-            .with_ignore_patterns(config.observe.ignore_patterns.clone());
+        let ctx =
+            ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
 
         let fp = source_fingerprint(&ctx);
         let fp_key = base.display().to_string();
@@ -85,8 +86,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
             if observer.name() == "file" {
                 for artifact in &package.artifacts {
                     let rel_str = &artifact.content.target;
-                    let obj_id =
-                        KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, rel_str.as_bytes()));
+                    let obj_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, rel_str.as_bytes()));
                     let ev_id = KirId(Uuid::new_v5(
                         &Uuid::NAMESPACE_URL,
                         format!("ev:{rel_str}").as_bytes(),
@@ -142,8 +142,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
 
     let snapshot_dir = config.ekos_dir(cwd).join("snapshots");
     std::fs::create_dir_all(&snapshot_dir)?;
-    let snapshot_path = snapshot_dir.join(format!("{build_id}.json"));
-    std::fs::write(&snapshot_path, serde_json::to_string_pretty(&index_json)?)?;
+    // RFC 0015: snapshots are compressed and pruned; the full history stays
+    // available through the content-addressed IndexArtifacts written above.
+    let snapshot_path = snapshot_dir.join(format!("{build_id}.json.zst"));
+    ekos_common::compress::write_json_zst(&snapshot_path, &index_json)?;
+    prune_snapshots(&snapshot_dir, SNAPSHOT_KEEP);
 
     let total_objects = ledger.object_count()?;
     println!("Build complete.");
@@ -160,6 +163,28 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     if connectors_skipped_cached > 0 {
         println!("  {connectors_skipped_cached} connector(s) skipped (cached)");
     }
-    println!("  Snapshot: .ekos/snapshots/{build_id}.json");
+    println!("  Snapshot: .ekos/snapshots/{build_id}.json.zst");
     Ok(())
+}
+
+/// Snapshots kept on disk after each build (RFC 0015 retention).
+const SNAPSHOT_KEEP: usize = 10;
+
+/// Delete all but the newest `keep` snapshot files. Build ids are UTC
+/// timestamps, so lexicographic filename order is chronological order —
+/// including legacy uncompressed `.json` snapshots.
+fn prune_snapshots(snapshot_dir: &Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(snapshot_dir) else {
+        return;
+    };
+    let mut names: Vec<_> = entries
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .map(|e| e.path())
+        .collect();
+    names.sort();
+    let excess = names.len().saturating_sub(keep);
+    for path in names.into_iter().take(excess) {
+        std::fs::remove_file(&path).ok();
+    }
 }

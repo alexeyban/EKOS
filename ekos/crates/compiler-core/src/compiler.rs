@@ -61,8 +61,12 @@ mod tests {
 
     #[async_trait]
     impl CompilerPass for NoopPass {
-        fn name(&self) -> &str { "noop" }
-        async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> { Ok(()) }
+        fn name(&self) -> &str {
+            "noop"
+        }
+        async fn run(&mut self, _ctx: &mut PassContext) -> Result<(), PassError> {
+            Ok(())
+        }
     }
 
     #[tokio::test]

@@ -33,7 +33,10 @@ pub struct CachedLlmProvider<T> {
 
 impl<T: LlmProvider> CachedLlmProvider<T> {
     pub fn new(inner: T, cache_root: impl Into<PathBuf>) -> Self {
-        Self { inner, cache_root: cache_root.into() }
+        Self {
+            inner,
+            cache_root: cache_root.into(),
+        }
     }
 
     pub fn cache_root(&self) -> &std::path::Path {
@@ -76,8 +79,8 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
 mod tests {
     use super::*;
     use crate::llm::MockLlmProvider;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use tempfile::TempDir;
 
     struct CountingMock {
@@ -87,7 +90,9 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for CountingMock {
-        fn model_name(&self) -> &str { "counting-mock" }
+        fn model_name(&self) -> &str {
+            "counting-mock"
+        }
         async fn complete(&self, _req: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(LlmResponse {
@@ -104,7 +109,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let calls = Arc::new(AtomicU32::new(0));
         let provider = CachedLlmProvider::new(
-            CountingMock { calls: calls.clone(), response: r#"{"result":"ok"}"#.into() },
+            CountingMock {
+                calls: calls.clone(),
+                response: r#"{"result":"ok"}"#.into(),
+            },
             dir.path(),
         );
 
@@ -118,7 +126,11 @@ mod tests {
         let r1 = provider.complete(&req).await.unwrap();
         let r2 = provider.complete(&req).await.unwrap();
 
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "inner provider must be called exactly once");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "inner provider must be called exactly once"
+        );
         assert_eq!(r1.content, r2.content);
     }
 
@@ -127,16 +139,33 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let calls = Arc::new(AtomicU32::new(0));
         let provider = CachedLlmProvider::new(
-            CountingMock { calls: calls.clone(), response: "resp".into() },
+            CountingMock {
+                calls: calls.clone(),
+                response: "resp".into(),
+            },
             dir.path(),
         );
 
-        let req_v1 = LlmRequest { system: "s", user: "u", prompt_version: "v1", max_tokens: 10 };
-        let req_v2 = LlmRequest { system: "s", user: "u", prompt_version: "v2", max_tokens: 10 };
+        let req_v1 = LlmRequest {
+            system: "s",
+            user: "u",
+            prompt_version: "v1",
+            max_tokens: 10,
+        };
+        let req_v2 = LlmRequest {
+            system: "s",
+            user: "u",
+            prompt_version: "v2",
+            max_tokens: 10,
+        };
 
         provider.complete(&req_v1).await.unwrap();
         provider.complete(&req_v2).await.unwrap();
 
-        assert_eq!(calls.load(Ordering::SeqCst), 2, "different prompt versions must be separate cache entries");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "different prompt versions must be separate cache entries"
+        );
     }
 }

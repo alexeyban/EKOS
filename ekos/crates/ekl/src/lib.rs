@@ -9,4 +9,4 @@ pub mod interpreter;
 pub mod parser;
 
 pub use interpreter::{EklError, EklInterpreter, EklResult};
-pub use parser::{ekl_parse, EklAst, Entity, Literal, Op, Order, ParseError, Predicate};
+pub use parser::{EklAst, Entity, Literal, Op, Order, ParseError, Predicate, ekl_parse};

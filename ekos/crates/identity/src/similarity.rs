@@ -9,7 +9,10 @@
 /// 4. Collapse whitespace; trim
 pub fn normalize(name: &str) -> String {
     let lower = name.to_lowercase();
-    let spaced: String = lower.chars().map(|c| if matches!(c, '_' | '-' | '.') { ' ' } else { c }).collect();
+    let spaced: String = lower
+        .chars()
+        .map(|c| if matches!(c, '_' | '-' | '.') { ' ' } else { c })
+        .collect();
 
     // Strip known suffixes (must strip in order of specificity: longest first).
     let suffixes = [" table", " tbl", "table ", "tbl ", " dim", " fact"];
@@ -26,7 +29,11 @@ pub fn normalize(name: &str) -> String {
     }
 
     // Collapse remaining whitespace.
-    s.split_whitespace().collect::<Vec<_>>().join(" ").trim().to_string()
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
 }
 
 /// Jaro similarity between two strings (0.0 = no similarity, 1.0 = identical).

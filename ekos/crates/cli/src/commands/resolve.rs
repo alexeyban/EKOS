@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ekos_artifact::{ArtifactStore, FileSystemArtifactStore};
+use ekos_artifact::{ArtifactStore, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_identity::{DefaultResolver, IdentityResolver};
 use ekos_kir::KirGraph;
@@ -7,7 +7,8 @@ use std::path::Path;
 
 pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let artifact_dir = config.artifact_dir(cwd);
-    let store = FileSystemArtifactStore::new(&artifact_dir);
+    let store = PackArtifactStore::open(&artifact_dir)
+        .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
 
     // ── Collect all KnowledgeArtifact KirGraphs ───────────────────────────
     let ids = match store.list() {
@@ -85,10 +86,16 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
 
     // ── Stats ─────────────────────────────────────────────────────────────
     println!("\nStats:");
-    println!("  Candidates evaluated : {}", result.stats.candidates_evaluated);
+    println!(
+        "  Candidates evaluated : {}",
+        result.stats.candidates_evaluated
+    );
     println!("  Pairs compared       : {}", result.stats.pairs_compared);
     println!("  Merges proposed      : {}", result.stats.merges_proposed);
-    println!("  Conflicts detected   : {}", result.stats.conflicts_detected);
+    println!(
+        "  Conflicts detected   : {}",
+        result.stats.conflicts_detected
+    );
 
     if !result.conflicts.is_empty() {
         anyhow::bail!(
@@ -115,4 +122,3 @@ fn merge_into(dst: &mut KirGraph, src: KirGraph) {
         dst.events.push(ev);
     }
 }
-

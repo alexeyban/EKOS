@@ -26,8 +26,8 @@ impl AnthropicProvider {
     }
 
     pub fn from_env_var(env_var: &str) -> Result<Self, LlmError> {
-        let api_key = std::env::var(env_var)
-            .map_err(|_| LlmError::NoApiKey(env_var.to_string()))?;
+        let api_key =
+            std::env::var(env_var).map_err(|_| LlmError::NoApiKey(env_var.to_string()))?;
         Ok(Self::new(DEFAULT_MODEL, api_key))
     }
 
@@ -89,7 +89,10 @@ impl LlmProvider for AnthropicProvider {
             max_tokens: req.max_tokens,
             temperature: 0.0,
             system: req.system,
-            messages: [ApiMessage { role: "user", content: req.user }],
+            messages: [ApiMessage {
+                role: "user",
+                content: req.user,
+            }],
         };
 
         let http_resp = self
@@ -104,7 +107,10 @@ impl LlmProvider for AnthropicProvider {
         let status = http_resp.status().as_u16();
         if !http_resp.status().is_success() {
             let body_text = http_resp.text().await.unwrap_or_default();
-            return Err(LlmError::Api { status, body: body_text });
+            return Err(LlmError::Api {
+                status,
+                body: body_text,
+            });
         }
 
         let api_resp: ApiResponse = http_resp.json().await?;

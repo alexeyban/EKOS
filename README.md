@@ -82,6 +82,20 @@ server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl`, `ekos_neighbo
 claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace
 ```
 
+The server also honors `EKOS_WORKSPACE` and `EKOS_CONFIG` environment variables, so a
+registration can be path-free: `claude mcp add ekos --env EKOS_WORKSPACE=/path/to/workspace -- ekos mcp serve`.
+
+### Compact storage (RFC 0015)
+
+Workspaces created before RFC 0015 can be shrunk in place (both commands verify before
+touching anything and leave backups):
+
+```bash
+ekos ledger status --storage   # per-component size report
+ekos ledger migrate            # ledger v1 → v2: dictionary-zstd payloads (~2.5x smaller)
+ekos artifact repack           # loose JSON files → packed segments (~7x smaller on disk)
+```
+
 ## Development Process
 
 All significant architectural decisions begin as RFCs in `docs/rfcs/`. No feature is implemented until its RFC is accepted. See `CLAUDE.md` for the full mandatory development workflow.

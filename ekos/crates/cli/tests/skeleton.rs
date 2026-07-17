@@ -11,7 +11,11 @@ fn setup_workspace(dir: &Path) {
     // Create a small fixture project tree
     std::fs::create_dir_all(dir.join("src")).unwrap();
     std::fs::write(dir.join("src/main.rs"), b"fn main() {}").unwrap();
-    std::fs::write(dir.join("src/lib.rs"), b"pub fn add(a: i32, b: i32) -> i32 { a + b }").unwrap();
+    std::fs::write(
+        dir.join("src/lib.rs"),
+        b"pub fn add(a: i32, b: i32) -> i32 { a + b }",
+    )
+    .unwrap();
     std::fs::write(dir.join("README.md"), b"# Sample Project").unwrap();
 
     // Write a minimal ekos.toml
@@ -116,6 +120,12 @@ fn clean_removes_artifacts_not_ledger() {
 
     ekos::commands::clean::run(&config, dir).unwrap();
 
-    assert!(!artifact_dir.join("dummy.json").exists(), "artifact not cleaned");
-    assert!(dir.join(".ekos/ledger").exists(), "ledger should survive clean");
+    assert!(
+        !artifact_dir.join("dummy.json").exists(),
+        "artifact not cleaned"
+    );
+    assert!(
+        dir.join(".ekos/ledger").exists(),
+        "ledger should survive clean"
+    );
 }

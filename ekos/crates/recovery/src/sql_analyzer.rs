@@ -59,7 +59,12 @@ impl SqlAnalyzerPass {
     ) -> Self {
         let source_path = source_path.into();
         let pass_id = format!("sql-analyzer:{source_path}");
-        Self { pass_id, sql: sql.into(), source_path, llm }
+        Self {
+            pass_id,
+            sql: sql.into(),
+            source_path,
+            llm,
+        }
     }
 }
 
@@ -81,10 +86,10 @@ impl CompilerPass for SqlAnalyzerPass {
         let mut graph = parse_ddl_structural(&self.sql, &self.source_path);
 
         if graph.objects.is_empty() {
-            ctx.diagnostics.lock().unwrap().warning(
-                "SQL001",
-                format!("no tables found in {}", self.source_path),
-            );
+            ctx.diagnostics
+                .lock()
+                .unwrap()
+                .warning("SQL001", format!("no tables found in {}", self.source_path));
             return Ok(());
         }
 
@@ -195,9 +200,14 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str) -> KirGraph {
                     let to_name = foreign_table.to_string().to_lowercase();
                     if let Some(&to_id) = table_ids.get(&to_name) {
                         add_fk_relationship(
-                            &mut graph, source_path, from_id, to_id,
-                            &from_name, &col_names(fk_columns),
-                            &to_name, &col_names(referred_columns),
+                            &mut graph,
+                            source_path,
+                            from_id,
+                            to_id,
+                            &from_name,
+                            &col_names(fk_columns),
+                            &to_name,
+                            &col_names(referred_columns),
                         );
                     }
                 }
@@ -217,12 +227,21 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str) -> KirGraph {
                             let ref_cols = if referred_columns.is_empty() {
                                 "id".to_string()
                             } else {
-                                referred_columns.iter().map(|c| c.value.as_str()).collect::<Vec<_>>().join(", ")
+                                referred_columns
+                                    .iter()
+                                    .map(|c| c.value.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
                             };
                             add_fk_relationship(
-                                &mut graph, source_path, from_id, to_id,
-                                &from_name, &col.name.value,
-                                &to_name, &ref_cols,
+                                &mut graph,
+                                source_path,
+                                from_id,
+                                to_id,
+                                &from_name,
+                                &col.name.value,
+                                &to_name,
+                                &ref_cols,
                             );
                         }
                     }
@@ -249,13 +268,17 @@ fn add_fk_relationship(
     let ev = KirEvidence::new(SourceLocation::file(source_path), fk_desc.clone());
     let ev_id = graph.add_evidence(ev);
     let mut rel = KirRelationship::new(RelationshipKind::ForeignKey, from_id, to_id);
-    rel.properties.insert("fk_desc".into(), serde_json::Value::String(fk_desc));
+    rel.properties
+        .insert("fk_desc".into(), serde_json::Value::String(fk_desc));
     rel.evidence.push(ev_id);
     graph.add_relationship(rel);
 }
 
 fn col_names(cols: &[sqlparser::ast::Ident]) -> String {
-    cols.iter().map(|c| c.value.as_str()).collect::<Vec<_>>().join(", ")
+    cols.iter()
+        .map(|c| c.value.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn columns_json(ct: &sqlparser::ast::CreateTable) -> serde_json::Value {
@@ -337,13 +360,22 @@ fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<
         let to_lc = sem_rel.to_table.to_lowercase();
 
         // Find the KirObject IDs for from/to tables.
-        let from_id =
-            graph.objects.iter().find(|o| o.name.to_lowercase() == from_lc).map(|o| o.id);
-        let to_id =
-            graph.objects.iter().find(|o| o.name.to_lowercase() == to_lc).map(|o| o.id);
+        let from_id = graph
+            .objects
+            .iter()
+            .find(|o| o.name.to_lowercase() == from_lc)
+            .map(|o| o.id);
+        let to_id = graph
+            .objects
+            .iter()
+            .find(|o| o.name.to_lowercase() == to_lc)
+            .map(|o| o.id);
 
         if let (Some(fid), Some(tid)) = (from_id, to_id)
-            && let Some(rel) = graph.relationships.iter_mut().find(|r| r.from == fid && r.to == tid)
+            && let Some(rel) = graph
+                .relationships
+                .iter_mut()
+                .find(|r| r.from == fid && r.to == tid)
         {
             rel.properties.insert(
                 "semantic_name".into(),
@@ -400,7 +432,11 @@ mod tests {
         let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql");
         // orders→customers, order_items→orders, order_items→products, payments→orders,
         // products→categories, categories→categories (self-ref)
-        assert!(graph.relationships.len() >= 5, "expected ≥5 FK relationships, got {}", graph.relationships.len());
+        assert!(
+            graph.relationships.len() >= 5,
+            "expected ≥5 FK relationships, got {}",
+            graph.relationships.len()
+        );
     }
 
     #[test]
@@ -436,13 +472,19 @@ mod tests {
             .objects
             .iter()
             .find(|o| o.name.to_lowercase().replace('"', "") == "order details");
-        assert!(order_details.is_some(), "Order Details table (quoted, contains a space) must parse");
+        assert!(
+            order_details.is_some(),
+            "Order Details table (quoted, contains a space) must parse"
+        );
     }
 
     #[test]
     fn structural_parse_table_has_columns() {
         let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql");
-        let customers = graph.objects.iter().find(|o| o.name.to_lowercase() == "customers");
+        let customers = graph
+            .objects
+            .iter()
+            .find(|o| o.name.to_lowercase() == "customers");
         assert!(customers.is_some());
         let cols = &customers.unwrap().properties["columns"];
         assert!(cols.is_array());
@@ -464,7 +506,10 @@ mod tests {
         let mut pass = SqlAnalyzerPass::new("ecommerce.sql", ECOMMERCE_SQL, mock);
         let mut ctx = make_ctx(&dir);
         pass.run(&mut ctx).await.unwrap();
-        assert!(!ctx.diagnostics.lock().unwrap().has_errors(), "no errors expected with mock llm");
+        assert!(
+            !ctx.diagnostics.lock().unwrap().has_errors(),
+            "no errors expected with mock llm"
+        );
     }
 
     #[tokio::test]
@@ -489,7 +534,11 @@ mod tests {
         })
         .to_string();
         apply_llm_enrichment(&mut graph, &llm_json).unwrap();
-        let customers = graph.objects.iter().find(|o| o.name.to_lowercase() == "customers").unwrap();
+        let customers = graph
+            .objects
+            .iter()
+            .find(|o| o.name.to_lowercase() == "customers")
+            .unwrap();
         assert_eq!(customers.properties["entity_name"], "Customer");
     }
 }

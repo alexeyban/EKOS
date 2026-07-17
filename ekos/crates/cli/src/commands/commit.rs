@@ -8,15 +8,14 @@ use std::path::Path;
 pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let model_path = config.ekos_dir(cwd).join("ckm").join("model.json");
 
-    if !model_path.exists() {
+    if ekos_common::compress::resolve_auto(&model_path).is_none() {
         anyhow::bail!(
-            "CKM not found at {}. Run `ekos compile` first.",
+            "CKM not found at {}[.zst]. Run `ekos compile` first.",
             model_path.display()
         );
     }
 
-    let json = std::fs::read_to_string(&model_path)?;
-    let model: CkModel = serde_json::from_str(&json)?;
+    let model: CkModel = ekos_common::compress::read_json_auto(&model_path)?;
 
     let ledger = open_ledger(config, cwd)?;
 
@@ -55,7 +54,10 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  Objects skipped:       {objects_skipped} (already in ledger)");
     println!("  Relationships written: {rels_written}");
     println!("  Evidence records:      {evidence_written}");
-    println!("  Ledger:                {}", config.ledger_path(cwd).display());
+    println!(
+        "  Ledger:                {}",
+        config.ledger_path(cwd).display()
+    );
 
     Ok(())
 }

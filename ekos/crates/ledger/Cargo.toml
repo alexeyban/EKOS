@@ -18,3 +18,5 @@ uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+zstd.workspace = true
+hex.workspace = true

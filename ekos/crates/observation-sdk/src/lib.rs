@@ -118,7 +118,9 @@ pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
         if !entry.file_type().is_file() {
             continue;
         }
-        let Ok(rel_path) = entry.path().strip_prefix(&ctx.workspace_root) else { continue };
+        let Ok(rel_path) = entry.path().strip_prefix(&ctx.workspace_root) else {
+            continue;
+        };
         let rel = rel_path.to_string_lossy().replace('\\', "/");
         if ctx.is_ignored(&rel) {
             continue;
@@ -171,7 +173,12 @@ impl ObservationPackage {
             file_count: 0,
             error_count: 0,
         };
-        Self { observer, target, artifacts: Vec::new(), meta }
+        Self {
+            observer,
+            target,
+            artifacts: Vec::new(),
+            meta,
+        }
     }
 
     pub fn push(&mut self, artifact: ObservationArtifact) {
@@ -254,6 +261,9 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("target")).unwrap();
         std::fs::write(dir.path().join("target").join("out.bin"), b"junk").unwrap();
         let fp2 = source_fingerprint(&ctx);
-        assert_eq!(fp1, fp2, "changes under an ignored directory must not affect the fingerprint");
+        assert_eq!(
+            fp1, fp2,
+            "changes under an ignored directory must not affect the fingerprint"
+        );
     }
 }

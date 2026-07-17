@@ -82,7 +82,9 @@ async fn claude_code_session_over_mcp() {
     // ── The pipeline an operator runs before pointing an agent at EKOS ──────
     ekos::commands::init::run(&config, dir).unwrap();
     ekos::commands::build::run(&config, dir).await.unwrap();
-    ekos::commands::recover::run(&config, dir, false).await.unwrap();
+    ekos::commands::recover::run(&config, dir, false)
+        .await
+        .unwrap();
     ekos::commands::compile::run(&config, dir).await.unwrap();
     ekos::commands::commit::run(&config, dir).unwrap();
 
@@ -102,7 +104,10 @@ async fn claude_code_session_over_mcp() {
 
     // ── Turn 1: "is there anything here?" ───────────────────────────────────
     let status = call_tool(&config, dir, 1, "ekos_status", serde_json::json!({}));
-    assert!(status["objects"].as_u64().unwrap() >= 5, "files + tables expected");
+    assert!(
+        status["objects"].as_u64().unwrap() >= 5,
+        "files + tables expected"
+    );
 
     // ── Turn 2: "what tables does this workspace have?" ─────────────────────
     let tables = call_tool(
@@ -118,7 +123,11 @@ async fn claude_code_session_over_mcp() {
         .iter()
         .map(|r| r["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["customers", "orders"], "SQL recovery must find both tables");
+    assert_eq!(
+        names,
+        ["customers", "orders"],
+        "SQL recovery must find both tables"
+    );
 
     // ── Turn 3: agent picks `orders` from turn 2 and asks what's connected ──
     let orders_id = tables["rows"]
@@ -159,7 +168,10 @@ async fn claude_code_session_over_mcp() {
     );
     assert_eq!(state["object"]["name"], "orders");
     let evidence = state["evidence"].as_array().unwrap();
-    assert!(!evidence.is_empty(), "every conclusion must be traceable to evidence");
+    assert!(
+        !evidence.is_empty(),
+        "every conclusion must be traceable to evidence"
+    );
     let fragments = evidence
         .iter()
         .map(|e| e["fragment"].as_str().unwrap_or_default().to_lowercase())

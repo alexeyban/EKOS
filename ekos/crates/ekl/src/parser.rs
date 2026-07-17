@@ -85,7 +85,11 @@ struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     fn new(input: &'a str) -> Self {
-        Self { input, bytes: input.as_bytes(), pos: 0 }
+        Self {
+            input,
+            bytes: input.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn tokenize(mut self) -> Result<Vec<(Token, usize)>, ParseError> {
@@ -143,7 +147,10 @@ impl<'a> Lexer<'a> {
         let mut out = String::new();
         loop {
             if self.pos >= self.bytes.len() {
-                return Err(ParseError { message: "unterminated string literal".into(), position: start });
+                return Err(ParseError {
+                    message: "unterminated string literal".into(),
+                    position: start,
+                });
             }
             let c = self.bytes[self.pos];
             if c == b'\'' {
@@ -164,7 +171,10 @@ impl<'a> Lexer<'a> {
         }
         self.input[start..self.pos]
             .parse::<f64>()
-            .map_err(|_| ParseError { message: "invalid number literal".into(), position: start })
+            .map_err(|_| ParseError {
+                message: "invalid number literal".into(),
+                position: start,
+            })
     }
 
     fn read_ident(&mut self) -> String {
@@ -195,9 +205,10 @@ impl Parser {
     }
 
     fn peek_pos(&self) -> usize {
-        self.tokens.get(self.pos).map(|(_, p)| *p).unwrap_or_else(|| {
-            self.tokens.last().map(|(_, p)| *p + 1).unwrap_or(0)
-        })
+        self.tokens
+            .get(self.pos)
+            .map(|(_, p)| *p)
+            .unwrap_or_else(|| self.tokens.last().map(|(_, p)| *p + 1).unwrap_or(0))
     }
 
     fn advance(&mut self) -> Option<Token> {
@@ -237,7 +248,10 @@ impl Parser {
         match self.advance() {
             Some(Token::Str(s)) => Ok(s),
             other => Err(ParseError {
-                message: format!("expected string literal, found {}", describe(other.as_ref())),
+                message: format!(
+                    "expected string literal, found {}",
+                    describe(other.as_ref())
+                ),
                 position: pos,
             }),
         }
@@ -315,7 +329,14 @@ impl Parser {
             });
         }
 
-        Ok(EklAst { entity, predicates, from, returns, order_by, limit })
+        Ok(EklAst {
+            entity,
+            predicates,
+            from,
+            returns,
+            order_by,
+            limit,
+        })
     }
 
     fn parse_entity(&mut self) -> Result<Entity, ParseError> {
@@ -326,7 +347,10 @@ impl Parser {
         } else if ident.eq_ignore_ascii_case("Relationship") {
             Ok(Entity::Relationship)
         } else {
-            Err(ParseError { message: format!("unknown entity '{ident}'"), position: pos })
+            Err(ParseError {
+                message: format!("unknown entity '{ident}'"),
+                position: pos,
+            })
         }
     }
 
@@ -348,7 +372,10 @@ impl Parser {
                 ">=" => Ok(Op::Ge),
                 "<=" => Ok(Op::Le),
                 _ if s.eq_ignore_ascii_case("CONTAINS") => Ok(Op::Contains),
-                other => Err(ParseError { message: format!("unknown operator '{other}'"), position: pos }),
+                other => Err(ParseError {
+                    message: format!("unknown operator '{other}'"),
+                    position: pos,
+                }),
             },
             other => Err(ParseError {
                 message: format!("expected operator, found {}", describe(other.as_ref())),
@@ -395,7 +422,14 @@ mod tests {
     fn parses_minimal_find_object() {
         let ast = ekl_parse("FIND Object WHERE kind = 'Table'").unwrap();
         assert_eq!(ast.entity, Entity::Object);
-        assert_eq!(ast.predicates, vec![Predicate { field: "kind".into(), op: Op::Eq, value: Literal::Str("Table".into()) }]);
+        assert_eq!(
+            ast.predicates,
+            vec![Predicate {
+                field: "kind".into(),
+                op: Op::Eq,
+                value: Literal::Str("Table".into())
+            }]
+        );
     }
 
     #[test]
@@ -475,9 +509,18 @@ mod tests {
     #[test]
     fn fuzz_random_strings_never_panic() {
         let seeds = [
-            "", "FIND", "FIND Object WHERE", "'''", "!!!===", "FIND Object WHERE a = ",
-            "FIND Object LIMIT abc", "\u{0}\u{1}\u{2}", "FIND Object WHERE a = 'unterminated",
-            "FIND Relationship FROM", ",,,,", "FIND Object RETURN ,",
+            "",
+            "FIND",
+            "FIND Object WHERE",
+            "'''",
+            "!!!===",
+            "FIND Object WHERE a = ",
+            "FIND Object LIMIT abc",
+            "\u{0}\u{1}\u{2}",
+            "FIND Object WHERE a = 'unterminated",
+            "FIND Relationship FROM",
+            ",,,,",
+            "FIND Object RETURN ,",
         ];
         for s in seeds {
             let _ = ekl_parse(s); // must not panic
