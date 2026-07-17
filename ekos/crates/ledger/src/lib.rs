@@ -1,4 +1,5 @@
 pub mod fact;
+pub mod segment;
 
 use chrono::{DateTime, Utc};
 use ekos_artifact::ArtifactId;

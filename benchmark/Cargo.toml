@@ -53,3 +53,7 @@ harness = false
 [[bench]]
 name = "fact_model"
 harness = false
+
+[[bench]]
+name = "segment_store"
+harness = false
