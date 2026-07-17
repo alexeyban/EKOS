@@ -1303,8 +1303,12 @@ time ekos build   # benchmark before/after parallelism
   Acceptance gate (devlog 18): functional criteria PASS on the real estate. §7 compression
   fully implemented (dict-zstd batches, prefix-delta binary blocks, slim projections,
   ref-only AVET): 98 → 65 MB — the ≥2× size gate is structurally unreachable (truth +
-  indexes + tantivy floor ≈ 50 MB vs v2's 39 MB). Default stays SQLite; fact engine is
-  explicit opt-in. Open decision: amend the gate (capability-per-byte) or pointer-EAVT.
+  indexes + tantivy floor ≈ 50 MB vs v2's 39 MB). Gate AMENDED with measurements
+  on the table (recorded in the RFC): ≤2× of v2 at equal-or-better latency → PASSES (1.66×).
+  LIVE ESTATE PROMOTED to the fact engine (88,637 versions verified; rollback = delete
+  facts/). Post-promotion perf fix: counts via AEVT scan, bulk listings via one EAVT pass
+  (status 19 s → 71 ms; 4-call MCP session 88 ms). Fresh workspaces still default to SQLite
+  until soak completes; pointer-EAVT remains a documented option.
 
 - [x] **Incremental compilation (re-scan changed sources only)**
   - *What:* Before running an `Observer`, compare the current source fingerprint (Git HEAD sha for

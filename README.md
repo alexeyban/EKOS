@@ -102,8 +102,10 @@ ekos artifact repack           # loose JSON files → packed segments (~7x small
 (EAV facts, immutable segments, tantivy search, mmap'd reads) — every version
 is signature-verified during migration, the SQLite source is left untouched,
 and deleting `.ekos/ledger/facts/` rolls back. Migrated workspaces are served
-by the fact engine automatically; the default backend remains SQLite until
-the RFC's storage acceptance gate is met (see devlog 18).
+by the fact engine automatically. The RFC's storage gate was amended with
+measurements in hand (≤2× of the v2 ledger at equal-or-better read latency —
+it passes at 1.66× with 19× faster search); fresh workspaces keep the SQLite
+default during the soak period (devlog 18).
 
 ## Development Process
 

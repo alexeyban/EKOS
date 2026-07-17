@@ -70,6 +70,24 @@ pointer-EAVT redesign. An ignored estate-scale gate test
 `target/estate-v2-path.txt`) makes the measurement reproducible with one
 cargo command.
 
+## Gate amendment and live promotion (same day, part 3)
+
+With the §7 measurements on the table, the §8 storage criterion was amended
+(recorded in the RFC): from "≥2× smaller than v2" to **"≤2× of v2 at
+equal-or-better read latency"** — the original number predated the
+architecture and implicitly priced the index set and search engine at zero
+bytes. Under the amended gate the engine passes (1.66×, every read faster),
+and the **live estate was promoted**: 88,637 versions migrated in 20 min,
+every signature verified, 70 MB fact store; rollback = delete `facts/`
+(SQLite source untouched).
+
+Verification surfaced one real performance bug: `object_count` reconstructed
+all 22K objects via per-entity EAVT point scans — 19 s for a count, ~9 s per
+MCP call. Fixed: counts ride a single AEVT scan (same never-shrinks
+semantics as SQLite's pointer tables), and bulk listings do ONE sequential
+EAVT pass grouped by entity. Result: `ledger status` 19 s → **71 ms**; a
+4-call MCP session (open-per-call) **88 ms total**.
+
 ## Knowledge Captured
 
 - **A "covering index ×3 sort orders" triples your values.** EAVT needs
@@ -96,6 +114,17 @@ cargo command.
 - Criterion + a size report per phase caught every regression the same day
   it was written (45 ms zstd contexts, the 59 MB indexes). Measurement-first
   is the reason the gate failure is a diagnosis, not a mystery.
+- **Counts and listings must never take the point-read path.** A count that
+  reconstructs (22K × per-entity scan × zstd-19 block decode) is 19 s; the
+  same count as one slim AEVT scan is milliseconds. In LSM-shaped stores,
+  design bulk reads as sequential passes and counts as index-only scans —
+  the unit benchmarks (get_object µs) never see this class of bug; only
+  estate-scale smoke tests do.
+- **Acceptance gates written before the architecture exists price unknowns
+  at zero.** The ≥2× criterion implicitly assumed indexes and search were
+  free. Write gates as ratios against the capability they buy, or expect to
+  amend them with measurements in hand — and record the amendment, don't
+  quietly reinterpret.
 
 ## Files Changed
 

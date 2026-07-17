@@ -623,6 +623,11 @@ impl FactIndexes {
         Ok(())
     }
 
+    /// The open runs of one sort order (bulk sequential reads).
+    pub fn runs_of(&self, order: SortOrder) -> &[IndexRun] {
+        self.runs.get(&order).map(Vec::as_slice).unwrap_or(&[])
+    }
+
     /// Total runs currently open for a sort order.
     pub fn run_count(&self, order: SortOrder) -> usize {
         self.runs.get(&order).map(Vec::len).unwrap_or(0)

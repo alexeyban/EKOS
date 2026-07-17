@@ -294,28 +294,25 @@ impl FactLedger {
         }
     }
 
-    /// All objects currently tracked.
+    /// All objects currently tracked — one sequential EAVT pass, not a
+    /// point scan per entity.
     pub fn all_objects(&self) -> Result<Vec<KirObject>, LedgerError> {
-        let inner = self.inner.lock().unwrap();
-        let mut out = Vec::new();
-        for id in inner.entities_with_attr("name")? {
-            if let Some(payload) = inner.reconstruct_at(id, TxId(u64::MAX))?
-                && kind_of_payload(&payload) == EntityKind::Object
-            {
-                out.push(serde_json::from_value(payload)?);
-            }
-        }
-        Ok(out)
+        self.all_of_kind(EntityKind::Object)
     }
 
     /// All relationships currently tracked.
     pub fn all_relationships(&self) -> Result<Vec<KirRelationship>, LedgerError> {
+        self.all_of_kind(EntityKind::Relationship)
+    }
+
+    fn all_of_kind<T: serde::de::DeserializeOwned>(
+        &self,
+        kind: EntityKind,
+    ) -> Result<Vec<T>, LedgerError> {
         let inner = self.inner.lock().unwrap();
         let mut out = Vec::new();
-        for id in inner.entities_with_attr("from")? {
-            if let Some(payload) = inner.reconstruct_at(id, TxId(u64::MAX))?
-                && kind_of_payload(&payload) == EntityKind::Relationship
-            {
+        for (_, payload) in inner.all_current_payloads()? {
+            if kind_of_payload(&payload) == kind {
                 out.push(serde_json::from_value(payload)?);
             }
         }
@@ -410,14 +407,19 @@ impl FactLedger {
         Ok(self.inner.lock().unwrap().batch_times.len())
     }
 
-    /// Number of distinct objects currently tracked.
+    /// Number of distinct objects currently tracked — one AEVT scan over
+    /// the `name` attribute (objects are the only entities carrying it).
+    /// Like the SQLite backend's pointer tables, the count never shrinks on
+    /// retraction; no reconstruction happens here.
     pub fn object_count(&self) -> Result<usize, LedgerError> {
-        Ok(self.all_objects()?.len())
+        let inner = self.inner.lock().unwrap();
+        Ok(inner.entities_with_attr("name")?.len())
     }
 
-    /// Number of distinct relationships currently tracked.
+    /// Number of distinct relationships currently tracked (AEVT over `from`).
     pub fn relationship_count(&self) -> Result<usize, LedgerError> {
-        Ok(self.all_relationships()?.len())
+        let inner = self.inner.lock().unwrap();
+        Ok(inner.entities_with_attr("from")?.len())
     }
 
     // ── Branching / diff / merge ──────────────────────────────────────────
@@ -559,6 +561,35 @@ fn self_counts(inner: &Inner) -> Result<usize, LedgerError> {
 }
 
 impl Inner {
+    /// Every entity's current payload, from ONE sequential pass over the
+    /// EAVT runs plus the memtable — the bulk-read path for listings.
+    fn all_current_payloads(&self) -> Result<Vec<(Uuid, serde_json::Value)>, LedgerError> {
+        let mut by_entity: HashMap<Uuid, Vec<IndexEntry>> = HashMap::new();
+        for run in self.runs.runs_of(crate::index::SortOrder::Eavt) {
+            for entry in run.all()? {
+                by_entity.entry(entry.entity).or_default().push(entry);
+            }
+        }
+        for entry in &self.memtable {
+            by_entity
+                .entry(entry.entity)
+                .or_default()
+                .push(entry.clone());
+        }
+
+        let mut out = Vec::with_capacity(by_entity.len());
+        for (entity, entries) in by_entity {
+            let facts = fold_state(entity, &entries, None);
+            if facts.is_empty() {
+                continue;
+            }
+            let payload = reconstruct(&facts, &self.store.manifest.attributes)
+                .map_err(|e| LedgerError::Corrupt(e.to_string()))?;
+            out.push((entity, payload));
+        }
+        Ok(out)
+    }
+
     /// All history entries of one entity: run scans + memtable tail.
     fn entity_entries(&self, entity: Uuid) -> Result<Vec<IndexEntry>, LedgerError> {
         let mut entries = self.runs.scan(&ScanPrefix::Entity { entity, attr: None })?;
@@ -567,35 +598,10 @@ impl Inner {
     }
 
     /// Fold an entity's history (up to `cut`, if given) into its live fact
-    /// set: the latest op per (attr, pos) wins; a retract removes the slot.
+    /// set — see [`fold_state`].
     fn state_at(&self, entity: Uuid, cut: Option<TxId>) -> Result<Vec<Fact>, LedgerError> {
         let entries = self.entity_entries(entity)?;
-        let mut live: HashMap<(AttrId, Option<u32>), (TxId, FactOp, &FactValue)> = HashMap::new();
-        for e in &entries {
-            if let Some(cut) = cut
-                && e.tx > cut
-            {
-                continue;
-            }
-            let slot = live
-                .entry((e.attr, e.pos))
-                .or_insert((e.tx, e.op, &e.value));
-            if e.tx >= slot.0 {
-                *slot = (e.tx, e.op, &e.value);
-            }
-        }
-        let mut facts: Vec<Fact> = live
-            .into_iter()
-            .filter(|(_, (_, op, _))| matches!(op, FactOp::Assert))
-            .map(|((attr, pos), (_, _, value))| Fact {
-                entity,
-                attr,
-                pos,
-                value: value.clone(),
-            })
-            .collect();
-        facts.sort_by_key(|f| (f.attr, f.pos));
-        Ok(facts)
+        Ok(fold_state(entity, &entries, cut))
     }
 
     fn reconstruct_at(
@@ -730,6 +736,37 @@ impl Inner {
             .find(|(_, w)| *w <= at_us)
             .map(|(t, _)| *t)
     }
+}
+
+/// Fold history entries into the live fact set at `cut` (or now): the
+/// latest op per (attr, pos) wins; a retract removes the slot.
+fn fold_state(entity: Uuid, entries: &[IndexEntry], cut: Option<TxId>) -> Vec<Fact> {
+    let mut live: HashMap<(AttrId, Option<u32>), (TxId, FactOp, &FactValue)> = HashMap::new();
+    for e in entries {
+        if let Some(cut) = cut
+            && e.tx > cut
+        {
+            continue;
+        }
+        let slot = live
+            .entry((e.attr, e.pos))
+            .or_insert((e.tx, e.op, &e.value));
+        if e.tx >= slot.0 {
+            *slot = (e.tx, e.op, &e.value);
+        }
+    }
+    let mut facts: Vec<Fact> = live
+        .into_iter()
+        .filter(|(_, (_, op, _))| matches!(op, FactOp::Assert))
+        .map(|((attr, pos), (_, _, value))| Fact {
+            entity,
+            attr,
+            pos,
+            value: value.clone(),
+        })
+        .collect();
+    facts.sort_by_key(|f| (f.attr, f.pos));
+    facts
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {

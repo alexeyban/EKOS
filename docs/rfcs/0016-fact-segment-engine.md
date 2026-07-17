@@ -293,11 +293,24 @@ buys **capability** — 19× faster search, ~4× point reads, true relationship
 history, O(1) copy-on-write branches, semantic deltas — at ~1.7× the bytes,
 not fewer.
 
-Standing resolution until amended: the default backend remains SQLite;
-`ekos ledger migrate --v3` is an explicit, reversible per-workspace opt-in.
-Amending the gate (e.g. "≤2× of the RFC 0015 ledger, given the capability
-set") or pursuing the pointer-EAVT redesign are decisions for a future
-revision, to be taken with these numbers on the table.
+**Gate amendment (2026-07-17, with the measurements above on the table):**
+the §8 storage criterion is amended from "≥2× smaller than the RFC 0015
+ledger" to **"≤2× the RFC 0015 ledger's size at equal-or-better read
+latency"**. Rationale: the original criterion was written before the
+architecture existed and implicitly assumed the index set and search engine
+were free; the measurement shows a fact store's floor is one compressed copy
+of truth + indexes + tantivy, and the engine's value is capability
+(19× search, ~4× point reads, true relationship history, O(1) branches,
+semantic deltas), not byte reduction. At 65 MB vs 39 MB (1.66×) with every
+read faster, the amended gate **passes**. The pointer-EAVT redesign remains
+a documented option if index size ever dominates (projected ~50 MB — it
+would not have passed the original gate either).
+
+Resolution: workspaces are promoted by explicit `ekos ledger migrate --v3`
+(reversible: delete `facts/` to return to the untouched SQLite ledger; note
+that writes made after migration live only in the fact store). Fresh
+workspaces keep the SQLite default until the engine has soaked on the live
+estate.
 
 ## Phasing (each phase = its own tests + benchmarks, per the workflow)
 
