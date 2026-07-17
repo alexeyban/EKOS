@@ -1,8 +1,8 @@
+use super::store::open_store;
 use anyhow::Result;
 use ekos_artifact::{ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
-use ekos_ledger::Ledger;
 use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
@@ -27,9 +27,7 @@ fn save_fingerprints(path: &Path, fingerprints: &HashMap<String, String>) -> Res
 }
 
 pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
-    let ledger_path = config.ledger_path(cwd);
-    let ledger = Ledger::open(&ledger_path)
-        .map_err(|e| anyhow::anyhow!("cannot open ledger at {}: {e}", ledger_path.display()))?;
+    let ledger = open_store(config, cwd)?;
 
     let artifact_store = PackArtifactStore::open(config.artifact_dir(cwd))
         .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;

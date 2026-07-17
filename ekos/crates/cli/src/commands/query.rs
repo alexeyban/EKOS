@@ -1,7 +1,8 @@
+use super::store::open_store;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::KirId;
-use ekos_ledger::Ledger;
+use ekos_ledger::KnowledgeStore;
 use ekos_runtime::Runtime;
 use std::{path::Path, str::FromStr};
 
@@ -57,7 +58,7 @@ pub fn object(config: &EkosConfig, cwd: &Path, id_str: &str, format: &str) -> Re
 
 pub fn find(config: &EkosConfig, cwd: &Path, query: &str) -> Result<()> {
     let ledger = open_ledger(config, cwd)?;
-    let rt = Runtime::new(&ledger);
+    let rt = Runtime::over(&*ledger);
     let results = rt.find_objects(query)?;
 
     if results.is_empty() {
@@ -76,7 +77,7 @@ pub fn neighbourhood(config: &EkosConfig, cwd: &Path, id_str: &str, depth: u32) 
     let id = KirId::from_str(id_str).map_err(|_| anyhow::anyhow!("invalid object id: {id_str}"))?;
 
     let ledger = open_ledger(config, cwd)?;
-    let rt = Runtime::new(&ledger);
+    let rt = Runtime::over(&*ledger);
     let graph = rt.load_neighborhood(&id, depth)?;
 
     if graph.objects.is_empty() {
@@ -108,12 +109,6 @@ pub fn neighbourhood(config: &EkosConfig, cwd: &Path, id_str: &str, depth: u32) 
     Ok(())
 }
 
-fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Ledger> {
-    let path = config.ledger_path(cwd);
-    Ledger::open(&path).map_err(|e| {
-        anyhow::anyhow!(
-            "cannot open ledger at {}: {e}\nRun `ekos build` first.",
-            path.display()
-        )
-    })
+fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    open_store(config, cwd).map_err(|e| anyhow::anyhow!("{e}\nRun `ekos build` first."))
 }

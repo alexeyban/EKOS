@@ -8,7 +8,7 @@ pub mod ai;
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{KirEvidence, KirGraph, KirId, KirObject, KirRelationship};
-use ekos_ledger::{Ledger, LedgerError};
+use ekos_ledger::{KnowledgeStore, LedgerError};
 use serde::Serialize;
 use std::collections::{HashSet, VecDeque};
 use thiserror::Error;
@@ -30,13 +30,20 @@ pub struct ObjectState {
     pub evidence: Vec<KirEvidence>,
 }
 
-/// Read-only view over the Knowledge Ledger.
+/// Read-only view over the Knowledge Ledger. Backend-agnostic since
+/// RFC 0016: works over any [`KnowledgeStore`] (the SQLite `Ledger` or the
+/// fact engine's `FactLedger`).
 pub struct Runtime<'a> {
-    ledger: &'a Ledger,
+    ledger: &'a dyn KnowledgeStore,
 }
 
 impl<'a> Runtime<'a> {
-    pub fn new(ledger: &'a Ledger) -> Self {
+    pub fn new<S: KnowledgeStore>(ledger: &'a S) -> Self {
+        Self { ledger }
+    }
+
+    /// Construct from an already-erased store reference.
+    pub fn over(ledger: &'a dyn KnowledgeStore) -> Self {
         Self { ledger }
     }
 
@@ -181,10 +188,10 @@ mod tests {
     };
     use tempfile::TempDir;
 
-    fn temp_ledger() -> (Ledger, TempDir) {
+    fn temp_ledger() -> (ekos_ledger::Ledger, TempDir) {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ledger.db");
-        (Ledger::open(&path).unwrap(), dir)
+        (ekos_ledger::Ledger::open(&path).unwrap(), dir)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

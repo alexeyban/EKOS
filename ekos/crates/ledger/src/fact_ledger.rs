@@ -171,6 +171,43 @@ impl FactLedger {
         entity: Uuid,
         payload: serde_json::Value,
     ) -> Result<bool, LedgerError> {
+        self.append_inner(entity, payload, None)
+    }
+
+    /// Migration entry point: append one historical version with its
+    /// **original** commit timestamp (RFC 0016 §8).
+    pub(crate) fn append_version(
+        &self,
+        entity: Uuid,
+        payload: serde_json::Value,
+        wall_us: i64,
+    ) -> Result<bool, LedgerError> {
+        self.append_inner(entity, payload, Some(wall_us))
+    }
+
+    /// Current content signature of an entity (migration verification).
+    pub(crate) fn current_signature(&self, entity: Uuid) -> Result<Option<String>, LedgerError> {
+        self.inner.lock().unwrap().current_sig(entity)
+    }
+
+    /// Seal the active segment and flush indexes — called at the end of a
+    /// migration so the new store opens fast.
+    pub(crate) fn seal_and_flush(&self) -> Result<(), LedgerError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.store.seal_active()?;
+        if let Some((tx, _)) = inner.batch_times.last().copied() {
+            inner.flush_memtable(tx)?;
+            inner.search.commit(Some(tx))?;
+        }
+        Ok(())
+    }
+
+    fn append_inner(
+        &self,
+        entity: Uuid,
+        payload: serde_json::Value,
+        wall_override_us: Option<i64>,
+    ) -> Result<bool, LedgerError> {
         let mut inner = self.inner.lock().unwrap();
         let sig = content_signature(&payload);
         if inner.current_sig(entity)?.as_ref() == Some(&sig) {
@@ -188,7 +225,7 @@ impl FactLedger {
         let old_facts = inner.state_at(entity, None)?;
         let ops = diff(&old_facts, &new_facts);
 
-        let wall = Utc::now().timestamp_micros();
+        let wall = wall_override_us.unwrap_or_else(|| Utc::now().timestamp_micros());
         let (tx, sealed) = inner.store.append_with_seal(ops.clone(), wall)?;
         inner.batch_times.push((tx, wall));
         for (op, fact) in &ops {

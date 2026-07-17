@@ -96,6 +96,15 @@ ekos ledger migrate            # ledger v1 → v2: dictionary-zstd payloads (~2.
 ekos artifact repack           # loose JSON files → packed segments (~7x smaller on disk)
 ```
 
+### Fact-segment engine (RFC 0016, experimental opt-in)
+
+`ekos ledger migrate --v3` migrates a workspace onto the fact-segment engine
+(EAV facts, immutable segments, tantivy search, mmap'd reads) — every version
+is signature-verified during migration, the SQLite source is left untouched,
+and deleting `.ekos/ledger/facts/` rolls back. Migrated workspaces are served
+by the fact engine automatically; the default backend remains SQLite until
+the RFC's storage acceptance gate is met (see devlog 18).
+
 ## Development Process
 
 All significant architectural decisions begin as RFCs in `docs/rfcs/`. No feature is implemented until its RFC is accepted. See `CLAUDE.md` for the full mandatory development workflow.

@@ -1318,6 +1318,289 @@ pub fn merge_branch(main: &Ledger, branch: &Ledger) -> Result<MergeReport, Ledge
     Ok(report)
 }
 
+// ── The backend seam (RFC 0016) ─────────────────────────────────────────────
+
+/// The `Ledger` API as a trait — the seam RFC 0016 flips behind. Both the
+/// SQLite backend ([`Ledger`]) and the fact engine ([`FactLedger`])
+/// implement it; the runtime, EKL, CLI, and MCP consume only this surface.
+pub trait KnowledgeStore {
+    fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError>;
+    fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError>;
+    fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError>;
+    fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError>;
+    fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, LedgerError>;
+    fn get_relationship(&self, id: &KirId) -> Result<Option<KirRelationship>, LedgerError>;
+    fn all_objects(&self) -> Result<Vec<KirObject>, LedgerError>;
+    fn all_relationships(&self) -> Result<Vec<KirRelationship>, LedgerError>;
+    fn relationships_for(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError>;
+    fn object_at(&self, id: &KirId, at: DateTime<Utc>) -> Result<Option<KirObject>, LedgerError>;
+    fn relationships_at(
+        &self,
+        id: &KirId,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<KirRelationship>, LedgerError>;
+    fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError>;
+    fn entry_count(&self) -> Result<usize, LedgerError>;
+    fn object_count(&self) -> Result<usize, LedgerError>;
+    fn relationship_count(&self) -> Result<usize, LedgerError>;
+    /// Write a complete branch copy to `dest` (file for SQLite, directory
+    /// for the fact engine).
+    fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError>;
+    /// What changed in `(from, to]`.
+    fn diff(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError>;
+}
+
+macro_rules! delegate_store {
+    ($ty:ty) => {
+        impl KnowledgeStore for $ty {
+            fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
+                <$ty>::append_object(self, obj)
+            }
+            fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError> {
+                <$ty>::append_evidence(self, ev)
+            }
+            fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
+                <$ty>::append_relationship(self, rel)
+            }
+            fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError> {
+                <$ty>::get_object(self, id)
+            }
+            fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, LedgerError> {
+                <$ty>::get_evidence(self, id)
+            }
+            fn get_relationship(&self, id: &KirId) -> Result<Option<KirRelationship>, LedgerError> {
+                <$ty>::get_relationship(self, id)
+            }
+            fn all_objects(&self) -> Result<Vec<KirObject>, LedgerError> {
+                <$ty>::all_objects(self)
+            }
+            fn all_relationships(&self) -> Result<Vec<KirRelationship>, LedgerError> {
+                <$ty>::all_relationships(self)
+            }
+            fn relationships_for(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError> {
+                <$ty>::relationships_for(self, id)
+            }
+            fn object_at(
+                &self,
+                id: &KirId,
+                at: DateTime<Utc>,
+            ) -> Result<Option<KirObject>, LedgerError> {
+                <$ty>::object_at(self, id, at)
+            }
+            fn relationships_at(
+                &self,
+                id: &KirId,
+                at: DateTime<Utc>,
+            ) -> Result<Vec<KirRelationship>, LedgerError> {
+                <$ty>::relationships_at(self, id, at)
+            }
+            fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
+                <$ty>::find_objects(self, query)
+            }
+            fn entry_count(&self) -> Result<usize, LedgerError> {
+                <$ty>::entry_count(self)
+            }
+            fn object_count(&self) -> Result<usize, LedgerError> {
+                <$ty>::object_count(self)
+            }
+            fn relationship_count(&self) -> Result<usize, LedgerError> {
+                <$ty>::relationship_count(self)
+            }
+            fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
+                <$ty>::vacuum_into(self, dest)
+            }
+            fn diff(
+                &self,
+                from: DateTime<Utc>,
+                to: DateTime<Utc>,
+            ) -> Result<LedgerDiff, LedgerError> {
+                Self::diff_impl(self, from, to)
+            }
+        }
+    };
+}
+
+impl Ledger {
+    fn diff_impl(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError> {
+        diff_ledger(self, from, to)
+    }
+}
+impl FactLedger {
+    fn diff_impl(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError> {
+        FactLedger::diff(self, from, to)
+    }
+}
+delegate_store!(Ledger);
+delegate_store!(FactLedger);
+
+/// Merge every object/relationship currently tracked in `branch` into
+/// `main` — backend-agnostic form of [`merge_branch`], same RFC 0011
+/// last-write divergence semantics.
+pub fn merge_stores(
+    main: &dyn KnowledgeStore,
+    branch: &dyn KnowledgeStore,
+) -> Result<MergeReport, LedgerError> {
+    let mut report = MergeReport::default();
+    for obj in branch.all_objects()? {
+        match main.get_object(&obj.id)? {
+            None => {
+                main.append_object(&obj)?;
+                report.objects_merged += 1;
+            }
+            Some(existing) => {
+                let a = content_signature(&serde_json::to_value(&existing)?);
+                let b = content_signature(&serde_json::to_value(&obj)?);
+                if a != b {
+                    report.conflicts.push(MergeConflict {
+                        object_id: obj.id.to_string(),
+                        reason: "object diverged between branches".to_string(),
+                    });
+                }
+            }
+        }
+    }
+    for rel in branch.all_relationships()? {
+        match main.get_relationship(&rel.id)? {
+            None => {
+                main.append_relationship(&rel)?;
+                report.relationships_merged += 1;
+            }
+            Some(existing) => {
+                let a = content_signature(&serde_json::to_value(&existing)?);
+                let b = content_signature(&serde_json::to_value(&rel)?);
+                if a != b {
+                    report.conflicts.push(MergeConflict {
+                        object_id: rel.id.to_string(),
+                        reason: "relationship diverged between branches".to_string(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(report)
+}
+
+// ── v2 → v3 migration (RFC 0016 §8) ─────────────────────────────────────────
+
+/// One version row exported from a v1/v2 SQLite ledger, in commit order.
+#[derive(Debug, Clone)]
+pub struct VersionRow {
+    pub id: String,
+    pub entry_type: String,
+    pub payload: serde_json::Value,
+    pub written_at: DateTime<Utc>,
+}
+
+impl Ledger {
+    /// Every version row in commit (rowid) order — the migration export.
+    pub fn export_versions(&self) -> Result<Vec<VersionRow>, LedgerError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, entry_type, payload, written_at FROM entries ORDER BY rowid")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, SqlValue>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, SqlValue>(2)?,
+                row.get::<_, SqlValue>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, entry_type, payload, written_at) = row?;
+            out.push(VersionRow {
+                id: id_value_to_string(id),
+                entry_type,
+                payload: serde_json::from_str(&self.payload_to_string(payload)?)?,
+                written_at: ts_value_to_datetime(written_at)?,
+            });
+        }
+        Ok(out)
+    }
+}
+
+/// Result of a v2 → v3 (fact engine) migration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MigrateV3Report {
+    pub versions: usize,
+    pub objects: usize,
+    pub relationships: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+    pub dest: PathBuf,
+}
+
+/// Migrate a v1/v2 SQLite ledger into a fact-engine store at `dest`
+/// (a directory, which must not already contain one), preserving the full
+/// append-only history with original commit timestamps and verifying every
+/// version's `content_signature` byte-for-byte after reconstruction —
+/// the RFC 0016 §8 gate. The source is never modified.
+pub fn migrate_to_v3(v2_path: &Path, dest: &Path) -> Result<MigrateV3Report, LedgerError> {
+    if dest.join("manifest.json").exists() || dest.join("HEAD").exists() {
+        return Err(LedgerError::Corrupt(format!(
+            "destination {} already contains a fact store",
+            dest.display()
+        )));
+    }
+    let src = Ledger::open(v2_path)?;
+    let bytes_before = std::fs::metadata(v2_path)?.len();
+
+    let facts = FactLedger::open(dest)?;
+    let mut versions = 0usize;
+    for row in src.export_versions()? {
+        let Ok(entity) = row.id.parse::<uuid::Uuid>() else {
+            return Err(LedgerError::Corrupt(format!(
+                "entry id {} is not a UUID — cannot migrate",
+                row.id
+            )));
+        };
+        let expect = content_signature(&row.payload);
+        facts.append_version(entity, row.payload, row.written_at.timestamp_micros())?;
+        let got = facts.current_signature(entity)?;
+        if got.as_deref() != Some(expect.as_str()) {
+            return Err(LedgerError::Corrupt(format!(
+                "signature mismatch after migrating version of {entity}"
+            )));
+        }
+        versions += 1;
+    }
+
+    let objects = KnowledgeStore::object_count(&facts)?;
+    let relationships = KnowledgeStore::relationship_count(&facts)?;
+    if objects != src.object_count()? || relationships != src.relationship_count()? {
+        return Err(LedgerError::Corrupt(
+            "migration count mismatch — source left untouched".into(),
+        ));
+    }
+    facts.seal_and_flush()?;
+    drop(facts);
+
+    let bytes_after = dir_bytes(dest);
+    Ok(MigrateV3Report {
+        versions,
+        objects,
+        relationships,
+        bytes_before,
+        bytes_after,
+        dest: dest.to_path_buf(),
+    })
+}
+
+fn dir_bytes(dir: &Path) -> u64 {
+    let mut total = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                total += dir_bytes(&path);
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1940,5 +2223,68 @@ mod tests {
         // Dictionary-compressed frames decode fine on a fresh open.
         let v2 = Ledger::open(&path).unwrap();
         assert_eq!(v2.all_objects().unwrap().len(), 200);
+    }
+
+    /// RFC 0016 §8: v2 → v3 migration preserves history, verifies every
+    /// version's signature, and the fact store answers identically.
+    #[test]
+    fn migrate_v2_to_v3_preserves_history_and_signatures() {
+        let dir = tempdir().unwrap();
+        let v2_path = dir.path().join("ledger.db");
+        let v2 = Ledger::open(&v2_path).unwrap();
+
+        let mut obj = KirObject::new("orders", ObjectKind::Table)
+            .with_property("excerpt", serde_json::json!("wolverine tracking table"));
+        let other = KirObject::new("customers", ObjectKind::Table);
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, obj.id, other.id);
+        let ev = KirEvidence::new(SourceLocation::at("s.sql", 1), "CREATE TABLE orders");
+        v2.append_object(&obj).unwrap();
+        v2.append_object(&other).unwrap();
+        v2.append_relationship(&rel).unwrap();
+        v2.append_evidence(&ev).unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+        let mid = Utc::now();
+        std::thread::sleep(Duration::from_millis(2));
+        obj.properties
+            .insert("row_count".into(), serde_json::json!(3));
+        v2.append_object(&obj).unwrap();
+
+        let dest = dir.path().join("facts");
+        let report = migrate_to_v3(&v2_path, &dest).unwrap();
+        assert_eq!(report.versions, 5);
+        assert_eq!(report.objects, 2);
+        assert_eq!(report.relationships, 1);
+
+        let v3 = FactLedger::open(&dest).unwrap();
+        assert_eq!(KnowledgeStore::entry_count(&v3).unwrap(), 5);
+        // Current state matches the v2 backend exactly (payload + signature).
+        for id in [obj.id, other.id] {
+            let a = serde_json::to_value(v2.get_object(&id).unwrap().unwrap()).unwrap();
+            let b = serde_json::to_value(KnowledgeStore::get_object(&v3, &id).unwrap().unwrap())
+                .unwrap();
+            assert_eq!(content_signature(&a), content_signature(&b));
+        }
+        // History with ORIGINAL timestamps: the pre-update version is at `mid`.
+        let historical = KnowledgeStore::object_at(&v3, &obj.id, mid)
+            .unwrap()
+            .unwrap();
+        assert!(!historical.properties.contains_key("row_count"));
+        // Evidence, graph, and search all serve.
+        assert!(KnowledgeStore::get_evidence(&v3, &ev.id).unwrap().is_some());
+        assert_eq!(
+            KnowledgeStore::relationships_for(&v3, &obj.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            KnowledgeStore::find_objects(&v3, "wolverine")
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Re-running into the same destination is refused.
+        assert!(migrate_to_v3(&v2_path, &dest).is_err());
     }
 }

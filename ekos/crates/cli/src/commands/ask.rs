@@ -1,6 +1,6 @@
+use super::store::open_store;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
-use ekos_ledger::Ledger;
 use ekos_recovery::{anthropic::AnthropicProvider, llm::LlmProvider};
 use ekos_runtime::{AiRuntime, AiRuntimeConfig, Runtime};
 use std::{path::Path, sync::Arc};
@@ -23,14 +23,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, json: bool) ->
         }
     };
 
-    let ledger_path = config.ledger_path(cwd);
-    let ledger = Ledger::open(&ledger_path).map_err(|e| {
-        anyhow::anyhow!(
-            "cannot open ledger at {}: {e}\nRun `ekos build` first.",
-            ledger_path.display()
-        )
-    })?;
-    let runtime = Runtime::new(&ledger);
+    let ledger = open_store(config, cwd)?;
+    let runtime = Runtime::over(&*ledger);
     let ai = AiRuntime::new(&runtime, llm, ai_config);
 
     let answer = ai.ask(question).await?;

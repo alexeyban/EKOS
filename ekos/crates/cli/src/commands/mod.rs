@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod query;
 pub mod recover;
 pub mod resolve;
+pub mod store;
 
 use ekos_compiler_core::EkosConfig;
 

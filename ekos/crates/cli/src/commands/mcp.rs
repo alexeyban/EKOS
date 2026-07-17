@@ -8,12 +8,12 @@
 //! The ledger is opened per `tools/call`, so the server starts before a first
 //! `ekos build` and returns a readable tool error until a ledger exists.
 
+use super::store::open_store;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::KirId;
-use ekos_ledger::Ledger;
 use ekos_runtime::Runtime;
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
@@ -199,14 +199,9 @@ fn tools_call(config: &EkosConfig, workspace: &Path, params: &Value) -> Value {
 }
 
 fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) -> Result<Value> {
-    let ledger_path = config.ledger_path(workspace);
-    let ledger = Ledger::open(&ledger_path).map_err(|e| {
-        anyhow::anyhow!(
-            "cannot open ledger at {}: {e}\nRun `ekos build` in the workspace first.",
-            ledger_path.display()
-        )
-    })?;
-    let runtime = Runtime::new(&ledger);
+    let ledger = open_store(config, workspace)
+        .map_err(|e| anyhow::anyhow!("{e}\nRun `ekos build` in the workspace first."))?;
+    let runtime = Runtime::over(&*ledger);
 
     match name {
         "ekos_search" => {
@@ -295,7 +290,7 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
                 None => Utc::now(),
             };
 
-            let diff = ekos_ledger::diff_ledger(&ledger, from, to)?;
+            let diff = ledger.diff(from, to)?;
 
             // Resolve touched logical ids to something an agent can read;
             // cap the listing so a full-rebuild window stays consumable.
@@ -332,7 +327,7 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
             "entries": ledger.entry_count()?,
             "objects": ledger.object_count()?,
             "relationships": ledger.relationship_count()?,
-            "ledger_path": ledger_path.display().to_string(),
+            "ledger_path": super::store::store_display(config, workspace),
         })),
         other => Err(anyhow::anyhow!("unknown tool: {other}")),
     }

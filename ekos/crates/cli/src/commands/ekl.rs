@@ -1,7 +1,7 @@
+use super::store::open_store;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse, interpreter::default_returns};
-use ekos_ledger::Ledger;
 use ekos_runtime::Runtime;
 use std::path::Path;
 
@@ -16,14 +16,8 @@ pub fn run(config: &EkosConfig, cwd: &Path, query: &str, json: bool) -> Result<(
         }
     };
 
-    let ledger_path = config.ledger_path(cwd);
-    let ledger = Ledger::open(&ledger_path).map_err(|e| {
-        anyhow::anyhow!(
-            "cannot open ledger at {}: {e}\nRun `ekos build` first.",
-            ledger_path.display()
-        )
-    })?;
-    let runtime = Runtime::new(&ledger);
+    let ledger = open_store(config, cwd)?;
+    let runtime = Runtime::over(&*ledger);
     let interpreter = EklInterpreter::new(&runtime);
 
     let result = match interpreter.execute(&ast) {

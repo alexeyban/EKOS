@@ -123,8 +123,13 @@ enum LedgerCommands {
         #[arg(long)]
         storage: bool,
     },
-    /// Migrate the ledger to the v2 compact format (RFC 0015)
-    Migrate,
+    /// Migrate the ledger: v2 compact format (RFC 0015), or --v3 for the
+    /// fact engine (RFC 0016)
+    Migrate {
+        /// Migrate to the RFC 0016 fact-segment engine
+        #[arg(long)]
+        v3: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -187,7 +192,7 @@ async fn main() -> Result<()> {
             LedgerCommands::Status { storage } => {
                 ekos::commands::ledger::status(&config, &cwd, storage)
             }
-            LedgerCommands::Migrate => ekos::commands::ledger::migrate(&config, &cwd),
+            LedgerCommands::Migrate { v3 } => ekos::commands::ledger::migrate(&config, &cwd, v3),
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor => ekos::commands::doctor::run(&config, &cwd, &config_path),

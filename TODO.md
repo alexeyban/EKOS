@@ -1297,9 +1297,12 @@ time ekos build   # benchmark before/after parallelism
   on the live estate), EKOS Pack v1 packed artifact segments (`ekos artifact repack`, 214→31 MB
   on disk), compressed snapshots/CKM with retention, `ekos ledger status --storage` instrument,
   `storage_compaction` bench. Devlog 17.
-- [~] **Fact-segment engine (RFC 0016, accepted 2026-07-17)** — EAV facts, immutable segments,
-  EAVT/AEVT/AVET indexes, tantivy, mmap; replaces SQLite behind the `Ledger` API once the
-  acceptance gate passes. Implementation Phase 1 (fact model + signature-parity tests) is next.
+- [~] **Fact-segment engine (RFC 0016, accepted 2026-07-17)** — Phases 1–6 implemented (fact
+  model, segments+watermark, EAVT/AEVT/AVET runs, API parity, tantivy, mmap) plus
+  `ekos ledger migrate --v3` and the `KnowledgeStore` backend seam with auto-detection.
+  Acceptance gate (devlog 18): functional criteria PASS on the real estate; storage FAILS
+  (98 MB vs ≤20 MB — index runs store full values ×3 orders). Default stays SQLite; flip
+  blocked on RFC §7 compression: dict-zstd batches, prefix/delta blocks, slim projections.
 
 - [x] **Incremental compilation (re-scan changed sources only)**
   - *What:* Before running an `Observer`, compare the current source fingerprint (Git HEAD sha for

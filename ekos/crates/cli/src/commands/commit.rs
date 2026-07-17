@@ -1,7 +1,8 @@
+use super::store::{open_store, store_display};
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirObject, KirRelationship, SourceLocation};
-use ekos_ledger::Ledger;
+use ekos_ledger::KnowledgeStore;
 use ekos_semantic::{CkModel, CkmRelationship, EvidenceRecord};
 use std::path::Path;
 
@@ -54,18 +55,13 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  Objects skipped:       {objects_skipped} (already in ledger)");
     println!("  Relationships written: {rels_written}");
     println!("  Evidence records:      {evidence_written}");
-    println!(
-        "  Ledger:                {}",
-        config.ledger_path(cwd).display()
-    );
+    println!("  Ledger:                {}", store_display(config, cwd));
 
     Ok(())
 }
 
-fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Ledger> {
-    let path = config.ledger_path(cwd);
-    Ledger::open(&path)
-        .map_err(|e| anyhow::anyhow!("cannot open ledger at {}: {e}", path.display()))
+fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    open_store(config, cwd)
 }
 
 fn ckm_rel_to_kir(rel: &CkmRelationship) -> KirRelationship {
