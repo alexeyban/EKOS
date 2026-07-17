@@ -1,3 +1,5 @@
+pub mod fact;
+
 use chrono::{DateTime, Utc};
 use ekos_artifact::ArtifactId;
 use ekos_kir::{KirEvidence, KirId, KirObject, KirRelationship};
@@ -19,7 +21,7 @@ use uuid::Uuid;
 /// The signature is always the SHA-256 of *canonical JSON* — never of the
 /// stored (compressed) bytes — so identity is independent of the on-disk
 /// format (RFC 0015).
-fn content_signature(payload: &serde_json::Value) -> String {
+pub(crate) fn content_signature(payload: &serde_json::Value) -> String {
     let mut stripped = payload.clone();
     if let serde_json::Value::Object(ref mut map) = stripped {
         map.remove("created_at");

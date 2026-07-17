@@ -89,6 +89,22 @@ Fact {
 - **Attribute registry**: `a` is a u32 interned via a dictionary persisted in
   the manifest (append-only list; ids never reused).
 
+**Phase 1 refinements** (discovered implementing `ledger/src/fact.rs`; all
+are consequences of the byte-parity requirement):
+
+- Facts carry an optional **position** component: the top-level `evidence`
+  array decomposes into position-indexed ref facts, because evidence *order*
+  is signature-relevant and a bare value set cannot preserve it.
+- Attribute paths **escape** literal `.` and `\` in key segments (`\.`,
+  `\\`), so `{"a.b": 1}` and `{"a": {"b": 1}}` remain distinct payloads with
+  distinct signatures.
+- **Empty** objects and arrays are stored as one composite fact — flattening
+  them to nothing would erase them from the reconstruction.
+- Ref detection is strictly **schema-positional** (`id`, `from`, `to`,
+  `subject`, `evidence[*]`) and only for canonical hyphenated-lowercase UUID
+  text; anything else in a ref position round-trips verbatim as a plain
+  value. Values are never sniffed for UUID-ness.
+
 ### 2. Transactions & identity
 
 - `TxId` is a monotone u64. Each commit batch carries `(tx, wall_time_us)` —
