@@ -1,5 +1,4 @@
 ---
-
 name: memory
 description: >-
 Global cross-project memory for Claude sessions, backed by the EKOS
@@ -13,7 +12,7 @@ Triggers include: the user asking "have we/I done this before?",
 workspace root, finishing significant work, being corrected, or
 discovering something non-obvious. This applies in EVERY project,
 not just EKOS — the memory is shared between all projects and sessions.
------------------------------------------------------------------------
+---
 
 # EKOS as global memory
 
