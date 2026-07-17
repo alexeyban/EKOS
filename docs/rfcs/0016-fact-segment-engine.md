@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Draft |
+| **Status** | Accepted (2026-07-17; reviewed against RFC 0001–0015 invariants — see Review notes) |
 | **Author** | EKOS team |
 | **Created** | 2026-07-17 |
 | **Gating** | Ledger v3; supersedes the SQLite backend of RFCs 0005/0011/0015 |
@@ -101,6 +101,18 @@ Fact {
   therefore identical, and v2→v3 migration can verify signatures byte-for-byte.
   A cache `(e → sig)` of current signatures lives in the manifest's
   current-state index so idempotence checks don't reconstruct JSON per append.
+- **Numeric fidelity is signature-critical.** Byte-compatibility requires JSON
+  numbers to survive decompose → recompose *exactly*: scalar values store
+  `serde_json::Number` semantics (i64/u64/f64 distinction and float lexical
+  form via the same serializer), never a lossy f64-only encoding. The fact
+  round-trip property tests must include the edge cases — `1` vs `1.0`,
+  `u64::MAX`, negative zero, sub-normal floats — before any other phase
+  builds on the fact model.
+- **As-of queries map wall time to tx.** The public API keeps
+  `object_at(id, at: DateTime)`; the engine resolves `at` to the greatest
+  `tx` whose batch `wall_time_us ≤ at` via the (tiny, in-manifest) batch time
+  index, then reads by `tx`. Ties are impossible by construction — `tx` is
+  the ordering authority.
 - Determinism: fact decomposition is a pure function of the payload;
   reconstruction is a pure function of the fact set. Property order never
   matters (canonical JSON sorts keys). Every compiler-pass invariant holds.
@@ -116,6 +128,13 @@ Fact {
   recovery truncates at the last valid batch boundary (checksummed batch
   frames, same frame discipline as Pack v1). Sealed segments are verified by
   manifest hash. The manifest itself is updated by write-temp + atomic rename.
+- **Read-your-writes across processes** (the MCP server reads while a build
+  writes): each committed batch fsyncs the active segment and then publishes
+  a **committed-length watermark** (a tiny `HEAD` file, atomically renamed).
+  Readers see sealed segments plus the active segment *up to the watermark* —
+  the same visibility SQLite WAL gives today, without waiting for a seal.
+  A crash between fsync and watermark publish loses nothing: recovery scans
+  the active segment past the watermark and republishes it.
 - **Branches are manifests.** A branch is a new manifest listing the same
   sealed segments plus its own divergent ones — copy-on-write, O(1) instead
   of `VACUUM INTO`'s O(database). Merge = fact-set comparison per entity
@@ -158,9 +177,12 @@ invariant since RFC 0002):
 
 ### 6. Execution — mmap'd sealed segments
 
-- Sealed segments and index runs are opened via `memmap2`. **This requires
-  `unsafe`** (the map's validity depends on the file not being truncated
-  concurrently); justification per the zero-unsafe rule:
+- Sealed segments and index runs are opened via `memmap2`; the **active**
+  segment is read with plain `pread` up to the committed watermark — mmap is
+  never applied to a file that can still grow or be truncated by recovery.
+  **The sealed-file maps require `unsafe`** (the map's validity depends on
+  the file not being truncated concurrently); justification per the
+  zero-unsafe rule:
   - maps cover only **sealed, content-addressed** files that EKOS never
     mutates or truncates (the manifest referencing them is immutable
     history);
@@ -212,6 +234,29 @@ invariant since RFC 0002):
   Their architecture is the borrowed asset, not their runtime.
 - **Keep FTS5** — no SQLite, no FTS5. Tantivy is the natural fit for the
   segment lifecycle and unlocks full-content search.
+
+## Review notes (acceptance, 2026-07-17)
+
+Checked against every standing invariant: append-only (retract is a fact,
+nothing is deleted; compaction explicitly deferred to its own RFC), evidence
+traceability (evidence entities and their blobs survive as facts), determinism
+(decomposition/reconstruction are pure; no wall-clock ordering authority),
+content-addressing (signatures byte-compatible with v2 by construction, so
+migration is verifiable), derived-index rebuildability (all three sorts and
+tantivy rebuild from segments), runtime read-only (unchanged `Ledger` seam),
+and the zero-unsafe rule (single audited mmap constructor over sealed files).
+
+Four gaps were found in the draft and resolved in this revision:
+
+1. **Active-segment visibility** — readers would have gone stale until a seal;
+   fixed with the fsync-then-publish committed-length watermark (§3).
+2. **Numeric fidelity** — a lossy number encoding would silently change every
+   signature; fixed by mandating `serde_json::Number` semantics plus edge-case
+   property tests gating Phase 1 (§2).
+3. **Wall-time → tx resolution** for `object_at` was implied but unspecified;
+   now explicit (§2).
+4. **mmap scope** — the active segment is `pread`-only; maps cover sealed,
+   immutable files exclusively (§6).
 
 ## Phasing (each phase = its own tests + benchmarks, per the workflow)
 
