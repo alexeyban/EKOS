@@ -298,6 +298,13 @@ impl SegmentStore {
         Ok(())
     }
 
+    /// Persist the manifest now (atomic rename). Called by owners whenever
+    /// manifest state outside the seal path changes — e.g. the attribute
+    /// registry grew during an append.
+    pub fn persist_manifest(&self) -> Result<(), SegmentError> {
+        save_manifest(&self.root, &self.manifest)
+    }
+
     /// The next transaction number this store will assign.
     pub fn next_tx(&self) -> TxId {
         TxId(self.next_tx)

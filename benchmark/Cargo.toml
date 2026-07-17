@@ -62,3 +62,7 @@ harness = false
 [[bench]]
 name = "index_runs"
 harness = false
+
+[[bench]]
+name = "fact_ledger"
+harness = false

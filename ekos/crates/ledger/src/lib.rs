@@ -1,6 +1,9 @@
 pub mod fact;
+pub mod fact_ledger;
 pub mod index;
 pub mod segment;
+
+pub use fact_ledger::FactLedger;
 
 use chrono::{DateTime, Utc};
 use ekos_artifact::ArtifactId;
