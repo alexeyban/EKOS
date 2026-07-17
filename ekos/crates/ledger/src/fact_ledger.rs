@@ -1,30 +1,25 @@
-//! RFC 0016 Phase 4 — the fact engine behind the `Ledger` API.
+//! RFC 0016 Phases 4–6 — the fact engine behind the `Ledger` API.
 //!
 //! [`FactLedger`] exposes the same public surface as the SQLite [`Ledger`]
 //! (`append_object` … `find_objects`, diff/merge/branching) implemented over
-//! the Phase 1–3 machinery: payloads decompose into facts, commits are
-//! segment batches (Phase 2), reads fold an entity's assert/retract history.
-//! The acceptance gate is behavioral parity — this module's tests mirror the
-//! SQLite backend's suite case by case, plus a cross-backend test asserting
-//! identical payloads and content signatures for the same inputs.
+//! the fact model (Phase 1), segment batches (Phase 2), index runs
+//! (Phase 3), tantivy search (Phase 5), and mmap'd sealed reads (Phase 6).
 //!
-//! Phase 4 scoping (recorded, not hidden):
+//! Read architecture (Phase 6): committed history lives in the segments;
+//! entries up to the `indexes/last_tx` marker are served from the on-disk
+//! EAVT/AEVT/AVET runs, and the (bounded) remainder — everything since the
+//! last seal — lives in an in-memory **memtable**. A seal flushes the
+//! memtable into new runs and advances the marker, so `open` replays only
+//! the post-seal tail instead of the whole ledger: frame *headers* are
+//! walked for the time→tx map, but batch bodies before the marker are never
+//! decompressed.
 //!
-//! - Entity state is replayed from segment batches into memory on open;
-//!   reads serve from that state. The Phase 3 on-disk runs and the Phase 6
-//!   mmap path take over when the backends are swapped — correctness first,
-//!   the I/O plumbing after parity is proven.
-//! - `find_objects` is tantivy (Phase 5, `crate::search`): BM25 with the
-//!   RFC 0014 semantics the suite pins (AND terms, `*` prefix, name 10× /
-//!   kind 4× / content 1× boosts), buffered upserts group-committing on
-//!   the first query after a write.
-//! - Entity typing (object / relationship / evidence / event) derives from
-//!   payload shape (`from`+`to`, `fragment`, `subject`) — deterministic, and
-//!   exactly the information the SQLite `entry_type` column carries.
-//!
-//! Time travel: wall time maps to the greatest `tx` whose batch time is
-//! ≤ the asked instant (RFC 0016 §2); `tx` remains the ordering authority,
-//! so same-microsecond appends can never produce an ambiguous history.
+//! Entity typing (object / relationship / evidence / event) derives from
+//! payload shape (`from`+`to`, `fragment`, `subject`) — deterministic, and
+//! exactly the information the SQLite `entry_type` column carried. Time
+//! travel maps wall time to the greatest `tx` at or before it (RFC 0016
+//! §2); `tx` is the ordering authority, so same-microsecond appends can
+//! never produce an ambiguous history.
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{KirEvidence, KirId, KirObject, KirRelationship};
@@ -34,9 +29,9 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::fact::{AttrId, Fact, FactOp, FactValue, TxId, decompose, diff, reconstruct};
-use crate::index::IndexEntry;
+use crate::index::{FactIndexes, IndexEntry, ScanPrefix, entries_from_batches};
 use crate::search::SearchIndex;
-use crate::segment::{SegmentError, SegmentStore};
+use crate::segment::{SEGMENT_SEAL_BYTES, SegmentError, SegmentStore};
 use crate::{
     LedgerDiff, LedgerEntryId, LedgerError, MergeConflict, MergeReport, content_signature,
 };
@@ -74,24 +69,23 @@ fn kind_of_payload(payload: &serde_json::Value) -> EntityKind {
     }
 }
 
-#[derive(Debug, Default)]
-struct EntityState {
-    kind: Option<EntityKind>,
-    /// Full assert/retract history in tx order.
-    entries: Vec<IndexEntry>,
-    /// Signature of the current reconstruction (`created_at` stripped).
-    current_sig: Option<String>,
-}
+/// Compact runs once more than this many accumulate per sort order.
+const MERGE_RUNS_AT: usize = 8;
 
 struct Inner {
     store: SegmentStore,
-    entities: HashMap<Uuid, EntityState>,
-    /// node id → relationship entities touching it (both directions).
-    rel_index: HashMap<Uuid, HashSet<Uuid>>,
-    /// (tx, wall_time_us) per committed batch, tx-ordered — the time→tx map.
+    /// On-disk index runs covering all batches with `tx ≤ runs_marker`.
+    runs: FactIndexes,
+    runs_marker: Option<TxId>,
+    /// Entries past the marker (everything since the last seal) — bounded by
+    /// the seal threshold.
+    memtable: Vec<IndexEntry>,
+    /// (tx, wall_time_us) per committed batch, tx-ordered — the time→tx map,
+    /// rebuilt from frame headers only.
     batch_times: Vec<(TxId, i64)>,
-    /// Tantivy object search (RFC 0016 Phase 5). Upserts buffer on append
-    /// and group-commit lazily on the first query.
+    /// Current content signatures, filled lazily (idempotence checks).
+    sig_cache: HashMap<Uuid, String>,
+    /// Tantivy object search (Phase 5): buffered upserts, lazy group commit.
     search: SearchIndex,
 }
 
@@ -103,50 +97,50 @@ pub struct FactLedger {
 }
 
 impl FactLedger {
-    /// Open (or create) a fact ledger rooted at `root` (a directory), and
-    /// replay its committed batches into serving state.
+    /// Open (or create) a fact ledger rooted at `root` (a directory).
     pub fn open(root: &Path) -> Result<Self, LedgerError> {
-        let store = SegmentStore::open(root)?;
+        Self::open_with_seal_threshold(root, SEGMENT_SEAL_BYTES)
+    }
+
+    /// `open` with a custom segment seal threshold (tests exercise the
+    /// seal → run-flush path without writing megabytes).
+    pub fn open_with_seal_threshold(root: &Path, seal_bytes: u64) -> Result<Self, LedgerError> {
+        let store = SegmentStore::open_with_seal_threshold(root, seal_bytes)?;
+        let runs = FactIndexes::open(root.join("indexes"))?;
+        let runs_marker = std::fs::read_to_string(root.join("indexes/last_tx"))
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .map(TxId);
         let (search, search_marker) = SearchIndex::open(&root.join("search"))?;
+
         let mut inner = Inner {
+            batch_times: store.batch_headers()?,
+            memtable: entries_from_batches(&store.batches_after(runs_marker)?),
             store,
-            entities: HashMap::new(),
-            rel_index: HashMap::new(),
-            batch_times: Vec::new(),
+            runs,
+            runs_marker,
+            sig_cache: HashMap::new(),
             search,
         };
-        let batches = inner.store.batches()?;
-        // Entities the search index hasn't seen (committed after its marker).
-        let mut stale: HashSet<Uuid> = HashSet::new();
-        for batch in &batches {
-            inner.batch_times.push((batch.tx, batch.wall_time_us));
-            let unseen = search_marker.is_none_or(|m| batch.tx > m);
-            for (op, fact) in &batch.ops {
-                inner
-                    .entities
-                    .entry(fact.entity)
-                    .or_default()
-                    .entries
-                    .push(IndexEntry::from_fact(fact, batch.tx, *op));
-                if unseen {
-                    stale.insert(fact.entity);
-                }
-            }
-        }
-        // Derive kind, signature, and the relationship reverse index from
-        // each entity's current state; catch the search index up on the way.
-        let ids: Vec<Uuid> = inner.entities.keys().copied().collect();
-        for id in ids {
-            let payload = inner.reconstruct_current(id)?;
-            if let Some(payload) = payload {
-                inner.note_entity(id, &payload);
-                if stale.contains(&id) && kind_of_payload(&payload) == EntityKind::Object {
-                    inner.index_object(id, &payload);
-                }
+
+        // Catch the search index up: entities committed past its marker get
+        // their current state re-indexed (bounded decode, usually ≈ memtable).
+        let stale: HashSet<Uuid> = inner
+            .store
+            .batches_after(search_marker)?
+            .iter()
+            .flat_map(|b| b.ops.iter().map(|(_, f)| f.entity))
+            .collect();
+        for id in stale {
+            if let Some(payload) = inner.reconstruct_at(id, TxId(u64::MAX))?
+                && kind_of_payload(&payload) == EntityKind::Object
+            {
+                inner.index_object(id, &payload);
             }
         }
         let last_tx = inner.batch_times.last().map(|(t, _)| *t);
         inner.search.commit(last_tx)?;
+
         Ok(Self {
             inner: Mutex::new(inner),
             root: root.to_path_buf(),
@@ -179,12 +173,7 @@ impl FactLedger {
     ) -> Result<bool, LedgerError> {
         let mut inner = self.inner.lock().unwrap();
         let sig = content_signature(&payload);
-        if inner
-            .entities
-            .get(&entity)
-            .and_then(|e| e.current_sig.as_ref())
-            == Some(&sig)
-        {
+        if inner.current_sig(entity)?.as_ref() == Some(&sig) {
             return Ok(false); // logically identical — no new version
         }
 
@@ -196,20 +185,21 @@ impl FactLedger {
         if inner.store.manifest.attributes.len() > attrs_before {
             inner.store.persist_manifest()?;
         }
-        let old_facts = inner.current_facts(entity);
+        let old_facts = inner.state_at(entity, None)?;
         let ops = diff(&old_facts, &new_facts);
 
         let wall = Utc::now().timestamp_micros();
-        let tx = inner.store.append(ops.clone(), wall)?;
+        let (tx, sealed) = inner.store.append_with_seal(ops.clone(), wall)?;
         inner.batch_times.push((tx, wall));
-        let state = inner.entities.entry(entity).or_default();
         for (op, fact) in &ops {
-            state.entries.push(IndexEntry::from_fact(fact, tx, *op));
+            inner.memtable.push(IndexEntry::from_fact(fact, tx, *op));
         }
-        state.current_sig = Some(sig);
-        inner.note_entity(entity, &payload);
+        inner.sig_cache.insert(entity, sig);
         if kind_of_payload(&payload) == EntityKind::Object {
             inner.index_object(entity, &payload);
+        }
+        if sealed {
+            inner.flush_memtable(tx)?;
         }
         Ok(true)
     }
@@ -236,58 +226,56 @@ impl FactLedger {
         id: Uuid,
         kind: EntityKind,
     ) -> Result<Option<T>, LedgerError> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.entities.get(&id).and_then(|e| e.kind) != Some(kind) {
-            return Ok(None);
-        }
-        match inner.reconstruct_current(id)? {
-            Some(payload) => Ok(Some(serde_json::from_value(payload)?)),
-            None => Ok(None),
+        let inner = self.inner.lock().unwrap();
+        match inner.reconstruct_at(id, TxId(u64::MAX))? {
+            Some(payload) if kind_of_payload(&payload) == kind => {
+                Ok(Some(serde_json::from_value(payload)?))
+            }
+            _ => Ok(None),
         }
     }
 
     /// All objects currently tracked.
     pub fn all_objects(&self) -> Result<Vec<KirObject>, LedgerError> {
-        self.all_of_kind(EntityKind::Object)
-    }
-
-    /// All relationships currently tracked.
-    pub fn all_relationships(&self) -> Result<Vec<KirRelationship>, LedgerError> {
-        self.all_of_kind(EntityKind::Relationship)
-    }
-
-    fn all_of_kind<T: serde::de::DeserializeOwned>(
-        &self,
-        kind: EntityKind,
-    ) -> Result<Vec<T>, LedgerError> {
-        let mut inner = self.inner.lock().unwrap();
-        let ids: Vec<Uuid> = inner
-            .entities
-            .iter()
-            .filter(|(_, s)| s.kind == Some(kind))
-            .map(|(id, _)| *id)
-            .collect();
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            if let Some(payload) = inner.reconstruct_current(id)? {
+        let inner = self.inner.lock().unwrap();
+        let mut out = Vec::new();
+        for id in inner.entities_with_attr("name")? {
+            if let Some(payload) = inner.reconstruct_at(id, TxId(u64::MAX))?
+                && kind_of_payload(&payload) == EntityKind::Object
+            {
                 out.push(serde_json::from_value(payload)?);
             }
         }
         Ok(out)
     }
 
-    /// All relationships where `from` or `to` equals `id`.
-    pub fn relationships_for(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError> {
-        let mut inner = self.inner.lock().unwrap();
-        let rels: Vec<Uuid> = inner
-            .rel_index
-            .get(&id.0)
-            .map(|s| s.iter().copied().collect())
-            .unwrap_or_default();
+    /// All relationships currently tracked.
+    pub fn all_relationships(&self) -> Result<Vec<KirRelationship>, LedgerError> {
+        let inner = self.inner.lock().unwrap();
         let mut out = Vec::new();
-        for rel in rels {
-            if let Some(payload) = inner.reconstruct_current(rel)? {
+        for id in inner.entities_with_attr("from")? {
+            if let Some(payload) = inner.reconstruct_at(id, TxId(u64::MAX))?
+                && kind_of_payload(&payload) == EntityKind::Relationship
+            {
                 out.push(serde_json::from_value(payload)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// All relationships where `from` or `to` equals `id` — AVET ranged
+    /// scans instead of a reverse-index table (RFC 0016 §4).
+    pub fn relationships_for(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        let mut out = Vec::new();
+        for rel in inner.relationship_candidates(id.0)? {
+            if let Some(payload) = inner.reconstruct_at(rel, TxId(u64::MAX))? {
+                let touches = ["from", "to"].iter().any(|side| {
+                    payload.get(side).and_then(|v| v.as_str()) == Some(id.to_string()).as_deref()
+                });
+                if touches && kind_of_payload(&payload) == EntityKind::Relationship {
+                    out.push(serde_json::from_value(payload)?);
+                }
             }
         }
         Ok(out)
@@ -301,13 +289,15 @@ impl FactLedger {
         id: &KirId,
         at: DateTime<Utc>,
     ) -> Result<Option<KirObject>, LedgerError> {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         let Some(cut) = inner.tx_at(at) else {
             return Ok(None);
         };
         match inner.reconstruct_at(id.0, cut)? {
-            Some(payload) => Ok(Some(serde_json::from_value(payload)?)),
-            None => Ok(None),
+            Some(payload) if kind_of_payload(&payload) == EntityKind::Object => {
+                Ok(Some(serde_json::from_value(payload)?))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -319,21 +309,16 @@ impl FactLedger {
         id: &KirId,
         at: DateTime<Utc>,
     ) -> Result<Vec<KirRelationship>, LedgerError> {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
         let cut = inner.tx_at(at);
-        let rels: Vec<Uuid> = inner
-            .rel_index
-            .get(&id.0)
-            .map(|s| s.iter().copied().collect())
-            .unwrap_or_default();
         let mut out = Vec::new();
-        for rel in rels {
-            let latest = inner
-                .entities
-                .get(&rel)
-                .and_then(|s| s.entries.last().map(|e| e.tx));
+        for rel in inner.relationship_candidates(id.0)? {
+            let latest = inner.entity_entries(rel)?.iter().map(|e| e.tx).max();
             let visible = matches!((latest, cut), (Some(t), Some(c)) if t <= c);
-            if visible && let Some(payload) = inner.reconstruct_current(rel)? {
+            if visible
+                && let Some(payload) = inner.reconstruct_at(rel, TxId(u64::MAX))?
+                && kind_of_payload(&payload) == EntityKind::Relationship
+            {
                 out.push(serde_json::from_value(payload)?);
             }
         }
@@ -368,22 +353,12 @@ impl FactLedger {
 
     /// Number of distinct objects currently tracked.
     pub fn object_count(&self) -> Result<usize, LedgerError> {
-        Ok(self.count_kind(EntityKind::Object))
+        Ok(self.all_objects()?.len())
     }
 
     /// Number of distinct relationships currently tracked.
     pub fn relationship_count(&self) -> Result<usize, LedgerError> {
-        Ok(self.count_kind(EntityKind::Relationship))
-    }
-
-    fn count_kind(&self, kind: EntityKind) -> usize {
-        self.inner
-            .lock()
-            .unwrap()
-            .entities
-            .values()
-            .filter(|s| s.kind == Some(kind))
-            .count()
+        Ok(self.all_relationships()?.len())
     }
 
     // ── Branching / diff / merge ──────────────────────────────────────────
@@ -408,7 +383,13 @@ impl FactLedger {
         let from_us = from.timestamp_micros();
         let to_us = to.timestamp_micros();
 
-        let txs: HashSet<TxId> = inner
+        let window_start = inner
+            .batch_times
+            .iter()
+            .rev()
+            .find(|(_, w)| *w <= from_us)
+            .map(|(t, _)| *t);
+        let in_window: HashSet<TxId> = inner
             .batch_times
             .iter()
             .filter(|(_, w)| *w > from_us && *w <= to_us)
@@ -417,33 +398,27 @@ impl FactLedger {
 
         let mut added = Vec::new();
         let mut touched_ids = HashSet::new();
-        let ids: Vec<Uuid> = inner.entities.keys().copied().collect();
-        for id in ids {
-            let kind = inner.entities[&id].kind;
-            if !matches!(
-                kind,
-                Some(EntityKind::Object) | Some(EntityKind::Relationship)
-            ) {
+        for batch in inner.store.batches_after(window_start)? {
+            if !in_window.contains(&batch.tx) {
                 continue;
             }
-            let mut version_txs: Vec<TxId> =
-                inner.entities[&id].entries.iter().map(|e| e.tx).collect();
-            version_txs.dedup();
-            for tx in version_txs {
-                if txs.contains(&tx) {
-                    added.push(LedgerEntryId(tx.0 as i64));
-                    touched_ids.insert(id.to_string());
-                }
+            let Some(entity) = batch.ops.first().map(|(_, f)| f.entity) else {
+                continue;
+            };
+            let Some(payload) = inner.reconstruct_at(entity, TxId(u64::MAX))? else {
+                continue;
+            };
+            if matches!(
+                kind_of_payload(&payload),
+                EntityKind::Object | EntityKind::Relationship
+            ) {
+                added.push(LedgerEntryId(batch.tx.0 as i64));
+                touched_ids.insert(entity.to_string());
             }
         }
 
-        let total = inner.entities.values().filter(|s| {
-            matches!(
-                s.kind,
-                Some(EntityKind::Object) | Some(EntityKind::Relationship)
-            )
-        });
-        let unchanged = total.count().saturating_sub(touched_ids.len());
+        let total = self_counts(&inner)?;
+        let unchanged = total.saturating_sub(touched_ids.len());
         let mut touched: Vec<String> = touched_ids.into_iter().collect();
         touched.sort();
         Ok(LedgerDiff {
@@ -495,17 +470,49 @@ impl FactLedger {
         }
         Ok(report)
     }
+
+    /// Runs currently open per sort order (test/diagnostic hook).
+    pub fn run_count(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap()
+            .runs
+            .run_count(crate::index::SortOrder::Eavt)
+    }
+}
+
+/// Objects + relationships currently tracked (diff's `unchanged` base).
+fn self_counts(inner: &Inner) -> Result<usize, LedgerError> {
+    let mut total = 0usize;
+    for attr in ["name", "from"] {
+        for id in inner.entities_with_attr(attr)? {
+            if let Some(payload) = inner.reconstruct_at(id, TxId(u64::MAX))?
+                && matches!(
+                    kind_of_payload(&payload),
+                    EntityKind::Object | EntityKind::Relationship
+                )
+            {
+                total += 1;
+            }
+        }
+    }
+    Ok(total)
 }
 
 impl Inner {
+    /// All history entries of one entity: run scans + memtable tail.
+    fn entity_entries(&self, entity: Uuid) -> Result<Vec<IndexEntry>, LedgerError> {
+        let mut entries = self.runs.scan(&ScanPrefix::Entity { entity, attr: None })?;
+        entries.extend(self.memtable.iter().filter(|e| e.entity == entity).cloned());
+        Ok(entries)
+    }
+
     /// Fold an entity's history (up to `cut`, if given) into its live fact
     /// set: the latest op per (attr, pos) wins; a retract removes the slot.
-    fn state_at(&self, entity: Uuid, cut: Option<TxId>) -> Vec<Fact> {
-        let Some(state) = self.entities.get(&entity) else {
-            return Vec::new();
-        };
+    fn state_at(&self, entity: Uuid, cut: Option<TxId>) -> Result<Vec<Fact>, LedgerError> {
+        let entries = self.entity_entries(entity)?;
         let mut live: HashMap<(AttrId, Option<u32>), (TxId, FactOp, &FactValue)> = HashMap::new();
-        for e in &state.entries {
+        for e in &entries {
             if let Some(cut) = cut
                 && e.tx > cut
             {
@@ -529,26 +536,15 @@ impl Inner {
             })
             .collect();
         facts.sort_by_key(|f| (f.attr, f.pos));
-        facts
-    }
-
-    fn current_facts(&self, entity: Uuid) -> Vec<Fact> {
-        self.state_at(entity, None)
-    }
-
-    fn reconstruct_current(
-        &mut self,
-        entity: Uuid,
-    ) -> Result<Option<serde_json::Value>, LedgerError> {
-        self.reconstruct_at(entity, TxId(u64::MAX))
+        Ok(facts)
     }
 
     fn reconstruct_at(
-        &mut self,
+        &self,
         entity: Uuid,
         cut: TxId,
     ) -> Result<Option<serde_json::Value>, LedgerError> {
-        let facts = self.state_at(entity, Some(cut));
+        let facts = self.state_at(entity, Some(cut))?;
         if facts.is_empty() {
             return Ok(None);
         }
@@ -557,26 +553,95 @@ impl Inner {
         Ok(Some(payload))
     }
 
-    /// Record shape-derived kind, signature cache, and relationship reverse
-    /// index for an entity whose payload is known.
-    fn note_entity(&mut self, entity: Uuid, payload: &serde_json::Value) {
-        let kind = kind_of_payload(payload);
-        let state = self.entities.entry(entity).or_default();
-        state.kind = Some(kind);
-        if state.current_sig.is_none() {
-            state.current_sig = Some(content_signature(payload));
+    /// Current signature, computed lazily through reconstruction.
+    fn current_sig(&mut self, entity: Uuid) -> Result<Option<String>, LedgerError> {
+        if let Some(sig) = self.sig_cache.get(&entity) {
+            return Ok(Some(sig.clone()));
         }
-        if kind == EntityKind::Relationship {
-            for side in ["from", "to"] {
-                if let Some(node) = payload
-                    .get(side)
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| s.parse().ok())
-                {
-                    self.rel_index.entry(node).or_default().insert(entity);
-                }
+        match self.reconstruct_at(entity, TxId(u64::MAX))? {
+            Some(payload) => {
+                let sig = content_signature(&payload);
+                self.sig_cache.insert(entity, sig.clone());
+                Ok(Some(sig))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Distinct entities carrying `attr_path` anywhere in history — AEVT
+    /// runs plus the memtable (current-state filtering is the caller's job).
+    fn entities_with_attr(&self, attr_path: &str) -> Result<Vec<Uuid>, LedgerError> {
+        let Some(attr) = self.store.manifest.attributes.get(attr_path) else {
+            return Ok(Vec::new());
+        };
+        let mut ids: HashSet<Uuid> = self
+            .runs
+            .scan(&ScanPrefix::Attr { attr })?
+            .into_iter()
+            .map(|e| e.entity)
+            .collect();
+        ids.extend(
+            self.memtable
+                .iter()
+                .filter(|e| e.attr == attr)
+                .map(|e| e.entity),
+        );
+        let mut out: Vec<Uuid> = ids.into_iter().collect();
+        out.sort();
+        Ok(out)
+    }
+
+    /// Relationship entities that ever referenced `node` in `from`/`to` —
+    /// AVET ranged scans + memtable (the RFC's graph-hop read path).
+    fn relationship_candidates(&self, node: Uuid) -> Result<Vec<Uuid>, LedgerError> {
+        let mut ids: HashSet<Uuid> = HashSet::new();
+        for side in ["from", "to"] {
+            let Some(attr) = self.store.manifest.attributes.get(side) else {
+                continue;
+            };
+            ids.extend(
+                self.runs
+                    .scan(&ScanPrefix::AttrValue {
+                        attr,
+                        value: FactValue::Ref(node),
+                    })?
+                    .into_iter()
+                    .map(|e| e.entity),
+            );
+            ids.extend(
+                self.memtable
+                    .iter()
+                    .filter(|e| e.attr == attr && e.value == FactValue::Ref(node))
+                    .map(|e| e.entity),
+            );
+        }
+        let mut out: Vec<Uuid> = ids.into_iter().collect();
+        out.sort();
+        Ok(out)
+    }
+
+    /// Seal hook: flush the memtable into new runs, advance the marker,
+    /// and compact when runs accumulate.
+    fn flush_memtable(&mut self, up_to: TxId) -> Result<(), LedgerError> {
+        if self.memtable.is_empty() {
+            return Ok(());
+        }
+        self.runs
+            .add_runs(&format!("{:012}", up_to.0), &self.memtable)?;
+        std::fs::write(self.runs_dir().join("last_tx"), up_to.0.to_string())
+            .map_err(LedgerError::Io)?;
+        self.runs_marker = Some(up_to);
+        self.memtable.clear();
+        for order in crate::index::SortOrder::ALL {
+            if self.runs.run_count(order) > MERGE_RUNS_AT {
+                self.runs.merge_runs(order)?;
             }
         }
+        Ok(())
+    }
+
+    fn runs_dir(&self) -> PathBuf {
+        self.store.root().join("indexes")
     }
 
     /// Buffer this object's current state into the tantivy index.
@@ -921,6 +986,54 @@ mod tests {
         assert_eq!(ledger.get_object(&obj.id).unwrap().unwrap().name, "orders");
         assert_eq!(ledger.relationships_for(&obj.id).unwrap().len(), 1);
         assert_eq!(ledger.find_objects("zebra").unwrap().len(), 1);
+    }
+
+    /// Phase 6: with a tiny seal threshold every append seals its segment,
+    /// flushing the memtable into on-disk runs — reads (point, listing,
+    /// graph, history, search) must serve identically from runs after
+    /// reopen, when the memtable starts empty.
+    #[test]
+    fn reads_serve_from_runs_after_seal_and_reopen() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let mut obj = KirObject::new("orders", ObjectKind::Table)
+            .with_property("excerpt", serde_json::json!("axolotl inventory"));
+        let other = KirObject::new("customers", ObjectKind::Table);
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, obj.id, other.id);
+        let mid;
+        {
+            let ledger = FactLedger::open_with_seal_threshold(&path, 1).unwrap();
+            ledger.append_object(&obj).unwrap();
+            ledger.append_object(&other).unwrap();
+            ledger.append_relationship(&rel).unwrap();
+            std::thread::sleep(StdDuration::from_millis(2));
+            mid = Utc::now();
+            std::thread::sleep(StdDuration::from_millis(2));
+            obj.properties
+                .insert("row_count".into(), serde_json::json!(7));
+            ledger.append_object(&obj).unwrap();
+            assert!(ledger.run_count() >= 1, "seals must have flushed runs");
+        }
+
+        let ledger = FactLedger::open_with_seal_threshold(&path, 1).unwrap();
+        // Point + listing reads.
+        let current = ledger.get_object(&obj.id).unwrap().unwrap();
+        assert_eq!(
+            current.properties.get("row_count"),
+            Some(&serde_json::json!(7))
+        );
+        assert_eq!(ledger.all_objects().unwrap().len(), 2);
+        assert_eq!(ledger.object_count().unwrap(), 2);
+        assert_eq!(ledger.entry_count().unwrap(), 4);
+        // Graph read via AVET scans.
+        assert_eq!(ledger.relationships_for(&obj.id).unwrap().len(), 1);
+        // History read across runs.
+        let historical = ledger.object_at(&obj.id, mid).unwrap().unwrap();
+        assert!(!historical.properties.contains_key("row_count"));
+        // Search.
+        assert_eq!(ledger.find_objects("axolotl").unwrap().len(), 1);
+        // Idempotence still holds against run-served state.
+        assert!(!ledger.append_object(&obj).unwrap());
     }
 
     /// The search index is derived: deleting its directory and reopening

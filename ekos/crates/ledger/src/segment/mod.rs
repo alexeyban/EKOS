@@ -37,14 +37,17 @@
 //! `tx` is the ordering authority (monotone, assigned by the store); wall
 //! time is metadata carried per batch for as-of queries.
 
+pub mod map;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::fact::{AttributeRegistry, Fact, FactOp, TxId};
+use map::MappedSegment;
 
 /// Active segment seals at this size (RFC 0016 §3).
 pub const SEGMENT_SEAL_BYTES: u64 = 8 * 1024 * 1024;
@@ -154,8 +157,11 @@ impl SegmentStore {
 
         // Recovery: scan the whole active file. Every valid frame — including
         // ones committed after the last HEAD publish — is kept; the first
-        // invalid byte truncates the rest.
-        let (valid_len, batches) = scan_frames(&mut active, None)?;
+        // invalid byte truncates the rest. The active segment is read, never
+        // mapped (it is the one file that grows and can be truncated here).
+        let mut bytes = Vec::new();
+        active.read_to_end(&mut bytes)?;
+        let (valid_len, batches) = scan_slice(&bytes);
         if valid_len < active.metadata()?.len() {
             tracing::warn!(
                 segment = active_seq,
@@ -193,6 +199,16 @@ impl SegmentStore {
         ops: Vec<(FactOp, Fact)>,
         wall_time_us: i64,
     ) -> Result<TxId, SegmentError> {
+        self.append_with_seal(ops, wall_time_us).map(|(tx, _)| tx)
+    }
+
+    /// [`Self::append`], additionally reporting whether this commit sealed a
+    /// segment — the owner's cue to flush derived indexes (RFC 0016 Phase 6).
+    pub fn append_with_seal(
+        &mut self,
+        ops: Vec<(FactOp, Fact)>,
+        wall_time_us: i64,
+    ) -> Result<(TxId, bool), SegmentError> {
         let tx = TxId(self.next_tx);
         let batch = Batch {
             tx,
@@ -207,10 +223,12 @@ impl SegmentStore {
         self.head.committed_len += frame.len() as u64;
         write_head(&self.root, self.head)?;
 
+        let mut sealed = false;
         if self.head.committed_len >= self.seal_bytes {
             self.seal_active()?;
+            sealed = true;
         }
-        Ok(tx)
+        Ok((tx, sealed))
     }
 
     /// Seal the active segment (hash it into the manifest) and start a fresh
@@ -231,10 +249,10 @@ impl SegmentStore {
             )));
         }
 
-        let mut file = File::open(&path)?;
-        let (_, batches) = scan_frames(&mut file, Some(len))?;
-        let (tx_min, tx_max) = match (batches.first(), batches.last()) {
-            (Some(first), Some(last)) => (first.tx, last.tx),
+        let map = MappedSegment::open(&path, len)?;
+        let (_, headers) = scan_headers_slice(map.bytes());
+        let (tx_min, tx_max) = match (headers.first(), headers.last()) {
+            (Some(first), Some(last)) => (first.0, last.0),
             _ => {
                 return Err(SegmentError::Corrupt(format!(
                     "sealed segment {seq} has no batches"
@@ -247,7 +265,7 @@ impl SegmentStore {
             sha256,
             tx_min,
             tx_max,
-            batches: batches.len() as u64,
+            batches: headers.len() as u64,
         });
         save_manifest(&self.root, &self.manifest)?;
 
@@ -265,19 +283,71 @@ impl SegmentStore {
         Ok(())
     }
 
-    /// Every committed batch in tx order: sealed segments first, then the
-    /// active segment up to the watermark.
+    /// Every committed batch in tx order: sealed segments (mmap'd) first,
+    /// then the active segment (read, never mapped) up to the watermark.
     pub fn batches(&self) -> Result<Vec<Batch>, SegmentError> {
+        self.batches_after(None)
+    }
+
+    /// Committed batches with `tx > after` (all of them when `None`).
+    /// Frame headers are always walked, but batch *bodies* are only
+    /// decompressed past the cutoff — the cheap catch-up read.
+    pub fn batches_after(&self, after: Option<TxId>) -> Result<Vec<Batch>, SegmentError> {
         let mut out = Vec::new();
+        let keep = |tx: TxId| after.is_none_or(|a| tx > a);
         for sealed in &self.manifest.sealed {
-            let mut file = File::open(segment_path(&self.root, sealed.seq))?;
-            let (_, batches) = scan_frames(&mut file, Some(sealed.len))?;
+            // Whole sealed segments before the cutoff are skipped outright.
+            if !keep(sealed.tx_max) {
+                continue;
+            }
+            let map = MappedSegment::open(&segment_path(&self.root, sealed.seq), sealed.len)?;
+            let (valid, batches) = scan_batches_filtered(map.bytes(), &keep);
+            if valid != sealed.len {
+                return Err(SegmentError::Corrupt(format!(
+                    "sealed segment {} has invalid frames at offset {valid}",
+                    sealed.seq
+                )));
+            }
             out.extend(batches);
         }
-        let mut active = File::open(segment_path(&self.root, self.head.active_seq))?;
-        let (_, batches) = scan_frames(&mut active, Some(self.head.committed_len))?;
-        out.extend(batches);
+        out.extend(self.active_batches(&keep)?);
         Ok(out)
+    }
+
+    /// Frame headers `(tx, wall_time_us)` of every committed batch, in tx
+    /// order — no body decompression. This is how owners rebuild the
+    /// time→tx map without replaying content (RFC 0016 §2).
+    pub fn batch_headers(&self) -> Result<Vec<(TxId, i64)>, SegmentError> {
+        let mut out = Vec::new();
+        for sealed in &self.manifest.sealed {
+            let map = MappedSegment::open(&segment_path(&self.root, sealed.seq), sealed.len)?;
+            let (valid, headers) = scan_headers_slice(map.bytes());
+            if valid != sealed.len {
+                return Err(SegmentError::Corrupt(format!(
+                    "sealed segment {} has invalid frames at offset {valid}",
+                    sealed.seq
+                )));
+            }
+            out.extend(headers);
+        }
+        let bytes = self.read_active_committed()?;
+        let (_, headers) = scan_headers_slice(&bytes);
+        out.extend(headers);
+        Ok(out)
+    }
+
+    fn read_active_committed(&self) -> Result<Vec<u8>, SegmentError> {
+        let mut file = File::open(segment_path(&self.root, self.head.active_seq))?;
+        let mut bytes = Vec::with_capacity(self.head.committed_len as usize);
+        file.read_to_end(&mut bytes)?;
+        bytes.truncate(self.head.committed_len as usize);
+        Ok(bytes)
+    }
+
+    fn active_batches(&self, keep: &dyn Fn(TxId) -> bool) -> Result<Vec<Batch>, SegmentError> {
+        let bytes = self.read_active_committed()?;
+        let (_, batches) = scan_batches_filtered(&bytes, keep);
+        Ok(batches)
     }
 
     /// Verify every sealed segment against its manifest hash.
@@ -303,6 +373,11 @@ impl SegmentStore {
     /// registry grew during an append.
     pub fn persist_manifest(&self) -> Result<(), SegmentError> {
         save_manifest(&self.root, &self.manifest)
+    }
+
+    /// The store's root directory.
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     /// The next transaction number this store will assign.
@@ -336,39 +411,72 @@ fn encode_frame(batch: &Batch) -> Result<Vec<u8>, SegmentError> {
     Ok(frame)
 }
 
-/// Scan frames from the start of `file` up to `limit` (or EOF). Returns the
-/// byte length of the valid prefix and the decoded batches. Any invalid or
-/// truncated frame ends the scan at the last good boundary — never an error,
-/// because a torn tail is the expected crash artifact.
-fn scan_frames(file: &mut File, limit: Option<u64>) -> Result<(u64, Vec<Batch>), SegmentError> {
-    let file_len = file.metadata()?.len();
-    let end = limit.unwrap_or(file_len).min(file_len);
-    file.seek(SeekFrom::Start(0))?;
-
-    let mut batches = Vec::new();
+/// Walk frame boundaries in `bytes`, calling `visit(frame)` for each valid
+/// frame; a `visit` returning `false` (or any invalid/truncated frame) ends
+/// the walk at the last good boundary — never an error, because a torn tail
+/// is the expected crash artifact. Returns the valid prefix length.
+fn walk_frames(bytes: &[u8], mut visit: impl FnMut(&[u8]) -> bool) -> u64 {
+    let end = bytes.len() as u64;
     let mut pos = 0u64;
     while pos + 4 <= end {
-        let mut len_bytes = [0u8; 4];
-        file.seek(SeekFrom::Start(pos))?;
-        if file.read_exact(&mut len_bytes).is_err() {
-            break;
-        }
-        let frame_len = u32::from_le_bytes(len_bytes) as u64;
+        let at = pos as usize;
+        let frame_len = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as u64;
         if frame_len < FRAME_HEADER as u64 || pos + 4 + frame_len > end {
             break;
         }
-
-        let mut frame = vec![0u8; frame_len as usize];
-        if file.read_exact(&mut frame).is_err() {
+        let frame = &bytes[at + 4..at + 4 + frame_len as usize];
+        if !visit(frame) {
             break;
         }
-        let Some(batch) = decode_frame(&frame) else {
-            break;
-        };
-        batches.push(batch);
         pos += 4 + frame_len;
     }
-    Ok((pos, batches))
+    pos
+}
+
+/// Decode every valid frame from the start of `bytes`.
+fn scan_slice(bytes: &[u8]) -> (u64, Vec<Batch>) {
+    scan_batches_filtered(bytes, &|_| true)
+}
+
+/// Decode frames, decompressing bodies only for batches `keep` selects —
+/// header validation still walks every frame.
+fn scan_batches_filtered(bytes: &[u8], keep: &dyn Fn(TxId) -> bool) -> (u64, Vec<Batch>) {
+    let mut batches = Vec::new();
+    let valid = walk_frames(bytes, |frame| {
+        let Some((tx, _)) = decode_header(frame) else {
+            return false;
+        };
+        if keep(tx) {
+            match decode_frame(frame) {
+                Some(batch) => batches.push(batch),
+                None => return false,
+            }
+        }
+        true
+    });
+    (valid, batches)
+}
+
+/// Header-only walk: `(tx, wall_time_us)` per frame, no body decompression.
+fn scan_headers_slice(bytes: &[u8]) -> (u64, Vec<(TxId, i64)>) {
+    let mut headers = Vec::new();
+    let valid = walk_frames(bytes, |frame| match decode_header(frame) {
+        Some(h) => {
+            headers.push(h);
+            true
+        }
+        None => false,
+    });
+    (valid, headers)
+}
+
+fn decode_header(frame: &[u8]) -> Option<(TxId, i64)> {
+    if frame.len() < FRAME_HEADER || frame[0] != FRAME_VERSION {
+        return None;
+    }
+    let tx = u64::from_le_bytes(frame[1..9].try_into().ok()?);
+    let wall_time_us = i64::from_le_bytes(frame[9..17].try_into().ok()?);
+    Some((TxId(tx), wall_time_us))
 }
 
 fn decode_frame(frame: &[u8]) -> Option<Batch> {

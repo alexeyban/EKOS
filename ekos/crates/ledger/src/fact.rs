@@ -130,6 +130,11 @@ impl AttributeRegistry {
         id
     }
 
+    /// Look up an already-interned path without allocating an id.
+    pub fn get(&self, path: &str) -> Option<AttrId> {
+        self.index.get(path).copied()
+    }
+
     pub fn name(&self, id: AttrId) -> Option<&str> {
         self.names.get(id.0 as usize).map(String::as_str)
     }

@@ -516,6 +516,7 @@ dependencies = [
  "ekos-common",
  "ekos-kir",
  "hex",
+ "memmap2",
  "rusqlite",
  "serde",
  "serde_json",
