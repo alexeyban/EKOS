@@ -1,17 +1,16 @@
 ---
 name: memory
 description: >-
-Global cross-project memory for Claude sessions, backed by the EKOS
-knowledge ledger. Use this at the START of any substantial task to restore
-context by searching the ledger instead of re-reading files, and DURING any
-session where you learn something worth keeping — a hard-won lesson, an
-effective approach, a decision with rationale, new material the user shared,
-or a completed piece of work.
-Triggers include: the user asking "have we/I done this before?",
-"how did I solve X?", starting work in any project under the current
-workspace root, finishing significant work, being corrected, or
-discovering something non-obvious. This applies in EVERY project,
-not just EKOS — the memory is shared between all projects and sessions.
+  Global cross-project memory for Claude sessions, backed by the EKOS
+  knowledge ledger. Use this at the START of any substantial task to restore
+  context by searching the ledger instead of re-reading files, and DURING any
+  session where you learn something worth keeping — a hard-won lesson, an
+  effective approach, a decision with rationale, new material the user shared,
+  or a completed piece of work. Triggers include: the user asking "have we/I
+  done this before?", "how did I solve X?", starting work in any project the current
+  workspace root, finishing significant work, being corrected,
+  or discovering something non-obvious. This applies in EVERY project, not
+  just EKOS — the memory is shared between all projects and sessions.
 ---
 
 # EKOS as global memory
