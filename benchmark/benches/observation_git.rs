@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ekos_observation_sdk::{Observer, ScanContext};
 use ekos_plugin_git::GitObserver;
 use std::process::Command;
@@ -7,7 +7,11 @@ use std::process::Command;
 fn fixture_repo(commits: usize) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
-        let status = Command::new("git").args(args).current_dir(dir.path()).status().unwrap();
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?} failed");
     };
 
@@ -31,7 +35,8 @@ fn bench_observation_git(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     c.bench_function("observation_git_scan_20_commits", |b| {
-        b.to_async(&rt).iter(|| async { observer.scan(&ctx).await.unwrap() });
+        b.to_async(&rt)
+            .iter(|| async { observer.scan(&ctx).await.unwrap() });
     });
 }
 

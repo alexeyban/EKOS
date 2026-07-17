@@ -3,7 +3,7 @@
 //! byte counts print to stderr during setup; the latency gates are criterion
 //! benchmarks so regressions show up like any other bench.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ekos_kir::{KirId, KirObject, ObjectKind};
 use ekos_ledger::Ledger;
 use std::path::Path;
@@ -23,8 +23,14 @@ fn realistic_object(i: usize) -> KirObject {
     KirObject::new(&path, ObjectKind::File)
         .with_property("path", serde_json::Value::String(path.clone()))
         .with_property("size_bytes", serde_json::json!(1024 + i * 37))
-        .with_property("artifact_id", serde_json::Value::String(format!("{:064x}", i)))
-        .with_property("excerpt", serde_json::Value::String(excerpt[..600.min(excerpt.len())].to_string()))
+        .with_property(
+            "artifact_id",
+            serde_json::Value::String(format!("{:064x}", i)),
+        )
+        .with_property(
+            "excerpt",
+            serde_json::Value::String(excerpt[..600.min(excerpt.len())].to_string()),
+        )
 }
 
 fn ledger_file_bytes(dir: &Path) -> u64 {

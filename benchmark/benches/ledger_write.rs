@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ekos_kir::{KirObject, ObjectKind};
 use ekos_ledger::Ledger;
 

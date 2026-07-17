@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use ekos_kir::{KirGraph, KirObject, KirRelationship, ObjectKind, RelationshipKind};
 use ekos_semantic::build_ckm;
 
@@ -10,7 +10,11 @@ fn fixture_graph(n: usize) -> KirGraph {
         ids.push(id);
     }
     for pair in ids.windows(2) {
-        graph.relationships.push(KirRelationship::new(RelationshipKind::ForeignKey, pair[0], pair[1]));
+        graph.relationships.push(KirRelationship::new(
+            RelationshipKind::ForeignKey,
+            pair[0],
+            pair[1],
+        ));
     }
     graph
 }
