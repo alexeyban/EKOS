@@ -85,6 +85,45 @@ claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /p
 The server also honors `EKOS_WORKSPACE` and `EKOS_CONFIG` environment variables, so a
 registration can be path-free: `claude mcp add ekos --env EKOS_WORKSPACE=/path/to/workspace -- ekos mcp serve`.
 
+### Demo: skills + custom subagents
+
+`demo/` contains a rehearsable, 7-act demo of EKOS's Claude Code integration, run against
+a real compiled workspace — two skills (`ekos-knowledge`, `memory`) and four custom
+subagents, each embodying one capability:
+
+| Agent | Model | Capability |
+|---|---|---|
+| `estate-scout` | haiku | existence — "what's out there?" (MCP-only, no file access) |
+| `impact-analyst` | sonnet | consequence — blast radius + cited evidence |
+| `memory-keeper` | sonnet | memory — the only agent that writes (recall, capture, async refresh) |
+| `estate-architect` | inherit | synthesis — designs from the workspace's own prior art |
+
+**Install the agents:**
+
+```bash
+cp demo/agents/*.md ~/.claude/agents/
+```
+
+Then in Claude Code, run `/agents` and confirm all four appear.
+
+**Run it live** — open Claude Code from the workspace root (the directory containing
+`ekos.toml`) and follow the acts in [`demo/DEMO.md`](demo/DEMO.md), which gives the exact
+prompt, expected MCP calls, and payoff line for each act.
+
+**Run it headless** (rehearsal, transcripts, or a live-demo fallback):
+
+```bash
+sh demo/headless.sh          # generate a transcript for all 7 acts
+sh demo/headless.sh 2 7      # just specific acts
+```
+
+Transcripts land in `demo/transcripts/act-N.md` — see the ones already committed there for
+real, unedited examples of what each act produces.
+
+Before presenting, work through **Act 0** in `demo/DEMO.md`: refresh the ledger, start a
+fresh MCP connection (a long-running one can go stale after a rebuild), install the agents,
+and smoke-test headlessly first.
+
 ### Compact storage (RFC 0015)
 
 Workspaces created before RFC 0015 can be shrunk in place (both commands verify before
