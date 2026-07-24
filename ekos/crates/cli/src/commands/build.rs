@@ -132,6 +132,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
                             serde_json::Value::String(excerpt.to_string()),
                         );
                     }
+                    // RFC 0019: harvested declaration-line symbols ride
+                    // alongside the excerpt so FTS can find e.g.
+                    // `fn authenticate_user` even deep in a large file.
+                    if let Some(symbols) = artifact.content.data.get("symbols") {
+                        obj = obj.with_property("symbols", symbols.clone());
+                    }
                     obj.id = obj_id;
 
                     ledger.append_evidence(&ev)?;

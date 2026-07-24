@@ -544,6 +544,13 @@ reasoning this section originally called out as missing now exists for the "what
 N levels deep" shape of question; `EXPLAIN WHY ...`-style natural-language framing is still out of
 EKL's scope by design (that's `ekos ask`'s job).
 
+**Facts to traverse added — RFC 0019.** `RelationshipKind::DependsOn` had zero real construction
+sites before this RFC; `DependencyAnalyzerPass` (`crates/recovery/src/dependency_analyzer.rs`) now
+emits real `DependsOn` edges to synthetic Technology objects from pattern-matched imports/connection
+strings (PostgreSQL, MySQL, MongoDB, Redis, Kafka across Python/JS/Java idioms). Combined with RFC
+0018's `trace_impact`, "what depends on Postgres, transitively" is now answerable end-to-end over
+real ledger facts, not just the engine in isolation.
+
 <details><summary>Original problem statement</summary>
 
 Need a query layer.

@@ -100,6 +100,18 @@ impl Observer for FileObserver {
             if let Some(excerpt) = text_excerpt(&content) {
                 data["excerpt"] = serde_json::Value::String(excerpt);
             }
+            // RFC 0019: declaration-line symbols, harvested from the *full*
+            // content (unlike the 600-char excerpt above) — makes
+            // `ekos_search "authenticate"` findable even when the matching
+            // `fn`/`def`/`class` sits deep in a large file.
+            if let Ok(text) = std::str::from_utf8(&content) {
+                let symbols = harvest_symbols(text);
+                if !symbols.is_empty() {
+                    data["symbols"] = serde_json::Value::Array(
+                        symbols.into_iter().map(serde_json::Value::String).collect(),
+                    );
+                }
+            }
 
             let artifact =
                 ObservationArtifact::new("file", &rel_path, data).with_producer("ekos-plugin-file");
@@ -126,10 +138,47 @@ fn text_excerpt(content: &[u8]) -> Option<String> {
     Some(text.chars().take(EXCERPT_MAX_CHARS).collect())
 }
 
+/// Declaration keywords recognized by [`harvest_symbols`] (RFC 0019). Plain
+/// prefix matching, not per-language parsing — covers the common case
+/// (`fn foo(...)`, `def foo(...):`, `class Foo:`, `func foo(...)`,
+/// `interface Foo {`) without a parser dependency.
+const DECL_PREFIXES: &[&str] = &["fn ", "def ", "class ", "func ", "interface "];
+
+/// Cap on symbols harvested per file — bounds indexed content size the same
+/// way `EXCERPT_MAX_CHARS` bounds the excerpt (RFC 0019).
+const SYMBOLS_MAX: usize = 50;
+
+/// Scans every line for a recognized declaration prefix and extracts the
+/// identifier that follows. Not an AST parse: a line that merely mentions
+/// `fn ` in a comment or string literal is indistinguishable from a real
+/// declaration — an accepted v1 false-positive rate, same tradeoff RFC 0019
+/// makes for dependency-pattern matching.
+fn harvest_symbols(text: &str) -> Vec<String> {
+    let mut symbols = Vec::new();
+    for line in text.lines() {
+        if symbols.len() >= SYMBOLS_MAX {
+            break;
+        }
+        let trimmed = line.trim_start();
+        for prefix in DECL_PREFIXES {
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    symbols.push(name);
+                }
+                break;
+            }
+        }
+    }
+    symbols
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
     use tempfile::TempDir;
 
     async fn scan_temp(setup: impl FnOnce(&TempDir)) -> ObservationPackage {
@@ -143,6 +192,55 @@ mod tests {
     async fn empty_dir_produces_no_artifacts() {
         let pkg = scan_temp(|_| {}).await;
         assert!(pkg.is_empty());
+    }
+
+    #[test]
+    fn harvest_symbols_finds_known_declaration_kinds() {
+        let text = "fn authenticate_user(x: u32) {}\ndef login(user):\n    pass\nclass AuthService:\n    pass\nfunc Handle(w Response) {}\ninterface Authenticator {\n";
+        let symbols = harvest_symbols(text);
+        assert_eq!(
+            symbols,
+            vec![
+                "authenticate_user",
+                "login",
+                "AuthService",
+                "Handle",
+                "Authenticator"
+            ]
+        );
+    }
+
+    #[test]
+    fn harvest_symbols_ignores_lines_without_a_declaration() {
+        let text = "// just a comment\nlet x = 1;\nreturn foo();\n";
+        assert!(harvest_symbols(text).is_empty());
+    }
+
+    #[test]
+    fn harvest_symbols_is_capped() {
+        let text = (0..100)
+            .map(|i| format!("fn f{i}() {{}}\n"))
+            .collect::<String>();
+        assert_eq!(harvest_symbols(&text).len(), SYMBOLS_MAX);
+    }
+
+    #[tokio::test]
+    async fn symbols_ride_on_the_artifact_alongside_excerpt() {
+        let pkg = scan_temp(|dir| {
+            std::fs::write(dir.path().join("auth.rs"), b"fn authenticate_user() {}\n").unwrap();
+        })
+        .await;
+        let data = &pkg.artifacts[0].content.data;
+        assert_eq!(data["symbols"], serde_json::json!(["authenticate_user"]));
+    }
+
+    #[tokio::test]
+    async fn files_with_no_declarations_carry_no_symbols_field() {
+        let pkg = scan_temp(|dir| {
+            std::fs::write(dir.path().join("notes.md"), b"just some prose\n").unwrap();
+        })
+        .await;
+        assert!(pkg.artifacts[0].content.data.get("symbols").is_none());
     }
 
     #[tokio::test]

@@ -2,8 +2,8 @@ use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
 use ekos_compiler_core::{EkosConfig, pass::PassContext, scheduler::FailureMode};
 use ekos_recovery::{
-    CryptoAnalyzerPass, GitAnalyzerPass, MockLlmProvider, OllamaProvider, SqlAnalyzerPass,
-    anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
+    CryptoAnalyzerPass, DependencyAnalyzerPass, GitAnalyzerPass, MockLlmProvider, OllamaProvider,
+    SqlAnalyzerPass, anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -78,6 +78,66 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         }
     }
 
+    // ── Source files for dependency-fact extraction (RFC 0019) ───────────
+    // Pattern/regex-based only (no AST/call-graph) — one pass batching every
+    // matched file so technology objects dedup within the batch before
+    // append_object's content-addressed idempotency takes over across runs.
+    const DEP_SCAN_EXTENSIONS: &[&str] = &["py", "js", "ts", "java", "go", "rb"];
+    let mut dep_files: Vec<(String, String)> = Vec::new();
+    for base in &observe_paths {
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_str().unwrap_or("");
+                    return !ignore.iter().any(|p| name == p.as_str());
+                }
+                true
+            })
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let is_candidate = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| {
+                    DEP_SCAN_EXTENSIONS
+                        .iter()
+                        .any(|ext| e.eq_ignore_ascii_case(ext))
+                })
+                .unwrap_or(false);
+            if !is_candidate {
+                continue;
+            }
+
+            let content = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            dep_files.push((rel.to_string_lossy().replace('\\', "/"), content));
+        }
+    }
+    let dep_file_count = dep_files.len();
+    if !dep_files.is_empty() {
+        let dep_pass = DependencyAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            dep_files,
+        );
+        pass_manager.register(Box::new(dep_pass));
+    }
+
     // ── Git commit artifacts ─────────────────────────────────────────────
     let (commit_ids, repo_id) = collect_git_artifact_ids(&*artifact_store);
     let git_count = commit_ids.len();
@@ -108,7 +168,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
 
     if pass_manager.is_empty() {
-        println!("Nothing to recover (no SQL files, git artifacts, or crypto batches found).");
+        println!(
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, or dependency-scan source files found)."
+        );
         return Ok(());
     }
 
@@ -134,6 +196,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     println!("  Git commits analysed: {git_count}");
     if crypto_batch_count > 0 {
         println!("  Crypto batches analysed: {crypto_batch_count}");
+    }
+    if dep_file_count > 0 {
+        println!("  Source files scanned for dependencies: {dep_file_count}");
     }
     println!("  Passes run: {}", report.passes_run());
     if report.passes_skipped() > 0 {

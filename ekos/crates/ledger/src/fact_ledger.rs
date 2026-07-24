@@ -719,12 +719,31 @@ impl Inner {
             .get("kind")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        let content = payload
-            .get("properties")
+        let properties = payload.get("properties");
+        let excerpt = properties
             .and_then(|p| p.get("excerpt"))
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        self.search.upsert(entity, name, kind, content);
+        // RFC 0019: harvested symbols ride alongside the excerpt so a
+        // declaration deep in a file is still searchable.
+        let symbols = properties
+            .and_then(|p| p.get("symbols"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        let content = if symbols.is_empty() {
+            excerpt.to_string()
+        } else if excerpt.is_empty() {
+            symbols
+        } else {
+            format!("{excerpt} {symbols}")
+        };
+        self.search.upsert(entity, name, kind, &content);
     }
 
     /// The greatest tx whose batch wall time is ≤ `at` (RFC 0016 §2).
@@ -985,6 +1004,20 @@ mod tests {
         let results = ledger.find_objects("orders").unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].1, "orders", "name match must rank first");
+    }
+
+    /// RFC 0019: a symbol name is searchable even when it isn't in the excerpt.
+    #[test]
+    fn fts_finds_objects_by_harvested_symbol() {
+        let (ledger, _dir) = temp_ledger();
+        let src = KirObject::new("auth.rs", ObjectKind::File)
+            .with_property("excerpt", serde_json::json!("// module preamble only"))
+            .with_property("symbols", serde_json::json!(["authenticate_user"]));
+        ledger.append_object(&src).unwrap();
+
+        let results = ledger.find_objects("authenticate_user").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, "auth.rs");
     }
 
     #[test]

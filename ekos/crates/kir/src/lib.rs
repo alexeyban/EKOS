@@ -219,6 +219,37 @@ impl KirObject {
         self.evidence.push(ev);
         self
     }
+
+    /// Text fed to full-text search (RFC 0014's `excerpt`, extended by RFC
+    /// 0019's `symbols`): the file-opening excerpt plus any harvested
+    /// declaration-line symbol names, space-joined. Shared by both ledger
+    /// backends so `ekos_search` finds a symbol whether or not it happens to
+    /// fall within the excerpt's leading window.
+    pub fn indexed_content(&self) -> String {
+        let excerpt = self
+            .properties
+            .get("excerpt")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let symbols = self
+            .properties
+            .get("symbols")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        if symbols.is_empty() {
+            excerpt.to_string()
+        } else if excerpt.is_empty() {
+            symbols
+        } else {
+            format!("{excerpt} {symbols}")
+        }
+    }
 }
 
 /// Provenance — links a knowledge claim back to the source fragment that justifies it.

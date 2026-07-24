@@ -395,11 +395,7 @@ impl Ledger {
 
     /// v1: (re)index one object into the column-storing FTS table.
     fn index_object_fts_v1(&self, obj: &KirObject) -> Result<(), LedgerError> {
-        let content = obj
-            .properties
-            .get("excerpt")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
+        let content = obj.indexed_content();
         self.conn.execute(
             "INSERT OR REPLACE INTO object_fts (object_id, name, kind, content)
              VALUES (?1, ?2, ?3, ?4)",
@@ -425,11 +421,7 @@ impl Ledger {
             self.conn
                 .execute("DELETE FROM object_fts WHERE rowid = ?1", params![old])?;
         }
-        let content = obj
-            .properties
-            .get("excerpt")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
+        let content = obj.indexed_content();
         self.conn.execute(
             "INSERT INTO object_fts (rowid, name, kind, content) VALUES (?1, ?2, ?3, ?4)",
             params![rowid, obj.name, obj.kind.to_string(), content],
@@ -1743,6 +1735,21 @@ mod tests {
             "body keyword must match via content column"
         );
         assert_eq!(results[0].1, "note-17.md");
+    }
+
+    /// RFC 0019: a symbol name is searchable even when it isn't in the
+    /// excerpt (e.g. a declaration deep in a large file).
+    #[test]
+    fn fts_finds_objects_by_harvested_symbol() {
+        let (ledger, _dir) = temp_ledger();
+        let src = KirObject::new("auth.rs", ObjectKind::File)
+            .with_property("excerpt", serde_json::json!("// module preamble only"))
+            .with_property("symbols", serde_json::json!(["authenticate_user"]));
+        ledger.append_object(&src).unwrap();
+
+        let results = ledger.find_objects("authenticate_user").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, "auth.rs");
     }
 
     /// RFC 0014: a name hit outranks a content-only mention.

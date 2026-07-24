@@ -235,11 +235,13 @@ my estate?"*
 `ekos_state` on the strongest hits to quote the actual declaration or
 config line.
 
-**Verified reality today:** this depends on Phase 2 (RFC 0019) symbol
-harvesting having landed — until then, this only surfaces file/excerpt-
-level hits, which is an honest, narrower answer ("here's every file whose
-excerpt mentions auth-related terms") rather than a symbol-level one. State
-that distinction plainly if Phase 2 hasn't shipped yet by demo day.
+**Verified reality today:** Phase 2 (RFC 0019) symbol harvesting has landed —
+`ekos_search` now hits real declaration lines (`fn`/`def`/`class`/`func`/
+`interface authenticate_...`), not just excerpt text, even when the
+declaration sits deep in a large file. It is still plain-text harvesting, not
+a call graph: a match proves the symbol exists, not who calls it. State that
+distinction if asked "does this show me every caller" — it doesn't, by
+design (see RFC 0019's Alternatives Considered).
 
 **Say (query 2 — consequence):** *"If I replace PostgreSQL with Cosmos DB,
 what breaks?"*
@@ -254,16 +256,18 @@ a directed graph walk through real foreign-key and dependency edges, with
 the evidence for every single hop, telling you exactly how deep the damage
 goes."*
 
-**Verified reality today:** the *engine* (`ekos_impact`) is real and works
-now over whatever `DependsOn`/`ForeignKey`/`CoupledWith` facts the ledger
-already has (SQL FK chains, git co-change coupling). The full "swap
-Postgres for Cosmos DB" scenario needs Phase 2 (RFC 0019)'s
-dependency-fact extraction pass to have emitted a `DependsOn` edge from
-each consumer to a synthetic PostgreSQL Technology object — without that,
-`ekos_impact` still traces real edges, just not ones rooted at a
-database-technology node yet. Frame this act as "here is the reasoning
-engine, proven on real data" rather than promising the exact query line if
-Phase 2 hasn't landed.
+**Verified reality today:** both halves are real now. The *engine*
+(`ekos_impact`) traces `DependsOn`/`ForeignKey`/`CoupledWith` facts
+transitively, and Phase 2 (RFC 0019)'s `DependencyAnalyzerPass` now emits
+real `DependsOn` edges from every consumer file to a deduplicated
+`PostgreSQL` Technology object whenever it detects a known import
+(`psycopg2`, `org.postgresql`, `require('pg')`, …) or a `postgres://`
+connection string. Find the PostgreSQL object (`ekos_search "postgresql"`),
+then `ekos_impact(direction: "dependents")` on it for the real transitive
+blast radius. This is still pattern matching, not a parser — an aliased or
+obfuscated import can be missed (documented v1 limitation, RFC 0019); an
+empty result is worth double-checking against a raw grep before presenting
+it as "nothing depends on this."
 
 ---
 

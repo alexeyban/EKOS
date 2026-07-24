@@ -5,6 +5,7 @@
 pub mod anthropic;
 pub mod cache;
 pub mod crypto_analyzer;
+pub mod dependency_analyzer;
 pub mod git_analyzer;
 pub mod llm;
 pub mod ollama;
@@ -13,6 +14,7 @@ pub mod sql_analyzer;
 pub use anthropic::AnthropicProvider;
 pub use cache::CachedLlmProvider;
 pub use crypto_analyzer::CryptoAnalyzerPass;
+pub use dependency_analyzer::DependencyAnalyzerPass;
 pub use git_analyzer::GitAnalyzerPass;
 pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MockLlmProvider};
 pub use ollama::OllamaProvider;
