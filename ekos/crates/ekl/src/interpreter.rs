@@ -133,7 +133,13 @@ fn object_row(obj: &KirObject) -> Row {
 fn relationship_row(rel: &KirRelationship) -> Row {
     let mut row = Row::new();
     row.insert("id".into(), Value::String(rel.id.to_string()));
-    row.insert("kind".into(), Value::String(format!("{:?}", rel.kind)));
+    // Display, not Debug: matches object_row's obj.kind.to_string() above.
+    // Debug happened to agree with Display for every built-in unit-variant
+    // RelationshipKind (ForeignKey, CoupledWith, ...), which hid this bug
+    // until a Custom(String) kind existed (RFC 0017's crypto connector) —
+    // Debug renders that as `Custom("DEPLOYED")`, not `DEPLOYED`, breaking
+    // `WHERE kind = 'DEPLOYED'`.
+    row.insert("kind".into(), Value::String(rel.kind.to_string()));
     row.insert("from".into(), Value::String(rel.from.to_string()));
     row.insert("to".into(), Value::String(rel.to.to_string()));
     row.insert(
@@ -396,5 +402,32 @@ mod tests {
         let result = run(&rt, "FIND Object WHERE kind = 'Person'");
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0]["name"], Value::String("Alice".into()));
+    }
+
+    #[test]
+    fn finds_relationships_of_a_custom_kind() {
+        // Regression: relationship_row used to format `kind` with `{:?}` (Debug),
+        // which renders Custom("DEPLOYED") as the literal string `Custom("DEPLOYED")`
+        // instead of `DEPLOYED` — silently breaking `WHERE kind = '...'` for every
+        // Custom relationship kind (RFC 0017's crypto connector is the first user).
+        // Built-in kinds masked this because Debug of a bare unit variant happens
+        // to equal its Display output.
+        let (ledger, _dir) = fixture();
+        let wallet_obj = KirObject::new("Dep1", ObjectKind::Custom("Wallet".into()));
+        let token_obj = KirObject::new("Mint1", ObjectKind::Custom("Token".into()));
+        let (wallet_id, token_id) = (wallet_obj.id, token_obj.id);
+        ledger.append_object(&wallet_obj).unwrap();
+        ledger.append_object(&token_obj).unwrap();
+        ledger
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::Custom("DEPLOYED".into()),
+                wallet_id,
+                token_id,
+            ))
+            .unwrap();
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Relationship WHERE kind = 'DEPLOYED'");
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0]["kind"], Value::String("DEPLOYED".into()));
     }
 }

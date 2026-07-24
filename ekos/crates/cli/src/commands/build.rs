@@ -4,11 +4,20 @@ use ekos_artifact::{ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
+use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use uuid::Uuid;
+
+/// Env var pointing at a DeFi Sentinel export root (see RFC 0017). The crypto
+/// observer is only added when this is set — most `ekos build` runs in this
+/// repo self-observe and have no crypto export to read, so its absence is a
+/// normal state, not a misconfiguration (soft-skip, mirrors how `recover.rs`
+/// selects an LLM provider off `ANTHROPIC_API_KEY`).
+const CRYPTO_EXPORT_DIR_ENV: &str = "EKOS_CRYPTO_EXPORT_DIR";
 
 /// Load the `.ekos/fingerprints.json` map of observe-path → last-seen source fingerprint.
 fn load_fingerprints(path: &Path) -> HashMap<String, String> {
@@ -38,8 +47,16 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         config.observe.paths.iter().map(|p| cwd.join(p)).collect()
     };
 
-    let observers: Vec<Box<dyn Observer>> =
+    let mut observers: Vec<Box<dyn Observer>> =
         vec![Box::new(FileObserver::new()), Box::new(GitObserver::new())];
+    if let Ok(export_dir) = std::env::var(CRYPTO_EXPORT_DIR_ENV) {
+        observers.push(Box::new(CryptoObserver::new(
+            Arc::new(ParquetExportReader),
+            export_dir,
+        )));
+    } else {
+        tracing::debug!("{CRYPTO_EXPORT_DIR_ENV} not set — crypto connector skipped (RFC 0017)");
+    }
 
     let fingerprint_path = config.ekos_dir(cwd).join("fingerprints.json");
     let mut fingerprints = load_fingerprints(&fingerprint_path);

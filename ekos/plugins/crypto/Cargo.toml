@@ -1,0 +1,22 @@
+[package]
+name = "ekos-plugin-crypto"
+description = "DeFi Sentinel crypto entity/relationship/evidence observer plugin (see RFC 0017)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-observation-sdk.workspace = true
+ekos-artifact.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+parquet = { version = "53", default-features = false, features = ["snap", "zstd"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

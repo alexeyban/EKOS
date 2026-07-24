@@ -2,9 +2,10 @@ use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
 use ekos_compiler_core::{EkosConfig, pass::PassContext, scheduler::FailureMode};
 use ekos_recovery::{
-    GitAnalyzerPass, MockLlmProvider, SqlAnalyzerPass, anthropic::AnthropicProvider,
-    cache::CachedLlmProvider, llm::LlmProvider,
+    CryptoAnalyzerPass, GitAnalyzerPass, MockLlmProvider, SqlAnalyzerPass,
+    anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
 };
+use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
 use walkdir::WalkDir;
 
@@ -92,8 +93,22 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(git_pass));
     }
 
+    // ── Crypto export artifacts (RFC 0017) ───────────────────────────────
+    let crypto_artifact_ids = collect_crypto_artifact_ids(&*artifact_store);
+    let crypto_batch_count = crypto_artifact_ids.len();
+    if !crypto_artifact_ids.is_empty() {
+        let crypto_pass = CryptoAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            crypto_artifact_ids,
+        );
+        pass_manager.register(Box::new(crypto_pass));
+    }
+
     if pass_manager.is_empty() {
-        println!("Nothing to recover (no SQL files and no git artifacts found).");
+        println!("Nothing to recover (no SQL files, git artifacts, or crypto batches found).");
         return Ok(());
     }
 
@@ -117,6 +132,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     println!("Recover complete.");
     println!("  SQL files analysed: {sql_count}");
     println!("  Git commits analysed: {git_count}");
+    if crypto_batch_count > 0 {
+        println!("  Crypto batches analysed: {crypto_batch_count}");
+    }
     println!("  Passes run: {}", report.passes_run());
     if report.passes_skipped() > 0 {
         println!("  Passes skipped (cached): {}", report.passes_skipped());
@@ -163,6 +181,29 @@ fn collect_git_artifact_ids(store: &dyn ArtifactStore) -> (Vec<ArtifactId>, Opti
     }
 
     (commit_ids, repo_id)
+}
+
+/// Collect ArtifactIds for every crypto export-batch artifact currently in the store.
+fn collect_crypto_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    // Dedup by target (batch_id): content-addressing already makes re-processing an
+    // unchanged batch a no-op downstream, but there's no reason to pass duplicate ids.
+    let mut by_batch: HashMap<String, ArtifactId> = HashMap::new();
+    for id in all_ids {
+        if let Ok(Some(json)) = store.read(&id)
+            && json["connector_name"].as_str() == Some("crypto")
+        {
+            let batch_id = json["target"].as_str().unwrap_or_default().to_string();
+            by_batch.insert(batch_id, id);
+        }
+    }
+    let mut ids: Vec<ArtifactId> = by_batch.into_values().collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
 }
 
 /// Choose LLM provider: Anthropic with cache if API key present, mock otherwise.

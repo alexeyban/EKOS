@@ -26,6 +26,7 @@ ekos-ekl.workspace = true
 ekos-semantic = { path = "../../crates/semantic" }
 ekos-plugin-file = { path = "../../plugins/file" }
 ekos-plugin-git  = { path = "../../plugins/git" }
+ekos-plugin-crypto = { path = "../../plugins/crypto" }
 clap.workspace = true
 uuid.workspace = true
 tokio.workspace = true
