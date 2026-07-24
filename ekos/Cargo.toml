@@ -23,6 +23,7 @@ members = [
     "plugins/fabric",
     "plugins/snowflake",
     "plugins/crypto",
+    "plugins/github",
 ]
 
 [workspace.package]

@@ -7,6 +7,7 @@ use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
+use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -18,6 +19,16 @@ use uuid::Uuid;
 /// normal state, not a misconfiguration (soft-skip, mirrors how `recover.rs`
 /// selects an LLM provider off `ANTHROPIC_API_KEY`).
 const CRYPTO_EXPORT_DIR_ENV: &str = "EKOS_CRYPTO_EXPORT_DIR";
+
+/// Env vars naming the `owner/repo` to observe via the GitHub connector (see
+/// RFC 0020). Both must be set — the observer is only added when they are;
+/// their absence is a normal state (most workspaces have no GitHub repo
+/// configured), not a misconfiguration, same soft-skip as the crypto
+/// connector above. `EKOS_GITHUB_TOKEN` is optional — unauthenticated
+/// requests work against public repos, just with a lower rate limit.
+const GITHUB_OWNER_ENV: &str = "EKOS_GITHUB_OWNER";
+const GITHUB_REPO_ENV: &str = "EKOS_GITHUB_REPO";
+const GITHUB_TOKEN_ENV: &str = "EKOS_GITHUB_TOKEN";
 
 /// Load the `.ekos/fingerprints.json` map of observe-path → last-seen source fingerprint.
 fn load_fingerprints(path: &Path) -> HashMap<String, String> {
@@ -56,6 +67,24 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         )));
     } else {
         tracing::debug!("{CRYPTO_EXPORT_DIR_ENV} not set — crypto connector skipped (RFC 0017)");
+    }
+    match (
+        std::env::var(GITHUB_OWNER_ENV),
+        std::env::var(GITHUB_REPO_ENV),
+    ) {
+        (Ok(owner), Ok(repo)) => {
+            let token = std::env::var(GITHUB_TOKEN_ENV).ok();
+            observers.push(Box::new(GitHubObserver::new(
+                Arc::new(GitHubApiClient::new(token)),
+                owner,
+                repo,
+            )));
+        }
+        _ => {
+            tracing::debug!(
+                "{GITHUB_OWNER_ENV}/{GITHUB_REPO_ENV} not set — github connector skipped (RFC 0020)"
+            );
+        }
     }
 
     let fingerprint_path = config.ekos_dir(cwd).join("fingerprints.json");

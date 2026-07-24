@@ -2,8 +2,9 @@ use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
 use ekos_compiler_core::{EkosConfig, pass::PassContext, scheduler::FailureMode};
 use ekos_recovery::{
-    CryptoAnalyzerPass, DependencyAnalyzerPass, GitAnalyzerPass, MockLlmProvider, OllamaProvider,
-    SqlAnalyzerPass, anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
+    CryptoAnalyzerPass, DependencyAnalyzerPass, GitAnalyzerPass, GitHubAnalyzerPass,
+    MockLlmProvider, OllamaProvider, SqlAnalyzerPass, anthropic::AnthropicProvider,
+    cache::CachedLlmProvider, llm::LlmProvider,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -167,9 +168,23 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(crypto_pass));
     }
 
+    // ── GitHub issue/PR artifacts (RFC 0020) ─────────────────────────────
+    let github_artifact_ids = collect_github_artifact_ids(&*artifact_store);
+    let github_item_count = github_artifact_ids.len();
+    if !github_artifact_ids.is_empty() {
+        let github_pass = GitHubAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            github_artifact_ids,
+        );
+        pass_manager.register(Box::new(github_pass));
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, or dependency-scan source files found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, or GitHub items found)."
         );
         return Ok(());
     }
@@ -199,6 +214,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
     if dep_file_count > 0 {
         println!("  Source files scanned for dependencies: {dep_file_count}");
+    }
+    if github_item_count > 0 {
+        println!("  GitHub issues/PRs analysed: {github_item_count}");
     }
     println!("  Passes run: {}", report.passes_run());
     if report.passes_skipped() > 0 {
@@ -267,6 +285,27 @@ fn collect_crypto_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
         }
     }
     let mut ids: Vec<ArtifactId> = by_batch.into_values().collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
+/// Collect ArtifactIds for every GitHub issue/PR artifact currently in the store (RFC 0020).
+fn collect_github_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("github"))
+        })
+        .collect();
     ids.sort_by_key(|id| id.to_string());
     ids
 }
