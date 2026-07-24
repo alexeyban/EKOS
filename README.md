@@ -75,7 +75,8 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
 server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`,
-`ekos_state`, `ekos_dependents` (impact analysis), `ekos_diff` (what changed since T),
+`ekos_state`, `ekos_dependents` (single-hop impact analysis), `ekos_impact` (directed,
+kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_diff` (what changed since T),
 `ekos_status`. Connect Claude Code with:
 
 ```bash
@@ -87,7 +88,7 @@ registration can be path-free: `claude mcp add ekos --env EKOS_WORKSPACE=/path/t
 
 ### Demo: skills + custom subagents
 
-`demo/` contains a rehearsable, 7-act demo of EKOS's Claude Code integration, run against
+`demo/` contains a rehearsable, 8-act demo of EKOS's Claude Code integration, run against
 a real compiled workspace — two skills (`ekos-knowledge`, `memory`) and four custom
 subagents, each embodying one capability:
 

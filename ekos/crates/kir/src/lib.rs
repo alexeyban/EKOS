@@ -152,6 +152,39 @@ impl std::fmt::Display for RelationshipKind {
     }
 }
 
+/// Parses the same names `Display` renders (case-insensitively for the
+/// built-in variants); anything unrecognized becomes `Custom(s)` — this
+/// never fails, matching the taxonomy's own escape hatch. Shared by EKL's
+/// `VIA <kind>` clause and the `ekos_impact` MCP tool's `kinds` filter
+/// (RFC 0018) so both parse relationship-kind names identically.
+impl std::str::FromStr for RelationshipKind {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(if s.eq_ignore_ascii_case("ForeignKey") {
+            Self::ForeignKey
+        } else if s.eq_ignore_ascii_case("Calls") {
+            Self::Calls
+        } else if s.eq_ignore_ascii_case("Extends") {
+            Self::Extends
+        } else if s.eq_ignore_ascii_case("DependsOn") {
+            Self::DependsOn
+        } else if s.eq_ignore_ascii_case("OwnedBy") {
+            Self::OwnedBy
+        } else if s.eq_ignore_ascii_case("Contains") {
+            Self::Contains
+        } else if s.eq_ignore_ascii_case("References") {
+            Self::References
+        } else if s.eq_ignore_ascii_case("CoupledWith") {
+            Self::CoupledWith
+        } else if s.eq_ignore_ascii_case("Unknown") {
+            Self::Unknown
+        } else {
+            Self::Custom(s.to_string())
+        })
+    }
+}
+
 /// The identity of a concept in the enterprise (table, entity, service, rule…).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KirObject {

@@ -534,10 +534,15 @@ Priority: HIGH
 **Status: RESOLVED (v0 scope) — Phase 12, EKL (`crates/ekl/`, RFC 0010).** A custom DSL:
 `FIND <Object|Relationship> WHERE ... FROM ... RETURN ... ORDER BY ... LIMIT ...`, compiling directly
 to `Runtime` calls, no LLM in the loop. Explicitly narrower than the original examples — no
-multi-hop path expressions (`EXPLAIN WHY TABLE A DEPENDS ON TABLE B` needs graph-path reasoning EKL
-v0 doesn't have), no natural-language-shaped queries (that's `ekos ask`'s job, Phase 11, a different
-mechanism entirely — LLM-grounded, not deterministic). RFC 0010 documents this narrowing explicitly
-as a deliberate v0 scope decision, not an oversight.
+natural-language-shaped queries (that's `ekos ask`'s job, Phase 11, a different mechanism entirely —
+LLM-grounded, not deterministic).
+
+**Multi-hop path expressions added — RFC 0018.** `FIND Object VIA <RelationshipKind> FROM '<name>'
+DEPTH <n>` now compiles to a real directed, kind-filtered, cycle-safe traversal
+(`Runtime::trace_impact`), also exposed standalone as the `ekos_impact` MCP tool. The graph-path
+reasoning this section originally called out as missing now exists for the "what depends on this,
+N levels deep" shape of question; `EXPLAIN WHY ...`-style natural-language framing is still out of
+EKL's scope by design (that's `ekos ask`'s job).
 
 <details><summary>Original problem statement</summary>
 
@@ -649,15 +654,20 @@ Priority: MEDIUM
 
 ## AI-001 — Single LLM Provider
 
+**Status: PARTIALLY RESOLVED — RFC 0021.** `OllamaProvider` (`crates/recovery/src/ollama.rs`) adds
+a keyless local-model path, selected via `config.llm.provider = "ollama"`, wrapped in the same
+generic `CachedLlmProvider<T>` as Anthropic. Closes the "local models" / Ollama items below; Azure
+OpenAI, OpenAI, and Gemini remain open.
+
 Need provider abstraction beyond Anthropic.
 
 Add:
 
 * Azure OpenAI
 * OpenAI
-* Ollama
+* ~~Ollama~~ (done, RFC 0021)
 * Gemini
-* local models
+* ~~local models~~ (done via Ollama, RFC 0021)
 
 Priority: MEDIUM
 

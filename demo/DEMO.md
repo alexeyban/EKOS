@@ -4,7 +4,7 @@
 into an evidence-backed knowledge ledger, then serves it read-only through
 MCP tools. This demo shows two different ways Claude Code consumes that
 ledger — **skills** (methods loaded inline into any session) and **custom
-subagents** (dedicated personas with a scoped toolset) — across seven acts
+subagents** (dedicated personas with a scoped toolset) — across eight acts
 that run against the presenter's real, live estate. Nothing here is staged
 data; every query hits the actual compiled ledger.
 
@@ -20,7 +20,7 @@ data; every query hits the actual compiled ledger.
 | `ekos-knowledge` | skill | query mechanics: tool picker, Locate→Expand→Prove, EKL cheat sheet |
 | `memory` | skill | cross-project memory: recall, capture, async refresh |
 | `estate-scout` | agent (haiku) | existence — "what's out there?", MCP-only, cannot open files |
-| `impact-analyst` | agent (sonnet) | consequence — blast-radius + evidence |
+| `impact-analyst` | agent (sonnet) | consequence — multi-hop blast-radius + evidence (RFC 0018) |
 | `memory-keeper` | agent (sonnet) | memory — the only agent that writes |
 | `estate-architect` | agent (inherit) | synthesis — designs from the estate's own prior art |
 
@@ -115,12 +115,13 @@ table?"*
 
 **Activates:** `impact-analyst`.
 
-**Expected calls:** locate → `ekos_dependents` → `ekos_state` per
-dependent for evidence.
+**Expected calls:** locate → `ekos_impact` (multi-hop, `direction:
+"dependents"`) → `ekos_state` per hop for evidence.
 
 **Wow line:** *"A blast-radius report where every dependency comes with
 the actual foreign-key clause or config line that proves it — not a
-guess."*
+guess — and it doesn't stop at direct dependents. It keeps walking the
+chain until nothing else is affected."*
 
 **Verified reality:** rehearsal shows the analyst correctly reports that
 today's only indexed `customers` tables are the fixture schemas (it
@@ -217,6 +218,52 @@ and `data-platform/pipelines/spark_jobs/cdc_stream.py`) and named lesson
 notes, then say it plainly: *this isn't a generic architecture — it's the
 one **you** would actually build, because it's built from what you already
 know.*
+
+---
+
+## Act 8 — Reasoning, not retrieval (impact-analyst, RFC 0018)
+
+**What this proves:** the two questions that motivated RFC 0018 — *"where
+is X implemented?"* and *"if I replace X with Y, what breaks?"* — actually
+get answered by walking a real, directed, evidence-backed dependency chain,
+not by a single keyword hit.
+
+**Say (query 1 — structural):** *"Where is authentication implemented in
+my estate?"*
+
+**Expected calls:** `ekos_search "authenticate"` / `ekos_search "auth"` →
+`ekos_state` on the strongest hits to quote the actual declaration or
+config line.
+
+**Verified reality today:** this depends on Phase 2 (RFC 0019) symbol
+harvesting having landed — until then, this only surfaces file/excerpt-
+level hits, which is an honest, narrower answer ("here's every file whose
+excerpt mentions auth-related terms") rather than a symbol-level one. State
+that distinction plainly if Phase 2 hasn't shipped yet by demo day.
+
+**Say (query 2 — consequence):** *"If I replace PostgreSQL with Cosmos DB,
+what breaks?"*
+
+**Expected calls:** locate the PostgreSQL/database object (`ekos_search` or
+`ekos_ekl`) → `ekos_impact(direction: "dependents", max_hops: 5)` to get the
+full transitive blast radius, level by level → `ekos_state` per hop for
+evidence.
+
+**Wow line:** *"That's not a text search for 'postgres' across files — it's
+a directed graph walk through real foreign-key and dependency edges, with
+the evidence for every single hop, telling you exactly how deep the damage
+goes."*
+
+**Verified reality today:** the *engine* (`ekos_impact`) is real and works
+now over whatever `DependsOn`/`ForeignKey`/`CoupledWith` facts the ledger
+already has (SQL FK chains, git co-change coupling). The full "swap
+Postgres for Cosmos DB" scenario needs Phase 2 (RFC 0019)'s
+dependency-fact extraction pass to have emitted a `DependsOn` edge from
+each consumer to a synthetic PostgreSQL Technology object — without that,
+`ekos_impact` still traces real edges, just not ones rooted at a
+database-technology node yet. Frame this act as "here is the reasoning
+engine, proven on real data" rather than promising the exact query line if
+Phase 2 hasn't landed.
 
 ---
 

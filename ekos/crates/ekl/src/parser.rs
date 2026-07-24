@@ -48,6 +48,13 @@ pub struct EklAst {
     pub entity: Entity,
     pub predicates: Vec<Predicate>,
     pub from: Option<String>,
+    /// RFC 0018: relationship kind name to walk from `from` (e.g. `DependsOn`).
+    /// Requires `from`; when present, expansion delegates to `trace_impact`
+    /// instead of the undirected `load_neighborhood`.
+    pub via: Option<String>,
+    /// RFC 0018: hop count for `from`-anchored expansion (default 1, same as
+    /// today's implicit single hop).
+    pub depth: Option<u32>,
     pub returns: Vec<String>,
     pub order_by: Option<(String, Order)>,
     pub limit: Option<u64>,
@@ -274,6 +281,8 @@ impl Parser {
 
         let mut predicates = Vec::new();
         let mut from = None;
+        let mut via = None;
+        let mut depth = None;
         let mut returns = Vec::new();
         let mut order_by = None;
         let mut limit = None;
@@ -292,6 +301,12 @@ impl Parser {
             if self.peek_keyword("FROM") {
                 self.advance();
                 from = Some(self.expect_string()?);
+            } else if self.peek_keyword("VIA") {
+                self.advance();
+                via = Some(self.expect_ident()?);
+            } else if self.peek_keyword("DEPTH") {
+                self.advance();
+                depth = Some(self.expect_num()? as u32);
             } else if self.peek_keyword("RETURN") {
                 self.advance();
                 returns.push(self.expect_ident()?);
@@ -329,10 +344,20 @@ impl Parser {
             });
         }
 
+        if via.is_some() && from.is_none() {
+            let pos = self.peek_pos();
+            return Err(ParseError {
+                message: "VIA requires a FROM anchor".to_string(),
+                position: pos,
+            });
+        }
+
         Ok(EklAst {
             entity,
             predicates,
             from,
+            via,
+            depth,
             returns,
             order_by,
             limit,
@@ -484,6 +509,33 @@ mod tests {
             let ast = ekl_parse(text).unwrap();
             assert_eq!(ast.predicates[0].op, expected, "for {text}");
         }
+    }
+
+    #[test]
+    fn parses_via_and_depth() {
+        let ast = ekl_parse("FIND Object VIA DependsOn FROM 'orders' DEPTH 3").unwrap();
+        assert_eq!(ast.from, Some("orders".to_string()));
+        assert_eq!(ast.via, Some("DependsOn".to_string()));
+        assert_eq!(ast.depth, Some(3));
+    }
+
+    #[test]
+    fn depth_alone_generalizes_from_without_via() {
+        let ast = ekl_parse("FIND Object FROM 'orders' DEPTH 2").unwrap();
+        assert_eq!(ast.via, None);
+        assert_eq!(ast.depth, Some(2));
+    }
+
+    #[test]
+    fn queries_without_via_or_depth_default_to_none() {
+        let ast = ekl_parse("FIND Object FROM 'orders'").unwrap();
+        assert_eq!(ast.via, None);
+        assert_eq!(ast.depth, None);
+    }
+
+    #[test]
+    fn rejects_via_without_from() {
+        assert!(ekl_parse("FIND Object VIA DependsOn").is_err());
     }
 
     #[test]

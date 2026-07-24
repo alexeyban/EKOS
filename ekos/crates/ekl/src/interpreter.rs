@@ -2,11 +2,12 @@
 //! predicates generically over `serde_json::Value` rows (RFC 0010).
 
 use crate::parser::{EklAst, Entity, Literal, Op, Order, Predicate};
-use ekos_kir::{KirId, KirObject, KirRelationship};
-use ekos_runtime::{Runtime, RuntimeError};
+use ekos_kir::{KirGraph, KirId, KirObject, KirRelationship, RelationshipKind};
+use ekos_runtime::{ImpactDirection, Runtime, RuntimeError};
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::str::FromStr;
 use thiserror::Error;
 
 pub type Row = HashMap<String, Value>;
@@ -88,12 +89,12 @@ impl<'a> EklInterpreter<'a> {
                 .collect()),
             (Entity::Object, Some(name)) => {
                 let anchor = self.resolve_anchor(name)?;
-                let graph = self.runtime.load_neighborhood(&anchor, 1)?;
+                let graph = self.expand_from_anchor(anchor, ast)?;
                 Ok(graph.objects.iter().map(object_row).collect())
             }
             (Entity::Relationship, Some(name)) => {
                 let anchor = self.resolve_anchor(name)?;
-                let graph = self.runtime.load_neighborhood(&anchor, 1)?;
+                let graph = self.expand_from_anchor(anchor, ast)?;
                 Ok(graph.relationships.iter().map(relationship_row).collect())
             }
         }
@@ -106,6 +107,39 @@ impl<'a> EklInterpreter<'a> {
             .next()
             .map(|(id, _)| id)
             .ok_or_else(|| EklError::AnchorNotFound(name.to_string()))
+    }
+
+    /// Expands a `FROM` anchor per RFC 0018: without `VIA`, generalizes the
+    /// original single-hop `load_neighborhood(anchor, 1)` to
+    /// `load_neighborhood(anchor, depth)` (default 1, fully backward
+    /// compatible). With `VIA <kind>`, delegates to the directed,
+    /// kind-filtered `trace_impact` (dependencies direction — tracing
+    /// outward along the named kind, matching RFC 0010's own FK-chasing
+    /// example) and reassembles a `KirGraph` so the existing row
+    /// projections keep working unchanged.
+    fn expand_from_anchor(&self, anchor: KirId, ast: &EklAst) -> Result<KirGraph, EklError> {
+        let depth = ast.depth.unwrap_or(1);
+        match &ast.via {
+            None => Ok(self.runtime.load_neighborhood(&anchor, depth)?),
+            Some(kind_name) => {
+                let kind = RelationshipKind::from_str(kind_name).expect("infallible");
+                let hops = self.runtime.trace_impact(
+                    &anchor,
+                    ImpactDirection::Dependencies,
+                    &[kind],
+                    depth,
+                )?;
+                let mut graph = KirGraph::new();
+                if let Some(root) = self.runtime.load_object(&anchor)? {
+                    graph.add_object(root);
+                }
+                for hop in hops {
+                    graph.add_object(hop.object);
+                    graph.add_relationship(hop.via);
+                }
+                Ok(graph)
+            }
+        }
     }
 }
 
@@ -378,6 +412,49 @@ mod tests {
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0].len(), 2);
         assert!(result.rows[0].contains_key("from") && result.rows[0].contains_key("to"));
+    }
+
+    #[test]
+    fn via_kind_filters_and_traces_dependencies() {
+        let (ledger, _dir) = fixture();
+        // Add a non-FK edge from orders that VIA ForeignKey must not follow.
+        let shipping = KirObject::new("shipping_notes", ObjectKind::Table);
+        let shipping_id = shipping.id;
+        ledger.append_object(&shipping).unwrap();
+        let orders_id = ledger
+            .find_objects("orders")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .0;
+        ledger
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::CoupledWith,
+                orders_id,
+                shipping_id,
+            ))
+            .unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Object VIA ForeignKey FROM 'orders'");
+        // orders itself + its two FK neighbours (customers, order_items);
+        // shipping_notes (CoupledWith) must be excluded.
+        assert_eq!(result.rows.len(), 3);
+        assert!(
+            result
+                .rows
+                .iter()
+                .all(|r| r["name"] != Value::String("shipping_notes".into()))
+        );
+    }
+
+    #[test]
+    fn depth_without_via_generalizes_single_hop_default() {
+        let (ledger, _dir) = fixture();
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Object FROM 'orders' DEPTH 1");
+        assert_eq!(result.rows.len(), 3, "same as no-DEPTH default");
     }
 
     #[test]

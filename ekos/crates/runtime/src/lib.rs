@@ -7,7 +7,7 @@
 pub mod ai;
 
 use chrono::{DateTime, Utc};
-use ekos_kir::{KirEvidence, KirGraph, KirId, KirObject, KirRelationship};
+use ekos_kir::{KirEvidence, KirGraph, KirId, KirObject, KirRelationship, RelationshipKind};
 use ekos_ledger::{KnowledgeStore, LedgerError};
 use serde::Serialize;
 use std::collections::{HashSet, VecDeque};
@@ -28,6 +28,25 @@ pub struct ObjectState {
     pub object: KirObject,
     pub relationships: Vec<KirRelationship>,
     pub evidence: Vec<KirEvidence>,
+}
+
+/// Which way to walk edges from the root in [`Runtime::trace_impact`]
+/// (RFC 0018).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImpactDirection {
+    /// What depends on this object — follow edges where `rel.to == current`.
+    Dependents,
+    /// What this object depends on — follow edges where `rel.from == current`.
+    Dependencies,
+}
+
+/// One node reached while tracing impact: which hop it was found at, the
+/// object itself, and the relationship that led to it (RFC 0018).
+#[derive(Debug, Clone, Serialize)]
+pub struct ImpactHop {
+    pub hop: u32,
+    pub object: KirObject,
+    pub via: KirRelationship,
 }
 
 /// Read-only view over the Knowledge Ledger. Backend-agnostic since
@@ -101,6 +120,68 @@ impl<'a> Runtime<'a> {
         }
 
         Ok(graph)
+    }
+
+    /// Directed, relationship-kind-filtered impact trace (RFC 0018).
+    ///
+    /// Reuses `load_neighborhood`'s cycle-safe BFS shape but only follows
+    /// edges in `direction` and (if `kinds` is non-empty) only edges whose
+    /// kind is in `kinds`. Traversal stops past `max_hops`. The root itself
+    /// is never included in the output. Like `load_neighborhood`, a
+    /// neighbour is recorded the first time it's reached — a second edge
+    /// into an already-visited object is not separately reported.
+    pub fn trace_impact(
+        &self,
+        id: &KirId,
+        direction: ImpactDirection,
+        kinds: &[RelationshipKind],
+        max_hops: u32,
+    ) -> Result<Vec<ImpactHop>, RuntimeError> {
+        let mut hops = Vec::new();
+        let mut visited: HashSet<KirId> = HashSet::new();
+        let mut queue: VecDeque<(KirId, u32)> = VecDeque::new();
+
+        if self.ledger.get_object(id)?.is_none() {
+            return Ok(hops);
+        }
+
+        visited.insert(*id);
+        queue.push_back((*id, 0));
+
+        while let Some((current_id, current_depth)) = queue.pop_front() {
+            if current_depth >= max_hops {
+                continue;
+            }
+
+            for rel in self.ledger.relationships_for(&current_id)? {
+                let neighbour_id = match direction {
+                    ImpactDirection::Dependents if rel.to == current_id => rel.from,
+                    ImpactDirection::Dependencies if rel.from == current_id => rel.to,
+                    _ => continue,
+                };
+
+                if !kinds.is_empty() && !kinds.contains(&rel.kind) {
+                    continue;
+                }
+
+                if visited.contains(&neighbour_id) {
+                    continue;
+                }
+                visited.insert(neighbour_id);
+
+                if let Some(neighbour) = self.ledger.get_object(&neighbour_id)? {
+                    let next_depth = current_depth + 1;
+                    hops.push(ImpactHop {
+                        hop: next_depth,
+                        object: neighbour,
+                        via: rel,
+                    });
+                    queue.push_back((neighbour_id, next_depth));
+                }
+            }
+        }
+
+        Ok(hops)
     }
 
     /// Reconstruct the full current state of an object: object + relationships + evidence.
@@ -317,6 +398,111 @@ mod tests {
         let rt = Runtime::new(&ledger);
         let g = rt.load_neighborhood(&a.id, 5).unwrap();
         assert_eq!(g.objects.len(), 2, "cycle must not loop forever");
+    }
+
+    #[test]
+    fn trace_impact_dependents_and_dependencies_are_disjoint() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("a");
+        let b = obj("b");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        // a → b: a depends on b, b has a as a dependent.
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let dependents = rt
+            .trace_impact(&b.id, ImpactDirection::Dependents, &[], 5)
+            .unwrap();
+        assert_eq!(dependents.len(), 1);
+        assert_eq!(dependents[0].object.id, a.id);
+
+        let dependencies = rt
+            .trace_impact(&b.id, ImpactDirection::Dependencies, &[], 5)
+            .unwrap();
+        assert!(
+            dependencies.is_empty(),
+            "b has no outgoing edges, so no dependencies"
+        );
+
+        let a_dependencies = rt
+            .trace_impact(&a.id, ImpactDirection::Dependencies, &[], 5)
+            .unwrap();
+        assert_eq!(a_dependencies.len(), 1);
+        assert_eq!(a_dependencies[0].object.id, b.id);
+    }
+
+    #[test]
+    fn trace_impact_filters_by_kind() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("a");
+        let b = obj("b");
+        let c = obj("c");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_object(&c).unwrap();
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+        ledger
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::CoupledWith,
+                a.id,
+                c.id,
+            ))
+            .unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let only_fk = rt
+            .trace_impact(
+                &a.id,
+                ImpactDirection::Dependencies,
+                &[RelationshipKind::ForeignKey],
+                5,
+            )
+            .unwrap();
+        assert_eq!(only_fk.len(), 1);
+        assert_eq!(only_fk[0].object.id, b.id);
+    }
+
+    #[test]
+    fn trace_impact_handles_cycles() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("a");
+        let b = obj("b");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+        ledger.append_relationship(&fk(b.id, a.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let hops = rt
+            .trace_impact(&a.id, ImpactDirection::Dependencies, &[], 5)
+            .unwrap();
+        assert_eq!(hops.len(), 1, "cycle must not loop forever");
+        assert_eq!(hops[0].object.id, b.id);
+    }
+
+    #[test]
+    fn trace_impact_max_hops_bounds_traversal() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("a");
+        let b = obj("b");
+        let c = obj("c");
+        let d = obj("d");
+        let e = obj("e");
+        for o in [&a, &b, &c, &d, &e] {
+            ledger.append_object(o).unwrap();
+        }
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+        ledger.append_relationship(&fk(b.id, c.id)).unwrap();
+        ledger.append_relationship(&fk(c.id, d.id)).unwrap();
+        ledger.append_relationship(&fk(d.id, e.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let hops = rt
+            .trace_impact(&a.id, ImpactDirection::Dependencies, &[], 2)
+            .unwrap();
+        assert_eq!(hops.len(), 2, "only b (hop 1) and c (hop 2) within bound");
+        assert!(hops.iter().all(|h| h.hop <= 2));
     }
 
     #[test]

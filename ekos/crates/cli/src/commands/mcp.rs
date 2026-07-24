@@ -13,8 +13,8 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
-use ekos_kir::KirId;
-use ekos_runtime::Runtime;
+use ekos_kir::{KirId, RelationshipKind};
+use ekos_runtime::{ImpactDirection, Runtime};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -154,6 +154,20 @@ fn tool_definitions() -> Value {
             }
         },
         {
+            "name": "ekos_impact",
+            "description": "Transitive impact analysis: follows dependency edges multiple hops (default 5), directionally and optionally filtered to specific relationship kinds — 'what breaks N levels deep if I change this', not just direct edges. Use ekos_dependents for single-hop; use this for multi-hop.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Object id (UUID) from ekos_search or ekos_ekl" },
+                    "direction": { "type": "string", "description": "\"dependents\" (default; what depends on this) or \"dependencies\" (what this depends on)" },
+                    "kinds": { "type": "array", "items": { "type": "string" }, "description": "Relationship kind names to follow, e.g. [\"ForeignKey\", \"DependsOn\"] (default: all kinds)" },
+                    "max_hops": { "type": "integer", "description": "Hop bound (default 5)" }
+                },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "ekos_diff",
             "description": "What knowledge changed in the ledger in a time window: objects/relationships written in (from, to], resolved to names and kinds. Use to answer 'what changed since yesterday?'.",
             "inputSchema": {
@@ -279,6 +293,55 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
                 "dependencies_count": dependencies.len(),
             }))
         }
+        "ekos_impact" => {
+            let id = required_id(args)?;
+            runtime
+                .load_object(&id)?
+                .ok_or_else(|| anyhow::anyhow!("object not found: {id}"))?;
+
+            let direction = match args.get("direction").and_then(Value::as_str) {
+                Some("dependencies") => ImpactDirection::Dependencies,
+                Some("dependents") | None => ImpactDirection::Dependents,
+                Some(other) => {
+                    anyhow::bail!(
+                        "invalid `direction`: {other} (want \"dependents\" or \"dependencies\")"
+                    )
+                }
+            };
+            let kinds: Vec<RelationshipKind> = args
+                .get("kinds")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(|s| RelationshipKind::from_str(s).expect("infallible"))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(5) as u32;
+
+            let hops = runtime.trace_impact(&id, direction, &kinds, max_hops)?;
+            let by_hop: Vec<Value> = hops
+                .iter()
+                .map(|h| {
+                    json!({
+                        "hop": h.hop,
+                        "id": h.object.id.to_string(),
+                        "name": h.object.name,
+                        "kind": h.object.kind.to_string(),
+                        "via": h.via.kind.to_string(),
+                    })
+                })
+                .collect();
+
+            Ok(json!({
+                "target": { "id": id.to_string() },
+                "direction": match direction { ImpactDirection::Dependents => "dependents", ImpactDirection::Dependencies => "dependencies" },
+                "max_hops": max_hops,
+                "count": by_hop.len(),
+                "hops": by_hop,
+            }))
+        }
         "ekos_diff" => {
             let from: DateTime<Utc> = required_str(args, "from")?
                 .parse()
@@ -402,6 +465,7 @@ mod tests {
                 "ekos_neighborhood",
                 "ekos_state",
                 "ekos_dependents",
+                "ekos_impact",
                 "ekos_diff",
                 "ekos_status"
             ]
@@ -431,6 +495,88 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .contains("not found")
+        );
+    }
+
+    #[test]
+    fn impact_of_unknown_object_is_a_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let line = req(
+            13,
+            "tools/call",
+            json!({ "name": "ekos_impact",
+                    "arguments": { "id": "00000000-0000-0000-0000-000000000000" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
+    }
+
+    fn seeded_ledger(config: &EkosConfig, tmp: &Path) -> (ekos_kir::KirId, ekos_kir::KirId) {
+        use ekos_kir::{KirObject, KirRelationship, ObjectKind};
+        use ekos_ledger::Ledger;
+        let ledger = Ledger::open(&config.ledger_path(tmp)).unwrap();
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let items = KirObject::new("order_items", ObjectKind::Table);
+        ledger.append_object(&orders).unwrap();
+        ledger.append_object(&items).unwrap();
+        // order_items → orders: order_items depends on orders.
+        ledger
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::ForeignKey,
+                items.id,
+                orders.id,
+            ))
+            .unwrap();
+        (orders.id, items.id)
+    }
+
+    #[test]
+    fn impact_traces_multi_hop_dependents() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let (orders_id, items_id) = seeded_ledger(&config, tmp.path());
+
+        let line = req(
+            15,
+            "tools/call",
+            json!({ "name": "ekos_impact",
+                    "arguments": { "id": orders_id.to_string(), "direction": "dependents" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["count"], 1);
+        assert_eq!(body["hops"][0]["id"], items_id.to_string());
+        assert_eq!(body["hops"][0]["hop"], 1);
+    }
+
+    #[test]
+    fn impact_with_invalid_direction_is_a_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let (orders_id, _items_id) = seeded_ledger(&config, tmp.path());
+
+        let line = req(
+            14,
+            "tools/call",
+            json!({ "name": "ekos_impact",
+                    "arguments": { "id": orders_id.to_string(), "direction": "sideways" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("invalid `direction`")
         );
     }
 
