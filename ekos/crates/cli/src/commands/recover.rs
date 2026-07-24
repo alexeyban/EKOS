@@ -2,7 +2,7 @@ use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
 use ekos_compiler_core::{EkosConfig, pass::PassContext, scheduler::FailureMode};
 use ekos_recovery::{
-    CryptoAnalyzerPass, GitAnalyzerPass, MockLlmProvider, SqlAnalyzerPass,
+    CryptoAnalyzerPass, GitAnalyzerPass, MockLlmProvider, OllamaProvider, SqlAnalyzerPass,
     anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
 };
 use std::collections::HashMap;
@@ -206,13 +206,25 @@ fn collect_crypto_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
     ids
 }
 
-/// Choose LLM provider: Anthropic with cache if API key present, mock otherwise.
+/// Choose LLM provider (RFC 0021): `[llm] provider = "ollama"` in
+/// `ekos.toml` routes to a local Ollama daemon (no key required —
+/// unreachability surfaces as an ordinary error on first use, not here);
+/// anything else tries Anthropic with cache if an API key is present, mock
+/// otherwise.
 fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
     let cache_dir = artifact_dir
         .parent()
         .unwrap_or(artifact_dir)
         .join("llm-cache");
     std::fs::create_dir_all(&cache_dir).ok();
+
+    if config.llm.provider.as_deref() == Some("ollama") {
+        tracing::info!("using local Ollama provider with disk cache");
+        return Arc::new(CachedLlmProvider::new(
+            OllamaProvider::from_env(),
+            cache_dir,
+        ));
+    }
 
     let key_env = config
         .llm
@@ -233,5 +245,40 @@ fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmPr
                 r#"{"entities":[],"relationships":[]}"#,
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ekos_compiler_core::config::LlmConfig;
+    use tempfile::tempdir;
+
+    /// RFC 0021: `provider = "ollama"` must route here without ever
+    /// attempting a network call — `model_name()` alone proves which
+    /// provider was actually selected.
+    #[test]
+    fn ollama_provider_selected_when_configured() {
+        let dir = tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.llm = LlmConfig {
+            provider: Some("ollama".to_string()),
+            api_key_env: None,
+            model: None,
+        };
+        let provider = build_llm_provider(&config, dir.path());
+        assert_eq!(provider.model_name(), "llama3.1:8b");
+    }
+
+    /// Anything other than "ollama" falls through to the existing
+    /// Anthropic/Mock chain untouched.
+    #[test]
+    fn non_ollama_provider_falls_back_to_existing_chain() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let provider = build_llm_provider(&config, dir.path());
+        // Without ANTHROPIC_API_KEY set in the test environment this lands
+        // on the mock; either way it must not be the Ollama default model.
+        assert_ne!(provider.model_name(), "llama3.1:8b");
     }
 }
