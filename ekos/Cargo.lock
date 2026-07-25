@@ -424,6 +424,7 @@ dependencies = [
  "ekos-kir",
  "ekos-ledger",
  "ekos-observation-sdk",
+ "ekos-plugin-confluence",
  "ekos-plugin-crypto",
  "ekos-plugin-file",
  "ekos-plugin-git",
@@ -574,6 +575,22 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "ekos-plugin-confluence"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

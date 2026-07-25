@@ -28,6 +28,7 @@ ekos-plugin-file = { path = "../../plugins/file" }
 ekos-plugin-git  = { path = "../../plugins/git" }
 ekos-plugin-crypto = { path = "../../plugins/crypto" }
 ekos-plugin-github = { path = "../../plugins/github" }
+ekos-plugin-confluence = { path = "../../plugins/confluence" }
 clap.workspace = true
 uuid.workspace = true
 tokio.workspace = true

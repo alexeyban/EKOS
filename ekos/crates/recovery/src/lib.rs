@@ -4,6 +4,7 @@
 
 pub mod anthropic;
 pub mod cache;
+pub mod confluence_analyzer;
 pub mod crypto_analyzer;
 pub mod dependency_analyzer;
 pub mod git_analyzer;
@@ -14,6 +15,7 @@ pub mod sql_analyzer;
 
 pub use anthropic::AnthropicProvider;
 pub use cache::CachedLlmProvider;
+pub use confluence_analyzer::ConfluenceAnalyzerPass;
 pub use crypto_analyzer::CryptoAnalyzerPass;
 pub use dependency_analyzer::DependencyAnalyzerPass;
 pub use git_analyzer::GitAnalyzerPass;

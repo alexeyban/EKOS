@@ -4,6 +4,7 @@ use ekos_artifact::{ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
+use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
@@ -29,6 +30,15 @@ const CRYPTO_EXPORT_DIR_ENV: &str = "EKOS_CRYPTO_EXPORT_DIR";
 const GITHUB_OWNER_ENV: &str = "EKOS_GITHUB_OWNER";
 const GITHUB_REPO_ENV: &str = "EKOS_GITHUB_REPO";
 const GITHUB_TOKEN_ENV: &str = "EKOS_GITHUB_TOKEN";
+
+/// Env vars naming the Confluence site/space to observe (see RFC 0022).
+/// Both base URL and space key must be set — the observer is only added
+/// when they are; their absence is a normal state (most workspaces have no
+/// Confluence space configured), same soft-skip as the crypto/GitHub
+/// connectors above. `EKOS_CONFLUENCE_TOKEN` is optional.
+const CONFLUENCE_BASE_URL_ENV: &str = "EKOS_CONFLUENCE_BASE_URL";
+const CONFLUENCE_SPACE_ENV: &str = "EKOS_CONFLUENCE_SPACE";
+const CONFLUENCE_TOKEN_ENV: &str = "EKOS_CONFLUENCE_TOKEN";
 
 /// Load the `.ekos/fingerprints.json` map of observe-path → last-seen source fingerprint.
 fn load_fingerprints(path: &Path) -> HashMap<String, String> {
@@ -83,6 +93,23 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         _ => {
             tracing::debug!(
                 "{GITHUB_OWNER_ENV}/{GITHUB_REPO_ENV} not set — github connector skipped (RFC 0020)"
+            );
+        }
+    }
+    match (
+        std::env::var(CONFLUENCE_BASE_URL_ENV),
+        std::env::var(CONFLUENCE_SPACE_ENV),
+    ) {
+        (Ok(base_url), Ok(space_key)) => {
+            let token = std::env::var(CONFLUENCE_TOKEN_ENV).ok();
+            observers.push(Box::new(ConfluenceObserver::new(
+                Arc::new(ConfluenceApiClient::new(base_url, token)),
+                space_key,
+            )));
+        }
+        _ => {
+            tracing::debug!(
+                "{CONFLUENCE_BASE_URL_ENV}/{CONFLUENCE_SPACE_ENV} not set — confluence connector skipped (RFC 0022)"
             );
         }
     }
