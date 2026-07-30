@@ -16,6 +16,25 @@ impl DocumentParser for PdfParser {
     }
 
     fn parse(&self, bytes: &[u8]) -> Result<ParsedDocument, ParseError> {
+        // `pdf_extract`/`lopdf` panic (rather than return `Err`) on some
+        // malformed real-world PDFs (e.g. a Type3 font missing a glyph
+        // width) — observed on actual scanned/converted books in
+        // production use. A panic here must not take down the whole
+        // `ekos build` run; `catch_unwind` turns it into an ordinary
+        // soft-skip for this one file, same as any other `ParseError`.
+        std::panic::catch_unwind(|| Self::parse_inner(bytes)).unwrap_or_else(|payload| {
+            let msg = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_string());
+            Err(ParseError::Malformed(format!("pdf parser panicked: {msg}")))
+        })
+    }
+}
+
+impl PdfParser {
+    fn parse_inner(bytes: &[u8]) -> Result<ParsedDocument, ParseError> {
         let text = pdf_extract::extract_text_from_mem(bytes)
             .map_err(|e| ParseError::Malformed(format!("text extraction failed: {e}")))?;
 
@@ -81,20 +100,28 @@ impl DocumentParser for PdfParser {
 
 /// Whitespace-column table heuristic: contiguous lines that each split into
 /// ≥2 fields on a run of ≥2 whitespace characters are grouped into one
-/// table. Approximate — operates on the flat text stream, not per-page
+/// table, then kept only if every row in the group has the *same* field
+/// count. Approximate — operates on the flat text stream, not per-page
 /// glyph coordinates — documented as such in RFC 0023.
+///
+/// The uniform-column-count requirement was added after running against a
+/// real book library (RFC 0023's devlog): without it, justified body
+/// prose routinely misfires as a "table" — PDF text extraction leaves
+/// irregular multi-space gaps in justified paragraphs, but unlike an
+/// actual table, the field count varies wildly line to line. Real tables
+/// (including simple two-column ones like a table of contents) keep a
+/// constant column count; prose does not.
 fn extract_tables(text: &str) -> Vec<ExtractedTable> {
     let mut tables = Vec::new();
     let mut current_rows: Vec<Vec<String>> = Vec::new();
 
     let flush = |rows: &mut Vec<Vec<String>>, tables: &mut Vec<ExtractedTable>| {
-        if rows.len() >= 2 {
+        let taken = std::mem::take(rows);
+        if taken.len() >= 2 && has_uniform_column_count(&taken) {
             tables.push(ExtractedTable {
                 page: None,
-                rows: std::mem::take(rows),
+                rows: taken,
             });
-        } else {
-            rows.clear();
         }
     };
 
@@ -109,8 +136,19 @@ fn extract_tables(text: &str) -> Vec<ExtractedTable> {
     tables
 }
 
+/// True if every row has the same number of fields as the first row.
+fn has_uniform_column_count(rows: &[Vec<String>]) -> bool {
+    match rows.first() {
+        Some(first) => rows.iter().all(|r| r.len() == first.len()),
+        None => false,
+    }
+}
+
 /// Splits a line into ≥2 fields on runs of ≥2 whitespace characters, or
-/// returns `None` if the line doesn't look like a table row.
+/// returns `None` if the line doesn't look like a table row. A single
+/// space/tab is kept as part of the current field's text (real cell
+/// content like "Putting it all together" has internal single spaces);
+/// only a run of ≥2 is treated as a column delimiter.
 fn split_table_row(line: &str) -> Option<Vec<String>> {
     if line.trim().is_empty() {
         return None;
@@ -119,19 +157,30 @@ fn split_table_row(line: &str) -> Option<Vec<String>> {
     let mut current = String::new();
     let mut space_run = 0usize;
 
+    let push_field = |current: &mut String, fields: &mut Vec<String>, trailing_spaces: usize| {
+        let cut = current.len() - trailing_spaces;
+        let field = current[..cut].trim().to_string();
+        if !field.is_empty() {
+            fields.push(field);
+        }
+        current.clear();
+    };
+
     for ch in line.chars() {
         if ch == ' ' || ch == '\t' {
             space_run += 1;
-            if space_run == 2 && !current.trim().is_empty() {
-                fields.push(current.trim().to_string());
-                current.clear();
-            }
+            current.push(ch);
         } else {
+            if space_run >= 2 {
+                push_field(&mut current, &mut fields, space_run);
+            }
             space_run = 0;
             current.push(ch);
         }
     }
-    if !current.trim().is_empty() {
+    if space_run >= 2 {
+        push_field(&mut current, &mut fields, space_run);
+    } else if !current.trim().is_empty() {
         fields.push(current.trim().to_string());
     }
 
@@ -145,6 +194,52 @@ fn split_table_row(line: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The following two fixtures are real `pdf-extract` output captured
+    // from public technical PDFs in an end-to-end run against a real
+    // document library (RFC 0023's devlog) — not hand-crafted synthetic
+    // text. They pin down the heuristic's real-world precision: before the
+    // uniform-column-count check, justified body prose like
+    // `JUSTIFIED_PROSE_EXCERPT` was misdetected as a table on real books.
+
+    /// Real `pdf-extract` output: justified body prose. PDF text extraction
+    /// leaves irregular multi-space gaps between justified words — a naive
+    /// "≥2 spaces = column boundary" heuristic misfires on this, producing
+    /// rows with wildly different field counts per line.
+    const JUSTIFIED_PROSE_EXCERPT: &str = "The  world  of  enterprise  computing  is  now  starting  to  see  the  incorporation  of  new  technologies  that  have  been\ndeveloped and adopted by  the new media companies like Google, Yahoo, Facebook, LinkedIn et al. These technologies\ninclude  sy stems  like  large-scale  distributed  ﬁle  sy stems  like  Hadoop,  which  can  handle  enormously   large  data  sets,\ncloud  computing  and  virtualiz ation,  html  5 ,  smart  mobile  devices  and  many   more.  We  are  now  on  the  cusp  of  y et\n";
+
+    /// Real `pdf-extract` output: a table-of-contents fragment (two
+    /// consistently 2-field lines: entry title, page number).
+    const TOC_EXCERPT: &str = "Putting it all together   34\nAdditional resources   36\n";
+
+    #[test]
+    fn real_justified_prose_produces_no_table() {
+        // Before the uniform-column-count check, this excerpt produced a
+        // single bogus "table" spanning the whole paragraph.
+        assert!(extract_tables(JUSTIFIED_PROSE_EXCERPT).is_empty());
+    }
+
+    #[test]
+    fn real_toc_fragment_is_still_detected_as_a_table() {
+        let tables = extract_tables(TOC_EXCERPT);
+        assert_eq!(tables.len(), 1);
+        assert_eq!(
+            tables[0].rows,
+            vec![
+                vec!["Putting it all together".to_string(), "34".to_string()],
+                vec!["Additional resources".to_string(), "36".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn has_uniform_column_count_rejects_mismatched_rows() {
+        let rows = vec![
+            vec!["a".to_string(), "b".to_string()],
+            vec!["c".to_string()],
+        ];
+        assert!(!has_uniform_column_count(&rows));
+    }
 
     #[test]
     fn split_table_row_requires_two_space_gap() {

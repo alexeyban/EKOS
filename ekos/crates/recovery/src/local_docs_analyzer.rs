@@ -321,4 +321,38 @@ mod tests {
 
         assert_eq!(graph1.objects[0].id, graph2.objects[0].id);
     }
+
+    /// Real table content extracted by `PdfParser` from a public MLOps
+    /// white paper's table of contents, verified via an end-to-end run
+    /// against a real document library (RFC 0023's devlog) — confirms
+    /// genuine book table content survives into a `Table` KirObject
+    /// unmodified, not just synthetic two-cell fixtures.
+    #[tokio::test]
+    async fn real_book_table_content_produces_matching_table_object() {
+        let (c, _dir) = ctx();
+        let tables = serde_json::json!([
+            { "page": null, "rows": [
+                ["Putting it all together", "34"],
+                ["Additional resources", "36"]
+            ] }
+        ]);
+        let id = seed_doc(
+            &c,
+            "Practitioner's Guide to MLOps.pdf",
+            "pdf",
+            "Practitioners guide to MLOps: a framework for continuous delivery and automation of machine learning.",
+            tables,
+        );
+        let graph = run_pass(vec![id], c).await;
+
+        let tbl_id = table_kir_id("Practitioner's Guide to MLOps.pdf", 0);
+        let tbl_obj = graph.objects.iter().find(|o| o.id == tbl_id).unwrap();
+        assert_eq!(
+            tbl_obj.properties["rows"],
+            serde_json::json!([
+                ["Putting it all together", "34"],
+                ["Additional resources", "36"]
+            ])
+        );
+    }
 }

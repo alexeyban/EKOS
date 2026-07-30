@@ -88,10 +88,16 @@ pub trait OcrEngine: Send + Sync {
   `pdf-extract` (text layer extraction). Table extraction is a v1
   whitespace-column heuristic operating on the flat text `pdf-extract`
   returns (not per-page glyph coordinates): contiguous lines that each
-  split into ≥2 fields on runs of ≥2 whitespace characters are grouped into
-  one table (rows = lines, cells = fields); this is approximate — it will
-  misfire on multi-column prose that happens to align, and can merge/split
-  cells on unusual layouts — and is documented as such, not a layout-ML or
+  split into ≥2 fields on runs of ≥2 whitespace characters are grouped,
+  then kept only if every row in the group has the *same* field count
+  (rows = lines, cells = fields). The uniform-column-count check was added
+  after running against a real 82-book library (see devlog): without it,
+  justified body prose routinely misfired as a "table," since PDF text
+  extraction leaves irregular multi-space gaps in justified paragraphs but,
+  unlike a real table, the field count varies wildly line to line — even
+  with the check, this remains approximate and can still misfire on
+  multi-column prose that happens to align uniformly, or merge/split cells
+  on unusual layouts — documented as such, not a layout-ML or
   glyph-position result. Embedded-image extraction walks each page's
   `/Resources /XObject` dictionary for `Subtype /Image` streams; v1 only
   decodes images whose PDF filter is `DCTDecode` (JPEG) — the common case

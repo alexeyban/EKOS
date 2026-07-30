@@ -487,4 +487,45 @@ mod tests {
         let id2 = observer.scan(&ctx).await.unwrap().artifacts[0].id.clone();
         assert_eq!(id1, id2);
     }
+
+    /// Real `pdf-extract` output captured from a public statistics course
+    /// PDF, verified via an end-to-end run against a real document library
+    /// (RFC 0023's devlog) — not hand-crafted synthetic prose. Confirms the
+    /// excerpt carries genuine book content through unmodified (well under
+    /// the 600-char cap, so nothing is truncated here).
+    const REAL_STATISTICS_EXCERPT: &str = "\n\nThe normal curve\n\nMany data have histograms that look bell-shaped, e.g. heights, weights, IQ scores:\n\nHeights of 928 Fathers\n\n64 66 68 70 72\n\u{2018}The data follow the normal curve.\u{2019}\n\nBut remember that some data have histograms that look quite different, e.g. incomes,\nhouse prices.\n The empirical rule\n\n";
+
+    /// Real `tesseract` OCR output captured from a scanned book cover in
+    /// the same end-to-end run — noisy, irregularly spaced, but genuinely
+    /// legible text a scanned page's raw bytes would otherwise hide from
+    /// the ledger entirely.
+    const REAL_OCR_COVER_TEXT: &str = "cole nussbaumer knaflic\n\nstorytelling\nwith\n\ndata\n\na data\n\nvisualization\nguide for\nbusiness\nprofessionals";
+
+    #[tokio::test]
+    async fn real_book_excerpt_and_ocr_text_ride_on_the_artifact_unmodified() {
+        let parser: Arc<dyn DocumentParser> = Arc::new(FixedParser {
+            ext: "pdf",
+            doc: ParsedDocument {
+                page_count: Some(24),
+                text: REAL_STATISTICS_EXCERPT.to_string(),
+                tables: vec![],
+                images: vec![EmbeddedImage {
+                    page: Some(1),
+                    bytes: vec![0xff, 0xd8],
+                    format: ImageFormat::Jpeg,
+                }],
+            },
+        });
+        let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
+            text: REAL_OCR_COVER_TEXT.to_string(),
+            calls: Mutex::new(0),
+        });
+        let pkg = scan_temp(vec![parser], ocr, |dir| {
+            std::fs::write(dir.path().join("stats.pdf"), b"%PDF-fake").unwrap();
+        })
+        .await;
+        let data = &pkg.artifacts[0].content.data;
+        assert_eq!(data["excerpt"], REAL_STATISTICS_EXCERPT);
+        assert_eq!(data["ocr_text"], REAL_OCR_COVER_TEXT);
+    }
 }

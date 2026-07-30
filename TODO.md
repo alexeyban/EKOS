@@ -1445,9 +1445,12 @@ with real or vendor-supplied sandbox credentials.
     `Document` KIR object plus `Table` child objects with `Contains` edges.
   - *Output:* `plugins/localdocs/` crate; `crates/recovery/src/local_docs_analyzer.rs`; wired into
     `build.rs`/`recover.rs` unconditionally (no credential to gate on).
-  - *Test/Validate:* Fixture-driven unit tests (17 in the plugin crate, 4 in the analyzer pass);
-    end-to-end verified against a real generated PDF (table + JPEG scan) and DOCX (table + PNG
-    image) — OCR'd text and table cell content both confirmed present in the committed ledger.
+  - *Test/Validate:* Fixture-driven unit tests (20 in the plugin crate, 5 in the analyzer pass, 3
+    built from real book content); end-to-end verified against a real generated PDF (table + JPEG
+    scan) and DOCX (table + PNG image); further validated against a real 82-PDF, 955MB library
+    (devlog 25) — found and fixed a parser panic on malformed real-world PDFs, a single-space
+    text-mangling bug, and a table-heuristic false-positive on justified prose; final run produced
+    45 `Document` + 30 `Table` objects, 18 with real OCR'd cover text, committed to the ledger.
 
 ---
 
