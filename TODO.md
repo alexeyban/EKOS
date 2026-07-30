@@ -1438,6 +1438,17 @@ with real or vendor-supplied sandbox credentials.
   - *Output:* Tracked as individual issues/tickets; this item is the backlog bucket.
   - *Test/Validate:* Each connector added here must ship with a passing integration test before merge.
 
+- [x] **Local document connector (PDF/DOCX, text + tables + image OCR) — RFC 0023**
+  - *What:* `ekos-plugin-localdocs` observes `.pdf`/`.docx` files under the workspace, extracting
+    prose text, tables (heuristic for PDF, structural for DOCX), and OCR'd embedded-image text
+    (via a `tesseract` CLI subprocess, no `unsafe`). `LocalDocAnalyzerPass` maps each into a
+    `Document` KIR object plus `Table` child objects with `Contains` edges.
+  - *Output:* `plugins/localdocs/` crate; `crates/recovery/src/local_docs_analyzer.rs`; wired into
+    `build.rs`/`recover.rs` unconditionally (no credential to gate on).
+  - *Test/Validate:* Fixture-driven unit tests (17 in the plugin crate, 4 in the analyzer pass);
+    end-to-end verified against a real generated PDF (table + JPEG scan) and DOCX (table + PNG
+    image) — OCR'd text and table cell content both confirmed present in the committed ledger.
+
 ---
 
 ## Ongoing / Cross-cutting

@@ -71,6 +71,9 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 **Planned plugins:** PostgreSQL, SQL Server, Git, Confluence, Jira.
 
+**Implemented connectors (proof-of-concept):** File, Git, GitHub issues/PRs, Confluence, local
+documents (PDF/DOCX — text, tables, image OCR), crypto/DeFi export.
+
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol

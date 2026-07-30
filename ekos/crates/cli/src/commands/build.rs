@@ -9,6 +9,7 @@ use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
+use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -68,8 +69,13 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         config.observe.paths.iter().map(|p| cwd.join(p)).collect()
     };
 
-    let mut observers: Vec<Box<dyn Observer>> =
-        vec![Box::new(FileObserver::new()), Box::new(GitObserver::new())];
+    let mut observers: Vec<Box<dyn Observer>> = vec![
+        Box::new(FileObserver::new()),
+        Box::new(GitObserver::new()),
+        // RFC 0023: local files, no credential to gate on — runs
+        // unconditionally, same as FileObserver/GitObserver.
+        Box::new(LocalDocsObserver::with_defaults(Arc::new(TesseractOcr))),
+    ];
     if let Ok(export_dir) = std::env::var(CRYPTO_EXPORT_DIR_ENV) {
         observers.push(Box::new(CryptoObserver::new(
             Arc::new(ParquetExportReader),

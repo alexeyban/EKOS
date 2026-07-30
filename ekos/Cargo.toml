@@ -16,6 +16,7 @@ members = [
     "crates/semantic",
     "crates/cli",
     "plugins/file",
+    "plugins/localdocs",
     "plugins/git",
     "plugins/salesforce",
     "plugins/sap",

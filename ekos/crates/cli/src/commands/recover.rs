@@ -3,7 +3,7 @@ use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
 use ekos_compiler_core::{EkosConfig, pass::PassContext, scheduler::FailureMode};
 use ekos_recovery::{
     ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass, GitAnalyzerPass,
-    GitHubAnalyzerPass, MockLlmProvider, OllamaProvider, SqlAnalyzerPass,
+    GitHubAnalyzerPass, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, SqlAnalyzerPass,
     anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
 };
 use std::collections::HashMap;
@@ -196,9 +196,23 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(confluence_pass));
     }
 
+    // ── Local document artifacts (RFC 0023) ──────────────────────────────
+    let localdocs_artifact_ids = collect_localdocs_artifact_ids(&*artifact_store);
+    let localdocs_count = localdocs_artifact_ids.len();
+    if !localdocs_artifact_ids.is_empty() {
+        let localdocs_pass = LocalDocAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            localdocs_artifact_ids,
+        );
+        pass_manager.register(Box::new(localdocs_pass));
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, or Confluence pages found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, or local documents found)."
         );
         return Ok(());
     }
@@ -234,6 +248,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
     if confluence_page_count > 0 {
         println!("  Confluence pages analysed: {confluence_page_count}");
+    }
+    if localdocs_count > 0 {
+        println!("  Local documents analysed: {localdocs_count}");
     }
     println!("  Passes run: {}", report.passes_run());
     if report.passes_skipped() > 0 {
@@ -342,6 +359,27 @@ fn collect_confluence_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId>
                 .ok()
                 .flatten()
                 .is_some_and(|json| json["connector_name"].as_str() == Some("confluence"))
+        })
+        .collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
+/// Collect ArtifactIds for every local-document artifact currently in the store (RFC 0023).
+fn collect_localdocs_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("localdocs"))
         })
         .collect();
     ids.sort_by_key(|id| id.to_string());

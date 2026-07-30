@@ -10,6 +10,7 @@ pub mod dependency_analyzer;
 pub mod git_analyzer;
 pub mod github_analyzer;
 pub mod llm;
+pub mod local_docs_analyzer;
 pub mod ollama;
 pub mod sql_analyzer;
 
@@ -21,5 +22,6 @@ pub use dependency_analyzer::DependencyAnalyzerPass;
 pub use git_analyzer::GitAnalyzerPass;
 pub use github_analyzer::GitHubAnalyzerPass;
 pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MockLlmProvider};
+pub use local_docs_analyzer::LocalDocAnalyzerPass;
 pub use ollama::OllamaProvider;
 pub use sql_analyzer::{SqlAnalyzerPass, parse_ddl_structural};
