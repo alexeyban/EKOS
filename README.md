@@ -4,6 +4,21 @@ EKOS is an AI-native platform that continuously reconstructs, compiles, stores a
 
 Unlike traditional enterprise systems that manage data, documents or metadata independently, EKOS treats the entire enterprise as a living knowledge system — a permanently evolving semantic model that can be trusted by both humans and AI.
 
+## About
+
+EKOS is a **compiler for enterprise knowledge**, not a database or document store. It observes an
+enterprise's existing systems — source code, Git history, SQL schemas, GitHub issues/PRs,
+Confluence, local PDF/DOCX documents, crypto/DeFi exports — without interpreting them, compiles
+those observations through deterministic passes into a Canonical Knowledge Model, and stores the
+result in an append-only ledger where every conclusion carries the evidence it was derived from. AI
+agents (Claude Code among them) read that ledger through a read-only Model Context Protocol server
+(`ekos mcp serve`, RFC 0013) — they never touch raw enterprise systems directly.
+
+The project follows an RFC-first workflow (`docs/rfcs/`): every capability is designed in writing
+before it's implemented, and the `devlog_*.md` files at the repo root are the running record of
+what shipped, why, and what was learned building it. It is written in Rust (2024 edition) as a
+Cargo workspace, and is licensed under the [MIT License](LICENSE).
+
 ## The Problem
 
 Modern enterprises contain enormous amounts of valuable knowledge distributed across disconnected systems: source code, databases, data warehouses, documentation, wikis, Git repositories, infrastructure-as-code, APIs, runtime logs, and monitoring systems. Every system contains only a partial description of reality. Documentation becomes outdated. Employees leave. Business logic remains hidden inside production code. AI assistants receive fragmented, inconsistent, and often contradictory information.
@@ -67,12 +82,13 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 **Language:** Rust (2024 edition), Cargo workspace.
 
-**Planned crates:** `compiler-core`, `compiler-sdk`, `observation-sdk`, `artifact`, `scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `semantic`, `common`, `cli`.
+**Crates (`ekos/crates/`):** `compiler-core`, `compiler-sdk`, `observation-sdk`, `artifact`, `kir`,
+`scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `common`, `cli`.
 
-**Planned plugins:** PostgreSQL, SQL Server, Git, Confluence, Jira.
-
-**Implemented connectors (proof-of-concept):** File, Git, GitHub issues/PRs, Confluence, local
-documents (PDF/DOCX — text, tables, image OCR), crypto/DeFi export.
+**Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
+(PDF/DOCX — text, tables, image OCR), crypto/DeFi export, plus scaffolded proof-of-concept clients
+for Salesforce, SAP, Oracle, Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none
+yet exercised against a live account). PostgreSQL, SQL Server, and Jira remain planned.
 
 ### AI agent access (MCP)
 
@@ -166,3 +182,7 @@ All significant architectural decisions begin as RFCs in `docs/rfcs/`. No featur
 | v0.6 | Runtime |
 | v0.7 | AI Layer |
 | v1.0 | Enterprise Knowledge Compiler |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
