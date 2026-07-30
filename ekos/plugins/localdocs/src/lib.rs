@@ -17,10 +17,12 @@ use walkdir::WalkDir;
 mod docx;
 mod ocr;
 mod pdf;
+mod sanitize;
 
 pub use docx::DocxParser;
 pub use ocr::{MockOcr, TesseractOcr};
 pub use pdf::PdfParser;
+pub use sanitize::sanitize_text;
 
 // ── Parsing types ───────────────────────────────────────────────────────
 
@@ -193,17 +195,26 @@ impl Observer for LocalDocsObserver {
                 hex::encode(h.finalize())
             };
 
-            let excerpt: String = parsed.text.chars().take(EXCERPT_MAX_CHARS).collect();
+            // Every string below flows straight into the ledger and, from
+            // there, into an agent's context via ekos_search/ekos_state —
+            // sanitize before any of it is captured, not after.
+            let mut sanitized_count = 0usize;
+
+            let text_clean = sanitize_text(&parsed.text);
+            sanitized_count += text_clean.removed;
+            let excerpt: String = text_clean.text.chars().take(EXCERPT_MAX_CHARS).collect();
 
             let mut ocr_text = String::new();
             let mut ocr_image_count = 0usize;
             for image in &parsed.images {
                 match self.ocr.recognize(image) {
                     Ok(text) if !text.trim().is_empty() => {
+                        let clean = sanitize_text(text.trim());
+                        sanitized_count += clean.removed;
                         if !ocr_text.is_empty() {
                             ocr_text.push('\n');
                         }
-                        ocr_text.push_str(text.trim());
+                        ocr_text.push_str(&clean.text);
                         ocr_image_count += 1;
                     }
                     Ok(_) => {}
@@ -228,11 +239,31 @@ impl Observer for LocalDocsObserver {
                 .iter()
                 .take(TABLES_MAX)
                 .map(|t| {
-                    let rows: Vec<Vec<String>> =
-                        t.rows.iter().take(TABLE_ROWS_MAX).cloned().collect();
+                    let rows: Vec<Vec<String>> = t
+                        .rows
+                        .iter()
+                        .take(TABLE_ROWS_MAX)
+                        .map(|row| {
+                            row.iter()
+                                .map(|cell| {
+                                    let clean = sanitize_text(cell);
+                                    sanitized_count += clean.removed;
+                                    clean.text
+                                })
+                                .collect()
+                        })
+                        .collect();
                     serde_json::json!({ "page": t.page, "rows": rows })
                 })
                 .collect();
+
+            if sanitized_count > 0 {
+                tracing::warn!(
+                    "localdocs observer: stripped {sanitized_count} invisible/tag-block \
+                     character(s) from {} — possible hidden-instruction payload",
+                    abs_path.display()
+                );
+            }
 
             let mut data = serde_json::json!({
                 "path": rel_path,
@@ -247,6 +278,9 @@ impl Observer for LocalDocsObserver {
             });
             if !ocr_text.is_empty() {
                 data["ocr_text"] = serde_json::Value::String(ocr_text);
+            }
+            if sanitized_count > 0 {
+                data["sanitized_chars_removed"] = serde_json::json!(sanitized_count);
             }
 
             let artifact = ObservationArtifact::new("localdocs", &rel_path, data)
@@ -527,5 +561,74 @@ mod tests {
         let data = &pkg.artifacts[0].content.data;
         assert_eq!(data["excerpt"], REAL_STATISTICS_EXCERPT);
         assert_eq!(data["ocr_text"], REAL_OCR_COVER_TEXT);
+    }
+
+    #[tokio::test]
+    async fn hidden_unicode_payload_is_stripped_from_excerpt_table_and_ocr_text() {
+        // Tag-block "hidden" text (invisible when rendered) planted in the
+        // prose, a table cell, and the OCR output — the three places
+        // extracted text reaches the ledger.
+        let hidden = "\u{E0068}\u{E0069}\u{E0064}\u{E0064}\u{E0065}\u{E006E}"; // tag-spelled "hidden"
+        let parser: Arc<dyn DocumentParser> = Arc::new(FixedParser {
+            ext: "pdf",
+            doc: ParsedDocument {
+                page_count: Some(1),
+                text: format!("visible prose{hidden} continues"),
+                tables: vec![ExtractedTable {
+                    page: None,
+                    rows: vec![vec![format!("cell{hidden}"), "value".to_string()]],
+                }],
+                images: vec![EmbeddedImage {
+                    page: Some(1),
+                    bytes: vec![0xff, 0xd8],
+                    format: ImageFormat::Jpeg,
+                }],
+            },
+        });
+        let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
+            text: format!("scanned text{hidden} here"),
+            calls: Mutex::new(0),
+        });
+        let pkg = scan_temp(vec![parser], ocr, |dir| {
+            std::fs::write(dir.path().join("malicious.pdf"), b"%PDF-fake").unwrap();
+        })
+        .await;
+        let data = &pkg.artifacts[0].content.data;
+
+        assert_eq!(data["excerpt"], "visible prose continues");
+        assert_eq!(data["ocr_text"], "scanned text here");
+        assert_eq!(data["tables"][0]["rows"][0][0], "cell");
+        assert!(
+            data["sanitized_chars_removed"].as_u64().unwrap() > 0,
+            "removal count must be reported"
+        );
+    }
+
+    #[tokio::test]
+    async fn clean_document_carries_no_sanitized_chars_removed_field() {
+        let parser: Arc<dyn DocumentParser> = Arc::new(FixedParser {
+            ext: "pdf",
+            doc: ParsedDocument {
+                page_count: Some(1),
+                text: "perfectly ordinary prose".into(),
+                tables: vec![],
+                images: vec![],
+            },
+        });
+        let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
+            text: String::new(),
+            calls: Mutex::new(0),
+        });
+        let pkg = scan_temp(vec![parser], ocr, |dir| {
+            std::fs::write(dir.path().join("clean.pdf"), b"%PDF-fake").unwrap();
+        })
+        .await;
+        assert!(
+            pkg.artifacts[0]
+                .content
+                .data
+                .get("sanitized_chars_removed")
+                .is_none()
+        );
     }
 }

@@ -1451,6 +1451,9 @@ with real or vendor-supplied sandbox credentials.
     (devlog 25) — found and fixed a parser panic on malformed real-world PDFs, a single-space
     text-mangling bug, and a table-heuristic false-positive on justified prose; final run produced
     45 `Document` + 30 `Table` objects, 18 with real OCR'd cover text, committed to the ledger.
+    Hardened against document-borne prompt injection (devlog 26): strips zero-width Unicode and
+    the Unicode tag block from excerpt/table-cell/OCR text before capture, reporting a nonzero
+    removal count on the artifact and in logs.
 
 ---
 

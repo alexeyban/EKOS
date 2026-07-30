@@ -210,6 +210,37 @@ Same shape as `ConfluenceAnalyzerPass`/`GitHubAnalyzerPass`: one
   this RFC's goal (prove the connector pattern extends to binary document
   formats). The heuristic's known failure modes are documented above.
 
+## Security: prompt-injection sanitization (addendum)
+
+A document's text layer, table cells, or OCR output can carry characters
+that render invisibly but that an LLM still reads as text — zero-width
+joiners (`U+200B/200C/200D/2060`), a stray BOM (`U+FEFF`), or the Unicode
+tag block (`U+E0000`–`U+E007F`, historically for language tagging, now the
+common vector for ASCII-smuggled hidden instructions, since each tag
+codepoint maps 1:1 onto an ASCII character). Every string this connector
+extracts flows into the ledger and from there into an agent's context via
+`ekos_search`/`ekos_state` — an untrusted PDF/DOCX is exactly the kind of
+document-borne prompt-injection surface RFC 0023 didn't originally guard
+against.
+
+`plugins/localdocs/src/sanitize.rs` strips both character classes from the
+prose excerpt, every table cell, and OCR output, before any of it is
+written to an `ObservationArtifact`. The removed-character count rides on
+the artifact as `sanitized_chars_removed` (omitted when zero, same
+"absent means normal" convention as `ocr_text`) and a `tracing::warn!` is
+emitted per document when anything was stripped — a nonzero count is
+itself a signal worth surfacing, not just silently corrected. This mirrors
+the same narrow threat model `book-to-skill` (a comparable document-to-
+agent-knowledge tool) hardens against, applied at the same point: before
+extracted text is captured, not after.
+
+Deliberately out of scope for this addendum (a distinct project, DOCX
+already validates against XML-entity/DTD attacks via the `zip`/`docx-rs`
+libraries' own parsing, not something this connector adds): rejecting a
+document outright when sanitization removes 100% of its visible text, and
+scanning the *committed* KIR objects for instruction-override phrasing
+after the recovery pass runs.
+
 ## Testing
 
 - `MockOcr`/fixture-bytes-driven observer tests (small PDF/DOCX fixtures
@@ -237,6 +268,9 @@ Same shape as `ConfluenceAnalyzerPass`/`GitHubAnalyzerPass`: one
 - [ ] `LocalDocAnalyzerPass` emits one `Document` object per artifact and
       `Contains` edges to `Table` child objects, each with evidence.
 - [ ] Missing `tesseract` binary soft-skips OCR without failing the scan.
+- [ ] Zero-width and Unicode-tag-block characters are stripped from
+      excerpt, table cells, and OCR text before capture; a nonzero removal
+      count is reported on the artifact and logged.
 - [ ] Wired into `build.rs` (unconditional, alongside `FileObserver`) and
       `recover.rs` (artifact collection + pass registration), following the
       established connector pattern.
