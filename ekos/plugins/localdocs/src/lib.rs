@@ -45,12 +45,26 @@ pub struct ExtractedTable {
     pub rows: Vec<Vec<String>>,
 }
 
+/// One page (PDF) or fixed-character-budget chunk (DOCX) of a document's
+/// text, small enough to be fully indexed rather than sharing one
+/// whole-document excerpt budget (RFC 0024).
+#[derive(Debug, Clone)]
+pub struct DocumentSection {
+    /// 1-indexed PDF page number; `None` for DOCX — pagination is a
+    /// rendering-time concept the document model doesn't expose.
+    pub page: Option<u32>,
+    /// 0-indexed position among this document's sections.
+    pub index: usize,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ParsedDocument {
     pub page_count: Option<u32>,
     pub text: String,
     pub tables: Vec<ExtractedTable>,
     pub images: Vec<EmbeddedImage>,
+    pub sections: Vec<DocumentSection>,
 }
 
 #[derive(Debug, Error)]
@@ -92,6 +106,18 @@ const OCR_TEXT_MAX_CHARS: usize = 2000;
 const TABLES_MAX: usize = 20;
 /// Cap on the number of rows recorded per table.
 const TABLE_ROWS_MAX: usize = 200;
+/// Cap on sections captured per document (RFC 0024). See the RFC for the
+/// index-growth justification (bounded by real usage: 45 books × 300 in
+/// devlog 25's library is ~1.6x the pre-RFC-0024 index size).
+const SECTIONS_MAX: usize = 300;
+/// Cap on raw per-section text stored in the artifact. `LocalDocAnalyzerPass`
+/// (crates/recovery) applies its own, tighter cap when writing the
+/// searchable `excerpt` property per Section KirObject — this is just the
+/// artifact-storage bound.
+const SECTION_TEXT_MAX_CHARS: usize = 3000;
+/// DOCX has no page concept; paragraph text accumulates into a section
+/// until this character budget is hit, then a new section starts.
+const DOCX_CHUNK_CHAR_BUDGET: usize = 2500;
 
 /// Observer emitting one `ObservationArtifact` per PDF/DOCX file.
 pub struct LocalDocsObserver {
@@ -257,6 +283,18 @@ impl Observer for LocalDocsObserver {
                 })
                 .collect();
 
+            let sections_json: Vec<serde_json::Value> = parsed
+                .sections
+                .iter()
+                .take(SECTIONS_MAX)
+                .map(|s| {
+                    let clean = sanitize_text(&s.text);
+                    sanitized_count += clean.removed;
+                    let text: String = clean.text.chars().take(SECTION_TEXT_MAX_CHARS).collect();
+                    serde_json::json!({ "index": s.index, "page": s.page, "text": text })
+                })
+                .collect();
+
             if sanitized_count > 0 {
                 tracing::warn!(
                     "localdocs observer: stripped {sanitized_count} invisible/tag-block \
@@ -273,6 +311,7 @@ impl Observer for LocalDocsObserver {
                 "page_count": parsed.page_count,
                 "excerpt": excerpt,
                 "tables": tables_json,
+                "sections": sections_json,
                 "image_count": parsed.images.len(),
                 "ocr_image_count": ocr_image_count,
             });
@@ -368,6 +407,7 @@ mod tests {
                 text: "hello world".into(),
                 tables: vec![],
                 images: vec![],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -414,6 +454,7 @@ mod tests {
                     ],
                 }],
                 images: vec![],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -442,6 +483,7 @@ mod tests {
                     bytes: vec![0xff, 0xd8],
                     format: ImageFormat::Jpeg,
                 }],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -470,6 +512,7 @@ mod tests {
                     bytes: vec![0xff, 0xd8],
                     format: ImageFormat::Jpeg,
                 }],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(UnavailableOcr);
@@ -507,6 +550,7 @@ mod tests {
                 text: "stable".into(),
                 tables: vec![],
                 images: vec![],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -548,6 +592,7 @@ mod tests {
                     bytes: vec![0xff, 0xd8],
                     format: ImageFormat::Jpeg,
                 }],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -583,6 +628,7 @@ mod tests {
                     bytes: vec![0xff, 0xd8],
                     format: ImageFormat::Jpeg,
                 }],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -613,6 +659,7 @@ mod tests {
                 text: "perfectly ordinary prose".into(),
                 tables: vec![],
                 images: vec![],
+                sections: vec![],
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -630,5 +677,100 @@ mod tests {
                 .get("sanitized_chars_removed")
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn sections_are_capped_at_sections_max() {
+        let sections: Vec<DocumentSection> = (0..SECTIONS_MAX + 50)
+            .map(|i| DocumentSection {
+                page: Some(i as u32 + 1),
+                index: i,
+                text: format!("page {i} text"),
+            })
+            .collect();
+        let parser: Arc<dyn DocumentParser> = Arc::new(FixedParser {
+            ext: "pdf",
+            doc: ParsedDocument {
+                page_count: Some((SECTIONS_MAX + 50) as u32),
+                text: "whole doc".into(),
+                tables: vec![],
+                images: vec![],
+                sections,
+            },
+        });
+        let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
+            text: String::new(),
+            calls: Mutex::new(0),
+        });
+        let pkg = scan_temp(vec![parser], ocr, |dir| {
+            std::fs::write(dir.path().join("big.pdf"), b"%PDF-fake").unwrap();
+        })
+        .await;
+        let sections = pkg.artifacts[0].content.data["sections"]
+            .as_array()
+            .unwrap();
+        assert_eq!(sections.len(), SECTIONS_MAX);
+    }
+
+    #[tokio::test]
+    async fn section_page_numbers_pass_through() {
+        let parser: Arc<dyn DocumentParser> = Arc::new(FixedParser {
+            ext: "pdf",
+            doc: ParsedDocument {
+                page_count: Some(1),
+                text: "doc".into(),
+                tables: vec![],
+                images: vec![],
+                sections: vec![DocumentSection {
+                    page: Some(3),
+                    index: 0,
+                    text: "page three content".into(),
+                }],
+            },
+        });
+        let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
+            text: String::new(),
+            calls: Mutex::new(0),
+        });
+        let pkg = scan_temp(vec![parser], ocr, |dir| {
+            std::fs::write(dir.path().join("doc.pdf"), b"%PDF-fake").unwrap();
+        })
+        .await;
+        let sections = &pkg.artifacts[0].content.data["sections"];
+        assert_eq!(sections[0]["page"], 3);
+        assert_eq!(sections[0]["text"], "page three content");
+    }
+
+    #[tokio::test]
+    async fn section_text_is_sanitized_and_truncated() {
+        let hidden = "\u{E0068}\u{E0069}"; // tag-h, tag-i — invisible
+        let long_text = format!("start{hidden}{}", "x".repeat(SECTION_TEXT_MAX_CHARS + 100));
+        let parser: Arc<dyn DocumentParser> = Arc::new(FixedParser {
+            ext: "pdf",
+            doc: ParsedDocument {
+                page_count: Some(1),
+                text: "doc".into(),
+                tables: vec![],
+                images: vec![],
+                sections: vec![DocumentSection {
+                    page: Some(1),
+                    index: 0,
+                    text: long_text,
+                }],
+            },
+        });
+        let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
+            text: String::new(),
+            calls: Mutex::new(0),
+        });
+        let pkg = scan_temp(vec![parser], ocr, |dir| {
+            std::fs::write(dir.path().join("doc.pdf"), b"%PDF-fake").unwrap();
+        })
+        .await;
+        let data = &pkg.artifacts[0].content.data;
+        let section_text = data["sections"][0]["text"].as_str().unwrap();
+        assert!(!section_text.contains('\u{E0068}'));
+        assert!(section_text.chars().count() <= SECTION_TEXT_MAX_CHARS);
+        assert!(data["sanitized_chars_removed"].as_u64().unwrap() > 0);
     }
 }

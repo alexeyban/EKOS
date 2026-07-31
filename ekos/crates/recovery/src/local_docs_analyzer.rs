@@ -1,8 +1,13 @@
 //! `LocalDocAnalyzerPass` — converts local-document observation artifacts
-//! (RFC 0023) into KIR. Produces:
+//! (RFC 0023, RFC 0024) into KIR. Produces:
 //! - `KirObject(kind=Custom("Document"))` per PDF/DOCX file
 //! - `KirObject(kind=Table)` per extracted table, plus a
 //!   `KirRelationship(kind=Contains)` from the document to each table
+//! - `KirObject(kind=Custom("Section"))` per page (PDF) or chunk (DOCX),
+//!   plus a `Contains` edge from the document — RFC 0024's fix for deep
+//!   content being unsearchable behind the document's single whole-file
+//!   excerpt. `Custom("Section")`, not "segment": RFC 0016 already uses
+//!   "segment" for an unrelated storage-layer concept.
 //!
 //! Pure structural mapping — no LLM in the loop, same shape as
 //! `ConfluenceAnalyzerPass`/`GitHubAnalyzerPass`.
@@ -17,10 +22,26 @@ use ekos_kir::{
 use serde::Deserialize;
 use uuid::Uuid;
 
+/// Cap on the searchable `excerpt` property written per Section KirObject
+/// (RFC 0024) — larger than a whole document's own excerpt budget because
+/// the scope here is one page/chunk, not an entire book. Independently
+/// declared from `ekos-plugin-localdocs`'s `SECTION_TEXT_MAX_CHARS` (the
+/// artifact-storage bound): this crate doesn't depend on plugin crates,
+/// same as it doesn't import the Document-level `EXCERPT_MAX_CHARS`
+/// either — each layer re-truncates independently, defense in depth.
+const SECTION_EXCERPT_MAX_CHARS: usize = 1200;
+
 #[derive(Debug, Deserialize)]
 struct TableData {
     page: Option<u32>,
     rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SectionData {
+    index: usize,
+    page: Option<u32>,
+    text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +54,8 @@ struct DocumentData {
     excerpt: String,
     #[serde(default)]
     tables: Vec<TableData>,
+    #[serde(default)]
+    sections: Vec<SectionData>,
     #[serde(default)]
     ocr_text: Option<String>,
     artifact_id: Option<String>,
@@ -53,6 +76,15 @@ fn table_kir_id(path: &str, index: usize) -> KirId {
     KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
         format!("localdocs:{path}:table:{index}").as_bytes(),
+    ))
+}
+
+/// Deterministic id for a section object, scoped to its document + index
+/// within that document's sections (RFC 0024).
+fn section_kir_id(path: &str, index: usize) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("localdocs:{path}:section:{index}").as_bytes(),
     ))
 }
 
@@ -180,6 +212,50 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 rel.evidence.push(tbl_ev_id);
                 graph.relationships.push(rel);
             }
+
+            for section in &data.sections {
+                let sec_id = section_kir_id(&data.path, section.index);
+                let name = match section.page {
+                    Some(p) => format!("{}: page {p}", data.path),
+                    None => format!("{}: section {}", data.path, section.index + 1),
+                };
+                let mut sec_obj = KirObject::new(name, ObjectKind::Custom("Section".to_string()));
+                sec_obj.id = sec_id;
+                let excerpt: String = section
+                    .text
+                    .chars()
+                    .take(SECTION_EXCERPT_MAX_CHARS)
+                    .collect();
+                sec_obj
+                    .properties
+                    .insert("excerpt".into(), serde_json::json!(excerpt));
+                sec_obj
+                    .properties
+                    .insert("page".into(), serde_json::json!(section.page));
+                sec_obj
+                    .properties
+                    .insert("section_index".into(), serde_json::json!(section.index));
+
+                let page_note = section
+                    .page
+                    .map(|p| format!(" (page {p})"))
+                    .unwrap_or_default();
+                let sec_ev = KirEvidence::new(
+                    SourceLocation::file(data.path.clone()),
+                    format!(
+                        "section {}{page_note} extracted from {}",
+                        section.index + 1,
+                        data.path
+                    ),
+                );
+                let sec_ev_id = graph.add_evidence(sec_ev);
+                sec_obj.evidence.push(sec_ev_id);
+                graph.objects.push(sec_obj);
+
+                let mut rel = KirRelationship::new(RelationshipKind::Contains, doc_id, sec_id);
+                rel.evidence.push(sec_ev_id);
+                graph.relationships.push(rel);
+            }
         }
 
         if graph.objects.is_empty() {
@@ -224,12 +300,31 @@ mod tests {
         excerpt: &str,
         tables: serde_json::Value,
     ) -> ArtifactId {
+        seed_doc_with_sections(
+            ctx,
+            path,
+            doc_format,
+            excerpt,
+            tables,
+            serde_json::json!([]),
+        )
+    }
+
+    fn seed_doc_with_sections(
+        ctx: &PassContext,
+        path: &str,
+        doc_format: &str,
+        excerpt: &str,
+        tables: serde_json::Value,
+        sections: serde_json::Value,
+    ) -> ArtifactId {
         let data = serde_json::json!({
             "path": path,
             "doc_format": doc_format,
             "page_count": 3,
             "excerpt": excerpt,
             "tables": tables,
+            "sections": sections,
             "ocr_text": null,
             "image_count": 0,
             "ocr_image_count": 0,
@@ -354,5 +449,135 @@ mod tests {
                 ["Additional resources", "36"]
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn section_produces_child_object_and_contains_edge() {
+        let (c, _dir) = ctx();
+        let sections = serde_json::json!([
+            { "index": 0, "page": 5, "text": "page five prose about replication" }
+        ]);
+        let id = seed_doc_with_sections(
+            &c,
+            "Cloud Design Patterns.pdf",
+            "pdf",
+            "cover page",
+            serde_json::json!([]),
+            sections,
+        );
+        let graph = run_pass(vec![id], c).await;
+
+        assert_eq!(graph.objects.len(), 2);
+        let doc_id = document_kir_id("Cloud Design Patterns.pdf");
+        let sec_id = section_kir_id("Cloud Design Patterns.pdf", 0);
+        let sec_obj = graph.objects.iter().find(|o| o.id == sec_id).unwrap();
+        assert_eq!(sec_obj.kind, ObjectKind::Custom("Section".into()));
+        assert_eq!(sec_obj.name, "Cloud Design Patterns.pdf: page 5");
+        assert!(
+            graph
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Contains
+                    && r.from == doc_id
+                    && r.to == sec_id)
+        );
+    }
+
+    /// The direct regression test for RFC 0024's bug: a term buried past
+    /// the whole-document excerpt's 600-char budget must be findable once
+    /// it rides on its own Section object's `excerpt` property, since
+    /// `indexed_content()` reads `properties["excerpt"]` on any object.
+    #[tokio::test]
+    async fn section_excerpt_is_searchable_via_indexed_content() {
+        let (c, _dir) = ctx();
+        let sections = serde_json::json!([
+            { "index": 0, "page": 1, "text": "cover page, no relevant content here" },
+            { "index": 1, "page": 213, "text": "Data Replication and Synchronization Guidance: this section covers replication patterns in depth." }
+        ]);
+        let id = seed_doc_with_sections(
+            &c,
+            "Cloud Design Patterns.pdf",
+            "pdf",
+            "CLOUD DESIGN PATTERNS cover page, authors, and publisher information",
+            serde_json::json!([]),
+            sections,
+        );
+        let graph = run_pass(vec![id], c).await;
+
+        let sec_id = section_kir_id("Cloud Design Patterns.pdf", 1);
+        let sec_obj = graph.objects.iter().find(|o| o.id == sec_id).unwrap();
+        assert!(
+            sec_obj
+                .indexed_content()
+                .to_lowercase()
+                .contains("replication")
+        );
+
+        // And the document object's own excerpt does NOT contain it —
+        // proving the fix is real, not incidental.
+        let doc_id = document_kir_id("Cloud Design Patterns.pdf");
+        let doc_obj = graph.objects.iter().find(|o| o.id == doc_id).unwrap();
+        assert!(
+            !doc_obj
+                .indexed_content()
+                .to_lowercase()
+                .contains("replication")
+        );
+    }
+
+    #[tokio::test]
+    async fn zero_sections_produce_zero_section_objects() {
+        let (c, _dir) = ctx();
+        let id = seed_doc(
+            &c,
+            "notes.pdf",
+            "pdf",
+            "no sections here",
+            serde_json::json!([]),
+        );
+        let graph = run_pass(vec![id], c).await;
+        assert_eq!(graph.objects.len(), 1);
+        assert!(graph.relationships.is_empty());
+    }
+
+    #[tokio::test]
+    async fn same_document_across_two_runs_gets_same_section_id() {
+        let sections = serde_json::json!([{ "index": 0, "page": 1, "text": "stable text" }]);
+
+        let (c1, _dir1) = ctx();
+        let id1 = seed_doc_with_sections(
+            &c1,
+            "spec.pdf",
+            "pdf",
+            "hello",
+            serde_json::json!([]),
+            sections.clone(),
+        );
+        let graph1 = run_pass(vec![id1], c1).await;
+
+        let (c2, _dir2) = ctx();
+        let id2 = seed_doc_with_sections(
+            &c2,
+            "spec.pdf",
+            "pdf",
+            "hello",
+            serde_json::json!([]),
+            sections,
+        );
+        let graph2 = run_pass(vec![id2], c2).await;
+
+        let sec_id1 = graph1
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Custom("Section".into()))
+            .unwrap()
+            .id;
+        let sec_id2 = graph2
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Custom("Section".into()))
+            .unwrap()
+            .id;
+        assert_eq!(sec_id1, sec_id2);
     }
 }

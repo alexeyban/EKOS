@@ -1455,6 +1455,23 @@ with real or vendor-supplied sandbox credentials.
     the Unicode tag block from excerpt/table-cell/OCR text before capture, reporting a nonzero
     removal count on the artifact and in logs.
 
+- [x] **Document section indexing — RFC 0024**
+  - *What:* Fixed a real, demonstrated bug — `ekos_search` couldn't find content deep inside long
+    PDF/DOCX documents (only a 600-char whole-document excerpt was ever indexed). Decomposes each
+    document into `Custom("Section")` objects — one per PDF page (real per-page extraction via
+    `pdf-extract`) or DOCX character-budget chunk — each independently indexed. Bundled fix:
+    `KirObject::indexed_content()` now also includes `ocr_text` (previously never searchable).
+  - *Output:* `plugins/localdocs/src/{lib,pdf,docx}.rs`, `crates/recovery/src/local_docs_analyzer.rs`,
+    `crates/kir/src/lib.rs`.
+  - *Test/Validate:* Unit tests across all four touched crates, including a genuine PDF round-trip
+    (built with `lopdf`'s own writer, parsed by the real `PdfParser`). End-to-end verified against
+    the real 82-book library (devlog 27) — found and fixed a *second* bug along the way:
+    `ekos-identity`'s `DefaultResolver` was merging nearly every page of a book into one canonical
+    object (8,624 raw objects → 120 after resolution), fixed by excluding `Custom("Section")` from
+    resolution blocking. After both fixes: `ekos_search(query: "replication")` returns 30 real
+    matches, including `Cloud Design Patterns.pdf`'s actual "Data Replication and Synchronization
+    Guidance" section (pages 211–216) — previously unreachable.
+
 ---
 
 ## Ongoing / Cross-cutting

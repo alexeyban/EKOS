@@ -4,7 +4,8 @@
 //! traversal (RFC 0023).
 
 use crate::{
-    DocumentParser, EmbeddedImage, ExtractedTable, ImageFormat, ParseError, ParsedDocument,
+    DOCX_CHUNK_CHAR_BUDGET, DocumentParser, DocumentSection, EmbeddedImage, ExtractedTable,
+    ImageFormat, ParseError, ParsedDocument, SECTIONS_MAX,
 };
 use docx_rs::{
     DocumentChild, ParagraphChild, RunChild, TableCellContent, TableChild, TableRowChild,
@@ -24,6 +25,8 @@ impl DocumentParser for DocxParser {
 
         let mut text = String::new();
         let mut tables = Vec::new();
+        let mut sections = Vec::new();
+        let mut current_section = String::new();
 
         for child in &docx.document.children {
             match child {
@@ -34,6 +37,20 @@ impl DocumentParser for DocxParser {
                             text.push('\n');
                         }
                         text.push_str(&para_text);
+
+                        if !current_section.is_empty() {
+                            current_section.push('\n');
+                        }
+                        current_section.push_str(&para_text);
+                        if current_section.len() >= DOCX_CHUNK_CHAR_BUDGET
+                            && sections.len() < SECTIONS_MAX
+                        {
+                            sections.push(DocumentSection {
+                                page: None,
+                                index: sections.len(),
+                                text: std::mem::take(&mut current_section),
+                            });
+                        }
                     }
                 }
                 DocumentChild::Table(t) => {
@@ -45,6 +62,13 @@ impl DocumentParser for DocxParser {
                 _ => {}
             }
         }
+        if !current_section.trim().is_empty() && sections.len() < SECTIONS_MAX {
+            sections.push(DocumentSection {
+                page: None,
+                index: sections.len(),
+                text: current_section,
+            });
+        }
 
         let images = extract_media_images(bytes);
 
@@ -53,6 +77,7 @@ impl DocumentParser for DocxParser {
             text,
             tables,
             images,
+            sections,
         })
     }
 }

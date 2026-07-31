@@ -221,10 +221,14 @@ impl KirObject {
     }
 
     /// Text fed to full-text search (RFC 0014's `excerpt`, extended by RFC
-    /// 0019's `symbols`): the file-opening excerpt plus any harvested
-    /// declaration-line symbol names, space-joined. Shared by both ledger
-    /// backends so `ekos_search` finds a symbol whether or not it happens to
-    /// fall within the excerpt's leading window.
+    /// 0019's `symbols` and RFC 0024's `ocr_text`): the file-opening
+    /// excerpt, any harvested declaration-line symbol names, and any
+    /// OCR'd image text, space-joined. Shared by both ledger backends so
+    /// `ekos_search` finds a symbol or OCR'd phrase whether or not it
+    /// happens to fall within the excerpt's leading window. Before RFC
+    /// 0024, `ocr_text` rode on an object's properties but was never
+    /// actually searchable — an object's scanned-page text was only
+    /// reachable if its id was already known through some other path.
     pub fn indexed_content(&self) -> String {
         let excerpt = self
             .properties
@@ -242,13 +246,16 @@ impl KirObject {
                     .join(" ")
             })
             .unwrap_or_default();
-        if symbols.is_empty() {
-            excerpt.to_string()
-        } else if excerpt.is_empty() {
-            symbols
-        } else {
-            format!("{excerpt} {symbols}")
-        }
+        let ocr_text = self
+            .properties
+            .get("ocr_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        [excerpt, symbols.as_str(), ocr_text]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -383,6 +390,31 @@ mod tests {
         let back: KirObject = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, obj.name);
         assert_eq!(back.id, obj.id);
+    }
+
+    #[test]
+    fn indexed_content_includes_ocr_text() {
+        let obj = KirObject::new("scan.pdf", ObjectKind::Custom("Document".into()))
+            .with_property("ocr_text", serde_json::json!("hello from a scanned page"));
+        assert_eq!(obj.indexed_content(), "hello from a scanned page");
+    }
+
+    #[test]
+    fn indexed_content_concatenates_excerpt_symbols_and_ocr_text() {
+        let obj = KirObject::new("mixed", ObjectKind::File)
+            .with_property("excerpt", serde_json::json!("an excerpt"))
+            .with_property("symbols", serde_json::json!(["foo", "bar"]))
+            .with_property("ocr_text", serde_json::json!("scanned words"));
+        let content = obj.indexed_content();
+        assert!(content.contains("an excerpt"));
+        assert!(content.contains("foo bar"));
+        assert!(content.contains("scanned words"));
+    }
+
+    #[test]
+    fn indexed_content_empty_when_no_relevant_properties() {
+        let obj = KirObject::new("bare", ObjectKind::File);
+        assert_eq!(obj.indexed_content(), "");
     }
 
     #[test]

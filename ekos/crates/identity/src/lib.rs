@@ -186,8 +186,25 @@ impl IdentityResolver for DefaultResolver {
         }
 
         // ── Build blocks: (kind_str, first 3 chars of normalised name) ────────
+        //
+        // `Custom("Section")` objects (RFC 0024 — one per document page/chunk,
+        // named "{path}: page {n}") are never resolution candidates: each is
+        // already deterministically identified by (document, page/index), so
+        // no two distinct Section objects can legitimately represent the same
+        // real-world entity. Without this exclusion, pages of the same
+        // document share a long name prefix ("{path}: page ") that scores
+        // high on Jaro-Winkler, and `structural_score`'s same-kind fallback of
+        // 1.0 (no `columns` property to compare) adds a flat +0.3 floor on
+        // top — collapsing an entire book's worth of distinct pages into one
+        // canonical object and defeating RFC 0024's purpose outright (verified
+        // against the real 82-book library: 8,624 raw objects fell to 120
+        // after resolution, almost all of it Section over-merging — see
+        // devlog 27).
         let mut blocks: HashMap<(String, String), Vec<usize>> = HashMap::new();
         for (i, obj) in objects.iter().enumerate() {
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section") {
+                continue;
+            }
             let norm = similarity::normalize(&obj.name);
             let prefix: String = norm.chars().take(3).collect();
             blocks
@@ -550,5 +567,43 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         let back: ResolutionResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back.proposals.len(), result.proposals.len());
+    }
+
+    /// Regression test for the real-library finding (RFC 0024, devlog 27):
+    /// pages of the same document share a long name prefix ("{path}: page
+    /// ") that scores high on Jaro-Winkler even with `structural_score`'s
+    /// same-kind 1.0 fallback removed from the picture — `Custom("Section")`
+    /// objects must never be merge candidates regardless, since each is
+    /// already deterministically identified by (document, page).
+    #[test]
+    fn section_objects_are_never_merged_even_with_near_identical_names() {
+        let section = ObjectKind::Custom("Section".to_string());
+        let g = make_graph(&[
+            ("Cloud Design Patterns.pdf: page 1", section.clone()),
+            ("Cloud Design Patterns.pdf: page 2", section.clone()),
+            ("Cloud Design Patterns.pdf: page 213", section),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "Section objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    /// A non-"Section" `Custom` kind is unaffected by the exclusion — this
+    /// pins the fix to the literal string "Section", not `Custom` in
+    /// general (e.g. `Custom("Document")`/`Custom("Page")` still resolve
+    /// normally).
+    #[test]
+    fn other_custom_kinds_still_resolve_normally() {
+        let doc = ObjectKind::Custom("Document".to_string());
+        let g = make_graph(&[("report.pdf", doc.clone()), ("report.pdf", doc)]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "identical-name Documents should still merge"
+        );
     }
 }

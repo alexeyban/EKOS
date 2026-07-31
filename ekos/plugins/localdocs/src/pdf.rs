@@ -3,7 +3,8 @@
 //! (RFC 0023 — approximate, documented in the RFC's Design section).
 
 use crate::{
-    DocumentParser, EmbeddedImage, ExtractedTable, ImageFormat, ParseError, ParsedDocument,
+    DocumentParser, DocumentSection, EmbeddedImage, ExtractedTable, ImageFormat, ParseError,
+    ParsedDocument, SECTION_TEXT_MAX_CHARS, SECTIONS_MAX,
 };
 use lopdf::Document as LoDocument;
 use lopdf::Object;
@@ -88,14 +89,56 @@ impl PdfParser {
         }
 
         let tables = extract_tables(&text);
+        let sections = extract_sections(bytes, pages.len());
 
         Ok(ParsedDocument {
             page_count,
             text,
             tables,
             images,
+            sections,
         })
     }
+}
+
+/// One `DocumentSection` per PDF page, via `pdf-extract`'s real per-page
+/// API (RFC 0024) — small enough per page to be fully indexed, unlike the
+/// one whole-document excerpt every earlier version of this connector
+/// shared across however many pages a document had.
+///
+/// `extract_text_from_mem_by_pages`'s internal loop
+/// (`while let Ok(content) = extract_text_by_page(&doc, page_num)`) stops
+/// at the *first* page that errors, silently dropping every page after
+/// it — verified by reading the vendored `pdf-extract` 0.12.0 source. If
+/// fewer pages come back than `expected_page_count` (from the `lopdf`
+/// page walk already done by the caller), that truncation is logged; the
+/// pages that did extract are still a strict improvement over the old
+/// single 600-char whole-document cap.
+fn extract_sections(bytes: &[u8], expected_page_count: usize) -> Vec<DocumentSection> {
+    let pages = match pdf_extract::extract_text_from_mem_by_pages(bytes) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("pdf per-page text extraction failed, no sections captured: {e}");
+            return Vec::new();
+        }
+    };
+    if pages.len() < expected_page_count {
+        tracing::warn!(
+            "pdf per-page extraction stopped early: got {} of {} pages",
+            pages.len(),
+            expected_page_count
+        );
+    }
+    pages
+        .into_iter()
+        .take(SECTIONS_MAX)
+        .enumerate()
+        .map(|(i, text)| DocumentSection {
+            page: Some(i as u32 + 1),
+            index: i,
+            text: text.chars().take(SECTION_TEXT_MAX_CHARS).collect(),
+        })
+        .collect()
 }
 
 /// Whitespace-column table heuristic: contiguous lines that each split into
@@ -264,5 +307,74 @@ mod tests {
     fn extract_tables_ignores_single_row_matches() {
         let text = "Intro paragraph.\nsingle  row\nmore prose\n";
         assert!(extract_tables(text).is_empty());
+    }
+
+    #[test]
+    fn extract_sections_returns_empty_on_garbage_bytes_without_panicking() {
+        assert!(extract_sections(b"not a pdf", 0).is_empty());
+    }
+
+    #[test]
+    fn parse_real_multipage_pdf_produces_one_section_per_page() {
+        // A minimal, hand-assembled 2-page PDF (no external generator
+        // dependency at test time) — real bytes lopdf/pdf-extract parse,
+        // not a mock.
+        let pdf = build_two_page_pdf();
+        let parsed = PdfParser.parse(&pdf).unwrap();
+        assert_eq!(parsed.sections.len(), 2);
+        assert_eq!(parsed.sections[0].page, Some(1));
+        assert_eq!(parsed.sections[1].page, Some(2));
+        assert!(parsed.sections[0].text.contains("Page One"));
+        assert!(parsed.sections[1].text.contains("Page Two"));
+    }
+
+    /// Builds a minimal valid 2-page PDF with real, distinct text content
+    /// per page via `lopdf`'s own writer — exercising the real parser
+    /// against real bytes end to end, not a byte-string fixture.
+    fn build_two_page_pdf() -> Vec<u8> {
+        use lopdf::{Dictionary, Object as LoObject, Stream, dictionary};
+
+        let mut doc = LoDocument::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+
+        let mut page_ids = Vec::new();
+        for label in ["Page One", "Page Two"] {
+            let content = format!("BT /F1 24 Tf 72 700 Td ({label} content here) Tj ET");
+            let content_id = doc.add_object(Stream::new(Dictionary::new(), content.into_bytes()));
+            let page_id = doc.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "Contents" => content_id,
+                "Resources" => resources_id,
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            });
+            page_ids.push(LoObject::Reference(page_id));
+        }
+
+        doc.objects.insert(
+            pages_id,
+            LoObject::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => page_ids.clone(),
+                "Count" => page_ids.len() as i64,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+        buf
     }
 }
