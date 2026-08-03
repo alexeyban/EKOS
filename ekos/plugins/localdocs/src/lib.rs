@@ -15,14 +15,20 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 mod docx;
+mod email;
+mod html;
 mod ocr;
 mod pdf;
 mod sanitize;
+mod text;
 
 pub use docx::DocxParser;
+pub use email::EmailParser;
+pub use html::HtmlParser;
 pub use ocr::{MockOcr, TesseractOcr};
 pub use pdf::PdfParser;
 pub use sanitize::sanitize_text;
+pub use text::TextParser;
 
 // ── Parsing types ───────────────────────────────────────────────────────
 
@@ -79,6 +85,16 @@ pub enum ParseError {
 pub trait DocumentParser: Send + Sync {
     /// Lowercase extension this parser handles, e.g. `"pdf"`.
     fn supported_extension(&self) -> &str;
+
+    /// Every extension this parser handles. Defaults to just
+    /// `supported_extension()`, which is all any parser registered today
+    /// needs — multi-extension formats are handled by registering the same
+    /// parser once per extension (RFC 0025), keeping the observer's
+    /// extension→parser lookup unambiguous.
+    fn supported_extensions(&self) -> Vec<&str> {
+        vec![self.supported_extension()]
+    }
+
     fn parse(&self, bytes: &[u8]) -> Result<ParsedDocument, ParseError>;
 }
 
@@ -118,8 +134,11 @@ const SECTION_TEXT_MAX_CHARS: usize = 3000;
 /// DOCX has no page concept; paragraph text accumulates into a section
 /// until this character budget is hit, then a new section starts.
 const DOCX_CHUNK_CHAR_BUDGET: usize = 2500;
+/// Same budget for the formats that have neither pages nor paragraph
+/// structure to chunk on — plain text, Markdown, HTML, email (RFC 0025).
+const TEXT_CHUNK_CHAR_BUDGET: usize = 2500;
 
-/// Observer emitting one `ObservationArtifact` per PDF/DOCX file.
+/// Observer emitting one `ObservationArtifact` per supported document file.
 pub struct LocalDocsObserver {
     parsers: Vec<Arc<dyn DocumentParser>>,
     ocr: Arc<dyn OcrEngine>,
@@ -130,15 +149,28 @@ impl LocalDocsObserver {
         Self { parsers, ocr }
     }
 
-    /// Convenience constructor wiring the real `PdfParser`/`DocxParser`.
+    /// Convenience constructor wiring every real parser this plugin ships.
     pub fn with_defaults(ocr: Arc<dyn OcrEngine>) -> Self {
-        Self::new(vec![Arc::new(PdfParser), Arc::new(DocxParser)], ocr)
+        Self::new(
+            vec![
+                Arc::new(PdfParser),
+                Arc::new(DocxParser),
+                Arc::new(TextParser::new("txt")),
+                Arc::new(TextParser::new("md")),
+                Arc::new(HtmlParser::new("html")),
+                Arc::new(HtmlParser::new("htm")),
+                Arc::new(EmailParser),
+            ],
+            ocr,
+        )
     }
 
     fn parser_for(&self, ext: &str) -> Option<&Arc<dyn DocumentParser>> {
-        self.parsers
-            .iter()
-            .find(|p| p.supported_extension().eq_ignore_ascii_case(ext))
+        self.parsers.iter().find(|p| {
+            p.supported_extensions()
+                .iter()
+                .any(|e| e.eq_ignore_ascii_case(ext))
+        })
     }
 }
 
@@ -772,5 +804,170 @@ mod tests {
         assert!(!section_text.contains('\u{E0068}'));
         assert!(section_text.chars().count() <= SECTION_TEXT_MAX_CHARS);
         assert!(data["sanitized_chars_removed"].as_u64().unwrap() > 0);
+    }
+
+    // ── RFC 0025: text/Markdown, HTML, email ────────────────────────────
+
+    fn default_parsers() -> Vec<Arc<dyn DocumentParser>> {
+        vec![
+            Arc::new(TextParser::new("txt")),
+            Arc::new(TextParser::new("md")),
+            Arc::new(HtmlParser::new("html")),
+            Arc::new(HtmlParser::new("htm")),
+            Arc::new(EmailParser),
+        ]
+    }
+
+    fn silent_ocr() -> Arc<dyn OcrEngine> {
+        Arc::new(RecordingMockOcr {
+            text: String::new(),
+            calls: Mutex::new(0),
+        })
+    }
+
+    #[test]
+    fn with_defaults_registers_a_parser_for_every_rfc_0025_extension() {
+        let observer = LocalDocsObserver::with_defaults(silent_ocr());
+        for ext in ["pdf", "docx", "txt", "md", "html", "htm", "eml"] {
+            assert!(
+                observer.parser_for(ext).is_some(),
+                "no parser registered for .{ext}"
+            );
+        }
+        assert!(observer.parser_for("xlsx").is_none());
+    }
+
+    #[test]
+    fn extension_lookup_is_case_insensitive() {
+        let observer = LocalDocsObserver::with_defaults(silent_ocr());
+        assert!(observer.parser_for("MD").is_some());
+        assert!(observer.parser_for("HTML").is_some());
+        assert!(observer.parser_for("EML").is_some());
+    }
+
+    #[tokio::test]
+    async fn mixed_format_directory_produces_one_artifact_per_file() {
+        let pkg = scan_temp(default_parsers(), silent_ocr(), |dir| {
+            let p = dir.path();
+            std::fs::write(
+                p.join("handover.txt"),
+                include_bytes!("../tests/fixtures/handover.txt"),
+            )
+            .unwrap();
+            std::fs::write(
+                p.join("notes.md"),
+                include_bytes!("../tests/fixtures/notes.md"),
+            )
+            .unwrap();
+            std::fs::write(
+                p.join("runbook.html"),
+                include_bytes!("../tests/fixtures/runbook.html"),
+            )
+            .unwrap();
+            std::fs::write(
+                p.join("copy.htm"),
+                include_bytes!("../tests/fixtures/runbook.html"),
+            )
+            .unwrap();
+            std::fs::write(
+                p.join("incident.eml"),
+                include_bytes!("../tests/fixtures/incident-thread.eml"),
+            )
+            .unwrap();
+            // Unsupported by any registered parser — must be skipped, not
+            // counted as an error.
+            std::fs::write(p.join("sheet.xlsx"), b"PK-fake").unwrap();
+        })
+        .await;
+
+        assert_eq!(pkg.len(), 5);
+        assert_eq!(pkg.meta.error_count, 0);
+        let formats: std::collections::BTreeSet<String> = pkg
+            .artifacts
+            .iter()
+            .map(|a| a.content.data["doc_format"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            formats,
+            ["eml", "htm", "html", "md", "txt"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        );
+    }
+
+    #[tokio::test]
+    async fn markdown_artifact_carries_sections_beyond_the_excerpt_budget() {
+        let pkg = scan_temp(default_parsers(), silent_ocr(), |dir| {
+            std::fs::write(
+                dir.path().join("notes.md"),
+                include_bytes!("../tests/fixtures/notes.md"),
+            )
+            .unwrap();
+        })
+        .await;
+        let data = &pkg.artifacts[0].content.data;
+
+        // The whole-document excerpt is still capped at 600 chars...
+        assert!(data["excerpt"].as_str().unwrap().chars().count() <= EXCERPT_MAX_CHARS);
+        // ...but content past that cap survives on a Section.
+        let sections_text: String = data["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["text"].as_str().unwrap())
+            .collect();
+        assert!(sections_text.contains("Exceptions expire after one year"));
+        assert!(
+            !data["excerpt"]
+                .as_str()
+                .unwrap()
+                .contains("Exceptions expire")
+        );
+    }
+
+    #[tokio::test]
+    async fn hidden_unicode_in_a_markdown_file_is_stripped_from_excerpt_and_sections() {
+        let hidden = "\u{E0068}\u{E0069}\u{E0064}"; // tag-spelled, invisible
+        let pkg = scan_temp(default_parsers(), silent_ocr(), |dir| {
+            std::fs::write(
+                dir.path().join("payload.md"),
+                format!("# Heading{hidden}\n\nvisible prose{hidden} continues\n"),
+            )
+            .unwrap();
+        })
+        .await;
+        let data = &pkg.artifacts[0].content.data;
+        assert!(!data["excerpt"].as_str().unwrap().contains('\u{E0068}'));
+        assert!(
+            !data["sections"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains('\u{E0068}')
+        );
+        assert!(data["sanitized_chars_removed"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn email_artifact_carries_header_and_body_sections() {
+        let pkg = scan_temp(default_parsers(), silent_ocr(), |dir| {
+            std::fs::write(
+                dir.path().join("incident.eml"),
+                include_bytes!("../tests/fixtures/incident-thread.eml"),
+            )
+            .unwrap();
+        })
+        .await;
+        let data = &pkg.artifacts[0].content.data;
+        assert_eq!(data["doc_format"], "eml");
+        assert_eq!(data["page_count"], serde_json::Value::Null);
+        let sections = data["sections"].as_array().unwrap();
+        assert!(sections[0]["text"].as_str().unwrap().contains("Subject:"));
+        assert!(sections[0]["page"].is_null());
+        let body: String = sections[1..]
+            .iter()
+            .map(|s| s["text"].as_str().unwrap())
+            .collect();
+        assert!(body.contains("ingest_orders"));
     }
 }

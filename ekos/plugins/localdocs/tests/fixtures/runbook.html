@@ -1,0 +1,30 @@
+<html>
+  <head><title>Nightly Batch Runbook</title></head>
+  <body>
+    <div class="page">
+      <h1>Nightly Batch Runbook</h1>
+      <p>
+        This runbook covers the <em>nightly</em> batch window. If a job is still
+        running past its expected finish time, do not restart it blindly &mdash;
+        check the staging table first, then <strong>escalate to the on-call
+        engineer</strong> if the table is incomplete.
+      </p>
+      <div class="section">
+        <h2>Schedule</h2>
+        <table>
+          <tr><th>Job</th><th>Starts</th><th>Expected</th></tr>
+          <tr><td>ingest_orders</td><td>01:00</td><td>02:15</td></tr>
+          <tr><td>reconcile_ledger</td><td>02:30</td><td>03:10</td></tr>
+        </table>
+      </div>
+      <div class="section">
+        <h2>Known failures</h2>
+        <ul>
+          <li>Authentication errors usually mean a rotated credential.</li>
+          <li>Disk-pressure errors on the staging cluster resolve themselves
+              once the previous run's temporary files are reaped.</li>
+        </ul>
+      </div>
+    </div>
+  </body>
+</html>

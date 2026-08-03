@@ -1,0 +1,14 @@
+From: Records <records@example.invalid>
+To: Data Governance <governance@example.invalid>
+Subject: Quarterly retention review
+Date: Mon, 6 Jul 2026 09:00:00 +0000
+Message-ID: <20260706090000.2@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<html><body>
+<h1>Quarterly retention review</h1>
+<p>The <strong>quarterly retention review</strong> is scheduled for the second
+week of the quarter. Bring the exception list; every exception granted last
+quarter needs either a renewal or an explicit expiry.</p>
+</body></html>

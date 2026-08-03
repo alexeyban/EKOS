@@ -1,0 +1,15 @@
+Handover notes, platform on-call rotation
+
+The nightly batch window starts at 01:00 UTC and normally finishes by 03:30.
+If it is still running at 05:00, page the data-platform lead rather than
+waiting for the automatic timeout, which is set generously at eight hours.
+
+Two jobs are worth knowing about. The ingest_orders job is the long pole and
+accounts for most of the window; it is safe to rerun from the beginning after
+a failure because it writes to a staging table and swaps at the end. The
+reconcile_ledger job is not safe to rerun blindly, because it appends, so
+check whether its partition already exists before retrying it.
+
+Credentials live in the secret store, never in the repository. If a job fails
+with an authentication error, the usual cause is a rotated credential that the
+job configuration has not picked up yet.

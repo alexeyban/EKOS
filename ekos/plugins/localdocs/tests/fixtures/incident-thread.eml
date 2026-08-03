@@ -1,0 +1,27 @@
+From: Dana Ops <dana.ops@example.invalid>
+To: Platform Team <platform-team@example.invalid>
+Subject: Nightly batch failure, 2026-08-01
+Date: Sat, 1 Aug 2026 06:12:44 +0000
+Message-ID: <20260801061244.1@example.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b0undary"
+
+--b0undary
+Content-Type: text/plain; charset="utf-8"
+
+This is the plain-text alternative of the incident note.
+
+The ingest_orders job failed at 02:40 with an authentication error. The cause
+was a credential rotated the previous afternoon that the job configuration had
+not picked up. Reran from the beginning after refreshing the secret; the run
+completed at 04:05 and downstream reconciliation was unaffected.
+
+Action item: add a staleness check on the cached credential so the job fails
+fast with a clearer message next time.
+
+--b0undary
+Content-Type: text/html; charset="utf-8"
+
+<html><body><p>html-only marker text that should never be preferred.</p></body></html>
+
+--b0undary--

@@ -1472,6 +1472,43 @@ with real or vendor-supplied sandbox credentials.
     matches, including `Cloud Design Patterns.pdf`'s actual "Data Replication and Synchronization
     Guidance" section (pages 211–216) — previously unreachable.
 
+- [x] **Additional document formats: text/Markdown, HTML, email — RFC 0025**
+  - *What:* Extends `ekos-plugin-localdocs` beyond PDF/DOCX to `.txt`/`.md` (`TextParser`),
+    `.html`/`.htm` (`HtmlParser`, via `html2text`), and `.eml` (`EmailParser`, via `mail-parser`,
+    header block + text/plain-preferred body, falling back to HTML-to-text). `DocumentParser`
+    gained a default `supported_extensions()` method so one parser struct can serve two
+    extensions. `.msg` and email attachments explicitly out of scope.
+  - *Output:* `plugins/localdocs/src/{text,html,email}.rs`; `LocalDocsObserver::with_defaults`
+    wiring; fixtures under `plugins/localdocs/tests/fixtures/`.
+  - *Test/Validate:* Per-parser unit tests plus a direct regression proving zero downstream
+    changes: an artifact with a new `doc_format` produces the same `Document`/`Section` KIR
+    shape `LocalDocAnalyzerPass` already produces for PDF, and content past the 600-char
+    whole-document excerpt cap is searchable via `indexed_content()` for the new formats too.
+
+- [x] **LLM document-semantics extraction pass — RFC 0026**
+  - *What:* Closes the gap RFC 0023 explicitly deferred ("an LLM pass — a different, larger
+    mechanism"): `DocumentSemanticsAnalyzerPass` reads `Custom("Section")` objects from
+    `LocalDocAnalyzerPass`'s output and calls an LLM (whichever provider is already configured
+    via `config.llm.provider` — no new provider selection) to extract `Concept` objects and
+    `References`/`Custom`-kind relationship edges, each with evidence, so the same real-world
+    concept mentioned across different documents can be found and linked — real semantic memory
+    for AI tools, surfaced through the existing MCP tools (no new tool). Opt-in only
+    (`[document-semantics] enabled = true`) since it's O(sections) LLM calls, unlike every other
+    structural pass in this connector.
+  - *Output:* `crates/recovery/src/document_semantics_analyzer.rs`; `crates/recovery/src/llm_json.rs`
+    (shared JSON-fence-stripping, factored out of `sql_analyzer.rs` too); `ResolverConfig::
+    kind_thresholds` + a minimum-name-length blocking guard in `crates/identity/src/lib.rs`;
+    `DocumentSemanticsConfig` in `crates/compiler-core/src/config.rs`; gating in
+    `crates/cli/src/commands/recover.rs`.
+  - *Test/Validate:* Mock-LLM-driven creation/degradation/idempotency tests mirroring
+    `sql_analyzer.rs`'s style; two identity-resolution regression tests proving neither
+    degenerate outcome — a genuine cross-document Concept merge succeeds, and generic
+    short-name Concepts across unrelated documents do not all collapse into one group (the
+    devlog_27 Section over-merge failure shape, deliberately *not* repeated for Concepts, which
+    unlike Sections must be allowed to merge). `cargo test --workspace`: 166 tests across the
+    five touched crates, 0 failures; `cargo clippy --workspace --all-targets` and `cargo fmt
+    --check` clean; zero `unsafe` introduced.
+
 ---
 
 ## Ongoing / Cross-cutting

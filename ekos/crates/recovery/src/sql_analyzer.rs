@@ -321,15 +321,7 @@ struct LlmRelationship {
 }
 
 fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<()> {
-    // Strip markdown fences if present.
-    let json_str = llm_text
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-
-    let output: LlmOutput = serde_json::from_str(json_str)?;
+    let output: LlmOutput = serde_json::from_str(crate::llm_json::strip_json_fences(llm_text))?;
 
     // Apply entity enrichment.
     for entity in &output.entities {

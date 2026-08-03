@@ -85,16 +85,40 @@ pub trait IdentityResolver: Send + Sync {
 
 // ── DefaultResolver ──────────────────────────────────────────────────────────
 
+/// Stricter merge threshold applied to `Custom("Concept")` objects (RFC 0026).
+///
+/// Concepts are LLM-extracted from free prose, so they are the highest-cardinality
+/// and most name-collision-prone kind this compiler produces: two documents can
+/// name unrelated things almost identically. Unlike `Custom("Section")` they must
+/// stay mergeable — cross-document concept linking is the whole point of RFC 0026 —
+/// so instead of excluding them from resolution they get a higher bar to clear.
+pub const CONCEPT_MERGE_THRESHOLD: f32 = 0.95;
+
+/// A `Custom("Concept")` whose normalised name has fewer words than this is
+/// never a blocking candidate — see `MIN_CONCEPT_NAME_CHARS`.
+const MIN_CONCEPT_NAME_WORDS: usize = 2;
+
+/// A `Custom("Concept")` whose normalised name is shorter than this is never a
+/// blocking candidate. Generic short phrases ("data", "the API", "system") name
+/// different things in every document that uses them, so they would collapse into
+/// one canonical object on name similarity alone — the devlog_27 failure shape.
+const MIN_CONCEPT_NAME_CHARS: usize = 8;
+
 #[derive(Debug, Clone)]
 pub struct ResolverConfig {
     /// Minimum combined similarity score to propose a merge. Default: 0.85.
     pub merge_threshold: f32,
+    /// Per-`ObjectKind` overrides of `merge_threshold`, keyed on the kind's
+    /// `Display` form. The lookup itself is kind-agnostic; only the defaults
+    /// seeded below know about specific kinds.
+    pub kind_thresholds: HashMap<String, f32>,
 }
 
 impl Default for ResolverConfig {
     fn default() -> Self {
         Self {
             merge_threshold: 0.85,
+            kind_thresholds: HashMap::from([("Concept".to_string(), CONCEPT_MERGE_THRESHOLD)]),
         }
     }
 }
@@ -120,6 +144,23 @@ impl DefaultResolver {
     pub fn with_threshold(mut self, threshold: f32) -> Self {
         self.config.merge_threshold = threshold;
         self
+    }
+
+    /// Override the merge threshold for one `ObjectKind`, named by its `Display`
+    /// form (e.g. `"Table"`, `"Concept"`).
+    pub fn with_kind_threshold(mut self, kind: impl Into<String>, threshold: f32) -> Self {
+        self.config.kind_thresholds.insert(kind.into(), threshold);
+        self
+    }
+
+    /// Threshold that applies to a given object — its kind's override if one is
+    /// configured, otherwise the global `merge_threshold`.
+    fn threshold_for(&self, obj: &KirObject) -> f32 {
+        self.config
+            .kind_thresholds
+            .get(&format!("{}", obj.kind))
+            .copied()
+            .unwrap_or(self.config.merge_threshold)
     }
 
     fn score(&self, a: &KirObject, b: &KirObject) -> SimilarityScore {
@@ -200,12 +241,28 @@ impl IdentityResolver for DefaultResolver {
         // against the real 82-book library: 8,624 raw objects fell to 120
         // after resolution, almost all of it Section over-merging — see
         // devlog 27).
+        //
+        // `Custom("Concept")` objects (RFC 0026 — LLM-extracted from document
+        // prose) are the mirror image: two mentions of the same real concept in
+        // different documents *should* merge, so they are not excluded by kind.
+        // What is excluded is a degenerate *name*: a normalised name that is one
+        // word or under `MIN_CONCEPT_NAME_CHARS` characters ("data", "the API")
+        // names something different in every document that uses it, and would
+        // reproduce the Section over-merge above on name similarity alone. A
+        // concrete concept like "Data Replication" blocks normally, and then has
+        // to clear the stricter `CONCEPT_MERGE_THRESHOLD` to actually merge.
         let mut blocks: HashMap<(String, String), Vec<usize>> = HashMap::new();
         for (i, obj) in objects.iter().enumerate() {
             if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section") {
                 continue;
             }
             let norm = similarity::normalize(&obj.name);
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Concept")
+                && (norm.split_whitespace().count() < MIN_CONCEPT_NAME_WORDS
+                    || norm.chars().count() < MIN_CONCEPT_NAME_CHARS)
+            {
+                continue;
+            }
             let prefix: String = norm.chars().take(3).collect();
             blocks
                 .entry((format!("{}", obj.kind), prefix))
@@ -227,7 +284,8 @@ impl IdentityResolver for DefaultResolver {
                     let j = indices[b];
                     stats.pairs_compared += 1;
                     let score = self.score(&objects[i], &objects[j]);
-                    if score.combined >= self.config.merge_threshold {
+                    // Blocks are keyed by kind, so both sides share one threshold.
+                    if score.combined >= self.threshold_for(&objects[i]) {
                         uf.union(i, j);
                         max_score_per_idx[i] = max_score_per_idx[i].max(score.combined);
                         max_score_per_idx[j] = max_score_per_idx[j].max(score.combined);
@@ -519,6 +577,107 @@ mod tests {
         );
     }
 
+    /// Real bug, found 2026-08-03 rescanning a mixed-format real-content
+    /// workspace with RFC 0025/0026's new mechanics: every file under this
+    /// test's fixture directory shared the literal `docs/` path prefix, and
+    /// `normalize()` never strips path segments — so the blocking key's
+    /// "first 3 normalized chars" rule put every `Document` object in this
+    /// workspace into one block regardless of the files' actual names, and
+    /// `structural_score`'s same-kind 1.0 fallback (Documents have no
+    /// `columns` property) supplied the same free +0.3 floor devlog_27
+    /// already diagnosed for Section — except this hits genuinely unrelated
+    /// documents (a PDF, a Markdown file, an HTML file, a plain-text file,
+    /// an email), not near-duplicate pages of one book. Live repro: 7
+    /// entirely different files — two different PDFs, an RFC, a devlog, a
+    /// license, a doc-generated HTML page, and an email — collapsed into one
+    /// canonical `Document` object at confidence 0.90. `RFC 0024` only
+    /// excluded `Custom("Section")` from blocking; `Document` (and, see the
+    /// next test, PDF/DOCX-derived `Table`) were never covered and remain
+    /// exposed to the exact bug shape devlog_27 already named as
+    /// architecturally guaranteed for any kind sharing this structure. This
+    /// test currently FAILS — it documents the desired behavior (unrelated
+    /// documents in the same folder must not be treated as the same
+    /// real-world entity), pending a follow-up fix (candidates: block on the
+    /// file basename rather than the full relative path, or don't let
+    /// `structural_score` hand out a free floor to kinds with no comparable
+    /// structural property at all).
+    #[test]
+    #[ignore = "known bug, tracked for a follow-up fix — see doc comment above"]
+    fn unrelated_documents_sharing_a_folder_prefix_do_not_all_merge() {
+        let g = make_graph(&[
+            (
+                "docs/120 Data Science Interview Questions.pdf",
+                ObjectKind::Custom("Document".into()),
+            ),
+            (
+                "docs/41 Essential Machine Learning Interview Questions.pdf",
+                ObjectKind::Custom("Document".into()),
+            ),
+            ("docs/rfc-0026.md", ObjectKind::Custom("Document".into())),
+            ("docs/devlog-27.md", ObjectKind::Custom("Document".into())),
+            ("docs/license.txt", ObjectKind::Custom("Document".into())),
+            (
+                "docs/identity-crate-docs.html",
+                ObjectKind::Custom("Document".into()),
+            ),
+            (
+                "docs/rollout-note.eml",
+                ObjectKind::Custom("Document".into()),
+            ),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "seven unrelated documents (different formats, different real content) must not be \
+             proposed as one merge group just because they share a `docs/` folder prefix — got: {:?}",
+            result.proposals
+        );
+    }
+
+    /// Same root cause as the test above, one kind over: PDF/DOCX-derived
+    /// `Table` objects (`crates/recovery/src/local_docs_analyzer.rs`, named
+    /// `"{path}: table {n}"`) share both a long literal path prefix *and*
+    /// have no `columns` property (that signal only exists for SQL-derived
+    /// tables), so they get the exact same free structural-score floor.
+    /// Live repro: 9 distinct tables from one real PDF — different content,
+    /// different rows — collapsed into a single canonical `Table` object at
+    /// confidence 0.99. This is the identical failure shape RFC 0024 already
+    /// fixed for `Custom("Section")`, just on `ObjectKind::Table`, which RFC
+    /// 0024 deliberately left untouched because SQL-derived tables need
+    /// real fuzzy name dedup across files — so the fix can't be "exclude
+    /// Table," it has to distinguish PDF-sourced tables (no `columns`) from
+    /// SQL-sourced ones some other way. Currently FAILS; documents the bug.
+    #[test]
+    #[ignore = "known bug, tracked for a follow-up fix — see doc comment above"]
+    fn distinct_pdf_tables_in_one_document_do_not_all_merge() {
+        let g = make_graph(&[
+            (
+                "docs/120 Data Science Interview Questions.pdf: table 1",
+                ObjectKind::Table,
+            ),
+            (
+                "docs/120 Data Science Interview Questions.pdf: table 2",
+                ObjectKind::Table,
+            ),
+            (
+                "docs/120 Data Science Interview Questions.pdf: table 3",
+                ObjectKind::Table,
+            ),
+            (
+                "docs/120 Data Science Interview Questions.pdf: table 4",
+                ObjectKind::Table,
+            ),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "four distinct tables extracted from one PDF must not collapse into one canonical \
+             table just because they share a name prefix and have no `columns` property to \
+             compare — got: {:?}",
+            result.proposals
+        );
+    }
+
     #[test]
     fn three_way_transitivity_single_proposal() {
         let g = make_graph(&[
@@ -587,6 +746,58 @@ mod tests {
         assert!(
             result.proposals.is_empty(),
             "Section objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    /// RFC 0026: the merge this feature exists to produce. The same real-world
+    /// concept extracted from two different documents must resolve to one
+    /// canonical object, even across case differences — otherwise cross-document
+    /// concept linking never happens and the extraction pass is just per-document
+    /// noise.
+    #[test]
+    fn concept_same_real_entity_across_two_documents_merges() {
+        let concept = ObjectKind::Custom("Concept".to_string());
+        let g = make_graph(&[
+            ("Data Replication", concept.clone()),
+            ("data replication", concept),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "the same concept named in two documents must merge, got {:?}",
+            result.proposals
+        );
+        assert_eq!(result.proposals[0].source_ids.len(), 2);
+    }
+
+    /// RFC 0026, the opposite failure direction (devlog_27's shape applied to
+    /// Concepts): a generic short name appears in unrelated documents meaning
+    /// unrelated things, and must not collapse every mention into one object.
+    /// Phrased as "not all merge" rather than "never merge" — some Concept
+    /// merging is the correct outcome, as the test above asserts.
+    #[test]
+    fn concept_generic_short_names_across_unrelated_documents_do_not_all_merge() {
+        let concept = ObjectKind::Custom("Concept".to_string());
+        let g = make_graph(&[
+            ("the API", concept.clone()),
+            ("the API", concept.clone()),
+            ("data", concept.clone()),
+            ("data", concept),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result
+                .proposals
+                .iter()
+                .all(|p| p.source_ids.len() < g.objects.len()),
+            "generic short Concept names must not all collapse into one group, got {:?}",
+            result.proposals
+        );
+        assert!(
+            result.proposals.is_empty(),
+            "degenerate Concept names are excluded from blocking entirely, got {:?}",
             result.proposals
         );
     }

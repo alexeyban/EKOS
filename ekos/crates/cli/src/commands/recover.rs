@@ -1,9 +1,14 @@
 use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
-use ekos_compiler_core::{EkosConfig, pass::PassContext, scheduler::FailureMode};
+use ekos_compiler_core::{
+    EkosConfig,
+    pass::{CompilerPass, PassContext},
+    scheduler::FailureMode,
+};
 use ekos_recovery::{
-    ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass, GitAnalyzerPass,
-    GitHubAnalyzerPass, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, SqlAnalyzerPass,
+    ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass,
+    DocumentSemanticsAnalyzerPass, DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass,
+    LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, SqlAnalyzerPass,
     anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
 };
 use std::collections::HashMap;
@@ -199,6 +204,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     // ── Local document artifacts (RFC 0023) ──────────────────────────────
     let localdocs_artifact_ids = collect_localdocs_artifact_ids(&*artifact_store);
     let localdocs_count = localdocs_artifact_ids.len();
+    let mut docsem_stats: Option<Arc<std::sync::Mutex<DocumentSemanticsStats>>> = None;
     if !localdocs_artifact_ids.is_empty() {
         let localdocs_pass = LocalDocAnalyzerPass::new(
             cwd.file_name()
@@ -207,6 +213,18 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 .as_ref(),
             localdocs_artifact_ids,
         );
+
+        // ── LLM document-semantics extraction (RFC 0026) ─────────────────
+        // Opt-in: one LLM call per document section, so it stays off unless
+        // asked for. Reuses the provider already selected above.
+        if should_register_document_semantics(config, localdocs_count) {
+            let docsem_pass =
+                DocumentSemanticsAnalyzerPass::new(localdocs_pass.name(), llm.clone())
+                    .with_max_sections(config.document_semantics.max_sections);
+            docsem_stats = Some(docsem_pass.stats_handle());
+            pass_manager.register(Box::new(docsem_pass));
+        }
+
         pass_manager.register(Box::new(localdocs_pass));
     }
 
@@ -251,6 +269,13 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
     if localdocs_count > 0 {
         println!("  Local documents analysed: {localdocs_count}");
+    }
+    if let Some(stats) = &docsem_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Document concepts extracted: {} sections processed, {} concepts, {} relationships",
+            s.sections_processed, s.concepts, s.relationships
+        );
     }
     println!("  Passes run: {}", report.passes_run());
     if report.passes_skipped() > 0 {
@@ -386,6 +411,13 @@ fn collect_localdocs_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> 
     ids
 }
 
+/// RFC 0026's opt-in gate: the document-semantics pass costs one LLM call per
+/// document section, so it registers only when explicitly enabled *and* there is
+/// local-document output for it to read.
+fn should_register_document_semantics(config: &EkosConfig, localdocs_count: usize) -> bool {
+    config.document_semantics.enabled && localdocs_count > 0
+}
+
 /// Choose LLM provider (RFC 0021): `[llm] provider = "ollama"` in
 /// `ekos.toml` routes to a local Ollama daemon (no key required —
 /// unreachability surfaces as an ordinary error on first use, not here);
@@ -431,8 +463,47 @@ fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmPr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ekos_compiler_core::config::LlmConfig;
+    use ekos_compiler_core::config::{DocumentSemanticsConfig, LlmConfig};
     use tempfile::tempdir;
+
+    /// RFC 0026 acceptance criterion: zero LLM calls unless the user opted in.
+    /// A config that never mentions `[document-semantics]` must leave the pass
+    /// unregistered even when there are local documents to analyse.
+    #[test]
+    fn document_semantics_pass_not_registered_when_config_absent() {
+        let config = EkosConfig::default();
+        assert!(!config.document_semantics.enabled);
+        assert!(!should_register_document_semantics(&config, 12));
+    }
+
+    #[test]
+    fn document_semantics_pass_not_registered_when_explicitly_disabled() {
+        let config = EkosConfig {
+            document_semantics: DocumentSemanticsConfig {
+                enabled: false,
+                max_sections: Some(10),
+            },
+            ..Default::default()
+        };
+        assert!(!should_register_document_semantics(&config, 12));
+    }
+
+    /// Enabled but nothing to read is still no registration — the pass would
+    /// otherwise declare a dependency on a `LocalDocAnalyzerPass` that was never
+    /// registered, which the scheduler rejects as an unknown dependency.
+    #[test]
+    fn document_semantics_pass_not_registered_without_local_documents() {
+        let mut config = EkosConfig::default();
+        config.document_semantics.enabled = true;
+        assert!(!should_register_document_semantics(&config, 0));
+    }
+
+    #[test]
+    fn document_semantics_pass_registered_when_enabled_with_local_documents() {
+        let mut config = EkosConfig::default();
+        config.document_semantics.enabled = true;
+        assert!(should_register_document_semantics(&config, 1));
+    }
 
     /// RFC 0021: `provider = "ollama"` must route here without ever
     /// attempting a network call — `model_name()` alone proves which

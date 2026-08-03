@@ -12,6 +12,8 @@ pub struct EkosConfig {
     pub llm: LlmConfig,
     #[serde(default)]
     pub ai: AiConfig,
+    #[serde(default)]
+    pub document_semantics: DocumentSemanticsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +90,17 @@ pub struct AiConfig {
     pub system_prompt: Option<String>,
 }
 
+/// Gating for RFC 0026's `DocumentSemanticsAnalyzerPass`. Opt-in because the
+/// pass makes one LLM call per document section — thousands for a large corpus.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct DocumentSemanticsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Safety valve for "opted in, then ran against a huge corpus by accident".
+    pub max_sections: Option<u32>,
+}
+
 #[allow(clippy::derivable_impls)]
 impl Default for EkosConfig {
     fn default() -> Self {
@@ -96,6 +109,7 @@ impl Default for EkosConfig {
             observe: ObserveConfig::default(),
             llm: LlmConfig::default(),
             ai: AiConfig::default(),
+            document_semantics: DocumentSemanticsConfig::default(),
         }
     }
 }
@@ -170,5 +184,27 @@ log-level = "debug"
         let cfg = EkosConfig::default();
         assert_eq!(cfg.workspace.log_level, "info");
         assert!(!cfg.observe.ignore_patterns.is_empty());
+    }
+
+    /// RFC 0026: document-semantics extraction is opt-in, so a config that never
+    /// mentions it must leave the pass disabled.
+    #[test]
+    fn document_semantics_defaults_to_disabled() {
+        assert!(!EkosConfig::default().document_semantics.enabled);
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert!(!cfg.document_semantics.enabled);
+        assert!(cfg.document_semantics.max_sections.is_none());
+    }
+
+    #[test]
+    fn document_semantics_parses_from_kebab_case_table() {
+        let toml = r#"
+[document-semantics]
+enabled = true
+max-sections = 500
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.document_semantics.enabled);
+        assert_eq!(cfg.document_semantics.max_sections, Some(500));
     }
 }

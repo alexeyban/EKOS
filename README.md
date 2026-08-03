@@ -86,9 +86,31 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `common`, `cli`.
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
-(PDF/DOCX — text, tables, image OCR), crypto/DeFi export, plus scaffolded proof-of-concept clients
-for Salesforce, SAP, Oracle, Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none
-yet exercised against a live account). PostgreSQL, SQL Server, and Jira remain planned.
+(PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), crypto/DeFi export, plus
+scaffolded proof-of-concept clients for Salesforce, SAP, Oracle, Microsoft Fabric, and Snowflake
+(real API shapes, mock-tested — none yet exercised against a live account). PostgreSQL, SQL
+Server, and Jira remain planned.
+
+### Document semantic memory (RFC 0025/0026)
+
+Beyond structural parsing, an opt-in pass reads local documents through an LLM to extract real
+entities (`Concept` objects) and the relationships between them — so the same concept mentioned
+across different documents becomes one findable, linkable thing instead of isolated text hits.
+Enable it in `ekos.toml`:
+
+```toml
+[llm]
+provider = "ollama"   # or omit for Anthropic via ANTHROPIC_API_KEY; any LlmProvider works
+
+[document-semantics]
+enabled = true
+```
+
+Then `ekos recover` runs `DocumentSemanticsAnalyzerPass` alongside the structural document pass,
+and the extracted `Concept` objects are queryable through the same MCP tools as everything else
+— `ekos_search`, `ekos_neighborhood`, `ekos_dependents`, `ekos ask`. No new tool, no new query
+surface — this is exactly the point: AI tools get real memory through the Runtime they already
+talk to.
 
 ### AI agent access (MCP)
 

@@ -580,4 +580,130 @@ mod tests {
             .id;
         assert_eq!(sec_id1, sec_id2);
     }
+
+    /// RFC 0025's central claim, tested directly: `doc_format` is opaque to
+    /// this pass, so the formats it added (`txt`/`md`/`html`/`htm`/`eml`)
+    /// produce exactly the same Document+Section shape a `pdf` artifact
+    /// does, with zero code changes here. Asserted against the `pdf` case
+    /// rather than restated, so a future format-specific branch introduced
+    /// upstream breaks this test.
+    #[tokio::test]
+    async fn new_document_formats_produce_the_same_kir_shape_as_pdf() {
+        let sections = serde_json::json!([
+            { "index": 0, "page": null, "text": "first chunk of prose" },
+            { "index": 1, "page": null, "text": "second chunk of prose" }
+        ]);
+
+        let (c_pdf, _d1) = ctx();
+        let pdf_id = seed_doc_with_sections(
+            &c_pdf,
+            "doc",
+            "pdf",
+            "excerpt",
+            serde_json::json!([]),
+            sections.clone(),
+        );
+        let pdf_graph = run_pass(vec![pdf_id], c_pdf).await;
+
+        for format in ["txt", "md", "html", "htm", "eml"] {
+            let (c, _d) = ctx();
+            let id = seed_doc_with_sections(
+                &c,
+                "doc",
+                format,
+                "excerpt",
+                serde_json::json!([]),
+                sections.clone(),
+            );
+            let graph = run_pass(vec![id], c).await;
+
+            assert_eq!(
+                graph.objects.len(),
+                pdf_graph.objects.len(),
+                ".{format} must produce the same object count as .pdf"
+            );
+            assert_eq!(
+                graph.relationships.len(),
+                pdf_graph.relationships.len(),
+                ".{format} must produce the same edge count as .pdf"
+            );
+
+            // Same ids and kinds — the only intended difference is the
+            // `doc_format` property itself.
+            let doc_id = document_kir_id("doc");
+            let doc_obj = graph.objects.iter().find(|o| o.id == doc_id).unwrap();
+            assert_eq!(doc_obj.kind, ObjectKind::Custom("Document".into()));
+            assert_eq!(doc_obj.properties["doc_format"], format);
+
+            for index in 0..2 {
+                let sec_id = section_kir_id("doc", index);
+                let sec_obj = graph.objects.iter().find(|o| o.id == sec_id).unwrap();
+                assert_eq!(sec_obj.kind, ObjectKind::Custom("Section".into()));
+                assert!(!sec_obj.evidence.is_empty());
+                assert!(
+                    graph
+                        .relationships
+                        .iter()
+                        .any(|r| r.kind == RelationshipKind::Contains
+                            && r.from == doc_id
+                            && r.to == sec_id)
+                );
+            }
+        }
+    }
+
+    /// RFC 0024's search-depth regression, re-proven for RFC 0025's
+    /// page-less formats: prose past the Document excerpt's 600-char budget
+    /// is findable because it rides on its own Section object. The
+    /// page-less naming path (`section N`, not `page N`) is exercised here
+    /// too — every new format has `page: None`.
+    #[tokio::test]
+    async fn markdown_content_past_char_600_is_searchable_via_indexed_content() {
+        let filler = "Boilerplate front matter that fills the document excerpt budget. ".repeat(12); // > 600 chars on its own
+        assert!(filler.chars().count() > 600);
+        let deep_text = "## Exceptions\n\nAn exception requires a written justification recorded against \
+             the table's entry in the catalogue.";
+
+        let (c, _dir) = ctx();
+        let id = seed_doc_with_sections(
+            &c,
+            "notes.md",
+            "md",
+            // What the observer would have captured: only the first 600 chars.
+            &filler.chars().take(600).collect::<String>(),
+            serde_json::json!([]),
+            serde_json::json!([
+                { "index": 0, "page": null, "text": filler },
+                { "index": 1, "page": null, "text": deep_text }
+            ]),
+        );
+        let graph = run_pass(vec![id], c).await;
+
+        let sec_obj = graph
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id("notes.md", 1))
+            .unwrap();
+        assert_eq!(sec_obj.name, "notes.md: section 2");
+        assert!(
+            sec_obj
+                .indexed_content()
+                .to_lowercase()
+                .contains("written justification")
+        );
+
+        // The document object alone would not have found it — the same
+        // demonstrated-bug shape RFC 0024 fixed for PDF pages.
+        let doc_obj = graph
+            .objects
+            .iter()
+            .find(|o| o.id == document_kir_id("notes.md"))
+            .unwrap();
+        assert!(
+            !doc_obj
+                .indexed_content()
+                .to_lowercase()
+                .contains("written justification")
+        );
+    }
 }
