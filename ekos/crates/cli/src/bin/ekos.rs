@@ -85,6 +85,26 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ArtifactCommands,
     },
+    /// Marketing agent: devlog -> tweet draft -> approval -> X publish (RFC 0027)
+    Marketing {
+        #[command(subcommand)]
+        subcommand: MarketingCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum MarketingCommands {
+    /// Draft (and, after approval, publish) a tweet for a devlog
+    Publish {
+        /// Path, bare devlog number (e.g. "28"), or "latest" (default: latest devlog_*.md)
+        devlog: Option<String>,
+        /// Skip the interactive approval prompt and publish as drafted
+        #[arg(long)]
+        yes: bool,
+        /// Never call the real Publisher or record a posted entry
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -224,6 +244,13 @@ async fn main() -> Result<()> {
         },
         Commands::Artifact { subcommand } => match subcommand {
             ArtifactCommands::Repack => ekos::commands::artifact::repack(&config, &cwd),
+        },
+        Commands::Marketing { subcommand } => match subcommand {
+            MarketingCommands::Publish {
+                devlog,
+                yes,
+                dry_run,
+            } => ekos::commands::marketing::publish(&config, &cwd, devlog, yes, dry_run).await,
         },
     }
 }

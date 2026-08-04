@@ -7,3 +7,5 @@
 *.db-wal
 .DS_Store
 .serena/
+/marketing/posted/
+/marketing/logs/

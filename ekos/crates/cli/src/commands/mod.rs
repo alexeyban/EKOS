@@ -10,6 +10,7 @@ pub mod doctor;
 pub mod ekl;
 pub mod init;
 pub mod ledger;
+pub mod marketing;
 pub mod mcp;
 pub mod query;
 pub mod recover;

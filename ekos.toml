@@ -19,3 +19,13 @@ ignore-patterns = [
 # provider = "claude"
 # api-key-env = "ANTHROPIC_API_KEY"
 # model = "claude-sonnet-4-6"
+
+# RFC 0027 — Marketing Agent (`ekos marketing publish`). Defaults shown; publishing to X
+# stays off until [marketing.twitter] enabled = true is set explicitly.
+# [marketing]
+# github = "https://github.com/alexeyban/EKOS"
+# hashtags = ["Rust", "AI", "MCP"]
+#
+# [marketing.twitter]
+# enabled = false
+# dry-run = false

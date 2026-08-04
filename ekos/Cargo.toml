@@ -14,6 +14,7 @@ members = [
     "crates/recovery",
     "crates/ekl",
     "crates/semantic",
+    "crates/marketing",
     "crates/cli",
     "plugins/file",
     "plugins/localdocs",
@@ -47,6 +48,7 @@ ekos-semantic  = { path = "crates/semantic" }
 ekos-observation-sdk = { path = "crates/observation-sdk" }
 ekos-recovery       = { path = "crates/recovery" }
 ekos-ekl       = { path = "crates/ekl" }
+ekos-marketing = { path = "crates/marketing" }
 
 # Async
 tokio      = { version = "1", features = ["full"] }
@@ -93,3 +95,10 @@ sqlparser = "0.53"
 
 # HTTP client (LLM API calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# OAuth 1.0a request signing (RFC 0027 — X/Twitter publishing)
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22"
+percent-encoding = "2"
+rand = "0.8"

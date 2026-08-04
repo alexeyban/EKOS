@@ -83,7 +83,8 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 **Language:** Rust (2024 edition), Cargo workspace.
 
 **Crates (`ekos/crates/`):** `compiler-core`, `compiler-sdk`, `observation-sdk`, `artifact`, `kir`,
-`scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `common`, `cli`.
+`scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `marketing`, `common`,
+`cli`.
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
 (PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), crypto/DeFi export, plus
@@ -126,6 +127,26 @@ claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /p
 
 The server also honors `EKOS_WORKSPACE` and `EKOS_CONFIG` environment variables, so a
 registration can be path-free: `claude mcp add ekos --env EKOS_WORKSPACE=/path/to/workspace -- ekos mcp serve`.
+
+### Marketing agent (RFC 0027)
+
+`ekos marketing publish [devlog]` turns a `devlog_N.md` into a human-approved X (Twitter) release
+announcement: it classifies the devlog's importance (skipping docs/tests/refactor-only entries),
+drafts a tweet through the same `LlmProvider` used elsewhere, validates it (length, EKOS mention,
+GitHub link, hashtag count), asks for Y/N/E approval, and publishes via a real OAuth 1.0a-signed
+`POST /2/tweets` — with `marketing/posted/tweets.json` preventing the same devlog from ever being
+posted twice.
+
+```bash
+ekos marketing publish            # latest devlog_*.md, interactive approval
+ekos marketing publish 28         # a specific devlog number
+ekos marketing publish --dry-run  # preview only — never posts, never records
+```
+
+Configure via `[marketing]`/`[marketing.twitter]` in `ekos.toml` (see `marketing/README.md`);
+publishing requires `TWITTER_API_KEY`/`TWITTER_API_SECRET`/`TWITTER_ACCESS_TOKEN`/
+`TWITTER_ACCESS_SECRET` in the environment and stays off until `[marketing.twitter] enabled =
+true` is set explicitly.
 
 ### Demo: skills + custom subagents
 

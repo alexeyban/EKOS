@@ -14,6 +14,8 @@ pub struct EkosConfig {
     pub ai: AiConfig,
     #[serde(default)]
     pub document_semantics: DocumentSemanticsConfig,
+    #[serde(default)]
+    pub marketing: MarketingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +103,54 @@ pub struct DocumentSemanticsConfig {
     pub max_sections: Option<u32>,
 }
 
+/// RFC 0027: marketing-agent config. `[marketing]` in `ekos.toml`, replacing the source
+/// design doc's standalone `marketing/config.yaml` — this repo has exactly one config file
+/// and one format, and this follows the same opt-in-table pattern as `[document-semantics]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MarketingConfig {
+    /// Project GitHub URL, always included in generated tweets.
+    #[serde(default = "default_github")]
+    pub github: String,
+    /// Hashtags offered to the tweet-generation prompt (at most 3 are used).
+    #[serde(default = "default_hashtags")]
+    pub hashtags: Vec<String>,
+    #[serde(default)]
+    pub twitter: TwitterConfig,
+}
+
+fn default_github() -> String {
+    "https://github.com/alexeyban/EKOS".to_string()
+}
+
+fn default_hashtags() -> Vec<String> {
+    ["Rust", "AI", "MCP"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+impl Default for MarketingConfig {
+    fn default() -> Self {
+        Self {
+            github: default_github(),
+            hashtags: default_hashtags(),
+            twitter: TwitterConfig::default(),
+        }
+    }
+}
+
+/// Publishing is off by default — `ekos marketing publish` without `enabled = true` always
+/// behaves as `--dry-run`, so opting in requires an explicit, visible config change.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TwitterConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
 #[allow(clippy::derivable_impls)]
 impl Default for EkosConfig {
     fn default() -> Self {
@@ -110,6 +160,7 @@ impl Default for EkosConfig {
             llm: LlmConfig::default(),
             ai: AiConfig::default(),
             document_semantics: DocumentSemanticsConfig::default(),
+            marketing: MarketingConfig::default(),
         }
     }
 }
@@ -206,5 +257,37 @@ max-sections = 500
         let cfg: EkosConfig = toml::from_str(toml).unwrap();
         assert!(cfg.document_semantics.enabled);
         assert_eq!(cfg.document_semantics.max_sections, Some(500));
+    }
+
+    /// RFC 0027: publishing is off unless a config explicitly opts in, even if the
+    /// `[marketing]` table is entirely absent from `ekos.toml`.
+    #[test]
+    fn marketing_defaults_to_disabled_with_sensible_defaults() {
+        let cfg = EkosConfig::default();
+        assert!(!cfg.marketing.twitter.enabled);
+        assert!(!cfg.marketing.twitter.dry_run);
+        assert_eq!(cfg.marketing.github, "https://github.com/alexeyban/EKOS");
+        assert_eq!(cfg.marketing.hashtags, vec!["Rust", "AI", "MCP"]);
+
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert!(!cfg.marketing.twitter.enabled);
+    }
+
+    #[test]
+    fn marketing_parses_from_kebab_case_table() {
+        let toml = r#"
+[marketing]
+github = "https://github.com/example/repo"
+hashtags = ["Foo", "Bar"]
+
+[marketing.twitter]
+enabled = true
+dry-run = true
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.marketing.twitter.enabled);
+        assert!(cfg.marketing.twitter.dry_run);
+        assert_eq!(cfg.marketing.github, "https://github.com/example/repo");
+        assert_eq!(cfg.marketing.hashtags, vec!["Foo", "Bar"]);
     }
 }

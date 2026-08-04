@@ -1509,6 +1509,32 @@ with real or vendor-supplied sandbox credentials.
     five touched crates, 0 failures; `cargo clippy --workspace --all-targets` and `cargo fmt
     --check` clean; zero `unsafe` introduced.
 
+- [x] **Marketing Agent v1 — devlog → tweet → approval → X — RFC 0027**
+  - *What:* Auxiliary tooling outside the compiler pipeline (devlogs are release notes, not
+    enterprise knowledge — deliberately not a `CompilerPass`/`Observer`): `ekos marketing
+    publish [devlog] [--yes] [--dry-run]` reads a `devlog_N.md`, classifies its importance
+    (deterministic keyword heuristic — LOW skips before any LLM call), drafts a tweet via the
+    already-selected `LlmProvider` (RFC 0008), validates it server-side (≤280 chars, mentions
+    EKOS, includes the GitHub link, ≤3 hashtags — one retry on failure), gets interactive Y/N/E
+    human approval, and publishes to X via a real RFC 5849 OAuth 1.0a-signed `POST /2/tweets`
+    (`TwitterPublisher`) or a `NoopPublisher` for `--dry-run`/disabled. `marketing/posted/
+    tweets.json` prevents double-posting a devlog; `marketing/logs/marketing.log` records every
+    run. Config is `[marketing]`/`[marketing.twitter]` in `ekos.toml` — not the source design
+    doc's standalone `marketing/config.yaml`, since this repo has exactly one config file/format.
+  - *Output:* New crate `crates/marketing/` (`devlog.rs`, `importance.rs`, `prompt.rs`,
+    `tweet.rs`, `oauth1.rs`, `publisher.rs`, `store.rs`); `crates/cli/src/commands/marketing.rs`;
+    `MarketingConfig`/`TwitterConfig` in `crates/compiler-core/src/config.rs`; `marketing/`
+    directory (README, template, runtime-created `posted/`/`logs/`).
+  - *Test/Validate:* 44 new tests (37 in `ekos-marketing` incl. an RFC 2202 HMAC-SHA1 vector and
+    OAuth1 determinism/sensitivity checks, 2 config tests, 5 CLI-orchestration tests); `cargo
+    build/test/clippy -D warnings/fmt --check` all pass across the full workspace. Exercised live
+    against real devlog content through the actual binary: `ekos marketing publish 28 --dry-run
+    --yes` correctly parses and classifies (High) then fails with a clear "no API key" error
+    (expected — no credentials in this environment); the LOW-importance skip and duplicate-post
+    skip paths were run end-to-end with a synthetic devlog and a seeded `tweets.json`.
+    `TwitterPublisher` itself has not been exercised against a live X account — open item in the
+    RFC, not silently assumed correct.
+
 ---
 
 ## Ongoing / Cross-cutting
