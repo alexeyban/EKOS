@@ -237,6 +237,17 @@ default during the soak period (devlog 18).
 
 All significant architectural decisions begin as RFCs in `docs/rfcs/`. No feature is implemented until its RFC is accepted. See `CLAUDE.md` for the full mandatory development workflow.
 
+## Official EKOS Token
+
+Network: Solana
+
+Contract (Mint) Address:
+
+Cx2beEXqKeq63adkQweVfWHHs5wS7Zrib7Y17uTHpump
+
+Pump.fun:
+https://pump.fun/coin/Cx2beEXqKeq63adkQweVfWHHs5wS7Zrib7Y17uTHpump
+
 ## Versioning Roadmap
 
 | Version | Milestone |
