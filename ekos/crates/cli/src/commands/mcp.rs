@@ -309,6 +309,11 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
             let mut dependents = Vec::new();
             let mut dependencies = Vec::new();
             for rel in runtime.relationships_for(&id)? {
+                // Same rationale as `ekos_impact`/`ekos_neighborhood`: an
+                // unreviewed RFC 0029 candidate is a hypothesis, not a fact.
+                if rel.is_pending_review() {
+                    continue;
+                }
                 let (other_id, bucket) = if rel.to == id {
                     (rel.from, &mut dependents)
                 } else {

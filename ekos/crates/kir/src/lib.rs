@@ -312,6 +312,21 @@ impl KirRelationship {
             created_at: Utc::now(),
         }
     }
+
+    /// True for a cross-system identity candidate (RFC 0029) that hasn't been
+    /// confirmed by a human/agent via `ekos_identity_review` yet — a
+    /// hypothesis, not an observed fact. Graph traversal (`ekos_dependents`,
+    /// `ekos_impact`, `ekos_neighborhood`, EKL's `FROM` anchor) must exclude
+    /// these by default: RFC 0029 requires an unconfirmed match to stay
+    /// "structurally distinguishable from an observed fact, never
+    /// indistinguishable" — silently walking it as if it were a real edge
+    /// breaks that guarantee. Every other relationship kind (`ForeignKey`,
+    /// `Custom("FeedsInto")`, etc.) is a compiler-derived fact and always
+    /// passes.
+    pub fn is_pending_review(&self) -> bool {
+        matches!(&self.kind, RelationshipKind::Custom(k) if k == "SameAs")
+            && self.properties.get("status").and_then(|v| v.as_str()) != Some("confirmed")
+    }
 }
 
 /// Immutable change record — the only mechanism that mutates enterprise state.

@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pentaho + SQL Recovery, Tested Cold — EKOS</title>
+<meta name="description" content="EKOS's Pentaho and SQL recovery analyzers, run cold against two real GitHub ETL projects — with the terminal output, MCP transcripts, and honest gaps a data engineer would actually want to see.">
+</head>
+<body>
+<style>
+:root{
+  --ground:#f4f1e8;
+  --ground-raised:#ffffffcc;
+  --ink:#1d2129;
+  --ink-soft:#4b5160;
+  --rule:#d8d2c0;
+  --brass:#a8672a;
+  --brass-deep:#8a531f;
+  --slate:#3e5f5f;
+  --slate-soft:#e4ece9;
+  --code-bg:#1d2129;
+  --code-fg:#e9e4d6;
+  --code-dim:#8f96a3;
+  --code-key:#c98a3e;
+  --code-str:#7fa591;
+  --bad:#c96a5a;
+  --shadow: 0 1px 0 rgba(29,33,41,0.06);
+}
+:root[data-theme="dark"]{
+  --ground:#14161c;
+  --ground-raised:#1c1f28cc;
+  --ink:#ece7d8;
+  --ink-soft:#a9b0bd;
+  --rule:#333949;
+  --brass:#d69a52;
+  --brass-deep:#e8b06e;
+  --slate:#8fb8b0;
+  --slate-soft:#212a2a;
+  --code-bg:#0e1015;
+  --code-fg:#e9e4d6;
+  --code-dim:#727a89;
+  --code-key:#e0a866;
+  --code-str:#8fc4ac;
+  --bad:#e08c7d;
+  --shadow: 0 1px 0 rgba(0,0,0,0.4);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#14161c;
+    --ground-raised:#1c1f28cc;
+    --ink:#ece7d8;
+    --ink-soft:#a9b0bd;
+    --rule:#333949;
+    --brass:#d69a52;
+    --brass-deep:#e8b06e;
+    --slate:#8fb8b0;
+    --slate-soft:#212a2a;
+    --code-bg:#0e1015;
+    --code-fg:#e9e4d6;
+    --code-dim:#727a89;
+    --code-key:#e0a866;
+    --code-str:#8fc4ac;
+    --bad:#e08c7d;
+    --shadow: 0 1px 0 rgba(0,0,0,0.4);
+  }
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  scroll-snap-type: y proximity;
+  overflow-x:hidden;
+}
+::selection{ background: var(--brass); color:#fff; }
+
+.mono{
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+}
+
+section.slide{
+  min-height:100svh;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  padding: 6rem 8vw;
+  scroll-snap-align:start;
+  position:relative;
+  border-bottom:1px solid var(--rule);
+}
+section.slide:last-child{ border-bottom:none; }
+
+.eyebrow{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.72rem;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--brass-deep);
+  margin:0 0 1.1rem 0;
+  display:flex;
+  align-items:center;
+  gap:0.6rem;
+}
+.eyebrow::before{
+  content:"";
+  width:1.6rem;height:1px;background:var(--brass-deep);display:inline-block;
+}
+
+h1,h2,h3{
+  text-wrap:balance;
+  font-weight:600;
+  margin:0;
+  line-height:1.08;
+}
+
+.stage-num{
+  position:absolute;
+  top:3.2rem; right:8vw;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.85rem;
+  color:var(--ink-soft);
+  letter-spacing:0.08em;
+}
+
+p.lede{
+  max-width:38rem;
+  font-size:1.15rem;
+  line-height:1.65;
+  color:var(--ink-soft);
+  margin:1.4rem 0 0 0;
+}
+
+/* ---------- Hero ---------- */
+.hero{
+  align-items:flex-start;
+  background:
+    radial-gradient(ellipse 60% 50% at 85% 8%, color-mix(in srgb, var(--brass) 12%, transparent), transparent 70%),
+    var(--ground);
+}
+.hero h1{
+  font-size: clamp(2.4rem, 6vw, 4.6rem);
+  max-width: 26ch;
+}
+.hero .arrow-word{ color:var(--brass); font-style:italic; }
+.hero .byline{
+  margin-top:2.6rem;
+  display:flex;
+  align-items:center;
+  gap:0.9rem;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.85rem;
+  color:var(--ink-soft);
+}
+.hero .byline .dot{ width:6px;height:6px;border-radius:50%;background:var(--slate); }
+
+.hero-diagram{
+  margin-top:3.4rem;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:0.4rem;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.72rem;
+  color:var(--ink-soft);
+}
+.chip{
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  padding:0.42rem 0.75rem;
+  border-radius:3px;
+  white-space:nowrap;
+  box-shadow:var(--shadow);
+}
+.chip.hot{ border-color:var(--brass); color:var(--brass-deep); font-weight:600; }
+.chip.bad{ border-color:var(--bad); color:var(--bad); font-weight:600; }
+.sep{ color:var(--rule); }
+
+/* ---------- pipeline / stages generic ---------- */
+.stage-head{ display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.stage-head h2{ font-size:clamp(1.8rem,3.4vw,2.6rem); }
+
+.two-col{
+  display:grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap:3.5rem;
+  margin-top:2.6rem;
+  align-items:start;
+}
+@media (max-width:900px){ .two-col{ grid-template-columns:1fr; } }
+
+.codeblock{
+  background:var(--code-bg);
+  color:var(--code-fg);
+  border-radius:6px;
+  padding:1.3rem 1.5rem;
+  font-size:0.82rem;
+  line-height:1.65;
+  overflow-x:auto;
+  box-shadow: 0 8px 24px -12px rgba(0,0,0,0.35);
+}
+.codeblock .k{ color:var(--code-key); }
+.codeblock .s{ color:var(--code-str); }
+.codeblock .c{ color:var(--code-dim); font-style:italic; }
+.codeblock .bad{ color:var(--bad); }
+.codeblock .tag{
+  display:inline-block;
+  font-size:0.68rem;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--code-dim);
+  margin-bottom:0.8rem;
+}
+
+ul.facts{ list-style:none; margin:0; padding:0; }
+ul.facts li{
+  padding:0.85rem 0;
+  border-top:1px solid var(--rule);
+  display:grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap:1rem;
+  font-size:0.98rem;
+}
+ul.facts li:first-child{ border-top:none; }
+ul.facts li .k{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.72rem;
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  color:var(--brass-deep);
+  padding-top:0.15rem;
+}
+ul.facts li .v{ color:var(--ink-soft); line-height:1.55; }
+
+/* pipeline strip */
+.flow{
+  display:flex; align-items:stretch; gap:0; margin-top:2.8rem; flex-wrap:wrap;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+}
+.flow .node{
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  padding:1.1rem 1.3rem;
+  min-width:9rem;
+  box-shadow:var(--shadow);
+}
+.flow .node.active{ border-color:var(--brass); }
+.flow .node .l1{ font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-soft); }
+.flow .node .l2{ font-size:0.95rem; margin-top:0.35rem; font-weight:600; }
+.flow .arrow{ display:flex; align-items:center; padding:0 0.6rem; color:var(--rule); font-size:1.1rem; }
+
+/* stat strip — same visual language as .flow, numeric emphasis */
+.stat-grid{ display:flex; gap:1.2rem; margin-top:2.6rem; flex-wrap:wrap; }
+.stat{
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  box-shadow:var(--shadow);
+  padding:1.1rem 1.5rem;
+  min-width:8.5rem;
+}
+.stat .num{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:1.9rem; font-weight:600; color:var(--brass-deep); }
+.stat .label{ font-size:0.78rem; color:var(--ink-soft); margin-top:0.3rem; }
+
+/* tools / comparison table */
+.ttable{ width:100%; border-collapse:collapse; margin-top:2.2rem; font-size:0.86rem; }
+.ttable th{
+  text-align:left; font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em;
+  color:var(--ink-soft); font-weight:500;
+  border-bottom:1px solid var(--rule); padding:0.6rem 0.8rem 0.6rem 0;
+}
+.ttable td{
+  border-bottom:1px solid var(--rule);
+  padding:0.75rem 0.8rem 0.75rem 0;
+  vertical-align:top;
+}
+.ttable td.tool{ font-family: ui-monospace,"SF Mono",Consolas,monospace; color:var(--brass-deep); white-space:nowrap; }
+.ttable td.desc{ color:var(--ink-soft); }
+
+/* invariants / gains grid */
+.inv-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:1.6rem; margin-top:2.6rem; }
+@media (max-width:800px){ .inv-grid{ grid-template-columns:1fr; } }
+.inv{
+  border-left:2px solid var(--slate);
+  padding:0.2rem 0 0.2rem 1.2rem;
+}
+.inv.warn{ border-left-color:var(--bad); }
+.inv h3{ font-size:1.05rem; font-family: Georgia, serif; }
+.inv p{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.92rem; line-height:1.6; max-width:32ch; }
+
+/* diff callouts (added/removed) */
+.diffline{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.82rem;
+  padding:0.15rem 0;
+}
+.diffline.rm{ color:var(--bad); }
+.diffline.add{ color:var(--code-str); }
+
+/* CTA */
+.cta{
+  align-items:center;
+  text-align:center;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--brass) 10%, transparent), transparent 70%),
+    var(--ground);
+}
+.cta h2{ font-size:clamp(2rem,4.4vw,3.2rem); max-width:26ch; }
+.cta .codeblock{ margin-top:2.4rem; text-align:left; max-width:38rem; width:100%; }
+.cta .fineprint{ margin-top:2rem; font-size:0.82rem; color:var(--ink-soft); font-family: ui-monospace,"SF Mono",Consolas,monospace; }
+
+/* progress rail */
+.rail{
+  position:fixed; right:1.4rem; top:50%; transform:translateY(-50%);
+  display:flex; flex-direction:column; gap:0.55rem; z-index:20;
+}
+.rail a{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--rule); border:none; padding:0; cursor:pointer;
+  transition:background 0.2s ease, transform 0.2s ease;
+}
+.rail a.current{ background:var(--brass); transform:scale(1.4); }
+@media (max-width:700px){ .rail{ display:none; } }
+
+@media (prefers-reduced-motion:no-preference){
+  section.slide{ animation: rise 0.7s ease both; animation-timeline: view(); animation-range: entry 0% cover 30%; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(14px);} to{ opacity:1; transform:none; } }
+}
+</style>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+  <a href="#s10"></a><a href="#s11"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Pentaho and SQL recovery, tested cold. <span class="arrow-word">Not a demo fixture.</span></h1>
+  <p class="lede">Two real GitHub ETL projects, cloned fresh and run through the full EKOS pipeline
+  with nothing staged in advance — the terminal output, the MCP query/answer transcripts, and the
+  gaps it found are all reproduced here, from a data engineer's point of view.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">pih-pentaho</span><span class="sep mono">·</span>
+    <span class="chip hot">adventureworks datamart</span><span class="sep mono">→</span>
+    <span class="chip">ekos build/recover/resolve/compile/commit</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos ask / ekl / mcp serve</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0025 · RFC 0027 · Pentaho + SQL recovery analyzers</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / setup</div>
+  <div class="eyebrow">What was actually run</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:26ch;">Cloned cold. Compiled once. Cross-checked against the raw files.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      <code class="mono">pih-pentaho</code> is Partners In Health's production OpenMRS →
+      warehouse ETL — a live, actively maintained clinical-data pipeline. The AdventureWorks
+      project is a grad-school ETL exercise. Neither was touched or tuned before running EKOS
+      against it.
+    </p>
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">pih-pentaho</span><span class="v">60 Kettle files · 27 SQL files · 403 commits · 14 contributors</span></li>
+      <li><span class="k">adventureworks</span><span class="v">10 Kettle files · 5 SQL files · 3 commits · 1 contributor</span></li>
+      <li><span class="k">Command</span><span class="v"><code class="mono">ekos init && ekos build && ekos recover && ekos resolve && ekos compile && ekos commit</code></span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / terminal</div>
+  <div class="eyebrow">Real output, not a mockup</div>
+  <h2>Every line below came from an actual run.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">$ ekos doctor</div>
+<pre style="margin:0;">EKOS Doctor
+────────────────────────────
+<span class="s">[OK]</span>  Rust toolchain
+<span class="s">[OK]</span>  Working directory
+<span class="s">[OK]</span>  ekos.toml
+<span class="s">[OK]</span>  .ekos/
+<span class="s">[OK]</span>  LLM provider  claude (key: $ANTHROPIC_API_KEY ✓)
+────────────────────────────
+All checks passed.</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">$ ekos recover — pih-pentaho</div>
+<pre style="margin:0;">Recover complete.
+  SQL files analysed: 27
+  Git commits analysed: 403
+  Pentaho jobs analysed: 60
+  IR nodes (Pentaho): 312 total, <span class="k">33%</span> mapped
+  IR nodes (SQL): 18 total, <span class="s">100%</span> mapped
+  Passes run: 57</pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / evidence</div>
+  <div class="eyebrow">What "evidence-backed" means, concretely</div>
+  <h2>Every extracted fact cites the exact XML it came from.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">transforms/load-fact-coded-values.ktr</div>
+<pre style="margin:0;">Object :0 (TransformNode)
+  node_type: <span class="k">"Source"</span>
+  object_name: "omrs_obs"
+
+Object :1 (TransformNode)
+  node_type: <span class="k">"Sink"</span>
+  object_name: "fact_patient_coded_value"
+  columns: [patient_id, gender_id, age_id,
+    date_id, ... coded_value_id]</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">
+        The real Kettle steps, read straight from the file: <code class="mono">Import Coded
+        Obs</code> (<code class="mono">TableInput</code>) → <code class="mono">Write Coded
+        Obs</code> (<code class="mono">TableOutput</code>).
+      </p>
+      <ul class="facts" style="margin-top:1.6rem;">
+        <li><span class="k">Match</span><span class="v">Exact — source table, sink table, and every dimension foreign key column, all recovered without an LLM.</span></li>
+        <li><span class="k">Why it matters</span><span class="v">Structural parsing (<code class="mono">roxmltree</code>), not generation — nothing here was guessed.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / graph</div>
+  <div class="eyebrow">Beyond one file</div>
+  <h2>A compiled graph connects facts a grep never would.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">
+        Asking about <code class="mono">load-fact-coded-values.ktr</code> surfaced its most
+        tightly co-changed files across 403 commits of git history — without anyone documenting
+        that relationship anywhere.
+      </p>
+      <ul class="facts" style="margin-top:1.6rem;">
+        <li><span class="k">Co-change</span><span class="v"><code class="mono">load-fact-numeric-values.ktr</code>, <code class="mono">load-fact-patient-event.ktr</code>, reference-data setup transforms</span></li>
+        <li><span class="k">Identity</span><span class="v">Merged <code class="mono">Todd Anderson</code> and <code class="mono">toddrobertanderson</code> as the same person — recovered from git author metadata alone</span></li>
+      </ul>
+    </div>
+    <div class="stat-grid" style="margin-top:0;">
+      <div class="stat"><div class="num">375</div><div class="label">objects committed</div></div>
+      <div class="stat"><div class="num">1,314</div><div class="label">relationships</div></div>
+      <div class="stat"><div class="num">791</div><div class="label">evidence records</div></div>
+      <div class="stat"><div class="num">12</div><div class="label">identity merges, 0 conflicts</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / limits</div>
+  <div class="eyebrow">Shown, not hidden</div>
+  <h2>The AdventureWorks project exposed two real gaps.</h2>
+  <table class="ttable">
+    <thead><tr><th>Signal</th><th>pih-pentaho</th><th>adventureworks</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Pentaho step mapping</td><td class="desc">33%</td><td class="desc">33%</td></tr>
+      <tr><td class="tool">SQL DDL mapping</td><td class="desc">100% (18/18)</td><td class="desc" style="color:var(--bad);">0% (0/5)</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Every AdventureWorks SQL file failed to parse — MySQL <code class="mono">#</code>
+  comments and multi-statement scripts the generic SQL dialect can't handle. Zero tables were
+  fabricated to compensate; the pipeline logged the failure and moved on with an empty graph for
+  those files. A bonus finding: the <code class="mono">localdocs</code> observer also caught and
+  stripped an invisible, instruction-shaped payload hidden inside a course PDF in that same repo,
+  before it ever reached an LLM-backed pass.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / mcp</div>
+  <div class="eyebrow">A DE's AI agent, talking to the ledger</div>
+  <h2><code class="mono" style="font-family:inherit;">ekos mcp serve</code> — query in, evidenced answer out.</h2>
+  <div class="codeblock" style="max-width:44rem;">
+    <div class="tag">live JSON-RPC over stdio</div>
+<pre style="margin:0;"><span class="k">→ tools/call</span> ekos_search { "query": "omrs_obs" }
+
+<span class="s">← result</span> {
+  "matches": [
+    { "id": "889b30d6-...", "name": "omrs_obs" },
+    { "id": "01e3d482-...", "name": "omrs_obs_group" },
+    { "id": "f7238521-...", "name": "import-into-omrs-obs.ktr:0" },
+    <span class="c">... 34 more, ranked by relevance</span>
+  ]
+}</pre>
+  </div>
+  <p class="lede">No LLM generation happened here — FTS-ranked retrieval, straight from the ledger,
+  before the agent writes a single sentence.</p>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / mcp</div>
+  <div class="eyebrow">The DE question, live: "what would this ripple into?"</div>
+  <h2>Multi-hop impact trace through a real transformation.</h2>
+  <div class="codeblock" style="max-width:44rem;">
+    <div class="tag">ekos_impact — 5 hops, dependents of step :0</div>
+<pre style="margin:0;"><span class="k">→ tools/call</span> ekos_impact { "id": "f7238521-...", "direction": "dependents", "max_hops": 5 }
+
+<span class="s">← result</span> { "count": 5, "hops": [
+  { "hop": 1, "name": "...ktr:4", "via": "FeedsInto" },
+  { "hop": 2, "name": "...ktr:6", "via": "FeedsInto" },
+  { "hop": 3, "name": "...ktr:8", "via": "FeedsInto" },
+  { "hop": 4, "name": "...ktr:7", "via": "FeedsInto" },
+  { "hop": 5, "name": "...ktr:3", "via": "FeedsInto" }
+]}</pre>
+  </div>
+  <p class="lede">The exact question a DE asks before editing an early step in a 12-step
+  pipeline — answered without opening the file.</p>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / gap</div>
+  <div class="eyebrow">Same session, an honest gap</div>
+  <h2>Impact analysis doesn't yet cross the SQL ↔ Pentaho boundary.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ekos_dependents — fact_patient_coded_value (Table)</div>
+<pre style="margin:0;"><span class="k">→ tools/call</span> ekos_dependents
+   { "id": "a77168f6-..." }
+
+<span class="bad">← result</span> {
+  "target": { "kind": "Table" },
+  "dependents_count": 0,
+  "dependencies_count": 0
+}</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">
+        But §04 already showed <code class="mono">load-fact-coded-values.ktr</code> writes
+        exactly this table. The SQL <code class="mono">Table</code> object and the Pentaho
+        <code class="mono">Sink</code> node referencing it by name aren't yet resolved to the
+        same identity with a graph edge between them.
+      </p>
+      <p class="lede">Worth knowing before relying on cross-format impact queries for
+      SQL-defined tables touched only by Pentaho jobs.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / for data engineers</div>
+  <div class="eyebrow">What this is actually worth</div>
+  <h2>Four guarantees a raw-file grep doesn't give you.</h2>
+  <div class="inv-grid">
+    <div class="inv"><h3>Inherit legacy ETL without an owner</h3><p>Ask the ledger instead of reverse-engineering undocumented Kettle XML by hand.</p></div>
+    <div class="inv"><h3>Impact analysis before you touch anything</h3><p><code class="mono">ekos_impact</code>/<code class="mono">ekos_dependents</code> answer "what breaks?" from the real dependency graph.</p></div>
+    <div class="inv"><h3>Migration plans grounded in real logic</h3><p>Moving Kettle to dbt/Airflow against an already-extracted Source→Sink shape, not a re-read of 40 XML files.</p></div>
+    <div class="inv warn"><h3>Know the boundary, don't assume it</h3><p>SQL-defined tables and Pentaho steps that reference them aren't linked yet — a real limit, not a hidden one.</p></div>
+  </div>
+</section>
+
+<section class="slide cta" id="s11">
+  <div class="eyebrow">Try it</div>
+  <h2>Point an agent at the pipeline — not the XML, the compiled logic.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile every .ktr/.kjb and SQL file once</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># ask questions, or run deterministic queries</span>
+$ ekos ask "what does fact_sales depend on?"
+$ ekos ekl "FIND Object WHERE kind = 'Table'"
+
+<span class="c"># serve it to any MCP client over stdio</span>
+$ ekos mcp serve --workspace .</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>MCP tool</th><th>Answers</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">ekos_impact</td><td class="desc">What breaks if I change this table, job, or step</td></tr>
+      <tr><td class="tool">ekos_dependents</td><td class="desc">What already depends on this object</td></tr>
+      <tr><td class="tool">ekos_diff</td><td class="desc">What changed in the ledger since a given time</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · Pentaho + SQL recovery analyzers · github.com/alexeyban/EKOS</div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+  var sections = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  if(!('IntersectionObserver' in window)) return;
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){
+        var idx = sections.indexOf(e.target);
+        links.forEach(function(l,i){ l.classList.toggle('current', i===idx); });
+      }
+    });
+  }, { threshold: 0.55 });
+  sections.forEach(function(s){ if(s) io.observe(s); });
+})();
+</script>
+</body>
+</html>

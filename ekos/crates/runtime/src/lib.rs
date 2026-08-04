@@ -98,6 +98,12 @@ impl<'a> Runtime<'a> {
             }
 
             for rel in self.ledger.relationships_for(&current_id)? {
+                // An unconfirmed RFC 0029 identity candidate is a hypothesis,
+                // not a fact — never traversed as if it were a real edge.
+                if rel.is_pending_review() {
+                    continue;
+                }
+
                 let neighbour_id = if rel.from == current_id {
                     rel.to
                 } else {
@@ -154,6 +160,13 @@ impl<'a> Runtime<'a> {
             }
 
             for rel in self.ledger.relationships_for(&current_id)? {
+                // Same rationale as `load_neighborhood`: an unreviewed RFC
+                // 0029 candidate must not be walked as if it were a real
+                // dependency/dependent edge.
+                if rel.is_pending_review() {
+                    continue;
+                }
+
                 let neighbour_id = match direction {
                     ImpactDirection::Dependents if rel.to == current_id => rel.from,
                     ImpactDirection::Dependencies if rel.from == current_id => rel.to,
@@ -283,6 +296,20 @@ mod tests {
     fn fk(from: KirId, to: KirId) -> KirRelationship {
         KirRelationship::new(RelationshipKind::ForeignKey, from, to)
     }
+    fn same_as_unconfirmed(from: KirId, to: KirId) -> KirRelationship {
+        let mut rel =
+            KirRelationship::new(RelationshipKind::Custom("SameAs".to_string()), from, to);
+        rel.properties
+            .insert("status".into(), serde_json::json!("unconfirmed"));
+        rel
+    }
+    fn same_as_confirmed(from: KirId, to: KirId) -> KirRelationship {
+        let mut rel =
+            KirRelationship::new(RelationshipKind::Custom("SameAs".to_string()), from, to);
+        rel.properties
+            .insert("status".into(), serde_json::json!("confirmed"));
+        rel
+    }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -344,6 +371,39 @@ mod tests {
         let g = rt.load_neighborhood(&a.id, 0).unwrap();
         assert_eq!(g.objects.len(), 1);
         assert_eq!(g.relationships.len(), 0);
+    }
+
+    /// RFC 0029 identity candidates are hypotheses until reviewed — an
+    /// unconfirmed `SameAs` edge must not be walked as if it were a real
+    /// relationship. A confirmed one, or any structural relationship
+    /// (`ForeignKey`, etc.), is unaffected.
+    #[test]
+    fn load_neighborhood_excludes_unconfirmed_same_as_but_keeps_confirmed() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("a");
+        let b = obj("b");
+        let c = obj("c");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_object(&c).unwrap();
+        ledger
+            .append_relationship(&same_as_unconfirmed(a.id, b.id))
+            .unwrap();
+        ledger
+            .append_relationship(&same_as_confirmed(a.id, c.id))
+            .unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let g = rt.load_neighborhood(&a.id, 1).unwrap();
+        let object_ids: Vec<_> = g.objects.iter().map(|o| o.id).collect();
+        assert!(
+            !object_ids.contains(&b.id),
+            "unconfirmed SameAs must not be traversed"
+        );
+        assert!(
+            object_ids.contains(&c.id),
+            "confirmed SameAs must still be traversed"
+        );
     }
 
     #[test]
@@ -430,6 +490,42 @@ mod tests {
             .unwrap();
         assert_eq!(a_dependencies.len(), 1);
         assert_eq!(a_dependencies[0].object.id, b.id);
+    }
+
+    /// The concrete bug found running `ekos_impact` against a real
+    /// workspace: after `ekos identity scan`, every unconfirmed `SameAs`
+    /// candidate touching an object was being traced as if it were a real
+    /// dependent/dependency. An unconfirmed match must be excluded; a
+    /// confirmed one must still show up.
+    #[test]
+    fn trace_impact_excludes_unconfirmed_same_as_but_keeps_confirmed() {
+        let (ledger, _dir) = temp_ledger();
+        let table = obj("fact_patient_coded_value");
+        let unrelated = obj("unrelated_transform_node");
+        let reviewed = obj("reviewed_transform_node");
+        ledger.append_object(&table).unwrap();
+        ledger.append_object(&unrelated).unwrap();
+        ledger.append_object(&reviewed).unwrap();
+        ledger
+            .append_relationship(&same_as_unconfirmed(unrelated.id, table.id))
+            .unwrap();
+        ledger
+            .append_relationship(&same_as_confirmed(reviewed.id, table.id))
+            .unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let dependents = rt
+            .trace_impact(&table.id, ImpactDirection::Dependents, &[], 5)
+            .unwrap();
+        let ids: Vec<_> = dependents.iter().map(|h| h.object.id).collect();
+        assert!(
+            !ids.contains(&unrelated.id),
+            "unconfirmed SameAs candidate must not count as a dependent"
+        );
+        assert!(
+            ids.contains(&reviewed.id),
+            "confirmed SameAs candidate must still count as a dependent"
+        );
     }
 
     #[test]

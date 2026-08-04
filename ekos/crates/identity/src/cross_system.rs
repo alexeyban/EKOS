@@ -191,7 +191,19 @@ pub fn find_cross_system_candidates(objects: &[KirObject]) -> Vec<CrossSystemCan
         for j in (i + 1)..candidates.len() {
             let (obj_a, name_a, norm_a) = &candidates[i];
             let (obj_b, name_b, norm_b) = &candidates[j];
-            if obj_a.id == obj_b.id || name_a.eq_ignore_ascii_case(name_b) {
+            if obj_a.id == obj_b.id {
+                continue;
+            }
+            // Same-name, same-*kind* pairs are `DefaultResolver`'s job (RFC
+            // 0007) — skip them here to avoid double-proposing. But
+            // `DefaultResolver` only ever compares objects of identical
+            // `ObjectKind` (see its `structural_score`), so an exact-name
+            // match *across* kinds — a SQL `Table` and a Pentaho
+            // `Source`/`Sink` node sharing the same `object_name` — is never
+            // handled by either resolver unless it's scored here too. This
+            // is in fact the single most confident case this module can see
+            // (name_pattern resolves to 1.0), so it must not be skipped.
+            if obj_a.kind == obj_b.kind && name_a.eq_ignore_ascii_case(name_b) {
                 continue;
             }
 
@@ -245,6 +257,17 @@ mod tests {
         obj.properties
             .insert("object_name".into(), json!(object_name));
         obj.properties.insert("columns".into(), json!(columns));
+        obj
+    }
+
+    fn transform_sink(
+        source_path: &str,
+        index: usize,
+        object_name: &str,
+        columns: &[&str],
+    ) -> KirObject {
+        let mut obj = transform_source(source_path, index, object_name, columns);
+        obj.properties.insert("node_type".into(), json!("Sink"));
         obj
     }
 
@@ -352,6 +375,50 @@ mod tests {
         // not cross-system's.
         let a = table("customers", &[("id", "int")]);
         let b = table("customers", &[("id", "int")]);
+        let objects = vec![a, b];
+        assert!(find_cross_system_candidates(&objects).is_empty());
+    }
+
+    /// The bug this module previously had: `DefaultResolver` (RFC 0007) only
+    /// ever compares objects of identical `ObjectKind`, so an exact-name
+    /// match *across* kinds — a SQL `Table` and the Pentaho `Sink` node that
+    /// writes to it, sharing the literal same `object_name` — was skipped
+    /// here too (on the assumption same-name dedup was "someone else's
+    /// job") and so never linked by *either* resolver. This is the highest-
+    /// confidence case cross-system identity resolution can see and must
+    /// not be dropped.
+    #[test]
+    fn exact_name_match_across_kinds_is_proposed_at_max_confidence() {
+        let table_obj = table(
+            "fact_patient_coded_value",
+            &[("patient_id", "int"), ("coded_value_id", "int")],
+        );
+        let sink_obj = transform_sink(
+            "load-fact-coded-values.ktr",
+            1,
+            "fact_patient_coded_value",
+            &["patient_id", "coded_value_id"],
+        );
+        let objects = vec![table_obj, sink_obj];
+        let candidates = find_cross_system_candidates(&objects);
+        assert_eq!(
+            candidates.len(),
+            1,
+            "expected exactly one cross-kind candidate, got {candidates:?}"
+        );
+        assert!(
+            candidates[0].confidence >= 0.99,
+            "expected near-max confidence for an identical name, got {}",
+            candidates[0].confidence
+        );
+    }
+
+    /// Same-kind exact matches must still be left to `DefaultResolver` —
+    /// this module should not start double-proposing those.
+    #[test]
+    fn exact_name_match_same_kind_is_still_skipped() {
+        let a = table("fact_patient_coded_value", &[("patient_id", "int")]);
+        let b = table("fact_patient_coded_value", &[("patient_id", "int")]);
         let objects = vec![a, b];
         assert!(find_cross_system_candidates(&objects).is_empty());
     }
