@@ -248,6 +248,11 @@ CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
 Pump.fun:
 https://pump.fun/coin/CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
 
+## Official Channels
+
+X (Twitter): [@ekosproject](https://x.com/ekosproject) — release announcements posted via
+`ekos marketing publish` (RFC 0030).
+
 ## Versioning Roadmap
 
 | Version | Milestone |

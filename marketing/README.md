@@ -1,7 +1,8 @@
 # Marketing Agent v1
 
-RFC 0030 (`docs/rfcs/0027-marketing-agent.md`). Turns a new `devlog_N.md` into a human-approved
-X (Twitter) release announcement.
+RFC 0030 (`ekos/docs/rfcs/0030-marketing-agent.md`). Turns a new `devlog_N.md` into a
+human-approved X (Twitter) release announcement, posted to the project's official account,
+[@ekosproject](https://x.com/ekosproject).
 
 ```bash
 cargo run -p ekos -- marketing publish            # latest devlog, interactive approval
@@ -28,7 +29,11 @@ dry-run = false
 
 Publishing to X requires `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`,
 `TWITTER_ACCESS_SECRET` in the environment (OAuth 1.0a user-context tokens from the X Developer
-Portal, "Read and write" permissions). Never commit these.
+Portal, "Read and write" permissions). Never commit these. There is no separate "target account"
+setting — OAuth 1.0a user-context tokens are already tied to one account, so whichever
+credentials are configured determine where a post lands. To publish as
+[@ekosproject](https://x.com/ekosproject), the tokens must come from that account's Developer
+Portal app.
 
 ## What lives in this directory
 
