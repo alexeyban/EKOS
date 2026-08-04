@@ -243,10 +243,10 @@ Network: Solana
 
 Contract (Mint) Address:
 
-Cx2beEXqKeq63adkQweVfWHHs5wS7Zrib7Y17uTHpump
+CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
 
 Pump.fun:
-https://pump.fun/coin/Cx2beEXqKeq63adkQweVfWHHs5wS7Zrib7Y17uTHpump
+https://pump.fun/coin/CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
 
 ## Versioning Roadmap
 
