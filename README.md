@@ -92,6 +92,88 @@ RFC 0027), crypto/DeFi export, plus scaffolded proof-of-concept clients for Sale
 Oracle, Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against
 a live account). PostgreSQL, SQL Server, and Jira remain planned.
 
+## Installation
+
+EKOS builds from source — there's no prebuilt binary release yet. **The Cargo workspace root is
+`ekos/`, not the repo root** — there is no top-level `Cargo.toml`, so `cargo` commands must be run
+from inside `ekos/` (or with `--manifest-path ekos/Cargo.toml`).
+
+Prerequisites on both platforms:
+- **Rust**, stable channel, via [rustup](https://rustup.rs) — 2024 edition needs rustc 1.85+;
+  installing the latest stable is fine.
+- **A C/C++ toolchain** — `rusqlite`'s bundled SQLite and the `zstd` crate both compile native C
+  source at build time, so a working `cc` is required even though the project itself is pure Rust.
+- **Git**, to clone the repo.
+
+### macOS
+
+```bash
+# 1. C toolchain (skip if already installed)
+xcode-select --install
+
+# 2. Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+
+# 3. Clone and build (note: cd into ekos/, the actual workspace root)
+git clone https://github.com/alexeyban/EKOS.git
+cd EKOS/ekos
+cargo build --release --workspace
+
+# 4. Binary is at target/release/ekos — run it directly, or install onto PATH:
+cargo install --path crates/cli
+```
+
+(Homebrew's `rustup-init` — `brew install rustup-init && rustup-init` — works the same way if you
+prefer Homebrew-managed installs.)
+
+### Windows 11
+
+Two supported paths — WSL2 is the path of least friction for a Unix-first Rust CLI project, since
+it gives you a real Linux toolchain; native Windows works too and is fully supported by Rust.
+
+**Option A — WSL2 (recommended):**
+
+```powershell
+wsl --install                       # if WSL2 isn't already set up; reboot if prompted
+```
+
+Then open the Ubuntu shell it installs and follow the **macOS/Linux steps above** (`xcode-select`
+isn't applicable — `sudo apt install build-essential` gives you the C toolchain instead — then the
+same `rustup.rs` install and `cargo build` commands).
+
+**Option B — Native Windows:**
+
+```powershell
+# 1. C++ build tools (provides the MSVC linker rustc's default toolchain needs)
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+
+# 2. Rust (accept the default x86_64-pc-windows-msvc toolchain when prompted)
+winget install Rustlang.Rustup
+
+# 3. Git, if not already installed
+winget install Git.Git
+
+# 4. Clone and build (open a new terminal first, so the updated PATH takes effect)
+git clone https://github.com/alexeyban/EKOS.git
+cd EKOS\ekos
+cargo build --release --workspace
+
+# 5. Binary is at target\release\ekos.exe — run it directly, or install onto PATH:
+cargo install --path crates\cli
+```
+
+### Verify the install
+
+```bash
+ekos --help                # or: cargo run -p ekos -- --help, from ekos/
+ekos init                  # creates .ekos/ in the current directory
+cargo test --workspace     # optional: run the test suite (500+ tests)
+```
+
+See [`CLAUDE.md`](CLAUDE.md) for the full command reference and the mandatory development
+workflow if you're planning to contribute.
+
 ### Legacy transformation recovery (RFC 0027/0028/0029)
 
 A Pentaho step, a SQL `SELECT`, a `VIEW`, and a stored procedure are all the same underlying
