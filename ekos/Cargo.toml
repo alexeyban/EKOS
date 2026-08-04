@@ -106,3 +106,6 @@ sha1 = "0.10"
 base64 = "0.22"
 percent-encoding = "2"
 rand = "0.8"
+
+# .env loading (RFC 0030 — marketing/.env, never overrides already-set env vars)
+dotenvy = "0.15"

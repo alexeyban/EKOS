@@ -9,3 +9,5 @@
 .serena/
 /marketing/posted/
 /marketing/logs/
+/marketing/.env
+.env

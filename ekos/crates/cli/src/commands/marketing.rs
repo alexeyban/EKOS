@@ -21,6 +21,14 @@ pub async fn publish(
     dry_run: bool,
 ) -> Result<()> {
     let marketing_dir = cwd.join("marketing");
+
+    // Load marketing/.env if present — never overrides a variable already set
+    // in the real environment (dotenvy's default), so `export`ing directly
+    // still takes precedence. Silently absent is fine: TWITTER_*/ANTHROPIC_*
+    // may already be set in the shell instead, and dry-run mode needs none
+    // of this at all.
+    dotenvy::from_path(marketing_dir.join(".env")).ok();
+
     let devlog_path = resolve_devlog_path(cwd, devlog_arg.as_deref()).ok_or_else(|| {
         anyhow!("no devlog found (pass a path, a number, or ensure devlog_*.md files exist)")
     })?;
@@ -223,6 +231,78 @@ fn log_line(marketing_dir: &Path, message: &str) {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// Proves `marketing/.env` actually gets loaded — `dotenvy::from_path` is
+    /// a two-line call in `publish()` with nothing else exercising it, so a
+    /// direct test is worth more here than trusting "well-known crate, must
+    /// be fine": confirms the file we tell users to create really does reach
+    /// `std::env::var` the way `TwitterPublisher::from_env()`/`select_llm_provider`
+    /// expect. Uses a unique var name to avoid colliding with any other test
+    /// or real environment state (env vars are process-global).
+    #[test]
+    fn dotenv_file_populates_the_process_environment() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env"),
+            "EKOS_TEST_DOTENV_MARKER_1=loaded-from-file\n",
+        )
+        .unwrap();
+
+        // SAFETY: test-only, a uniquely-named var no other test touches —
+        // the documented hazard is concurrent env mutation racing another
+        // thread's read; nothing else in this process reads this name.
+        unsafe {
+            std::env::remove_var("EKOS_TEST_DOTENV_MARKER_1");
+        }
+        dotenvy::from_path(dir.path().join(".env")).ok();
+        assert_eq!(
+            std::env::var("EKOS_TEST_DOTENV_MARKER_1").as_deref(),
+            Ok("loaded-from-file")
+        );
+        unsafe {
+            std::env::remove_var("EKOS_TEST_DOTENV_MARKER_1");
+        }
+    }
+
+    /// The safety property the code comment in `publish()` promises: a
+    /// variable already exported in the real environment must win over
+    /// whatever `marketing/.env` says — so a user who exports fresh,
+    /// rotated credentials directly in their shell is never silently
+    /// overridden by a stale value left in the file.
+    #[test]
+    fn dotenv_file_never_overrides_an_already_set_var() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env"),
+            "EKOS_TEST_DOTENV_MARKER_2=from-file\n",
+        )
+        .unwrap();
+
+        // SAFETY: test-only, a uniquely-named var no other test touches —
+        // see the comment in the test above.
+        unsafe {
+            std::env::set_var("EKOS_TEST_DOTENV_MARKER_2", "from-real-shell");
+        }
+        dotenvy::from_path(dir.path().join(".env")).ok();
+        assert_eq!(
+            std::env::var("EKOS_TEST_DOTENV_MARKER_2").as_deref(),
+            Ok("from-real-shell"),
+            "an already-exported var must win over marketing/.env"
+        );
+        unsafe {
+            std::env::remove_var("EKOS_TEST_DOTENV_MARKER_2");
+        }
+    }
+
+    /// A missing `marketing/.env` must never fail the command — most users
+    /// will export real env vars directly and never create the file at all.
+    #[test]
+    fn missing_dotenv_file_is_a_silent_no_op() {
+        let dir = tempdir().unwrap();
+        // No .env written — from_path on a nonexistent file must not panic.
+        let result = dotenvy::from_path(dir.path().join(".env"));
+        assert!(result.is_err(), "nonexistent file returns Err, not panic");
+    }
 
     #[test]
     fn resolve_devlog_path_none_finds_latest() {

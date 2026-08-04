@@ -29,11 +29,16 @@ dry-run = false
 
 Publishing to X requires `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`,
 `TWITTER_ACCESS_SECRET` in the environment (OAuth 1.0a user-context tokens from the X Developer
-Portal, "Read and write" permissions). Never commit these. There is no separate "target account"
-setting — OAuth 1.0a user-context tokens are already tied to one account, so whichever
-credentials are configured determine where a post lands. To publish as
-[@ekosproject](https://x.com/ekosproject), the tokens must come from that account's Developer
-Portal app.
+Portal, "Read and write" permissions). There is no separate "target account" setting — OAuth 1.0a
+user-context tokens are already tied to one account, so whichever credentials are configured
+determine where a post lands. To publish as [@ekosproject](https://x.com/ekosproject), the tokens
+must come from that account's Developer Portal app.
+
+**Never commit real credentials, and never paste them into a chat/terminal transcript that gets
+logged** — export them directly in your own shell, or copy `marketing/.env.example` to
+`marketing/.env` (already gitignored) and fill in real values there. `ekos marketing publish`
+loads `marketing/.env` automatically on startup if present, without ever overriding a variable
+you've already exported in the real environment.
 
 ## What lives in this directory
 
