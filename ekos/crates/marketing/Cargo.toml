@@ -1,6 +1,6 @@
 [package]
 name = "ekos-marketing"
-description = "RFC 0027 — Marketing Agent: devlog -> tweet draft -> human approval -> X publish"
+description = "RFC 0030 — Marketing Agent: devlog -> tweet draft -> human approval -> X publish"
 version.workspace = true
 edition.workspace = true
 

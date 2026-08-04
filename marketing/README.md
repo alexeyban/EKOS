@@ -1,6 +1,6 @@
 # Marketing Agent v1
 
-RFC 0027 (`docs/rfcs/0027-marketing-agent.md`). Turns a new `devlog_N.md` into a human-approved
+RFC 0030 (`docs/rfcs/0027-marketing-agent.md`). Turns a new `devlog_N.md` into a human-approved
 X (Twitter) release announcement.
 
 ```bash
@@ -13,7 +13,7 @@ cargo run -p ekos -- marketing publish --yes       # skip the approval prompt (s
 
 ## Configuration
 
-`[marketing]` in `ekos.toml` at the repo root (not a separate file — see RFC 0027's Motivation
+`[marketing]` in `ekos.toml` at the repo root (not a separate file — see RFC 0030's Motivation
 for why this deviates from the source design doc's `marketing/config.yaml`):
 
 ```toml

@@ -1,4 +1,4 @@
-//! `Publisher` trait + implementations (RFC 0027).
+//! `Publisher` trait + implementations (RFC 0030).
 
 use async_trait::async_trait;
 use serde::Deserialize;

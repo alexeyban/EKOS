@@ -8,7 +8,7 @@ pub use fact_ledger::FactLedger;
 
 use chrono::{DateTime, Utc};
 use ekos_artifact::ArtifactId;
-use ekos_kir::{KirEvidence, KirId, KirObject, KirRelationship};
+use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, Result as SqlResult, params};
 use serde::{Deserialize, Serialize};
@@ -526,6 +526,20 @@ impl Ledger {
         Ok(())
     }
 
+    /// Write a KirEvent. Immutable log entry — no "current version" concept,
+    /// unlike Object/Relationship (RFC 0029: the first real write path for
+    /// `EntryType::Event`, previously defined but never used).
+    pub fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
+        let entry = LedgerEntry {
+            id: ev.id.to_string(),
+            entry_type: EntryType::Event,
+            payload: serde_json::to_value(ev)?,
+            written_at: Utc::now(),
+        };
+        self.append(&entry)?;
+        Ok(())
+    }
+
     /// Write a KirRelationship. Updates the relationship index to point at
     /// this version. Returns `true` if a new version was recorded.
     pub fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
@@ -601,6 +615,24 @@ impl Ledger {
     pub fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, LedgerError> {
         let row = self.conn.query_row(
             "SELECT payload FROM entries WHERE id = ?1 AND entry_type = 'evidence'
+             ORDER BY rowid DESC LIMIT 1",
+            params![self.id_param(&id.to_string())],
+            |row| row.get::<_, SqlValue>(0),
+        );
+
+        match row {
+            Ok(payload) => Ok(Some(serde_json::from_str(
+                &self.payload_to_string(payload)?,
+            )?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Retrieve a KirEvent by id.
+    pub fn get_event(&self, id: &KirId) -> Result<Option<KirEvent>, LedgerError> {
+        let row = self.conn.query_row(
+            "SELECT payload FROM entries WHERE id = ?1 AND entry_type = 'event'
              ORDER BY rowid DESC LIMIT 1",
             params![self.id_param(&id.to_string())],
             |row| row.get::<_, SqlValue>(0),
@@ -1319,9 +1351,11 @@ pub trait KnowledgeStore {
     fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError>;
     fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError>;
     fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError>;
+    fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError>;
     fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError>;
     fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, LedgerError>;
     fn get_relationship(&self, id: &KirId) -> Result<Option<KirRelationship>, LedgerError>;
+    fn get_event(&self, id: &KirId) -> Result<Option<KirEvent>, LedgerError>;
     fn all_objects(&self) -> Result<Vec<KirObject>, LedgerError>;
     fn all_relationships(&self) -> Result<Vec<KirRelationship>, LedgerError>;
     fn relationships_for(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError>;
@@ -1354,6 +1388,9 @@ macro_rules! delegate_store {
             fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
                 <$ty>::append_relationship(self, rel)
             }
+            fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
+                <$ty>::append_event(self, ev)
+            }
             fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError> {
                 <$ty>::get_object(self, id)
             }
@@ -1362,6 +1399,9 @@ macro_rules! delegate_store {
             }
             fn get_relationship(&self, id: &KirId) -> Result<Option<KirRelationship>, LedgerError> {
                 <$ty>::get_relationship(self, id)
+            }
+            fn get_event(&self, id: &KirId) -> Result<Option<KirEvent>, LedgerError> {
+                <$ty>::get_event(self, id)
             }
             fn all_objects(&self) -> Result<Vec<KirObject>, LedgerError> {
                 <$ty>::all_objects(self)
@@ -1613,7 +1653,8 @@ fn dir_bytes(dir: &Path) -> u64 {
 mod tests {
     use super::*;
     use ekos_kir::{
-        KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
+        EventKind, KirEvent, KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind,
+        SourceLocation,
     };
     use std::time::Duration;
     use tempfile::tempdir;
@@ -1632,6 +1673,34 @@ mod tests {
         ledger.append_object(&obj).unwrap();
         let found = ledger.get_object(&id).unwrap().unwrap();
         assert_eq!(found.name, "orders");
+    }
+
+    /// RFC 0029: first real write path for `EntryType::Event` — round-trip
+    /// proof `append_event`/`get_event` actually work, not just compile.
+    #[test]
+    fn append_and_retrieve_event() {
+        let (ledger, _dir) = temp_ledger();
+        let subject = KirId::new();
+        let ev = KirEvent {
+            id: KirId::new(),
+            kind: EventKind::Merged,
+            subject,
+            payload: serde_json::json!({"decision": "confirmed"}),
+            evidence: vec![],
+            occurred_at: Utc::now(),
+        };
+        let id = ev.id;
+        ledger.append_event(&ev).unwrap();
+        let found = ledger.get_event(&id).unwrap().unwrap();
+        assert_eq!(found.subject, subject);
+        assert_eq!(found.kind, EventKind::Merged);
+        assert_eq!(found.payload["decision"], "confirmed");
+    }
+
+    #[test]
+    fn get_event_of_unknown_id_is_none() {
+        let (ledger, _dir) = temp_ledger();
+        assert!(ledger.get_event(&KirId::new()).unwrap().is_none());
     }
 
     #[test]

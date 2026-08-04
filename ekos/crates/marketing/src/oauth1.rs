@@ -1,9 +1,9 @@
-//! RFC 5849 OAuth 1.0a request signing (RFC 0027) — required to `POST` to the X API as a
+//! RFC 5849 OAuth 1.0a request signing (RFC 0030) — required to `POST` to the X API as a
 //! specific user without a browser-based OAuth 2.0 PKCE flow.
 //!
 //! Implemented from spec and unit-tested against the RFC 2202 HMAC-SHA1 test vector plus
 //! internal determinism/sensitivity checks. **Not yet exercised against a live X account** —
-//! no credentials are available in this environment (see RFC 0027's Open Questions).
+//! no credentials are available in this environment (see RFC 0030's Open Questions).
 
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};

@@ -1,4 +1,4 @@
-//! Marketing Agent v1 (RFC 0027) — reads a `devlog_N.md`, classifies its importance,
+//! Marketing Agent v1 (RFC 0030) — reads a `devlog_N.md`, classifies its importance,
 //! drafts a validated X (Twitter) post via an `LlmProvider`, and publishes it after human
 //! approval, with duplicate-post protection. See `docs/rfcs/0027-marketing-agent.md`.
 

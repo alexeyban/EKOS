@@ -1,4 +1,4 @@
-//! Tweet-generation prompt (RFC 0027). System prompt is transcribed verbatim from the
+//! Tweet-generation prompt (RFC 0030). System prompt is transcribed verbatim from the
 //! source design doc's "Tweet Prompt" section; the user prompt embeds the devlog's
 //! `Summary` + `section_titles` plus the config-driven GitHub URL and hashtag pool.
 
@@ -42,7 +42,7 @@ pub fn build_user_prompt(devlog: &DevlogSummary, config: &MarketingConfig) -> St
 }
 
 /// Appended to the user prompt on a regeneration retry after `validate_tweet` rejects the
-/// first draft (RFC 0027's "Tweet too long → Regenerate" error-handling rule).
+/// first draft (RFC 0030's "Tweet too long → Regenerate" error-handling rule).
 pub fn build_retry_suffix(reason: &str) -> String {
     format!(
         "\n\nYour previous draft was rejected: {reason}. Write a new draft that fixes this \

@@ -1,4 +1,4 @@
-# RFC 0027 — Marketing Agent v1 (Automatic X Release Announcements)
+# RFC 0030 — Marketing Agent v1 (Automatic X Release Announcements)
 
 **Status:** Accepted
 **Author:** EKOS team (adapted from Alexey Banaev's design doc, `ekos-marketing-agent-plan.md`)

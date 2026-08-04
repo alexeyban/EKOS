@@ -8,6 +8,7 @@ pub mod compile;
 pub mod diff;
 pub mod doctor;
 pub mod ekl;
+pub mod identity;
 pub mod init;
 pub mod ledger;
 pub mod marketing;

@@ -5,10 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
-Read `devlog_*.md` (root, numbered chronologically, `devlog_28.md` is latest) before starting
+Read `devlog_*.md` (root, numbered chronologically, `devlog_30.md` is latest) before starting
 non-trivial work: they are the project's long-term memory and record what shipped, why, and what
-was learned. `TODO.md` tracks the phase-by-phase roadmap; `docs/rfcs/` has one accepted RFC per
-shipped capability (`0001`–`0026`).
+was learned. `TODO.md` tracks the phase-by-phase roadmap; RFCs are split across two locations for
+historical reasons, not a meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
+`ekos/docs/rfcs/` has `0025`+. **Check both directories for the highest existing number before
+picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
+sessions that only checked one location.
 
 **The Cargo workspace root is `ekos/`, not the repo root** — there is no top-level `Cargo.toml`.
 `benchmark/` and `tests/integration/` are separate Cargo workspaces that depend on the `ekos/`
@@ -39,6 +42,8 @@ cargo run -p ekos -- build && cargo run -p ekos -- recover && cargo run -p ekos 
   && cargo run -p ekos -- compile && cargo run -p ekos -- commit   # full pipeline, in order
 cargo run -p ekos -- doctor
 cargo run -p ekos -- ask "<question>"
+cargo run -p ekos -- identity scan          # cross-system candidate matches (RFC 0029)
+cargo run -p ekos -- marketing publish      # devlog -> tweet -> approval -> X (RFC 0030)
 cargo run -p ekos -- mcp serve --workspace <dir>
 ```
 
@@ -70,12 +75,13 @@ verb is a compiler stage, run in that order, writing artifacts the next stage co
 | `observation-sdk` | `Observer` trait — the contract every connector implements, returning an `ObservationPackage` of content-addressable `ObservationArtifact`s |
 | `artifact` | Artifact types + `ArtifactStore` (loose JSON, or packed segments post RFC 0015) |
 | `kir` | Knowledge Intermediate Representation — the typed output of knowledge-recovery passes, input to the semantic compiler |
-| `recovery` | Knowledge-recovery passes: one analyzer per source kind (`sql_analyzer`, `git_analyzer`, `github_analyzer`, `confluence_analyzer`, `local_docs_analyzer`, `document_semantics_analyzer`, `crypto_analyzer`, `dependency_analyzer`), plus LLM provider glue (`anthropic.rs`, `ollama.rs`, `llm.rs`) |
-| `identity` | Identity Resolution — merges synonymous concepts recovered from different sources into one canonical `Object` |
-| `semantic` | Semantic compiler: KIR + resolved identities → CKM |
+| `recovery` | Knowledge-recovery passes: one analyzer per source kind (`sql_analyzer` — DDL, `sql_transform_analyzer` — SELECT/VIEW/procedures into the Transformation IR, `pentaho_analyzer`, `git_analyzer`, `github_analyzer`, `confluence_analyzer`, `local_docs_analyzer`, `document_semantics_analyzer`, `crypto_analyzer`, `dependency_analyzer`), plus LLM provider glue (`anthropic.rs`, `ollama.rs`, `llm.rs`) |
+| `identity` | Identity Resolution — `DefaultResolver` merges same-source-kind duplicates before the CKM exists (RFC 0007); `cross_system.rs` separately scores cross-system candidate matches (RFC 0029), written as reviewable `unconfirmed` relationships, never auto-merged |
+| `semantic` | Semantic compiler: KIR + resolved identities → CKM; `transform_ir.rs` is the shared Transformation IR (RFC 0027) every legacy-format parser (Pentaho, SQL) compiles into |
 | `ledger` | Append-only Semantic Knowledge Ledger — `fact.rs`/`fact_ledger.rs` (facts), `index.rs`, `search.rs`; SQLite-backed by default, RFC 0016 fact-segment engine (tantivy + mmap) is an opt-in `--v3` migration |
 | `runtime` | Read-only state reconstruction and context projection; `ai.rs` is the surface AI agents query |
 | `ekl` | Enterprise Knowledge Language — `parser.rs` + `interpreter.rs` for the `ekos ekl` query command |
+| `marketing` | Devlog → tweet → human approval → X publish (RFC 0030) — auxiliary tooling outside the compiler pipeline, not a `CompilerPass`/`Observer` |
 | `cli` | `commands/` — one file per CLI subcommand, dispatched from `crates/cli/src/bin/ekos.rs`; also hosts the MCP server (`commands/mcp.rs`) |
 | `common`, `scheduler` | Shared utilities; pass scheduling primitives |
 
@@ -83,9 +89,9 @@ verb is a compiler stage, run in that order, writing artifacts the next stage co
 
 Each plugin implements `Observer` from `observation-sdk` and is registered independently in
 `ekos/Cargo.toml`'s workspace members. Real/tested: `file`, `git`, `github`, `confluence`,
-`localdocs` (PDF/DOCX/text/Markdown/HTML/email), `crypto`. Scaffolded proof-of-concept only (mock
-API shapes, not exercised against live accounts): `salesforce`, `sap`, `oracle`, `fabric`,
-`snowflake`.
+`localdocs` (PDF/DOCX/text/Markdown/HTML/email), `pentaho` (`.ktr`/`.kjb`, RFC 0027), `crypto`.
+Scaffolded proof-of-concept only (mock API shapes, not exercised against live accounts):
+`salesforce`, `sap`, `oracle`, `fabric`, `snowflake`.
 
 ### Key invariants (enforced by review, not just convention)
 
@@ -102,7 +108,10 @@ API shapes, not exercised against live accounts): `salesforce`, `sap`, `oracle`,
 
 `ekos mcp serve --workspace <dir>` exposes the Runtime read-only over stdio via newline-delimited
 JSON-RPC 2.0. Tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`, `ekos_state`,
-`ekos_dependents`, `ekos_impact` (multi-hop, RFC 0018), `ekos_diff`, `ekos_status`. This repo's
+`ekos_dependents`, `ekos_impact` (multi-hop, RFC 0018), `ekos_diff`, `ekos_status`,
+`ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR, RFC 0028), and
+`ekos_identity_review` (confirm/reject a cross-system identity match, RFC 0029 — the one
+write-capable tool; every other tool is read-only, going through `Runtime` only). This repo's
 own `.claude/skills/ekos-knowledge` and `.claude/skills/memory` skills consume this server —
 `demo/` has a rehearsable scripted walkthrough (`demo/DEMO.md`, `demo/headless.sh`) if you need
 to see the whole pipeline exercised end to end.
@@ -162,7 +171,7 @@ into the next substantive one.
 
 ### Filename
 
-Increment from the highest existing `devlog_N.md`: `devlog_28.md` → `devlog_29.md`, etc.
+Increment from the highest existing `devlog_N.md`: `devlog_30.md` → `devlog_31.md`, etc.
 
 ### Required sections
 

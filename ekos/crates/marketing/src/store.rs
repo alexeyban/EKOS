@@ -1,4 +1,4 @@
-//! `marketing/posted/tweets.json` — the duplicate-detection store (RFC 0027).
+//! `marketing/posted/tweets.json` — the duplicate-detection store (RFC 0030).
 
 use std::path::{Path, PathBuf};
 

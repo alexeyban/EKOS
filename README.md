@@ -87,10 +87,27 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `cli`.
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
-(PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), crypto/DeFi export, plus
-scaffolded proof-of-concept clients for Salesforce, SAP, Oracle, Microsoft Fabric, and Snowflake
-(real API shapes, mock-tested — none yet exercised against a live account). PostgreSQL, SQL
-Server, and Jira remain planned.
+(PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), Pentaho Kettle (`.ktr`/`.kjb` —
+RFC 0027), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP,
+Oracle, Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against
+a live account). PostgreSQL, SQL Server, and Jira remain planned.
+
+### Legacy transformation recovery (RFC 0027/0028/0029)
+
+A Pentaho step, a SQL `SELECT`, a `VIEW`, and a stored procedure are all the same underlying
+concept — a transformation of data from sources to a sink through filter/join/aggregate/calculate
+operations. `ekos recover` compiles all of them into one shared **Transformation IR**
+(`Source`/`Filter`/`Join`/`Aggregate`/`Calculate`/`Sink`/`Unmapped`), so legacy ETL logic recovered
+from a Pentaho `.ktr`/`.kjb` job can be diffed against a newly drafted SQL pipeline — no manual XML
+reading required. `Unmapped` is deliberate, not a gap swept under the rug: anything that can't be
+parsed is still recorded as evidenced fact ("something is here, not yet understood"), never
+silently dropped.
+
+The same real-world entity observed under different names across systems (Informix `cust_mstr`,
+Postgres `customers`, Databricks `gold.dim_customer`) can be linked too: `ekos identity scan`
+scores candidate cross-system matches (column overlap, naming-pattern similarity, type
+compatibility) and writes them as `unconfirmed` relationships — never a silent auto-merge — for
+review via the `ekos_identity_review` MCP tool.
 
 ### Document semantic memory (RFC 0025/0026)
 
@@ -111,7 +128,9 @@ Then `ekos recover` runs `DocumentSemanticsAnalyzerPass` alongside the structura
 and the extracted `Concept` objects are queryable through the same MCP tools as everything else
 — `ekos_search`, `ekos_neighborhood`, `ekos_dependents`, `ekos ask`. No new tool, no new query
 surface — this is exactly the point: AI tools get real memory through the Runtime they already
-talk to.
+talk to. `ekos ask` honors `[llm] provider = "ollama"` the same way `ekos recover` does — both
+commands select the LLM provider through one shared function, so a workspace configured for local
+Ollama works identically for recovery and for querying.
 
 ### AI agent access (MCP)
 
@@ -119,7 +138,10 @@ talk to.
 server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`,
 `ekos_state`, `ekos_dependents` (single-hop impact analysis), `ekos_impact` (directed,
 kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_diff` (what changed since T),
-`ekos_status`. Connect Claude Code with:
+`ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
+explanation and migration diffing — RFC 0028), and `ekos_identity_review` (confirm/reject a
+cross-system identity match — RFC 0029, the one write-capable tool; every other tool is read-only).
+Connect Claude Code with:
 
 ```bash
 claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace
@@ -128,7 +150,7 @@ claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /p
 The server also honors `EKOS_WORKSPACE` and `EKOS_CONFIG` environment variables, so a
 registration can be path-free: `claude mcp add ekos --env EKOS_WORKSPACE=/path/to/workspace -- ekos mcp serve`.
 
-### Marketing agent (RFC 0027)
+### Marketing agent (RFC 0030)
 
 `ekos marketing publish [devlog]` turns a `devlog_N.md` into a human-approved X (Twitter) release
 announcement: it classifies the devlog's importance (skipping docs/tests/refactor-only entries),
@@ -150,8 +172,8 @@ true` is set explicitly.
 
 ### Demo: skills + custom subagents
 
-`demo/` contains a rehearsable, 8-act demo of EKOS's Claude Code integration, run against
-a real compiled workspace — two skills (`ekos-knowledge`, `memory`) and four custom
+`demo/` contains a rehearsable, 10-act demo of EKOS's Claude Code integration, run against
+a real compiled workspace — two skills (`ekos-knowledge`, `memory`) and six custom
 subagents, each embodying one capability:
 
 | Agent | Model | Capability |
@@ -160,6 +182,8 @@ subagents, each embodying one capability:
 | `impact-analyst` | sonnet | consequence — blast radius + cited evidence |
 | `memory-keeper` | sonnet | memory — the only agent that writes (recall, capture, async refresh) |
 | `estate-architect` | inherit | synthesis — designs from the workspace's own prior art |
+| `legacy-logic-recoverer` | sonnet | recovery — explains a Pentaho/SQL transformation chain, evidence per step (RFC 0027/0028) |
+| `identity-reviewer` | sonnet | review — batches cross-system identity hypotheses for confirm/reject (RFC 0029) |
 
 **Install the agents:**
 
@@ -167,7 +191,7 @@ subagents, each embodying one capability:
 cp demo/agents/*.md ~/.claude/agents/
 ```
 
-Then in Claude Code, run `/agents` and confirm all four appear.
+Then in Claude Code, run `/agents` and confirm all six appear.
 
 **Run it live** — open Claude Code from the workspace root (the directory containing
 `ekos.toml`) and follow the acts in [`demo/DEMO.md`](demo/DEMO.md), which gives the exact

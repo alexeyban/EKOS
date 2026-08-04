@@ -1,4 +1,4 @@
-//! Importance classification (RFC 0027) — a deterministic keyword heuristic, not an LLM
+//! Importance classification (RFC 0030) — a deterministic keyword heuristic, not an LLM
 //! call, so a chores-only devlog never reaches the tweet-generation step at all.
 
 use crate::devlog::DevlogSummary;

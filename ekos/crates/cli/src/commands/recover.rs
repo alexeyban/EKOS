@@ -8,8 +8,9 @@ use ekos_compiler_core::{
 use ekos_recovery::{
     ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass,
     DocumentSemanticsAnalyzerPass, DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass,
-    LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, SqlAnalyzerPass,
-    anthropic::AnthropicProvider, cache::CachedLlmProvider, llm::LlmProvider,
+    LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, PentahoAnalyzerPass, PentahoStats,
+    SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
+    cache::CachedLlmProvider, llm::LlmProvider,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -39,6 +40,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
 
     let ignore = &config.observe.ignore_patterns;
     let mut sql_count = 0usize;
+    let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
 
     for base in &observe_paths {
         for entry in WalkDir::new(base)
@@ -78,8 +80,19 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             // paths, two projects can hold the same base-relative SQL path
             // (e.g. `schema.sql`), and pass names must be unique.
             let rel = path.strip_prefix(cwd).unwrap_or(path);
-            let pass = SqlAnalyzerPass::new(rel.to_string_lossy().as_ref(), sql, llm.clone());
+            let rel_str = rel.to_string_lossy().into_owned();
+            let pass = SqlAnalyzerPass::new(&rel_str, sql.clone(), llm.clone());
             pass_manager.register(Box::new(pass));
+
+            // ── Transformation IR extraction (RFC 0027 Phase 2) ───────────
+            // Pure structural, no LLM — same SQL text, a different concern
+            // (transformation logic, not schema/entities). Dialect selection
+            // is not yet wired to per-path config (see sql_transform_analyzer's
+            // module doc comment) — "generic" until that lands.
+            let transform_pass = SqlTransformAnalyzerPass::new(&rel_str, sql, "generic");
+            sql_transform_stats_handles.push(transform_pass.stats_handle());
+            pass_manager.register(Box::new(transform_pass));
+
             sql_count += 1;
         }
     }
@@ -228,9 +241,25 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(localdocs_pass));
     }
 
+    // ── Pentaho .ktr/.kjb artifacts (RFC 0027 Phase 3) ────────────────────
+    let pentaho_artifact_ids = collect_pentaho_artifact_ids(&*artifact_store);
+    let pentaho_count = pentaho_artifact_ids.len();
+    let mut pentaho_stats: Option<Arc<std::sync::Mutex<PentahoStats>>> = None;
+    if !pentaho_artifact_ids.is_empty() {
+        let pentaho_pass = PentahoAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            pentaho_artifact_ids,
+        );
+        pentaho_stats = Some(pentaho_pass.stats_handle());
+        pass_manager.register(Box::new(pentaho_pass));
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, or local documents found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, or Pentaho jobs found)."
         );
         return Ok(());
     }
@@ -275,6 +304,34 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         println!(
             "  Document concepts extracted: {} sections processed, {} concepts, {} relationships",
             s.sections_processed, s.concepts, s.relationships
+        );
+    }
+    if pentaho_count > 0 {
+        println!("  Pentaho jobs analysed: {pentaho_count}");
+    }
+    if let Some(stats) = &pentaho_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Transformation IR nodes (Pentaho): {} total, {:.0}% mapped (non-Unmapped)",
+            s.nodes_total,
+            s.coverage_percent()
+        );
+    }
+    if !sql_transform_stats_handles.is_empty() {
+        let mut nodes_total = 0usize;
+        let mut nodes_mapped = 0usize;
+        for handle in &sql_transform_stats_handles {
+            let s = handle.lock().unwrap();
+            nodes_total += s.nodes_total;
+            nodes_mapped += s.nodes_mapped;
+        }
+        let coverage = if nodes_total == 0 {
+            0.0
+        } else {
+            100.0 * nodes_mapped as f32 / nodes_total as f32
+        };
+        println!(
+            "  Transformation IR nodes (SQL): {nodes_total} total, {coverage:.0}% mapped (non-Unmapped)"
         );
     }
     println!("  Passes run: {}", report.passes_run());
@@ -411,6 +468,28 @@ fn collect_localdocs_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> 
     ids
 }
 
+/// Collect ArtifactIds for every Pentaho `.ktr`/`.kjb` artifact currently in
+/// the store (RFC 0027 Phase 3).
+fn collect_pentaho_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("pentaho"))
+        })
+        .collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
 /// RFC 0026's opt-in gate: the document-semantics pass costs one LLM call per
 /// document section, so it registers only when explicitly enabled *and* there is
 /// local-document output for it to read.
@@ -423,7 +502,7 @@ fn should_register_document_semantics(config: &EkosConfig, localdocs_count: usiz
 /// unreachability surfaces as an ordinary error on first use, not here);
 /// anything else tries Anthropic with cache if an API key is present, mock
 /// otherwise.
-fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
+pub(crate) fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
     let cache_dir = artifact_dir
         .parent()
         .unwrap_or(artifact_dir)

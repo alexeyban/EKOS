@@ -1,4 +1,4 @@
-//! `ekos marketing publish` (RFC 0027).
+//! `ekos marketing publish` (RFC 0030).
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -167,7 +167,7 @@ fn resolve_devlog_path(cwd: &Path, devlog_arg: Option<&str>) -> Option<PathBuf> 
     }
 }
 
-/// Interactive Y/N/E approval, per RFC 0027 ("No automatic publishing."). `--yes` (`auto`)
+/// Interactive Y/N/E approval, per RFC 0030 ("No automatic publishing."). `--yes` (`auto`)
 /// skips straight to approval-as-drafted. Returns `None` on reject/EOF.
 fn approve(draft: &str, auto: bool) -> Result<Option<String>> {
     if auto {

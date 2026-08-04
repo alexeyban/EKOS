@@ -27,6 +27,7 @@ members = [
     "plugins/crypto",
     "plugins/github",
     "plugins/confluence",
+    "plugins/pentaho",
 ]
 
 [workspace.package]
@@ -92,6 +93,9 @@ walkdir = "2"
 
 # SQL parsing
 sqlparser = "0.53"
+
+# XML parsing (Pentaho .ktr/.kjb — RFC 0027 Phase 3)
+roxmltree = "0.20"
 
 # HTTP client (LLM API calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

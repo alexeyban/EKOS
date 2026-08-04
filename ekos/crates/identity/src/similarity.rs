@@ -1,5 +1,38 @@
 //! Name normalisation and Jaro-Winkler similarity (RFC 0007).
 
+use std::collections::HashSet;
+
+use ekos_kir::KirObject;
+
+/// Lowercased column-name set from a `KirObject`'s `properties["columns"]`,
+/// or `None` if absent/empty. Two on-disk shapes exist and both must work:
+/// SQL DDL tables store `[{"name": ..., "data_type": ...}]` (`sql_analyzer.rs`);
+/// Transformation IR `Source`/`Sink` nodes store a plain string array
+/// (`crates/semantic/src/transform_ir.rs`'s `TransformNode::properties()`).
+/// Shared by `structural_score` (RFC 0007, same-kind dedup) and
+/// `cross_system` (RFC 0029, cross-kind/cross-system matching).
+pub fn column_names(obj: &KirObject) -> Option<HashSet<String>> {
+    let cols = obj.properties.get("columns")?.as_array()?;
+    let names: HashSet<String> = cols
+        .iter()
+        .filter_map(|c| {
+            c.as_str()
+                .or_else(|| c.get("name").and_then(|n| n.as_str()))
+                .map(|s| s.to_lowercase())
+        })
+        .collect();
+    if names.is_empty() { None } else { Some(names) }
+}
+
+/// Jaccard similarity (intersection over union) between two sets.
+pub fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
+    let union = a.union(b).count();
+    if union == 0 {
+        return 0.0;
+    }
+    a.intersection(b).count() as f32 / union as f32
+}
+
 /// Normalise an object name before comparison.
 ///
 /// Steps:

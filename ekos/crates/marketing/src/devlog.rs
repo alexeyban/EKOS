@@ -1,4 +1,4 @@
-//! Devlog parsing (RFC 0027). Targets the *real* structure this repo's devlogs use
+//! Devlog parsing (RFC 0030). Targets the *real* structure this repo's devlogs use
 //! (`CLAUDE.md`'s Devlog Rule), not the illustrative `## Added`/`## Changed`/`## Fixed`
 //! example from the source design doc.
 //!

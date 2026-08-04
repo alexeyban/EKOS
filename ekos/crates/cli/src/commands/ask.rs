@@ -1,27 +1,14 @@
+use super::recover::build_llm_provider;
 use super::store::open_store;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
-use ekos_recovery::{anthropic::AnthropicProvider, llm::LlmProvider};
 use ekos_runtime::{AiRuntime, AiRuntimeConfig, Runtime};
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, json: bool) -> Result<()> {
-    let key_env = config
-        .llm
-        .api_key_env
-        .as_deref()
-        .unwrap_or("ANTHROPIC_API_KEY");
     let ai_config = ai_config(config);
-
-    let llm: Arc<dyn LlmProvider> = match std::env::var(key_env) {
-        Ok(api_key) => Arc::new(AnthropicProvider::new(ai_config.model.clone(), api_key)),
-        Err(_) => {
-            eprintln!(
-                "No LLM provider configured. Set {key_env} and provider = 'claude' in ekos.toml."
-            );
-            std::process::exit(1);
-        }
-    };
+    let artifact_dir = config.artifact_dir(cwd);
+    let llm = build_llm_provider(config, &artifact_dir);
 
     let ledger = open_store(config, cwd)?;
     let runtime = Runtime::over(&*ledger);
@@ -72,5 +59,30 @@ fn ai_config(config: &EkosConfig) -> AiRuntimeConfig {
             .system_prompt
             .clone()
             .unwrap_or(default.system_prompt),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ekos_compiler_core::config::LlmConfig;
+    use tempfile::tempdir;
+
+    /// `ekos ask` must honor `config.llm.provider` the same way `ekos recover`
+    /// does — it calls the exact same `build_llm_provider` rather than
+    /// constructing `AnthropicProvider` itself, so this proves the shared
+    /// selection logic is reachable from `ask.rs`, not duplicated/diverged.
+    #[test]
+    fn ask_selects_ollama_provider_when_configured() {
+        let dir = tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.llm = LlmConfig {
+            provider: Some("ollama".to_string()),
+            api_key_env: None,
+            model: None,
+        };
+        let artifact_dir = config.artifact_dir(dir.path());
+        let provider = build_llm_provider(&config, &artifact_dir);
+        assert_eq!(provider.model_name(), "llama3.1:8b");
     }
 }

@@ -2,8 +2,10 @@
 //!
 //! Speaks newline-delimited JSON-RPC 2.0 on stdin/stdout and exposes the
 //! read-only Runtime as MCP tools (`ekos_search`, `ekos_ekl`,
-//! `ekos_neighborhood`, `ekos_state`, `ekos_status`). Stdout carries protocol
-//! frames only; logging must go to stderr (see `init_logging_stderr`).
+//! `ekos_neighborhood`, `ekos_state`, `ekos_dependents`, `ekos_impact`,
+//! `ekos_diff`, `ekos_status`, `ekos_transformation_explain`,
+//! `ekos_transformation_diff` — RFC 0028). Stdout carries protocol frames
+//! only; logging must go to stderr (see `init_logging_stderr`).
 //!
 //! The ledger is opened per `tools/call`, so the server starts before a first
 //! `ekos build` and returns a readable tool error until a ledger exists.
@@ -13,7 +15,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
-use ekos_kir::{KirId, RelationshipKind};
+use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
 use ekos_runtime::{ImpactDirection, Runtime};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
@@ -183,6 +185,43 @@ fn tool_definitions() -> Value {
             "name": "ekos_status",
             "description": "Ledger health: total entries, object count, relationship count, and the ledger path being served.",
             "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "ekos_transformation_explain",
+            "description": "Explains a Transformation IR pipeline (Pentaho job or SQL SELECT/VIEW/procedure) by walking the chain of Source/Filter/Join/Aggregate/Calculate/Sink/Unmapped nodes feeding into the given object, with each step's evidence (source file/fragment).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Transformation IR object id (a TransformNode, typically a Sink), from ekos_search or ekos_ekl" },
+                    "max_hops": { "type": "integer", "description": "Hop bound walking upstream (default 50)" }
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "ekos_transformation_diff",
+            "description": "Compares two Transformation IR pipelines (e.g. an old Pentaho-derived one and a newly drafted one) and reports added/removed sources, filters, joins, aggregations, and calculations — use to verify a migration preserves intended logic.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "old_id": { "type": "string", "description": "Transformation IR object id of the original pipeline's end node" },
+                    "new_id": { "type": "string", "description": "Transformation IR object id of the new pipeline's end node" },
+                    "max_hops": { "type": "integer", "description": "Hop bound walking upstream on each side (default 50)" }
+                },
+                "required": ["old_id", "new_id"]
+            }
+        },
+        {
+            "name": "ekos_identity_review",
+            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger. The only write-capable MCP tool; only Custom(\"SameAs\") relationships are reviewable this way.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "relationship_id": { "type": "string", "description": "Id of the unconfirmed SameAs relationship, from ekos_ekl (FIND Relationship WHERE kind CONTAINS 'SameAs')" },
+                    "decision": { "type": "string", "description": "\"confirmed\" or \"rejected\"" }
+                },
+                "required": ["relationship_id", "decision"]
+            }
         }
     ])
 }
@@ -392,8 +431,270 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
             "relationships": ledger.relationship_count()?,
             "ledger_path": super::store::store_display(config, workspace),
         })),
+        "ekos_transformation_explain" => {
+            let id = required_id(args)?;
+            let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(50) as u32;
+            let chain = transformation_chain(&runtime, &id, max_hops)?;
+
+            let steps: Vec<Value> = chain
+                .iter()
+                .map(|obj| explain_node(&*ledger, obj))
+                .collect::<Result<_>>()?;
+
+            Ok(json!({
+                "target": { "id": id.to_string() },
+                "steps": steps,
+                "step_count": steps.len(),
+            }))
+        }
+        "ekos_transformation_diff" => {
+            let old_id = KirId::from_str(required_str(args, "old_id")?)
+                .map_err(|_| anyhow::anyhow!("invalid `old_id`"))?;
+            let new_id = KirId::from_str(required_str(args, "new_id")?)
+                .map_err(|_| anyhow::anyhow!("invalid `new_id`"))?;
+            let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(50) as u32;
+
+            let old_chain = transformation_chain(&runtime, &old_id, max_hops)?;
+            let new_chain = transformation_chain(&runtime, &new_id, max_hops)?;
+
+            Ok(json!({
+                "old": { "id": old_id.to_string(), "step_count": old_chain.len() },
+                "new": { "id": new_id.to_string(), "step_count": new_chain.len() },
+                "diff": diff_chains(&old_chain, &new_chain),
+            }))
+        }
+        "ekos_identity_review" => {
+            let rel_id = KirId::from_str(required_str(args, "relationship_id")?)
+                .map_err(|_| anyhow::anyhow!("invalid `relationship_id`"))?;
+            let decision = required_str(args, "decision")?;
+            if decision != "confirmed" && decision != "rejected" {
+                anyhow::bail!(
+                    "invalid `decision`: {decision} (want \"confirmed\" or \"rejected\")"
+                );
+            }
+
+            let mut rel = ledger
+                .get_relationship(&rel_id)?
+                .ok_or_else(|| anyhow::anyhow!("relationship not found: {rel_id}"))?;
+            if !matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs") {
+                anyhow::bail!(
+                    "not a SameAs candidate, cannot be reviewed through this tool: {rel_id}"
+                );
+            }
+
+            rel.properties.insert("status".into(), json!(decision));
+            rel.properties
+                .insert("reviewed_at".into(), json!(Utc::now().to_rfc3339()));
+            ledger.append_relationship(&rel)?;
+
+            let event_kind = if decision == "confirmed" {
+                EventKind::Merged
+            } else {
+                EventKind::Modified
+            };
+            let event = KirEvent {
+                id: KirId::new(),
+                kind: event_kind,
+                subject: rel_id,
+                payload: json!({ "decision": decision, "relationship_id": rel_id.to_string() }),
+                evidence: Vec::new(),
+                occurred_at: Utc::now(),
+            };
+            ledger.append_event(&event)?;
+
+            Ok(json!({
+                "relationship_id": rel_id.to_string(),
+                "decision": decision,
+                "status": "recorded",
+            }))
+        }
         other => Err(anyhow::anyhow!("unknown tool: {other}")),
     }
+}
+
+/// Walks a Transformation IR chain upstream from `id` (RFC 0027/0028): the
+/// target object itself, followed by everything that `FeedsInto` it,
+/// ordered root-first-then-by-hop. Reuses `Runtime::trace_impact` exactly as
+/// `ekos_impact` already does — no bespoke graph-walking mechanism.
+fn transformation_chain(
+    runtime: &Runtime,
+    id: &KirId,
+    max_hops: u32,
+) -> Result<Vec<ekos_kir::KirObject>> {
+    let root = runtime
+        .load_object(id)?
+        .ok_or_else(|| anyhow::anyhow!("object not found: {id}"))?;
+
+    // FeedsInto edges point downstream (Source -> Filter -> Sink), so
+    // walking *upstream* from `id` means following edges where `rel.to ==
+    // current` back to `rel.from` — that's `ImpactDirection::Dependents`
+    // ("what points at this"), not `Dependencies`, despite "what feeds into
+    // this" sounding like a dependency relationship at first glance.
+    let hops = runtime.trace_impact(
+        id,
+        ImpactDirection::Dependents,
+        &[RelationshipKind::Custom("FeedsInto".to_string())],
+        max_hops,
+    )?;
+
+    let mut chain = vec![root];
+    chain.extend(hops.into_iter().map(|h| h.object));
+    Ok(chain)
+}
+
+/// Renders one Transformation IR `KirObject` (RFC 0027's
+/// `Custom("TransformNode")` shape) into a human-readable explanation step
+/// with resolved evidence — mirrors `Runtime::reconstruct_state`'s evidence
+/// resolution (`ekos_state`'s pattern) applied to a single object instead of
+/// a whole `ObjectState`.
+fn explain_node(
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    obj: &ekos_kir::KirObject,
+) -> Result<Value> {
+    let node_type = obj
+        .properties
+        .get("node_type")
+        .and_then(Value::as_str)
+        .unwrap_or("Unknown");
+
+    let evidence: Vec<Value> = obj
+        .evidence
+        .iter()
+        .filter_map(|ev_id| ledger.get_evidence(ev_id).ok().flatten())
+        .map(|ev| {
+            json!({
+                "source": ev.location.path,
+                "fragment": ev.fragment,
+                "confidence": ev.confidence,
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "id": obj.id.to_string(),
+        "node_type": node_type,
+        "summary": node_summary(obj, node_type),
+        "evidence": evidence,
+    }))
+}
+
+/// One human-readable sentence per Transformation IR node type, per RFC
+/// 0028's mapping table.
+fn node_summary(obj: &ekos_kir::KirObject, node_type: &str) -> String {
+    let prop = |key: &str| {
+        obj.properties
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    };
+    match node_type {
+        "Source" => format!("reads from {}", prop("object_name")),
+        "Sink" => format!("writes to {}", prop("object_name")),
+        "Filter" => format!("filters rows where {}", prop("excerpt")),
+        "Calculate" => format!("calculates {} = {}", prop("output"), prop("excerpt")),
+        "Join" => format!(
+            "{} joins on {}",
+            prop("join_kind"),
+            obj.properties
+                .get("keys")
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        ),
+        "Aggregate" => format!(
+            "groups by {}, aggregates {}",
+            obj.properties
+                .get("group_by")
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            obj.properties
+                .get("aggs")
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        ),
+        "Unmapped" => format!(
+            "⚠ not understood: {} — raw: {}",
+            prop("reason"),
+            prop("raw")
+        ),
+        other => format!("unrecognized node_type: {other}"),
+    }
+}
+
+/// A node's canonical comparable text, used only for `ekos_transformation_diff`'s
+/// set-based comparison — deliberately not the same as `node_summary`'s
+/// English-sentence rendering, since diffing should ignore wording, only the
+/// underlying value (RFC 0028's "structural diffing over node text").
+fn node_comparable(obj: &ekos_kir::KirObject, node_type: &str) -> String {
+    let prop = |key: &str| {
+        obj.properties
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    };
+    match node_type {
+        "Source" | "Sink" => prop("object_name").to_string(),
+        "Filter" => prop("excerpt").to_string(),
+        "Calculate" => format!("{}={}", prop("output"), prop("excerpt")),
+        "Join" => format!(
+            "{}|{}",
+            prop("join_kind"),
+            obj.properties
+                .get("keys")
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        ),
+        "Aggregate" => format!(
+            "{}|{}",
+            obj.properties
+                .get("group_by")
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
+            obj.properties
+                .get("aggs")
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        ),
+        _ => String::new(),
+    }
+}
+
+/// Buckets two Transformation IR chains by node type and reports set
+/// differences per bucket, plus `Unmapped` counts (RFC 0028's "Structural
+/// diffing over node text, not a typed expression diff" design decision).
+fn diff_chains(old: &[ekos_kir::KirObject], new: &[ekos_kir::KirObject]) -> Value {
+    use std::collections::BTreeSet;
+
+    fn bucket(chain: &[ekos_kir::KirObject], node_type: &str) -> BTreeSet<String> {
+        chain
+            .iter()
+            .filter(|o| o.properties.get("node_type").and_then(Value::as_str) == Some(node_type))
+            .map(|o| node_comparable(o, node_type))
+            .collect()
+    }
+
+    fn set_diff(old_set: &BTreeSet<String>, new_set: &BTreeSet<String>) -> Value {
+        json!({
+            "added": new_set.difference(old_set).cloned().collect::<Vec<_>>(),
+            "removed": old_set.difference(new_set).cloned().collect::<Vec<_>>(),
+        })
+    }
+
+    let count_unmapped = |chain: &[ekos_kir::KirObject]| {
+        chain
+            .iter()
+            .filter(|o| o.properties.get("node_type").and_then(Value::as_str) == Some("Unmapped"))
+            .count()
+    };
+
+    json!({
+        "sources": set_diff(&bucket(old, "Source"), &bucket(new, "Source")),
+        "sinks": set_diff(&bucket(old, "Sink"), &bucket(new, "Sink")),
+        "filters": set_diff(&bucket(old, "Filter"), &bucket(new, "Filter")),
+        "joins": set_diff(&bucket(old, "Join"), &bucket(new, "Join")),
+        "aggregates": set_diff(&bucket(old, "Aggregate"), &bucket(new, "Aggregate")),
+        "calculates": set_diff(&bucket(old, "Calculate"), &bucket(new, "Calculate")),
+        "unmapped": { "old_count": count_unmapped(old), "new_count": count_unmapped(new) },
+    })
 }
 
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
@@ -467,7 +768,10 @@ mod tests {
                 "ekos_dependents",
                 "ekos_impact",
                 "ekos_diff",
-                "ekos_status"
+                "ekos_status",
+                "ekos_transformation_explain",
+                "ekos_transformation_diff",
+                "ekos_identity_review"
             ]
         );
         for tool in tools {
@@ -690,5 +994,331 @@ mod tests {
         let resp = parse(&handle_message(&config, tmp.path(), "{not json").unwrap());
         assert_eq!(resp["error"]["code"], -32700);
         assert!(resp["id"].is_null());
+    }
+
+    /// Builds a real `Source → Filter → Sink` Transformation IR graph (RFC
+    /// 0027/0028) — `condition` is a parameter so two independently-built
+    /// chains sharing everything but one Filter can be seeded for diff tests.
+    fn seeded_transformation_ledger(
+        config: &EkosConfig,
+        tmp: &Path,
+        source_path: &str,
+        condition: &str,
+    ) -> ekos_kir::KirId {
+        use ekos_ledger::Ledger;
+        use ekos_semantic::transform_ir::{
+            TransformGraph, TransformNode, TransformOrigin, lower_to_kir,
+        };
+
+        let graph = TransformGraph {
+            nodes: vec![
+                TransformNode::Source {
+                    object_name: "dbo.cust_mstr".to_string(),
+                    columns: vec!["id".to_string(), "status".to_string()],
+                },
+                TransformNode::Filter {
+                    condition: condition.to_string(),
+                },
+                TransformNode::Sink {
+                    object_name: "gold.dim_customer".to_string(),
+                    columns: vec!["id".to_string()],
+                },
+            ],
+            edges: vec![
+                (
+                    ekos_semantic::transform_ir::NodeId(0),
+                    ekos_semantic::transform_ir::NodeId(1),
+                ),
+                (
+                    ekos_semantic::transform_ir::NodeId(1),
+                    ekos_semantic::transform_ir::NodeId(2),
+                ),
+            ],
+            origin: TransformOrigin {
+                source_path: source_path.to_string(),
+                source_kind: "pentaho-ktr".to_string(),
+                extracted_at: Utc::now(),
+            },
+        };
+
+        let kir = lower_to_kir(&graph);
+        let ledger = Ledger::open(&config.ledger_path(tmp)).unwrap();
+        for ev in &kir.evidence {
+            ledger.append_evidence(ev).unwrap();
+        }
+        for obj in &kir.objects {
+            ledger.append_object(obj).unwrap();
+        }
+        for rel in &kir.relationships {
+            ledger.append_relationship(rel).unwrap();
+        }
+
+        // Sink is always the last node.
+        kir.objects.last().unwrap().id
+    }
+
+    #[test]
+    fn explain_walks_the_full_chain_with_evidence() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let sink_id = seeded_transformation_ledger(
+            &config,
+            tmp.path(),
+            "jobs/load_customers.ktr",
+            "status = 'active'",
+        );
+
+        let line = req(
+            20,
+            "tools/call",
+            json!({ "name": "ekos_transformation_explain",
+                    "arguments": { "id": sink_id.to_string() } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+
+        let steps = body["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 3, "Sink, then Filter, then Source, root-first");
+        assert_eq!(steps[0]["node_type"], "Sink");
+
+        let filter_step = steps
+            .iter()
+            .find(|s| s["node_type"] == "Filter")
+            .expect("Filter step present");
+        assert!(
+            filter_step["summary"]
+                .as_str()
+                .unwrap()
+                .contains("status = 'active'")
+        );
+        assert!(
+            !filter_step["evidence"].as_array().unwrap().is_empty(),
+            "every step must carry resolved evidence"
+        );
+        assert_eq!(
+            filter_step["evidence"][0]["source"],
+            "jobs/load_customers.ktr"
+        );
+
+        assert!(steps.iter().any(|s| s["node_type"] == "Source"));
+    }
+
+    #[test]
+    fn explain_of_unknown_object_is_a_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let line = req(
+            21,
+            "tools/call",
+            json!({ "name": "ekos_transformation_explain",
+                    "arguments": { "id": "00000000-0000-0000-0000-000000000000" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
+    }
+
+    #[test]
+    fn diff_detects_added_and_removed_filter() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let old_sink =
+            seeded_transformation_ledger(&config, tmp.path(), "jobs/old.ktr", "status = 'active'");
+        let new_sink =
+            seeded_transformation_ledger(&config, tmp.path(), "jobs/new.ktr", "region = 'EU'");
+
+        let line = req(
+            22,
+            "tools/call",
+            json!({ "name": "ekos_transformation_diff",
+                    "arguments": { "old_id": old_sink.to_string(), "new_id": new_sink.to_string() } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+
+        let filters = &body["diff"]["filters"];
+        assert_eq!(filters["added"], json!(["region = 'EU'"]));
+        assert_eq!(filters["removed"], json!(["status = 'active'"]));
+
+        // Same Source/Sink object_name text on both sides — no diff there.
+        assert_eq!(body["diff"]["sources"]["added"], json!([]));
+        assert_eq!(body["diff"]["sources"]["removed"], json!([]));
+        assert_eq!(body["diff"]["sinks"]["added"], json!([]));
+        assert_eq!(body["diff"]["sinks"]["removed"], json!([]));
+    }
+
+    #[test]
+    fn diff_of_identical_chains_reports_no_differences() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let sink_a =
+            seeded_transformation_ledger(&config, tmp.path(), "jobs/a.ktr", "status = 'active'");
+        let sink_b =
+            seeded_transformation_ledger(&config, tmp.path(), "jobs/b.ktr", "status = 'active'");
+
+        let line = req(
+            23,
+            "tools/call",
+            json!({ "name": "ekos_transformation_diff",
+                    "arguments": { "old_id": sink_a.to_string(), "new_id": sink_b.to_string() } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+
+        for bucket in [
+            "sources",
+            "sinks",
+            "filters",
+            "joins",
+            "aggregates",
+            "calculates",
+        ] {
+            assert_eq!(body["diff"][bucket]["added"], json!([]), "{bucket} added");
+            assert_eq!(
+                body["diff"][bucket]["removed"],
+                json!([]),
+                "{bucket} removed"
+            );
+        }
+        assert_eq!(body["diff"]["unmapped"]["old_count"], 0);
+        assert_eq!(body["diff"]["unmapped"]["new_count"], 0);
+    }
+
+    /// Seeds one unconfirmed `Custom("SameAs")` relationship between two
+    /// plain `Table` objects (RFC 0029), returning its id.
+    fn seeded_same_as_relationship(config: &EkosConfig, tmp: &Path) -> ekos_kir::KirId {
+        use ekos_kir::{KirObject, KirRelationship, ObjectKind};
+        use ekos_ledger::Ledger;
+
+        let ledger = Ledger::open(&config.ledger_path(tmp)).unwrap();
+        let a = KirObject::new("cust_mstr", ObjectKind::Table);
+        let b = KirObject::new("customers", ObjectKind::Table);
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+
+        let mut rel =
+            KirRelationship::new(RelationshipKind::Custom("SameAs".to_string()), a.id, b.id);
+        rel.properties.insert("status".into(), json!("unconfirmed"));
+        rel.properties.insert("confidence".into(), json!(0.72));
+        let rel_id = rel.id;
+        ledger.append_relationship(&rel).unwrap();
+        rel_id
+    }
+
+    #[test]
+    fn identity_review_confirms_a_candidate_and_writes_an_event() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let rel_id = seeded_same_as_relationship(&config, tmp.path());
+
+        let line = req(
+            30,
+            "tools/call",
+            json!({ "name": "ekos_identity_review",
+                    "arguments": { "relationship_id": rel_id.to_string(), "decision": "confirmed" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["decision"], "confirmed");
+
+        // Status actually persisted — re-open the ledger and check directly.
+        let ledger = ekos_ledger::Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let rel = ledger.get_relationship(&rel_id).unwrap().unwrap();
+        assert_eq!(rel.properties["status"], "confirmed");
+        assert!(rel.properties.contains_key("reviewed_at"));
+    }
+
+    #[test]
+    fn identity_review_rejects_a_candidate() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let rel_id = seeded_same_as_relationship(&config, tmp.path());
+
+        let line = req(
+            31,
+            "tools/call",
+            json!({ "name": "ekos_identity_review",
+                    "arguments": { "relationship_id": rel_id.to_string(), "decision": "rejected" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+
+        let ledger = ekos_ledger::Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let rel = ledger.get_relationship(&rel_id).unwrap().unwrap();
+        assert_eq!(rel.properties["status"], "rejected");
+    }
+
+    #[test]
+    fn identity_review_with_invalid_decision_is_a_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let rel_id = seeded_same_as_relationship(&config, tmp.path());
+
+        let line = req(
+            32,
+            "tools/call",
+            json!({ "name": "ekos_identity_review",
+                    "arguments": { "relationship_id": rel_id.to_string(), "decision": "maybe" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn identity_review_of_non_same_as_relationship_is_a_tool_error() {
+        use ekos_kir::{KirObject, KirRelationship, ObjectKind};
+        use ekos_ledger::Ledger;
+
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let ledger = Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let a = KirObject::new("orders", ObjectKind::Table);
+        let b = KirObject::new("customers", ObjectKind::Table);
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, a.id, b.id);
+        let rel_id = rel.id;
+        ledger.append_relationship(&rel).unwrap();
+
+        let line = req(
+            33,
+            "tools/call",
+            json!({ "name": "ekos_identity_review",
+                    "arguments": { "relationship_id": rel_id.to_string(), "decision": "confirmed" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn identity_review_of_unknown_relationship_is_a_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let line = req(
+            34,
+            "tools/call",
+            json!({ "name": "ekos_identity_review",
+                    "arguments": { "relationship_id": "00000000-0000-0000-0000-000000000000", "decision": "confirmed" } }),
+        );
+        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
     }
 }

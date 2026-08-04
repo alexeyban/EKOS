@@ -1,4 +1,4 @@
-//! Tweet drafting + validation (RFC 0027). One `LlmProvider::complete` call, then hard
+//! Tweet drafting + validation (RFC 0030). One `LlmProvider::complete` call, then hard
 //! validation server-side rather than trusting the model followed every prompt rule.
 
 use ekos_compiler_core::config::MarketingConfig;
@@ -46,7 +46,7 @@ struct LlmTweetOutput {
     tweet: String,
 }
 
-/// Validate the four hard constraints from RFC 0027 / the source design doc's Tweet Prompt.
+/// Validate the four hard constraints from RFC 0030 / the source design doc's Tweet Prompt.
 pub fn validate_tweet(text: &str, config: &MarketingConfig) -> Result<(), TweetValidationError> {
     let trimmed = text.trim();
     if trimmed.is_empty() {

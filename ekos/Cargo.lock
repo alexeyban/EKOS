@@ -702,6 +702,7 @@ dependencies = [
  "ekos-plugin-git",
  "ekos-plugin-github",
  "ekos-plugin-localdocs",
+ "ekos-plugin-pentaho",
  "ekos-recovery",
  "ekos-runtime",
  "ekos-semantic",
@@ -1014,6 +1015,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-pentaho"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "hex",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "ekos-plugin-salesforce"
 version = "0.1.0"
 dependencies = [
@@ -1072,8 +1091,10 @@ dependencies = [
  "ekos-common",
  "ekos-compiler-core",
  "ekos-kir",
+ "ekos-semantic",
  "hex",
  "reqwest",
+ "roxmltree",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1120,12 +1141,14 @@ dependencies = [
  "ekos-compiler-core",
  "ekos-identity",
  "ekos-kir",
+ "ekos-ledger",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2781,6 +2804,12 @@ dependencies = [
  "untrusted",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rusqlite"
