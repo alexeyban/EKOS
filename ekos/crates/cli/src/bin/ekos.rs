@@ -70,6 +70,11 @@ enum Commands {
         #[arg(long)]
         to: DateTime<Utc>,
     },
+    /// Cross-system identity resolution subcommands (RFC 0029)
+    Identity {
+        #[command(subcommand)]
+        subcommand: IdentityCommands,
+    },
     /// Manage ledger branches
     Branch {
         #[command(subcommand)]
@@ -101,6 +106,14 @@ enum McpCommands {
         #[arg(long, value_name = "DIR")]
         workspace: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum IdentityCommands {
+    /// Scan the ledger for candidate cross-system matches (e.g. Informix
+    /// `cust_mstr` vs. Postgres `customers`); written as unconfirmed until
+    /// reviewed via the ekos_identity_review MCP tool.
+    Scan,
 }
 
 #[derive(Subcommand)]
@@ -186,6 +199,9 @@ async fn main() -> Result<()> {
             ekos::commands::recover::run(&config, &cwd, parallel).await
         }
         Commands::Resolve => ekos::commands::resolve::run(&config, &cwd),
+        Commands::Identity { subcommand } => match subcommand {
+            IdentityCommands::Scan => ekos::commands::identity::scan(&config, &cwd),
+        },
         Commands::Compile => ekos::commands::compile::run(&config, &cwd).await,
         Commands::Commit => ekos::commands::commit::run(&config, &cwd),
         Commands::Ledger { subcommand } => match subcommand {

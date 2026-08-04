@@ -12,9 +12,10 @@
 //! }
 //! ```
 
+pub mod cross_system;
 pub mod similarity;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use ekos_kir::{KirGraph, KirId, KirObject, ObjectKind};
 use serde::{Deserialize, Serialize};
@@ -253,7 +254,21 @@ impl IdentityResolver for DefaultResolver {
         // to clear the stricter `CONCEPT_MERGE_THRESHOLD` to actually merge.
         let mut blocks: HashMap<(String, String), Vec<usize>> = HashMap::new();
         for (i, obj) in objects.iter().enumerate() {
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section") {
+            // `Custom("TransformNode")` objects (RFC 0027/0028) are the same
+            // failure shape as Section, discovered live while smoke-testing
+            // Phase 6's demo: each node is named "{source_path}:{index}"
+            // (`lower_to_kir`, `crates/semantic/src/transform_ir.rs`), so
+            // every node parsed from one file shares a long name prefix, and
+            // `structural_score`'s same-kind 1.0 fallback (no `columns`
+            // property) collapsed a real 3-node Source→Filter→Sink pipeline
+            // into one canonical object at confidence 0.99. Each node is
+            // already deterministically identified by (source, node index) —
+            // no two distinct TransformNode objects can legitimately be the
+            // same real-world entity, so — like Section, unlike Concept —
+            // this is a blanket kind exclusion, not a threshold/name-length
+            // guard.
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode")
+            {
                 continue;
             }
             let norm = similarity::normalize(&obj.name);
@@ -350,29 +365,12 @@ fn structural_score(a: &KirObject, b: &KirObject) -> f32 {
     if a.kind != b.kind {
         return 0.0;
     }
-    match (column_names(a), column_names(b)) {
+    match (similarity::column_names(a), similarity::column_names(b)) {
         (Some(cols_a), Some(cols_b)) if !cols_a.is_empty() && !cols_b.is_empty() => {
-            jaccard(&cols_a, &cols_b)
+            similarity::jaccard(&cols_a, &cols_b)
         }
         _ => 1.0,
     }
-}
-
-fn column_names(obj: &KirObject) -> Option<HashSet<String>> {
-    let cols = obj.properties.get("columns")?.as_array()?;
-    Some(
-        cols.iter()
-            .filter_map(|c| c.get("name")?.as_str().map(|s| s.to_lowercase()))
-            .collect(),
-    )
-}
-
-fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
-    let union = a.union(b).count();
-    if union == 0 {
-        return 0.0;
-    }
-    a.intersection(b).count() as f32 / union as f32
 }
 
 // ── Union-Find ────────────────────────────────────────────────────────────────
@@ -746,6 +744,28 @@ mod tests {
         assert!(
             result.proposals.is_empty(),
             "Section objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    /// Regression test for a real bug found live while smoke-testing Phase 6's
+    /// demo (RFC 0027/0028): `Custom("TransformNode")` objects are named
+    /// "{source_path}:{index}" (`lower_to_kir`), so every node parsed from one
+    /// file shares a long name prefix — the identical failure shape as
+    /// `Custom("Section")`. Before the fix, a real 3-node Source→Filter→Sink
+    /// pipeline collapsed into one canonical object at confidence 0.99.
+    #[test]
+    fn transform_node_objects_are_never_merged_even_with_shared_source_prefix() {
+        let transform_node = ObjectKind::Custom("TransformNode".to_string());
+        let g = make_graph(&[
+            ("new_load_customers.sql#0:0", transform_node.clone()),
+            ("new_load_customers.sql#0:1", transform_node.clone()),
+            ("new_load_customers.sql#0:2", transform_node),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "TransformNode objects must never be merge candidates, got {:?}",
             result.proposals
         );
     }

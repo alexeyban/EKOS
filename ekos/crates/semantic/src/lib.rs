@@ -4,6 +4,8 @@
 //! of the compiler pipeline. Downstream consumers (Ledger, Runtime, AI) always
 //! read from the CKM, never from raw KIR.
 
+pub mod transform_ir;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};

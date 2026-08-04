@@ -10,6 +10,7 @@ use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
+use ekos_plugin_pentaho::PentahoObserver;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -75,6 +76,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         // RFC 0023: local files, no credential to gate on — runs
         // unconditionally, same as FileObserver/GitObserver.
         Box::new(LocalDocsObserver::with_defaults(Arc::new(TesseractOcr))),
+        // RFC 0027 Phase 3: local .ktr/.kjb files, no credential to gate on —
+        // runs unconditionally, same as LocalDocsObserver.
+        Box::new(PentahoObserver::new()),
     ];
     if let Ok(export_dir) = std::env::var(CRYPTO_EXPORT_DIR_ENV) {
         observers.push(Box::new(CryptoObserver::new(

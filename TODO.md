@@ -1511,6 +1511,178 @@ with real or vendor-supplied sandbox credentials.
 
 ---
 
+## Phase 15 — Unified Transformation Semantics
+
+Target scenario: reproducing a legacy Pentaho (Kettle) ETL job's business logic in a new pipeline,
+with one rule changed, using EKOS instead of manually reading `.ktr`/`.kjb` XML and Confluence
+tribal knowledge. A Pentaho step, a SQL `SELECT`, a `VIEW`, a stored procedure, and a function are
+all the same underlying concept — a transformation of data from sources to a sink through
+filter/join/aggregate/calculate operations — so every format compiles into one shared
+Transformation IR before becoming Object/Relationship/Evidence, rather than N incompatible
+per-format semantic models that cannot be diffed against each other. See
+`ekos-transformation-semantics-plan.md` (repo root) for the full phase-by-phase implementation
+plan.
+
+**Status: all 8 phases complete** (0 RFC → 3 Pentaho → 1 IR → 2 SQL → 5 MCP tools → 6 agents →
+4 identity resolution → 7 benchmark), per the plan's own phase order. One follow-up identified by
+Phase 7's benchmark, not blocking: canonicalize `Join`/`Calculate` node text across producers so
+`ekos_transformation_diff` doesn't report spurious changes there for semantically-identical logic.
+
+- [x] **RFC 0027 — Unified Transformation Semantics**
+  - *What:* Defines the `TransformNode`/`TransformGraph` IR (`Source`, `Filter`, `Join`,
+    `Aggregate`, `Calculate`, `Sink`, and an explicit `Unmapped` for anything unparseable —
+    recorded as evidence, never silently dropped) and how it lowers into
+    `KirObject`/`KirRelationship`/`KirEvidence` via `ObjectKind::Custom("TransformNode")`, following
+    the `Custom(...)` idiom RFC 0024/0026 already established. Argues deterministic SQL/Pentaho
+    parsing is still observation-layer fact collection (same input always produces the same IR,
+    zero judgment calls), while labeling *what a step means for the business* is recovery-layer
+    interpretation, explicitly out of scope here. Confirms content-addressability (no
+    non-deterministic fields) and append-only ledger fit (`Uuid::new_v5`-scoped ids per
+    `(source_path, node_index)`, mirroring RFC 0026's `Concept` id scheme, so a later re-parse is a
+    new version at a stable id, never a mutation). Flags cross-system identity resolution over
+    Transformation-IR objects as its own later phase/RFC, not folded in here.
+  - *Output:* `docs/rfcs/0027-unified-transformation-semantics.md`.
+  - *Test/Validate:* RFC review per the mandatory workflow; no implementation code in this RFC by
+    design (Phase 0 of the plan).
+- [x] **Phase 1 — Transformation IR implementation** (`crates/semantic/src/transform_ir.rs`):
+  `TransformNode`/`TransformGraph`/`TransformOrigin` types, `lower_to_kir`, one
+  deterministic-serialization test per node variant written before the variant (TDD). No
+  format-specific parser yet. Every IR node lowers to `ObjectKind::Custom("TransformNode")` with
+  a `node_type` property, one evidence record citing the source path, and `Filter.condition`/
+  `Calculate.expr` land in `properties["excerpt"]` so they're searchable via `ekos_search`/
+  `ekos ask` for free. Deterministic ids for both objects and evidence
+  (`transform_node_kir_id`/`transform_evidence_kir_id`, `Uuid::new_v5`-scoped per
+  `(source_kind, source_path, node_index)`) — evidence ids had to be made just as deterministic
+  as object ids, since `KirEvidence::new`'s default random id otherwise breaks the ledger's
+  no-op-on-unchanged-content guarantee (`obj.evidence: Vec<KirId>` is part of what
+  `content_signature` hashes). 16 tests, `cargo test --workspace`/`clippy --workspace
+  --all-targets`/`fmt --check` all clean.
+- [x] **Phase 2 — SQL analysis**: `crates/recovery/src/sql_transform_analyzer.rs`'s
+  `SqlTransformAnalyzerPass` (pure structural, no LLM — distinct from `sql_analyzer.rs`'s
+  DDL-only, LLM-enriched `SqlAnalyzerPass`) walks `sqlparser` ASTs for `SELECT`/`CREATE VIEW`
+  (near-direct AST → IR: `FROM`/`JOIN` → `Source`/`Join`, `WHERE` → `Filter`, `GROUP BY` +
+  aggregate projections → `Aggregate`, other computed projections → `Calculate`, a `VIEW`'s name
+  → `Sink`) and stored procedures/functions at MVP scope: `CREATE PROCEDURE` bodies are pre-parsed
+  by `sqlparser` into `Vec<Statement>` natively (MSSQL), so embedded `SELECT`s become real
+  fragments and anything else becomes `Unmapped` with reason `"control flow present, not
+  modeled"`; `CREATE FUNCTION` bodies (Postgres `AS $$ ... $$`) are opaque string literals to
+  `sqlparser`, so a `;`-split-and-reparse heuristic extracts embedded `SELECT`s the same way.
+  Dialects: native `PostgreSqlDialect`/`MsSqlDialect`/`DatabricksDialect` (Databricks coverage
+  against real Spark SQL extensions not independently verified, documented not blocking);
+  Informix has no dedicated `sqlparser` dialect, falls back to `GenericDialect` with accepted
+  incomplete coverage, per the plan's explicit scope. `SqlTransformStats::coverage_percent()` is
+  the readiness metric, printed by `ekos recover` as `"Transformation IR nodes (SQL): N total, X%
+  mapped"`, registered alongside the existing DDL pass for every `.sql` file found. Dialect
+  selection is not yet wired to `ekos.toml` (defaults to `"generic"` in `recover.rs`'s SQL-file
+  walk) — flagged as follow-up, not blocking. 14 new tests covering the plan's own golden-example
+  list (simple SELECT+WHERE, SELECT+JOIN, SELECT+GROUP BY, VIEW wrapping a multi-table query,
+  stored procedure with embedded SELECT + non-SQL statement) plus CTE/dialect/coverage edge cases.
+  `cargo test --workspace`/`clippy --workspace --all-targets`/`fmt --check` all clean.
+- [x] **Phase 3 — Pentaho plugin**: `plugins/pentaho`'s `PentahoObserver` walks the workspace for
+  `.ktr`/`.kjb` files and captures raw XML verbatim (no interpretation — that's fact collection,
+  same split as `LocalDocsObserver`/`LocalDocAnalyzerPass`); `crates/recovery/src/
+  pentaho_analyzer.rs`'s `PentahoAnalyzerPass` parses that XML via `roxmltree` (new workspace
+  dependency — none existed before this phase) and maps steps to `TransformNode`s per the table:
+  `TableInput`→`Source`, `FilterRows`→`Filter`, `Calculator`→`Calculate`,
+  `DatabaseJoin`/`MergeJoin`→`Join`, `GroupBy`→`Aggregate`, `TableOutput`→`Sink`, anything else→
+  `Unmapped` with the raw step XML preserved verbatim as evidence. `.kjb` job entries (orchestration,
+  not data transformation) are always `Unmapped`, honestly, rather than forced into the mapping
+  table. `PentahoStats::coverage_percent()` is the phase's readiness metric, printed by `ekos
+  recover` as "Transformation IR nodes: N total, X% mapped". No real `.ktr`/`.kjb` sample files were
+  available — synthetic fixtures per the implementation plan's explicit fallback, XML shapes
+  documented as best-effort against Pentaho's known step-metadata conventions, not verified against
+  a real export (flagged as follow-up once one is available). 14 new tests (4 observer, 10
+  analyzer); `cargo test --workspace`/`clippy --workspace --all-targets`/`fmt --check` all clean.
+- [x] **Phase 4 — Cross-system identity resolution**: RFC 0029 written and accepted first. New,
+  deliberately separate `find_cross_system_candidates` (`crates/identity/src/cross_system.rs`,
+  not a `DefaultResolver` config tweak — that resolver already excludes `Custom("TransformNode")`
+  from its own blocking, the opposite posture cross-system matching needs) scores every pair of
+  `Table`/`TransformNode` `Source`/`Sink` objects on column-name overlap (Jaccard, factored out to
+  `similarity::column_names`/`jaccard`, now shared with RFC 0007's `structural_score`), naming-
+  pattern similarity (schema-prefix + ETL-affix stripping, then Jaro-Winkler), and column-type
+  compatibility (only when both sides carry typed columns) — signals degrade gracefully when
+  absent rather than penalizing the pair. Candidates are written by a new `ekos identity scan` CLI
+  command as `unconfirmed` `RelationshipKind::Custom("SameAs")` relationships (never auto-merged,
+  never consumed by `DefaultResolver`/`apply_merges`), idempotent against pairs already known. A
+  new `ekos_identity_review(relationship_id, decision)` MCP tool — the first write-capable tool,
+  explicitly scoped to `SameAs` relationships only — confirms/rejects, writing a `KirEvent` to the
+  ledger via new `append_event`/`get_event` surface added to `KnowledgeStore`/`Ledger`/`FactLedger`
+  (the first real use of `EntryType::Event`, previously defined but never written anywhere).
+  `demo/agents/identity-reviewer.md`'s "not yet wired" status note removed per the RFC's own
+  acceptance criterion; new Act 10 in `demo/DEMO.md`. Rehearsed for real: a scratch workspace with
+  a real `customers` table and a real `.ktr` job reading `dbo.cust_mstr`, `ekos identity scan`
+  found the candidate and wrote it unconfirmed, and a real `ekos_identity_review` JSON-RPC call
+  confirmed it end-to-end. 9 new tests in `cross_system.rs` (including the exact three-system
+  `cust_mstr`/`customers`/`gold.dim_customer` scenario), 3 in `identity.rs`, 5 in `mcp.rs`, 2
+  ledger event round-trip tests. `cargo test --workspace`/`clippy --workspace --all-targets`/`fmt
+  --check` all clean.
+- [x] **Phase 5 — MCP tools**: RFC 0028 written and accepted first, then implemented in
+  `crates/cli/src/commands/mcp.rs`. `ekos_transformation_explain(id, max_hops?)` walks a
+  Transformation IR chain upstream from `id` via `Runtime::trace_impact(id,
+  ImpactDirection::Dependents, [Custom("FeedsInto")], max_hops)` — reusing `ekos_impact`'s exact
+  mechanism, no new graph-walking code — and renders each `Source`/`Filter`/`Join`/`Aggregate`/
+  `Calculate`/`Sink`/`Unmapped` node into a human-readable summary with resolved evidence (source
+  path + fragment) per step, so every claim is traceable. `ekos_transformation_diff(old_id,
+  new_id, max_hops?)` walks both chains and reports added/removed sets per node-type bucket
+  (sources, sinks, filters, joins, aggregates, calculates) plus `Unmapped` counts — text-level set
+  diffing over each node's rendered value, not a typed expression AST diff, per RFC 0027's own
+  Open Question resolution (no consumer exists yet to justify building one). Real bug caught by
+  the tests before merge: `ImpactDirection::Dependents` (not `Dependencies`) is the correct
+  direction for walking upstream along `FeedsInto` edges — confirmed against `trace_impact`'s
+  actual loop, not assumed from the enum variant names. 6 new tests (explain with evidence,
+  unknown-object error, diff added/removed, diff-of-identical-chains-is-empty); `tools/list`'s
+  asserted tool order updated. `cargo test --workspace`/`clippy --workspace --all-targets`/`fmt
+  --check` all clean.
+- [x] **Phase 6 — Agents**: `demo/agents/legacy-logic-recoverer.md` (sonnet) explains a
+  Pentaho/SQL transformation chain via `ekos_transformation_explain`, citing evidence per step and
+  flagging `Unmapped` portions honestly rather than guessing. `demo/agents/identity-reviewer.md`
+  (sonnet) is written ahead of its dependency — batches unconfirmed cross-system identity
+  hypotheses via `ekos_identity_review`, which is Phase 4 (not yet implemented); the agent
+  definition carries an explicit Status note saying so. `impact-analyst`/`estate-architect` reused
+  as-is (no changes needed). New Act 9 in `demo/DEMO.md`: recover Pentaho logic → check impact →
+  draft new pipeline with a modified rule → diff against the original — rehearsed for real this
+  session (not just written): a scratch workspace with one real `.ktr` file and one real SQL
+  `CREATE VIEW` replacement, run through the actual `build → recover → resolve → compile → commit`
+  pipeline and queried via real `ekos mcp serve` JSON-RPC calls (not a mocked transcript).
+  `ekos_transformation_diff` correctly reported exactly one filter changed
+  (`status = 'active'` → `status = 'active' AND region = 'EU'`) and every other bucket (sources,
+  sinks, joins, aggregates, calculates, unmapped) unchanged. **Found and fixed a real bug live
+  during rehearsal**: `ekos resolve` collapsed all 3 nodes of one pipeline into one canonical
+  object at confidence 0.99 — the same `Custom("Section")` name-prefix over-merge shape from
+  devlog 27/28, now hitting `Custom("TransformNode")` for the identical reason. Fixed by adding
+  `Custom("TransformNode")` to `DefaultResolver`'s blanket kind-exclusion list
+  (`crates/identity/src/lib.rs`), alongside `Section` — each node is already deterministically
+  identified by `(source, node index)`, so no two distinct nodes can legitimately be the same
+  entity. New regression test
+  `transform_node_objects_are_never_merged_even_with_shared_source_prefix`. Re-verified against a
+  full clean rebuild after the fix: zero merge proposals, all 6 nodes across both pipelines stayed
+  distinct. `cargo test --workspace`/`clippy --workspace --all-targets`/`fmt --check` all clean.
+- [x] **Phase 7 — End-to-end benchmark**: `crates/cli/tests/transformation_benchmark.rs` — a real
+  Pentaho job (2 source tables, filter, join, calculated field, sink) and a real SQL `CREATE VIEW`
+  redraft with one changed rule, run through the full pipeline, queried exclusively through
+  `ekos_ekl`/`ekos_state`/`ekos_transformation_explain`/`ekos_transformation_diff` (no fixture
+  file text read after setup — a permanent regression test, not a one-off script). Results: 100%
+  coverage (zero `Unmapped` nodes on either side), every explanation step evidenced, the diff
+  correctly isolated exactly the one changed filter rule. Real gap found and recorded, not hidden:
+  `Join`/`Calculate` node text differs syntactically between the Pentaho and SQL producers for
+  identical underlying logic (join-key tuple order reversed; calc-expression syntax differs) — the
+  benchmark test deliberately does not assert those two buckets as unchanged, since asserting that
+  would currently be false. Decision per the plan's own instruction: Phase 2 needs a small, bounded
+  follow-up (canonical join-key ordering + calc-expression rendering) before `joins`/`calculates`
+  diffing is trustworthy across producers; Phase 4 needs no further work (this benchmark doesn't
+  exercise cross-system naming, already covered separately by Act 10's live rehearsal).
+- [x] **Bug fix (opportunistic, unrelated to the IR work): `ekos ask` now honors
+  `config.llm.provider`** — `crates/cli/src/commands/ask.rs` previously hardcoded
+  `AnthropicProvider` directly, so it failed with "No LLM provider configured" even when
+  `[llm] provider = "ollama"` was set and already working for `ekos recover` in the same
+  workspace (RFC 0021 added Ollama support to the recovery path only). Fixed by calling
+  `recover.rs`'s `build_llm_provider` (now `pub(crate)`) instead of duplicating provider-selection
+  logic. Regression test `ask_selects_ollama_provider_when_configured` mirrors
+  `recover.rs`'s existing selection tests. `cargo test --workspace`, `cargo clippy --workspace
+  --all-targets`, `cargo fmt --check` all clean.
+
+---
+
 ## Ongoing / Cross-cutting
 
 These items have no single phase — they must be maintained and grown throughout the entire project lifecycle.

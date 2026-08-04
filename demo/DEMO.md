@@ -23,6 +23,8 @@ data; every query hits the actual compiled ledger.
 | `impact-analyst` | agent (sonnet) | consequence — multi-hop blast-radius + evidence (RFC 0018) |
 | `memory-keeper` | agent (sonnet) | memory — the only agent that writes |
 | `estate-architect` | agent (inherit) | synthesis — designs from the estate's own prior art |
+| `legacy-logic-recoverer` | agent (sonnet) | recovery — explains a Pentaho/SQL transformation chain, evidence per step, `Unmapped` flagged honestly (RFC 0027/0028) |
+| `identity-reviewer` | agent (sonnet) | batches cross-system identity hypotheses (`ekos identity scan`) for confirm/reject via `ekos_identity_review` (RFC 0029) |
 
 ---
 
@@ -44,8 +46,10 @@ data; every query hits the actual compiled ledger.
    ```bash
    cp demo/agents/*.md ~/.claude/agents/
    ```
-   Run `/agents` inside Claude Code and confirm all four appear with the
-   tool scopes described above.
+   Run `/agents` inside Claude Code and confirm all six appear with the
+   tool scopes described above. Run `ekos identity scan` at least once
+   before presenting Act 10 (below) so `identity-reviewer` has real
+   candidates to review, not an empty queue.
 4. **Smoke every act headless first** — see `headless.sh` below. Known-good
    targets to check for non-empty results (substitute your own estate's
    equivalents if these don't apply):
@@ -268,6 +272,103 @@ blast radius. This is still pattern matching, not a parser — an aliased or
 obfuscated import can be missed (documented v1 limitation, RFC 0019); an
 empty result is worth double-checking against a raw grep before presenting
 it as "nothing depends on this."
+
+---
+
+## Act 9 — Legacy migration (legacy-logic-recoverer + impact-analyst + estate-architect)
+
+**What this proves:** the target scenario `ekos-transformation-semantics-plan.md` was written
+for — reproducing an existing Pentaho job's business logic in a new pipeline, with one rule
+changed, verified against the original — end to end, using nothing but MCP tools. No `.ktr`/SQL
+file is ever opened directly.
+
+**Say (recover):** *"Use the legacy-logic-recoverer agent: explain what `load_customers.ktr`
+does."*
+
+**Activates:** `legacy-logic-recoverer`.
+
+**Expected calls:** `ekos_search`/`ekos_ekl` to find the job's `Sink` object id →
+`ekos_transformation_explain` on it.
+
+**Say (impact):** *"Now ask impact-analyst: what depends on the `gold.dim_customer` table this
+job writes to?"*
+
+**Activates:** `impact-analyst` — reused as-is, no changes needed for this workflow.
+
+**Say (draft + verify):** *"Draft a new pipeline that does the same thing but only includes EU
+customers, then use estate-architect to diff it against the original and confirm nothing else
+changed."*
+
+**Activates:** `estate-architect`, calling `ekos_transformation_diff` between the old job's Sink
+and the new pipeline's Sink.
+
+**Wow line:** *"That's not a text diff of two SQL files — it's a structural diff of what the
+pipeline actually does: exactly one filter changed, nothing else moved."*
+
+**Verified reality:** ran for real this session (`ekos build → recover → resolve → compile →
+commit` against a scratch workspace with one real `.ktr` file and one real `CREATE VIEW`
+representing the drafted replacement, then real JSON-RPC calls into `ekos mcp serve` — not a
+mocked transcript):
+
+- `ekos_transformation_explain` on the Pentaho job's Sink returned all 3 real steps
+  (`Sink → Filter → Source`, root-first) with evidence citing `load_customers.ktr` for every
+  claim, including the exact `status = 'active'` filter condition text.
+- `ekos_transformation_diff` between the old Pentaho Sink and the new SQL view's Sink correctly
+  reported `filters.removed: ["status = 'active'"]`, `filters.added: ["status = 'active' AND
+  region = 'EU'"]`, and **every other bucket empty** (`sources`, `sinks`, `joins`, `aggregates`,
+  `calculates`, `unmapped` all unchanged) — exactly the "one rule changed, nothing else did"
+  verification this whole plan exists to produce.
+
+**A real bug was found and fixed live while rehearsing this act, not hypothetically**: the first
+run of `ekos resolve` collapsed all 3 nodes of the new SQL pipeline into one canonical object at
+confidence 0.99 — the identical `Custom("Section")` name-prefix over-merge bug documented in
+devlog 27/28, now hitting `Custom("TransformNode")` for the same reason (every node in one file
+shares a long name prefix, and `DefaultResolver`'s same-kind structural-score fallback gave it a
+free floor). Fixed by adding `Custom("TransformNode")` to the resolver's blanket-exclusion list
+(`crates/identity/src/lib.rs`) alongside `Section` — each node is already deterministically
+identified by `(source, node index)`, so no two distinct `TransformNode` objects can legitimately
+be the same real-world entity, exactly the same reasoning as `Section`. Re-verified against a
+fully clean rebuild after the fix: `resolve` correctly reports "No merge proposals (all objects
+appear to be unique)" and all 6 nodes across both pipelines stayed distinct.
+
+**identity-reviewer is not part of this act** — its own act (Act 10) exercises it directly.
+
+---
+
+## Act 10 — Cross-system identity review (identity-reviewer, RFC 0029)
+
+**What this proves:** the same real-world table observed under different names in different
+systems (Informix `cust_mstr`, Postgres `customers`, Databricks `gold.dim_customer`) can be found,
+scored, and reviewed — as an explicit hypothesis, never a silent auto-merge — closing the gap
+Act 9's Transformation IR left open (each `Source`/`Sink` node's `object_name` stays an unresolved
+raw string until a human or agent links it).
+
+**Prep:** run `ekos identity scan` in the terminal before this act (Act 0's checklist already
+covers this) — the agent reviews existing candidates, it doesn't generate the scan itself.
+
+**Say:** *"Use the identity-reviewer agent: show me any pending cross-system identity matches and
+recommend what to do with each one."*
+
+**Activates:** `identity-reviewer`.
+
+**Expected calls:** `ekos_ekl "FIND Relationship WHERE kind CONTAINS 'SameAs'"` → `ekos_state` per
+candidate to read its confidence/signal breakdown and the actual objects on both sides → for a
+high-confidence, evidence-rich match, `ekos_identity_review(relationship_id, "confirmed")`; for an
+ambiguous one, a recommendation surfaced to the human instead of an autonomous decision.
+
+**Wow line:** *"That's not a fuzzy string match presented as fact — it's a scored hypothesis, with
+the actual column names and naming-pattern evidence behind the score, and it stays 'unconfirmed'
+in the ledger until something — a human or an agent, explicitly — says yes."*
+
+**Verified reality:** ran for real this session (not just written): a scratch workspace with a
+real `CREATE TABLE customers (...)` and a real `.ktr` job reading `dbo.cust_mstr`, run through the
+actual pipeline, then `ekos identity scan` via the release binary — found exactly 1 candidate
+(`customers` ↔ `dbo.cust_mstr`) among 5 scanned objects and wrote it as an `unconfirmed`
+`Custom("SameAs")` relationship. Confirmed it for real via a raw `ekos_identity_review` JSON-RPC
+call into `ekos mcp serve` — returned `{"decision": "confirmed", "status": "recorded"}`, and the
+relationship's `status` property was verified persisted (`crates/cli/src/commands/mcp.rs`'s own
+test suite proves this directly; the live run confirmed the tool call itself succeeds end-to-end
+against a real committed ledger).
 
 ---
 

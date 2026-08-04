@@ -22,7 +22,7 @@
 //! never produce an ambiguous history.
 
 use chrono::{DateTime, Utc};
-use ekos_kir::{KirEvidence, KirId, KirObject, KirRelationship};
+use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -172,6 +172,14 @@ impl FactLedger {
         Ok(())
     }
 
+    /// Write a KirEvent. Immutable log entry (RFC 0029: the first real write
+    /// path for events — `EntityKind::Event`/`kind_of_payload`'s `"subject"`
+    /// dispatch already existed, only this wrapper was missing).
+    pub fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
+        self.append_payload(ev.id.0, serde_json::to_value(ev)?)?;
+        Ok(())
+    }
+
     /// Write a KirRelationship. Returns `true` when a new version was recorded.
     pub fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
         self.append_payload(rel.id.0, serde_json::to_value(rel)?)
@@ -273,6 +281,11 @@ impl FactLedger {
     /// Retrieve a KirEvidence by id.
     pub fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, LedgerError> {
         self.typed_current(id.0, EntityKind::Evidence)
+    }
+
+    /// Retrieve a KirEvent by id.
+    pub fn get_event(&self, id: &KirId) -> Result<Option<KirEvent>, LedgerError> {
+        self.typed_current(id.0, EntityKind::Event)
     }
 
     /// Retrieve a KirRelationship by id.
@@ -810,7 +823,7 @@ mod tests {
     use super::*;
     use crate::Ledger;
     use chrono::Duration;
-    use ekos_kir::{ObjectKind, RelationshipKind, SourceLocation};
+    use ekos_kir::{EventKind, ObjectKind, RelationshipKind, SourceLocation};
     use std::time::Duration as StdDuration;
     use tempfile::tempdir;
 
@@ -882,6 +895,32 @@ mod tests {
             "typed reads respect entity kind"
         );
         assert_eq!(ledger.object_count().unwrap(), 0);
+    }
+
+    /// RFC 0029: first real write path for events on the fact-engine
+    /// backend — `kind_of_payload`'s `"subject"` dispatch already existed,
+    /// only the public `append_event`/`get_event` wrappers were missing.
+    #[test]
+    fn event_round_trips_and_is_not_an_object() {
+        let (ledger, _dir) = temp_ledger();
+        let subject = KirId::new();
+        let ev = KirEvent {
+            id: KirId::new(),
+            kind: EventKind::Merged,
+            subject,
+            payload: serde_json::json!({"decision": "confirmed"}),
+            evidence: vec![],
+            occurred_at: Utc::now(),
+        };
+        let id = ev.id;
+        ledger.append_event(&ev).unwrap();
+        let found = ledger.get_event(&id).unwrap().unwrap();
+        assert_eq!(found.subject, subject);
+        assert_eq!(found.kind, EventKind::Merged);
+        assert!(
+            ledger.get_object(&id).unwrap().is_none(),
+            "typed reads respect entity kind"
+        );
     }
 
     #[test]
