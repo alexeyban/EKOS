@@ -335,6 +335,12 @@ https://pump.fun/coin/CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
 X (Twitter): [@ekosproject](https://x.com/ekosproject) — release announcements posted via
 `ekos marketing publish` (RFC 0030).
 
+## Founder Vesting Wallet
+
+u2zUCiUHRoGp9jKRsyjMGQ8x9Z3UdtERm174aiXURZo
+
+Managed through Streamflow.
+
 ## Versioning Roadmap
 
 | Version | Milestone |
