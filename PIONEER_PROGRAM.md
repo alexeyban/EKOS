@@ -10,8 +10,9 @@ tokens — paid per task, not all-or-nothing.
    first-served — once 10 are confirmed, the program is closed to new signups.
 2. **Do any of the 5 tasks below, in any order.** They're independent — you don't need
    to finish all 5 to get paid for the ones you do.
-3. **Submit proof.** Reply to your confirmation email (or the pinned GitHub Discussion
-   thread) with a link/screenshot for each completed task.
+3. **Submit proof.** Reply to your confirmation email or the [pinned GitHub Discussion
+   thread](https://github.com/alexeyban/EKOS/discussions/4) with a link/screenshot for
+   each completed task.
 4. **Get verified and paid.** We check each submission (manually, with AI-assisted
    review) and pay out that task's tokens to your wallet within a few days — no need to
    wait for the others. Payment processing is done manually, and is completed within
