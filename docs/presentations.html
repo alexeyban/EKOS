@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS — Presentations</title>
+<meta name="description" content="EKOS — Enterprise Knowledge Operating System. Presentation decks.">
+<style>
+:root{
+  --ground:#f4f1e8; --ink:#1d2129; --ink-soft:#4b5160; --rule:#d8d2c0;
+  --brass:#a8672a; --brass-deep:#8a531f;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --ground:#14161c; --ink:#ece7d8; --ink-soft:#a9b0bd; --rule:#333949; --brass:#d69a52; --brass-deep:#e8b06e; }
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; min-height:100vh; background:var(--ground); color:var(--ink);
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  display:flex; align-items:center; justify-content:center; padding:6vh 8vw;
+}
+.wrap{ max-width:40rem; width:100%; }
+.eyebrow{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem;
+  letter-spacing:0.14em; text-transform:uppercase; color:var(--brass-deep);
+  margin:0 0 1rem 0; display:flex; align-items:center; gap:0.6rem;
+}
+.eyebrow::before{ content:""; width:1.6rem; height:1px; background:var(--brass-deep); display:inline-block; }
+h1{ font-size:clamp(1.8rem,4vw,2.6rem); margin:0 0 2.4rem 0; line-height:1.15; }
+ul{ list-style:none; margin:0; padding:0; }
+li{ border-top:1px solid var(--rule); padding:1.4rem 0; }
+li:first-child{ border-top:none; }
+a.deck{
+  display:block; font-size:1.15rem; font-weight:600; color:var(--ink); text-decoration:none;
+}
+a.deck:hover{ color:var(--brass-deep); }
+p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-height:1.55; max-width:36ch; }
+.rfc{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem;
+  color:var(--ink-soft); margin-top:0.6rem;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow"><a href="index.html" style="color:inherit; text-decoration:none;">← EKOS</a> — Enterprise Knowledge Operating System</div>
+  <h1>Presentations</h1>
+  <ul>
+    <li>
+      <a class="deck" href="presentations/ai-native-knowledge-compiler-pitch.html">The AI-Native Enterprise Knowledge Compiler</a>
+      <p class="desc">The startup pitch: why enterprise AI needs a compiler, not another RAG
+      index — proven cold against real repos, and audited live by Claude Code using EKOS's own
+      MCP server on itself.</p>
+      <div class="rfc">Start here</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/legacy-transformation-recovery.html">Reproduce Legacy ETL Logic, Verified</a>
+      <p class="desc">Pentaho jobs, SQL, and stored procedures compiled into one evidence-backed
+      Transformation IR — explain what a legacy pipeline does, and prove a migration didn't
+      change its meaning.</p>
+      <div class="rfc">RFC 0027 · RFC 0028 · RFC 0029</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/github-repo-to-mcp-server.html">Compile GitHub Repository → MCP Server</a>
+      <p class="desc">Issues, PRs, files, and their real relationships compiled into an
+      append-only, evidence-backed ledger any MCP-speaking agent can query.</p>
+      <div class="rfc">RFC 0013 · RFC 0020</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/pentaho-sql-recovery-for-data-engineers.html">Pentaho + SQL Recovery, Tested Cold</a>
+      <p class="desc">EKOS's Pentaho and SQL recovery analyzers run against two real GitHub ETL
+      projects — terminal output, MCP query/answer transcripts, and the honest gaps a data
+      engineer would want to see before trusting it.</p>
+      <div class="rfc">RFC 0025 · RFC 0027</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/recovery-gaps-closed.html">Two Real Recovery Gaps, Filed and Closed</a>
+      <p class="desc">The honest gaps the previous deck surfaced became GitHub issues #2 and #3 —
+      this deck reruns the exact repro shapes against the fixed pipeline, live, with the
+      before/after coverage numbers.</p>
+      <div class="rfc">RFC 0031 · issues #2, #3</div>
+    </li>
+  </ul>
+</div>
+</body>
+</html>
