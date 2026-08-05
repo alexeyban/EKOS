@@ -178,6 +178,36 @@ p.lede{
 .chip.hot{ border-color:var(--brass); color:var(--brass-deep); font-weight:600; }
 .sep{ color:var(--rule); }
 
+/* ---------- why / checklist ---------- */
+.why-grid{
+  display:grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap:3.5rem;
+  margin-top:2.8rem;
+  align-items:center;
+}
+@media (max-width:900px){ .why-grid{ grid-template-columns:1fr; } }
+ul.checklist{ list-style:none; margin:0; padding:0; }
+ul.checklist li{
+  display:flex; align-items:baseline; gap:0.85rem;
+  padding:0.9rem 0; border-top:1px solid var(--rule);
+  font-size:1.1rem;
+}
+ul.checklist li:first-child{ border-top:none; }
+ul.checklist .check{
+  color:var(--brass-deep); font-weight:700;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+}
+.why-punch{
+  border-left:2px solid var(--brass);
+  padding:0.2rem 0 0.2rem 1.4rem;
+}
+.why-punch p{
+  font-size:1.35rem; line-height:1.5; margin:0; color:var(--ink);
+  font-style:italic;
+}
+.why-punch p strong{ font-style:normal; color:var(--brass-deep); }
+
 /* ---------- feature strip ---------- */
 .feature-grid{
   display:grid;
@@ -257,6 +287,22 @@ footer a:hover{ color:var(--brass-deep); }
     <span class="chip hot">Transformation IR</span><span class="sep mono">→</span>
     <span class="chip">Evidence-backed ledger</span><span class="sep mono">→</span>
     <span class="chip hot">Any MCP-speaking agent</span>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Why EKOS?</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem); max-width:26ch;">Companies have all of this. None of it is usable by AI yet.</h2>
+  <div class="why-grid">
+    <ul class="checklist">
+      <li><span class="check">✓</span> Thousands of SQL queries</li>
+      <li><span class="check">✓</span> Hundreds of ETL jobs</li>
+      <li><span class="check">✓</span> Outdated documentation</li>
+      <li><span class="check">✓</span> Tribal knowledge</li>
+    </ul>
+    <div class="why-punch">
+      <p>EKOS turns them into <strong>knowledge AI can understand.</strong></p>
+    </div>
   </div>
 </section>
 
