@@ -5,102 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EKOS — AI that understands enterprise systems</title>
 <meta name="description" content="EKOS recovers business logic from legacy ETL, SQL, and enterprise code, and compiles it into an evidence-backed knowledge ledger any AI agent can query.">
+<link rel="stylesheet" href="assets/theme.css">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 </head>
 <body>
 <style>
-:root{
-  --ground:#f4f1e8;
-  --ground-raised:#ffffffcc;
-  --ink:#1d2129;
-  --ink-soft:#4b5160;
-  --rule:#d8d2c0;
-  --brass:#a8672a;
-  --brass-deep:#8a531f;
-  --slate:#3e5f5f;
-  --slate-soft:#e4ece9;
-  --code-bg:#1d2129;
-  --code-fg:#e9e4d6;
-  --code-dim:#8f96a3;
-  --code-key:#c98a3e;
-  --code-str:#7fa591;
-  --shadow: 0 1px 0 rgba(29,33,41,0.06);
-}
-:root[data-theme="dark"]{
-  --ground:#14161c;
-  --ground-raised:#1c1f28cc;
-  --ink:#ece7d8;
-  --ink-soft:#a9b0bd;
-  --rule:#333949;
-  --brass:#d69a52;
-  --brass-deep:#e8b06e;
-  --slate:#8fb8b0;
-  --slate-soft:#212a2a;
-  --code-bg:#0e1015;
-  --code-fg:#e9e4d6;
-  --code-dim:#727a89;
-  --code-key:#e0a866;
-  --code-str:#8fc4ac;
-  --shadow: 0 1px 0 rgba(0,0,0,0.4);
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --ground:#14161c;
-    --ground-raised:#1c1f28cc;
-    --ink:#ece7d8;
-    --ink-soft:#a9b0bd;
-    --rule:#333949;
-    --brass:#d69a52;
-    --brass-deep:#e8b06e;
-    --slate:#8fb8b0;
-    --slate-soft:#212a2a;
-    --code-bg:#0e1015;
-    --code-fg:#e9e4d6;
-    --code-dim:#727a89;
-    --code-key:#e0a866;
-    --code-str:#8fc4ac;
-    --shadow: 0 1px 0 rgba(0,0,0,0.4);
-  }
-}
-
-*{box-sizing:border-box;}
-html,body{margin:0;padding:0;}
-body{
-  background:var(--ground);
-  color:var(--ink);
-  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
-  overflow-x:hidden;
-}
-::selection{ background: var(--brass); color:#fff; }
-.mono{ font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace; }
-
 section{ padding: 6rem 8vw; border-bottom:1px solid var(--rule); }
 section:last-child{ border-bottom:none; }
-
-.eyebrow{
-  font-family: ui-monospace,"SF Mono",Consolas,monospace;
-  font-size:0.72rem;
-  letter-spacing:0.14em;
-  text-transform:uppercase;
-  color:var(--brass-deep);
-  margin:0 0 1.1rem 0;
-  display:flex;
-  align-items:center;
-  gap:0.6rem;
-}
-.eyebrow::before{
-  content:"";
-  width:1.6rem;height:1px;background:var(--brass-deep);display:inline-block;
-}
-
-h1,h2,h3{ text-wrap:balance; font-weight:600; margin:0; line-height:1.08; }
-
-p.lede{
-  max-width:38rem;
-  font-size:1.15rem;
-  line-height:1.65;
-  color:var(--ink-soft);
-  margin:1.4rem 0 0 0;
-}
 
 /* ---------- Hero ---------- */
 .hero{
@@ -109,7 +20,8 @@ p.lede{
   flex-direction:column;
   justify-content:center;
   background:
-    radial-gradient(ellipse 60% 50% at 85% 8%, color-mix(in srgb, var(--brass) 12%, transparent), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 85% 8%, var(--glow-a), transparent 70%),
+    radial-gradient(ellipse 45% 35% at 5% 100%, var(--glow-b), transparent 70%),
     var(--ground);
 }
 .hero-cols{
@@ -132,15 +44,18 @@ p.lede{
   text-align:center;
   border:1px solid var(--rule);
   background:var(--ground-raised);
-  border-radius:8px;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius:10px;
   padding:1rem 1.4rem;
   box-shadow:var(--shadow);
   animation: stage-pulse 15s ease-in-out infinite;
 }
 .pipeline-v .stage.engine{
-  border-color:var(--brass);
-  background:var(--brass);
-  color:#fff9f0;
+  border-color:transparent;
+  background:var(--accent-gradient);
+  color:#fff;
+  box-shadow: 0 8px 30px -8px var(--glow-a);
   animation:none;
 }
 .pipeline-v .stage .l{
@@ -149,7 +64,7 @@ p.lede{
   font-size:0.65rem; letter-spacing:0.09em; text-transform:uppercase;
   color:var(--ink-soft); margin-bottom:0.35rem;
 }
-.pipeline-v .stage.engine .l{ color:#fff9f0cc; }
+.pipeline-v .stage.engine .l{ color:#ffffffcc; }
 .pipeline-v .stage .name{ font-weight:700; font-size:1.05rem; }
 .pipeline-v .arrow-v{
   font-size:1.5rem; line-height:1; color:var(--rule); padding:0.25rem 0;
@@ -157,7 +72,7 @@ p.lede{
 }
 @keyframes stage-pulse{
   0%, 5%{ border-color:var(--rule); box-shadow:var(--shadow); transform:scale(1); }
-  9%, 13%{ border-color:var(--brass); box-shadow:0 0 0 4px color-mix(in srgb, var(--brass) 18%, transparent); transform:scale(1.035); }
+  9%, 13%{ border-color:var(--accent-a); box-shadow:0 0 0 4px var(--glow-a); transform:scale(1.035); }
   17%, 100%{ border-color:var(--rule); box-shadow:var(--shadow); transform:scale(1); }
 }
 @media (prefers-reduced-motion: reduce){
@@ -166,7 +81,9 @@ p.lede{
 .wordmark{
   font-size:clamp(3.2rem, 9vw, 6.4rem);
   letter-spacing:0.01em;
-  font-weight:700;
+  font-weight:800;
+  background:var(--accent-gradient);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
 }
 .hero h1{
   font-size: clamp(2rem, 4.6vw, 3.2rem);
@@ -175,62 +92,13 @@ p.lede{
   color:var(--ink-soft);
   font-weight:500;
 }
-.hero h1 strong{ color:var(--ink); font-weight:700; }
+.hero h1 strong{ color:var(--ink); font-weight:800; }
 
 .cta-row{
   margin-top:3rem;
   display:flex;
   flex-wrap:wrap;
   gap:1rem;
-}
-.btn{
-  display:inline-flex;
-  align-items:center;
-  gap:0.55rem;
-  font-family: ui-monospace,"SF Mono",Consolas,monospace;
-  font-size:0.92rem;
-  padding:0.9rem 1.5rem;
-  border-radius:5px;
-  text-decoration:none;
-  border:1px solid var(--rule);
-  color:var(--ink);
-  background:var(--ground-raised);
-  box-shadow:var(--shadow);
-  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.btn:hover{ transform:translateY(-1px); border-color:var(--brass); }
-.btn.primary{
-  background:var(--brass);
-  border-color:var(--brass);
-  color:#fff9f0;
-  font-weight:600;
-}
-.btn.primary:hover{ background:var(--brass-deep); border-color:var(--brass-deep); }
-
-.hero-diagram{
-  margin-top:3.6rem;
-  display:flex;
-  align-items:center;
-  flex-wrap:wrap;
-  gap:0.4rem;
-  font-family: ui-monospace,"SF Mono",Consolas,monospace;
-  font-size:0.72rem;
-  color:var(--ink-soft);
-}
-.chip{
-  border:1px solid var(--rule);
-  background:var(--ground-raised);
-  padding:0.42rem 0.75rem;
-  border-radius:3px;
-  white-space:nowrap;
-  box-shadow:var(--shadow);
-}
-.chip.hot{ border-color:var(--brass); color:var(--brass-deep); font-weight:600; }
-.sep{ color:var(--rule); }
-@media (max-width:600px){
-  .hero-diagram{ flex-direction:column; align-items:flex-start; }
-  .hero-diagram .sep{ display:none; }
-  .hero-diagram .chip{ white-space:normal; }
 }
 
 /* ---------- why / checklist ---------- */
@@ -250,18 +118,21 @@ ul.checklist li{
 }
 ul.checklist li:first-child{ border-top:none; }
 ul.checklist .check{
-  color:var(--brass-deep); font-weight:700;
+  color:var(--accent-b); font-weight:700;
   font-family: ui-monospace,"SF Mono",Consolas,monospace;
 }
 .why-punch{
-  border-left:2px solid var(--brass);
+  border-left:2px solid var(--accent-a);
   padding:0.2rem 0 0.2rem 1.4rem;
 }
 .why-punch p{
   font-size:1.35rem; line-height:1.5; margin:0; color:var(--ink);
   font-style:italic;
 }
-.why-punch p strong{ font-style:normal; color:var(--brass-deep); }
+.why-punch p strong{
+  font-style:normal;
+  background:var(--accent-gradient); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
 
 /* ---------- feature strip ---------- */
 .feature-grid{
@@ -271,40 +142,13 @@ ul.checklist .check{
   margin-top:3rem;
 }
 @media (max-width:860px){ .feature-grid{ grid-template-columns:1fr; } }
-.feature{ border-left:2px solid var(--slate); padding:0.1rem 0 0.1rem 1.3rem; }
+.feature{ border-left:2px solid var(--accent-b); padding:0.1rem 0 0.1rem 1.3rem; }
 .feature .num{
   font-family: ui-monospace,"SF Mono",Consolas,monospace;
-  font-size:0.72rem; letter-spacing:0.1em; color:var(--brass-deep); text-transform:uppercase;
+  font-size:0.72rem; letter-spacing:0.1em; color:var(--accent-a); text-transform:uppercase;
 }
 .feature h3{ font-size:1.25rem; margin-top:0.5rem; }
 .feature p{ margin:0.6rem 0 0 0; color:var(--ink-soft); font-size:0.98rem; line-height:1.6; max-width:30ch; }
-
-/* ---------- proof strip ---------- */
-.stat-grid{ display:flex; gap:1.2rem; margin-top:2.6rem; flex-wrap:wrap; }
-.stat{
-  border:1px solid var(--rule);
-  background:var(--ground-raised);
-  box-shadow:var(--shadow);
-  padding:1.1rem 1.5rem;
-  min-width:9.5rem;
-}
-.stat .num{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:1.9rem; font-weight:600; color:var(--brass-deep); }
-.stat .label{ font-size:0.78rem; color:var(--ink-soft); margin-top:0.3rem; }
-
-.codeblock{
-  background:var(--code-bg);
-  color:var(--code-fg);
-  border-radius:6px;
-  padding:1.3rem 1.5rem;
-  font-size:0.82rem;
-  line-height:1.65;
-  overflow-x:auto;
-  box-shadow: 0 8px 24px -12px rgba(0,0,0,0.35);
-  margin-top:2.6rem;
-  max-width:44rem;
-}
-.codeblock .c{ color:var(--code-dim); font-style:italic; }
-.codeblock .k{ color:var(--code-key); }
 
 /* ---------- live demos (big cards) ---------- */
 .demo-grid{
@@ -317,16 +161,18 @@ ul.checklist .check{
 .demo-card{
   border:1px solid var(--rule);
   background:var(--ground-raised);
-  border-radius:8px;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius:12px;
   padding:2rem 1.8rem;
   box-shadow:var(--shadow);
   display:flex; flex-direction:column;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.demo-card:hover{ transform:translateY(-3px); border-color:var(--brass); }
+.demo-card:hover{ transform:translateY(-3px); border-color:var(--accent-a); box-shadow:var(--glow-shadow); }
 .demo-card .tag{
   font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.68rem;
-  letter-spacing:0.08em; text-transform:uppercase; color:var(--brass-deep);
+  letter-spacing:0.08em; text-transform:uppercase; color:var(--accent-a);
 }
 .demo-card h3{ font-size:1.3rem; margin-top:0.7rem; line-height:1.25; }
 .demo-card p{ color:var(--ink-soft); font-size:0.92rem; line-height:1.55; margin:0.8rem 0 0 0; flex-grow:1; }
@@ -345,25 +191,29 @@ ul.checklist .check{
   display:block;
   border:1px solid var(--rule);
   background:var(--ground-raised);
-  border-radius:6px;
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius:8px;
   padding:1.3rem 1.4rem;
   box-shadow:var(--shadow);
   text-decoration:none;
   color:var(--ink);
-  font-weight:600;
+  font-weight:700;
   font-size:0.98rem;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.community-link:hover{ border-color:var(--brass); color:var(--brass-deep); }
+.community-link:hover{ border-color:var(--accent-a); color:var(--accent-a); box-shadow:var(--glow-shadow); }
 
 /* ---------- token (deliberately minimal) ---------- */
 .token-box{
   border:1px solid var(--rule);
-  border-radius:8px;
+  border-radius:10px;
   padding:1.8rem 2rem;
   max-width:34rem;
   margin-top:2rem;
   background:var(--ground-raised);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 .token-box h3{ font-size:1.1rem; }
 .token-box ul{ list-style:none; margin:1rem 0 0 0; padding:0; color:var(--ink-soft); font-size:0.92rem; }
@@ -374,8 +224,8 @@ ul.checklist .check{
 .deck-list{ list-style:none; margin:2.6rem 0 0 0; padding:0; max-width:46rem; }
 .deck-list li{ border-top:1px solid var(--rule); padding:1.5rem 0; }
 .deck-list li:first-child{ border-top:none; }
-a.deck{ display:block; font-size:1.1rem; font-weight:600; color:var(--ink); text-decoration:none; }
-a.deck:hover{ color:var(--brass-deep); }
+a.deck{ display:block; font-size:1.1rem; font-weight:700; color:var(--ink); text-decoration:none; }
+a.deck:hover{ color:var(--accent-a); }
 p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.92rem; line-height:1.55; max-width:40ch; }
 .rfc-tag{
   font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.7rem;
@@ -389,7 +239,7 @@ footer{
   font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.78rem; color:var(--ink-soft);
 }
 footer a{ color:var(--ink-soft); text-decoration:none; }
-footer a:hover{ color:var(--brass-deep); }
+footer a:hover{ color:var(--accent-a); }
 </style>
 
 <section class="hero">
@@ -483,7 +333,7 @@ footer a:hover{ color:var(--brass-deep); }
       <p>Every answer cites the exact fragment it came from. Served read-only over MCP to any AI agent — Claude, or otherwise.</p>
     </div>
   </div>
-  <div class="codeblock">
+  <div class="codeblock" style="margin-top:2.6rem; max-width:44rem;">
     <span class="c"># compile once</span><br>
     $ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit<br><br>
     <span class="c"># serve it to any MCP client over stdio</span><br>

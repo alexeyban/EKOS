@@ -5,45 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EKOS — Presentations</title>
 <meta name="description" content="EKOS — Enterprise Knowledge Operating System. Presentation decks.">
+<link rel="stylesheet" href="assets/theme.css">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <style>
-:root{
-  --ground:#f4f1e8; --ink:#1d2129; --ink-soft:#4b5160; --rule:#d8d2c0;
-  --brass:#a8672a; --brass-deep:#8a531f;
-}
-@media (prefers-color-scheme: dark){
-  :root{ --ground:#14161c; --ink:#ece7d8; --ink-soft:#a9b0bd; --rule:#333949; --brass:#d69a52; --brass-deep:#e8b06e; }
-}
-*{box-sizing:border-box;}
 body{
-  margin:0; min-height:100vh; background:var(--ground); color:var(--ink);
-  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  min-height:100vh;
   display:flex; align-items:center; justify-content:center; padding:6vh 8vw;
+  background:
+    radial-gradient(ellipse 55% 45% at 90% 0%, var(--glow-a), transparent 70%),
+    radial-gradient(ellipse 45% 35% at 5% 100%, var(--glow-b), transparent 70%),
+    var(--ground);
 }
 .wrap{ max-width:40rem; width:100%; }
-.eyebrow{
-  font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem;
-  letter-spacing:0.14em; text-transform:uppercase; color:var(--brass-deep);
-  margin:0 0 1rem 0; display:flex; align-items:center; gap:0.6rem;
-}
-.eyebrow::before{ content:""; width:1.6rem; height:1px; background:var(--brass-deep); display:inline-block; }
 h1{ font-size:clamp(1.8rem,4vw,2.6rem); margin:0 0 2.4rem 0; line-height:1.15; }
 ul{ list-style:none; margin:0; padding:0; }
 li{ border-top:1px solid var(--rule); padding:1.4rem 0; }
 li:first-child{ border-top:none; }
-a.deck{
-  display:block; font-size:1.15rem; font-weight:600; color:var(--ink); text-decoration:none;
-}
-a.deck:hover{ color:var(--brass-deep); }
+a.deck{ display:block; font-size:1.15rem; font-weight:700; color:var(--ink); text-decoration:none; }
+a.deck:hover{ color:var(--accent-a); }
 p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-height:1.55; max-width:36ch; }
-.rfc{
-  font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem;
-  color:var(--ink-soft); margin-top:0.6rem;
-}
+.rfc{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem; color:var(--ink-soft); margin-top:0.6rem; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="eyebrow"><a href="index.html" style="color:inherit; text-decoration:none;">← EKOS</a> — Enterprise Knowledge Operating System</div>
+  <div class="eyebrow"><a href="index.html" style="background:inherit; -webkit-text-fill-color:inherit; text-decoration:none;">← EKOS</a> — Enterprise Knowledge Operating System</div>
   <h1>Presentations</h1>
   <ul>
     <li>
