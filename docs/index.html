@@ -227,6 +227,11 @@ p.lede{
 }
 .chip.hot{ border-color:var(--brass); color:var(--brass-deep); font-weight:600; }
 .sep{ color:var(--rule); }
+@media (max-width:600px){
+  .hero-diagram{ flex-direction:column; align-items:flex-start; }
+  .hero-diagram .sep{ display:none; }
+  .hero-diagram .chip{ white-space:normal; }
+}
 
 /* ---------- why / checklist ---------- */
 .why-grid{
