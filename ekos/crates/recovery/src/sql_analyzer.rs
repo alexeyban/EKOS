@@ -11,8 +11,9 @@ use ekos_kir::{
     KirEvidence, KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind,
     SourceLocation,
 };
+use ekos_sql_dialect_sdk::SqlDialectParser;
 use sqlparser::ast::{ColumnOption, Statement, TableConstraint};
-use sqlparser::dialect::GenericDialect;
+use sqlparser::dialect::Dialect;
 use sqlparser::parser::Parser;
 use tracing::warn;
 
@@ -43,12 +44,16 @@ const PROMPT_VERSION: &str = "sql-analyzer-v1";
 pub struct SqlAnalyzerPass {
     /// Human-readable name (usually the source file path).
     pass_id: String,
-    /// Raw SQL DDL content.
+    /// SQL DDL content, already dialect-preprocessed (e.g. MySQL `DELIMITER` stripping) —
+    /// see `SqlDialectParser::preprocess`.
     sql: String,
     /// Source file path for evidence records.
     source_path: String,
     /// LLM provider (may be a `CachedLlmProvider` wrapping `AnthropicProvider`).
     llm: Arc<dyn LlmProvider>,
+    /// Resolved at construction time from a `SqlDialectParser` (RFC 0031) — which
+    /// `sqlparser` dialect grammar to parse `sql` with.
+    dialect: Box<dyn Dialect + Send + Sync>,
 }
 
 impl SqlAnalyzerPass {
@@ -56,14 +61,18 @@ impl SqlAnalyzerPass {
         source_path: impl Into<String>,
         sql: impl Into<String>,
         llm: Arc<dyn LlmProvider>,
+        dialect_parser: &dyn SqlDialectParser,
     ) -> Self {
         let source_path = source_path.into();
         let pass_id = format!("sql-analyzer:{source_path}");
+        let raw_sql: String = sql.into();
+        let preprocessed = dialect_parser.preprocess(&raw_sql);
         Self {
             pass_id,
-            sql: sql.into(),
+            sql: preprocessed,
             source_path,
             llm,
+            dialect: dialect_parser.sqlparser_dialect(),
         }
     }
 }
@@ -83,7 +92,7 @@ impl CompilerPass for SqlAnalyzerPass {
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
         // ── Structural parse ────────────────────────────────────────────────
-        let mut graph = parse_ddl_structural(&self.sql, &self.source_path);
+        let mut graph = parse_ddl_structural(&self.sql, &self.source_path, &*self.dialect);
 
         if graph.objects.is_empty() {
             ctx.diagnostics
@@ -147,11 +156,14 @@ impl CompilerPass for SqlAnalyzerPass {
 
 /// Parse SQL DDL and return a `KirGraph` with tables as `KirObject`s and FK
 /// constraints as `KirRelationship`s. No LLM; pure structural extraction.
-pub fn parse_ddl_structural(sql: &str, source_path: &str) -> KirGraph {
+///
+/// `dialect` (RFC 0031) is resolved by the caller — `recover.rs` via the dialect registry, or
+/// `&GenericDialect {}` directly for ANSI-baseline callers/tests that don't need the full
+/// `SqlDialectParser` machinery.
+pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect) -> KirGraph {
     let mut graph = KirGraph::new();
 
-    let dialect = GenericDialect {};
-    let stmts = match Parser::parse_sql(&dialect, sql) {
+    let stmts = match Parser::parse_sql(dialect, sql) {
         Ok(s) => s,
         Err(e) => {
             warn!("sqlparser failed on {source_path}: {e}; falling back to empty graph");
@@ -389,7 +401,9 @@ fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<
 mod tests {
     use super::*;
     use crate::llm::MockLlmProvider;
+    use crate::sql_dialect_registry::GenericDialectParser;
     use ekos_compiler_core::pass::PassContext;
+    use sqlparser::dialect::GenericDialect;
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -399,6 +413,12 @@ mod tests {
     /// FK graph (13 tables) than `ecommerce.sql`, used to test structural recovery at a more
     /// realistic scale.
     const NORTHWIND_SQL: &str = include_str!("../../../../tests/fixtures/northwind.sql");
+    /// Real MySQL DDL from a public GitHub ETL repo
+    /// (joseph-higaki/etl_adventureworks_sales_purchases_datamart), copied verbatim during
+    /// RFC 0031's testing. Uses `#`-style line comments, which `GenericDialect` rejects —
+    /// the exact regression this fixture guards against (GitHub issue #3 / devlog_31).
+    const MYSQL_HASH_COMMENTS_SQL: &str =
+        include_str!("../../../../tests/fixtures/mysql_hash_comments.sql");
 
     fn make_ctx(dir: &TempDir) -> PassContext {
         use std::sync::Arc;
@@ -411,7 +431,7 @@ mod tests {
 
     #[test]
     fn structural_parse_extracts_six_tables() {
-        let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql");
+        let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
         assert_eq!(
             graph.objects.len(),
             6,
@@ -421,7 +441,7 @@ mod tests {
 
     #[test]
     fn structural_parse_extracts_fk_relationships() {
-        let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql");
+        let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
         // orders→customers, order_items→orders, order_items→products, payments→orders,
         // products→categories, categories→categories (self-ref)
         assert!(
@@ -433,7 +453,7 @@ mod tests {
 
     #[test]
     fn northwind_structural_parse_extracts_thirteen_tables() {
-        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql");
+        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql", &GenericDialect {});
         assert_eq!(
             graph.objects.len(),
             13,
@@ -445,7 +465,7 @@ mod tests {
 
     #[test]
     fn northwind_structural_parse_extracts_deep_fk_graph() {
-        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql");
+        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql", &GenericDialect {});
         // A much deeper FK graph than ecommerce.sql's — real Northwind has 14 FK edges
         // across its 13 tables (including Employees' self-referential ReportsTo).
         assert!(
@@ -457,7 +477,7 @@ mod tests {
 
     #[test]
     fn northwind_structural_parse_finds_order_details_composite_pk_table() {
-        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql");
+        let graph = parse_ddl_structural(NORTHWIND_SQL, "northwind.sql", &GenericDialect {});
         // sqlparser's ObjectName::to_string() preserves the original quote style, so a
         // double-quoted identifier's name retains literal `"` characters.
         let order_details = graph
@@ -472,7 +492,7 @@ mod tests {
 
     #[test]
     fn structural_parse_table_has_columns() {
-        let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql");
+        let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
         let customers = graph
             .objects
             .iter()
@@ -481,6 +501,53 @@ mod tests {
         let cols = &customers.unwrap().properties["columns"];
         assert!(cols.is_array());
         assert!(!cols.as_array().unwrap().is_empty());
+    }
+
+    /// RFC 0031 regression: this exact file, parsed with `GenericDialect` (pre-RFC-0031
+    /// behavior for every `.sql` file, regardless of content), fails outright — 0 tables
+    /// recovered, matching devlog_31's documented 0%-mapped finding.
+    #[test]
+    fn generic_dialect_fails_on_real_mysql_hash_comments_fixture() {
+        let graph = parse_ddl_structural(
+            MYSQL_HASH_COMMENTS_SQL,
+            "mysql_hash_comments.sql",
+            &GenericDialect {},
+        );
+        assert!(
+            graph.objects.is_empty(),
+            "GenericDialect is expected to fail on '#' comments, recovering 0 tables"
+        );
+    }
+
+    /// The fix: selecting `MySqlDialect` (via the registry, exercised here directly) parses
+    /// the same real file successfully and recovers its tables.
+    #[test]
+    fn mysql_dialect_parses_real_mysql_hash_comments_fixture() {
+        use ekos_plugin_sql_dialect_mysql::MySqlDialectParser;
+
+        let dialect = MySqlDialectParser.sqlparser_dialect();
+        let graph = parse_ddl_structural(
+            MYSQL_HASH_COMMENTS_SQL,
+            "mysql_hash_comments.sql",
+            &*dialect,
+        );
+        assert!(
+            !graph.objects.is_empty(),
+            "MySqlDialect must recover tables from a real MySQL DDL file with '#' comments"
+        );
+        let names: Vec<String> = graph
+            .objects
+            .iter()
+            .map(|o| o.name.to_lowercase())
+            .collect();
+        assert!(
+            names.contains(&"fact_sales".to_string()),
+            "expected fact_sales among recovered tables, got {names:?}"
+        );
+        assert!(
+            names.contains(&"dim_date".to_string()),
+            "expected dim_date among recovered tables, got {names:?}"
+        );
     }
 
     #[tokio::test]
@@ -495,7 +562,8 @@ mod tests {
             ]
         });
         let mock = Arc::new(MockLlmProvider::new(mock_resp.to_string()));
-        let mut pass = SqlAnalyzerPass::new("ecommerce.sql", ECOMMERCE_SQL, mock);
+        let mut pass =
+            SqlAnalyzerPass::new("ecommerce.sql", ECOMMERCE_SQL, mock, &GenericDialectParser);
         let mut ctx = make_ctx(&dir);
         pass.run(&mut ctx).await.unwrap();
         assert!(
@@ -508,7 +576,8 @@ mod tests {
     async fn pass_tolerates_bad_llm_json() {
         let dir = TempDir::new().unwrap();
         let mock = Arc::new(MockLlmProvider::new("not valid json at all!!"));
-        let mut pass = SqlAnalyzerPass::new("ecommerce.sql", ECOMMERCE_SQL, mock);
+        let mut pass =
+            SqlAnalyzerPass::new("ecommerce.sql", ECOMMERCE_SQL, mock, &GenericDialectParser);
         let mut ctx = make_ctx(&dir);
         // Should not return an error — bad LLM response degrades to structural-only.
         pass.run(&mut ctx).await.unwrap();
@@ -517,7 +586,7 @@ mod tests {
 
     #[test]
     fn llm_enrichment_applies_entity_names() {
-        let mut graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql");
+        let mut graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
         let llm_json = serde_json::json!({
             "entities": [
                 {"table": "customers", "entity_name": "Customer", "type": "core", "description": "desc"}

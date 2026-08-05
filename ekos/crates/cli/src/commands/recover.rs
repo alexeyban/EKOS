@@ -6,11 +6,11 @@ use ekos_compiler_core::{
     scheduler::FailureMode,
 };
 use ekos_recovery::{
-    ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass,
+    ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass, DialectRule,
     DocumentSemanticsAnalyzerPass, DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass,
     LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, PentahoAnalyzerPass, PentahoStats,
     SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
-    cache::CachedLlmProvider, llm::LlmProvider,
+    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -41,6 +41,22 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     let ignore = &config.observe.ignore_patterns;
     let mut sql_count = 0usize;
     let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
+
+    // ── SQL dialect resolution (RFC 0031) ─────────────────────────────────
+    // Registry is compile-time (mirrors the Observer plugin pattern) — a new dialect means a
+    // new crate implementing `SqlDialectParser`, registered here, not a runtime plugin load.
+    let dialect_registry = build_dialect_registry();
+    let dialect_rules: Vec<DialectRule> = config
+        .recover
+        .sql
+        .dialect_rules
+        .iter()
+        .map(|r| DialectRule {
+            path_glob: r.path_glob.clone(),
+            dialect: r.dialect.clone(),
+        })
+        .collect();
+    let default_dialect = &config.recover.sql.default_dialect;
 
     for base in &observe_paths {
         for entry in WalkDir::new(base)
@@ -81,15 +97,35 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             // (e.g. `schema.sql`), and pass names must be unique.
             let rel = path.strip_prefix(cwd).unwrap_or(path);
             let rel_str = rel.to_string_lossy().into_owned();
-            let pass = SqlAnalyzerPass::new(&rel_str, sql.clone(), llm.clone());
+
+            // Resolve which dialect this file parses with (RFC 0031): first matching
+            // `[[recover.sql.dialect-rules]]` wins, else `default-dialect` ("generic" — the
+            // ANSI baseline — if the whole `[recover.sql]` section is omitted).
+            let dialect_name = resolve_dialect_name(&dialect_rules, default_dialect, &rel_str);
+            let dialect_parser = match dialect_registry.get(dialect_name) {
+                Some(parser) => parser.as_ref(),
+                None => {
+                    tracing::warn!(
+                        "unknown dialect {dialect_name:?} configured for {rel_str}; falling back to generic"
+                    );
+                    dialect_registry
+                        .get("generic")
+                        .expect("generic dialect always registered")
+                        .as_ref()
+                }
+            };
+
+            let pass = SqlAnalyzerPass::new(&rel_str, sql.clone(), llm.clone(), dialect_parser);
             pass_manager.register(Box::new(pass));
 
             // ── Transformation IR extraction (RFC 0027 Phase 2) ───────────
             // Pure structural, no LLM — same SQL text, a different concern
-            // (transformation logic, not schema/entities). Dialect selection
-            // is not yet wired to per-path config (see sql_transform_analyzer's
-            // module doc comment) — "generic" until that lands.
-            let transform_pass = SqlTransformAnalyzerPass::new(&rel_str, sql, "generic");
+            // (transformation logic, not schema/entities). Preprocessed the same way
+            // `SqlAnalyzerPass` preprocesses internally (e.g. MySQL `DELIMITER` stripping),
+            // so both passes see identically-normalized SQL text for this file.
+            let preprocessed_sql = dialect_parser.preprocess(&sql);
+            let transform_pass =
+                SqlTransformAnalyzerPass::new(&rel_str, preprocessed_sql, dialect_name);
             sql_transform_stats_handles.push(transform_pass.stats_handle());
             pass_manager.register(Box::new(transform_pass));
 

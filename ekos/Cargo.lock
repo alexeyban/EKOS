@@ -1088,6 +1088,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-mysql"
+version = "0.1.0"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
+name = "ekos-plugin-sql-dialect-postgres"
+version = "0.1.0"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-recovery"
 version = "0.1.0"
 dependencies = [
@@ -1098,7 +1114,11 @@ dependencies = [
  "ekos-common",
  "ekos-compiler-core",
  "ekos-kir",
+ "ekos-plugin-sql-dialect-mysql",
+ "ekos-plugin-sql-dialect-postgres",
  "ekos-semantic",
+ "ekos-sql-dialect-sdk",
+ "glob",
  "hex",
  "reqwest",
  "roxmltree",
@@ -1156,6 +1176,13 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "ekos-sql-dialect-sdk"
+version = "0.1.0"
+dependencies = [
+ "sqlparser",
 ]
 
 [[package]]
@@ -1372,6 +1399,12 @@ dependencies = [
  "color_quant",
  "weezl 0.1.12",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "half"

@@ -16,6 +16,7 @@ pub mod local_docs_analyzer;
 pub mod ollama;
 pub mod pentaho_analyzer;
 pub mod sql_analyzer;
+pub mod sql_dialect_registry;
 pub mod sql_transform_analyzer;
 
 pub use anthropic::AnthropicProvider;
@@ -32,6 +33,9 @@ pub use local_docs_analyzer::LocalDocAnalyzerPass;
 pub use ollama::OllamaProvider;
 pub use pentaho_analyzer::{PentahoAnalyzerPass, PentahoStats};
 pub use sql_analyzer::{SqlAnalyzerPass, parse_ddl_structural};
+pub use sql_dialect_registry::{
+    DialectRule, GenericDialectParser, build_dialect_registry, resolve_dialect_name,
+};
 pub use sql_transform_analyzer::{
     SqlTransformAnalyzerPass, SqlTransformStats, parse_sql_to_transform_graphs,
 };

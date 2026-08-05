@@ -24,6 +24,10 @@ anyhow.workspace = true
 sqlparser = { workspace = true }
 reqwest = { workspace = true }
 roxmltree = { workspace = true }
+ekos-sql-dialect-sdk.workspace = true
+ekos-plugin-sql-dialect-mysql.workspace = true
+ekos-plugin-sql-dialect-postgres.workspace = true
+glob.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

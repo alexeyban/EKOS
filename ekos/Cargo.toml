@@ -8,6 +8,7 @@ members = [
     "crates/compiler-sdk",
     "crates/scheduler",
     "crates/observation-sdk",
+    "crates/sql-dialect-sdk",
     "crates/ledger",
     "crates/runtime",
     "crates/identity",
@@ -28,6 +29,8 @@ members = [
     "plugins/github",
     "plugins/confluence",
     "plugins/pentaho",
+    "plugins/sql-dialect-mysql",
+    "plugins/sql-dialect-postgres",
 ]
 
 [workspace.package]
@@ -47,6 +50,9 @@ ekos-runtime   = { path = "crates/runtime" }
 ekos-identity  = { path = "crates/identity" }
 ekos-semantic  = { path = "crates/semantic" }
 ekos-observation-sdk = { path = "crates/observation-sdk" }
+ekos-sql-dialect-sdk = { path = "crates/sql-dialect-sdk" }
+ekos-plugin-sql-dialect-mysql = { path = "plugins/sql-dialect-mysql" }
+ekos-plugin-sql-dialect-postgres = { path = "plugins/sql-dialect-postgres" }
 ekos-recovery       = { path = "crates/recovery" }
 ekos-ekl       = { path = "crates/ekl" }
 ekos-marketing = { path = "crates/marketing" }
@@ -90,6 +96,7 @@ memmap2  = "0.9"
 
 # Filesystem
 walkdir = "2"
+glob = "0.3"
 
 # SQL parsing
 sqlparser = "0.53"

@@ -1,0 +1,9 @@
+[package]
+name = "ekos-plugin-sql-dialect-mysql"
+description = "MySQL SqlDialectParser plugin (RFC 0031)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-sql-dialect-sdk.workspace = true
+sqlparser.workspace = true

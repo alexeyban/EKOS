@@ -14,18 +14,20 @@
 //!   cursors, conditionals, variables) is out of scope. MVP: embedded SQL
 //!   statements become real IR fragments; everything else becomes
 //!   `Unmapped` with reason `"control flow present, not modeled"`.
-//! - Dialects: Postgres and MSSQL (T-SQL) via their native `sqlparser`
+//! - Dialects: Postgres, MySQL, and MSSQL (T-SQL) via their native `sqlparser`
 //!   dialects; Databricks via `sqlparser`'s native `DatabricksDialect`
 //!   (coverage not independently verified against real Spark SQL
 //!   extensions — flagged, not blocking); Informix has no dedicated
 //!   `sqlparser` dialect, so it falls back to `GenericDialect` and accepts
 //!   incomplete coverage, per the plan's explicit scoping.
 //!
-//! Dialect selection is not yet wired to `ekos.toml` — `SqlTransformAnalyzerPass::new`
-//! takes a dialect name directly and `recover.rs`'s existing SQL-file walk
-//! (which has no per-file dialect config today) passes `"generic"`.
-//! Config-driven per-path dialect selection is future work, not blocking
-//! this phase.
+//! Dialect selection is config-driven as of RFC 0031: `recover.rs` resolves a dialect name
+//! per `.sql` file (via `sql_dialect_registry`'s registry + `ekos.toml`'s `[recover.sql]`
+//! rules, falling back to `"generic"`) and passes the resolved name — and, for dialects with
+//! preprocessing needs like MySQL's `DELIMITER` stripping, the already-preprocessed SQL text —
+//! into `SqlTransformAnalyzerPass::new`. This pass's own `dialect_for`/`source_kind_for` stay
+//! keyed by name (not `Box<dyn SqlDialectParser>`) since the name itself is also used for
+//! stats/display (`dialect: self.dialect_name.clone()`) and `TransformOrigin` tagging.
 
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
@@ -39,7 +41,7 @@ use sqlparser::ast::{
     JoinOperator, Query, Select, SelectItem, SetExpr, Statement, TableFactor, Value,
 };
 use sqlparser::dialect::{
-    DatabricksDialect, Dialect, GenericDialect, MsSqlDialect, PostgreSqlDialect,
+    DatabricksDialect, Dialect, GenericDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect,
 };
 use sqlparser::parser::Parser;
 use std::sync::{Arc, Mutex};
@@ -168,6 +170,7 @@ impl CompilerPass for SqlTransformAnalyzerPass {
 fn dialect_for(name: &str) -> Box<dyn Dialect> {
     match name {
         "postgres" | "postgresql" => Box::new(PostgreSqlDialect {}),
+        "mysql" => Box::new(MySqlDialect {}),
         "mssql" | "tsql" | "synapse" => Box::new(MsSqlDialect {}),
         "databricks" | "spark" => Box::new(DatabricksDialect {}),
         // Informix has no dedicated sqlparser dialect — Generic accepts
@@ -179,6 +182,7 @@ fn dialect_for(name: &str) -> Box<dyn Dialect> {
 fn source_kind_for(dialect_name: &str) -> &'static str {
     match dialect_name {
         "postgres" | "postgresql" => "sql-postgres",
+        "mysql" => "sql-mysql",
         "mssql" | "tsql" | "synapse" => "sql-mssql",
         "databricks" | "spark" => "sql-databricks",
         "informix" => "sql-informix",
@@ -887,6 +891,28 @@ mod tests {
         );
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].nodes.len(), 2);
+    }
+
+    /// RFC 0031: MySQL is now a real `dialect_for` entry, not a `GenericDialect` fallback.
+    #[test]
+    fn mysql_dialect_parses_simple_select() {
+        let g = graphs("SELECT id FROM customers WHERE status = 'active'", "mysql");
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].nodes.len(), 2);
+    }
+
+    /// The concrete regression case from GitHub issue #3 / devlog_31: a MySQL `#`-style line
+    /// comment. `GenericDialect` (the pre-RFC-0031 default for everything) rejects this;
+    /// `dialect_for("mysql")` must not.
+    #[test]
+    fn mysql_dialect_parses_hash_comment_that_generic_dialect_rejects() {
+        let sql = "# a mysql-style comment\nSELECT id FROM customers";
+        assert!(
+            Parser::parse_sql(&GenericDialect {}, sql).is_err(),
+            "GenericDialect is expected to reject a leading '#' comment"
+        );
+        let g = graphs(sql, "mysql");
+        assert_eq!(g.len(), 1, "mysql dialect must parse a leading '#' comment");
     }
 
     #[test]

@@ -16,6 +16,8 @@ pub struct EkosConfig {
     pub document_semantics: DocumentSemanticsConfig,
     #[serde(default)]
     pub marketing: MarketingConfig,
+    #[serde(default)]
+    pub recover: RecoverConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +142,50 @@ impl Default for MarketingConfig {
     }
 }
 
+/// RFC 0031: pluggable SQL dialect selection. `[recover.sql]` in `ekos.toml`. Omitting the
+/// section entirely preserves pre-RFC-0031 behavior exactly — every `.sql` file parsed with
+/// the ANSI/`GenericDialect` baseline, no per-path rules.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RecoverConfig {
+    #[serde(default)]
+    pub sql: SqlRecoverConfig,
+}
+
+fn default_sql_dialect() -> String {
+    "generic".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SqlRecoverConfig {
+    /// The ANSI-SQL baseline fallback — "first, follow generic ANSI SQL rules." Used for any
+    /// `.sql` file that no `dialect-rules` entry matches.
+    #[serde(default = "default_sql_dialect")]
+    pub default_dialect: String,
+    /// Checked in order; the first `path-glob` match wins. A real workspace can mix dialects
+    /// by folder (e.g. a `Destination MySQL/` vs. `Source MSSQL/` split) — a single global
+    /// dialect setting can't express that.
+    #[serde(default)]
+    pub dialect_rules: Vec<SqlDialectRuleConfig>,
+}
+
+impl Default for SqlRecoverConfig {
+    fn default() -> Self {
+        Self {
+            default_dialect: default_sql_dialect(),
+            dialect_rules: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SqlDialectRuleConfig {
+    pub path_glob: String,
+    pub dialect: String,
+}
+
 /// Publishing is off by default — `ekos marketing publish` without `enabled = true` always
 /// behaves as `--dry-run`, so opting in requires an explicit, visible config change.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -161,6 +207,7 @@ impl Default for EkosConfig {
             ai: AiConfig::default(),
             document_semantics: DocumentSemanticsConfig::default(),
             marketing: MarketingConfig::default(),
+            recover: RecoverConfig::default(),
         }
     }
 }
@@ -271,6 +318,44 @@ max-sections = 500
 
         let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
         assert!(!cfg.marketing.twitter.enabled);
+    }
+
+    /// RFC 0031: omitting `[recover.sql]` entirely must preserve pre-RFC-0031 behavior —
+    /// every `.sql` file parsed as generic/ANSI, no dialect rules.
+    #[test]
+    fn sql_recover_defaults_to_generic_with_no_rules() {
+        let cfg = EkosConfig::default();
+        assert_eq!(cfg.recover.sql.default_dialect, "generic");
+        assert!(cfg.recover.sql.dialect_rules.is_empty());
+
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert_eq!(cfg.recover.sql.default_dialect, "generic");
+        assert!(cfg.recover.sql.dialect_rules.is_empty());
+    }
+
+    #[test]
+    fn sql_recover_parses_dialect_rules_from_kebab_case_table() {
+        let toml = r#"
+[recover.sql]
+default-dialect = "generic"
+
+[[recover.sql.dialect-rules]]
+path-glob = "**/mysql/**/*.sql"
+dialect = "mysql"
+
+[[recover.sql.dialect-rules]]
+path-glob = "**/postgres/**/*.sql"
+dialect = "postgres"
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.recover.sql.default_dialect, "generic");
+        assert_eq!(cfg.recover.sql.dialect_rules.len(), 2);
+        assert_eq!(
+            cfg.recover.sql.dialect_rules[0].path_glob,
+            "**/mysql/**/*.sql"
+        );
+        assert_eq!(cfg.recover.sql.dialect_rules[0].dialect, "mysql");
+        assert_eq!(cfg.recover.sql.dialect_rules[1].dialect, "postgres");
     }
 
     #[test]
