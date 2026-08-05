@@ -445,6 +445,7 @@ dependencies = [
  "ekos-runtime",
  "ekos-semantic",
  "serde_json",
+ "sqlparser",
  "tempfile",
  "tokio",
  "uuid",
