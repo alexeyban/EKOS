@@ -206,11 +206,21 @@ pub fn parse_sql_to_transform_graphs(
 
     let stmts = match Parser::parse_sql(dialect.as_ref(), sql) {
         Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(
-                "sql-transform-analyzer: sqlparser failed on {source_path} ({dialect_name}): {e}"
-            );
-            return Vec::new();
+        Err(first_err) => {
+            // Fallback (GitHub issue #3): some hand-written scripts omit `;` between top-level
+            // statements — retry once with synthetic separators inserted. See
+            // `statement_repair`'s doc comment for why this is only attempted after the
+            // unmodified text has already failed to parse.
+            let repaired = crate::statement_repair::ensure_statement_separators(sql);
+            match Parser::parse_sql(dialect.as_ref(), &repaired) {
+                Ok(s) => s,
+                Err(_) => {
+                    tracing::warn!(
+                        "sql-transform-analyzer: sqlparser failed on {source_path} ({dialect_name}): {first_err}"
+                    );
+                    return Vec::new();
+                }
+            }
         }
     };
 
@@ -669,6 +679,27 @@ mod tests {
 
     fn graphs(sql: &str, dialect: &str) -> Vec<TransformGraph> {
         parse_sql_to_transform_graphs(sql, "test.sql", dialect)
+    }
+
+    /// GitHub issue #3's second root cause: a script with an `UPDATE` and a `SELECT` and no
+    /// `;` separating them fails to parse at all — the `statement_repair` fallback recovers
+    /// both statements as independent transform graphs.
+    #[test]
+    fn recovers_statements_from_script_missing_semicolons_between_them() {
+        let g = graphs(
+            "\
+UPDATE customers SET status = 'active' WHERE id = 1
+
+SELECT id, status FROM customers
+",
+            "mssql",
+        );
+        assert_eq!(
+            g.len(),
+            1,
+            "UPDATE is not a modeled statement kind, only SELECT is"
+        );
+        assert!(matches!(&g[0].nodes[0], TransformNode::Source { .. }));
     }
 
     // ── Golden examples, per the implementation plan's own list ────────────

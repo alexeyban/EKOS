@@ -165,9 +165,21 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect)
 
     let stmts = match Parser::parse_sql(dialect, sql) {
         Ok(s) => s,
-        Err(e) => {
-            warn!("sqlparser failed on {source_path}: {e}; falling back to empty graph");
-            return graph;
+        Err(first_err) => {
+            // Fallback (GitHub issue #3): some hand-written scripts omit `;` between top-level
+            // statements — retry once with synthetic separators inserted. See
+            // `statement_repair`'s doc comment for why this is only attempted after the
+            // unmodified text has already failed to parse.
+            let repaired = crate::statement_repair::ensure_statement_separators(sql);
+            match Parser::parse_sql(dialect, &repaired) {
+                Ok(s) => s,
+                Err(_) => {
+                    warn!(
+                        "sqlparser failed on {source_path}: {first_err}; falling back to empty graph"
+                    );
+                    return graph;
+                }
+            }
         }
     };
 
@@ -547,6 +559,24 @@ mod tests {
         assert!(
             names.contains(&"dim_date".to_string()),
             "expected dim_date among recovered tables, got {names:?}"
+        );
+    }
+
+    /// GitHub issue #3's second root cause: a DDL script with multiple `CREATE TABLE`
+    /// statements and no `;` separating them fails to parse at all (not just the second
+    /// statement) — `parse_ddl_structural`'s fallback (`statement_repair`) recovers both tables.
+    #[test]
+    fn recovers_tables_from_ddl_script_missing_semicolons_between_statements() {
+        let sql = "\
+CREATE TABLE customers (id INT PRIMARY KEY, name VARCHAR(100))
+
+CREATE TABLE orders (id INT PRIMARY KEY, customer_id INT REFERENCES customers(id))
+";
+        let graph = parse_ddl_structural(sql, "no_semicolons.sql", &GenericDialect {});
+        let names: Vec<String> = graph.objects.iter().map(|o| o.name.clone()).collect();
+        assert!(
+            names.contains(&"customers".to_string()) && names.contains(&"orders".to_string()),
+            "expected both tables recovered despite missing statement separators, got {names:?}"
         );
     }
 

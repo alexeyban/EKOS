@@ -276,6 +276,7 @@ fn map_step(step: &roxmltree::Node, step_type: &str, xml: &str) -> TransformNode
         },
         "Calculator" => extract_calculator(step),
         "DatabaseJoin" | "MergeJoin" => extract_join(step),
+        "StreamLookup" => extract_stream_lookup(step),
         "GroupBy" => extract_group_by(step),
         "TableOutput" => {
             let object_name = child_text(step, "table").unwrap_or_default();
@@ -409,6 +410,25 @@ fn extract_join(step: &roxmltree::Node) -> TransformNode {
         right: NodeId(0),
         keys,
         kind,
+    }
+}
+
+/// `StreamLookup` has no `join_type` field in its Kettle XML (unlike
+/// `DatabaseJoin`/`MergeJoin`) because it's always a left join against the
+/// lookup stream on the configured key(s) — so the kind is forced to `Left`
+/// rather than read from the XML, reusing `extract_join`'s `keys` shape per
+/// this module's documented `DatabaseJoin`/`MergeJoin` approximation pattern.
+fn extract_stream_lookup(step: &roxmltree::Node) -> TransformNode {
+    match extract_join(step) {
+        TransformNode::Join {
+            left, right, keys, ..
+        } => TransformNode::Join {
+            left,
+            right,
+            keys,
+            kind: JoinKind::Left,
+        },
+        other => other,
     }
 }
 
@@ -635,6 +655,38 @@ mod tests {
                 assert!(reason.contains("SomeFutureStepType"));
             }
             other => panic!("expected Unmapped, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_stream_lookup_to_left_join() {
+        let xml = r#"<?xml version="1.0"?>
+<transformation>
+  <step>
+    <name>Sales Territory Lookup</name>
+    <type>StreamLookup</type>
+    <keys>
+      <key>
+        <value1>SalesTerritoryKey</value1>
+        <value2>SalesTerritoryKey</value2>
+      </key>
+    </keys>
+  </step>
+</transformation>
+"#;
+        let graph = parse_kettle_xml("stream_lookup.ktr", "transformation", xml).unwrap();
+        match &graph.nodes[0] {
+            TransformNode::Join { kind, keys, .. } => {
+                assert_eq!(*kind, JoinKind::Left);
+                assert_eq!(
+                    keys,
+                    &vec![(
+                        "SalesTerritoryKey".to_string(),
+                        "SalesTerritoryKey".to_string()
+                    )]
+                );
+            }
+            other => panic!("expected Join, got {other:?}"),
         }
     }
 

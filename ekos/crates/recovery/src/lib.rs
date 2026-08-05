@@ -18,6 +18,7 @@ pub mod pentaho_analyzer;
 pub mod sql_analyzer;
 pub mod sql_dialect_registry;
 pub mod sql_transform_analyzer;
+mod statement_repair;
 
 pub use anthropic::AnthropicProvider;
 pub use cache::CachedLlmProvider;
