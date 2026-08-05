@@ -3,19 +3,20 @@
 **Prompt:** What changed across my workspace in the last week?
 
 ```
-Here's what actually moved in the last week (2026-07-13 to now), based on git history across your project repos plus file timestamps — the EKOS ledger's raw diff was mostly noise from it ingesting/scanning everything for the first time, so I cross-checked against real git logs instead.
+Here's what happened in the EKOS workspace over the last 7 days, based on `git log` (the ledger itself is stale — 0 new objects/relationships since 2026-07-29, so it needs a rebuild if you want EKOS-native queries).
 
-**Active development:**
-- **EKOS** (2026-07-17) — heavy week: RFC 0013 (MCP server `ekos mcp serve`), RFC 0014 (content indexing + BM25 search), RFC 0015 (compact storage, ledger v2), RFC 0016 (new fact-segment storage engine — EAVT/AEVT/AVET indexes, mmap'd sealed reads, tantivy search integration, migration to v3), plus the `ekos-knowledge` and `memory` Claude skills you're using right now, and a CI bump to Node 24.
-- **BehavioralInterview** (2026-07-14) — manuscript work: added a "MODERNIZATION-FAIL" flagship story to ch.7/14, ASCII-safe symbol cleanup across the book, a tenure-reframe pass, and Leanpub directory restructuring.
+**Major features**
+- **RFC 0031 — pluggable SQL dialect parsers** (`8df7939`, `d3e5a35`): new `sql-dialect-sdk` crate + `sql-dialect-mysql`/`sql-dialect-postgres` plugins, dialect registry, MySQL hash-comment test fixtures, benchmark updated for the new `parse_ddl_structural` signature.
+- **Cross-system identity fix** (`8b15427`): SQL↔Pentaho exact table-name matches were being missed by identity resolution; also added two new pitch/recovery presentation HTML docs and MCP/runtime tweaks.
+- **StreamLookup Pentaho + SQL statement-separator fix** (`4c41b53`): new `statement_repair.rs` module, fixes in `pentaho_analyzer.rs`, `sql_analyzer.rs`, `sql_transform_analyzer.rs`.
+- **Marketing agent polish** (`54b20f7`): auto-loads `marketing/.env` for `ekos marketing publish`.
 
-**New additions to the workspace** (by file mtime, not yet in their own git history):
-- `DeFiSentinelPlatform` (2026-07-18) — still not its own git repo, per earlier notes.
-- `memory/`, `ekos.toml`, `.ekos/` ledger (2026-07-16/17) — this is the EKOS memory system getting stood up in this workspace.
-- `ekos-linkedin-*` announcement files (2026-07-17).
-- `SystemDesignInterview` (2026-07-14).
+**Docs / non-code**
+- New `PIONEER_PROGRAM.md` (created, then extended twice with signup link, consent section, payment SLA, and a link to GitHub Discussion #4).
+- New `TOKENOMICS.md`, README updates (Windows/macOS install instructions, X account, contract address, Founder Vesting Wallet section).
+- `devlog_31.md` and `devlog_32.md` added, recording the identity-resolution fix and RFC 0031 respectively.
 
-**Quiet** (no commits in the last 7 days): silero-models, cdc-lab, azure-data-project, serbian-legal-adviser, reversi-alpha-zero, lingualoop, ComfyUI, agency-agents, VoiceAssistant, rag, career-ops, game_agent, procfwk, azure-databricks-project, adf-pipelines.
+**Uncommitted right now** (per `git status`): edits to `README.md`, `demo/DEMO.md`, `demo/headless.sh`, all `demo/transcripts/act-*.md`, `ekos.toml`, and marketing crate files (`prompt.rs`, `tweet.rs`, `commands/marketing.rs`), plus two untracked files: `docs/presentations/recovery-gaps-closed.html` and `ekos-marketing-agent-plan.md` — this looks like in-progress work on a marketing-agent plan and demo refresh, not yet committed.
 
-**Worth flagging:** the top-level `PycharmProjects` repo itself has only one commit ("first commit") but `git status` shows a pile of modified/deleted Terraform files (`terraform/AzureResources/*`, `terraform/main.tf`, `terraform/labs/terraform/*`) sitting uncommitted — those look like real in-progress infra changes that haven't been committed yet.
+Want me to rebuild the EKOS ledger (`ekos build && ekos recover && ekos compile && ekos commit`) so future knowledge-based queries reflect this week's work?
 ```

@@ -3,15 +3,21 @@
 **Prompt:** Ask the impact-analyst: what breaks if I rename the customers table?
 
 ```
-The impact-analyst found three "customers"-named tables in EKOS, but all are in **test fixtures**, not a real production project:
+## Blast radius of renaming `customers`
 
-| Table | Location | Direct dependents |
-|---|---|---|
-| `customers` (ecommerce) | `EKOS/tests/fixtures/ecommerce.sql` | `orders.customer_id → customers.id` FK |
-| `Customers` (Northwind) | `EKOS/tests/fixtures/northwind.sql` | `Orders.CustomerID` and `CustomerCustomerDemo.CustomerID` FKs |
-| `Customers` (Northwind, dup) | same file, likely a duplicate ledger entry from a second scan | same dependents as above |
+The ledger actually has **three separate `customers`-like tables**, unlinked by any cross-system identity match — so nothing cascades between systems.
 
-No dbt models, DAGs, dashboards, or application code reference any of these — the agent checked and ruled out some similarly-named `customer` entities in `azure-databricks-project` (dbt models) since there's no FK/reference evidence linking them.
+**ecommerce `customers`** (most likely the one you mean):
+- Direct: `orders.customer_id → customers.id`
+- Transitive: `payments` and `order_items` (via `orders`)
+- No views, ETL jobs, stored procs, or app code reference it in the ledger — **low risk**, one FK to update.
 
-**Bottom line:** if you're asking about a real production `customers` table (not EKOS's test fixtures), it hasn't been ingested into the ledger yet — worth running `ekos_status` to check which projects are indexed before trusting an impact report. If you did mean one of the fixture tables, renaming just requires updating the FK column(s) in `orders`/`Orders`/`CustomerCustomerDemo` to match.
+**Northwind `Customers`** (exists as **two unmerged duplicate objects** from repeated file scans):
+- Direct: `CustomerCustomerDemo`, `Orders`
+- Transitive: `"Order Details"` (via `Orders`)
+- Same low-risk shape, but a rename needs to be applied against both duplicate object IDs, or the duplication should be resolved first.
+
+One noise source to ignore: hits for "customer" in `dbt/` and `databricks-lab/` files belong to an unrelated project and have zero actual relationship edges — text matches, not dependencies.
+
+**Bottom line:** renaming is low-to-medium risk — just FK references within one schema, nothing cross-system. Separately, the Northwind duplicate-object issue is worth a dedup pass regardless of what you do with the rename.
 ```

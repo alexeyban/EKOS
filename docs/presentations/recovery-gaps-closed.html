@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two Real Recovery Gaps, Filed and Closed — EKOS</title>
+<meta name="description" content="Two GitHub issues filed against EKOS's Pentaho and SQL recovery — StreamLookup falling through to Unmapped, and dialect-mixed SQL scripts failing to parse at all — fixed and re-verified against the exact repro shapes, live.">
+</head>
+<body>
+<style>
+:root{
+  --ground:#f4f1e8;
+  --ground-raised:#ffffffcc;
+  --ink:#1d2129;
+  --ink-soft:#4b5160;
+  --rule:#d8d2c0;
+  --brass:#a8672a;
+  --brass-deep:#8a531f;
+  --slate:#3e5f5f;
+  --slate-soft:#e4ece9;
+  --code-bg:#1d2129;
+  --code-fg:#e9e4d6;
+  --code-dim:#8f96a3;
+  --code-key:#c98a3e;
+  --code-str:#7fa591;
+  --bad:#c96a5a;
+  --shadow: 0 1px 0 rgba(29,33,41,0.06);
+}
+:root[data-theme="dark"]{
+  --ground:#14161c;
+  --ground-raised:#1c1f28cc;
+  --ink:#ece7d8;
+  --ink-soft:#a9b0bd;
+  --rule:#333949;
+  --brass:#d69a52;
+  --brass-deep:#e8b06e;
+  --slate:#8fb8b0;
+  --slate-soft:#212a2a;
+  --code-bg:#0e1015;
+  --code-fg:#e9e4d6;
+  --code-dim:#727a89;
+  --code-key:#e0a866;
+  --code-str:#8fc4ac;
+  --bad:#e08c7d;
+  --shadow: 0 1px 0 rgba(0,0,0,0.4);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#14161c;
+    --ground-raised:#1c1f28cc;
+    --ink:#ece7d8;
+    --ink-soft:#a9b0bd;
+    --rule:#333949;
+    --brass:#d69a52;
+    --brass-deep:#e8b06e;
+    --slate:#8fb8b0;
+    --slate-soft:#212a2a;
+    --code-bg:#0e1015;
+    --code-fg:#e9e4d6;
+    --code-dim:#727a89;
+    --code-key:#e0a866;
+    --code-str:#8fc4ac;
+    --bad:#e08c7d;
+    --shadow: 0 1px 0 rgba(0,0,0,0.4);
+  }
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  scroll-snap-type: y proximity;
+  overflow-x:hidden;
+}
+::selection{ background: var(--brass); color:#fff; }
+
+.mono{
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+}
+
+section.slide{
+  min-height:100svh;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  padding: 6rem 8vw;
+  scroll-snap-align:start;
+  position:relative;
+  border-bottom:1px solid var(--rule);
+}
+section.slide:last-child{ border-bottom:none; }
+
+.eyebrow{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.72rem;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--brass-deep);
+  margin:0 0 1.1rem 0;
+  display:flex;
+  align-items:center;
+  gap:0.6rem;
+}
+.eyebrow::before{
+  content:"";
+  width:1.6rem;height:1px;background:var(--brass-deep);display:inline-block;
+}
+
+h1,h2,h3{
+  text-wrap:balance;
+  font-weight:600;
+  margin:0;
+  line-height:1.08;
+}
+
+.stage-num{
+  position:absolute;
+  top:3.2rem; right:8vw;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.85rem;
+  color:var(--ink-soft);
+  letter-spacing:0.08em;
+}
+
+p.lede{
+  max-width:38rem;
+  font-size:1.15rem;
+  line-height:1.65;
+  color:var(--ink-soft);
+  margin:1.4rem 0 0 0;
+}
+
+/* ---------- Hero ---------- */
+.hero{
+  align-items:flex-start;
+  background:
+    radial-gradient(ellipse 60% 50% at 85% 8%, color-mix(in srgb, var(--brass) 12%, transparent), transparent 70%),
+    var(--ground);
+}
+.hero h1{
+  font-size: clamp(2.4rem, 6vw, 4.6rem);
+  max-width: 26ch;
+}
+.hero .arrow-word{ color:var(--brass); font-style:italic; }
+.hero .byline{
+  margin-top:2.6rem;
+  display:flex;
+  align-items:center;
+  gap:0.9rem;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.85rem;
+  color:var(--ink-soft);
+}
+.hero .byline .dot{ width:6px;height:6px;border-radius:50%;background:var(--slate); }
+
+.hero-diagram{
+  margin-top:3.4rem;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:0.4rem;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.72rem;
+  color:var(--ink-soft);
+}
+.chip{
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  padding:0.42rem 0.75rem;
+  border-radius:3px;
+  white-space:nowrap;
+  box-shadow:var(--shadow);
+}
+.chip.hot{ border-color:var(--brass); color:var(--brass-deep); font-weight:600; }
+.chip.bad{ border-color:var(--bad); color:var(--bad); font-weight:600; }
+.sep{ color:var(--rule); }
+
+/* ---------- pipeline / stages generic ---------- */
+.stage-head{ display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.stage-head h2{ font-size:clamp(1.8rem,3.4vw,2.6rem); }
+
+.two-col{
+  display:grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap:3.5rem;
+  margin-top:2.6rem;
+  align-items:start;
+}
+@media (max-width:900px){ .two-col{ grid-template-columns:1fr; } }
+
+.codeblock{
+  background:var(--code-bg);
+  color:var(--code-fg);
+  border-radius:6px;
+  padding:1.3rem 1.5rem;
+  font-size:0.82rem;
+  line-height:1.65;
+  overflow-x:auto;
+  box-shadow: 0 8px 24px -12px rgba(0,0,0,0.35);
+}
+.codeblock .k{ color:var(--code-key); }
+.codeblock .s{ color:var(--code-str); }
+.codeblock .c{ color:var(--code-dim); font-style:italic; }
+.codeblock .bad{ color:var(--bad); }
+.codeblock .tag{
+  display:inline-block;
+  font-size:0.68rem;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--code-dim);
+  margin-bottom:0.8rem;
+}
+
+ul.facts{ list-style:none; margin:0; padding:0; }
+ul.facts li{
+  padding:0.85rem 0;
+  border-top:1px solid var(--rule);
+  display:grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap:1rem;
+  font-size:0.98rem;
+}
+ul.facts li:first-child{ border-top:none; }
+ul.facts li .k{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.72rem;
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  color:var(--brass-deep);
+  padding-top:0.15rem;
+}
+ul.facts li .v{ color:var(--ink-soft); line-height:1.55; }
+
+/* stat strip */
+.stat-grid{ display:flex; gap:1.2rem; margin-top:2.6rem; flex-wrap:wrap; }
+.stat{
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  box-shadow:var(--shadow);
+  padding:1.1rem 1.5rem;
+  min-width:9.5rem;
+}
+.stat .num{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:1.9rem; font-weight:600; color:var(--brass-deep); }
+.stat .num .bad{ color:var(--bad); }
+.stat .label{ font-size:0.78rem; color:var(--ink-soft); margin-top:0.3rem; }
+
+/* before/after table */
+.ttable{ width:100%; border-collapse:collapse; margin-top:2.2rem; font-size:0.86rem; }
+.ttable th{
+  text-align:left; font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em;
+  color:var(--ink-soft); font-weight:500;
+  border-bottom:1px solid var(--rule); padding:0.6rem 0.8rem 0.6rem 0;
+}
+.ttable td{
+  border-bottom:1px solid var(--rule);
+  padding:0.75rem 0.8rem 0.75rem 0;
+  vertical-align:top;
+}
+.ttable td.tool{ font-family: ui-monospace,"SF Mono",Consolas,monospace; color:var(--brass-deep); white-space:nowrap; }
+.ttable td.desc{ color:var(--ink-soft); }
+.ttable td.bad{ color:var(--bad); font-weight:600; }
+.ttable td.good{ color:var(--slate); font-weight:600; }
+
+/* invariants */
+.inv-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:1.6rem; margin-top:2.6rem; }
+@media (max-width:800px){ .inv-grid{ grid-template-columns:1fr; } }
+.inv{
+  border-left:2px solid var(--slate);
+  padding:0.2rem 0 0.2rem 1.2rem;
+}
+.inv h3{ font-size:1.05rem; font-family: Georgia, serif; }
+.inv p{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.92rem; line-height:1.6; max-width:32ch; }
+
+/* CTA */
+.cta{
+  align-items:center;
+  text-align:center;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 0%, color-mix(in srgb, var(--brass) 10%, transparent), transparent 70%),
+    var(--ground);
+}
+.cta h2{ font-size:clamp(2rem,4.4vw,3.2rem); max-width:26ch; }
+.cta .codeblock{ margin-top:2.4rem; text-align:left; max-width:38rem; width:100%; }
+.cta .fineprint{ margin-top:2rem; font-size:0.82rem; color:var(--ink-soft); font-family: ui-monospace,"SF Mono",Consolas,monospace; }
+
+/* progress rail */
+.rail{
+  position:fixed; right:1.4rem; top:50%; transform:translateY(-50%);
+  display:flex; flex-direction:column; gap:0.55rem; z-index:20;
+}
+.rail a{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--rule); border:none; padding:0; cursor:pointer;
+  transition:background 0.2s ease, transform 0.2s ease;
+}
+.rail a.current{ background:var(--brass); transform:scale(1.4); }
+@media (max-width:700px){ .rail{ display:none; } }
+
+@media (prefers-reduced-motion:no-preference){
+  section.slide{ animation: rise 0.7s ease both; animation-timeline: view(); animation-range: entry 0% cover 30%; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(14px);} to{ opacity:1; transform:none; } }
+}
+</style>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Two real recovery gaps. <span class="arrow-word">Filed, fixed, re-verified.</span></h1>
+  <p class="lede">The <a href="pentaho-sql-recovery-for-data-engineers.html" style="color:inherit;">Pentaho + SQL recovery deck</a> documented an honest gap — AdventureWorks' SQL files all failed to
+  parse — as a limit, not hidden. It became GitHub issue #3. A second gap, `StreamLookup` steps
+  falling through to <code class="mono">Unmapped</code>, became issue #2. Both are closed, and this
+  deck reruns the exact repro shapes from each issue against the fixed pipeline, live.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">issue #2 — StreamLookup → Unmapped</span><span class="sep mono">·</span>
+    <span class="chip bad">issue #3 — # comments / no ; between statements</span><span class="sep mono">→</span>
+    <span class="chip hot">fixed</span><span class="sep mono">→</span>
+    <span class="chip hot">re-verified against the original repro</span>
+  </div>
+  <div class="byline"><span class="dot"></span> github.com/alexeyban/EKOS/issues/2 · /issues/3</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the gaps</div>
+  <div class="eyebrow">What was actually broken</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:26ch;">Two real ETL scripts, two silent recovery failures.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">Both bugs were found the same way the recovery deck
+      found them originally: run EKOS cold against real files, don't fabricate anything to paper
+      over a gap, and report exactly what didn't map.</p>
+      <ul class="facts" style="margin-top:1.6rem;">
+        <li><span class="k">Issue #2</span><span class="v"><code class="mono">StreamLookup</code> — one of the most common real-world Kettle step types — had no match arm in <code class="mono">map_step</code>, so it fell through to <code class="mono">Unmapped</code>.</span></li>
+        <li><span class="k">Issue #3</span><span class="v">MySQL <code class="mono">#</code> line comments broke the tokenizer outright; hand-written scripts with no <code class="mono">;</code> between statements failed the whole file, not just one statement.</span></li>
+      </ul>
+    </div>
+    <div class="codeblock">
+      <div class="tag">the exact failure signatures</div>
+<pre style="margin:0;"><span class="c"># issue #3, root cause 1</span>
+sqlparser error: <span class="bad">Expected: an SQL statement, found: #</span>
+
+<span class="c"># issue #3, root cause 2</span>
+sqlparser error: <span class="bad">Expected: end of statement, found: update</span>
+
+<span class="c"># issue #2</span>
+node_type: <span class="bad">"Unmapped"</span>
+reason: "unrecognized step type: StreamLookup"</pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / fix — dialects</div>
+  <div class="eyebrow">Issue #3, root cause 1</div>
+  <h2>Select the right dialect instead of guessing at ANSI SQL.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      RFC 0031 made SQL dialect selection pluggable and config-driven — a per-file
+      <code class="mono">[[recover.sql.dialect-rules]]</code> glob resolves which
+      <code class="mono">SqlDialectParser</code> to use, instead of every recovery pass
+      hardcoding <code class="mono">GenericDialect</code>. <code class="mono">MySqlDialect</code>
+      already tokenizes <code class="mono">#</code>-style comments correctly — the fix is picking
+      it, not writing a new tokenizer.
+    </p>
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">Registry</span><span class="v"><code class="mono">generic</code>, <code class="mono">mysql</code>, <code class="mono">postgres</code> — a new dialect crate plus one registry line, same pattern as every <code class="mono">Observer</code> plugin.</span></li>
+      <li><span class="k">Config</span><span class="v"><code class="mono">ekos.toml</code>: <code class="mono">path-glob = "*MySQL*/*.sql"</code> → <code class="mono">dialect = "mysql"</code>.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / fix — statement_repair</div>
+  <div class="eyebrow">Issue #3, root cause 2</div>
+  <h2>A fallback that only ever runs after parsing has already failed.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">crates/recovery/src/statement_repair.rs</div>
+<pre style="margin:0;"><span class="k">let</span> stmts = <span class="k">match</span> Parser::parse_sql(dialect, sql) {
+    Ok(s) => s,
+    Err(first_err) => {
+        <span class="c">// only after the unmodified text
+        // has already failed to parse</span>
+        <span class="k">let</span> repaired =
+            ensure_statement_separators(sql);
+        Parser::parse_sql(dialect, &amp;repaired)
+            .unwrap_or_else(|_| { <span class="c">/* ... */</span> vec![] })
+    }
+};</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">
+        Hand-written scripts often separate statements with a blank line instead of
+        <code class="mono">;</code> — <code class="mono">sqlparser</code> requires the explicit
+        separator. Inserting one unconditionally would risk corrupting a legitimate
+        <code class="mono">UNION ALL SELECT ...</code> chain, which also starts a line with
+        <code class="mono">SELECT</code>. Restricting the repair to a retry-after-failure means it
+        can never touch input that already parses correctly.
+      </p>
+      <ul class="facts" style="margin-top:1.6rem;">
+        <li><span class="k">Safety net</span><span class="v">Tracks paren depth and set-operation keywords (<code class="mono">UNION</code>/<code class="mono">INTERSECT</code>/<code class="mono">EXCEPT</code>) so multi-line constructs are never split.</span></li>
+        <li><span class="k">Shared</span><span class="v">Wired into both <code class="mono">SqlAnalyzerPass</code> (DDL) and <code class="mono">SqlTransformAnalyzerPass</code> (DML) — one fix, two consumers.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / fix — StreamLookup</div>
+  <div class="eyebrow">Issue #2</div>
+  <h2><code class="mono" style="font-family:inherit;">StreamLookup</code> is a left join. Now it's modeled as one.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      Kettle's <code class="mono">StreamLookup</code> XML has no <code class="mono">join_type</code>
+      field, unlike <code class="mono">DatabaseJoin</code>/<code class="mono">MergeJoin</code> —
+      because a stream lookup is semantically always a left join against the lookup stream on the
+      configured key(s). The fix reuses the existing join-extraction shape and forces
+      <code class="mono">JoinKind::Left</code>, rather than adding a new IR variant.
+    </p>
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">Before</span><span class="v"><code class="mono">TransformNode::Unmapped { reason: "unrecognized step type: StreamLookup" }</code></span></li>
+      <li><span class="k">After</span><span class="v"><code class="mono">TransformNode::Join { kind: Left, keys: [...] }</code> — same evidence-backed shape as every other join.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / re-verified, live</div>
+  <div class="eyebrow">Not a unit test claim — the same repro shape, run for real</div>
+  <h2>Both issues' exact scenarios, through the real pipeline, today.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">$ ekos ekl "FIND Object WHERE kind = 'Table'"</div>
+<pre style="margin:0;">id                                    name                        kind
+45590d6b-...                          eae_data_management_mmjja  Table
+b4206f56-...                          testing_scenarios          Table
+
+2 row(s).</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">ekos_transformation_explain — fact_sales.ktr</div>
+<pre style="margin:0;">{ <span class="k">"node_type"</span>: <span class="s">"Join"</span>,
+  <span class="k">"summary"</span>: <span class="s">"Left joins on
+    [[\"SalesTerritoryKey\",\"SalesTerritoryKey\"]]"</span>,
+  <span class="k">"evidence"</span>: [{ <span class="k">"fragment"</span>:
+    <span class="s">"Left JOIN ON [(\"SalesTerritoryKey\",
+    \"SalesTerritoryKey\")]"</span> }] }</pre>
+    </div>
+  </div>
+  <p class="lede">The first: a scratch <code class="mono">DB Scripts/Destination MySQL/</code> +
+  <code class="mono">Source MSSQL/</code> fixture reproducing both of issue #3's root causes —
+  <code class="mono">#</code> comments in one file, zero semicolons across three statements in the
+  other — recovers both tables. The second: a real 3-step <code class="mono">.ktr</code>
+  (<code class="mono">TableInput → StreamLookup → TableOutput</code>) explained via a live MCP
+  JSON-RPC call, with the join key cited as evidence straight from the file.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / coverage, before vs. after</div>
+  <div class="eyebrow">The numbers that moved</div>
+  <h2>Zero fabricated data either way — the difference is what recovers.</h2>
+  <table class="ttable">
+    <thead><tr><th>Fixture</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Dialect-mixed DB Scripts (issue #3 repro)</td><td class="bad">0/2 tables recovered</td><td class="good">2/2 tables recovered</td></tr>
+      <tr><td class="tool">fact_sales.ktr, 3 steps (issue #2 repro)</td><td class="bad">66% mapped (StreamLookup → Unmapped)</td><td class="good">100% mapped</td></tr>
+    </tbody>
+  </table>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">2</div><div class="label">GitHub issues closed</div></div>
+    <div class="stat"><div class="num">5</div><div class="label">new regression tests</div></div>
+    <div class="stat"><div class="num"><span style="color:var(--slate);">0</span></div><div class="label">already-working inputs touched by either fix</div></div>
+  </div>
+</section>
+
+<section class="slide cta" id="s8">
+  <div class="eyebrow">Try it</div>
+  <h2>File the gap you find. It becomes the next fix, verified the same way.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># recover a dialect-mixed estate — config-driven, per file</span>
+$ cat ekos.toml
+[[recover.sql.dialect-rules]]
+path-glob = "*MySQL*/*.sql"
+dialect = "mysql"
+
+<span class="c"># then the usual pipeline</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Doc</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Demo Acts 11 &amp; 12</td><td class="desc"><code class="mono">demo/DEMO.md</code> — full repro + verification steps</td></tr>
+      <tr><td class="tool">Issue #2 / #3</td><td class="desc">github.com/alexeyban/EKOS/issues (closed)</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · RFC 0031 (pluggable SQL dialects) · statement_repair · Pentaho StreamLookup → Join · github.com/alexeyban/EKOS</div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+  var sections = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  if(!('IntersectionObserver' in window)) return;
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){
+        var idx = sections.indexOf(e.target);
+        links.forEach(function(l,i){ l.classList.toggle('current', i===idx); });
+      }
+    });
+  }, { threshold: 0.55 });
+  sections.forEach(function(s){ if(s) io.observe(s); });
+})();
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@
 into an evidence-backed knowledge ledger, then serves it read-only through
 MCP tools. This demo shows two different ways Claude Code consumes that
 ledger — **skills** (methods loaded inline into any session) and **custom
-subagents** (dedicated personas with a scoped toolset) — across eight acts
+subagents** (dedicated personas with a scoped toolset) — across twelve acts
 that run against the presenter's real, live estate. Nothing here is staged
 data; every query hits the actual compiled ledger.
 
@@ -369,6 +369,86 @@ call into `ekos mcp serve` — returned `{"decision": "confirmed", "status": "re
 relationship's `status` property was verified persisted (`crates/cli/src/commands/mcp.rs`'s own
 test suite proves this directly; the live run confirmed the tool call itself succeeds end-to-end
 against a real committed ledger).
+
+---
+
+## Act 11 — Dialect-aware recovery, before and after (estate-scout)
+
+**What this proves:** a real bug filed against this project (GitHub issue #3) — SQL scripts
+failing to recover entirely because of MySQL `#` comments and hand-written scripts missing `;`
+between statements — is now fixed, verified against the exact repro shape from the issue.
+
+**Say:** *"Use the estate-scout agent: find every Table object recovered from the dialect-mixed
+DB Scripts fixture, and tell me which files they came from."*
+
+**Activates:** `estate-scout`.
+
+**Expected calls:** `ekos_ekl "FIND Object WHERE kind = 'Table'"` → `ekos_state` per result to
+show the source file.
+
+**Wow line:** *"Two files that used to recover zero tables between them — one with MySQL's `#`
+comments, one with no semicolons separating three statements — now both recover cleanly, with
+zero fabricated data. The fix isn't a guess; it's a fallback that only ever triggers after the
+unmodified text has already failed to parse, so it can't touch anything that already worked."*
+
+**Verified reality:** ran for real this session — a scratch workspace with two files reproducing
+issue #3's exact repro shape (`DB Scripts/Destination MySQL/create.eae_data_management_mmjja.sql`
+with `#`-style line comments, `DB Scripts/Source MSSQL/transactional.testing.scenarios.sql` with
+a `CREATE TABLE` / `UPDATE` / `SELECT` sequence and no `;` anywhere), a `[[recover.sql.dialect-
+rules]]` entry routing the MySQL-path file to the `mysql` dialect (the MSSQL-path file stays on
+`generic`, deliberately, to prove the *statement_repair* fallback — not dialect selection — is
+what fixes the second file). Full `ekos build && recover && resolve && compile && commit` run,
+then a real `ekos ekl` query against the committed ledger:
+
+```
+$ ekos ekl "FIND Object WHERE kind = 'Table'"
+id                                    name                        kind
+45590d6b-e317-4285-ac93-4b85929fae4d  eae_data_management_mmjja  Table
+b4206f56-f7b3-42d6-aa25-f15511987976  testing_scenarios          Table
+```
+
+Both tables recovered — the MySQL file via dialect selection, the MSSQL file via the
+`statement_repair` fallback inserting a synthetic `;` before `UPDATE`/`SELECT`. Before the fix
+(`GenericDialect` on both, no repair fallback), both files failed outright and this query
+returned 0 rows.
+
+---
+
+## Act 12 — Pentaho `StreamLookup`, no longer a blind spot (legacy-logic-recoverer)
+
+**What this proves:** the second bug filed against this project (GitHub issue #2) —
+`StreamLookup`, one of the most common real-world Kettle step types, silently falling through to
+`Unmapped` — is fixed, and the recovered semantics (a left join on the configured key) are
+correct, not just "no longer blank."
+
+**Say:** *"Use the legacy-logic-recoverer agent: explain what `fact_sales.ktr` does."*
+
+**Activates:** `legacy-logic-recoverer`.
+
+**Expected calls:** `ekos_search`/`ekos_ekl` to find the job's `Sink` object id →
+`ekos_transformation_explain` on it.
+
+**Wow line:** *"That `StreamLookup` step used to be a dead end in the graph — `Unmapped`, no
+semantics, just raw XML. Now it's a real `Join` node, with the actual lookup key it joins on
+cited as evidence, straight from the file."*
+
+**Verified reality:** ran for real this session — a scratch `.ktr` with the exact 3-step shape
+from the issue's real-world example (`fact_sales.ktr`: `TableInput` → `StreamLookup` →
+`TableOutput`, keyed on `SalesTerritoryKey`), through the full pipeline, then a real
+`ekos_transformation_explain` JSON-RPC call into `ekos mcp serve`:
+
+```
+← result { "step_count": 3, "steps": [
+  { "node_type": "Sink",   "summary": "writes to fact_sales" },
+  { "node_type": "Join",   "summary": "Left joins on [[\"SalesTerritoryKey\",\"SalesTerritoryKey\"]]",
+    "evidence": [{ "fragment": "Left JOIN ON [(\"SalesTerritoryKey\", \"SalesTerritoryKey\")]" }] },
+  { "node_type": "Source", "summary": "reads from sales_order_header" }
+]}
+```
+
+`recover`'s own coverage counter confirms it structurally, not just via this one query: `3 total,
+100% mapped` — before the fix, the `StreamLookup` step alone would have been the 1 `Unmapped`
+node dragging that number to 66%.
 
 ---
 

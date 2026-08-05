@@ -3,11 +3,13 @@
 **Prompt:** Have I ever hit FTS5 duplicate-row problems before? How did I fix it?
 
 ```
-Yes — you hit this on 2026-07-17 while building EKOS's ledger (source: `devlog_17.md`).
+Yes — twice, both real, both slightly different:
 
-**The problem:** `INSERT OR REPLACE` doesn't work on FTS5 virtual tables because they have no unique constraints — it just plain-inserts every time. This silently accumulated 44,796 FTS rows for only 22,023 real objects, so searches returned duplicate results.
+**1. FTS5 `INSERT OR REPLACE` doesn't actually replace rows** (devlog_17.md, RFC 0015 work)
+FTS5 tables have no unique constraints, so v1's "upsert on reindex" logic silently duplicated a row on every reindex — the live index ended up with 44,796 rows for 22,023 objects, and searches returned duplicates. Fix: don't try to upsert into FTS5 at all. RFC 0015's v2 schema switched to a **contentless FTS5 index keyed by entry rowid** (`contentless_delete=1`), which structurally can't duplicate — delete-then-insert by rowid instead of relying on FTS5's own replace semantics.
 
-**The fix:** key the FTS index by rowid and do DELETE+INSERT instead of relying on `INSERT OR REPLACE` (or alternatively use `contentless_delete=1`).
+**2. FTS5 `MATCH` syntax characters caused query errors, which is adjacent but different** (devlog_6.md, Phase 10)
+Not a duplicate-row bug, but the same "FTS5 doesn't behave like a normal table" family: `-`, `:`, `"` are operator characters to FTS5's query parser (NOT, column filter, phrase delimiter), so raw user text sent into `MATCH` could throw a SQL error. Fixed in `Ledger::find_objects` by escaping any query with special characters into a quoted literal phrase, passing plain alphanumeric/`*` queries through unescaped so prefix search still works.
 
-(Side note recorded in the same lesson, unrelated but from the same debugging session: `zstd::encode_all(data, 19)` was also costing ~45ms/record from reallocating match tables — fixed by reusing one `zstd::bulk::Compressor`, dropping it to ~2.3ms/record.)
+Bottom line if you hit this again: **never treat FTS5 as a normal indexed table** — it has no unique constraints (so upsert-by-reindex duplicates silently) and its query string is a mini query language (so raw text needs escaping). The durable fix that generalizes is going contentless and keying by rowid, not patching the upsert logic.
 ```

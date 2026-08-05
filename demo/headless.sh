@@ -98,5 +98,17 @@ if want 7 "$@"; then
   run_act 7 "Design a CDC architecture for ingesting order data into a lakehouse. Base it on my past work — my prior CDC projects, my mistakes, my lessons." estate-architect \
     "mcp__ekos__ekos_status,mcp__ekos__ekos_search,mcp__ekos__ekos_ekl,mcp__ekos__ekos_neighborhood,mcp__ekos__ekos_dependents,mcp__ekos__ekos_state,mcp__ekos__ekos_diff,Read"
 fi
+if want 8 "$@"; then
+  run_act 8 "Where is authentication implemented in my estate? Then, if I replace PostgreSQL with Cosmos DB, what breaks?" impact-analyst \
+    "mcp__ekos__ekos_search,mcp__ekos__ekos_ekl,mcp__ekos__ekos_dependents,mcp__ekos__ekos_neighborhood,mcp__ekos__ekos_state,mcp__ekos__ekos_impact"
+fi
+
+# Acts 9-12 are deliberately NOT single-prompt entries here, same reasoning DEMO.md already
+# documents for 9/10: each needs its own scratch workspace (a real .ktr/SQL fixture, a full
+# `ekos build/recover/resolve/compile/commit` run, sometimes an `ekos identity scan`) built
+# *before* any prompt can run against it — there's no single `$WORKSPACE_ROOT` query that
+# reproduces them. DEMO.md's "Verified reality" notes under each act are the record of that
+# setup + the real command/JSON-RPC output it produced; re-run the setup steps there directly
+# rather than trying to fold them into this runner's single-prompt shape.
 
 echo "Done. Transcripts in $OUT_DIR"

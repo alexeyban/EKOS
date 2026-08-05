@@ -3,27 +3,31 @@
 **Prompt:** Use the estate-scout agent: find every database table related to orders across my estate, and show me what one of them is connected to.
 
 ```
-The estate-scout came back with results. Note: all of these are test fixtures, not production tables.
+## Order-related tables found
 
-**Order-related tables found (all in `EKOS/tests/fixtures/`, not real production schemas):**
+**E-commerce fixture** (`EKOS/tests/fixtures/ecommerce.sql`)
+- `orders`, `order_items`
 
-| Table | File | Notes |
-|---|---|---|
-| `orders` | `ecommerce.sql` | generic e-commerce fixture |
-| `order_items` | `ecommerce.sql` | line items for the above |
-| `Orders` | `northwind.sql` | classic Northwind demo schema |
-| `"Order Details"` | `northwind.sql` | Northwind line items |
+**Northwind fixture** (`EKOS/tests/fixtures/northwind.sql`)
+- `Orders` (×2 — appears twice, likely from repeated compilation), `"Order Details"` (×2)
 
-These are sample/test data used for exercising EKOS itself — the ledger didn't surface any orders tables from your other real projects (DeFi Sentinel, azure-data-project, etc.), so either none exist there or they haven't been ingested.
+## Neighborhood of `orders` (e-commerce)
 
-**Connections of `Orders` (Northwind)** — the most connected one, 4 direct FKs:
+```
+customers (parent)
+    ↓ FK customer_id
+  orders  ←────────────── central table
+    ├─ order_items  ← FK order_id
+    │     └─ products  ← FK product_id (via order_items)
+    └─ payments     ← FK order_id
+```
 
-- **"Order Details"** ← `OrderID` (line items: product, price, qty, discount)
-- **Customers** ← `CustomerID` (company/contact/address info)
-- **Employees** ← `EmployeeID` (with self-referential `ReportsTo` hierarchy, and a link to `EmployeeTerritories`)
-- **Shippers** ← `ShipVia`
+- `orders.customer_id → customers.id`
+- `order_items.order_id → orders.id`
+- `order_items.product_id → products.id`
+- `payments.order_id → orders.id`
 
-Transitively, through "Order Details" it also reaches **Products**, and through Customers it reaches **CustomerCustomerDemo**. Classic star-schema shape: Orders as fact table, Customers/Employees/Shippers/Products as dimensions.
+Every edge is backed by a `ForeignKey` relationship in the ledger with cited fragment evidence from `ecommerce.sql`. `orders` sits at the hub of the e-commerce domain — tying customer identity, line-item/product detail, and payment records together.
 
-Want me to check if any of your other repos (azure-data-project, adf-pipelines, cdc-lab) have real order tables that just haven't been indexed into EKOS yet?
+One caveat: the found tables are all from test fixtures (`tests/fixtures/ecommerce.sql`, `tests/fixtures/northwind.sql`), not a production estate — if you have real production databases compiled into the ledger, let me know which project/workspace and I can re-scope the search.
 ```
