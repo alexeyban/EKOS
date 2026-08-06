@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS — The AI-Native Enterprise Knowledge Compiler</title>
+<meta name="description" content="EKOS compiles enterprise systems into an evidence-backed, append-only knowledge ledger any AI agent can query safely — proven cold against real repos, and audited live by Claude Code using EKOS's own MCP server.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+  <a href="#s10"></a><a href="#s11"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>The compiler enterprise knowledge needs <span class="arrow-word">before</span> AI can be trusted with it.</h1>
+  <p class="lede">Every AI agent an enterprise deploys today reasons over raw files, stale wikis, or a
+  vector index that can't tell fact from guess. EKOS compiles the enterprise itself — code, SQL,
+  ETL, Git history, docs — into an append-only, evidence-backed knowledge ledger. Every answer an
+  agent gives cites the exact source it came from, or it doesn't answer.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">Enterprise systems</span><span class="sep mono">→</span>
+    <span class="chip">Knowledge Compiler</span><span class="sep mono">→</span>
+    <span class="chip hot">Evidence-backed ledger</span><span class="sep mono">→</span>
+    <span class="chip">MCP</span><span class="sep mono">→</span>
+    <span class="chip hot">Any AI agent</span>
+  </div>
+  <div class="byline">
+    <span class="dot"></span> Rust 2024 · Apache-style open source ·
+    <a href="https://github.com/alexeyban/EKOS" target="_blank" rel="noopener">github.com/alexeyban/EKOS</a>
+    · <a href="https://x.com/ekosproject" target="_blank" rel="noopener">@ekosproject</a>
+  </div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / problem</div>
+  <div class="eyebrow">The knowledge is already there. Nobody compiles it.</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:26ch;">Enterprises don't lack information. They lack a compiler for it.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      Business logic sits in a Pentaho job nobody's opened in years, a stored procedure with no
+      comments, a Confluence page that stopped being updated the day its author left. Every
+      system holds a partial, decaying truth — and every AI assistant pointed at that mess
+      inherits the same fragmentation, then papers over the gaps with a confident-sounding guess.
+    </p>
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">Scattered</span><span class="v">SQL in one repo, ETL XML in another, tribal knowledge in nobody's head anymore</span></li>
+      <li><span class="k">Untraceable</span><span class="v">A dashboard number nobody can trace back to the transformation that produced it</span></li>
+      <li><span class="k">Perishable</span><span class="v">The one engineer who understood the legacy pipeline leaves; the code stays, unread</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / why now</div>
+  <div class="eyebrow">The AI-native inflection point</div>
+  <h2>Agents don't fail because they're not smart. They fail because they're not grounded.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      Every enterprise is wiring AI agents into their workflows right now — and every one of those
+      agents is only as trustworthy as the context it's given. Vector-search RAG retrieves
+      similar-looking text; it can't tell you a fact is true, only that it's nearby. MCP
+      (Model Context Protocol) is emerging as the standard wire format for how agents reach
+      tools and data — but a protocol is only as good as what's on the other end of it.
+    </p>
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">RAG's limit</span><span class="v">Similarity is not truth — a fuzzy match is not evidence</span></li>
+      <li><span class="k">MCP's gap</span><span class="v">A universal wire protocol with nothing structurally trustworthy behind most of its endpoints yet</span></li>
+      <li><span class="k">EKOS's bet</span><span class="v">Be the evidence-backed thing an agent talks to over MCP — not another retrieval index</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / product</div>
+  <div class="eyebrow">How it works</div>
+  <h2>Six verbs. Every one deterministic. Nothing silently dropped.</h2>
+  <div class="flow">
+    <div class="node"><div class="l1">01</div><div class="l2">init</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">02</div><div class="l2">build</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">03</div><div class="l2">recover</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">04</div><div class="l2">resolve</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">05</div><div class="l2">compile</div></div>
+    <div class="arrow">→</div>
+    <div class="node active"><div class="l1">06</div><div class="l2">commit</div></div>
+  </div>
+  <ul class="facts" style="margin-top:2.2rem;">
+    <li><span class="k">Observe</span><span class="v">Read raw content — code, SQL, Kettle XML, Git, Confluence, PDFs — as content-addressable artifacts. No interpretation yet.</span></li>
+    <li><span class="k">Recover</span><span class="v">Per-source analyzers turn artifacts into typed knowledge, each fact citing the exact evidence it came from.</span></li>
+    <li><span class="k">Resolve + commit</span><span class="v">Merge duplicate concepts, then append the result to a ledger that is never rewritten — only added to.</span></li>
+  </ul>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / proof, not a slide claim</div>
+  <div class="eyebrow">Tested cold against real code, not fixtures</div>
+  <h2>Cloned two real GitHub ETL projects. Ran the full pipeline. Cross-checked every claim.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">transforms/load-fact-coded-values.ktr</div>
+<pre style="margin:0;">Object :0  node_type: <span class="k">"Source"</span>
+  object_name: "omrs_obs"
+Object :1  node_type: <span class="k">"Sink"</span>
+  object_name: "fact_patient_coded_value"
+  columns: [patient_id, gender_id, ... ]</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">
+        The real Kettle steps: <code class="mono">Import Coded Obs</code> → <code class="mono">Write
+        Coded Obs</code>. Exact match — parsed, not generated.
+      </p>
+      <div class="stat-grid" style="margin-top:1rem;">
+        <div class="stat"><div class="num">375</div><div class="label">objects, one real repo</div></div>
+        <div class="stat"><div class="num">100%</div><div class="label">SQL nodes mapped</div></div>
+        <div class="stat"><div class="num">0</div><div class="label">facts fabricated on parse failure</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / ai interaction log — part 1</div>
+  <div class="eyebrow">Claude Code, using EKOS's own MCP server, found a real bug in EKOS</div>
+  <h2>Not a demo. A live audit, by an Anthropic model, of its own infrastructure.</h2>
+  <p class="lede">This deck itself was built inside a Claude Code session backed by Anthropic's
+  Claude models. While proving EKOS's Pentaho/SQL recovery worked, that same session queried
+  EKOS's <code class="mono">ekos_dependents</code> MCP tool on a table it had already shown a
+  real ETL job writes to — and got back <code class="mono">dependents_count: 0</code>.</p>
+  <div class="codeblock" style="max-width:44rem; margin-top:1.6rem;">
+    <div class="tag">live JSON-RPC over stdio — before the fix</div>
+<pre style="margin:0;"><span class="k">→ tools/call</span> ekos_dependents { "id": "...fact_patient_coded_value" }
+
+<span class="bad">← result</span> { "target": { "kind": "Table" },
+           "dependents_count": 0, "dependencies_count": 0 }</pre>
+  </div>
+  <p class="lede" style="font-size:0.98rem;">No hand-waving, no "that's probably fine" — the agent
+  treated its own product's wrong answer as a bug to root-cause, the same way it would for a
+  user's code.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / ai interaction log — part 2</div>
+  <div class="eyebrow">Root-caused, fixed, tested, then re-verified live</div>
+  <h2>The agent didn't just patch the symptom — it found two independent bugs.</h2>
+  <div class="two-col">
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">Bug 1</span><span class="v">Cross-system identity resolution skipped the single most confident match it could ever see — an exact name shared between a SQL table and the Pentaho step that writes it</span></li>
+      <li><span class="k">Bug 2</span><span class="v">Impact/dependents queries had no concept of "unconfirmed" — thousands of unreviewed hypotheses were being traversed as if they were facts</span></li>
+      <li><span class="k">Fix</span><span class="v">Two small, targeted patches + 6 new tests, written before the fix, per the repo's own test-first workflow</span></li>
+    </ul>
+    <div class="codeblock">
+      <div class="tag">same query, after the fix + human-style review</div>
+<pre style="margin:0;"><span class="k">→ tools/call</span> ekos_dependents { "id": "...fact_patient_coded_value" }
+
+<span class="s">← result</span> { "dependents": [{
+  "name": "load-fact-coded-values.ktr:1",
+  "relationship": "SameAs",
+  "properties": { "confidence": 0.95,
+    "status": "confirmed" } }],
+  "dependents_count": 1 }</pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / engineering discipline</div>
+  <div class="eyebrow">Why a technical buyer should trust this codebase</div>
+  <h2>RFC-first. Test-first. Append-only. Zero shortcuts on the ledger's invariants.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">548</div><div class="label">tests passing, 0 failing</div></div>
+    <div class="stat"><div class="num">30</div><div class="label">accepted RFCs</div></div>
+    <div class="stat"><div class="num">31</div><div class="label">devlogs — full build history</div></div>
+    <div class="stat"><div class="num">0</div><div class="label"><span class="mono">unsafe</span> without a written justification</div></div>
+  </div>
+  <p class="lede" style="margin-top:2.2rem;">Every capability is designed in writing before it's
+  built. Every devlog captures what shipped, why, and what broke — including this session's own
+  bug fix. Nothing here is "trust me" — clone it, run <code class="mono">cargo test --workspace</code>,
+  read the RFC.</p>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / who this is for</div>
+  <div class="eyebrow">Positioning</div>
+  <h2>For teams who need an AI agent to be right about their business, not just fluent about it.</h2>
+  <div class="inv-grid">
+    <div class="inv"><h3>Data &amp; platform teams</h3><p>Inheriting legacy ETL (Pentaho, SQL, stored procs) with no owner and no docs — get an evidence-backed explanation instead of reverse-engineering XML by hand.</p></div>
+    <div class="inv"><h3>Teams building AI agents</h3><p>Need grounded enterprise context, not another vector index that can't distinguish a fact from a plausible guess.</p></div>
+    <div class="inv"><h3>Engineering orgs, generally</h3><p>Any team where "what does this actually do, and how do you know" keeps landing on a person instead of a system.</p></div>
+    <div class="inv warn"><h3>Not for</h3><p>Teams wanting a BI dashboard or a data catalog with a nice UI — EKOS is the compiler underneath that kind of tool, not a replacement for one.</p></div>
+  </div>
+</section>
+
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / where this stands today</div>
+  <div class="eyebrow">Honest about the stage</div>
+  <h2>Early. Open source. Built in public, bugs and all.</h2>
+  <p class="lede">EKOS is early-stage and open source — this deck's own §05–06 is the point: the
+  product is far enough along to be genuinely useful, and immature enough that testing it against
+  real, uncontrolled data still finds real bugs, which get fixed in the open. Real/tested
+  connectors today: file, Git, GitHub, Confluence, local docs (PDF/DOCX/etc.), Pentaho, crypto.
+  Several more (Salesforce, SAP, Oracle, Snowflake, Fabric) are scaffolded but not yet proven
+  against live accounts.</p>
+  <div class="hero-diagram" style="margin-top:2.2rem;">
+    <span class="chip hot">Design partners wanted</span><span class="sep mono">·</span>
+    <span class="chip hot">Contributors wanted</span><span class="sep mono">·</span>
+    <span class="chip">Feedback wanted</span>
+  </div>
+</section>
+
+<section class="slide cta" id="s11">
+  <div class="eyebrow">Try it</div>
+  <h2>Point an agent at your enterprise's real knowledge — not its raw files.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ git clone https://github.com/alexeyban/EKOS.git &amp;&amp; cd EKOS/ekos
+$ cargo build --workspace
+
+<span class="c"># compile a workspace once</span>
+$ ekos init &amp;&amp; ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># hand it to Claude, or any MCP-speaking agent</span>
+$ ekos mcp serve --workspace .</pre>
+  </div>
+  <div class="fineprint">
+    EKOS · Rust 2024 · MIT-licensed ·
+    <a href="https://github.com/alexeyban/EKOS" target="_blank" rel="noopener">github.com/alexeyban/EKOS</a>
+    · <a href="https://x.com/ekosproject" target="_blank" rel="noopener">@ekosproject</a> for updates
+  </div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

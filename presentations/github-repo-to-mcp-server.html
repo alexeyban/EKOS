@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compile GitHub Repository → MCP Server — EKOS</title>
+<meta name="description" content="A scrollable deck on EKOS's GitHub connector + MCP server: compiling repo knowledge into an evidence-backed ledger AI agents can query.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Compile a GitHub repository<br>into an <span class="arrow-word">MCP server</span>.</h1>
+  <p class="lede">Not a wrapper around the GitHub API. A compiler pass — issues, PRs, files, and their
+  real relationships become append-only, evidence-backed knowledge that any MCP-speaking agent
+  can query directly.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">GitHub repo</span><span class="sep mono">→</span>
+    <span class="chip">Observer</span><span class="sep mono">→</span>
+    <span class="chip">Recovery pass</span><span class="sep mono">→</span>
+    <span class="chip">Ledger</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos mcp serve</span><span class="sep mono">→</span>
+    <span class="chip">Claude / any agent</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0013 · RFC 0020 — Rust 2024, Cargo workspace</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / problem</div>
+  <div class="eyebrow">Why this exists</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:20ch;">Agents read your repo. They don't understand it.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      A coding agent can grep your issues and diff your PRs, but it re-derives the same facts
+      every session: which files a PR actually touched, which issue a merge closed, what
+      depends on what. None of it persists, and none of it is traceable back to a source.
+    </p>
+    <ul class="facts">
+      <li><span class="k">Today</span><span class="v">Free-text issues/PRs, re-read and re-guessed on every prompt.</span></li>
+      <li><span class="k">Missing</span><span class="v">A structured "references X" relationship agents can query instead of infer.</span></li>
+      <li><span class="k">EKOS</span><span class="v">Compiles that relationship once, stores it with evidence, serves it over MCP.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / architecture</div>
+  <div class="eyebrow">The pipeline</div>
+  <h2>One compiler, four semantic primitives.</h2>
+  <p class="lede">Object · Relationship · Event · Evidence — everything GitHub emits gets mapped onto these before it ever reaches an agent.</p>
+  <div class="flow">
+    <div class="node"><div class="l1">Source</div><div class="l2">GitHub repo</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node active"><div class="l1">Observation</div><div class="l2">GitHubObserver</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node active"><div class="l1">Compiler pass</div><div class="l2">GitHubAnalyzerPass</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">Storage</div><div class="l2">Semantic Ledger</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">Runtime</div><div class="l2">read-only</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node active"><div class="l1">Interface</div><div class="l2">ekos mcp serve</div></div>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / observe</div>
+  <div class="eyebrow">Stage 1 — Observation</div>
+  <h2>Every issue and PR becomes one artifact.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">
+        <code class="mono">GitHubObserver</code> walks <code class="mono">GET /issues?state=all</code>
+        and <code class="mono">GET /pulls/{n}/files</code>, distinguishing issues from PRs the same
+        way GitHub's own API does. A <code class="mono">MockGitHubClient</code> exercises the real
+        mapping logic with zero network dependency — the same discipline used for every other
+        connector in the codebase.
+      </p>
+      <ul class="facts" style="margin-top:2rem;">
+        <li><span class="k">Emits</span><span class="v">One ObservationArtifact per issue/PR, target <code class="mono">"{owner}/{repo}#{number}"</code></span></li>
+        <li><span class="k">Config</span><span class="v"><code class="mono">[connectors.github]</code> — owner, repo, token env var</span></li>
+      </ul>
+    </div>
+    <div class="codeblock">
+      <div class="tag">observation-sdk / github</div>
+<pre style="margin:0;"><span class="k">pub struct</span> GitHubItem {
+    <span class="k">pub</span> number: u64,
+    <span class="k">pub</span> title: String,
+    <span class="k">pub</span> body: String,
+    <span class="k">pub</span> state: String,          <span class="c">// "open" | "closed"</span>
+    <span class="k">pub</span> is_pull_request: bool,
+    <span class="k">pub</span> files_changed: Vec&lt;String&gt;,
+}
+
+<span class="k">pub trait</span> GitHubClient: Send + Sync {
+    <span class="k">async fn</span> list_items(
+        &amp;self, owner: &amp;str, repo: &amp;str
+    ) -&gt; Result&lt;Vec&lt;GitHubItem&gt;, GitHubClientError&gt;;
+}</pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / compile</div>
+  <div class="eyebrow">Stage 2 — Recovery pass</div>
+  <h2>Text becomes traceable relationships.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">GitHubAnalyzerPass</div>
+<pre style="margin:0;"><span class="c">// PR → changed file</span>
+References(pr_id, file_id)
+  <span class="k">evidence:</span> <span class="s">"the PR's file-change entry"</span>
+
+<span class="c">// body text: "Fixes #12"</span>
+References(issue_47, issue_12)
+  <span class="k">evidence:</span> <span class="s">"body sentence containing keyword"</span>
+
+<span class="c">// deterministic id — stable across re-runs</span>
+Uuid::new_v5(NAMESPACE, <span class="s">"github:{owner}/{repo}#{n}"</span>)</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">
+        Every PR's <code class="mono">files_changed</code> becomes a <code class="mono">References</code>
+        edge to that file's object. Every recognized closing keyword — <em>closes, fixes, resolves</em> —
+        becomes a <code class="mono">References</code> edge between items. No LLM guesses at the
+        relationship; GitHub already told us what closed what.
+      </p>
+      <ul class="facts" style="margin-top:2rem;">
+        <li><span class="k">Idempotent</span><span class="v">Same item, same run, same object id — every re-<code class="mono">ekos recover</code> converges.</span></li>
+        <li><span class="k">Evidenced</span><span class="v">Every edge cites the exact file entry or body sentence that produced it.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / store</div>
+  <div class="eyebrow">Stage 3 — The ledger</div>
+  <h2>Append-only. Content-addressable. Never rewritten.</h2>
+  <div class="two-col">
+    <ul class="facts">
+      <li><span class="k">Object</span><span class="v">An Issue or PullRequest — named, typed, with its number/state/body excerpt as properties.</span></li>
+      <li><span class="k">Relationship</span><span class="v">A References edge — PR → file, or item → item via a closing keyword.</span></li>
+      <li><span class="k">Evidence</span><span class="v">The literal source text every conclusion traces back to — never optional.</span></li>
+      <li><span class="k">Event</span><span class="v">A timestamped fact in the append-only stream, replayable at any point in time.</span></li>
+    </ul>
+    <p class="lede" style="margin-top:0;">
+      The ledger never edits history — it only appends. That single invariant is what makes
+      <code class="mono">ekos_diff</code> possible downstream: "what has changed since T" is a
+      query over the log, not a guess from two snapshots.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / serve</div>
+  <div class="eyebrow">Stage 4 — <code class="mono" style="font-family:inherit;">ekos mcp serve</code></div>
+  <h2>Eleven tools. One read-only runtime.</h2>
+  <p class="lede">stdio, newline-delimited JSON-RPC 2.0 — the transport every MCP client already speaks. No network surface, no auth story, no new dependency.</p>
+  <table class="ttable">
+    <thead><tr><th>MCP tool</th><th>Answers</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">ekos_search</td><td class="desc">Find an object by name or kind</td></tr>
+      <tr><td class="tool">ekos_neighborhood</td><td class="desc">What's connected to this, N hops out</td></tr>
+      <tr><td class="tool">ekos_dependents</td><td class="desc">What breaks if this changes — incoming vs. outgoing edges</td></tr>
+      <tr><td class="tool">ekos_impact</td><td class="desc">Multi-hop blast radius across the whole graph</td></tr>
+      <tr><td class="tool">ekos_state</td><td class="desc">Reconstruct state as of any RFC 3339 timestamp</td></tr>
+      <tr><td class="tool">ekos_diff</td><td class="desc">What knowledge changed since T</td></tr>
+      <tr><td class="tool">ekos_ekl</td><td class="desc">Run a structured knowledge-query expression</td></tr>
+      <tr><td class="tool">ekos_status</td><td class="desc">Ledger entry / object / relationship counts</td></tr>
+      <tr><td class="tool">ekos_transformation_explain</td><td class="desc">What a legacy ETL/SQL transformation actually does, evidence per step</td></tr>
+      <tr><td class="tool">ekos_transformation_diff</td><td class="desc">Did a migration change a transformation's meaning</td></tr>
+      <tr><td class="tool">ekos_identity_review</td><td class="desc">Confirm/reject a cross-system identity match — the one write-capable tool</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / invariants</div>
+  <div class="eyebrow">Why an agent can trust it</div>
+  <h2>Four guarantees no vector index gives you.</h2>
+  <div class="inv-grid">
+    <div class="inv"><h3>Read-only Runtime</h3><p>The handler holds no write path — an agent can query the ledger but never mutate it.</p></div>
+    <div class="inv"><h3>Evidence-traceable</h3><p>Every Object and Relationship cites the exact source line that produced it — no unsourced claims.</p></div>
+    <div class="inv"><h3>Append-only</h3><p>Nothing is edited in place, so "what changed since T" is a real, replayable query.</p></div>
+    <div class="inv"><h3>Deterministic ids</h3><p>The same issue or PR resolves to the same object across every rebuild — no drift, no duplicates.</p></div>
+  </div>
+</section>
+
+<section class="slide cta" id="s9">
+  <div class="eyebrow">Try it</div>
+  <h2>Point an agent at your repo. Not the API — the compiled knowledge.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile the repo once</span>
+$ ekos build
+
+<span class="c"># serve it to any MCP client over stdio</span>
+$ ekos mcp serve --workspace .
+
+<span class="c"># point Claude Code / Claude Desktop at it — one line of config</span>
+{ <span class="s">"command"</span>: <span class="s">"ekos"</span>, <span class="s">"args"</span>: [<span class="s">"mcp"</span>, <span class="s">"serve"</span>] }</pre>
+  </div>
+  <div class="fineprint">EKOS · RFC 0013 (MCP Server) + RFC 0020 (GitHub Connector) · github.com/alexeyban/EKOS</div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

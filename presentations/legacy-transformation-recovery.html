@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reproduce Legacy ETL Logic, Verified — EKOS</title>
+<meta name="description" content="A scrollable deck on EKOS's Transformation IR: compiling Pentaho jobs, SQL, and stored procedures into one evidence-backed representation an AI agent can explain and diff.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Reproduce legacy ETL logic.<br><span class="arrow-word">Verified</span>, not guessed.</h1>
+  <p class="lede">A Pentaho step, a SQL <code class="mono">SELECT</code>, a <code class="mono">VIEW</code>,
+  and a stored procedure are all the same underlying idea — a transformation of data from sources
+  to a sink. EKOS compiles all of them into one shared, evidence-backed representation, so an AI
+  agent can explain what a legacy pipeline does and prove a migration didn't change its meaning.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">Pentaho .ktr/.kjb</span><span class="sep mono">+</span>
+    <span class="chip hot">SQL SELECT · VIEW · procedure</span><span class="sep mono">→</span>
+    <span class="chip">Transformation IR</span><span class="sep mono">→</span>
+    <span class="chip">Ledger</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos_transformation_explain / diff</span><span class="sep mono">→</span>
+    <span class="chip">Claude / any agent</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0027 · RFC 0028 · RFC 0029 — Rust 2024, Cargo workspace</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / problem</div>
+  <div class="eyebrow">Why this exists</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:22ch;">1000+ repos. Four data platforms. One Pentaho job nobody wants to open.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      A developer needs to reproduce an existing Pentaho job's business logic in a new pipeline —
+      with one rule changed — across an estate spanning GitHub, PostgreSQL, Databricks, Synapse,
+      an Informix database with no source repo, an outdated Confluence, and legacy Kettle ETL.
+      Today that means manually reading <code class="mono">.ktr</code>/<code class="mono">.kjb</code>
+      XML and hunting for tribal knowledge in Confluence.
+    </p>
+    <ul class="facts">
+      <li><span class="k">Today</span><span class="v">Read the XML by hand, guess at what a step means, hope Confluence still describes it.</span></li>
+      <li><span class="k">Missing</span><span class="v">One representation that a Pentaho step, a SQL query, and a stored procedure all compile into — so they can be compared.</span></li>
+      <li><span class="k">EKOS</span><span class="v">Compiles every format into a shared Transformation IR once, evidenced, queryable, diffable.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / architecture</div>
+  <div class="eyebrow">The Transformation IR</div>
+  <h2>Seven node kinds. Every format compiles into them.</h2>
+  <p class="lede">Building a separate extraction path per format would produce N incompatible semantic
+  models that can't be diffed against each other — which defeats the point. So everything maps into
+  one intermediate representation first.</p>
+  <ul class="facts" style="margin-top:2.4rem;">
+    <li><span class="k">Source</span><span class="v">A read from a table, view, or file — <code class="mono">TableInput</code>, a SQL <code class="mono">FROM</code> clause.</span></li>
+    <li><span class="k">Filter</span><span class="v">A row-filtering predicate — <code class="mono">FilterRows</code>, a SQL <code class="mono">WHERE</code> clause.</span></li>
+    <li><span class="k">Join</span><span class="v">Two streams merged on keys — <code class="mono">MergeJoin</code>/<code class="mono">DatabaseJoin</code>, a SQL <code class="mono">JOIN</code>.</span></li>
+    <li><span class="k">Aggregate</span><span class="v"><code class="mono">GroupBy</code>, a SQL <code class="mono">GROUP BY</code> with aggregate functions.</span></li>
+    <li><span class="k">Calculate</span><span class="v">A computed field — <code class="mono">Calculator</code>, a SQL scalar expression.</span></li>
+    <li><span class="k">Sink</span><span class="v">A write to a table, view, or file — <code class="mono">TableOutput</code>, a <code class="mono">CREATE VIEW</code> target.</span></li>
+    <li><span class="k">Unmapped</span><span class="v">Deliberate, not a placeholder — anything unparsed is recorded as evidenced fact, never silently dropped.</span></li>
+  </ul>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / observe</div>
+  <div class="eyebrow">Stage 1 — Parsing, deterministically</div>
+  <h2>Parsing an XML file is still a fact. Labeling its business meaning isn't.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">
+        Two independent parsers compile into the same <code class="mono">TransformNode</code>
+        enum — a Pentaho XML DOM walker (<code class="mono">roxmltree</code>) and a SQL AST walker
+        (<code class="mono">sqlparser-rs</code>, Postgres/T-SQL/Databricks dialects). The same
+        bytes always parse to the same graph, with zero judgment calls — that's what keeps this a
+        deterministic compiler pass, not an LLM guess.
+      </p>
+      <ul class="facts" style="margin-top:2rem;">
+        <li><span class="k">Stored procs</span><span class="v">Embedded SQL statements become real IR fragments; surrounding control flow becomes <code class="mono">Unmapped</code>, honestly.</span></li>
+        <li><span class="k">Coverage</span><span class="v">Reported per file as a percentage — how much of a legacy job maps to real nodes vs. unresolved gaps.</span></li>
+      </ul>
+    </div>
+    <div class="codeblock">
+      <div class="tag">crates/semantic/transform_ir.rs</div>
+<pre style="margin:0;"><span class="k">pub enum</span> TransformNode {
+    Source { object_name: String, columns: Vec&lt;String&gt; },
+    Filter { condition: String },
+    Join { left: NodeId, right: NodeId,
+           keys: Vec&lt;(String, String)&gt;, kind: JoinKind },
+    Aggregate { group_by: Vec&lt;String&gt;, aggs: Vec&lt;AggExpr&gt; },
+    Calculate { output: String, expr: String },
+    Sink { object_name: String, columns: Vec&lt;String&gt; },
+    <span class="c">// deliberate — never a silent drop</span>
+    Unmapped { raw: String, reason: String },
+}</pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / explain</div>
+  <div class="eyebrow">Ask what a legacy job does</div>
+  <h2><code class="mono" style="font-family:inherit;">ekos_transformation_explain</code> — every claim cites its source.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      Point the tool at a pipeline's <code class="mono">Sink</code> and it walks the chain of
+      real IR nodes feeding into it, root-first, rendering each into a plain-English step with the
+      exact source fragment behind it. Unresolved steps are surfaced by name — <code class="mono">⚠
+      not understood</code> — not silently omitted.
+    </p>
+    <ul class="facts" style="margin-top:2rem;">
+      <li><span class="k">No XML</span><span class="v">The agent never opens the <code class="mono">.ktr</code> file — every fact comes through this one tool.</span></li>
+      <li><span class="k">Reuses</span><span class="v">The same graph-walking primitive already powering blast-radius analysis (RFC 0018) — no new traversal engine.</span></li>
+    </ul>
+  </div>
+  <div class="codeblock" style="margin-top:2.4rem;">
+    <div class="tag">ekos_transformation_explain(id)</div>
+<pre style="margin:0;">{ <span class="k">"node_type"</span>: <span class="s">"Filter"</span>,
+  <span class="k">"summary"</span>: <span class="s">"filters rows where status = 'active'"</span>,
+  <span class="k">"evidence"</span>: [{ <span class="k">"source"</span>: <span class="s">"load_customers.ktr"</span>,
+                 <span class="k">"fragment"</span>: <span class="s">"status = 'active'"</span>,
+                 <span class="k">"confidence"</span>: 1.0 }] }</pre>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / diff</div>
+  <div class="eyebrow">Prove the migration is safe</div>
+  <h2><code class="mono" style="font-family:inherit;">ekos_transformation_diff</code> — exactly what changed, nothing more.</h2>
+  <p class="lede">Draft the new pipeline, then diff its <code class="mono">Sink</code> against the
+  original's. Sources, filters, joins, aggregates, and calculates are bucketed and compared as
+  sets — not by position, since a pipeline can reorder independent steps without changing meaning.</p>
+  <div class="codeblock" style="margin-top:2.2rem; max-width:44rem;">
+    <div class="tag">ekos_transformation_diff(old_id, new_id) — one rule added</div>
+<pre style="margin:0;"><span class="k">"sources"</span>: { added: [], removed: [] }   <span class="c">// unchanged</span>
+<span class="k">"sinks"</span>:   { added: [], removed: [] }   <span class="c">// unchanged</span>
+<span class="k">"filters"</span>: {
+  <span class="diffline rm">  removed: ["status = 'active'"]</span>
+  <span class="diffline add">  added:   ["status = 'active' AND region = 'EU'"]</span>
+}</pre>
+  </div>
+  <p class="lede" style="margin-top:1.6rem; font-size:0.95rem;">Verified end to end against a real
+  benchmark: a two-source, filtered, joined, calculated Pentaho job redrafted as SQL with one
+  changed rule — 100% coverage, zero <code class="mono">Unmapped</code> nodes, and the diff
+  isolated exactly the one rule that changed.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / identity</div>
+  <div class="eyebrow">The same table, three names</div>
+  <h2>A hypothesis until confirmed — never a silent merge.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">
+      Informix <code class="mono">cust_mstr</code>, Postgres <code class="mono">customers</code>,
+      Databricks <code class="mono">gold.dim_customer</code> — the same real-world entity, three
+      different names, three different systems. <code class="mono">ekos identity scan</code>
+      scores candidate matches on column overlap, naming-pattern similarity, and type
+      compatibility, and writes each one as an <em>unconfirmed</em> relationship.
+    </p>
+    <ul class="facts" style="margin-top:2rem;">
+      <li><span class="k">Never automatic</span><span class="v">Even a 0.95-confidence match stays unconfirmed until reviewed — a wrong silent merge corrupts every downstream answer.</span></li>
+      <li><span class="k">Confirm/reject</span><span class="v"><code class="mono">ekos_identity_review</code> — the one write-capable MCP tool, scoped to exactly this relationship kind.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / guarantees</div>
+  <div class="eyebrow">Why an agent can trust it</div>
+  <h2>Four guarantees no LLM summary gives you.</h2>
+  <div class="inv-grid">
+    <div class="inv"><h3>Hypothesis ≠ fact</h3><p>A candidate cross-system match carries an explicit <code class="mono">unconfirmed</code> status — structurally distinguishable from an observed fact, never indistinguishable.</p></div>
+    <div class="inv"><h3>Evidence per step</h3><p>Every claim in an explanation cites the exact source file and fragment it came from — nothing is asserted without a citation.</p></div>
+    <div class="inv"><h3>Unmapped is signal</h3><p>What can't be parsed is recorded as "something is here, not yet understood" — never dropped, never presented as a complete answer.</p></div>
+    <div class="inv"><h3>Deterministic, append-only</h3><p>The same source re-parsed twice gets the same id; a re-parse that changed is a new version, never an in-place rewrite.</p></div>
+  </div>
+</section>
+
+<section class="slide cta" id="s9">
+  <div class="eyebrow">Try it</div>
+  <h2>Point an agent at the pipeline. Not the XML — the compiled logic.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile every .ktr/.kjb and SQL file once</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># link the same entity across systems (optional)</span>
+$ ekos identity scan
+
+<span class="c"># serve it to any MCP client over stdio</span>
+$ ekos mcp serve --workspace .</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>MCP tool</th><th>Answers</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">ekos_transformation_explain</td><td class="desc">What does this legacy pipeline actually do, with evidence</td></tr>
+      <tr><td class="tool">ekos_transformation_diff</td><td class="desc">Did my redraft preserve the original logic</td></tr>
+      <tr><td class="tool">ekos_identity_review</td><td class="desc">Confirm/reject a cross-system identity match</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · RFC 0027 (Transformation IR) + RFC 0028 (MCP tools) + RFC 0029 (Cross-system identity) · github.com/alexeyban/EKOS</div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

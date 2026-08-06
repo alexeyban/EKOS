@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS — AI that understands enterprise systems</title>
+<meta name="description" content="EKOS recovers business logic from legacy ETL, SQL, and enterprise code, and compiles it into an evidence-backed knowledge ledger any AI agent can query.">
+<link rel="stylesheet" href="assets/theme.css">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<style>
+section{ padding: 6rem 8vw; border-bottom:1px solid var(--rule); }
+section:last-child{ border-bottom:none; }
+
+/* ---------- Hero ---------- */
+.hero{
+  min-height:92svh;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  background:
+    radial-gradient(ellipse 60% 50% at 85% 8%, var(--glow-a), transparent 70%),
+    radial-gradient(ellipse 45% 35% at 5% 100%, var(--glow-b), transparent 70%),
+    var(--ground);
+}
+.hero-cols{
+  display:grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap:3.5rem;
+  align-items:center;
+  width:100%;
+}
+@media (max-width:900px){ .hero-cols{ grid-template-columns:1fr; } }
+.hero-text{ display:flex; flex-direction:column; align-items:flex-start; }
+
+/* vertical pipeline visual — the whole point is 15-second comprehension */
+.pipeline-v{
+  display:flex; flex-direction:column; align-items:center; gap:0;
+  padding:1rem 0;
+}
+.pipeline-v .stage{
+  width:100%; max-width:21rem;
+  text-align:center;
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius:10px;
+  padding:1rem 1.4rem;
+  box-shadow:var(--shadow);
+  animation: stage-pulse 15s ease-in-out infinite;
+}
+.pipeline-v .stage.engine{
+  border-color:transparent;
+  background:var(--accent-gradient);
+  color:#fff;
+  box-shadow: 0 8px 30px -8px var(--glow-a);
+  animation:none;
+}
+.pipeline-v .stage .l{
+  display:block;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.65rem; letter-spacing:0.09em; text-transform:uppercase;
+  color:var(--ink-soft); margin-bottom:0.35rem;
+}
+.pipeline-v .stage.engine .l{ color:#ffffffcc; }
+.pipeline-v .stage .name{ font-weight:700; font-size:1.05rem; }
+.pipeline-v .arrow-v{
+  font-size:1.5rem; line-height:1; color:var(--rule); padding:0.25rem 0;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+}
+@keyframes stage-pulse{
+  0%, 5%{ border-color:var(--rule); box-shadow:var(--shadow); transform:scale(1); }
+  9%, 13%{ border-color:var(--accent-a); box-shadow:0 0 0 4px var(--glow-a); transform:scale(1.035); }
+  17%, 100%{ border-color:var(--rule); box-shadow:var(--shadow); transform:scale(1); }
+}
+@media (prefers-reduced-motion: reduce){
+  .pipeline-v .stage{ animation:none; }
+}
+.wordmark{
+  font-size:clamp(3.2rem, 9vw, 6.4rem);
+  letter-spacing:0.01em;
+  font-weight:800;
+  background:var(--accent-gradient);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.hero h1{
+  font-size: clamp(2rem, 4.6vw, 3.2rem);
+  max-width: 30ch;
+  margin-top:1.2rem;
+  color:var(--ink-soft);
+  font-weight:500;
+}
+.hero h1 strong{ color:var(--ink); font-weight:800; }
+
+.cta-row{
+  margin-top:3rem;
+  display:flex;
+  flex-wrap:wrap;
+  gap:1rem;
+}
+
+/* ---------- why / checklist ---------- */
+.why-grid{
+  display:grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap:3.5rem;
+  margin-top:2.8rem;
+  align-items:center;
+}
+@media (max-width:900px){ .why-grid{ grid-template-columns:1fr; } }
+ul.checklist{ list-style:none; margin:0; padding:0; }
+ul.checklist li{
+  display:flex; align-items:baseline; gap:0.85rem;
+  padding:0.9rem 0; border-top:1px solid var(--rule);
+  font-size:1.1rem;
+}
+ul.checklist li:first-child{ border-top:none; }
+ul.checklist .check{
+  color:var(--accent-b); font-weight:700;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+}
+.why-punch{
+  border-left:2px solid var(--accent-a);
+  padding:0.2rem 0 0.2rem 1.4rem;
+}
+.why-punch p{
+  font-size:1.35rem; line-height:1.5; margin:0; color:var(--ink);
+  font-style:italic;
+}
+.why-punch p strong{
+  font-style:normal;
+  background:var(--accent-gradient); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+
+/* ---------- feature strip ---------- */
+.feature-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:2.4rem;
+  margin-top:3rem;
+}
+@media (max-width:860px){ .feature-grid{ grid-template-columns:1fr; } }
+.feature{ border-left:2px solid var(--accent-b); padding:0.1rem 0 0.1rem 1.3rem; }
+.feature .num{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace;
+  font-size:0.72rem; letter-spacing:0.1em; color:var(--accent-a); text-transform:uppercase;
+}
+.feature h3{ font-size:1.25rem; margin-top:0.5rem; }
+.feature p{ margin:0.6rem 0 0 0; color:var(--ink-soft); font-size:0.98rem; line-height:1.6; max-width:30ch; }
+
+/* ---------- live demos (big cards) ---------- */
+.demo-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:1.6rem;
+  margin-top:2.8rem;
+}
+@media (max-width:900px){ .demo-grid{ grid-template-columns:1fr; } }
+.demo-card{
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius:12px;
+  padding:2rem 1.8rem;
+  box-shadow:var(--shadow);
+  display:flex; flex-direction:column;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.demo-card:hover{ transform:translateY(-3px); border-color:var(--accent-a); box-shadow:var(--glow-shadow); }
+.demo-card .tag{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.68rem;
+  letter-spacing:0.08em; text-transform:uppercase; color:var(--accent-a);
+}
+.demo-card h3{ font-size:1.3rem; margin-top:0.7rem; line-height:1.25; }
+.demo-card p{ color:var(--ink-soft); font-size:0.92rem; line-height:1.55; margin:0.8rem 0 0 0; flex-grow:1; }
+.demo-card .btn{ margin-top:1.6rem; align-self:flex-start; }
+
+/* ---------- community ---------- */
+.community-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:1.6rem;
+  margin-top:2.6rem;
+  max-width:46rem;
+}
+@media (max-width:700px){ .community-grid{ grid-template-columns:1fr; } }
+.community-link{
+  display:block;
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius:8px;
+  padding:1.3rem 1.4rem;
+  box-shadow:var(--shadow);
+  text-decoration:none;
+  color:var(--ink);
+  font-weight:700;
+  font-size:0.98rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.community-link:hover{ border-color:var(--accent-a); color:var(--accent-a); box-shadow:var(--glow-shadow); }
+
+/* ---------- token (deliberately minimal) ---------- */
+.token-box{
+  border:1px solid var(--rule);
+  border-radius:10px;
+  padding:1.8rem 2rem;
+  max-width:34rem;
+  margin-top:2rem;
+  background:var(--ground-raised);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+.token-box h3{ font-size:1.1rem; }
+.token-box ul{ list-style:none; margin:1rem 0 0 0; padding:0; color:var(--ink-soft); font-size:0.92rem; }
+.token-box li{ padding:0.3rem 0; }
+.token-box .btn{ margin-top:1.4rem; font-size:0.8rem; padding:0.6rem 1.1rem; }
+
+/* ---------- presentations section ---------- */
+.deck-list{ list-style:none; margin:2.6rem 0 0 0; padding:0; max-width:46rem; }
+.deck-list li{ border-top:1px solid var(--rule); padding:1.5rem 0; }
+.deck-list li:first-child{ border-top:none; }
+a.deck{ display:block; font-size:1.1rem; font-weight:700; color:var(--ink); text-decoration:none; }
+a.deck:hover{ color:var(--accent-a); }
+p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.92rem; line-height:1.55; max-width:40ch; }
+.rfc-tag{
+  font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.7rem;
+  color:var(--ink-soft); margin-top:0.6rem;
+}
+
+/* ---------- footer ---------- */
+footer{
+  padding:3rem 8vw;
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;
+  font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.78rem; color:var(--ink-soft);
+}
+footer a{ color:var(--ink-soft); text-decoration:none; }
+footer a:hover{ color:var(--accent-a); }
+</style>
+
+<section class="hero">
+  <div class="hero-cols">
+    <div class="hero-text">
+      <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+      <div class="wordmark">EKOS</div>
+      <h1><strong>AI that understands enterprise systems.</strong><br>Recover business logic from legacy ETL, SQL, and enterprise code.</h1>
+      <div class="cta-row">
+        <a class="btn primary" href="presentations/pentaho-sql-recovery-for-data-engineers.html">🚀 Try Live Demo</a>
+        <a class="btn" href="https://github.com/alexeyban/EKOS">⭐ GitHub</a>
+        <a class="btn" href="presentations.html">📖 Documentation</a>
+      </div>
+      <div class="hero-diagram">
+        <span class="chip">Evidence-backed ledger</span><span class="sep mono">→</span>
+        <span class="chip hot">Any MCP-speaking agent</span>
+      </div>
+    </div>
+    <div class="pipeline-v" aria-hidden="true">
+      <div class="stage" style="animation-delay:0s"><span class="l">Legacy format</span><span class="name">Pentaho XML</span></div>
+      <div class="arrow-v">↓</div>
+      <div class="stage engine"><span class="l">Compiler</span><span class="name">EKOS</span></div>
+      <div class="arrow-v">↓</div>
+      <div class="stage" style="animation-delay:3s"><span class="l">Shared IR</span><span class="name">Intermediate Representation</span></div>
+      <div class="arrow-v">↓</div>
+      <div class="stage" style="animation-delay:6s"><span class="l">Evidenced, queryable</span><span class="name">Business Logic</span></div>
+      <div class="arrow-v">↓</div>
+      <div class="stage" style="animation-delay:9s"><span class="l">Redrafted, verified</span><span class="name">Databricks Pipeline</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Why EKOS?</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem); max-width:26ch;">Companies have all of this. None of it is usable by AI yet.</h2>
+  <div class="why-grid">
+    <ul class="checklist">
+      <li><span class="check">✓</span> Thousands of SQL queries</li>
+      <li><span class="check">✓</span> Hundreds of ETL jobs</li>
+      <li><span class="check">✓</span> Outdated documentation</li>
+      <li><span class="check">✓</span> Tribal knowledge</li>
+    </ul>
+    <div class="why-punch">
+      <p>EKOS turns them into <strong>knowledge AI can understand.</strong></p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Live Demos</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem); max-width:26ch;">Not slides. Real runs against real repos.</h2>
+  <div class="demo-grid">
+    <div class="demo-card">
+      <div class="tag">RFC 0027 · 0028 · 0029</div>
+      <h3>Legacy Transformation Recovery</h3>
+      <p>Pentaho jobs, SQL, and stored procedures compiled into one evidence-backed Transformation IR — explain what a legacy pipeline does, and prove a migration didn't change its meaning.</p>
+      <a class="btn primary" href="presentations/legacy-transformation-recovery.html">Open Demo →</a>
+    </div>
+    <div class="demo-card">
+      <div class="tag">RFC 0025 · 0027 · 0031</div>
+      <h3>Pentaho SQL Recovery</h3>
+      <p>EKOS's Pentaho and SQL recovery analyzers, run cold against two real GitHub ETL projects — terminal output, MCP transcripts, and the honest gaps found along the way.</p>
+      <a class="btn primary" href="presentations/pentaho-sql-recovery-for-data-engineers.html">Open Demo →</a>
+    </div>
+    <div class="demo-card">
+      <div class="tag">RFC 0013 · 0020</div>
+      <h3>Enterprise Knowledge Graph</h3>
+      <p>Issues, PRs, files, and their real relationships compiled into an append-only, evidence-backed ledger any MCP-speaking agent can query.</p>
+      <a class="btn primary" href="presentations/github-repo-to-mcp-server.html">Open Demo →</a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">What it actually does</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem); max-width:26ch;">A compiler for enterprise knowledge — not another RAG index.</h2>
+  <div class="feature-grid">
+    <div class="feature">
+      <div class="num">01 / observe</div>
+      <h3>Read systems, don't interpret them yet</h3>
+      <p>SQL DDL, Pentaho jobs, git history, Confluence, GitHub issues — pulled in as raw, content-addressable evidence.</p>
+    </div>
+    <div class="feature">
+      <div class="num">02 / recover</div>
+      <h3>Compile legacy logic into one IR</h3>
+      <p>A Pentaho step and a SQL <code class="mono">SELECT</code> both become the same Transformation IR node — Source, Filter, Join, Aggregate, Sink.</p>
+    </div>
+    <div class="feature">
+      <div class="num">03 / serve</div>
+      <h3>Query it, prove it, never guess</h3>
+      <p>Every answer cites the exact fragment it came from. Served read-only over MCP to any AI agent — Claude, or otherwise.</p>
+    </div>
+  </div>
+  <div class="codeblock" style="margin-top:2.6rem; max-width:44rem;">
+    <span class="c"># compile once</span><br>
+    $ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit<br><br>
+    <span class="c"># serve it to any MCP client over stdio</span><br>
+    $ ekos mcp serve --workspace .
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Proven, not promised</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem); max-width:24ch;">Run cold against real repos, not staged demos.</h2>
+  <p class="lede">Every deck below reproduces its claims live — real terminal output, real MCP
+  query/answer transcripts, and the honest gaps found along the way, never papered over.</p>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">2</div><div class="label">real ETL projects recovered cold</div></div>
+    <div class="stat"><div class="num">2</div><div class="label">GitHub issues filed and closed on real gaps</div></div>
+    <div class="stat"><div class="num">0</div><div class="label">fabricated facts — <code class="mono">Unmapped</code> is a citizen, not a failure</div></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Community</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem);">Built in the open. Improved in the open.</h2>
+  <div class="community-grid">
+    <a class="community-link" href="https://github.com/alexeyban/EKOS/discussions">GitHub Discussions</a>
+    <a class="community-link" href="https://github.com/alexeyban/EKOS/blob/main/TODO.md">Roadmap</a>
+    <a class="community-link" href="https://github.com/alexeyban/EKOS/blob/main/VISION.md">Vision</a>
+    <a class="community-link" href="https://github.com/alexeyban/EKOS/blob/main/PIONEER_PROGRAM.md">Community Rewards</a>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Token</div>
+  <div class="token-box">
+    <h3>Official EKOS Token</h3>
+    <p style="color:var(--ink-soft); font-size:0.92rem; margin:0.6rem 0 0 0; max-width:34ch;">
+      Token utility is designed to grow as the platform is adopted — a consequence of usage, not
+      a promise of price.
+    </p>
+    <div class="rfc-tag" style="margin-top:1rem;">Purpose, by phase</div>
+    <ul>
+      <li>• Community rewards</li>
+      <li>• Contributor incentives</li>
+      <li>• Governance</li>
+      <li>• Ecosystem</li>
+    </ul>
+    <a class="btn" href="https://github.com/alexeyban/EKOS/blob/main/VISION.md">Read the Vision</a>
+    <a class="btn" href="https://github.com/alexeyban/EKOS/blob/main/TOKENOMICS.md" style="margin-left:0.6rem;">View Tokenomics</a>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Go deeper</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem);">Presentations</h2>
+  <ul class="deck-list">
+    <li>
+      <a class="deck" href="presentations/ai-native-knowledge-compiler-pitch.html">The AI-Native Enterprise Knowledge Compiler</a>
+      <p class="desc">The startup pitch: why enterprise AI needs a compiler, not another RAG
+      index — proven cold against real repos, and audited live by Claude Code using EKOS's own
+      MCP server on itself.</p>
+      <div class="rfc-tag">Start here</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/legacy-transformation-recovery.html">Reproduce Legacy ETL Logic, Verified</a>
+      <p class="desc">Pentaho jobs, SQL, and stored procedures compiled into one evidence-backed
+      Transformation IR — explain what a legacy pipeline does, and prove a migration didn't
+      change its meaning.</p>
+      <div class="rfc-tag">RFC 0027 · RFC 0028 · RFC 0029</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/github-repo-to-mcp-server.html">Compile GitHub Repository → MCP Server</a>
+      <p class="desc">Issues, PRs, files, and their real relationships compiled into an
+      append-only, evidence-backed ledger any MCP-speaking agent can query.</p>
+      <div class="rfc-tag">RFC 0013 · RFC 0020</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/pentaho-sql-recovery-for-data-engineers.html">Pentaho + SQL Recovery, Tested Cold</a>
+      <p class="desc">EKOS's Pentaho and SQL recovery analyzers run against two real GitHub ETL
+      projects — terminal output, MCP query/answer transcripts, and the honest gaps a data
+      engineer would want to see before trusting it.</p>
+      <div class="rfc-tag">RFC 0025 · RFC 0027</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/recovery-gaps-closed.html">Two Real Recovery Gaps, Filed and Closed</a>
+      <p class="desc">The honest gaps the previous deck surfaced became GitHub issues #2 and #3 —
+      this deck reruns the exact repro shapes against the fixed pipeline, live, with the
+      before/after coverage numbers.</p>
+      <div class="rfc-tag">RFC 0031 · issues #2, #3</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/claude-code-with-ekos.html">Claude Code + EKOS</a>
+      <p class="desc">How Claude Code searches and analyzes a codebase through EKOS's MCP server
+      instead of raw grep/Read — a measured, honest with-vs-without comparison, the real
+      <code>/context</code> token footprint, real 24-hour usage logs, and gaps stated plainly.</p>
+      <div class="rfc-tag">RFC 0013</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/vision-and-token-utility.html">Vision &amp; Token Utility</a>
+      <p class="desc">Why the EKOS token's relevance is designed to grow as a consequence of
+      platform adoption, not a promise of price — the phased ecosystem roadmap from contributor
+      rewards to plugin, agent, and knowledge marketplaces.</p>
+      <div class="rfc-tag">VISION.md</div>
+    </li>
+  </ul>
+</section>
+
+<footer>
+  <div>EKOS · Enterprise Knowledge Operating System · MIT License</div>
+  <div><a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</footer>
+
+</body>
+</html>
