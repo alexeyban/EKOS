@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code + EKOS — EKOS</title>
+<meta name="description" content="How Claude Code searches and analyzes a codebase through EKOS's MCP server instead of raw grep/Read — a measured, honest with-vs-without comparison, real /context token footprint, real 24-hour usage logs, and gaps stated plainly.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+  <a href="#s9"></a><a href="#s10"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Claude Code stops <span class="arrow-word">re-deriving your codebase from scratch.</span></h1>
+  <p class="lede">Every question Claude Code asks about a repo — where's this implemented, what
+  does this module do, what else touches this — has an answer EKOS already compiled, with the
+  evidence attached. Served read-only over MCP, so Claude reads a cited answer instead of
+  grep-read-reread-forget. Every number on this deck was measured live against this repo and a
+  real compiled ledger, not estimated.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">grep → open file → open file → …</span><span class="sep mono">vs</span>
+    <span class="chip hot">one MCP call, evidence attached</span>
+  </div>
+  <div class="byline"><span class="dot"></span> mcp__ekos__ekos_search / ekos_state / ekos_neighborhood / ekos_status</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / without EKOS</div>
+  <div class="eyebrow">The question: "where is <code class="mono">Observer</code> implemented?"</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:28ch;">Grep finds the files. Understanding them means opening every one.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">$ grep -rln "impl Observer for" ekos/plugins/ ekos/crates/</div>
+<pre style="margin:0;">ekos/plugins/oracle/src/lib.rs
+ekos/plugins/pentaho/src/lib.rs
+ekos/plugins/confluence/src/lib.rs
+ekos/plugins/snowflake/src/lib.rs
+ekos/plugins/file/src/lib.rs
+ekos/plugins/sap/src/lib.rs
+ekos/plugins/crypto/src/lib.rs
+ekos/plugins/fabric/src/lib.rs
+ekos/plugins/salesforce/src/lib.rs
+ekos/plugins/github/src/lib.rs
+ekos/plugins/git/src/lib.rs
+ekos/plugins/localdocs/src/lib.rs</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">
+        12 files, one round-trip — cheap. But the grep hit only says <em>where</em>, not
+        <em>what each one does</em>. Confirming that means opening all 12, full files, before
+        Claude can actually answer the question.
+      </p>
+      <ul class="facts" style="margin-top:1.6rem;">
+        <li><span class="k">Locate</span><span class="v"><code class="mono">grep -rn</code> output: <strong>851 bytes</strong></span></li>
+        <li><span class="k">Confirm</span><span class="v">all 12 <code class="mono">lib.rs</code> files, read in full: <strong>149,194 bytes</strong></span></li>
+        <li><span class="k">Round-trips</span><span class="v">1 grep + 12 reads = <strong>13 tool calls</strong></span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / with EKOS</div>
+  <div class="eyebrow">Same question, through the MCP server</div>
+  <h2>One call. Structured. Ids ready for the next hop.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ekos_search(query: "Observer trait")</div>
+<pre style="margin:0;"><span class="k">{</span> <span class="s">"matches"</span>: [
+  <span class="c">// all 7 real plugin implementers,</span>
+  <span class="c">// each with an id for the next call</span>
+  <span class="s">{ "id": "7cdc5253-...", "name":
+     "ekos/plugins/file/src/lib.rs" }</span>,
+  <span class="s">{ "id": "8941bcba-...", "name":
+     "ekos/plugins/git/src/lib.rs" }</span>,
+  <span class="s">{ "id": "62e147c2-...", "name":
+     "ekos/plugins/salesforce/src/lib.rs" }</span>,
+  <span class="c">// … 14 more matches, incl. Cargo.toml</span>
+  <span class="c">// and one RFC — see § 08</span>
+]<span class="k"> }</span></pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      One tool call returns 17 ranked matches — every real plugin implementer plus some
+      <code class="mono">Cargo.toml</code>/RFC noise, honestly (see § 06). Each match carries an
+      <code class="mono">id</code>: no second grep needed to go deeper, just
+      <code class="mono">ekos_state(id)</code> or <code class="mono">ekos_neighborhood(id)</code>
+      on the ones that matter.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / measured, side by side</div>
+  <div class="eyebrow">The numbers that actually moved</div>
+  <h2>The win isn't always fewer bytes. It's fewer round-trips — and it compounds on wayfinding.</h2>
+  <table class="ttable">
+    <thead><tr><th>Step</th><th>Without EKOS</th><th>With EKOS</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Locate all Observer implementers</td><td class="desc">851 B (grep) → then 12 more reads</td><td class="good">1,620 B, 1 call, ids included</td></tr>
+      <tr><td class="tool">Round-trips to a usable answer</td><td class="bad">13 (1 grep + 12 reads)</td><td class="good">1</td></tr>
+      <tr><td class="tool">"What does this module do?" (observation-sdk/lib.rs)</td><td class="bad">8,490 B — the whole file</td><td class="good">600 B curated excerpt, ~14x smaller</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">First hop's raw bytes: EKOS's 1,620 B response is <em>larger</em> than the 851 B
+  grep output, because it carries structure (ids, evidence) grep can't — the payoff shows up one
+  hop later, when EKOS needs zero further reads to know what each file is and grep needs 12. The
+  wayfinding case is the clean win: a 600-byte excerpt instead of the full 8,490-byte file for
+  "what is this module for."</p>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / why this matters for an agent specifically</div>
+  <div class="eyebrow">Not just shorter — traceable</div>
+  <h2>Every object carries the evidence it was compiled from.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ekos_neighborhood — observation-sdk/lib.rs</div>
+<pre style="margin:0;"><span class="k">{</span> <span class="s">"objects"</span>: [{
+  <span class="s">"name"</span>: <span class="s">"ekos/crates/observation-sdk/src/lib.rs"</span>,
+  <span class="s">"evidence"</span>: [<span class="s">"29069ec0-..."</span>],
+  <span class="s">"properties"</span>: {
+    <span class="s">"artifact_id"</span>: <span class="s">"b4aa558e..."</span>,
+    <span class="s">"excerpt"</span>: <span class="s">"//! Observation SDK —
+      contract between the compiler and
+      connectors. Every connector ...
+      implements the \`Observer\` trait ..."</span>
+  }}]<span class="k">}</span></pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      A plain grep result is a filename and a line number — Claude still has to trust its own
+      reading of the file to answer correctly. An EKOS object ships the
+      <code class="mono">excerpt</code> it was compiled from and an <code class="mono">evidence</code>
+      id pointing at the exact <code class="mono">artifact_id</code> behind it. Claude can cite the
+      fragment instead of paraphrasing from memory — the same append-only, evidence-backed
+      guarantee the rest of EKOS runs on, not a special case for MCP.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / past one repo</div>
+  <div class="eyebrow">The ledger doesn't stop at this repo's boundary</div>
+  <h2>One workspace, many projects, still one call.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">88,637</div><div class="label">compiled entries in the live ledger</div></div>
+    <div class="stat"><div class="num">22,032</div><div class="label">objects across the whole workspace</div></div>
+    <div class="stat"><div class="num">10,335</div><div class="label">relationships compiled so far</div></div>
+  </div>
+  <p class="lede" style="margin-top:2rem;">
+    <code class="mono">ekos_status</code>, called live: this ledger spans every project under the
+    workspace root, not just EKOS itself. Without it, a question that crosses repo boundaries means
+    <code class="mono">cd</code>-ing into each one and repeating the whole grep/read cycle per
+    project. With it, the query surface doesn't change — same <code class="mono">ekos_search</code>
+    call, same evidence guarantee, whichever project the answer turns out to live in.
+  </p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / what it costs to have EKOS available</div>
+  <div class="eyebrow">Tool schemas load on demand, not eagerly</div>
+  <h2>Deferred loading means idle capability isn't a token tax.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">/context — this session, real output</div>
+<pre style="margin:0;">System prompt      9.6k tokens  (1.0%)
+System tools      12.6k tokens  (1.3%)
+<span class="hot">MCP tools</span>            <span class="hot">595 tokens  (0.1%)</span>
+Custom agents        992 tokens  (0.1%)
+Messages         111.4k tokens (11.5%)
+Free space       787.8k        (81.5%)
+
+967k token window, claude-sonnet-5</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      Only 4 of EKOS's 11 MCP tools were ever loaded into this session's context —
+      <code class="mono">ekos_status</code>, <code class="mono">ekos_search</code>,
+      <code class="mono">ekos_dependents</code>, <code class="mono">ekos_neighborhood</code> —
+      because those are the ones this session actually called. The other 7
+      (<code class="mono">ekos_state</code>, <code class="mono">ekos_ekl</code>,
+      <code class="mono">ekos_diff</code>, <code class="mono">ekos_impact</code>,
+      <code class="mono">ekos_identity_review</code>,
+      <code class="mono">ekos_transformation_explain</code>/<code class="mono">_diff</code>) stay
+      unloaded, fetchable on demand, costing nothing until asked for. All 11 definitions loaded
+      eagerly would run ~2,208 tokens combined — instead this session paid 595, 0.1% of the
+      967k-token window.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / not staged for this deck</div>
+  <div class="eyebrow">Pulled from real session transcripts, last 24 hours</div>
+  <h2>What EKOS usage actually looks like when nobody's demoing it.</h2>
+  <table class="ttable">
+    <thead><tr><th>Session</th><th>Asked</th><th>Tool calls</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">5a904f01…</td><td class="desc">"What changed across the workspace in the last 7 days?"</td><td class="good"><code class="mono">ekos_status</code>, <code class="mono">ekos_diff</code></td></tr>
+      <tr><td class="tool">cd71a423…</td><td class="desc">"Where is auth implemented across the estate, and what breaks if Postgres → Cosmos DB?"</td><td class="good">13 calls: <code class="mono">status</code>, <code class="mono">search</code> ×3, <code class="mono">state</code> ×5, <code class="mono">dependents</code> ×2, <code class="mono">ekl</code></td></tr>
+      <tr><td class="tool">7247d986… (this one)</td><td class="desc">Researching the token-cost example for § 03–05 of this deck</td><td class="good">6 calls: <code class="mono">status</code>, <code class="mono">search</code> ×2, <code class="mono">dependents</code>, <code class="mono">neighborhood</code> ×2</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">2 <code class="mono">ekos-knowledge</code> skill invocations, 21
+  <code class="mono">mcp__ekos__ekos_*</code> calls, across 3 sessions in a 24-hour window — 8 other
+  sessions active in the same window made zero EKOS calls, honestly: not every task needs a
+  compiled ledger. Source: <code class="mono">~/.claude/projects/&lt;project&gt;/*.jsonl</code>,
+  grepped for <code class="mono">tool_use</code> blocks.</p>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / honest limits</div>
+  <div class="eyebrow">Where grep still wins outright</div>
+  <h2>Search is excerpt-ranked today, not symbol-aware — and it shows.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ekos_search(query: "PassManager") — real response</div>
+<pre style="margin:0;"><span class="k">{</span> <span class="s">"matches"</span>: [
+  <span class="s">{ "name": "compiler-core/src/lib.rs" }</span>,
+  <span class="s">{ "name": "0001-compiler-core.md" }</span>,
+  <span class="s">{ "name": "compiler-core/Cargo.toml" }</span>
+]<span class="k">}</span>
+<span class="bad">// pass.rs — where PassManager is actually
+// *defined* — never appears.</span></pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      <code class="mono">grep -rn "PassManager"</code> finds <code class="mono">pass.rs</code>
+      immediately — 14 hits, one command. EKOS's search ranks by file/excerpt relevance, not by
+      symbol definitions, so a type's actual home file can lose to files that merely mention its
+      name. Today EKOS is a wayfinding and evidence layer — the fast first hop and the
+      cross-project reach — not a replacement for a symbol-level call graph or a deep-dive
+      <code class="mono">Read</code>. Stated plainly, the same way <a href="recovery-gaps-closed.html" style="color:inherit;">two other real gaps</a> got filed and fixed instead of hidden.
+    </p>
+  </div>
+</section>
+
+<section class="slide cta" id="s10">
+  <div class="eyebrow">Try it</div>
+  <h2>One command wires Claude Code to your compiled ledger.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile once</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># register the MCP server with Claude Code</span>
+$ claude mcp add ekos -- ekos mcp serve --workspace .</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Doc</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Full scripted walkthrough</td><td class="desc"><code class="mono">demo/DEMO.md</code> — 12 acts, real subagents, real transcripts</td></tr>
+      <tr><td class="tool">MCP tool reference</td><td class="desc"><code class="mono">ekos/crates/cli/src/commands/mcp.rs</code> — all 11 tools, one write-capable</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · RFC 0013 (MCP server) · every number above measured live against this repo, github.com/alexeyban/EKOS</div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>
