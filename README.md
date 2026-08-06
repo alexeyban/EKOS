@@ -19,6 +19,9 @@ before it's implemented, and the `devlog_*.md` files at the repo root are the ru
 what shipped, why, and what was learned building it. It is written in Rust (2024 edition) as a
 Cargo workspace, and is licensed under the [MIT License](LICENSE).
 
+EKOS also has a community token (`TOKENOMICS.md`) whose utility is designed to grow alongside
+the platform — see `VISION.md` for the phased ecosystem roadmap behind it.
+
 ## The Problem
 
 Modern enterprises contain enormous amounts of valuable knowledge distributed across disconnected systems: source code, databases, data warehouses, documentation, wikis, Git repositories, infrastructure-as-code, APIs, runtime logs, and monitoring systems. Every system contains only a partial description of reality. Documentation becomes outdated. Employees leave. Business logic remains hidden inside production code. AI assistants receive fragmented, inconsistent, and often contradictory information.
@@ -329,6 +332,8 @@ CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
 
 Pump.fun:
 https://pump.fun/coin/CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
+
+See [TOKENOMICS.md](TOKENOMICS.md) for full allocation details.
 
 ## Official Channels
 

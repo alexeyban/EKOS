@@ -1,5 +1,9 @@
 # EKOS Tokenomics
 
+See `VISION.md` for what the token is *for* — the phased ecosystem roadmap (community rewards →
+plugin/agent/knowledge marketplaces → governance) the token's utility is designed to grow into as
+the platform is adopted. This document covers supply, allocation, and vesting facts only.
+
 Network: Solana
 
 Contract (Mint) Address: `CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump`
