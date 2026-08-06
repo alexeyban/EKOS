@@ -165,7 +165,7 @@ Uuid::new_v5(NAMESPACE, <span class="s">"github:{owner}/{repo}#{n}"</span>)</pre
 <section class="slide" id="s7">
   <div class="stage-num mono">§ 06 / serve</div>
   <div class="eyebrow">Stage 4 — <code class="mono" style="font-family:inherit;">ekos mcp serve</code></div>
-  <h2>Seven tools. One read-only runtime.</h2>
+  <h2>Eleven tools. One read-only runtime.</h2>
   <p class="lede">stdio, newline-delimited JSON-RPC 2.0 — the transport every MCP client already speaks. No network surface, no auth story, no new dependency.</p>
   <table class="ttable">
     <thead><tr><th>MCP tool</th><th>Answers</th></tr></thead>
@@ -173,10 +173,14 @@ Uuid::new_v5(NAMESPACE, <span class="s">"github:{owner}/{repo}#{n}"</span>)</pre
       <tr><td class="tool">ekos_search</td><td class="desc">Find an object by name or kind</td></tr>
       <tr><td class="tool">ekos_neighborhood</td><td class="desc">What's connected to this, N hops out</td></tr>
       <tr><td class="tool">ekos_dependents</td><td class="desc">What breaks if this changes — incoming vs. outgoing edges</td></tr>
+      <tr><td class="tool">ekos_impact</td><td class="desc">Multi-hop blast radius across the whole graph</td></tr>
       <tr><td class="tool">ekos_state</td><td class="desc">Reconstruct state as of any RFC 3339 timestamp</td></tr>
       <tr><td class="tool">ekos_diff</td><td class="desc">What knowledge changed since T</td></tr>
       <tr><td class="tool">ekos_ekl</td><td class="desc">Run a structured knowledge-query expression</td></tr>
       <tr><td class="tool">ekos_status</td><td class="desc">Ledger entry / object / relationship counts</td></tr>
+      <tr><td class="tool">ekos_transformation_explain</td><td class="desc">What a legacy ETL/SQL transformation actually does, evidence per step</td></tr>
+      <tr><td class="tool">ekos_transformation_diff</td><td class="desc">Did a migration change a transformation's meaning</td></tr>
+      <tr><td class="tool">ekos_identity_review</td><td class="desc">Confirm/reject a cross-system identity match — the one write-capable tool</td></tr>
     </tbody>
   </table>
 </section>
@@ -207,7 +211,7 @@ $ ekos mcp serve --workspace .
 <span class="c"># point Claude Code / Claude Desktop at it — one line of config</span>
 { <span class="s">"command"</span>: <span class="s">"ekos"</span>, <span class="s">"args"</span>: [<span class="s">"mcp"</span>, <span class="s">"serve"</span>] }</pre>
   </div>
-  <div class="fineprint">EKOS · RFC 0013 (MCP Server) + RFC 0020 (GitHub Connector) · github.com — coming soon</div>
+  <div class="fineprint">EKOS · RFC 0013 (MCP Server) + RFC 0020 (GitHub Connector) · github.com/alexeyban/EKOS</div>
 </section>
 
 </div>
