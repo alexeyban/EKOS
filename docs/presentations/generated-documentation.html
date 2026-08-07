@@ -157,6 +157,10 @@ graph TD</span>
   pipeline — two upstream steps feeding one join, one downstream step consuming it. No hand-built
   example: this is step 10 of the real <code class="mono">fact_sales.ktr</code>, exactly as
   recovered.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/pentaho-join-fact-sales.md" style="color:var(--accent-a);">.md</a> ·
+    <a href="examples/pentaho-join-fact-sales.html" style="color:var(--accent-a);">.html, diagram rendered live</a>
+  </div>
 </section>
 
 <section class="slide" id="s6">
@@ -187,6 +191,10 @@ graph TD</span>
   evidence, still wired into the same diagram with its real upstream/downstream edges. "Unmapped
   is a citizen, not a failure" — the same rule this whole project runs on, visible in the
   generated docs themselves, not just the code.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/pentaho-unmapped-dim-customer.md" style="color:var(--accent-a);">.md</a> ·
+    <a href="examples/pentaho-unmapped-dim-customer.html" style="color:var(--accent-a);">.html, diagram rendered live</a>
+  </div>
 </section>
 
 <section class="slide" id="s7">
@@ -211,6 +219,10 @@ graph TD</span>
   </div>
   <p class="lede">Relationship targets resolve to real names, not raw ids — a gap only found by
   rendering this exact file against real data (devlog_34) and fixed the same session.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/northwind-table-order-details.md" style="color:var(--accent-a);">.md</a> ·
+    <a href="examples/northwind-table-order-details.html" style="color:var(--accent-a);">.html</a>
+  </div>
 </section>
 
 <section class="slide" id="s8">
@@ -244,6 +256,10 @@ graph TD</span>
   <code class="mono">Custom("FeedsInto")</code> relationships, the exact shape the generic
   dependency-graph renderer already draws for any object. Three planned diagram families
   collapsed into two renderers once real data showed they were the same mechanism.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real ER diagram:
+    <a href="examples/northwind-er-diagram.md" style="color:var(--accent-a);">.md</a> ·
+    <a href="examples/northwind-er-diagram.html" style="color:var(--accent-a);">.html, all 13 tables rendered live</a>
+  </div>
 </section>
 
 <section class="slide" id="s9">
@@ -264,7 +280,13 @@ graph TD</span>
   this repo's files available. Mermaid is shown as source in a <code class="mono">&lt;pre&gt;</code>
   block, not live-rendered: rendering it would need bundling or CDN-loading
   <code class="mono">mermaid.js</code>, which conflicts with staying fully offline. Stated as a
-  limit, not fixed silently.</p>
+  limit, not fixed silently. The hosted examples linked on this page add <code class="mono">mermaid.js</code>
+  from a CDN on top of the unmodified generated HTML, purely for this demo — the generator's own
+  output never does that by default.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/northwind-table-order-details.html" style="color:var(--accent-a);">.html</a> ·
+    <a href="examples/pentaho-index.html" style="color:var(--accent-a);">full generated site index, 198 objects</a>
+  </div>
 </section>
 
 <section class="slide" id="s10">
@@ -290,6 +312,11 @@ graph TD</span>
 <span class="k">## TransformNode (7)</span>
 - [northwind.sql#13:0](transformnode-northwind-sql-13-0.md)
   <span class="c">… 6 more</span></pre>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real index for the Pentaho repo (198 objects):
+    <a href="examples/pentaho-index.md" style="color:var(--accent-a);">.md</a> ·
+    <a href="examples/pentaho-index.html" style="color:var(--accent-a);">.html</a>
+    <span style="color:var(--ink-soft);">— only the linked example pages above are hosted; other cross-links on this index point to the local output tree.</span>
   </div>
 </section>
 

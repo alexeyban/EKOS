@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>&quot;Order Details&quot; — Table</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>&quot;Order Details&quot; <span class="kind">(Table)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>columns</code></td><td>[{&quot;data_type&quot;:&quot;INT&quot;,&quot;name&quot;:&quot;OrderID&quot;},{&quot;data_type&quot;:&quot;INT&quot;,&quot;name&quot;:&quot;ProductID&quot;},{&quot;data_type&quot;:&quot;DECIMAL(10,2)&quot;,&quot;name&quot;:&quot;UnitPrice&quot;},{&quot;data_type&quot;:&quot;SMALLINT&quot;,&quot;name&quot;:&quot;Quantity&quot;},{&quot;data_type&quot;:&quot;REAL&quot;,&quot;name&quot;:&quot;Discount&quot;}]</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>ForeignKey</h3>
+<ul>
+<li>&rarr; Orders <code>e6969c91-8b70-4a56-b73c-73a0725c919f</code> — evidence: &quot;order details&quot;.OrderID → orders.OrderID</li>
+<li>&rarr; Products <code>72719579-f001-4e49-a262-d39d00dc2e5e</code> — evidence: &quot;order details&quot;.ProductID → products.ProductID</li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    nf3aa02baa8864a589a803b19110a4bf6[&quot;'Order Details'&quot;]
+    ne6969c918b704a56b73c73a0725c919f[&quot;Orders&quot;]
+    nf3aa02baa8864a589a803b19110a4bf6 --&gt;|ForeignKey| ne6969c918b704a56b73c73a0725c919f
+    n72719579f0014e49a262d39d00dc2e5e[&quot;Products&quot;]
+    nf3aa02baa8864a589a803b19110a4bf6 --&gt;|ForeignKey| n72719579f0014e49a262d39d00dc2e5e
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>123db216-75bb-4c02-bac7-aa1f92f1b49e</code> — CREATE TABLE &quot;Order Details&quot; (confidence: 1.00)</li>
+<li><code>6c11b1d1-a7dc-4e07-859a-d8cf56aab1c2</code> — &quot;order details&quot;.OrderID → orders.OrderID (confidence: 1.00)</li>
+<li><code>5ff10a17-f804-42b7-beeb-8dfb86b3040c</code> — &quot;order details&quot;.ProductID → products.ProductID (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    nf3aa02baa8864a589a803b19110a4bf6["'Order Details'"]
+    ne6969c918b704a56b73c73a0725c919f["Orders"]
+    nf3aa02baa8864a589a803b19110a4bf6 -->|ForeignKey| ne6969c918b704a56b73c73a0725c919f
+    n72719579f0014e49a262d39d00dc2e5e["Products"]
+    nf3aa02baa8864a589a803b19110a4bf6 -->|ForeignKey| n72719579f0014e49a262d39d00dc2e5e
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default — see "Diagram" above for the exact unmodified output.</p>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    nf3aa02baa8864a589a803b19110a4bf6["'Order Details'"]
+    ne6969c918b704a56b73c73a0725c919f["Orders"]
+    nf3aa02baa8864a589a803b19110a4bf6 -->|ForeignKey| ne6969c918b704a56b73c73a0725c919f
+    n72719579f0014e49a262d39d00dc2e5e["Products"]
+    nf3aa02baa8864a589a803b19110a4bf6 -->|ForeignKey| n72719579f0014e49a262d39d00dc2e5e
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default — see "Diagram" above for the exact unmodified output.</p>
+</body>
+</html>
+

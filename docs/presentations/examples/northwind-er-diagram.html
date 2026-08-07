@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entity-Relationship Diagram</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>Entity-Relationship Diagram</h1>
+<pre class="mermaid-source"><code>erDiagram
+    &quot;Employees&quot; }o--|| &quot;Employees&quot; : references
+    &quot;Orders&quot; }o--|| &quot;Customers&quot; : references
+    &quot;Orders&quot; }o--|| &quot;Employees&quot; : references
+    &quot;Orders&quot; }o--|| &quot;Shippers&quot; : references
+    &quot;Products&quot; }o--|| &quot;Categories&quot; : references
+    &quot;Products&quot; }o--|| &quot;Suppliers&quot; : references
+    &quot;'Order Details'&quot; }o--|| &quot;Orders&quot; : references
+    &quot;'Order Details'&quot; }o--|| &quot;Products&quot; : references
+    &quot;Territories&quot; }o--|| &quot;Region&quot; : references
+    &quot;EmployeeTerritories&quot; }o--|| &quot;Employees&quot; : references
+    &quot;EmployeeTerritories&quot; }o--|| &quot;Territories&quot; : references
+    &quot;CustomerCustomerDemo&quot; }o--|| &quot;Customers&quot; : references
+    &quot;CustomerCustomerDemo&quot; }o--|| &quot;CustomerDemographics&quot; : references
+</code></pre>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+erDiagram
+    "Employees" }o--|| "Employees" : references
+    "Orders" }o--|| "Customers" : references
+    "Orders" }o--|| "Employees" : references
+    "Orders" }o--|| "Shippers" : references
+    "Products" }o--|| "Categories" : references
+    "Products" }o--|| "Suppliers" : references
+    "'Order Details'" }o--|| "Orders" : references
+    "'Order Details'" }o--|| "Products" : references
+    "Territories" }o--|| "Region" : references
+    "EmployeeTerritories" }o--|| "Employees" : references
+    "EmployeeTerritories" }o--|| "Territories" : references
+    "CustomerCustomerDemo" }o--|| "Customers" : references
+    "CustomerCustomerDemo" }o--|| "CustomerDemographics" : references
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default — see "Diagram" above for the exact unmodified output.</p>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+erDiagram
+    "Employees" }o--|| "Employees" : references
+    "Orders" }o--|| "Customers" : references
+    "Orders" }o--|| "Employees" : references
+    "Orders" }o--|| "Shippers" : references
+    "Products" }o--|| "Categories" : references
+    "Products" }o--|| "Suppliers" : references
+    "'Order Details'" }o--|| "Orders" : references
+    "'Order Details'" }o--|| "Products" : references
+    "Territories" }o--|| "Region" : references
+    "EmployeeTerritories" }o--|| "Employees" : references
+    "EmployeeTerritories" }o--|| "Territories" : references
+    "CustomerCustomerDemo" }o--|| "Customers" : references
+    "CustomerCustomerDemo" }o--|| "CustomerDemographics" : references
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default — see "Diagram" above for the exact unmodified output.</p>
+</body>
+</html>
+
