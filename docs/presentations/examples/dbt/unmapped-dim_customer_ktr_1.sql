@@ -1,0 +1,38 @@
+-- Unmapped: unrecognized step type: Sequence
+-- Raw source:
+-- <step>
+--     <name>Create surrogate key</name>
+--     <type>Sequence</type>
+--     <description/>
+--     <distribute>Y</distribute>
+--     <custom_distribution/>
+--     <copies>1</copies>
+--     <partitioning>
+--       <method>none</method>
+--       <schema_name/>
+--     </partitioning>
+--     <valuename>dim_customer_id</valuename>
+--     <use_database>N</use_database>
+--     <connection>AdventureWorks</connection>
+--     <schema/>
+--     <seqname>SEQ_</seqname>
+--     <use_counter>Y</use_counter>
+--     <counter_name/>
+--     <start_at>1</start_at>
+--     <increment_by>1</increment_by>
+--     <max_value>999999999</max_value>
+--     <attributes/>
+--     <cluster_schema/>
+--     <remotesteps>
+--       <input>
+--       </input>
+--       <output>
+--       </output>
+--     </remotesteps>
+--     <GUI>
+--       <xloc>336</xloc>
+--       <yloc>592</yloc>
+--       <draw>Y</draw>
+--     </GUI>
+--   </step>
+select * from {{ ref('dim_customer_ktr_5') }} -- passthrough stub, not translated

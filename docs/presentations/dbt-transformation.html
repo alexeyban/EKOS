@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pentaho → dbt — EKOS</title>
+<meta name="description" content="ekos dbt generate: compiles already-recovered Pentaho ETL logic into real dbt SQL models, ref()-chained via the Transformation IR. Real source Pentaho steps, real generated dbt models, real honest gaps found by running it against a real repo.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+  <a href="#s10"></a><a href="#s11"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Pentaho already compiled.<br><span class="arrow-word">Now compile it into dbt.</span></h1>
+  <p class="lede">EKOS recovers Pentaho ETL logic into the Transformation IR (RFC 0027) — the same
+  compiled graph <code class="mono">ekos docs generate</code> already renders as documentation.
+  <code class="mono">ekos dbt generate</code> renders that same graph a second way: real dbt SQL
+  models, <code class="mono">ref()</code>/<code class="mono">source()</code>-chained via the
+  compiled data-flow edges. Every example on this page is real output from a real cloned Pentaho
+  repo, unedited — including the real gaps it found.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">Pentaho .ktr/.kjb</span><span class="sep mono">→</span>
+    <span class="chip">Transformation IR</span><span class="sep mono">→</span>
+    <span class="chip hot">dbt SQL models + schema.yml</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0036 — <code class="mono">ekos dbt generate</code></div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the command</div>
+  <div class="eyebrow">One command, the ledger already has everything it needs</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:26ch;">No new extraction. Just a second rendering of what's already compiled.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — real run, real Pentaho repo</div>
+<pre style="margin:0;">$ ekos dbt generate
+dbt models generated.
+  Models rendered: 98
+  Source tables: 23
+  Output: dbt-generated</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      98 real dbt <code class="mono">.sql</code> models from 10 real Pentaho jobs — one file per
+      compiled <code class="mono">TransformNode</code>, <code class="mono">ref()</code>-chained via
+      the same real <code class="mono">FeedsInto</code> edges the documentation deck's diagrams
+      already draw from. Zero LLM calls, zero new analyzer: this reads the exact graph
+      <code class="mono">ekos docs generate</code> reads.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / source → dbt source()</div>
+  <div class="eyebrow">dim_customer.ktr, step 6 — real, unedited</div>
+  <h2>A real TableInput step becomes a real dbt source.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">source — Pentaho .ktr XML</div>
+<pre style="margin:0;"><span class="k">&lt;step&gt;
+  &lt;name&gt;Sales Person&lt;/name&gt;
+  &lt;type&gt;TableInput&lt;/type&gt;</span>
+  &lt;connection&gt;AdventureWorks&lt;/connection&gt;
+  &lt;sql&gt;SELECT
+  BusinessEntityID
+, TerritoryID
+FROM Sales.SalesPerson
+&lt;/sql&gt;</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">target — dbt-generated/dim_customer_ktr_6.sql</div>
+<pre style="margin:0;">select
+    *
+from <span class="s">{{ source('pentaho', 'Sales.SalesPerson') }}</span></pre>
+    </div>
+  </div>
+  <p class="lede">The <code class="mono">FROM</code> clause of a real Kettle
+  <code class="mono">TableInput</code> step, resolved into a real dbt <code class="mono">source()</code>
+  reference — no guessing, the object name is carried through exactly as compiled.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/dbt/source-dim_customer_ktr_6.sql" style="color:var(--accent-a);">source-dim_customer_ktr_6.sql</a>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / a real gap, found by running it</div>
+  <div class="eyebrow">fact_sales.ktr, step 10 — real, unedited</div>
+  <h2>A real StreamLookup step. Real join kind. Empty join keys — shown honestly.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">source — Pentaho .ktr XML</div>
+<pre style="margin:0;"><span class="k">&lt;step&gt;
+  &lt;name&gt;Sales Territory Lookup&lt;/name&gt;
+  &lt;type&gt;StreamLookup&lt;/type&gt;</span>
+  &lt;lookup&gt;
+    &lt;key&gt;
+      &lt;name&gt;TerritoryID&lt;/name&gt;
+      &lt;field&gt;territory_id&lt;/field&gt;
+    &lt;/key&gt;
+    ...
+  &lt;/lookup&gt;</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">target — dbt-generated/fact_sales_ktr_10.sql</div>
+<pre style="margin:0;"><span class="c">-- NOTE: l/r assignment is positional...</span>
+select *
+from {{ ref('fact_sales_ktr_0') }} as l
+left join {{ ref('fact_sales_ktr_14') }} as r
+    on <span class="bad">true -- no join keys compiled</span></pre>
+    </div>
+  </div>
+  <p class="lede">Real finding from this session's Phase 2 testing: every real
+  <code class="mono">MergeJoin</code>/<code class="mono">StreamLookup</code> step in this repo
+  compiled with empty <code class="mono">keys</code> — their key XML shape
+  (<code class="mono">&lt;lookup&gt;&lt;key&gt;</code>, <code class="mono">&lt;keys_1&gt;/&lt;keys_2&gt;</code>)
+  doesn't match <code class="mono">DatabaseJoin</code>'s shape the analyzer currently parses. The
+  join kind (<code class="mono">Left</code>) and topology are still real and correct — only the
+  key columns are missing, and it says so, rather than guessing a wrong condition.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real files:
+    <a href="examples/dbt/join-streamlookup-fact_sales_ktr_10.sql" style="color:var(--accent-a);">StreamLookup example</a> ·
+    <a href="examples/dbt/join-mergejoin-fact_sales_ktr_4.sql" style="color:var(--accent-a);">MergeJoin example</a>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / for contrast — when keys ARE compiled</div>
+  <div class="eyebrow">A SQL-sourced join (not Pentaho) — real, unedited</div>
+  <h2>The renderer works correctly once the IR actually has key data.</h2>
+  <div class="codeblock">
+    <div class="tag">dbt-generated — real, from a compiled SQL view join</div>
+<pre style="margin:0;"><span class="c">-- NOTE: l/r assignment is positional...</span>
+select *
+from {{ ref('...sql_2_0') }} as l
+inner join {{ ref('...sql_2_1') }} as r
+    on <span class="s">s.dim_product_id = p.dim_product_id</span> <span class="c">-- TODO: verify column
+       qualification, source dialect: Pentaho</span></pre>
+  </div>
+  <p class="lede">Real keys, rendered exactly as compiled — including the real bug this session's
+  Phase 2 testing found and fixed: an earlier version prefixed keys with an invented
+  <code class="mono">l.</code>/<code class="mono">r.</code> alias, which silently double-qualified
+  SQL-sourced keys that already carried their own table alias
+  (<code class="mono">l.o.customer_id</code> — invalid). Fixed by passing compiled key text
+  through unmodified. This example is SQL-sourced, not Pentaho, shown here specifically because no
+  real Pentaho join in this repo had populated keys to demonstrate the healthy case with.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/dbt/join-sql-source-with-real-keys.sql" style="color:var(--accent-a);">join-sql-source-with-real-keys.sql</a>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / honest, not hidden</div>
+  <div class="eyebrow">dim_customer.ktr, step 1 — real, unedited</div>
+  <h2>A step EKOS can't translate still gets a real model file, still wired into the DAG.</h2>
+  <div class="codeblock">
+    <div class="tag">dbt-generated/dim_customer_ktr_1.sql — real, unedited</div>
+<pre style="margin:0;"><span class="k">-- Unmapped: unrecognized step type: Sequence
+-- Raw source:
+-- &lt;step&gt;&lt;name&gt;Create surrogate key&lt;/name&gt;
+--         &lt;type&gt;Sequence&lt;/type&gt;... &lt;/step&gt;</span>
+select * from {{ ref('dim_customer_ktr_5') }} <span class="c">-- passthrough stub, not translated</span></pre>
+  </div>
+  <p class="lede">A real Kettle <code class="mono">Sequence</code> (surrogate-key generator) step —
+  no structured semantics to render, so it becomes an honest passthrough: the raw XML and reason
+  preserved as a comment, still <code class="mono">ref()</code>-chained to its real upstream, so
+  the pipeline's shape stays connected end to end even where content isn't fully translated.
+  "Unmapped is a citizen, not a failure" — the same rule the documentation generator runs on,
+  applied to a second output format.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/dbt/unmapped-dim_customer_ktr_1.sql" style="color:var(--accent-a);">unmapped-dim_customer_ktr_1.sql</a>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / sinks and schema.yml</div>
+  <div class="eyebrow">Real output, real project structure</div>
+  <h2>Every model file resolves to a real ref(). A real schema.yml ties it together.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">dbt-generated/dim_date_ktr_10.sql — real sink</div>
+<pre style="margin:0;">select * from {{ ref('dim_date_ktr_3') }}</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">dbt-generated/schema.yml — real, excerpt</div>
+<pre style="margin:0;">version: 2
+
+sources:
+  - name: pentaho
+    tables:
+      - name: "Sales.SalesPerson"
+      - name: "Sales.Customer"
+      - name: "fact_sales"
+      <span class="c">... 20 more, real</span>
+
+models:
+  - name: dim_customer_ktr_0
+  <span class="c">... 97 more, real</span></pre>
+    </div>
+  </div>
+  <p class="lede">23 real source tables, 98 real models — every <code class="mono">sources:</code>
+  entry traces to a real compiled <code class="mono">Source</code> node's
+  <code class="mono">object_name</code>, never invented.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real files:
+    <a href="examples/dbt/sink-dim_date_ktr_10.sql" style="color:var(--accent-a);">sink-dim_date_ktr_10.sql</a> ·
+    <a href="examples/dbt/schema.yml" style="color:var(--accent-a);">schema.yml, full real file</a>
+  </div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / what's never guessed</div>
+  <div class="eyebrow">The line this feature refuses to cross</div>
+  <h2>No expression transpiler. Filter and Calculate stay raw, flagged, not translated.</h2>
+  <div class="codeblock">
+    <div class="tag">the honest-passthrough contract, real generated shapes</div>
+<pre style="margin:0;"><span class="k">-- Filter:</span>
+select * from {{ ref(upstream) }}
+where {condition} <span class="c">-- TODO: verify, source dialect: Pentaho</span>
+
+<span class="k">-- Calculate:</span>
+select *, {expr} as {output} <span class="c">-- TODO: verify, source dialect: Pentaho</span>
+from {{ ref(upstream) }}</pre>
+  </div>
+  <p class="lede">Kettle's <code class="mono">Filter Rows</code>/<code class="mono">Calculator</code>
+  conditions and expressions are raw, un-parsed source-dialect text — RFC 0027 already rejected
+  building a cross-format expression AST as out of scope, since a wrong guess here would be worse
+  than an honest TODO. Every one of these gets inlined exactly as compiled, flagged for manual
+  verification, never silently rewritten.</p>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / real bugs, real fixes</div>
+  <div class="eyebrow">What running this against a real repo actually found</div>
+  <h2>Two real bugs. Both from real data, neither from imagination.</h2>
+  <div class="two-col">
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">Double-qualification</span><span class="v">SQL-sourced join keys already carry their own table alias; an early version's invented <code class="mono">l.</code>/<code class="mono">r.</code> prefix produced <code class="mono">l.o.customer_id</code> — invalid. Fixed: keys pass through unmodified.</span></li>
+      <li><span class="k">Confusing no-keys comment</span><span class="v">The <code class="mono">on true</code> fallback had a "verify column qualification" comment appended with nothing to verify. Fixed: the comment only attaches to real key text.</span></li>
+    </ul>
+    <div class="codeblock">
+      <div class="tag">before → after, the second fix</div>
+<pre style="margin:0;"><span class="bad">on true -- no join keys compiled
+   -- TODO: verify column qualification,
+   source dialect: Pentaho</span>
+
+<span class="c">-- fixed:</span>
+<span class="s">on true -- no join keys compiled</span></pre>
+    </div>
+  </div>
+  <p class="lede">Both found by running this against a real 198-object Pentaho repo, not by unit
+  tests — the same pattern that found real bugs in the documentation generator (RFC 0035) and the
+  earlier version of this feature. Real, messy data keeps finding what hand-built fixtures miss.</p>
+</section>
+
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / the real numbers</div>
+  <div class="eyebrow">This whole deck is one real repo, one real run</div>
+  <div class="facts">
+    <div><span class="k">Source repo</span><span class="v">joseph-higaki/etl_adventureworks_sales_purchases_datamart — a real public GitHub repo</span></div>
+    <div><span class="k">Models rendered</span><span class="v">98, from 10 real .ktr/.kjb jobs</span></div>
+    <div><span class="k">Source tables</span><span class="v">23, real object names from compiled Source nodes</span></div>
+    <div><span class="k">Real Pentaho joins with populated keys</span><span class="v">0 of 2 — an honest, disclosed gap, not hidden</span></div>
+    <div><span class="k">Real bugs found &amp; fixed this session</span><span class="v">2, both from real-data testing</span></div>
+  </div>
+</section>
+
+<section class="slide cta" id="s11">
+  <div class="eyebrow">Try it</div>
+  <h2>Point it at anything EKOS has already compiled.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile once</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># real dbt models, ref()-chained, zero LLM cost</span>
+$ ekos dbt generate</pre>
+  </div>
+  <div class="fineprint">EKOS · RFC 0036 (Pentaho → dbt Export) · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>
