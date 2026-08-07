@@ -13,6 +13,7 @@
 <nav class="rail" aria-hidden="true">
   <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
   <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+  <a href="#s10"></a>
 </nav>
 
 <div class="deck">
@@ -197,21 +198,76 @@ Uuid::new_v5(NAMESPACE, <span class="s">"github:{owner}/{repo}#{n}"</span>)</pre
   </div>
 </section>
 
-<section class="slide cta" id="s9">
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / install &amp; run</div>
+  <div class="eyebrow">Builds from source — Rust 2024, Cargo workspace, no prebuilt binary yet</div>
+  <h2>Clone, build, compile, serve.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — macOS / Linux / WSL2</div>
+<pre style="margin:0;"><span class="c"># 1. clone — the Cargo workspace root is ekos/, not the repo root</span>
+$ git clone https://github.com/alexeyban/EKOS.git
+$ cd EKOS/ekos
+
+<span class="c"># 2. build (needs Rust stable via rustup.rs + a C toolchain)</span>
+$ cargo build --release --workspace
+$ cargo install --path crates/cli
+
+<span class="c"># 3. compile a workspace's knowledge, once</span>
+$ cd /path/to/your/repo
+$ ekos init
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># 4. serve it over MCP, stdio</span>
+$ ekos mcp serve --workspace .</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">
+        Prerequisites: Rust stable (2024 edition needs rustc 1.85+) and a C/C++ toolchain —
+        <code class="mono">rusqlite</code>'s bundled SQLite and the <code class="mono">zstd</code>
+        crate both compile native C at build time even though the project itself is pure Rust.
+        Windows has a native path too (<code class="mono">winget</code> + MSVC build tools); WSL2
+        is the path of least friction if you'd rather follow the Linux steps unmodified.
+      </p>
+      <ul class="facts" style="margin-top:1.6rem;">
+        <li><span class="k">Verify</span><span class="v"><code class="mono">ekos --help</code> · <code class="mono">cargo test --workspace</code> — 500+ tests</span></li>
+        <li><span class="k">GitHub connector config</span><span class="v"><code class="mono">[connectors.github]</code> in <code class="mono">ekos.toml</code> — owner, repo, token env var</span></li>
+        <li><span class="k">Full OS-by-OS steps</span><span class="v">README.md → Installation (macOS, Windows native, WSL2)</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide cta" id="s10">
   <div class="eyebrow">Try it</div>
   <h2>Point an agent at your repo. Not the API — the compiled knowledge.</h2>
-  <div class="codeblock">
-    <div class="tag">terminal</div>
-<pre style="margin:0;"><span class="c"># compile the repo once</span>
-$ ekos build
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — wire it into Claude Code</div>
+<pre style="margin:0;"><span class="c"># register the server — path-based</span>
+$ claude mcp add ekos -- ekos --config ekos.toml \
+    mcp serve --workspace /path/to/workspace
 
-<span class="c"># serve it to any MCP client over stdio</span>
-$ ekos mcp serve --workspace .
+<span class="c"># or path-free, via env vars</span>
+$ claude mcp add ekos --env EKOS_WORKSPACE=/path/to/workspace \
+    -- ekos mcp serve</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">then just ask</div>
+<pre style="margin:0;"><span class="c">"What does PR #47 actually close,</span>
+<span class="c"> and which files does it touch?"</span>
 
-<span class="c"># point Claude Code / Claude Desktop at it — one line of config</span>
-{ <span class="s">"command"</span>: <span class="s">"ekos"</span>, <span class="s">"args"</span>: [<span class="s">"mcp"</span>, <span class="s">"serve"</span>] }</pre>
+<span class="k">→</span> ekos_neighborhood(pr_47_id)
+<span class="k">{</span> <span class="s">"relationships"</span>: [
+  <span class="s">{ "kind": "References", "to": "issue_12",</span>
+    <span class="s">"evidence": "body: closes #12" }</span>,
+  <span class="s">{ "kind": "References", "to": "file:src/auth.rs",</span>
+    <span class="s">"evidence": "PR file-change entry" }</span>
+]<span class="k"> }</span></pre>
+    </div>
   </div>
-  <div class="fineprint">EKOS · RFC 0013 (MCP Server) + RFC 0020 (GitHub Connector) · github.com/alexeyban/EKOS</div>
+  <div class="fineprint">EKOS · RFC 0013 (MCP Server) + RFC 0020 (GitHub Connector) ·
+    <a href="https://github.com/alexeyban/EKOS/tree/main" style="color:inherit;">github.com/alexeyban/EKOS</a> (main branch)</div>
 </section>
 
 </div>
