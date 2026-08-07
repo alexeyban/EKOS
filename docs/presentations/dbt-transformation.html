@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pentaho → dbt — EKOS</title>
-<meta name="description" content="ekos dbt generate: compiles already-recovered Pentaho ETL logic into real dbt SQL models, ref()-chained via the Transformation IR. Real source Pentaho steps, real generated dbt models, real honest gaps found by running it against a real repo.">
+<meta name="description" content="ekos dbt generate: compiles already-recovered Pentaho ETL logic into real dbt SQL models, ref()-chained via the Transformation IR. Real source Pentaho steps, real generated dbt models, and the five real bugs found — and fixed — by running it against a real repo.">
 <link rel="stylesheet" href="../assets/theme.css">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 </head>
@@ -13,7 +13,7 @@
 <nav class="rail" aria-hidden="true">
   <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
   <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
-  <a href="#s10"></a><a href="#s11"></a>
+  <a href="#s10"></a>
 </nav>
 
 <div class="deck">
@@ -26,7 +26,7 @@
   <code class="mono">ekos dbt generate</code> renders that same graph a second way: real dbt SQL
   models, <code class="mono">ref()</code>/<code class="mono">source()</code>-chained via the
   compiled data-flow edges. Every example on this page is real output from a real cloned Pentaho
-  repo, unedited — including the real gaps it found.</p>
+  repo, unedited — including the five real bugs it found, and fixed, along the way.</p>
   <div class="hero-diagram">
     <span class="chip hot">Pentaho .ktr/.kjb</span><span class="sep mono">→</span>
     <span class="chip">Transformation IR</span><span class="sep mono">→</span>
@@ -78,25 +78,28 @@ FROM Sales.SalesPerson
     <div class="codeblock">
       <div class="tag">target — dbt-generated/dim_customer_ktr_6.sql</div>
 <pre style="margin:0;">select
-    *
-from <span class="s">{{ source('pentaho', 'Sales.SalesPerson') }}</span></pre>
+    <span class="s">BusinessEntityID,
+    TerritoryID</span>
+from {{ source('pentaho', 'Sales.SalesPerson') }}</pre>
     </div>
   </div>
-  <p class="lede">The <code class="mono">FROM</code> clause of a real Kettle
-  <code class="mono">TableInput</code> step, resolved into a real dbt <code class="mono">source()</code>
-  reference — no guessing, the object name is carried through exactly as compiled.</p>
+  <p class="lede">The <code class="mono">FROM</code> clause resolves into a real dbt
+  <code class="mono">source()</code> reference, and the real declared columns — read from the
+  step's structured <code class="mono">&lt;row-meta&gt;/&lt;value-meta&gt;/&lt;name&gt;</code>
+  metadata, not parsed out of the free-text SQL — become a real explicit column list instead of
+  <code class="mono">select *</code>.</p>
   <div class="tag" style="margin-top:0.8rem;">Open the real file:
     <a href="examples/dbt/source-dim_customer_ktr_6.sql" style="color:var(--accent-a);">source-dim_customer_ktr_6.sql</a>
   </div>
 </section>
 
 <section class="slide" id="s4">
-  <div class="stage-num mono">§ 03 / a real gap, found by running it</div>
+  <div class="stage-num mono">§ 03 / a real gap, found — and fixed</div>
   <div class="eyebrow">fact_sales.ktr, step 10 — real, unedited</div>
-  <h2>A real StreamLookup step. Real join kind. Empty join keys — shown honestly.</h2>
+  <h2>StreamLookup and MergeJoin have their own key XML shapes. Now both are read correctly.</h2>
   <div class="two-col">
     <div class="codeblock">
-      <div class="tag">source — Pentaho .ktr XML</div>
+      <div class="tag">source — Pentaho .ktr XML (StreamLookup)</div>
 <pre style="margin:0;"><span class="k">&lt;step&gt;
   &lt;name&gt;Sales Territory Lookup&lt;/name&gt;
   &lt;type&gt;StreamLookup&lt;/type&gt;</span>
@@ -105,7 +108,6 @@ from <span class="s">{{ source('pentaho', 'Sales.SalesPerson') }}</span></pre>
       &lt;name&gt;TerritoryID&lt;/name&gt;
       &lt;field&gt;territory_id&lt;/field&gt;
     &lt;/key&gt;
-    ...
   &lt;/lookup&gt;</pre>
     </div>
     <div class="codeblock">
@@ -114,16 +116,19 @@ from <span class="s">{{ source('pentaho', 'Sales.SalesPerson') }}</span></pre>
 select *
 from {{ ref('fact_sales_ktr_0') }} as l
 left join {{ ref('fact_sales_ktr_14') }} as r
-    on <span class="bad">true -- no join keys compiled</span></pre>
+    on <span class="s">territory_id = TerritoryID</span> <span class="c">-- TODO: verify column
+       qualification, source dialect: Pentaho</span></pre>
     </div>
   </div>
-  <p class="lede">Real finding from this session's Phase 2 testing: every real
+  <p class="lede">Real finding from this session's Phase 2 testing, now fixed: every real
   <code class="mono">MergeJoin</code>/<code class="mono">StreamLookup</code> step in this repo
-  compiled with empty <code class="mono">keys</code> — their key XML shape
-  (<code class="mono">&lt;lookup&gt;&lt;key&gt;</code>, <code class="mono">&lt;keys_1&gt;/&lt;keys_2&gt;</code>)
-  doesn't match <code class="mono">DatabaseJoin</code>'s shape the analyzer currently parses. The
-  join kind (<code class="mono">Left</code>) and topology are still real and correct — only the
-  key columns are missing, and it says so, rather than guessing a wrong condition.</p>
+  first compiled with empty <code class="mono">keys</code> — each uses its own real key XML shape
+  (<code class="mono">&lt;lookup&gt;&lt;key&gt;&lt;name&gt;/&lt;field&gt;</code> for
+  <code class="mono">StreamLookup</code>; <code class="mono">&lt;keys_1&gt;/&lt;keys_2&gt;</code>
+  for <code class="mono">MergeJoin</code>), neither matching <code class="mono">DatabaseJoin</code>'s
+  <code class="mono">&lt;keys&gt;&lt;key&gt;&lt;value1&gt;/&lt;value2&gt;</code> shape the analyzer
+  originally only read. Both shapes are parsed correctly now — real keys, real join kind, real
+  topology, for every real join in this repo.</p>
   <div class="tag" style="margin-top:0.8rem;">Open the real files:
     <a href="examples/dbt/join-streamlookup-fact_sales_ktr_10.sql" style="color:var(--accent-a);">StreamLookup example</a> ·
     <a href="examples/dbt/join-mergejoin-fact_sales_ktr_4.sql" style="color:var(--accent-a);">MergeJoin example</a>
@@ -131,32 +136,7 @@ left join {{ ref('fact_sales_ktr_14') }} as r
 </section>
 
 <section class="slide" id="s5">
-  <div class="stage-num mono">§ 04 / for contrast — when keys ARE compiled</div>
-  <div class="eyebrow">A SQL-sourced join (not Pentaho) — real, unedited</div>
-  <h2>The renderer works correctly once the IR actually has key data.</h2>
-  <div class="codeblock">
-    <div class="tag">dbt-generated — real, from a compiled SQL view join</div>
-<pre style="margin:0;"><span class="c">-- NOTE: l/r assignment is positional...</span>
-select *
-from {{ ref('...sql_2_0') }} as l
-inner join {{ ref('...sql_2_1') }} as r
-    on <span class="s">s.dim_product_id = p.dim_product_id</span> <span class="c">-- TODO: verify column
-       qualification, source dialect: Pentaho</span></pre>
-  </div>
-  <p class="lede">Real keys, rendered exactly as compiled — including the real bug this session's
-  Phase 2 testing found and fixed: an earlier version prefixed keys with an invented
-  <code class="mono">l.</code>/<code class="mono">r.</code> alias, which silently double-qualified
-  SQL-sourced keys that already carried their own table alias
-  (<code class="mono">l.o.customer_id</code> — invalid). Fixed by passing compiled key text
-  through unmodified. This example is SQL-sourced, not Pentaho, shown here specifically because no
-  real Pentaho join in this repo had populated keys to demonstrate the healthy case with.</p>
-  <div class="tag" style="margin-top:0.8rem;">Open the real file:
-    <a href="examples/dbt/join-sql-source-with-real-keys.sql" style="color:var(--accent-a);">join-sql-source-with-real-keys.sql</a>
-  </div>
-</section>
-
-<section class="slide" id="s6">
-  <div class="stage-num mono">§ 05 / honest, not hidden</div>
+  <div class="stage-num mono">§ 04 / honest, not hidden</div>
   <div class="eyebrow">dim_customer.ktr, step 1 — real, unedited</div>
   <h2>A step EKOS can't translate still gets a real model file, still wired into the DAG.</h2>
   <div class="codeblock">
@@ -178,8 +158,8 @@ select * from {{ ref('dim_customer_ktr_5') }} <span class="c">-- passthrough stu
   </div>
 </section>
 
-<section class="slide" id="s7">
-  <div class="stage-num mono">§ 06 / sinks and schema.yml</div>
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / sinks and schema.yml</div>
   <div class="eyebrow">Real output, real project structure</div>
   <h2>Every model file resolves to a real ref(). A real schema.yml ties it together.</h2>
   <div class="two-col">
@@ -213,8 +193,8 @@ models:
   </div>
 </section>
 
-<section class="slide" id="s8">
-  <div class="stage-num mono">§ 07 / what's never guessed</div>
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / what's never guessed</div>
   <div class="eyebrow">The line this feature refuses to cross</div>
   <h2>No expression transpiler. Filter and Calculate stay raw, flagged, not translated.</h2>
   <div class="codeblock">
@@ -234,43 +214,53 @@ from {{ ref(upstream) }}</pre>
   verification, never silently rewritten.</p>
 </section>
 
-<section class="slide" id="s9">
-  <div class="stage-num mono">§ 08 / real bugs, real fixes</div>
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / real bugs, real fixes</div>
   <div class="eyebrow">What running this against a real repo actually found</div>
-  <h2>Two real bugs. Both from real data, neither from imagination.</h2>
+  <h2>Five real bugs. All from real data, none from imagination.</h2>
   <div class="two-col">
     <ul class="facts" style="margin-top:0;">
+      <li><span class="k">Empty Source columns</span><span class="v"><code class="mono">TableInput</code> steps compiled with <code class="mono">columns: []</code> — the real declared columns were in <code class="mono">&lt;row-meta&gt;</code>, never read. Fixed: read from the real structured metadata.</span></li>
+      <li><span class="k">Empty StreamLookup keys</span><span class="v">Its real key shape (<code class="mono">&lt;lookup&gt;&lt;key&gt;&lt;name&gt;/&lt;field&gt;</code>) doesn't match <code class="mono">DatabaseJoin</code>'s. Fixed: a dedicated extractor for the real shape.</span></li>
+      <li><span class="k">Empty MergeJoin keys</span><span class="v">Its real key shape (<code class="mono">&lt;keys_1&gt;/&lt;keys_2&gt;</code>, two separate lists) doesn't match <code class="mono">DatabaseJoin</code>'s either. Fixed: positional pairing of the two real lists.</span></li>
       <li><span class="k">Double-qualification</span><span class="v">SQL-sourced join keys already carry their own table alias; an early version's invented <code class="mono">l.</code>/<code class="mono">r.</code> prefix produced <code class="mono">l.o.customer_id</code> — invalid. Fixed: keys pass through unmodified.</span></li>
       <li><span class="k">Confusing no-keys comment</span><span class="v">The <code class="mono">on true</code> fallback had a "verify column qualification" comment appended with nothing to verify. Fixed: the comment only attaches to real key text.</span></li>
     </ul>
     <div class="codeblock">
-      <div class="tag">before → after, the second fix</div>
-<pre style="margin:0;"><span class="bad">on true -- no join keys compiled
-   -- TODO: verify column qualification,
-   source dialect: Pentaho</span>
+      <div class="tag">before → after, on the same real step</div>
+<pre style="margin:0;"><span class="bad">select
+    *
+from {{ source('pentaho',
+  'Sales.SalesPerson') }}</span>
 
 <span class="c">-- fixed:</span>
-<span class="s">on true -- no join keys compiled</span></pre>
+<span class="s">select
+    BusinessEntityID,
+    TerritoryID
+from {{ source('pentaho',
+  'Sales.SalesPerson') }}</span></pre>
     </div>
   </div>
-  <p class="lede">Both found by running this against a real 198-object Pentaho repo, not by unit
-  tests — the same pattern that found real bugs in the documentation generator (RFC 0035) and the
-  earlier version of this feature. Real, messy data keeps finding what hand-built fixtures miss.</p>
+  <p class="lede">All five found by running this against a real 198-object Pentaho repo, not by
+  unit tests — the same pattern that found real bugs in the documentation generator (RFC 0035).
+  Three live in the recovery layer (<code class="mono">pentaho_analyzer.rs</code>, shared with
+  <code class="mono">ekos docs generate</code>), two in this feature's own rendering. Real, messy
+  data keeps finding what hand-built fixtures miss.</p>
 </section>
 
-<section class="slide" id="s10">
-  <div class="stage-num mono">§ 09 / the real numbers</div>
-  <div class="eyebrow">This whole deck is one real repo, one real run</div>
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / the real numbers</div>
+  <div class="eyebrow">This whole deck is one real repo, two real runs</div>
   <div class="facts">
     <div><span class="k">Source repo</span><span class="v">joseph-higaki/etl_adventureworks_sales_purchases_datamart — a real public GitHub repo</span></div>
     <div><span class="k">Models rendered</span><span class="v">98, from 10 real .ktr/.kjb jobs</span></div>
     <div><span class="k">Source tables</span><span class="v">23, real object names from compiled Source nodes</span></div>
-    <div><span class="k">Real Pentaho joins with populated keys</span><span class="v">0 of 2 — an honest, disclosed gap, not hidden</span></div>
-    <div><span class="k">Real bugs found &amp; fixed this session</span><span class="v">2, both from real-data testing</span></div>
+    <div><span class="k">Real Pentaho joins with populated keys</span><span class="v">2 of 2, after the fix — 0 of 2 before it</span></div>
+    <div><span class="k">Real bugs found &amp; fixed this session</span><span class="v">5 — 3 in shared recovery, 2 in dbt rendering, all from real-data testing</span></div>
   </div>
 </section>
 
-<section class="slide cta" id="s11">
+<section class="slide cta" id="s10">
   <div class="eyebrow">Try it</div>
   <h2>Point it at anything EKOS has already compiled.</h2>
   <div class="codeblock">

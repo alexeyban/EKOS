@@ -14,19 +14,19 @@
 //! `TableOutput` → `Sink`, anything else → `Unmapped` with the raw step XML
 //! preserved as evidence.
 //!
-//! **No real `.ktr`/`.kjb` sample files were available to validate field
-//! names against** — the per-step XML shapes below (`<sql>`, `<compare>/
-//! <condition>`, `<fields>/<field>`, `<keys>/<key>`, `<group>`, `<table>`)
-//! follow Pentaho Kettle's documented step metadata conventions as closely as
-//! possible from general knowledge, but are best-effort, not verified against
-//! a real export. `DatabaseJoin` in particular is modeled with the same
-//! `step1`/`step2`/`keys` shape as `MergeJoin` for simplicity, even though
-//! real `DatabaseJoin` semantics (a per-row parameterized SQL lookup) don't
-//! cleanly fit the two-upstream-step `Join` shape — a documented
-//! approximation, not a blocker, matching this RFC's explicit tolerance for
+//! Field name shapes below were originally written without a real `.ktr`/`.kjb` sample to
+//! validate against (best-effort from Kettle's documented conventions). Since revisited against a
+//! real cloned Pentaho repo (RFC 0036 Phase 2 testing) — `TableInput`'s `<row-meta>/<value-meta>/
+//! <name>` (declared output columns), `MergeJoin`'s `<keys_1>`/`<keys_2>` (two separate bare-`
+//! <key>` lists, not `DatabaseJoin`'s `<keys><key><value1>/<value2></key></keys>` pairs), and
+//! `StreamLookup`'s `<lookup><key><name>/<field></key></lookup>` (a third, different shape again)
+//! were all found to differ from what was originally assumed and have been corrected — see
+//! [`extract_join_keys`] and [`extract_stream_lookup`]. `DatabaseJoin` itself still has no real
+//! sample to verify against (none appeared in the repo used for testing) and is modeled with the
+//! same `step1`/`step2`/`keys` shape as `MergeJoin` for simplicity, even though real `DatabaseJoin`
+//! semantics (a per-row parameterized SQL lookup) don't cleanly fit the two-upstream-step `Join`
+//! shape — a documented approximation, not a blocker, matching this RFC's explicit tolerance for
 //! "accept incomplete coverage" scoping (see RFC 0025's Informix precedent).
-//! Revisiting field names against a real exported `.ktr` file is listed as
-//! follow-up work once one is available.
 
 use async_trait::async_trait;
 use ekos_artifact::ArtifactId;
@@ -265,9 +265,25 @@ fn map_step(step: &roxmltree::Node, step_type: &str, xml: &str) -> TransformNode
         "TableInput" => {
             let sql = child_text(step, "sql").unwrap_or_default();
             let object_name = extract_table_from_sql(&sql).unwrap_or_else(|| sql.clone());
+            // Kettle records the declared output columns as structured `<row-meta>/<value-meta>/
+            // <name>` metadata — the same real shape `TableOutput` already reads from `<fields>/
+            // <field>/<stream_name>` below, just under a different tag. Reading this (rather than
+            // parsing the free-text SQL `SELECT` list, which would be fragile across dialects) is
+            // why a real TableInput step's compiled `Source.columns` can be non-empty at all —
+            // found missing by running `ekos dbt generate` against a real repo: a real `Sales.
+            // SalesPerson` read compiled with `columns: []`, so the generated dbt model fell back
+            // to `select *` even though the columns were sitting right there in the same XML.
+            let columns = step
+                .children()
+                .find(|n| n.has_tag_name("row-meta"))
+                .into_iter()
+                .flat_map(|f| f.children())
+                .filter(|n| n.has_tag_name("value-meta"))
+                .filter_map(|f| child_text(&f, "name"))
+                .collect();
             TransformNode::Source {
                 object_name,
-                columns: Vec::new(),
+                columns,
             }
         }
         "FilterRows" => TransformNode::Filter {
@@ -385,18 +401,7 @@ fn extract_join(step: &roxmltree::Node) -> TransformNode {
         _ => JoinKind::Inner,
     };
 
-    let keys: Vec<(String, String)> = step
-        .children()
-        .find(|n| n.has_tag_name("keys"))
-        .into_iter()
-        .flat_map(|k| k.children())
-        .filter(|n| n.has_tag_name("key"))
-        .filter_map(|k| {
-            let v1 = child_text(&k, "value1")?;
-            let v2 = child_text(&k, "value2")?;
-            Some((v1, v2))
-        })
-        .collect();
+    let keys = extract_join_keys(step);
 
     // `left`/`right` are graph-local node indices, but this step's own two
     // upstream steps (`step1`/`step2`) are named references, not indices
@@ -413,22 +418,81 @@ fn extract_join(step: &roxmltree::Node) -> TransformNode {
     }
 }
 
-/// `StreamLookup` has no `join_type` field in its Kettle XML (unlike
-/// `DatabaseJoin`/`MergeJoin`) because it's always a left join against the
-/// lookup stream on the configured key(s) — so the kind is forced to `Left`
-/// rather than read from the XML, reusing `extract_join`'s `keys` shape per
-/// this module's documented `DatabaseJoin`/`MergeJoin` approximation pattern.
+/// Join keys, across the three real XML shapes this repo's real jobs actually use —
+/// `DatabaseJoin`'s and `StreamLookup`'s XML shapes are genuinely different from each other, not
+/// just cosmetically, so a single `<keys>` lookup silently returned empty for two of the three
+/// real step types. Found by running `ekos dbt generate` against a real repo: every real
+/// `MergeJoin`/`StreamLookup` step compiled with `keys: []`, even though the key data was present
+/// in the XML the whole time, just under different tags.
+fn extract_join_keys(step: &roxmltree::Node) -> Vec<(String, String)> {
+    // `DatabaseJoin`'s documented shape: `<keys><key><value1>/<value2></key></keys>`.
+    let paired: Vec<(String, String)> = step
+        .children()
+        .find(|n| n.has_tag_name("keys"))
+        .into_iter()
+        .flat_map(|k| k.children())
+        .filter(|n| n.has_tag_name("key"))
+        .filter_map(|k| {
+            let v1 = child_text(&k, "value1")?;
+            let v2 = child_text(&k, "value2")?;
+            Some((v1, v2))
+        })
+        .collect();
+    if !paired.is_empty() {
+        return paired;
+    }
+
+    // `MergeJoin`'s real shape: two separate lists of bare `<key>` text, paired positionally —
+    // `<keys_1><key>ProductID</key></keys_1>` against the first upstream,
+    // `<keys_2><key>ProductCostHistoryProductId</key></keys_2>` against the second.
+    let bare_key_list = |tag: &str| -> Vec<String> {
+        step.children()
+            .find(|n| n.has_tag_name(tag))
+            .into_iter()
+            .flat_map(|k| k.children())
+            .filter(|n| n.has_tag_name("key"))
+            .filter_map(|k| {
+                k.text()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .collect()
+    };
+    let keys_1 = bare_key_list("keys_1");
+    let keys_2 = bare_key_list("keys_2");
+    if !keys_1.is_empty() && keys_1.len() == keys_2.len() {
+        return keys_1.into_iter().zip(keys_2).collect();
+    }
+
+    Vec::new()
+}
+
+/// `StreamLookup` has no `join_type` field in its Kettle XML (unlike `DatabaseJoin`/`MergeJoin`)
+/// because it's always a left join against the lookup stream on the configured key(s) — so the
+/// kind is forced to `Left` rather than read from the XML. Its key data lives in a real, different
+/// shape from `extract_join_keys`'s `<keys>`/`<keys_1>`/`<keys_2>` — `<lookup><key><name>/
+/// <field></key></lookup>`, where `<field>` names the column on the main (upstream) stream and
+/// `<name>` names the column on the lookup stream, matching this pipeline's `l`/`r` alias
+/// convention (`l` = first `FeedsInto` upstream = the main stream; `r` = the lookup stream).
 fn extract_stream_lookup(step: &roxmltree::Node) -> TransformNode {
-    match extract_join(step) {
-        TransformNode::Join {
-            left, right, keys, ..
-        } => TransformNode::Join {
-            left,
-            right,
-            keys,
-            kind: JoinKind::Left,
-        },
-        other => other,
+    let keys: Vec<(String, String)> = step
+        .children()
+        .find(|n| n.has_tag_name("lookup"))
+        .into_iter()
+        .flat_map(|l| l.children())
+        .filter(|n| n.has_tag_name("key"))
+        .filter_map(|k| {
+            let name = child_text(&k, "name")?;
+            let field = child_text(&k, "field")?;
+            Some((field, name))
+        })
+        .collect();
+
+    TransformNode::Join {
+        left: NodeId(0),
+        right: NodeId(0),
+        keys,
+        kind: JoinKind::Left,
     }
 }
 
@@ -576,6 +640,53 @@ mod tests {
         ));
     }
 
+    /// Regression test for a real gap found by running `ekos dbt generate` against a real
+    /// Pentaho repo: a real `TableInput` step's declared output columns live in structured
+    /// `<row-meta>/<value-meta>/<name>` metadata (the same real shape as `TableOutput`'s
+    /// `<fields>/<field>/<stream_name>`, just a different tag) — reading it, rather than parsing
+    /// the free-text SQL `SELECT` list, is what lets a compiled `Source.columns` be non-empty at
+    /// all. Before this fix every real `TableInput` step compiled with `columns: []`, so
+    /// `ekos dbt generate` always fell back to `select *` even when the real columns were sitting
+    /// right there in the same XML.
+    #[test]
+    fn maps_table_input_columns_from_row_meta() {
+        const KTR_WITH_ROW_META: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <info><name>Load Sales Person</name></info>
+  <order></order>
+  <step>
+    <name>Sales Person</name>
+    <type>TableInput</type>
+    <sql>SELECT
+  BusinessEntityID
+, TerritoryID
+FROM Sales.SalesPerson
+</sql>
+    <row-meta>
+      <value-meta>
+        <type>Integer</type>
+        <storagetype>normal</storagetype>
+        <name>BusinessEntityID</name>
+      </value-meta>
+      <value-meta>
+        <type>Integer</type>
+        <storagetype>normal</storagetype>
+        <name>TerritoryID</name>
+      </value-meta>
+    </row-meta>
+  </step>
+</transformation>
+"#;
+        let graph =
+            parse_kettle_xml("jobs/sales_person.ktr", "transformation", KTR_WITH_ROW_META).unwrap();
+        assert!(matches!(
+            &graph.nodes[0],
+            TransformNode::Source { object_name, columns }
+                if object_name == "Sales.SalesPerson"
+                    && columns == &vec!["BusinessEntityID".to_string(), "TerritoryID".to_string()]
+        ));
+    }
+
     #[test]
     fn maps_filter_rows_to_filter_with_readable_condition() {
         let graph = sample_graph();
@@ -660,17 +771,24 @@ mod tests {
 
     #[test]
     fn maps_stream_lookup_to_left_join() {
+        // The real Kettle shape (verified against a real cloned Pentaho repo's `fact_sales.ktr`),
+        // not the `<keys><key><value1>/<value2></key></keys>` shape `DatabaseJoin`/`MergeJoin`
+        // use — `StreamLookup` nests its key pairs under `<lookup><key><name>/<field></key>`.
         let xml = r#"<?xml version="1.0"?>
 <transformation>
   <step>
     <name>Sales Territory Lookup</name>
     <type>StreamLookup</type>
-    <keys>
+    <lookup>
       <key>
-        <value1>SalesTerritoryKey</value1>
-        <value2>SalesTerritoryKey</value2>
+        <name>TerritoryID</name>
+        <field>territory_id</field>
       </key>
-    </keys>
+      <value>
+        <name>dim_sales_territory_id</name>
+        <rename>calculated_dim_sales_territory_id</rename>
+      </value>
+    </lookup>
   </step>
 </transformation>
 "#;
@@ -680,9 +798,45 @@ mod tests {
                 assert_eq!(*kind, JoinKind::Left);
                 assert_eq!(
                     keys,
+                    &vec![("territory_id".to_string(), "TerritoryID".to_string())],
+                    "field (main stream) = name (lookup stream), matching the l/r alias convention"
+                );
+            }
+            other => panic!("expected Join, got {other:?}"),
+        }
+    }
+
+    /// Regression test for a real gap found by running `ekos dbt generate` against a real
+    /// Pentaho repo: `MergeJoin`'s real key XML shape is two separate `<keys_1>`/`<keys_2>` lists
+    /// of bare `<key>` text (verified against a real `fact_sales.ktr`'s "Merge Product Cost"
+    /// step), not `DatabaseJoin`'s `<keys><key><value1>/<value2></key></keys>` shape — every real
+    /// `MergeJoin` step in that repo compiled with `keys: []` before this fix.
+    #[test]
+    fn maps_merge_join_keys_from_keys_1_keys_2() {
+        let xml = r#"<?xml version="1.0"?>
+<transformation>
+  <step>
+    <name>Merge Product Cost</name>
+    <type>MergeJoin</type>
+    <join_type>INNER</join_type>
+    <keys_1>
+      <key>ProductID</key>
+    </keys_1>
+    <keys_2>
+      <key>ProductCostHistoryProductId</key>
+    </keys_2>
+  </step>
+</transformation>
+"#;
+        let graph = parse_kettle_xml("merge_join.ktr", "transformation", xml).unwrap();
+        match &graph.nodes[0] {
+            TransformNode::Join { kind, keys, .. } => {
+                assert_eq!(*kind, JoinKind::Inner);
+                assert_eq!(
+                    keys,
                     &vec![(
-                        "SalesTerritoryKey".to_string(),
-                        "SalesTerritoryKey".to_string()
+                        "ProductID".to_string(),
+                        "ProductCostHistoryProductId".to_string()
                     )]
                 );
             }

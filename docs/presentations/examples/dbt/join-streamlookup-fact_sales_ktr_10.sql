@@ -2,4 +2,4 @@
 select *
 from {{ ref('fact_sales_ktr_0') }} as l
 left join {{ ref('fact_sales_ktr_14') }} as r
-    on true -- no join keys compiled
+    on territory_id = TerritoryID -- TODO: verify column qualification, source dialect: Pentaho

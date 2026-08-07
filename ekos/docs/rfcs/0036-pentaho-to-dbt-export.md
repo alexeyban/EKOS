@@ -177,6 +177,35 @@ real keys (`on s.dim_product_id = p.dim_product_id -- TODO: verify column qualif
 dialect: Pentaho`) — correct, no double-qualification, matching Phase 2's `on o.customer_id =
 c.id` result from the SQL-schema fixture.
 
+**Phase 2b — recovery-layer key/column gaps found by building the deck. DONE (2026-08-07).**
+Building a presentation deck pairing real Pentaho source XML against real generated dbt models
+(rather than just reading the generated `.sql` files in isolation) surfaced three further real
+bugs, all in `ekos/crates/recovery/src/pentaho_analyzer.rs` — upstream of `ekos-dbt-gen`, shared
+with `ekos docs generate`:
+- `TableInput` steps always compiled with `columns: []`; the real declared columns live in
+  structured `<row-meta>/<value-meta>/<name>` metadata that was never read. Fixed by reading it
+  (mirroring `TableOutput`'s existing `<fields>/<field>/<stream_name>` pattern) — a real
+  `Sales.SalesPerson` read now renders `select BusinessEntityID, TerritoryID from
+  {{ source(...) }}` instead of `select *`.
+- `StreamLookup`'s real key XML (`<lookup><key><name>/<field></key></lookup>`) doesn't match
+  `DatabaseJoin`'s `<keys><key><value1>/<value2></key></keys>` shape `extract_join` only read —
+  every real `StreamLookup` step compiled with empty `keys`. Fixed with a dedicated extractor
+  reading the real shape (`extract_stream_lookup`).
+- `MergeJoin`'s real key XML is two separate lists (`<keys_1><key>...</key></keys_1>`/
+  `<keys_2><key>...</key></keys_2>`), not `DatabaseJoin`'s single paired-`<keys>` shape either —
+  every real `MergeJoin` step also compiled with empty `keys`. Fixed by pairing the two lists
+  positionally in a new shared `extract_join_keys` (also handles `DatabaseJoin`'s original shape).
+
+After a fresh clean re-run of the full pipeline against the same real repo (the workspace used for
+the original Phase 2 run had accumulated stale re-ingested `dbt-generated`/`docs-curated` output
+into its own ledger from a much earlier session — a fresh clone was used instead of trying to
+un-ingest append-only data), all three fixes verified: real explicit `Source` columns, real join
+keys on both `StreamLookup` and `MergeJoin`, 98 models / 23 sources unchanged. 3 new regression
+tests added directly against real-shaped fixture XML
+(`maps_table_input_columns_from_row_meta`, `maps_merge_join_keys_from_keys_1_keys_2`, and
+`maps_stream_lookup_to_left_join` rewritten to use the real `<lookup>` shape instead of an
+unverified assumed one).
+
 **Phase 3 — dbt `tests:` generation.** Emit `not_null`/`relationships` schema tests from
 evidence-backed relationship data, once Phase 1/2 prove the base model generation is sound.
 
