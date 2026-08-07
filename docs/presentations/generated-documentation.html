@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generated Documentation — EKOS</title>
+<meta name="description" content="ekos docs generate: Markdown, self-contained HTML, and Mermaid diagrams rendered straight from the compiled ledger — zero LLM by default, an opt-in citation-validated prose tier on top. Every example on this page is real output from a real recovered SQL schema.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>The compiler already knows.<br><span class="arrow-word">Now it can say so.</span></h1>
+  <p class="lede">EKOS compiles GitHub, Pentaho, SQL, and more into an evidence-backed ledger — but
+  until now the only way to read it was through an agent or a query. <code class="mono">ekos docs
+  generate</code> renders that same compiled knowledge as Markdown, self-contained HTML, and
+  Mermaid diagrams: pure rendering, zero LLM calls, zero cost, with an opt-in citation-validated
+  prose tier on top. Every example on this page is real output from a real recovered SQL schema —
+  nothing staged.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">Compiled ledger</span><span class="sep mono">→</span>
+    <span class="chip">ObjectPageModel</span><span class="sep mono">→</span>
+    <span class="chip">Markdown / HTML</span><span class="sep mono">+</span>
+    <span class="chip hot">Mermaid diagrams</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0035 — <code class="mono">ekos docs generate</code></div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the command</div>
+  <div class="eyebrow">One command, whatever's already compiled</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:26ch;">No new extraction. Just rendering what's already there.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — real run, Northwind fixture</div>
+<pre style="margin:0;">$ ekos docs generate
+Documentation generated.
+  Format: md
+  Objects rendered: 22
+  Diagrams rendered: 1
+  Output: docs-generated</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      13 real recovered <code class="mono">Table</code> objects, 2 real <code class="mono">File</code>
+      objects, and 7 real <code class="mono">TransformNode</code> objects from a
+      <code class="mono">CREATE VIEW ... JOIN</code> — every kind gets a page except
+      <code class="mono">Column</code>, which stays embedded in its parent table's properties. One
+      ER diagram. No API key required, no network call made.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / deterministic Markdown</div>
+  <div class="eyebrow">Properties, relationships, evidence — nothing interpreted</div>
+  <h2>Real output for a real recovered table.</h2>
+  <div class="codeblock">
+    <div class="tag">docs-generated/table-order-details.md — real, unedited</div>
+<pre style="margin:0;"><span class="k">#</span> "Order Details" (Table)
+
+<span class="k">## Relationships</span>
+
+<span class="k">### ForeignKey</span>
+
+- → Orders (`e6969c91-...`) — evidence: "order details".OrderID → orders.OrderID
+- → Products (`72719579-...`) — evidence: "order details".ProductID → products.OrderID
+
+<span class="k">## Evidence</span>
+
+- `123db216-...` — CREATE TABLE "Order Details" (confidence: 1.00)
+- `6c11b1d1-...` — "order details".OrderID → orders.OrderID (confidence: 1.00)</pre>
+  </div>
+  <p class="lede">Relationship targets resolve to real names, not raw ids — a gap only found by
+  rendering this exact file against real data (devlog_34) and fixed the same session.</p>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / diagrams</div>
+  <div class="eyebrow">One renderer, two diagram families for free</div>
+  <h2>Transformation IR nodes are ordinary objects. So they get an ordinary diagram.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ER diagram — real ForeignKey edges</div>
+<pre style="margin:0;"><span class="k">```mermaid
+erDiagram</span>
+    "Order Details" }o--|| "Orders" : references
+    "Order Details" }o--|| "Products" : references
+    "Products" }o--|| "Categories" : references
+    "Territories" }o--|| "Region" : references</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">Transformation DAG — real FeedsInto edge</div>
+<pre style="margin:0;"><span class="k">### FeedsInto</span>
+← northwind.sql#13:5
+
+<span class="k">```mermaid
+graph TD</span>
+    n_5["northwind.sql#13:5"]
+    n_5 -->|FeedsInto| n_6["northwind.sql#13:6"]</pre>
+    </div>
+  </div>
+  <p class="lede">The transformation DAG needed no new code — a real
+  <code class="mono">CREATE VIEW ... JOIN ... JOIN</code> compiled into
+  <code class="mono">Custom("TransformNode")</code> objects linked by
+  <code class="mono">Custom("FeedsInto")</code> relationships, the exact shape the generic
+  dependency-graph renderer already draws for any object. Three planned diagram families
+  collapsed into two renderers once real data showed they were the same mechanism.</p>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / HTML output</div>
+  <div class="eyebrow"><code class="mono" style="font-family:inherit;">--format html</code></div>
+  <h2>Same model, self-contained document, zero external dependency.</h2>
+  <div class="codeblock">
+    <div class="tag">docs-generated/table-order-details.html — real, escaped</div>
+<pre style="margin:0;">&lt;h1&gt;&amp;quot;Order Details&amp;quot; &lt;span class="kind"&gt;(Table)&lt;/span&gt;&lt;/h1&gt;
+&lt;h3&gt;ForeignKey&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&amp;rarr; Orders &lt;code&gt;e6969c91-...&lt;/code&gt;
+    — evidence: &amp;quot;order details&amp;quot;.OrderID → orders.OrderID&lt;/li&gt;
+&lt;/ul&gt;</pre>
+  </div>
+  <p class="lede">Embedded CSS, not a build-time include of this repo's own site theme —
+  <code class="mono">ekos docs generate</code> runs in arbitrary user workspaces that don't have
+  this repo's files available. Mermaid is shown as source in a <code class="mono">&lt;pre&gt;</code>
+  block, not live-rendered: rendering it would need bundling or CDN-loading
+  <code class="mono">mermaid.js</code>, which conflicts with staying fully offline. Stated as a
+  limit, not fixed silently.</p>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / index</div>
+  <div class="eyebrow">Nothing hidden by an allowlist</div>
+  <h2>Every kind gets a group. Column is the one deliberate exception.</h2>
+  <div class="codeblock">
+    <div class="tag">docs-generated/index.md — real, unedited</div>
+<pre style="margin:0;"><span class="k"># Generated Documentation
+
+## Diagrams</span>
+
+- [Entity-Relationship Diagram](er-diagram.md)
+
+<span class="k">## File (2)</span>
+- [northwind.sql](file-northwind-sql.md)
+
+<span class="k">## Table (13)</span>
+- ["Order Details"](table-order-details.md)
+- [Categories](table-categories.md)
+  <span class="c">… 11 more</span>
+
+<span class="k">## TransformNode (7)</span>
+- [northwind.sql#13:0](transformnode-northwind-sql-13-0.md)
+  <span class="c">… 6 more</span></pre>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / opt-in prose</div>
+  <div class="eyebrow"><code class="mono" style="font-family:inherit;">--prose</code> — real local LLM, not a mock</div>
+  <h2>Reuses <code class="mono">ekos ask</code>'s citation validation exactly. Never a new pipeline.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal</div>
+<pre style="margin:0;">$ ekos docs generate --prose
+Prose generation requested for 22 page(s).
+Estimated input tokens: ~7901
+Proceed with these LLM call(s)? [y/N]: y</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">docs-generated-prose/file-northwind-sql.md — real, from llama3</div>
+<pre style="margin:0;"><span class="k">## Overview</span>
+
+The northwind.sql file contains a SQL query
+that joins three tables: Orders, Customers,
+and Order Details...
+
+<span class="s">_Cited evidence: `6c66cfe7-...`, `97228874-...`,
+`2e516286-...`, `af5279d1-...`_</span></pre>
+    </div>
+  </div>
+  <p class="lede">Real end-to-end run against local <code class="mono">llama3</code>, not a mock:
+  22/22 objects got a real Overview, 16/22 with real citation-validated evidence ids. The other 6
+  degraded honestly — full answer kept, empty citation list — the same "answer is never discarded"
+  contract <code class="mono">ekos ask</code> already had. Across every one of the 22 real calls,
+  zero fabricated citations survived: a bogus id mixed into a mock response in testing never made
+  it into <code class="mono">cited_evidence</code>, and the real run only ever cited ids that
+  actually exist in the ledger.</p>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / honest limits</div>
+  <div class="eyebrow">What this deck won't overclaim</div>
+  <h2>A rough estimate, a real citation gap, and a real bug found by running it.</h2>
+  <div class="two-col">
+    <ul class="facts" style="margin-top:0;">
+      <li><span class="k">Token estimate</span><span class="v">~4 chars/token over the page's own compiled content — a stated approximation, not a provider-verified count.</span></li>
+      <li><span class="k">Small-model citations</span><span class="v">16/22 pages got real citations from llama3; the other 6 didn't include a parseable citation block. Real-world variable, not a defect in the validation.</span></li>
+      <li><span class="k">No live Mermaid</span><span class="v">HTML shows diagram source in a <code class="mono">&lt;pre&gt;</code>, not rendered — the offline-first tradeoff.</span></li>
+    </ul>
+    <div class="codeblock">
+      <div class="tag">the bug this session actually found</div>
+<pre style="margin:0;"><span class="c">// full sentence as the ask() question:</span>
+<span class="bad">"Write an overview of X: what it is..."</span>
+<span class="c">// buries the name deep enough that
+// retrieval matches nothing → every
+// citation gets dropped, even valid ones</span>
+
+<span class="c">// fixed: just the object's name</span>
+ai.ask(<span class="s">&amp;model.name</span>)</pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide cta" id="s9">
+  <div class="eyebrow">Try it</div>
+  <h2>Point it at anything EKOS has already compiled.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile once</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># deterministic, zero LLM, zero cost</span>
+$ ekos docs generate --format html
+
+<span class="c"># opt-in, citation-validated overview per page</span>
+$ ekos docs generate --prose</pre>
+  </div>
+  <div class="fineprint">EKOS · RFC 0035 (Generated Documentation) · every example on this page is real output, unedited · github.com/alexeyban/EKOS</div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>
