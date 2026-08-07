@@ -43,8 +43,10 @@ Investigated directly against the current source before writing this roadmap:
 - **Five plugins are scaffolded-only** (`salesforce`, `sap`, `oracle`, `fabric`, `snowflake`) —
   verified via each plugin's own header comment, all self-disclosing "never run against a live
   account," all following the "Phase 14 — scaffold, RFC 0012" pattern with a `Mock*Client` proving
-  the mapping logic without live credentials. This is the pattern a scaffolded Databricks/ADF
-  connector should follow if live credentials aren't available when that phase starts.
+  the mapping logic without live credentials. **This pattern does not apply to Phase 4/5** —
+  real local test repos (below) showed Databricks Asset Bundles and ADF pipeline exports are both
+  fully local, git-checked-in declarative config, recoverable the same way `pentaho_analyzer.rs`
+  already scans `.ktr`/`.kjb` XML, with no live API or mock client needed at all.
 - **No parameter/variable concept exists anywhere in the KIR or Transformation IR** —
   `ObjectKind` (`kir/src/lib.rs:81-115`) and `RelationshipKind` (`:129-141`) have no
   `Parameter`/`ConfigTable`/`Variable` variant; `TransformNode` (`transform_ir.rs:418-457`) has no
@@ -67,20 +69,29 @@ design each phase's interfaces/data models in full — each phase gets its own R
 
 - Not a full design for every phase — deliberately deferred to each phase's own just-in-time RFC.
 - Not starting any phase's implementation in this pass.
-- Not a promise of live-tested Databricks/ADF connectors — if no sandbox credential exists when
-  those phases start, they follow the existing scaffolded-plugin pattern (real mapping logic,
-  mock-client-tested, live wiring deferred), same honest disclosure as the five Phase-14 plugins.
+- Not a live Databricks Jobs API / ADF management-plane connector — Phase 4/5 recover from local,
+  git-checked-in pipeline definitions (Asset Bundle YAML, exported ADF JSON), the same posture
+  Pentaho already has. A live-API connector (for state not visible in checked-in files — e.g. run
+  history, Unity Catalog lineage) is explicitly out of scope here and would be its own future RFC
+  if ever pursued, following the existing scaffolded-plugin pattern (`salesforce`/`sap`/`oracle`/
+  `fabric`/`snowflake`, Phase 14/RFC 0012) for that different problem.
 
 ## What already exists and is reused
 
 - `SqlDialectParser` trait + registry (RFC 0031) — Phase 1's extension point, zero new
   architecture needed.
-- `Observer` trait (`observation-sdk`) — the contract Phase 4/5's new connectors implement.
-- The scaffolded-plugin pattern (`salesforce`/`sap`/`oracle`/`fabric`/`snowflake`, Phase 14/RFC
-  0012) — the template for Databricks/ADF if live credentials aren't available.
+- `pentaho_analyzer.rs`'s local-file-scan shape (parse a real, git-checked-in declarative format
+  — XML for Pentaho, YAML for Databricks Asset Bundles, JSON for ADF — into the Transformation
+  IR) — the template Phase 4/5 now follow, revised from an earlier live-API-connector assumption
+  once real local test repos showed both are fully local, checked-in config (see Phase 4/5 below).
 - The Transformation IR (RFC 0027) and its diff/explain MCP tools (RFC 0028) — Phase 2's PySpark
   analyzer lowers into the *same* IR Pentaho/SQL already use, making cross-format diffing free.
 - `local_docs_analyzer.rs`'s document-chunking pattern — Phase 3's notebook markdown-cell handling.
+- Two real local repos as test fixtures, available immediately (not synthetic fixtures): 
+  `/home/legion/PycharmProjects/azure-databricks-project` (Databricks Asset Bundle, real job/task
+  YAML) and `/home/legion/PycharmProjects/adf-pipelines` (real ADF pipeline/dataset/linkedService
+  JSON + a real metadata-driven control table) — matching this project's established discipline of
+  verifying every phase against real data, not just unit fixtures.
 
 ## Design — the six phases
 
@@ -108,19 +119,40 @@ cells get their source handed to Phase 2's analyzer per-cell, markdown cells bec
 `Custom("Section")` objects via `local_docs_analyzer.rs`'s existing chunking pattern. No new IR
 concept needed.
 
-**Phase 4 — Databricks connector (depends on Phase 2/3 for notebook recovery).** New
-`plugins/databricks`, following the scaffold pattern the five Phase-14 plugins establish. Recovers
-workspace notebooks (via Phase 3) and, the real prize, **Jobs API job/task DAGs** — the first real
-`RelationshipKind::Calls` data anywhere in the project. Unity Catalog table lineage, if exposed
-without extra entitlements, is a stretch goal, not a blocker.
+**Phase 4 — Databricks connector (depends on Phase 2/3 for notebook recovery).** **Architecture
+revised**: real local test data (`/home/legion/PycharmProjects/azure-databricks-project`, a real
+Databricks Asset Bundle project) showed this is a **local file scan, not a live-API-scaffolded
+connector** — `databricks.yml` + `jobs/**/*.yml` are declarative, git-checked-in YAML defining real
+job/task DAGs (`task_key`, `depends_on`, `notebook_task`/`dbt_task`), the same shape Pentaho's
+`.ktr`/`.kjb` XML already gets scanned from. New `crates/recovery/src/databricks_analyzer.rs`
+(mirrors `pentaho_analyzer.rs`'s structure: parse the bundle YAML, `depends_on` edges → real
+`RelationshipKind::Calls` — the first real `Calls` data anywhere in the project — `notebook_task`
+entries link to Phase 2/3's Python/notebook recovery by path). Real parameterization is already
+visible here too: Databricks Asset Bundles template task parameters with `${var.catalog}`/
+`${bundle.target}`/`${workspace.file_path}` — a second real example of the metadata-driven pattern,
+alongside ADF's (below). No live API, no `Mock*Client` scaffold needed — this phase can be fully
+tested against the real local repo from day one. Unity Catalog table lineage (needs a live API) is
+now explicitly a separate future stretch goal, not part of this phase's core scope.
 
-**Phase 5 — Azure Data Factory connector.** New `plugins/azure-data-factory`, same scaffold
-pattern. ADF pipelines are literally JSON (activities + dependency edges + parameters/global
-parameters) — the natural home to design the parameter/variable IR concept for real, against
-ADF's idiomatic metadata-driven pattern (`Lookup` over a control table → `ForEach` → parameterized
-child pipeline/dataset). This phase's own RFC designs the actual data model (a
+**Phase 5 — Azure Data Factory connector.** **Architecture revised the same way**: real local test
+data (`/home/legion/PycharmProjects/adf-pipelines`) is entirely exported/checked-in JSON —
+`pipeline/*.json` (activities + real `dependsOn` edges + expression-language parameter references
+like `@pipeline().globalParameters.dbx_bronze_job_id`), `dataset/*.json`, `linkedService/*.json`,
+and — concretely proving the metadata-driven pattern this phase exists to model —
+`metadata/ingestion/pgsql_to_adls_incremental.json`: a real control-table array (one JSON object
+per source entity: `source_table`, `primary_key_column`, `watermark_col`, `load_type`,
+`custom_query`, etc.) that an ADF `Lookup`+`ForEach` pattern iterates to drive one generic
+parameterized copy activity per entity, instead of one hardcoded pipeline per table. New
+`crates/recovery/src/adf_analyzer.rs`, same local-file-scan shape as Phase 4. This phase's own RFC
+designs the actual parameter/variable IR data model against this real control-table shape (a
 `TransformNode::Parameter{name, source}` variant, or a new `ObjectKind::Parameter` +
-`RelationshipKind::Custom("ParameterizedBy")` edge — left open deliberately).
+`RelationshipKind::Custom("ParameterizedBy")` edge — left open deliberately). **A real cross-
+connector link exists between the two local repos**: `adf-pipelines/pipeline/
+pl_dvdrental_run_dbx_jobs.json` invokes Databricks jobs directly via a `DatabricksJob` activity
+type, referencing job ids by ADF global parameter (`globalParameters.dbx_bronze_job_id`) — once
+both Phase 4 and Phase 5 exist, resolving that reference into a real cross-system relationship
+(an ADF pipeline activity → the specific Databricks job it invokes) is a natural, low-effort
+follow-up, not a separate phase.
 
 **Phase 6 — Generalize metadata-driven parameterization (depends on Phase 5).** Once ADF's real
 parameter/variable IR construct exists and has a real consumer, retrofit the same vocabulary onto
@@ -136,26 +168,37 @@ PySpark (job/widget parameters). Mirrors how the Transformation IR itself was on
 - **Lightweight regex-based Python parsing** — rejected per explicit decision; wouldn't reliably
   recover PySpark transformation chains into the Transformation IR, missing Phase 2's highest-value
   outcome (diffing Pentaho against PySpark rewrites).
-- **Databricks/ADF connectors before Python/notebooks** — rejected per explicit decision to keep
-  the dependency-ordered sequence (notebooks need Python; Databricks benefits from notebook
-  recovery already existing; ADF's parameter design is cleaner to do once, not twice).
+- **Databricks/ADF connectors before Python/notebooks** — rejected per explicit decision, twice:
+  once when this RFC was first written, and again after discovering both connectors are cheaper
+  than assumed (local file scan, not live-API-scaffolded) and have real linked test data available
+  immediately. Even with that lower cost, the dependency-ordered sequence still holds: notebooks
+  need Python (Phase 2/3); Databricks job YAML's `notebook_task` entries benefit from notebook
+  recovery already existing (Phase 3) rather than only linking to unparsed files; ADF's parameter
+  design is cleaner to do once, against real data, not twice.
 
 ## Open Questions (each resolved by its own phase's future RFC)
 
 - [ ] Python parser crate choice (`rustpython-parser` vs `tree-sitter-python`) — Phase 2's RFC.
 - [ ] Whether Python source discovery reuses `plugins/file`'s existing generic walk or needs its
       own connector — Phase 2's RFC.
-- [ ] Exact parameter/variable IR data model — Phase 5's RFC.
-- [ ] Databricks/ADF live-credential availability at implementation time (determines scaffold-only
-      vs. live-tested) — Phase 4/5's RFCs, decided when each phase starts.
+- [ ] Exact parameter/variable IR data model — Phase 5's RFC, designed against the real
+      `metadata/ingestion/*.json` control-table shape found in `adf-pipelines`.
+- [ ] Whether/when a live Databricks Jobs API or ADF management-plane connector (run history,
+      Unity Catalog lineage — state not visible in checked-in files) is worth its own future RFC,
+      following the scaffolded-plugin pattern for that different problem — not blocking Phase 4/5.
+- [ ] Whether resolving the real cross-connector link (`adf-pipelines`' `DatabricksJob` activity →
+      the specific `azure-databricks-project` job it invokes) ships as part of Phase 5 or as a
+      small follow-up once both connectors exist — Phase 5's RFC.
 
 ## Testing
 
 Every phase follows `CLAUDE.md`'s mandatory Tests-before-Implementation workflow, detailed in each
-phase's own RFC. Phases 1-3: structural/deterministic parsing tests (same style as
-`pentaho_analyzer.rs`'s real-XML-fixture tests). Phases 4-5: the existing scaffolded-plugin
-pattern — real trait/mapping-logic unit tests against a `Mock*Client`, live integration deferred
-until a real sandbox credential exists.
+phase's own RFC. All six phases are structural/deterministic parsing — same style as
+`pentaho_analyzer.rs`'s real-XML-fixture tests: unit tests against small hand-built fixture
+files, then a real-data smoke test against the actual local repos (`azure-databricks-project`,
+`adf-pipelines`) once the parser is real-fixture-verified, matching the pattern that found real
+bugs in every prior phase of this project's recovery-layer work (RFC 0035/0036/0037's real-data
+testing).
 
 ## Acceptance Criteria
 
