@@ -131,6 +131,10 @@ enum DocsCommands {
         /// Output format: "md" (default) or "html"
         #[arg(long, default_value = "md")]
         format: String,
+        /// Output layout: "objects" (default, one page per compiled object) or "curated"
+        /// (README.md/Architecture.md/API.md/SequenceDiagrams.md — RFC 0037, Markdown only)
+        #[arg(long, default_value = "objects")]
+        layout: String,
         /// Opt-in: add an LLM-written "Overview" to each page, grounded and citation-validated
         /// via the same pipeline `ekos ask` uses. Shows a token-cost estimate and asks for
         /// confirmation first, unless --yes is also given.
@@ -317,12 +321,15 @@ async fn main() -> Result<()> {
             DocsCommands::Generate {
                 output,
                 format,
+                layout,
                 prose,
                 yes,
             } => {
                 let output = ekos::commands::docs::resolve_output_dir(&cwd, output);
                 let format = ekos::commands::docs::Format::parse(&format)?;
-                ekos::commands::docs::generate(&config, &cwd, &output, format, prose, yes).await
+                let layout = ekos::commands::docs::Layout::parse(&layout)?;
+                ekos::commands::docs::generate(&config, &cwd, &output, format, layout, prose, yes)
+                    .await
             }
         },
         Commands::Dbt { subcommand } => match subcommand {

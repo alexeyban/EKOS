@@ -13,6 +13,13 @@
 //! reusing `AiRuntime::ask` — the exact same grounding+citation-validation pipeline `ekos ask`
 //! uses, not a reimplementation — so a prose section can never cite evidence that doesn't exist.
 //! A rough token-cost estimate is shown and must be confirmed (or `--yes`) before any LLM call.
+//!
+//! `--layout curated` (RFC 0037, additive — `--layout objects` above stays the unchanged default)
+//! renders a fixed four-file set instead — `README.md`, `Architecture.md`, `API.md`,
+//! `SequenceDiagrams.md` — the shape a developer actually expects from a project's docs, built
+//! from the same compiled objects/relationships via [`ekos_docs_gen::render_readme`] and friends.
+//! Markdown only in this phase; `--format html --layout curated` errors clearly rather than
+//! silently ignoring `--format`.
 
 use super::ask::ai_config;
 use super::store::open_store;
@@ -44,15 +51,47 @@ impl Format {
     }
 }
 
+/// Output layout for `ekos docs generate`. `--layout objects` (default, RFC 0035) is one page per
+/// significant object; `--layout curated` (RFC 0037) is the fixed four-file
+/// README/Architecture/API/SequenceDiagrams set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    Objects,
+    Curated,
+}
+
+impl Layout {
+    pub fn parse(s: &str) -> Result<Self> {
+        match s {
+            "objects" => Ok(Layout::Objects),
+            "curated" => Ok(Layout::Curated),
+            other => Err(anyhow::anyhow!(
+                "unknown --layout '{other}' — expected 'objects' or 'curated'"
+            )),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn generate(
     config: &EkosConfig,
     cwd: &Path,
     output: &Path,
     format: Format,
+    layout: Layout,
     prose: bool,
     yes: bool,
 ) -> Result<()> {
+    if layout == Layout::Curated {
+        if format != Format::Markdown {
+            anyhow::bail!(
+                "--layout curated only supports --format md today (HTML curated output is an \
+                 open question in RFC 0037, not yet implemented)"
+            );
+        }
+        return generate_curated(config, cwd, output);
+    }
+
     let ledger = open_store(config, cwd).map_err(|e| {
         anyhow::anyhow!(
             "{e}\nRun `ekos build && ekos recover && ekos resolve && ekos compile && ekos commit` first."
@@ -305,6 +344,42 @@ fn write_page(output: &Path, page: &RenderedPage) -> Result<()> {
     std::fs::write(&path, &page.content).with_context(|| format!("cannot write {}", path.display()))
 }
 
+/// `--layout curated` (RFC 0037): reads the committed ledger once (`all_objects()` +
+/// `all_relationships()`, no per-object evidence assembly needed — these are aggregate-level
+/// documents, not per-object citation pages) and writes exactly four fixed-name files.
+fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
+    let ledger = open_store(config, cwd).map_err(|e| {
+        anyhow::anyhow!(
+            "{e}\nRun `ekos build && ekos recover && ekos resolve && ekos compile && ekos commit` first."
+        )
+    })?;
+
+    let objects = ledger.all_objects()?;
+    let relationships = ledger.all_relationships()?;
+
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("cannot create output dir {}", output.display()))?;
+
+    let readme = ekos_docs_gen::render_readme(&objects);
+    let architecture = ekos_docs_gen::render_architecture(&objects, &relationships);
+    let api = ekos_docs_gen::render_api(&objects);
+    let sequence_diagrams = ekos_docs_gen::render_sequence_diagrams(&objects, &relationships);
+
+    for page in [&readme, &architecture, &api, &sequence_diagrams] {
+        write_page(output, page)?;
+    }
+
+    println!("Curated documentation generated.");
+    println!("  Objects considered: {}", objects.len());
+    println!(
+        "  Files: {}, {}, {}, {}",
+        readme.file_name, architecture.file_name, api.file_name, sequence_diagrams.file_name
+    );
+    println!("  Output: {}", output.display());
+
+    Ok(())
+}
+
 /// Resolve the output directory: the `--output` flag if given, else `<cwd>/docs-generated`.
 pub fn resolve_output_dir(cwd: &Path, output: Option<PathBuf>) -> PathBuf {
     output.unwrap_or_else(|| cwd.join("docs-generated"))
@@ -340,9 +415,17 @@ mod tests {
         ledger.append_relationship(&rel).unwrap();
 
         let output = dir.path().join("out");
-        generate(&config, dir.path(), &output, Format::Markdown, false, false)
-            .await
-            .unwrap();
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Objects,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         assert!(output.join("table-customers.md").exists());
         assert!(output.join("table-orders.md").exists());
@@ -369,9 +452,17 @@ mod tests {
         ledger.append_relationship(&rel).unwrap();
 
         let output = dir.path().join("out");
-        generate(&config, dir.path(), &output, Format::Markdown, false, false)
-            .await
-            .unwrap();
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Objects,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         let er = std::fs::read_to_string(output.join("er-diagram.md")).unwrap();
         assert!(er.contains("erDiagram"));
@@ -391,9 +482,17 @@ mod tests {
             .unwrap();
 
         let output = dir.path().join("out");
-        generate(&config, dir.path(), &output, Format::Markdown, false, false)
-            .await
-            .unwrap();
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Objects,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         assert!(!output.join("er-diagram.md").exists());
         let index = std::fs::read_to_string(output.join("index.md")).unwrap();
@@ -419,9 +518,17 @@ mod tests {
             .unwrap();
 
         let output = dir.path().join("out");
-        generate(&config, dir.path(), &output, Format::Markdown, false, false)
-            .await
-            .unwrap();
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Objects,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         assert!(output.join("file-main-rs.md").exists());
         assert!(output.join("transformnode-fact-sales.md").exists());
@@ -441,9 +548,17 @@ mod tests {
             .unwrap();
 
         let output = dir.path().join("out");
-        generate(&config, dir.path(), &output, Format::Markdown, false, false)
-            .await
-            .unwrap();
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Objects,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         let index = std::fs::read_to_string(output.join("index.md")).unwrap();
         assert!(index.contains("## Table (1)"));
@@ -457,9 +572,17 @@ mod tests {
         let _ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
 
         let output = dir.path().join("out");
-        generate(&config, dir.path(), &output, Format::Markdown, false, false)
-            .await
-            .unwrap();
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Objects,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         let index = std::fs::read_to_string(output.join("index.md")).unwrap();
         assert!(index.contains("No documented objects yet"));
@@ -500,9 +623,17 @@ mod tests {
         ledger.append_relationship(&rel).unwrap();
 
         let output = dir.path().join("out");
-        generate(&config, dir.path(), &output, Format::Html, false, false)
-            .await
-            .unwrap();
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Html,
+            Layout::Objects,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
 
         assert!(output.join("table-customers.html").exists());
         assert!(output.join("table-orders.html").exists());
@@ -624,10 +755,92 @@ mod tests {
         // to mock prose — the exact behavior `select_llm_provider_for_prose`'s doc comment
         // promises.
         let output = dir.path().join("out");
-        let result = generate(&config, dir.path(), &output, Format::Markdown, true, true).await;
+        let result = generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Objects,
+            true,
+            true,
+        )
+        .await;
         assert!(
             result.is_err(),
             "no API key configured — --prose must fail clearly, not silently degrade"
         );
+    }
+
+    // ── RFC 0037 — `--layout curated` ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn generate_curated_writes_exactly_the_four_named_files_and_nothing_else() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+        ledger
+            .append_object(&KirObject::new("customers", ObjectKind::Table))
+            .unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let mut names: Vec<String> = std::fs::read_dir(&output)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "API.md".to_string(),
+                "Architecture.md".to_string(),
+                "README.md".to_string(),
+                "SequenceDiagrams.md".to_string(),
+            ]
+        );
+
+        let readme = std::fs::read_to_string(output.join("README.md")).unwrap();
+        assert!(readme.contains("**Table**: 1"));
+    }
+
+    #[tokio::test]
+    async fn generate_curated_rejects_html_format_with_a_clear_error() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let _ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+
+        let output = dir.path().join("out");
+        let result = generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Html,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "--layout curated with --format html must error, not silently ignore --format"
+        );
+    }
+
+    #[test]
+    fn layout_parse_accepts_objects_and_curated_rejects_unknown() {
+        assert_eq!(Layout::parse("objects").unwrap(), Layout::Objects);
+        assert_eq!(Layout::parse("curated").unwrap(), Layout::Curated);
+        assert!(Layout::parse("weird").is_err());
     }
 }
