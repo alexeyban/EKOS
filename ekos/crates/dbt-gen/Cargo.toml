@@ -1,0 +1,11 @@
+[package]
+name = "ekos-dbt-gen"
+description = "RFC 0036 — Pentaho to dbt Model Export: renders compiled Transformation IR nodes as dbt SQL models + schema.yml"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]

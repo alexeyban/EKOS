@@ -100,6 +100,24 @@ enum Commands {
         #[command(subcommand)]
         subcommand: DocsCommands,
     },
+    /// Pentaho -> dbt model export from the compiled Transformation IR (RFC 0036)
+    Dbt {
+        #[command(subcommand)]
+        subcommand: DbtCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DbtCommands {
+    /// Render dbt SQL models + schema.yml from already-committed Custom("TransformNode")
+    /// objects, ref()-chained via real FeedsInto edges. No LLM calls, no cost. Filter/Calculate
+    /// expressions and Unmapped nodes render as flagged raw text/stubs, never silently
+    /// transpiled.
+    Generate {
+        /// Output directory (default: <workspace>/dbt-generated)
+        #[arg(long, value_name = "DIR")]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -305,6 +323,12 @@ async fn main() -> Result<()> {
                 let output = ekos::commands::docs::resolve_output_dir(&cwd, output);
                 let format = ekos::commands::docs::Format::parse(&format)?;
                 ekos::commands::docs::generate(&config, &cwd, &output, format, prose, yes).await
+            }
+        },
+        Commands::Dbt { subcommand } => match subcommand {
+            DbtCommands::Generate { output } => {
+                let output = ekos::commands::dbt::resolve_output_dir(&cwd, output);
+                ekos::commands::dbt::generate(&cwd, &output, &config).await
             }
         },
     }

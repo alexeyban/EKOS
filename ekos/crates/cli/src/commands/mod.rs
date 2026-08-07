@@ -5,6 +5,7 @@ pub mod build;
 pub mod clean;
 pub mod commit;
 pub mod compile;
+pub mod dbt;
 pub mod diff;
 pub mod docs;
 pub mod doctor;

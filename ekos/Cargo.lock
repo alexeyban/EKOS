@@ -697,6 +697,7 @@ dependencies = [
  "ekos-artifact",
  "ekos-common",
  "ekos-compiler-core",
+ "ekos-dbt-gen",
  "ekos-docs-gen",
  "ekos-ekl",
  "ekos-identity",
@@ -783,6 +784,14 @@ name = "ekos-compiler-sdk"
 version = "0.1.0"
 dependencies = [
  "ekos-compiler-core",
+]
+
+[[package]]
+name = "ekos-dbt-gen"
+version = "0.1.0"
+dependencies = [
+ "ekos-kir",
+ "serde_json",
 ]
 
 [[package]]
