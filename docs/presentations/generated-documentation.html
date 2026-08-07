@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Generated Documentation — EKOS</title>
-<meta name="description" content="ekos docs generate: Markdown, self-contained HTML, and Mermaid diagrams rendered straight from the compiled ledger — zero LLM by default, an opt-in citation-validated prose tier on top. Every example on this page is real output from a real recovered SQL schema.">
+<meta name="description" content="ekos docs generate: Markdown, self-contained HTML, and Mermaid diagrams rendered straight from the compiled ledger — zero LLM by default, an opt-in citation-validated prose tier on top. Every example on this page is real output from a real recovered SQL schema and a real cloned Pentaho ETL project.">
 <link rel="stylesheet" href="../assets/theme.css">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 </head>
@@ -13,6 +13,7 @@
 <nav class="rail" aria-hidden="true">
   <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
   <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+  <a href="#s10"></a><a href="#s11"></a><a href="#s12"></a><a href="#s13"></a>
 </nav>
 
 <div class="deck">
@@ -60,7 +61,136 @@ Documentation generated.
 </section>
 
 <section class="slide" id="s3">
-  <div class="stage-num mono">§ 02 / deterministic Markdown</div>
+  <div class="stage-num mono">§ 02 / a real external project</div>
+  <div class="eyebrow">Not a fixture — a real public Pentaho ETL repo</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:28ch;">Clone it. Compile it. Nothing hand-picked.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — real clone</div>
+<pre style="margin:0;">$ git clone https://github.com/joseph-higaki/\
+  etl_adventureworks_sales_purchases_datamart
+
+$ ls
+dim_customer.ktr    dim_vendor.ktr
+dim_date.ktr        fact_purchase.ktr
+dim_product.ktr     fact_sales.ktr
+dim_sales_person.ktr    DimensionsJob.kjb
+dim_sales_territory.ktr FactsJob.kjb
+DB Scripts/         readme.md</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      8 real <code class="mono">.ktr</code> transforms + 2 real <code class="mono">.kjb</code>
+      jobs — the same real repo used elsewhere in this project's own recovery testing (devlog_29,
+      devlog_31), not a synthetic fixture built to look good. <code class="mono">ekos build &amp;&amp;
+      recover &amp;&amp; resolve &amp;&amp; compile &amp;&amp; commit</code>, then
+      <code class="mono">ekos docs generate</code> — same command, no Pentaho-specific flag.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / what got compiled</div>
+  <div class="eyebrow">Real recovery output for this real repo</div>
+  <h2>86 Transformation IR nodes from 10 real Pentaho jobs.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">Recover complete.
+  SQL files analysed: 5
+  Git commits analysed: 1
+  Local documents analysed: 4
+  Pentaho jobs analysed: 10
+  Transformation IR nodes (Pentaho): 86 total, 49% mapped (non-Unmapped)
+  Transformation IR nodes (SQL): 12 total, 100% mapped (non-Unmapped)
+
+Documentation generated.
+  Objects rendered: 198
+  Output: docs-generated</pre>
+  </div>
+  <p class="lede">198 real objects: 21 <code class="mono">File</code>s, 86
+  <code class="mono">TransformNode</code>s across 10 Pentaho jobs, a
+  <code class="mono">Person</code> object recovered from real git commit authorship, and
+  <code class="mono">Section</code> objects from the repo's own PDF slide deck — the same
+  file/document/person recovery this deck's other examples show, all from one real project, one
+  command.</p>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / a real Join, two real inputs</div>
+  <div class="eyebrow">docs-generated/transformnode-fact-sales-ktr-10.md — real, unedited</div>
+  <h2>The star-schema join pattern, as an actual diagram.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">generated page</div>
+<pre style="margin:0;"><span class="k"># fact_sales.ktr:10 (TransformNode)
+
+## Properties</span>
+
+| `join_kind` | Left |
+| `node_type` | Join |
+
+<span class="k">## Relationships
+
+### FeedsInto</span>
+
+- → fact_sales.ktr:16
+- ← fact_sales.ktr:0
+- ← fact_sales.ktr:14
+
+<span class="k">## Evidence</span>
+
+- Left JOIN ON [] (confidence: 1.00)</pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">the diagram, rendered from the same edges</div>
+<pre style="margin:0;"><span class="k">```mermaid
+graph TD</span>
+    n_0["fact_sales.ktr:0"]
+    n_14["fact_sales.ktr:14"]
+    n_10["fact_sales.ktr:10"]
+    n_16["fact_sales.ktr:16"]
+    n_0 -->|FeedsInto| n_10
+    n_14 -->|FeedsInto| n_10
+    n_10 -->|FeedsInto| n_16</pre>
+    </div>
+  </div>
+  <p class="lede">A real Kettle <code class="mono">Join Rows</code> step from a real fact-table
+  pipeline — two upstream steps feeding one join, one downstream step consuming it. No hand-built
+  example: this is step 10 of the real <code class="mono">fact_sales.ktr</code>, exactly as
+  recovered.</p>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / honest, not hidden</div>
+  <div class="eyebrow">docs-generated/transformnode-dim-customer-ktr-1.md — real, unedited</div>
+  <h2>A step EKOS doesn't recognize still gets a page, a diagram, and its raw XML.</h2>
+  <div class="codeblock">
+    <div class="tag">generated page — the honest case</div>
+<pre style="margin:0;"><span class="k"># dim_customer.ktr:1 (TransformNode)
+
+## Properties</span>
+
+| `node_type` | Unmapped |
+| `reason` | unrecognized step type: Sequence |
+| `raw` | &lt;step&gt;&lt;name&gt;Create surrogate key&lt;/name&gt;
+         &lt;type&gt;Sequence&lt;/type&gt;... &lt;/step&gt;
+
+<span class="k">## Relationships
+
+### FeedsInto</span>
+
+- → dim_customer.ktr:4
+- ← dim_customer.ktr:5</pre>
+  </div>
+  <p class="lede">49% of this repo's Pentaho steps mapped onto the Transformation IR; the rest —
+  like this real <code class="mono">Sequence</code> (surrogate-key generator) step — become
+  <code class="mono">Unmapped</code> with the exact reason and the full raw XML preserved as
+  evidence, still wired into the same diagram with its real upstream/downstream edges. "Unmapped
+  is a citizen, not a failure" — the same rule this whole project runs on, visible in the
+  generated docs themselves, not just the code.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / deterministic Markdown</div>
   <div class="eyebrow">Properties, relationships, evidence — nothing interpreted</div>
   <h2>Real output for a real recovered table.</h2>
   <div class="codeblock">
@@ -83,8 +213,8 @@ Documentation generated.
   rendering this exact file against real data (devlog_34) and fixed the same session.</p>
 </section>
 
-<section class="slide" id="s4">
-  <div class="stage-num mono">§ 03 / diagrams</div>
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / diagrams</div>
   <div class="eyebrow">One renderer, two diagram families for free</div>
   <h2>Transformation IR nodes are ordinary objects. So they get an ordinary diagram.</h2>
   <div class="two-col">
@@ -116,8 +246,8 @@ graph TD</span>
   collapsed into two renderers once real data showed they were the same mechanism.</p>
 </section>
 
-<section class="slide" id="s5">
-  <div class="stage-num mono">§ 04 / HTML output</div>
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / HTML output</div>
   <div class="eyebrow"><code class="mono" style="font-family:inherit;">--format html</code></div>
   <h2>Same model, self-contained document, zero external dependency.</h2>
   <div class="codeblock">
@@ -137,8 +267,8 @@ graph TD</span>
   limit, not fixed silently.</p>
 </section>
 
-<section class="slide" id="s6">
-  <div class="stage-num mono">§ 05 / index</div>
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / index</div>
   <div class="eyebrow">Nothing hidden by an allowlist</div>
   <h2>Every kind gets a group. Column is the one deliberate exception.</h2>
   <div class="codeblock">
@@ -163,8 +293,8 @@ graph TD</span>
   </div>
 </section>
 
-<section class="slide" id="s7">
-  <div class="stage-num mono">§ 06 / opt-in prose</div>
+<section class="slide" id="s11">
+  <div class="stage-num mono">§ 10 / opt-in prose</div>
   <div class="eyebrow"><code class="mono" style="font-family:inherit;">--prose</code> — real local LLM, not a mock</div>
   <h2>Reuses <code class="mono">ekos ask</code>'s citation validation exactly. Never a new pipeline.</h2>
   <div class="two-col">
@@ -196,8 +326,8 @@ and Order Details...
   actually exist in the ledger.</p>
 </section>
 
-<section class="slide" id="s8">
-  <div class="stage-num mono">§ 07 / honest limits</div>
+<section class="slide" id="s12">
+  <div class="stage-num mono">§ 11 / honest limits</div>
   <div class="eyebrow">What this deck won't overclaim</div>
   <h2>A rough estimate, a real citation gap, and a real bug found by running it.</h2>
   <div class="two-col">
@@ -220,7 +350,7 @@ ai.ask(<span class="s">&amp;model.name</span>)</pre>
   </div>
 </section>
 
-<section class="slide cta" id="s9">
+<section class="slide cta" id="s13">
   <div class="eyebrow">Try it</div>
   <h2>Point it at anything EKOS has already compiled.</h2>
   <div class="codeblock">
