@@ -165,9 +165,17 @@ edges, plus a generated `schema.yml`.
 `Commands::Dbt{subcommand}` wiring, same plumbing shape as `docs.rs`. Golden-file + CLI-level
 tests.
 
-**Phase 2 — Real Pentaho smoke test.** Run `ekos dbt generate` against the same real cloned
-Pentaho repo used for RFC 0035's testing, inspect real output for correctness/readability, likely
-surfacing real gaps the way RFC 0035's real-data testing did.
+**Phase 2 — Real Pentaho smoke test. DONE (2026-08-07).** Ran `ekos dbt generate` against the same
+real cloned Pentaho repo used for RFC 0035's testing: 98 real models rendered, 23 real source
+tables. Surfaced and fixed one real bug: the no-join-keys fallback (`on true -- no join keys
+compiled`) still had the `-- TODO: verify column qualification` comment appended, which read as
+"verify this qualification" for a condition that never claimed to have one — found on a real
+Pentaho `StreamLookup` step with an empty compiled `keys` list. Fixed by only appending the verify
+comment when there's real key text to qualify; regression test added
+(`join_node_with_no_keys_renders_honest_true_condition` extended). Spot-checked a real join with
+real keys (`on s.dim_product_id = p.dim_product_id -- TODO: verify column qualification, source
+dialect: Pentaho`) — correct, no double-qualification, matching Phase 2's `on o.customer_id =
+c.id` result from the SQL-schema fixture.
 
 **Phase 3 — dbt `tests:` generation.** Emit `not_null`/`relationships` schema tests from
 evidence-backed relationship data, once Phase 1/2 prove the base model generation is sound.

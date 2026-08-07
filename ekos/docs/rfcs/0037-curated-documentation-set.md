@@ -176,8 +176,26 @@ objects/relationships. `--layout objects` (today's per-object behavior) stays th
 `ekos-docs-gen`, `Layout` enum + CLI wiring in `commands/docs.rs`/`bin/ekos.rs`, golden-file +
 CLI-level tests.
 
-**Phase 2 — Real-data smoke test.** Run `ekos docs generate --layout curated` against a real
-compiled workspace (same scratch fixtures used for RFC 0035/0036's testing), inspect real output.
+**Phase 2 — Real-data smoke test. DONE (2026-08-07).** Ran `ekos docs generate --layout curated`
+against the same real cloned Pentaho repo used for RFC 0035/0036's testing (198 compiled objects,
+including 74 `Section` objects from real PDF pages/slides). Surfaced and fixed a real bug the
+design's own stated goal ("never one giant unreadable diagram") didn't fully deliver on: excluding
+`Custom("FeedsInto")` from `Architecture.md`'s `## Dependency Graph` wasn't enough — `Contains`
+edges from PDF pages alone produced 75 edges in one relationship kind, still unreadable
+(`Architecture.md` was 189 lines with a 76-edge graph). Fixed by adding a per-kind size cap (20
+edges): a kind over the cap renders an honest one-line summary ("75 `Contains` relationships
+compiled — diagram omitted, too large to render usefully") instead of the graph — `Architecture.md`
+dropped to 34 lines. Regression test added
+(`architecture_omits_a_diagram_for_a_relationship_kind_with_too_many_edges`).
+
+Also found and fixed a wording bug in `SequenceDiagrams.md`: the no-edges placeholder said "single
+step" even when a `.kjb` job (whose entries are always `Unmapped` by design, never wired together)
+had 8 participants and zero edges. Fixed to report the real step count with correct
+singular/plural wording; regression test added
+(`sequence_diagrams_multi_step_pipeline_with_no_edges_uses_plural_wording`).
+
+`README.md`, the real join/aggregate/filter renderers, and `API.md`'s empty-state placeholder all
+rendered correctly on the first real run — no other gaps found.
 
 **Phase 3 — HTML curated output.** Resolves the HTML Open Question, once Phase 1/2 prove the
 Markdown shape is sound.

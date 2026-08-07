@@ -923,12 +923,22 @@ pub fn render_architecture(
         kinds.sort();
         for kind in kinds {
             out.push_str(&format!("### {kind}\n\n"));
-            out.push_str(&render_relationship_kind_graph(
-                kind,
-                &by_kind[kind],
-                &name_by_id,
-            ));
-            out.push('\n');
+            let rels = &by_kind[kind];
+            // A single relationship kind can itself be too large to render usefully — found by
+            // running this against a real Pentaho+PDF workspace, where `Contains` alone (PDF
+            // pages/sections) produced 74 edges. Excluding `FeedsInto` wasn't enough; the cap
+            // applies per kind, not just to the one kind known in advance to be large.
+            const MAX_GRAPH_EDGES: usize = 20;
+            if rels.len() > MAX_GRAPH_EDGES {
+                out.push_str(&format!(
+                    "_{} `{kind}` relationships compiled — diagram omitted, too large to render \
+                     usefully. See `ekos docs generate --layout objects` for per-object detail._\n\n",
+                    rels.len()
+                ));
+            } else {
+                out.push_str(&render_relationship_kind_graph(kind, rels, &name_by_id));
+                out.push('\n');
+            }
         }
     }
 
@@ -1111,7 +1121,19 @@ pub fn render_sequence_diagrams(
         }
         out.push_str("```\n");
         if edges.is_empty() {
-            out.push_str("\n_(single step — no `FeedsInto` edges compiled for this pipeline)_\n");
+            // Found by running against a real Pentaho .kjb job — job-orchestration entries are
+            // always `Unmapped` by design (never wired together), so a job can have several
+            // participants and still zero `FeedsInto` edges; "single step" was wrong whenever
+            // more than one node shared an origin with no edges between them.
+            let step_word = if origin_ids.len() == 1 {
+                "step"
+            } else {
+                "steps"
+            };
+            out.push_str(&format!(
+                "\n_({} {step_word} — no `FeedsInto` edges compiled for this pipeline)_\n",
+                origin_ids.len()
+            ));
         }
         out.push('\n');
     }
@@ -1708,6 +1730,37 @@ mod tests {
         );
     }
 
+    /// Regression test for a real bug found by running this against a real Pentaho+PDF workspace:
+    /// `Contains` edges from PDF pages/sections alone produced 74 edges in one relationship kind,
+    /// still unreadable even after excluding `FeedsInto` — the size cap must apply per kind, not
+    /// only to the one kind known in advance to be large.
+    #[test]
+    fn architecture_omits_a_diagram_for_a_relationship_kind_with_too_many_edges() {
+        let objects: Vec<KirObject> = (0..50)
+            .map(|i| KirObject::new(format!("section-{i}"), ObjectKind::Custom("Section".into())))
+            .collect();
+        let doc = KirObject::new("doc.pdf", ObjectKind::File);
+        let relationships: Vec<KirRelationship> = objects
+            .iter()
+            .map(|o| KirRelationship::new(RelationshipKind::Contains, doc.id, o.id))
+            .collect();
+
+        let mut all_objects = objects;
+        all_objects.push(doc);
+        let page = render_architecture(&all_objects, &relationships);
+
+        assert!(page.content.contains("### Contains"));
+        assert!(
+            page.content
+                .contains("50 `Contains` relationships compiled")
+        );
+        assert!(
+            page.content
+                .contains("diagram omitted, too large to render usefully")
+        );
+        assert!(!page.content.contains("```mermaid\ngraph TD\n    n"));
+    }
+
     #[test]
     fn architecture_embeds_er_diagram_when_foreign_keys_exist() {
         let orders = KirObject::new("orders", ObjectKind::Table);
@@ -1795,6 +1848,26 @@ mod tests {
             ObjectKind::Custom("TransformNode".to_string()),
         );
         let page = render_sequence_diagrams(&[solo], &[]);
-        assert!(page.content.contains("no `FeedsInto` edges compiled"));
+        assert!(
+            page.content
+                .contains("1 step — no `FeedsInto` edges compiled")
+        );
+    }
+
+    /// Regression test for a real bug found by running this against a real Pentaho `.kjb` job:
+    /// job-orchestration entries are always `Unmapped` (never wired together), so a job can have
+    /// several participants and zero edges — the placeholder said "single step" even with 8
+    /// participants before this fix.
+    #[test]
+    fn sequence_diagrams_multi_step_pipeline_with_no_edges_uses_plural_wording() {
+        let a = KirObject::new("job.kjb:0", ObjectKind::Custom("TransformNode".to_string()));
+        let b = KirObject::new("job.kjb:1", ObjectKind::Custom("TransformNode".to_string()));
+        let c = KirObject::new("job.kjb:2", ObjectKind::Custom("TransformNode".to_string()));
+        let page = render_sequence_diagrams(&[a, b, c], &[]);
+        assert!(
+            page.content
+                .contains("3 steps — no `FeedsInto` edges compiled")
+        );
+        assert!(!page.content.contains("single step"));
     }
 }

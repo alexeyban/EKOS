@@ -229,13 +229,19 @@ fn render_join(props: &Props, upstream_models: &[String]) -> String {
     // Prefixing either would either leave Pentaho's bare names ambiguous or double-qualify SQL's
     // already-qualified ones, so the honest choice is to pass the compiled text through unchanged
     // and flag it for verification, matching Filter/Calculate's TODO-comment contract.
+    // The "verify column qualification" comment only makes sense when there's a real key
+    // expression to qualify — appending it to the `true` no-keys fallback would read as "verify
+    // this qualification" for a condition that never claimed to have one. Found by running this
+    // against a real Pentaho StreamLookup step with an empty compiled `keys` list, not assumed.
     let on_clause = if keys.is_empty() {
         "true -- no join keys compiled".to_string()
     } else {
-        keys.iter()
+        let joined = keys
+            .iter()
             .map(|(l, r)| format!("{l} = {r}"))
             .collect::<Vec<_>>()
-            .join("\n    and ")
+            .join("\n    and ");
+        format!("{joined} -- TODO: verify column qualification, source dialect: Pentaho")
     };
     let side_note = if upstream_models.len() == 2 {
         "-- NOTE: l/r assignment is positional (first two FeedsInto edges), not guaranteed to \
@@ -244,7 +250,7 @@ fn render_join(props: &Props, upstream_models: &[String]) -> String {
         ""
     };
     format!(
-        "{side_note}select *\nfrom {{{{ ref('{a}') }}}} as l\n{kind} join {{{{ ref('{b}') }}}} as r\n    on {on_clause} -- TODO: verify column qualification, source dialect: Pentaho\n"
+        "{side_note}select *\nfrom {{{{ ref('{a}') }}}} as l\n{kind} join {{{{ ref('{b}') }}}} as r\n    on {on_clause}\n"
     )
 }
 
@@ -526,6 +532,13 @@ mod tests {
         );
         let model = render_dbt_model(&obj, &["a".to_string(), "b".to_string()], "pentaho");
         assert!(model.sql.contains("true -- no join keys compiled"));
+        assert!(
+            !model.sql.contains("TODO: verify column qualification"),
+            "no-keys fallback has nothing to verify a qualification for — found by running a \
+             real Pentaho StreamLookup step with an empty compiled keys list, which rendered a \
+             confusing 'on true -- no join keys compiled -- TODO: verify column qualification' \
+             before this fix"
+        );
     }
 
     #[test]
