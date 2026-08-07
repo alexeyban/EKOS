@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dim_date.ktr:0 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>dim_date.ktr:0 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>node_type</code></td><td>Unmapped</td></tr>
+<tr><td><code>raw</code></td><td>&lt;step&gt;
+    &lt;name&gt;Calculate API Url&lt;/name&gt;
+    &lt;type&gt;ScriptValueMod&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;compatible&gt;N&lt;/compatible&gt;
+    &lt;optimizationLevel&gt;9&lt;/optimizationLevel&gt;
+    &lt;jsScripts&gt;
+      &lt;jsScript&gt;
+        &lt;jsScript_type&gt;0&lt;/jsScript_type&gt;
+        &lt;jsScript_name&gt;Script 1&lt;/jsScript_name&gt;
+        &lt;jsScript_script&gt;var api_url = url + &quot;/&quot; + year_number + &quot;/&quot; + holiday_country_code;&lt;/jsScript_script&gt;
+      &lt;/jsScript&gt;
+    &lt;/jsScripts&gt;
+    &lt;fields&gt;
+      &lt;field&gt;
+        &lt;name&gt;api_url&lt;/name&gt;
+        &lt;rename&gt;api_url&lt;/rename&gt;
+        &lt;type&gt;String&lt;/type&gt;
+        &lt;length&gt;-1&lt;/length&gt;
+        &lt;precision&gt;-1&lt;/precision&gt;
+        &lt;replace&gt;N&lt;/replace&gt;
+      &lt;/field&gt;
+    &lt;/fields&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;288&lt;/xloc&gt;
+      &lt;yloc&gt;144&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt;</td></tr>
+<tr><td><code>reason</code></td><td>unrecognized step type: ScriptValueMod</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&rarr; dim_date.ktr:5 <code>d0a86255-f80e-5729-aff0-b5f77fe8ed2a</code></li>
+<li>&larr; dim_date.ktr:9 <code>abb32620-4c9c-5a19-9b84-6455af079744</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    n8b3e1814e9cc578f894f6b088e69a4aa[&quot;dim_date.ktr:0&quot;]
+    nd0a86255f80e5729aff0b5f77fe8ed2a[&quot;dim_date.ktr:5&quot;]
+    n8b3e1814e9cc578f894f6b088e69a4aa --&gt;|FeedsInto| nd0a86255f80e5729aff0b5f77fe8ed2a
+    nabb326204c9c5a199b846455af079744[&quot;dim_date.ktr:9&quot;]
+    nabb326204c9c5a199b846455af079744 --&gt;|FeedsInto| n8b3e1814e9cc578f894f6b088e69a4aa
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>0ed4b621-67f1-510a-a989-a9c04b98af63</code> — &lt;step&gt;
+    &lt;name&gt;Calculate API Url&lt;/name&gt;
+    &lt;type&gt;ScriptValueMod&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;compatible&gt;N&lt;/compatible&gt;
+    &lt;optimizationLevel&gt;9&lt;/optimizationLevel&gt;
+    &lt;jsScripts&gt;
+      &lt;jsScript&gt;
+        &lt;jsScript_type&gt;0&lt;/jsScript_type&gt;
+        &lt;jsScript_name&gt;Script 1&lt;/jsScript_name&gt;
+        &lt;jsScript_script&gt;var api_url = url + &quot;/&quot; + year_number + &quot;/&quot; + holiday_country_code;&lt;/jsScript_script&gt;
+      &lt;/jsScript&gt;
+    &lt;/jsScripts&gt;
+    &lt;fields&gt;
+      &lt;field&gt;
+        &lt;name&gt;api_url&lt;/name&gt;
+        &lt;rename&gt;api_url&lt;/rename&gt;
+        &lt;type&gt;String&lt;/type&gt;
+        &lt;length&gt;-1&lt;/length&gt;
+        &lt;precision&gt;-1&lt;/precision&gt;
+        &lt;replace&gt;N&lt;/replace&gt;
+      &lt;/field&gt;
+    &lt;/fields&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;288&lt;/xloc&gt;
+      &lt;yloc&gt;144&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt; (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    n8b3e1814e9cc578f894f6b088e69a4aa["dim_date.ktr:0"]
+    nd0a86255f80e5729aff0b5f77fe8ed2a["dim_date.ktr:5"]
+    n8b3e1814e9cc578f894f6b088e69a4aa -->|FeedsInto| nd0a86255f80e5729aff0b5f77fe8ed2a
+    nabb326204c9c5a199b846455af079744["dim_date.ktr:9"]
+    nabb326204c9c5a199b846455af079744 -->|FeedsInto| n8b3e1814e9cc578f894f6b088e69a4aa
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>

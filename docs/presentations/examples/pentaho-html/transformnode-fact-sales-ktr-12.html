@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fact_sales.ktr:12 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>fact_sales.ktr:12 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>node_type</code></td><td>Unmapped</td></tr>
+<tr><td><code>raw</code></td><td>&lt;step&gt;
+    &lt;name&gt;Sort ProductId&lt;/name&gt;
+    &lt;type&gt;SortRows&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;directory&gt;%%java.io.tmpdir%%&lt;/directory&gt;
+    &lt;prefix&gt;out&lt;/prefix&gt;
+    &lt;sort_size&gt;1000000&lt;/sort_size&gt;
+    &lt;free_memory/&gt;
+    &lt;compress&gt;N&lt;/compress&gt;
+    &lt;compress_variable/&gt;
+    &lt;unique_rows&gt;N&lt;/unique_rows&gt;
+    &lt;fields&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductID&lt;/name&gt;
+        &lt;ascending&gt;Y&lt;/ascending&gt;
+        &lt;case_sensitive&gt;N&lt;/case_sensitive&gt;
+        &lt;collator_enabled&gt;N&lt;/collator_enabled&gt;
+        &lt;collator_strength&gt;0&lt;/collator_strength&gt;
+        &lt;presorted&gt;N&lt;/presorted&gt;
+      &lt;/field&gt;
+    &lt;/fields&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;528&lt;/xloc&gt;
+      &lt;yloc&gt;496&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt;</td></tr>
+<tr><td><code>reason</code></td><td>unrecognized step type: SortRows</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&rarr; fact_sales.ktr:4 <code>8eb94913-b4b9-5d88-915d-7fb890edd830</code></li>
+<li>&larr; fact_sales.ktr:9 <code>71039590-7ed6-5761-a7c7-95fe29d56665</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    ne54591c9e1d958808ebaf77196e45271[&quot;fact_sales.ktr:12&quot;]
+    n8eb94913b4b95d88915d7fb890edd830[&quot;fact_sales.ktr:4&quot;]
+    ne54591c9e1d958808ebaf77196e45271 --&gt;|FeedsInto| n8eb94913b4b95d88915d7fb890edd830
+    n710395907ed65761a7c795fe29d56665[&quot;fact_sales.ktr:9&quot;]
+    n710395907ed65761a7c795fe29d56665 --&gt;|FeedsInto| ne54591c9e1d958808ebaf77196e45271
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>03a7da11-daa6-52d2-b629-350055286671</code> — &lt;step&gt;
+    &lt;name&gt;Sort ProductId&lt;/name&gt;
+    &lt;type&gt;SortRows&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;directory&gt;%%java.io.tmpdir%%&lt;/directory&gt;
+    &lt;prefix&gt;out&lt;/prefix&gt;
+    &lt;sort_size&gt;1000000&lt;/sort_size&gt;
+    &lt;free_memory/&gt;
+    &lt;compress&gt;N&lt;/compress&gt;
+    &lt;compress_variable/&gt;
+    &lt;unique_rows&gt;N&lt;/unique_rows&gt;
+    &lt;fields&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductID&lt;/name&gt;
+        &lt;ascending&gt;Y&lt;/ascending&gt;
+        &lt;case_sensitive&gt;N&lt;/case_sensitive&gt;
+        &lt;collator_enabled&gt;N&lt;/collator_enabled&gt;
+        &lt;collator_strength&gt;0&lt;/collator_strength&gt;
+        &lt;presorted&gt;N&lt;/presorted&gt;
+      &lt;/field&gt;
+    &lt;/fields&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;528&lt;/xloc&gt;
+      &lt;yloc&gt;496&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt; (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    ne54591c9e1d958808ebaf77196e45271["fact_sales.ktr:12"]
+    n8eb94913b4b95d88915d7fb890edd830["fact_sales.ktr:4"]
+    ne54591c9e1d958808ebaf77196e45271 -->|FeedsInto| n8eb94913b4b95d88915d7fb890edd830
+    n710395907ed65761a7c795fe29d56665["fact_sales.ktr:9"]
+    n710395907ed65761a7c795fe29d56665 -->|FeedsInto| ne54591c9e1d958808ebaf77196e45271
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>

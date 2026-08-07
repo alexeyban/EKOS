@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dim_product.ktr:1 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>dim_product.ktr:1 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>node_type</code></td><td>Unmapped</td></tr>
+<tr><td><code>raw</code></td><td>&lt;step&gt;
+    &lt;name&gt;Insert / Update dim_product&lt;/name&gt;
+    &lt;type&gt;DimensionLookup&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;schema&gt;eae_data_management_mmjja&lt;/schema&gt;
+    &lt;table&gt;dim_product&lt;/table&gt;
+    &lt;connection&gt;Local-MySQL&lt;/connection&gt;
+    &lt;commit&gt;100&lt;/commit&gt;
+    &lt;update&gt;Y&lt;/update&gt;
+    &lt;fields&gt;
+      &lt;key&gt;
+        &lt;name&gt;ProductID&lt;/name&gt;
+        &lt;lookup&gt;product_id&lt;/lookup&gt;
+      &lt;/key&gt;
+      &lt;date&gt;
+        &lt;name/&gt;
+        &lt;from&gt;start_date&lt;/from&gt;
+        &lt;to&gt;end_date&lt;/to&gt;
+      &lt;/date&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductNumber&lt;/name&gt;
+        &lt;lookup&gt;product_number&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Name&lt;/name&gt;
+        &lt;lookup&gt;product_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;MakeFlag&lt;/name&gt;
+        &lt;lookup&gt;make_flag&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;FinishedGoodsFlag&lt;/name&gt;
+        &lt;lookup&gt;finished_goods_flag&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Color&lt;/name&gt;
+        &lt;lookup&gt;color&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Size&lt;/name&gt;
+        &lt;lookup&gt;size&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;SizeUnitMeasureCode&lt;/name&gt;
+        &lt;lookup&gt;size_unit_measure_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Weight&lt;/name&gt;
+        &lt;lookup&gt;weight&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;WeightUnitMeasureCode&lt;/name&gt;
+        &lt;lookup&gt;weight_unit_measure_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductLine&lt;/name&gt;
+        &lt;lookup&gt;product_line_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Style&lt;/name&gt;
+        &lt;lookup&gt;style&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductSubcategoryID&lt;/name&gt;
+        &lt;lookup&gt;product_subcategory_id&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductSubCategoryName&lt;/name&gt;
+        &lt;lookup&gt;product_subcategory_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductCategoryId&lt;/name&gt;
+        &lt;lookup&gt;product_category_id&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductCategoryName&lt;/name&gt;
+        &lt;lookup&gt;product_category_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductModelID&lt;/name&gt;
+        &lt;lookup&gt;product_model_id&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductModelName&lt;/name&gt;
+        &lt;lookup&gt;product_model_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Class&lt;/name&gt;
+        &lt;lookup&gt;class_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;return&gt;
+        &lt;name&gt;dim_product_id&lt;/name&gt;
+        &lt;rename/&gt;
+        &lt;creation_method&gt;tablemax&lt;/creation_method&gt;
+        &lt;use_autoinc&gt;N&lt;/use_autoinc&gt;
+        &lt;version&gt;version_number&lt;/version&gt;
+      &lt;/return&gt;
+    &lt;/fields&gt;
+    &lt;sequence/&gt;
+    &lt;min_year&gt;1900&lt;/min_year&gt;
+    &lt;max_year&gt;2199&lt;/max_year&gt;
+    &lt;cache_size&gt;5000&lt;/cache_size&gt;
+    &lt;preload_cache&gt;N&lt;/preload_cache&gt;
+    &lt;use_start_date_alternative&gt;N&lt;/use_start_date_alternative&gt;
+    &lt;start_date_alternative&gt;none&lt;/start_date_alternative&gt;
+    &lt;start_date_field_name/&gt;
+    &lt;useBatch&gt;N&lt;/useBatch&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;720&lt;/xloc&gt;
+      &lt;yloc&gt;128&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt;</td></tr>
+<tr><td><code>reason</code></td><td>unrecognized step type: DimensionLookup</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&larr; dim_product.ktr:8 <code>44d97c2a-0242-5444-ad46-9d9c6217899c</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    n49ed182aa70d552caaf6d746af182b4f[&quot;dim_product.ktr:1&quot;]
+    n44d97c2a02425444ad469d9c6217899c[&quot;dim_product.ktr:8&quot;]
+    n44d97c2a02425444ad469d9c6217899c --&gt;|FeedsInto| n49ed182aa70d552caaf6d746af182b4f
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>61859631-3b02-5dda-8762-4becc6a32440</code> — &lt;step&gt;
+    &lt;name&gt;Insert / Update dim_product&lt;/name&gt;
+    &lt;type&gt;DimensionLookup&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;schema&gt;eae_data_management_mmjja&lt;/schema&gt;
+    &lt;table&gt;dim_product&lt;/table&gt;
+    &lt;connection&gt;Local-MySQL&lt;/connection&gt;
+    &lt;commit&gt;100&lt;/commit&gt;
+    &lt;update&gt;Y&lt;/update&gt;
+    &lt;fields&gt;
+      &lt;key&gt;
+        &lt;name&gt;ProductID&lt;/name&gt;
+        &lt;lookup&gt;product_id&lt;/lookup&gt;
+      &lt;/key&gt;
+      &lt;date&gt;
+        &lt;name/&gt;
+        &lt;from&gt;start_date&lt;/from&gt;
+        &lt;to&gt;end_date&lt;/to&gt;
+      &lt;/date&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductNumber&lt;/name&gt;
+        &lt;lookup&gt;product_number&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Name&lt;/name&gt;
+        &lt;lookup&gt;product_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;MakeFlag&lt;/name&gt;
+        &lt;lookup&gt;make_flag&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;FinishedGoodsFlag&lt;/name&gt;
+        &lt;lookup&gt;finished_goods_flag&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Color&lt;/name&gt;
+        &lt;lookup&gt;color&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Size&lt;/name&gt;
+        &lt;lookup&gt;size&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;SizeUnitMeasureCode&lt;/name&gt;
+        &lt;lookup&gt;size_unit_measure_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Weight&lt;/name&gt;
+        &lt;lookup&gt;weight&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;WeightUnitMeasureCode&lt;/name&gt;
+        &lt;lookup&gt;weight_unit_measure_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductLine&lt;/name&gt;
+        &lt;lookup&gt;product_line_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Style&lt;/name&gt;
+        &lt;lookup&gt;style&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductSubcategoryID&lt;/name&gt;
+        &lt;lookup&gt;product_subcategory_id&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductSubCategoryName&lt;/name&gt;
+        &lt;lookup&gt;product_subcategory_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductCategoryId&lt;/name&gt;
+        &lt;lookup&gt;product_category_id&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductCategoryName&lt;/name&gt;
+        &lt;lookup&gt;product_category_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductModelID&lt;/name&gt;
+        &lt;lookup&gt;product_model_id&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;ProductModelName&lt;/name&gt;
+        &lt;lookup&gt;product_model_name&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;field&gt;
+        &lt;name&gt;Class&lt;/name&gt;
+        &lt;lookup&gt;class_code&lt;/lookup&gt;
+        &lt;update&gt;Insert&lt;/update&gt;
+      &lt;/field&gt;
+      &lt;return&gt;
+        &lt;name&gt;dim_product_id&lt;/name&gt;
+        &lt;rename/&gt;
+        &lt;creation_method&gt;tablemax&lt;/creation_method&gt;
+        &lt;use_autoinc&gt;N&lt;/use_autoinc&gt;
+        &lt;version&gt;version_number&lt;/version&gt;
+      &lt;/return&gt;
+    &lt;/fields&gt;
+    &lt;sequence/&gt;
+    &lt;min_year&gt;1900&lt;/min_year&gt;
+    &lt;max_year&gt;2199&lt;/max_year&gt;
+    &lt;cache_size&gt;5000&lt;/cache_size&gt;
+    &lt;preload_cache&gt;N&lt;/preload_cache&gt;
+    &lt;use_start_date_alternative&gt;N&lt;/use_start_date_alternative&gt;
+    &lt;start_date_alternative&gt;none&lt;/start_date_alternative&gt;
+    &lt;start_date_field_name/&gt;
+    &lt;useBatch&gt;N&lt;/useBatch&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;720&lt;/xloc&gt;
+      &lt;yloc&gt;128&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt; (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    n49ed182aa70d552caaf6d746af182b4f["dim_product.ktr:1"]
+    n44d97c2a02425444ad469d9c6217899c["dim_product.ktr:8"]
+    n44d97c2a02425444ad469d9c6217899c -->|FeedsInto| n49ed182aa70d552caaf6d746af182b4f
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>

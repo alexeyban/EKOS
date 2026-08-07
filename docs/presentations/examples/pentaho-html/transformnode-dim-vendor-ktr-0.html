@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dim_vendor.ktr:0 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>dim_vendor.ktr:0 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>node_type</code></td><td>Unmapped</td></tr>
+<tr><td><code>raw</code></td><td>&lt;step&gt;
+    &lt;name&gt;Add sequence&lt;/name&gt;
+    &lt;type&gt;Sequence&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;valuename&gt;dim_vendor_id&lt;/valuename&gt;
+    &lt;use_database&gt;N&lt;/use_database&gt;
+    &lt;connection/&gt;
+    &lt;schema/&gt;
+    &lt;seqname&gt;SEQ_&lt;/seqname&gt;
+    &lt;use_counter&gt;Y&lt;/use_counter&gt;
+    &lt;counter_name/&gt;
+    &lt;start_at&gt;1&lt;/start_at&gt;
+    &lt;increment_by&gt;1&lt;/increment_by&gt;
+    &lt;max_value&gt;999999999&lt;/max_value&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;400&lt;/xloc&gt;
+      &lt;yloc&gt;80&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt;</td></tr>
+<tr><td><code>reason</code></td><td>unrecognized step type: Sequence</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&rarr; dim_vendor.ktr:1 <code>a109b5da-bf9f-55e3-8d78-4669fc7745f9</code></li>
+<li>&larr; dim_vendor.ktr:2 <code>c4d59d25-c09e-5c70-89e0-14f8f6b71d91</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    nb5c7d07e3cd7561ba5a5d363ef97f6c7[&quot;dim_vendor.ktr:0&quot;]
+    na109b5dabf9f55e38d784669fc7745f9[&quot;dim_vendor.ktr:1&quot;]
+    nb5c7d07e3cd7561ba5a5d363ef97f6c7 --&gt;|FeedsInto| na109b5dabf9f55e38d784669fc7745f9
+    nc4d59d25c09e5c7089e014f8f6b71d91[&quot;dim_vendor.ktr:2&quot;]
+    nc4d59d25c09e5c7089e014f8f6b71d91 --&gt;|FeedsInto| nb5c7d07e3cd7561ba5a5d363ef97f6c7
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>4c98f090-3768-5d46-9307-3db9da0cd8cf</code> — &lt;step&gt;
+    &lt;name&gt;Add sequence&lt;/name&gt;
+    &lt;type&gt;Sequence&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;valuename&gt;dim_vendor_id&lt;/valuename&gt;
+    &lt;use_database&gt;N&lt;/use_database&gt;
+    &lt;connection/&gt;
+    &lt;schema/&gt;
+    &lt;seqname&gt;SEQ_&lt;/seqname&gt;
+    &lt;use_counter&gt;Y&lt;/use_counter&gt;
+    &lt;counter_name/&gt;
+    &lt;start_at&gt;1&lt;/start_at&gt;
+    &lt;increment_by&gt;1&lt;/increment_by&gt;
+    &lt;max_value&gt;999999999&lt;/max_value&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;400&lt;/xloc&gt;
+      &lt;yloc&gt;80&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt; (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    nb5c7d07e3cd7561ba5a5d363ef97f6c7["dim_vendor.ktr:0"]
+    na109b5dabf9f55e38d784669fc7745f9["dim_vendor.ktr:1"]
+    nb5c7d07e3cd7561ba5a5d363ef97f6c7 -->|FeedsInto| na109b5dabf9f55e38d784669fc7745f9
+    nc4d59d25c09e5c7089e014f8f6b71d91["dim_vendor.ktr:2"]
+    nc4d59d25c09e5c7089e014f8f6b71d91 -->|FeedsInto| nb5c7d07e3cd7561ba5a5d363ef97f6c7
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>

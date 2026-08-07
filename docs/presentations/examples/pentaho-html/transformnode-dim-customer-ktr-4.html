@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dim_customer.ktr:4 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>dim_customer.ktr:4 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>join_kind</code></td><td>Left</td></tr>
+<tr><td><code>keys</code></td><td>[]</td></tr>
+<tr><td><code>left</code></td><td>0</td></tr>
+<tr><td><code>node_type</code></td><td>Join</td></tr>
+<tr><td><code>right</code></td><td>0</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&rarr; dim_customer.ktr:7 <code>91a74c3f-86b8-5ea3-989e-5d6d577864fd</code></li>
+<li>&larr; dim_customer.ktr:1 <code>8d1a81e6-f0e2-5b1d-bae9-2e2600ed81c8</code></li>
+<li>&larr; dim_customer.ktr:3 <code>71c485ba-3183-585d-962e-71ad1499c739</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    n65f972fccf695b31b267600dd103faef[&quot;dim_customer.ktr:4&quot;]
+    n91a74c3f86b85ea3989e5d6d577864fd[&quot;dim_customer.ktr:7&quot;]
+    n65f972fccf695b31b267600dd103faef --&gt;|FeedsInto| n91a74c3f86b85ea3989e5d6d577864fd
+    n8d1a81e6f0e25b1dbae92e2600ed81c8[&quot;dim_customer.ktr:1&quot;]
+    n8d1a81e6f0e25b1dbae92e2600ed81c8 --&gt;|FeedsInto| n65f972fccf695b31b267600dd103faef
+    n71c485ba3183585d962e71ad1499c739[&quot;dim_customer.ktr:3&quot;]
+    n71c485ba3183585d962e71ad1499c739 --&gt;|FeedsInto| n65f972fccf695b31b267600dd103faef
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>9601aa3e-28df-5bff-9638-3070b46fe00f</code> — Left JOIN ON [] (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    n65f972fccf695b31b267600dd103faef["dim_customer.ktr:4"]
+    n91a74c3f86b85ea3989e5d6d577864fd["dim_customer.ktr:7"]
+    n65f972fccf695b31b267600dd103faef -->|FeedsInto| n91a74c3f86b85ea3989e5d6d577864fd
+    n8d1a81e6f0e25b1dbae92e2600ed81c8["dim_customer.ktr:1"]
+    n8d1a81e6f0e25b1dbae92e2600ed81c8 -->|FeedsInto| n65f972fccf695b31b267600dd103faef
+    n71c485ba3183585d962e71ad1499c739["dim_customer.ktr:3"]
+    n71c485ba3183585d962e71ad1499c739 -->|FeedsInto| n65f972fccf695b31b267600dd103faef
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>

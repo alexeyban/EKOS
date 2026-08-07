@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fact_purchase.ktr:8 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>fact_purchase.ktr:8 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>node_type</code></td><td>Unmapped</td></tr>
+<tr><td><code>raw</code></td><td>&lt;step&gt;
+    &lt;name&gt;Vendor Lookup&lt;/name&gt;
+    &lt;type&gt;DimensionLookup&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;schema&gt;eae_data_management_mmjja&lt;/schema&gt;
+    &lt;table&gt;dim_vendor&lt;/table&gt;
+    &lt;connection&gt;mySql_eae_Dm&lt;/connection&gt;
+    &lt;commit&gt;100&lt;/commit&gt;
+    &lt;update&gt;N&lt;/update&gt;
+    &lt;fields&gt;
+      &lt;key&gt;
+        &lt;name&gt;VendorID&lt;/name&gt;
+        &lt;lookup&gt;vendor_id&lt;/lookup&gt;
+      &lt;/key&gt;
+      &lt;date&gt;
+        &lt;name&gt;OrderDate&lt;/name&gt;
+        &lt;from&gt;start_date&lt;/from&gt;
+        &lt;to&gt;end_date&lt;/to&gt;
+      &lt;/date&gt;
+      &lt;return&gt;
+        &lt;name&gt;dim_vendor_id&lt;/name&gt;
+        &lt;rename/&gt;
+        &lt;creation_method&gt;tablemax&lt;/creation_method&gt;
+        &lt;use_autoinc&gt;N&lt;/use_autoinc&gt;
+        &lt;version&gt;version_number&lt;/version&gt;
+      &lt;/return&gt;
+    &lt;/fields&gt;
+    &lt;sequence/&gt;
+    &lt;min_year&gt;1900&lt;/min_year&gt;
+    &lt;max_year&gt;2199&lt;/max_year&gt;
+    &lt;cache_size&gt;5000&lt;/cache_size&gt;
+    &lt;preload_cache&gt;N&lt;/preload_cache&gt;
+    &lt;use_start_date_alternative&gt;N&lt;/use_start_date_alternative&gt;
+    &lt;start_date_alternative&gt;none&lt;/start_date_alternative&gt;
+    &lt;start_date_field_name/&gt;
+    &lt;useBatch&gt;N&lt;/useBatch&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;464&lt;/xloc&gt;
+      &lt;yloc&gt;304&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt;</td></tr>
+<tr><td><code>reason</code></td><td>unrecognized step type: DimensionLookup</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&rarr; fact_purchase.ktr:1 <code>bc5e6ac3-c306-5ec8-850f-c5ac0d6afd57</code></li>
+<li>&larr; fact_purchase.ktr:7 <code>aacf805d-ac0d-5ebe-8eb5-be7f9dea1724</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    n9ecd6f0eb5565b189afce9fdabc61e95[&quot;fact_purchase.ktr:8&quot;]
+    nbc5e6ac3c3065ec8850fc5ac0d6afd57[&quot;fact_purchase.ktr:1&quot;]
+    n9ecd6f0eb5565b189afce9fdabc61e95 --&gt;|FeedsInto| nbc5e6ac3c3065ec8850fc5ac0d6afd57
+    naacf805dac0d5ebe8eb5be7f9dea1724[&quot;fact_purchase.ktr:7&quot;]
+    naacf805dac0d5ebe8eb5be7f9dea1724 --&gt;|FeedsInto| n9ecd6f0eb5565b189afce9fdabc61e95
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>df1b3a8f-716a-5732-b724-7c4fb53f761f</code> — &lt;step&gt;
+    &lt;name&gt;Vendor Lookup&lt;/name&gt;
+    &lt;type&gt;DimensionLookup&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;schema&gt;eae_data_management_mmjja&lt;/schema&gt;
+    &lt;table&gt;dim_vendor&lt;/table&gt;
+    &lt;connection&gt;mySql_eae_Dm&lt;/connection&gt;
+    &lt;commit&gt;100&lt;/commit&gt;
+    &lt;update&gt;N&lt;/update&gt;
+    &lt;fields&gt;
+      &lt;key&gt;
+        &lt;name&gt;VendorID&lt;/name&gt;
+        &lt;lookup&gt;vendor_id&lt;/lookup&gt;
+      &lt;/key&gt;
+      &lt;date&gt;
+        &lt;name&gt;OrderDate&lt;/name&gt;
+        &lt;from&gt;start_date&lt;/from&gt;
+        &lt;to&gt;end_date&lt;/to&gt;
+      &lt;/date&gt;
+      &lt;return&gt;
+        &lt;name&gt;dim_vendor_id&lt;/name&gt;
+        &lt;rename/&gt;
+        &lt;creation_method&gt;tablemax&lt;/creation_method&gt;
+        &lt;use_autoinc&gt;N&lt;/use_autoinc&gt;
+        &lt;version&gt;version_number&lt;/version&gt;
+      &lt;/return&gt;
+    &lt;/fields&gt;
+    &lt;sequence/&gt;
+    &lt;min_year&gt;1900&lt;/min_year&gt;
+    &lt;max_year&gt;2199&lt;/max_year&gt;
+    &lt;cache_size&gt;5000&lt;/cache_size&gt;
+    &lt;preload_cache&gt;N&lt;/preload_cache&gt;
+    &lt;use_start_date_alternative&gt;N&lt;/use_start_date_alternative&gt;
+    &lt;start_date_alternative&gt;none&lt;/start_date_alternative&gt;
+    &lt;start_date_field_name/&gt;
+    &lt;useBatch&gt;N&lt;/useBatch&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;464&lt;/xloc&gt;
+      &lt;yloc&gt;304&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt; (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    n9ecd6f0eb5565b189afce9fdabc61e95["fact_purchase.ktr:8"]
+    nbc5e6ac3c3065ec8850fc5ac0d6afd57["fact_purchase.ktr:1"]
+    n9ecd6f0eb5565b189afce9fdabc61e95 -->|FeedsInto| nbc5e6ac3c3065ec8850fc5ac0d6afd57
+    naacf805dac0d5ebe8eb5be7f9dea1724["fact_purchase.ktr:7"]
+    naacf805dac0d5ebe8eb5be7f9dea1724 -->|FeedsInto| n9ecd6f0eb5565b189afce9fdabc61e95
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>

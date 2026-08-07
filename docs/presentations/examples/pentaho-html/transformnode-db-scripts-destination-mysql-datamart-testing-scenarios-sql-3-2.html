@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:2 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:2 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>join_kind</code></td><td>Inner</td></tr>
+<tr><td><code>keys</code></td><td>[[&quot;po.dim_product_id&quot;,&quot;p.dim_product_id&quot;]]</td></tr>
+<tr><td><code>left</code></td><td>0</td></tr>
+<tr><td><code>node_type</code></td><td>Join</td></tr>
+<tr><td><code>right</code></td><td>1</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&rarr; DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:3 <code>9ebb1e63-1883-51a5-ba86-4de5d1eea0f5</code></li>
+<li>&larr; DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:0 <code>1ad8cca6-5cea-5722-87f3-7507db631292</code></li>
+<li>&larr; DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:1 <code>5a2080fb-8cc6-57e0-a9c6-09fd7854fb74</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    n0c5e40a101ac522baebf7cfab887c9c7[&quot;DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:2&quot;]
+    n9ebb1e63188351a5ba864de5d1eea0f5[&quot;DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:3&quot;]
+    n0c5e40a101ac522baebf7cfab887c9c7 --&gt;|FeedsInto| n9ebb1e63188351a5ba864de5d1eea0f5
+    n1ad8cca65cea572287f37507db631292[&quot;DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:0&quot;]
+    n1ad8cca65cea572287f37507db631292 --&gt;|FeedsInto| n0c5e40a101ac522baebf7cfab887c9c7
+    n5a2080fb8cc657e0a9c609fd7854fb74[&quot;DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:1&quot;]
+    n5a2080fb8cc657e0a9c609fd7854fb74 --&gt;|FeedsInto| n0c5e40a101ac522baebf7cfab887c9c7
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>d6c83102-82c6-5093-a60b-aaea0a1cfc91</code> — Inner JOIN ON [(&quot;po.dim_product_id&quot;, &quot;p.dim_product_id&quot;)] (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    n0c5e40a101ac522baebf7cfab887c9c7["DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:2"]
+    n9ebb1e63188351a5ba864de5d1eea0f5["DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:3"]
+    n0c5e40a101ac522baebf7cfab887c9c7 -->|FeedsInto| n9ebb1e63188351a5ba864de5d1eea0f5
+    n1ad8cca65cea572287f37507db631292["DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:0"]
+    n1ad8cca65cea572287f37507db631292 -->|FeedsInto| n0c5e40a101ac522baebf7cfab887c9c7
+    n5a2080fb8cc657e0a9c609fd7854fb74["DB Scripts/Destination MySQL/datamart.testing.scenarios.sql#3:1"]
+    n5a2080fb8cc657e0a9c609fd7854fb74 -->|FeedsInto| n0c5e40a101ac522baebf7cfab887c9c7
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>

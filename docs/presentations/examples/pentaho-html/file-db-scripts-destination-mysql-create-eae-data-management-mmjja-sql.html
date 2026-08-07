@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB Scripts/Destination MySQL/create.eae_data_management_mmjja.sql — File</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>DB Scripts/Destination MySQL/create.eae_data_management_mmjja.sql <span class="kind">(File)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>artifact_id</code></td><td>26eb3f5888485a8a10f6ab8bf3b4879013aa5a1cb88d86b65977f1343c3ef312</td></tr>
+<tr><td><code>excerpt</code></td><td># Create schemas
+drop schema if exists eae_data_management_mmjja; 
+create schema eae_data_management_mmjja;
+use eae_data_management_mmjja;
+
+# Drop tables
+drop table IF EXISTS fact_sales;
+drop table IF EXISTS fact_purchases;
+drop table IF EXISTS dim_date;
+drop table IF EXISTS dim_product;
+drop table IF EXISTS dim_customer;
+drop table IF EXISTS dim_sales_territory;
+drop table IF EXISTS dim_sales_person;
+drop table IF EXISTS dim_vendor;
+
+# Create tables
+CREATE TABLE fact_sales
+(
+    fact_sales_id INT NOT NULL AUTO_INCREMENT,
+    order_date_id INT,
+    order_date_datetime DATETIME,
+    dim_custome</td></tr>
+<tr><td><code>path</code></td><td>DB Scripts/Destination MySQL/create.eae_data_management_mmjja.sql</td></tr>
+<tr><td><code>size_bytes</code></td><td>5716</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<p class="empty">No compiled relationships touch this object.</p>
+<h2>Diagram</h2>
+<p class="empty">No relationships to diagram.</p>
+<h2>Evidence</h2>
+<ul>
+<li><code>5112ec2d-562a-5cc9-a3f7-38fbd0fa748f</code> — file: DB Scripts/Destination MySQL/create.eae_data_management_mmjja.sql (5716 bytes) (confidence: 1.00)</li>
+</ul>
+</body>
+</html>

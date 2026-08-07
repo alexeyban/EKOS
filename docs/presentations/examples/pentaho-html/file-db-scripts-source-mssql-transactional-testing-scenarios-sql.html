@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB Scripts/Source MSSQL/transactional.testing.scenarios.sql — File</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>DB Scripts/Source MSSQL/transactional.testing.scenarios.sql <span class="kind">(File)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>artifact_id</code></td><td>a680bce801e0022f376f9b23576352d91eaff1c6677204451d572c68db000149</td></tr>
+<tr><td><code>excerpt</code></td><td>/*
+Escenario 1
+0. Run dim_product transformation
+1. Check dim_product of product id 875 at the datamart
+2. Check product of product id 875 at the transactional Adventureworks
+3. Update product name from product id 875 at the transactional Adventureworks
+4. Check dim_product of product id 875 at the datamart, new version should've been created
+*/
+select p.ProductID, p.Name,
+pc.Name as CategoryName, ps.Name as SubCategoryName
+from Production.Product p
+join Production.ProductSubcategory ps 
+	on p.ProductSubcategoryID = ps.ProductSubcategoryID
+join Production.ProductCategory pc 
+	on ps.ProductCate</td></tr>
+<tr><td><code>path</code></td><td>DB Scripts/Source MSSQL/transactional.testing.scenarios.sql</td></tr>
+<tr><td><code>size_bytes</code></td><td>3491</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<p class="empty">No compiled relationships touch this object.</p>
+<h2>Diagram</h2>
+<p class="empty">No relationships to diagram.</p>
+<h2>Evidence</h2>
+<ul>
+<li><code>a60022c9-8daf-566b-bfec-a44358eb7b70</code> — file: DB Scripts/Source MSSQL/transactional.testing.scenarios.sql (3491 bytes) (confidence: 1.00)</li>
+</ul>
+</body>
+</html>

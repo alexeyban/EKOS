@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fact_purchase.ktr:6 — TransformNode</title>
+<style>
+:root{ --bg:#f6f4fc; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5; --accent:#7c3aed; --code-bg:#130f22; --code-fg:#e9e4f7; }
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0b0a12; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.12); --accent:#9945ff; --code-bg:#100d1c; --code-fg:#e9e4f7; }
+}
+body{ background:var(--bg); color:var(--ink); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:52rem; margin:0 auto; padding:2.5rem 1.5rem 6rem; }
+h1,h2,h3{ line-height:1.25; }
+h1{ font-size:1.9rem; } h2{ font-size:1.3rem; margin-top:2.2rem; border-bottom:1px solid var(--rule); padding-bottom:0.4rem; } h3{ font-size:1.05rem; color:var(--ink-soft); }
+.kind{ color:var(--ink-soft); font-weight:400; }
+a{ color:var(--accent); }
+code{ background:var(--code-bg); color:var(--code-fg); padding:0.1em 0.4em; border-radius:4px; font-size:0.88em; }
+pre{ background:var(--code-bg); color:var(--code-fg); padding:1rem; border-radius:8px; overflow-x:auto; }
+pre code{ background:none; padding:0; }
+table{ border-collapse:collapse; width:100%; }
+th,td{ text-align:left; padding:0.4rem 0.6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+ul{ padding-left:1.3rem; }
+.empty{ color:var(--ink-soft); font-style:italic; }
+</style>
+</head>
+<body>
+<h1>fact_purchase.ktr:6 <span class="kind">(TransformNode)</span></h1>
+<h2>Properties</h2>
+<table>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td><code>node_type</code></td><td>Unmapped</td></tr>
+<tr><td><code>raw</code></td><td>&lt;step&gt;
+    &lt;name&gt;Insert / update fact purchases&lt;/name&gt;
+    &lt;type&gt;InsertUpdate&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;connection&gt;mySql_eae_Dm&lt;/connection&gt;
+    &lt;commit&gt;100&lt;/commit&gt;
+    &lt;update_bypassed&gt;N&lt;/update_bypassed&gt;
+    &lt;lookup&gt;
+      &lt;schema&gt;eae_data_management_mmjja&lt;/schema&gt;
+      &lt;table&gt;fact_purchases&lt;/table&gt;
+      &lt;key&gt;
+        &lt;name&gt;PurchaseOrderDetailID&lt;/name&gt;
+        &lt;field&gt;purchase_order_detail_id&lt;/field&gt;
+        &lt;condition&gt;=&lt;/condition&gt;
+        &lt;name2/&gt;
+      &lt;/key&gt;
+      &lt;value&gt;
+        &lt;name&gt;purchase_order_id&lt;/name&gt;
+        &lt;rename&gt;PurchaseOrderID&lt;/rename&gt;
+        &lt;update&gt;N&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;purchase_order_detail_id&lt;/name&gt;
+        &lt;rename&gt;PurchaseOrderDetailID&lt;/rename&gt;
+        &lt;update&gt;N&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;received_flag&lt;/name&gt;
+        &lt;rename&gt;calculated_received_flag&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;stocked_amount&lt;/name&gt;
+        &lt;rename&gt;calculated_stocked_amount&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;received_amount&lt;/name&gt;
+        &lt;rename&gt;calculated_received_amount&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;rejected_amount&lt;/name&gt;
+        &lt;rename&gt;calculated_rejected_amount&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;stocked_qty&lt;/name&gt;
+        &lt;rename&gt;StockedQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;received_qty&lt;/name&gt;
+        &lt;rename&gt;ReceivedQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;rejected_qty&lt;/name&gt;
+        &lt;rename&gt;RejectedQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_amount&lt;/name&gt;
+        &lt;rename&gt;LineTotal&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_qty&lt;/name&gt;
+        &lt;rename&gt;OrderQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;product_unit_price&lt;/name&gt;
+        &lt;rename&gt;UnitPrice&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;dim_product_id&lt;/name&gt;
+        &lt;rename&gt;dim_product_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;dim_vendor_id&lt;/name&gt;
+        &lt;rename&gt;dim_vendor_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;ship_date_datetime&lt;/name&gt;
+        &lt;rename&gt;ShipDate&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;ship_date_id&lt;/name&gt;
+        &lt;rename&gt;calculated_ship_date_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_date_datetime&lt;/name&gt;
+        &lt;rename&gt;OrderDate&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_date_id&lt;/name&gt;
+        &lt;rename&gt;calculated_order_date_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+    &lt;/lookup&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;704&lt;/xloc&gt;
+      &lt;yloc&gt;64&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt;</td></tr>
+<tr><td><code>reason</code></td><td>unrecognized step type: InsertUpdate</td></tr>
+</tbody>
+</table>
+<h2>Relationships</h2>
+<h3>FeedsInto</h3>
+<ul>
+<li>&larr; fact_purchase.ktr:1 <code>bc5e6ac3-c306-5ec8-850f-c5ac0d6afd57</code></li>
+</ul>
+<h2>Diagram</h2>
+<pre class="mermaid-source"><code>graph TD
+    n6331067b8cd053c791f2feb9791df119[&quot;fact_purchase.ktr:6&quot;]
+    nbc5e6ac3c3065ec8850fc5ac0d6afd57[&quot;fact_purchase.ktr:1&quot;]
+    nbc5e6ac3c3065ec8850fc5ac0d6afd57 --&gt;|FeedsInto| n6331067b8cd053c791f2feb9791df119
+</code></pre>
+<h2>Evidence</h2>
+<ul>
+<li><code>5a3f8261-e177-5f55-b408-fa8fe846a2ff</code> — &lt;step&gt;
+    &lt;name&gt;Insert / update fact purchases&lt;/name&gt;
+    &lt;type&gt;InsertUpdate&lt;/type&gt;
+    &lt;description/&gt;
+    &lt;distribute&gt;Y&lt;/distribute&gt;
+    &lt;custom_distribution/&gt;
+    &lt;copies&gt;1&lt;/copies&gt;
+    &lt;partitioning&gt;
+      &lt;method&gt;none&lt;/method&gt;
+      &lt;schema_name/&gt;
+    &lt;/partitioning&gt;
+    &lt;connection&gt;mySql_eae_Dm&lt;/connection&gt;
+    &lt;commit&gt;100&lt;/commit&gt;
+    &lt;update_bypassed&gt;N&lt;/update_bypassed&gt;
+    &lt;lookup&gt;
+      &lt;schema&gt;eae_data_management_mmjja&lt;/schema&gt;
+      &lt;table&gt;fact_purchases&lt;/table&gt;
+      &lt;key&gt;
+        &lt;name&gt;PurchaseOrderDetailID&lt;/name&gt;
+        &lt;field&gt;purchase_order_detail_id&lt;/field&gt;
+        &lt;condition&gt;=&lt;/condition&gt;
+        &lt;name2/&gt;
+      &lt;/key&gt;
+      &lt;value&gt;
+        &lt;name&gt;purchase_order_id&lt;/name&gt;
+        &lt;rename&gt;PurchaseOrderID&lt;/rename&gt;
+        &lt;update&gt;N&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;purchase_order_detail_id&lt;/name&gt;
+        &lt;rename&gt;PurchaseOrderDetailID&lt;/rename&gt;
+        &lt;update&gt;N&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;received_flag&lt;/name&gt;
+        &lt;rename&gt;calculated_received_flag&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;stocked_amount&lt;/name&gt;
+        &lt;rename&gt;calculated_stocked_amount&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;received_amount&lt;/name&gt;
+        &lt;rename&gt;calculated_received_amount&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;rejected_amount&lt;/name&gt;
+        &lt;rename&gt;calculated_rejected_amount&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;stocked_qty&lt;/name&gt;
+        &lt;rename&gt;StockedQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;received_qty&lt;/name&gt;
+        &lt;rename&gt;ReceivedQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;rejected_qty&lt;/name&gt;
+        &lt;rename&gt;RejectedQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_amount&lt;/name&gt;
+        &lt;rename&gt;LineTotal&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_qty&lt;/name&gt;
+        &lt;rename&gt;OrderQty&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;product_unit_price&lt;/name&gt;
+        &lt;rename&gt;UnitPrice&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;dim_product_id&lt;/name&gt;
+        &lt;rename&gt;dim_product_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;dim_vendor_id&lt;/name&gt;
+        &lt;rename&gt;dim_vendor_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;ship_date_datetime&lt;/name&gt;
+        &lt;rename&gt;ShipDate&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;ship_date_id&lt;/name&gt;
+        &lt;rename&gt;calculated_ship_date_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_date_datetime&lt;/name&gt;
+        &lt;rename&gt;OrderDate&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+      &lt;value&gt;
+        &lt;name&gt;order_date_id&lt;/name&gt;
+        &lt;rename&gt;calculated_order_date_id&lt;/rename&gt;
+        &lt;update&gt;Y&lt;/update&gt;
+      &lt;/value&gt;
+    &lt;/lookup&gt;
+    &lt;attributes/&gt;
+    &lt;cluster_schema/&gt;
+    &lt;remotesteps&gt;
+      &lt;input&gt;
+      &lt;/input&gt;
+      &lt;output&gt;
+      &lt;/output&gt;
+    &lt;/remotesteps&gt;
+    &lt;GUI&gt;
+      &lt;xloc&gt;704&lt;/xloc&gt;
+      &lt;yloc&gt;64&lt;/yloc&gt;
+      &lt;draw&gt;Y&lt;/draw&gt;
+    &lt;/GUI&gt;
+  &lt;/step&gt; (confidence: 1.00)</li>
+</ul>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<h2>Rendered</h2>
+<div class="mermaid">
+graph TD
+    n6331067b8cd053c791f2feb9791df119["fact_purchase.ktr:6"]
+    nbc5e6ac3c3065ec8850fc5ac0d6afd57["fact_purchase.ktr:1"]
+    nbc5e6ac3c3065ec8850fc5ac0d6afd57 -->|FeedsInto| n6331067b8cd053c791f2feb9791df119
+
+</div>
+<p class="empty">Live rendering added for this hosted example via mermaid.js (CDN). The <code>ekos docs generate</code> tool itself ships the diagram as source only, to stay fully offline by default.</p>
+</body>
+</html>
