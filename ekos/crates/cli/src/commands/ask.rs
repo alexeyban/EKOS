@@ -44,7 +44,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, json: bool) ->
     Ok(())
 }
 
-fn ai_config(config: &EkosConfig) -> AiRuntimeConfig {
+/// Shared with `docs.rs`'s `--prose` tier (RFC 0035 Phase 5) — same `[ai]` config resolution,
+/// so prose generation honors the same model/provider settings `ekos ask` already does.
+pub(crate) fn ai_config(config: &EkosConfig) -> AiRuntimeConfig {
     let default = AiRuntimeConfig::default();
     AiRuntimeConfig {
         model: config.ai.model.clone().unwrap_or(default.model),

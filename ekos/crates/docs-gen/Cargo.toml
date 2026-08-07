@@ -1,0 +1,11 @@
+[package]
+name = "ekos-docs-gen"
+description = "RFC 0035 — Generated Documentation: renders compiled ledger objects as Markdown/HTML/diagrams"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]

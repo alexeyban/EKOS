@@ -6,6 +6,7 @@ pub mod clean;
 pub mod commit;
 pub mod compile;
 pub mod diff;
+pub mod docs;
 pub mod doctor;
 pub mod ekl;
 pub mod identity;

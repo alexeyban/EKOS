@@ -95,6 +95,33 @@ enum Commands {
         #[command(subcommand)]
         subcommand: MarketingCommands,
     },
+    /// Generated documentation from the compiled ledger (RFC 0035)
+    Docs {
+        #[command(subcommand)]
+        subcommand: DocsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DocsCommands {
+    /// Render deterministic Markdown or HTML pages from already-committed ledger objects,
+    /// with Mermaid diagrams. No LLM calls, no cost — unless --prose is given.
+    Generate {
+        /// Output directory (default: <workspace>/docs-generated)
+        #[arg(long, value_name = "DIR")]
+        output: Option<PathBuf>,
+        /// Output format: "md" (default) or "html"
+        #[arg(long, default_value = "md")]
+        format: String,
+        /// Opt-in: add an LLM-written "Overview" to each page, grounded and citation-validated
+        /// via the same pipeline `ekos ask` uses. Shows a token-cost estimate and asks for
+        /// confirmation first, unless --yes is also given.
+        #[arg(long)]
+        prose: bool,
+        /// Skip the --prose confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -267,6 +294,18 @@ async fn main() -> Result<()> {
                 yes,
                 dry_run,
             } => ekos::commands::marketing::publish(&config, &cwd, devlog, yes, dry_run).await,
+        },
+        Commands::Docs { subcommand } => match subcommand {
+            DocsCommands::Generate {
+                output,
+                format,
+                prose,
+                yes,
+            } => {
+                let output = ekos::commands::docs::resolve_output_dir(&cwd, output);
+                let format = ekos::commands::docs::Format::parse(&format)?;
+                ekos::commands::docs::generate(&config, &cwd, &output, format, prose, yes).await
+            }
         },
     }
 }

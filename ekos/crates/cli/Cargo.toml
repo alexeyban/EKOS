@@ -24,6 +24,7 @@ ekos-recovery.workspace = true
 ekos-identity.workspace = true
 ekos-ekl.workspace = true
 ekos-marketing.workspace = true
+ekos-docs-gen.workspace = true
 ekos-semantic = { path = "../../crates/semantic" }
 ekos-plugin-file = { path = "../../plugins/file" }
 ekos-plugin-git  = { path = "../../plugins/git" }

@@ -16,6 +16,7 @@ members = [
     "crates/ekl",
     "crates/semantic",
     "crates/marketing",
+    "crates/docs-gen",
     "crates/cli",
     "plugins/file",
     "plugins/localdocs",
@@ -56,6 +57,7 @@ ekos-plugin-sql-dialect-postgres = { path = "plugins/sql-dialect-postgres" }
 ekos-recovery       = { path = "crates/recovery" }
 ekos-ekl       = { path = "crates/ekl" }
 ekos-marketing = { path = "crates/marketing" }
+ekos-docs-gen  = { path = "crates/docs-gen" }
 
 # Async
 tokio      = { version = "1", features = ["full"] }
