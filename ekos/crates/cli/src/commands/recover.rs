@@ -124,8 +124,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             // `SqlAnalyzerPass` preprocesses internally (e.g. MySQL `DELIMITER` stripping),
             // so both passes see identically-normalized SQL text for this file.
             let preprocessed_sql = dialect_parser.preprocess(&sql);
-            let transform_pass =
-                SqlTransformAnalyzerPass::new(&rel_str, preprocessed_sql, dialect_name);
+            let transform_pass = SqlTransformAnalyzerPass::new(
+                &rel_str,
+                preprocessed_sql,
+                dialect_name,
+                dialect_parser.sqlparser_dialect(),
+            );
             sql_transform_stats_handles.push(transform_pass.stats_handle());
             pass_manager.register(Box::new(transform_pass));
 

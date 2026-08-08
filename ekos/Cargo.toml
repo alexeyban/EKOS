@@ -33,6 +33,9 @@ members = [
     "plugins/pentaho",
     "plugins/sql-dialect-mysql",
     "plugins/sql-dialect-postgres",
+    "plugins/sql-dialect-snowflake",
+    "plugins/sql-dialect-databricks",
+    "plugins/sql-dialect-mssql",
 ]
 
 [workspace.package]
@@ -55,6 +58,9 @@ ekos-observation-sdk = { path = "crates/observation-sdk" }
 ekos-sql-dialect-sdk = { path = "crates/sql-dialect-sdk" }
 ekos-plugin-sql-dialect-mysql = { path = "plugins/sql-dialect-mysql" }
 ekos-plugin-sql-dialect-postgres = { path = "plugins/sql-dialect-postgres" }
+ekos-plugin-sql-dialect-snowflake = { path = "plugins/sql-dialect-snowflake" }
+ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks" }
+ekos-plugin-sql-dialect-mssql = { path = "plugins/sql-dialect-mssql" }
 ekos-recovery       = { path = "crates/recovery" }
 ekos-ekl       = { path = "crates/ekl" }
 ekos-marketing = { path = "crates/marketing" }

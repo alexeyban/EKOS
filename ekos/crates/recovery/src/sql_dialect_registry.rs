@@ -8,8 +8,11 @@
 
 use std::collections::HashMap;
 
+use ekos_plugin_sql_dialect_databricks::DatabricksDialectParser;
+use ekos_plugin_sql_dialect_mssql::MsSqlDialectParser;
 use ekos_plugin_sql_dialect_mysql::MySqlDialectParser;
 use ekos_plugin_sql_dialect_postgres::PostgresDialectParser;
+use ekos_plugin_sql_dialect_snowflake::SnowflakeDialectParser;
 use ekos_sql_dialect_sdk::SqlDialectParser;
 use sqlparser::dialect::{Dialect, GenericDialect};
 
@@ -44,6 +47,26 @@ pub fn build_dialect_registry() -> HashMap<String, Box<dyn SqlDialectParser>> {
     registry.insert("generic".to_string(), Box::new(GenericDialectParser));
     registry.insert("mysql".to_string(), Box::new(MySqlDialectParser));
     registry.insert("postgres".to_string(), Box::new(PostgresDialectParser));
+    // Alias preserved from `sql_transform_analyzer.rs`'s old private `dialect_for`, same
+    // rationale as the mssql aliases below.
+    registry.insert("postgresql".to_string(), Box::new(PostgresDialectParser));
+    registry.insert("snowflake".to_string(), Box::new(SnowflakeDialectParser));
+    registry.insert("databricks".to_string(), Box::new(DatabricksDialectParser));
+    // Same alias set `sql_transform_analyzer.rs`'s old private `dialect_for` recognized —
+    // preserved exactly so unifying both passes on this registry doesn't regress existing
+    // `dialect = "mssql"`/`"tsql"`/`"synapse"` workspace configs.
+    registry.insert(
+        "mssql".to_string(),
+        Box::new(MsSqlDialectParser::new("mssql")),
+    );
+    registry.insert(
+        "tsql".to_string(),
+        Box::new(MsSqlDialectParser::new("tsql")),
+    );
+    registry.insert(
+        "synapse".to_string(),
+        Box::new(MsSqlDialectParser::new("synapse")),
+    );
     registry
 }
 
@@ -79,6 +102,29 @@ mod tests {
         assert_eq!(registry.get("mysql").unwrap().name(), "mysql");
         assert_eq!(registry.get("postgres").unwrap().name(), "postgres");
         assert_eq!(registry.get("generic").unwrap().name(), "generic");
+    }
+
+    /// RFC 0039: snowflake/databricks are real registry entries now, not only reachable via
+    /// `sql_transform_analyzer.rs`'s formerly-private `dialect_for`.
+    #[test]
+    fn registry_contains_snowflake_and_databricks() {
+        let registry = build_dialect_registry();
+        assert!(registry.contains_key("snowflake"));
+        assert!(registry.contains_key("databricks"));
+        assert_eq!(registry.get("snowflake").unwrap().name(), "snowflake");
+        assert_eq!(registry.get("databricks").unwrap().name(), "databricks");
+    }
+
+    /// RFC 0039: mssql/tsql/synapse must be real registry entries, not only reachable via
+    /// `sql_transform_analyzer.rs`'s formerly-private `dialect_for` — regression guard for the
+    /// exact alias set that pass used to recognize.
+    #[test]
+    fn registry_contains_mssql_aliases() {
+        let registry = build_dialect_registry();
+        for alias in ["mssql", "tsql", "synapse"] {
+            assert!(registry.contains_key(alias), "missing alias: {alias}");
+            assert_eq!(registry.get(alias).unwrap().name(), alias);
+        }
     }
 
     #[test]

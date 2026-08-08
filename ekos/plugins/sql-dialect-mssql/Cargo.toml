@@ -1,0 +1,9 @@
+[package]
+name = "ekos-plugin-sql-dialect-mssql"
+description = "MSSQL (T-SQL) SqlDialectParser plugin (RFC 0039)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-sql-dialect-sdk.workspace = true
+sqlparser.workspace = true

@@ -13,21 +13,24 @@
 //! - Stored procedures/functions: **not pure SQL** — control flow (loops,
 //!   cursors, conditionals, variables) is out of scope. MVP: embedded SQL
 //!   statements become real IR fragments; everything else becomes
-//!   `Unmapped` with reason `"control flow present, not modeled"`.
-//! - Dialects: Postgres, MySQL, and MSSQL (T-SQL) via their native `sqlparser`
-//!   dialects; Databricks via `sqlparser`'s native `DatabricksDialect`
-//!   (coverage not independently verified against real Spark SQL
-//!   extensions — flagged, not blocking); Informix has no dedicated
-//!   `sqlparser` dialect, so it falls back to `GenericDialect` and accepts
-//!   incomplete coverage, per the plan's explicit scoping.
+//!   `Unmapped`. `IF`/`WHILE` specifically have no `sqlparser` grammar support at all (verified
+//!   directly, RFC 0039) — a procedure body using either fails whole-file structured parsing, so
+//!   this module falls back to a per-statement text split (see
+//!   `parse_sql_statement_by_statement`) rather than losing every other statement in the file.
+//! - Dialects: Postgres, MySQL, MSSQL (T-SQL), Snowflake, and Databricks via their native
+//!   `sqlparser` dialects (Databricks/Snowflake coverage not independently verified against
+//!   every real syntax extension — flagged, not blocking); Informix has no dedicated `sqlparser`
+//!   dialect, so it falls back to `GenericDialect` and accepts incomplete coverage, per the
+//!   plan's explicit scoping.
 //!
-//! Dialect selection is config-driven as of RFC 0031: `recover.rs` resolves a dialect name
-//! per `.sql` file (via `sql_dialect_registry`'s registry + `ekos.toml`'s `[recover.sql]`
-//! rules, falling back to `"generic"`) and passes the resolved name — and, for dialects with
-//! preprocessing needs like MySQL's `DELIMITER` stripping, the already-preprocessed SQL text —
-//! into `SqlTransformAnalyzerPass::new`. This pass's own `dialect_for`/`source_kind_for` stay
-//! keyed by name (not `Box<dyn SqlDialectParser>`) since the name itself is also used for
-//! stats/display (`dialect: self.dialect_name.clone()`) and `TransformOrigin` tagging.
+//! Dialect selection is config-driven as of RFC 0031, and — as of RFC 0039 — fully unified with
+//! `SqlAnalyzerPass`: `recover.rs` resolves one `SqlDialectParser` per `.sql` file (via
+//! `sql_dialect_registry`'s registry + `ekos.toml`'s `[recover.sql]` rules, falling back to
+//! `"generic"`) and passes both the resolved dialect name (still needed for
+//! `SqlTransformStats.dialect`/`TransformOrigin.source_kind` display/tagging) and the resolved
+//! `sqlparser::Dialect` object itself into `SqlTransformAnalyzerPass::new` — this pass no longer
+//! owns a private `dialect_for` that could silently disagree with the registry (RFC 0031's
+//! previously-unchecked acceptance criterion, closed by RFC 0039).
 
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
@@ -40,9 +43,7 @@ use sqlparser::ast::{
     BinaryOperator, CreateFunctionBody, Expr, Function, GroupByExpr, Join, JoinConstraint,
     JoinOperator, Query, Select, SelectItem, SetExpr, Statement, TableFactor, Value,
 };
-use sqlparser::dialect::{
-    DatabricksDialect, Dialect, GenericDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect,
-};
+use sqlparser::dialect::Dialect;
 use sqlparser::parser::Parser;
 use std::sync::{Arc, Mutex};
 
@@ -75,6 +76,13 @@ pub struct SqlTransformAnalyzerPass {
     sql: String,
     source_path: String,
     dialect_name: String,
+    /// RFC 0039: the same resolved `SqlDialectParser::sqlparser_dialect()` output
+    /// `SqlAnalyzerPass` gets, passed in by the caller (`recover.rs`) instead of being
+    /// re-derived from `dialect_name` via a private `dialect_for` match — closes RFC 0031's
+    /// previously-unchecked acceptance criterion that both passes use one shared resolution.
+    /// `dialect_name` is kept alongside it (not replaced) because it's still needed for
+    /// `SqlTransformStats.dialect`/`TransformOrigin.source_kind` display/tagging.
+    dialect: Box<dyn Dialect + Send + Sync>,
     stats: Arc<Mutex<SqlTransformStats>>,
 }
 
@@ -83,6 +91,7 @@ impl SqlTransformAnalyzerPass {
         source_path: impl Into<String>,
         sql: impl Into<String>,
         dialect_name: impl Into<String>,
+        dialect: Box<dyn Dialect + Send + Sync>,
     ) -> Self {
         let source_path = source_path.into();
         let dialect_name = dialect_name.into();
@@ -95,6 +104,7 @@ impl SqlTransformAnalyzerPass {
                 ..Default::default()
             })),
             dialect_name,
+            dialect,
         }
     }
 
@@ -120,8 +130,12 @@ impl CompilerPass for SqlTransformAnalyzerPass {
     }
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
-        let graphs =
-            parse_sql_to_transform_graphs(&self.sql, &self.source_path, &self.dialect_name);
+        let graphs = parse_sql_to_transform_graphs(
+            &self.sql,
+            &self.source_path,
+            &self.dialect_name,
+            self.dialect.as_ref(),
+        );
 
         let mut combined = KirGraph::new();
         let mut stats = SqlTransformStats {
@@ -166,18 +180,12 @@ impl CompilerPass for SqlTransformAnalyzerPass {
 }
 
 // ── Dialect selection ────────────────────────────────────────────────────────
-
-fn dialect_for(name: &str) -> Box<dyn Dialect> {
-    match name {
-        "postgres" | "postgresql" => Box::new(PostgreSqlDialect {}),
-        "mysql" => Box::new(MySqlDialect {}),
-        "mssql" | "tsql" | "synapse" => Box::new(MsSqlDialect {}),
-        "databricks" | "spark" => Box::new(DatabricksDialect {}),
-        // Informix has no dedicated sqlparser dialect — Generic accepts
-        // incomplete coverage, per the implementation plan's explicit scope.
-        _ => Box::new(GenericDialect {}),
-    }
-}
+//
+// RFC 0039: the actual `sqlparser::Dialect` to parse with is now always supplied by the caller
+// (resolved from the shared `sql_dialect_registry`, same object `SqlAnalyzerPass` gets) —
+// no more private `dialect_for` match to fall out of sync with the registry. `source_kind_for`
+// stays a name-keyed match: it's a pure display/tagging label for `TransformOrigin`, not a
+// parsing decision, so it doesn't duplicate the registry's actual dialect-selection behavior.
 
 fn source_kind_for(dialect_name: &str) -> &'static str {
     match dialect_name {
@@ -185,6 +193,7 @@ fn source_kind_for(dialect_name: &str) -> &'static str {
         "mysql" => "sql-mysql",
         "mssql" | "tsql" | "synapse" => "sql-mssql",
         "databricks" | "spark" => "sql-databricks",
+        "snowflake" => "sql-snowflake",
         "informix" => "sql-informix",
         _ => "sql-generic",
     }
@@ -200,11 +209,11 @@ pub fn parse_sql_to_transform_graphs(
     sql: &str,
     source_path: &str,
     dialect_name: &str,
+    dialect: &dyn Dialect,
 ) -> Vec<TransformGraph> {
-    let dialect = dialect_for(dialect_name);
     let source_kind = source_kind_for(dialect_name);
 
-    let stmts = match Parser::parse_sql(dialect.as_ref(), sql) {
+    let stmts = match Parser::parse_sql(dialect, sql) {
         Ok(s) => s,
         Err(first_err) => {
             // Fallback (GitHub issue #3): some hand-written scripts omit `;` between top-level
@@ -212,13 +221,26 @@ pub fn parse_sql_to_transform_graphs(
             // `statement_repair`'s doc comment for why this is only attempted after the
             // unmodified text has already failed to parse.
             let repaired = crate::statement_repair::ensure_statement_separators(sql);
-            match Parser::parse_sql(dialect.as_ref(), &repaired) {
+            match Parser::parse_sql(dialect, &repaired) {
                 Ok(s) => s,
                 Err(_) => {
+                    // RFC 0039: found by verifying directly against real `sqlparser` 0.53
+                    // behavior — a `CREATE PROCEDURE` body using `IF`/`WHILE` control flow has
+                    // no grammar support at all (any dialect), so the *whole file* fails to
+                    // parse here, not just the procedure. Before this fallback, every other
+                    // statement in the same file (an unrelated `CREATE VIEW`, another `SELECT`)
+                    // was silently lost too. Falls back to a per-statement text split so those
+                    // survive — see `parse_sql_statement_by_statement`'s doc comment for the
+                    // honest limitation this introduces.
                     tracing::warn!(
-                        "sql-transform-analyzer: sqlparser failed on {source_path} ({dialect_name}): {first_err}"
+                        "sql-transform-analyzer: sqlparser failed on {source_path} ({dialect_name}): {first_err} — falling back to per-statement recovery"
                     );
-                    return Vec::new();
+                    return parse_sql_statement_by_statement(
+                        sql,
+                        source_path,
+                        source_kind,
+                        dialect,
+                    );
                 }
             }
         }
@@ -226,46 +248,112 @@ pub fn parse_sql_to_transform_graphs(
 
     let mut graphs = Vec::new();
     for (index, stmt) in stmts.iter().enumerate() {
-        let origin = || TransformOrigin {
+        let origin = TransformOrigin {
             source_path: format!("{source_path}#{index}"),
             source_kind: source_kind.to_string(),
             extracted_at: chrono::Utc::now(),
         };
-
-        match stmt {
-            Statement::Query(query) => {
-                graphs.push(query_to_graph(query, origin()));
-            }
-            Statement::CreateView { name, query, .. } => {
-                let mut graph = query_to_graph(query, origin());
-                let last = graph.nodes.len().checked_sub(1).map(|i| NodeId(i as u32));
-                let sink_id = push(
-                    &mut graph.nodes,
-                    TransformNode::Sink {
-                        object_name: name.to_string(),
-                        columns: Vec::new(),
-                    },
-                );
-                if let Some(prev) = last {
-                    graph.edges.push((prev, sink_id));
-                }
-                graphs.push(graph);
-            }
-            Statement::CreateProcedure { name, body, .. } => {
-                graphs.push(procedure_body_to_graph(name.to_string(), body, &origin()));
-            }
-            Statement::CreateFunction(cf) => {
-                graphs.push(function_to_graph(
-                    cf.name.to_string(),
-                    cf.function_body.as_ref(),
-                    dialect.as_ref(),
-                    &origin(),
-                ));
-            }
-            _ => {}
+        if let Some(graph) = dispatch_one_statement(stmt, origin, dialect) {
+            graphs.push(graph);
         }
     }
 
+    graphs
+}
+
+/// Turns one already-parsed `Statement` into a `TransformGraph`, or `None` for statement kinds
+/// this pass doesn't model (DDL other than `CREATE VIEW`, etc. — the same `_ => {}` no-op the
+/// original inline `match` had). Factored out so the whole-file happy path and
+/// `parse_sql_statement_by_statement`'s per-fragment fallback share one dispatch, instead of two
+/// copies that could silently drift apart.
+fn dispatch_one_statement(
+    stmt: &Statement,
+    origin: TransformOrigin,
+    dialect: &dyn Dialect,
+) -> Option<TransformGraph> {
+    match stmt {
+        Statement::Query(query) => Some(query_to_graph(query, origin)),
+        Statement::CreateView { name, query, .. } => {
+            let mut graph = query_to_graph(query, origin);
+            let last = graph.nodes.len().checked_sub(1).map(|i| NodeId(i as u32));
+            let sink_id = push(
+                &mut graph.nodes,
+                TransformNode::Sink {
+                    object_name: name.to_string(),
+                    columns: Vec::new(),
+                },
+            );
+            if let Some(prev) = last {
+                graph.edges.push((prev, sink_id));
+            }
+            Some(graph)
+        }
+        Statement::CreateProcedure { name, body, .. } => {
+            Some(procedure_body_to_graph(name.to_string(), body, &origin))
+        }
+        Statement::CreateFunction(cf) => Some(function_to_graph(
+            cf.name.to_string(),
+            cf.function_body.as_ref(),
+            dialect,
+            &origin,
+        )),
+        _ => None,
+    }
+}
+
+/// Whole-file parse fallback (RFC 0039), engaged only when full-file structured parsing (plus
+/// the missing-`;` repair retry) both fail. Splits `sql` on top-level `;` and retries each
+/// fragment independently, so a `CREATE PROCEDURE` using unmodelable control flow doesn't take
+/// every other statement in the same file down with it.
+///
+/// Honest limitation, stated not hidden: this split does not track nested `BEGIN...END` blocks,
+/// so a failing procedure's own internal semicolons can produce several partial/duplicate
+/// `Unmapped` fragments instead of one clean node for the whole procedure — an approximation, not
+/// a silently wrong answer. The procedure's control flow was never going to be modeled either
+/// way (RFC 0027's documented MVP scope); this only changes whether *unrelated* statements in the
+/// same file survive.
+fn parse_sql_statement_by_statement(
+    sql: &str,
+    source_path: &str,
+    source_kind: &str,
+    dialect: &dyn Dialect,
+) -> Vec<TransformGraph> {
+    let mut graphs = Vec::new();
+    for (index, fragment) in sql.split(';').enumerate() {
+        let fragment = fragment.trim();
+        if fragment.is_empty() {
+            continue;
+        }
+        let origin = TransformOrigin {
+            source_path: format!("{source_path}#{index}"),
+            source_kind: source_kind.to_string(),
+            extracted_at: chrono::Utc::now(),
+        };
+        let graph = match Parser::parse_sql(dialect, fragment) {
+            Ok(stmts) if stmts.len() == 1 => {
+                dispatch_one_statement(&stmts[0], origin.clone(), dialect).unwrap_or_else(|| {
+                    TransformGraph {
+                        nodes: vec![TransformNode::Unmapped {
+                            raw: fragment.to_string(),
+                            reason: "statement type not modeled".to_string(),
+                        }],
+                        edges: Vec::new(),
+                        origin,
+                    }
+                })
+            }
+            _ => TransformGraph {
+                nodes: vec![TransformNode::Unmapped {
+                    raw: fragment.to_string(),
+                    reason: "statement-level parse failure (likely control flow), not modeled"
+                        .to_string(),
+                }],
+                edges: Vec::new(),
+                origin,
+            },
+        };
+        graphs.push(graph);
+    }
     graphs
 }
 
@@ -676,9 +764,19 @@ fn append_fragment(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlparser::dialect::GenericDialect;
 
-    fn graphs(sql: &str, dialect: &str) -> Vec<TransformGraph> {
-        parse_sql_to_transform_graphs(sql, "test.sql", dialect)
+    /// Resolves `dialect_name` the same way `recover.rs` does in production — via the shared
+    /// registry — rather than duplicating a separate name→`Dialect` table in tests. Names not in
+    /// the registry (e.g. `"informix"`, which has no dedicated `sqlparser` dialect) fall back to
+    /// `GenericDialect`, matching this crate's documented "accept incomplete coverage" scope.
+    fn graphs(sql: &str, dialect_name: &str) -> Vec<TransformGraph> {
+        let registry = crate::sql_dialect_registry::build_dialect_registry();
+        let dialect: Box<dyn Dialect + Send + Sync> = match registry.get(dialect_name) {
+            Some(parser) => parser.sqlparser_dialect(),
+            None => Box::new(GenericDialect {}),
+        };
+        parse_sql_to_transform_graphs(sql, "test.sql", dialect_name, dialect.as_ref())
     }
 
     /// GitHub issue #3's second root cause: a script with an `UPDATE` and a `SELECT` and no
@@ -825,6 +923,58 @@ SELECT id, status FROM customers
         assert!(
             has_unmapped_control_flow,
             "non-SQL statement in the procedure body must become Unmapped, not silently dropped"
+        );
+    }
+
+    /// Regression test for a real bug found this session (RFC 0039): verified directly against
+    /// real `sqlparser` 0.53 behavior that `IF`/`WHILE` have no grammar support at all, in any
+    /// dialect — a `CREATE PROCEDURE` body containing either fails the *entire file's* parse,
+    /// not just the procedure. Before the whole-file fallback, an unrelated `CREATE VIEW` in the
+    /// same file was silently lost too. This must not happen anymore.
+    #[test]
+    fn independent_statement_survives_when_another_procedure_in_the_same_file_has_unparseable_control_flow()
+     {
+        let sql = "\
+CREATE VIEW active_customers AS SELECT id FROM customers WHERE status = 'active';
+CREATE PROCEDURE notify_if_active AS
+BEGIN
+    IF EXISTS (SELECT 1 FROM customers WHERE status = 'active')
+    BEGIN
+        SELECT id FROM customers WHERE status = 'active'
+    END
+END;
+";
+        // Confirm the premise directly: the whole file really does fail full-file structured
+        // parsing under MsSqlDialect because of the IF.
+        let registry = crate::sql_dialect_registry::build_dialect_registry();
+        let dialect = registry.get("mssql").unwrap().sqlparser_dialect();
+        assert!(
+            Parser::parse_sql(dialect.as_ref(), sql).is_err(),
+            "premise check: sqlparser is expected to reject IF in a procedure body"
+        );
+
+        let g = graphs(sql, "mssql");
+        let has_recovered_view = g.iter().any(|graph| {
+            graph.nodes.iter().any(|n| {
+                matches!(n, TransformNode::Sink { object_name, .. } if object_name == "active_customers")
+            })
+        });
+        assert!(
+            has_recovered_view,
+            "an independent CREATE VIEW earlier in the same file must survive the other \
+             procedure's unparseable control flow, not be dropped along with it"
+        );
+
+        let has_unmapped_for_the_failing_procedure = g.iter().any(|graph| {
+            graph
+                .nodes
+                .iter()
+                .any(|n| matches!(n, TransformNode::Unmapped { .. }))
+        });
+        assert!(
+            has_unmapped_for_the_failing_procedure,
+            "the procedure's own unparseable fragments must become Unmapped, not silently \
+             vanish either"
         );
     }
 
@@ -990,6 +1140,7 @@ SELECT id, status FROM customers
             "queries/active_customers.sql",
             "SELECT id, status FROM customers WHERE status = 'active'",
             "postgres",
+            Box::new(sqlparser::dialect::PostgreSqlDialect {}),
         );
         let stats_handle = pass.stats_handle();
         pass.run(&mut ctx).await.unwrap();
