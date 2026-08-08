@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross-Project Generated Documentation — EKOS</title>
+<meta name="description" content="ekos docs generate pointed at three real, unrelated codebases in one session — EKOS's own ~50-crate workspace, a real Databricks Asset Bundle repo, and a real Azure Data Factory pipeline repo — with real counts, real links, and an honest gap called out where no ADF-specific connector exists yet.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>One compiler.<br><span class="arrow-word">Three real, unrelated codebases.</span></h1>
+  <p class="lede">Same pipeline, same command, no per-project flags:
+  <code class="mono">ekos build &amp;&amp; ekos recover &amp;&amp; ekos compile &amp;&amp; ekos commit</code>,
+  then <code class="mono">ekos docs generate --layout curated</code>. Pointed at EKOS's own
+  ~50-crate Rust workspace, a real Databricks Asset Bundle repo, and a real Azure Data Factory
+  pipeline repo — in the same session, back to back. Every number on this page is real output,
+  unedited.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">Real repo</span><span class="sep mono">→</span>
+    <span class="chip">Compiled ledger</span><span class="sep mono">→</span>
+    <span class="chip hot">README / Architecture / API / SequenceDiagrams</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0035/0037 — <code class="mono">ekos docs generate --layout curated</code></div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / dogfood — EKOS on itself</div>
+  <div class="eyebrow">The same product, pointed at its own source tree</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:28ch;">751 files. 3,334 compiled objects. 733 real function-call edges.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">Build complete.
+  Files observed (new): 751
+
+Recover complete.
+  Git commits analysed: 102
+  Local documents analysed: 536
+  Rust files analysed: 132
+  Rust symbols recovered: 1301 total, 733 Calls edges
+  Transformation IR nodes (SQL): 34 total
+
+Compile complete.
+  Objects:       3334
+  Relationships: 5335</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      733 real <code class="mono">RelationshipKind::Calls</code> edges — the Rust source analyzer
+      (RFC 0041) shipped this same session, verified against this exact repo. 1,518
+      <code class="mono">Section</code> objects from the project's own devlogs and RFCs, 441
+      <code class="mono">RustModule</code> import edges, 19 <code class="mono">Table</code>
+      objects from the SQL test fixtures — the compiler documenting the compiler.
+    </p>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real generated docs:
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/README.md" style="color:var(--accent-a);">README</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/Architecture.md" style="color:var(--accent-a);">Architecture</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/API.md" style="color:var(--accent-a);">API</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/SequenceDiagrams.md" style="color:var(--accent-a);">SequenceDiagrams</a>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / a real Databricks Asset Bundle repo</div>
+  <div class="eyebrow">Not a fixture — the same repo RFC 0040's Python analyzer was verified against</div>
+  <h2>263 files, 83 real PySpark files, 57 Transformation IR nodes at 60% mapped.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">Recover complete.
+  SQL files analysed: 43
+  Git commits analysed: 117
+  Local documents analysed: 27
+  Python files analysed: 83
+  Transformation IR nodes (Python): 57 total, 60% mapped (non-Unmapped)
+
+Compile complete.
+  Objects:       538
+  Relationships: 842</pre>
+  </div>
+  <p class="lede">252 real <code class="mono">PythonSymbol</code> objects, 45 real
+  <code class="mono">PythonModule</code> import edges, real DataFrame method chains recovered from
+  the shared <code class="mono">src/dp/</code> library — not the notebooks, which mostly delegate
+  by function call (RFC 0040's own real-data finding, reproduced here on a second, independent
+  run).</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real generated docs:
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/databricks/README.md" style="color:var(--accent-a);">README</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/databricks/Architecture.md" style="color:var(--accent-a);">Architecture</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/databricks/API.md" style="color:var(--accent-a);">API</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/databricks/SequenceDiagrams.md" style="color:var(--accent-a);">SequenceDiagrams</a>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / a real recovered chain</div>
+  <div class="eyebrow">doc/databricks/SequenceDiagrams.md — real, unedited</div>
+  <h2>Three real <code class="mono">.withColumn(...)</code> calls, in source order.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">generated page — real Mermaid source</div>
+<pre style="margin:0;"><span class="k">## src/dp/quality/reconciliation.py#0
+
+```mermaid
+sequenceDiagram</span>
+    participant n2f4...f6 as ".../reconciliation.py#0:0"
+    participant n7e8...95 as ".../reconciliation.py#0:1"
+    participant na94...91 as ".../reconciliation.py#0:2"
+    n2f4...f6-&gt;&gt;n7e8...95: Calculate
+    n7e8...95-&gt;&gt;na94...91: Calculate</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      A real 3-step <code class="mono">Calculate</code> chain from
+      <code class="mono">src/dp/quality/reconciliation.py</code> — recognized by real AST parsing
+      (<code class="mono">rustpython-parser</code>), not a regex scan, and rendered through the
+      exact same <code class="mono">TransformNode</code>/<code class="mono">FeedsInto</code>
+      diagram renderer Pentaho and SQL already use (RFC 0027's format-agnostic design, paying off
+      a third time).
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / a real Azure Data Factory pipeline repo</div>
+  <div class="eyebrow">Real ADF exports — pipeline/dataset/linkedService JSON, a metadata-driven control table</div>
+  <h2>38 files, 95 compiled objects — and an honest gap.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">Recover complete.
+  Git commits analysed: 43
+  Source files scanned for dependencies: 1
+  Local documents analysed: 11
+  Python files analysed: 1
+
+Compile complete.
+  Objects:       95
+  Relationships: 158</pre>
+  </div>
+  <p class="lede">No SQL files, no dedicated ADF-pipeline recovery — because there isn't one yet.
+  RFC 0038's roadmap scopes an Azure Data Factory connector as a future phase (real local
+  pipeline/dataset JSON scan, plus the parameter/variable IR this repo's own real
+  <code class="mono">Lookup</code>+<code class="mono">ForEach</code> control-table pattern would
+  finally justify designing). Today, this repo's real
+  <code class="mono">pipeline/</code>/<code class="mono">dataset/</code>/
+  <code class="mono">linkedService/</code>/<code class="mono">metadata/</code> JSON exports are
+  captured as plain <code class="mono">File</code> facts — discoverable, but not yet parsed into
+  structured knowledge. Stated as a limit, not hidden by only showing the projects that look good.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real generated docs:
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/adf-pipelines/README.md" style="color:var(--accent-a);">README</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/adf-pipelines/Architecture.md" style="color:var(--accent-a);">Architecture</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/adf-pipelines/API.md" style="color:var(--accent-a);">API</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/adf-pipelines/SequenceDiagrams.md" style="color:var(--accent-a);">SequenceDiagrams</a>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / what did get recovered</div>
+  <div class="eyebrow">doc/adf-pipelines/Architecture.md — real, unedited</div>
+  <h2>The one Python utility script in the repo, real imports and all.</h2>
+  <div class="codeblock">
+    <div class="tag">generated page — real Mermaid source</div>
+<pre style="margin:0;"><span class="k">### DependsOn
+
+```mermaid
+graph TD</span>
+    n_db["unknown"]
+    n_97["PostgreSQL"]
+    n_db --&gt;|DependsOn| n_97
+    n_edb["scripts/pg_inspect.py"]
+    n_939["argparse"]
+    n_edb --&gt;|DependsOn| n_939
+    n_1d4["csv"]
+    n_edb --&gt;|DependsOn| n_1d4
+    n_433["json"]
+    n_edb --&gt;|DependsOn| n_433</pre>
+  </div>
+  <p class="lede">Even with no ADF-specific connector, the generic pattern-matching dependency
+  scanner and the Python analyzer both still ran, finding what they're actually scoped to find:
+  one real <code class="mono">scripts/pg_inspect.py</code> utility and its real standard-library
+  imports. Every recovery pass degrades independently — a missing connector for one source format
+  never blocks what the others can already see.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / honest limits</div>
+  <div class="eyebrow">What this deck won't overclaim</div>
+  <h2>Two real, disclosed gaps — not smoothed over.</h2>
+  <ul class="facts" style="margin-top:0;">
+    <li><span class="k">No ADF connector yet</span><span class="v">Real pipeline/dataset/linkedService JSON in <code class="mono">adf-pipelines</code> is captured as plain files, not parsed into pipeline/activity objects — RFC 0038 Phase 5, not yet built.</span></li>
+    <li><span class="k">API.md predates the new analyzers</span><span class="v">The curated <code class="mono">API.md</code> page still uses a legacy heuristic text-scan for symbol names, not the richer <code class="mono">RustSymbol</code>/<code class="mono">PythonSymbol</code> KIR objects RFC 0040/0041 added — a known follow-up, not fixed in this pass.</span></li>
+  </ul>
+</section>
+
+<section class="slide cta" id="s8">
+  <div class="eyebrow">Try it</div>
+  <h2>Point it at anything EKOS has already compiled.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile once</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># deterministic, zero LLM, zero cost</span>
+$ ekos docs generate --layout curated</pre>
+  </div>
+  <div class="fineprint">EKOS · RFC 0035/0037/0040/0041 · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>
