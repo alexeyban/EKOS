@@ -1445,15 +1445,31 @@ with real or vendor-supplied sandbox credentials.
     (2) [x] a real AST-based Python/PySpark analyzer lowering DataFrame chains into the existing
     Transformation IR (RFC 0040, done — verified against a real Databricks Asset Bundle repo: 83
     files, 57 real nodes recovered), (3) Jupyter notebooks (reuses Phase 2 per code cell), (4) a
-    Databricks connector (real Jobs API job/task DAGs — first real `Calls`-relationship data in
-    the project), (5) an Azure Data Factory connector (also where the parameter/variable IR
-    concept for metadata-driven pipelines finally gets designed, against ADF's idiomatic
-    `Lookup`+`ForEach` pattern), (6) generalizing that parameterization vocabulary back onto
-    Pentaho/PySpark. See RFC 0038 for full detail; each remaining phase gets its own just-in-time
-    RFC before it starts.
+    Databricks connector (real Jobs API job/task DAGs), (5) an Azure Data Factory connector (also
+    where the parameter/variable IR concept for metadata-driven pipelines finally gets designed,
+    against ADF's idiomatic `Lookup`+`ForEach` pattern), (6) generalizing that parameterization
+    vocabulary back onto Pentaho/PySpark. See RFC 0038 for full detail; each remaining phase gets
+    its own just-in-time RFC before it starts.
   - *Output:* `ekos/docs/rfcs/0038-code-knowledge-expansion-roadmap.md`; six follow-up RFCs as each
     phase starts.
   - *Test/Validate:* Per-phase, detailed in each phase's own RFC.
+
+- [x] **Rust source analyzer — real symbols/imports + real Calls edges — RFC 0041**
+  - *What:* A direct user request run alongside the RFC 0038 roadmap (not one of its six numbered
+    phases): `plugins/rust` (`RustObserver`) + `crates/recovery/src/rust_analyzer.rs`
+    (`RustAnalyzerPass`, real AST parsing via `syn`) recognize `use` imports, fn/struct/enum/
+    trait/impl-method definitions, and — the headline capability — real intra-file `Calls` edges,
+    the first analyzer in the project to populate `RelationshipKind::Calls` (superseding RFC
+    0038 Phase 4's original claim to that title). Real-data testing against this repo's own
+    ~50-crate workspace (118 files, 1270 symbols, 715 `Calls` edges) found and fixed a real,
+    pre-existing bug in the shared `DefaultResolver` identity-resolution code (silently merging
+    distinct same-suffix-named symbols across every analyzer, not just this one) — see devlog_41.
+  - *Output:* `ekos/docs/rfcs/0041-rust-source-analyzer.md`; `ekos/plugins/rust/`;
+    `ekos/crates/recovery/src/rust_analyzer.rs`; bug fix in `ekos/crates/identity/src/lib.rs`.
+  - *Test/Validate:* 9 unit tests (`rust_analyzer.rs`) + 3 unit tests (`plugins/rust`) + 1
+    regression test (`crates/identity/src/lib.rs`); real pipeline run against `ekos/` itself,
+    spot-checked a real `Calls` edge (`PentahoAnalyzerPass::run` → `parse_kettle_xml`) against
+    the actual source.
 
 - [x] **Local document connector (PDF/DOCX, text + tables + image OCR) — RFC 0023**
   - *What:* `ekos-plugin-localdocs` observes `.pdf`/`.docx` files under the workspace, extracting

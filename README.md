@@ -91,7 +91,9 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
 (PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), Pentaho Kettle (`.ktr`/`.kjb` —
-RFC 0027), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP,
+RFC 0027), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
+Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
+RFC 0041), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP,
 Oracle, Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against
 a live account). PostgreSQL, SQL Server, and Jira remain planned.
 

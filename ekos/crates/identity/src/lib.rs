@@ -267,7 +267,23 @@ impl IdentityResolver for DefaultResolver {
             // same real-world entity, so — like Section, unlike Concept —
             // this is a blanket kind exclusion, not a threshold/name-length
             // guard.
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode")
+            //
+            // `Custom("RustSymbol")`/`Custom("RustModule")` (RFC 0041) and
+            // `Custom("PythonSymbol")`/`Custom("PythonModule")` (RFC 0038/0040) are the same
+            // failure shape again, discovered live while real-data-testing RFC 0041 against this
+            // repo's own ~50-crate workspace: many analyzer passes are literally named
+            // `<X>AnalyzerPass` (`ConfluenceAnalyzerPass`, `PentahoAnalyzerPass`,
+            // `PythonAnalyzerPass`, ...), so their long shared suffix scores high on Jaro-Winkler,
+            // and `structural_score`'s same-kind 1.0 fallback (no `columns` property) pushed
+            // several genuinely distinct structs in different files over the 0.85 merge threshold
+            // — e.g. `ConfluenceAnalyzerPass` (confluence_analyzer.rs) and `PentahoAnalyzerPass`
+            // (pentaho_analyzer.rs) collapsed into one canonical object, silently dropping the
+            // other from the ledger even though `resolve`'s cross-kind conflict detector (above)
+            // never flagged anything, since these merges are same-kind. Each of these objects is
+            // already deterministically identified by (file path, qualified name) — no two
+            // distinct source-code symbols/imports can legitimately be the same real-world entity
+            // — so this is a blanket kind exclusion, matching Section/TransformNode exactly.
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule")
             {
                 continue;
             }
@@ -766,6 +782,29 @@ mod tests {
         assert!(
             result.proposals.is_empty(),
             "TransformNode objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    /// Regression test for a real bug found live while real-data-testing RFC 0041 against this
+    /// repo's own ~50-crate workspace: `Custom("RustSymbol")` objects sharing a common name
+    /// suffix (this repo genuinely has `ConfluenceAnalyzerPass`, `PentahoAnalyzerPass`, and
+    /// `GitAnalyzerPass`, each defined in a different file) scored above the merge threshold on
+    /// name similarity alone (`structural_score`'s same-kind 1.0 fallback, no `columns` property
+    /// to differentiate on) — the identical failure shape as `Section`/`TransformNode`. Before the
+    /// fix, distinct structs from different files silently collapsed into one canonical object.
+    #[test]
+    fn rust_symbol_objects_are_never_merged_even_with_shared_name_suffix() {
+        let rust_symbol = ObjectKind::Custom("RustSymbol".to_string());
+        let g = make_graph(&[
+            ("ConfluenceAnalyzerPass", rust_symbol.clone()),
+            ("PentahoAnalyzerPass", rust_symbol.clone()),
+            ("GitAnalyzerPass", rust_symbol),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "RustSymbol objects must never be merge candidates, got {:?}",
             result.proposals
         );
     }

@@ -9,9 +9,9 @@ use ekos_recovery::{
     ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass, DialectRule,
     DocumentSemanticsAnalyzerPass, DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass,
     LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, PentahoAnalyzerPass, PentahoStats,
-    PythonAnalyzerPass, PythonStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
-    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
-    llm::LlmProvider, resolve_dialect_name,
+    PythonAnalyzerPass, PythonStats, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
+    SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
+    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -314,9 +314,25 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(python_pass));
     }
 
+    // ── Rust .rs artifacts (RFC 0041) ──────────────────────────────────────
+    let rust_artifact_ids = collect_rust_artifact_ids(&*artifact_store);
+    let rust_count = rust_artifact_ids.len();
+    let mut rust_stats: Option<Arc<std::sync::Mutex<RustStats>>> = None;
+    if !rust_artifact_ids.is_empty() {
+        let rust_pass = RustAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            rust_artifact_ids,
+        );
+        rust_stats = Some(rust_pass.stats_handle());
+        pass_manager.register(Box::new(rust_pass));
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, Pentaho jobs, or Python files found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, Pentaho jobs, Python files, or Rust files found)."
         );
         return Ok(());
     }
@@ -383,6 +399,16 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             "  Transformation IR nodes (Python): {} total, {:.0}% mapped (non-Unmapped)",
             s.nodes_total,
             s.coverage_percent()
+        );
+    }
+    if rust_count > 0 {
+        println!("  Rust files analysed: {rust_count}");
+    }
+    if let Some(stats) = &rust_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Rust symbols recovered: {} total, {} Calls edges",
+            s.symbols_total, s.calls_total
         );
     }
     if !sql_transform_stats_handles.is_empty() {
@@ -574,6 +600,27 @@ fn collect_python_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
                 .ok()
                 .flatten()
                 .is_some_and(|json| json["connector_name"].as_str() == Some("python"))
+        })
+        .collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
+/// Collect ArtifactIds for every Rust `.rs` artifact currently in the store (RFC 0041).
+fn collect_rust_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("rust"))
         })
         .collect();
     ids.sort_by_key(|id| id.to_string());
