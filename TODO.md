@@ -1438,17 +1438,19 @@ with real or vendor-supplied sandbox credentials.
   - *Output:* Tracked as individual issues/tickets; this item is the backlog bucket.
   - *Test/Validate:* Each connector added here must ship with a passing integration test before merge.
 
-- [ ] **Code knowledge expansion — SQL/Pentaho depth, Python/PySpark, notebooks, Databricks,
+- [~] **Code knowledge expansion — SQL/Pentaho depth, Python/PySpark, notebooks, Databricks,
       Azure Data Factory, metadata-driven pipelines — RFC 0038**
-  - *What:* Six-phase roadmap, sequenced by dependency: (1) close existing SQL/Pentaho gaps
-    (stored-procedure control flow, snowflake/databricks SQL dialect plugins), (2) a real
-    AST-based Python/PySpark analyzer lowering DataFrame chains into the existing Transformation
-    IR, (3) Jupyter notebooks (reuses Phase 2 per code cell), (4) a Databricks connector (real
-    Jobs API job/task DAGs — first real `Calls`-relationship data in the project), (5) an Azure
-    Data Factory connector (also where the parameter/variable IR concept for metadata-driven
-    pipelines finally gets designed, against ADF's idiomatic `Lookup`+`ForEach` pattern), (6)
-    generalizing that parameterization vocabulary back onto Pentaho/PySpark. See RFC 0038 for full
-    detail; each phase gets its own just-in-time RFC before it starts.
+  - *What:* Six-phase roadmap, sequenced by dependency: (1) [x] close existing SQL/Pentaho gaps
+    (stored-procedure control flow, snowflake/databricks SQL dialect plugins — RFC 0039, done),
+    (2) [x] a real AST-based Python/PySpark analyzer lowering DataFrame chains into the existing
+    Transformation IR (RFC 0040, done — verified against a real Databricks Asset Bundle repo: 83
+    files, 57 real nodes recovered), (3) Jupyter notebooks (reuses Phase 2 per code cell), (4) a
+    Databricks connector (real Jobs API job/task DAGs — first real `Calls`-relationship data in
+    the project), (5) an Azure Data Factory connector (also where the parameter/variable IR
+    concept for metadata-driven pipelines finally gets designed, against ADF's idiomatic
+    `Lookup`+`ForEach` pattern), (6) generalizing that parameterization vocabulary back onto
+    Pentaho/PySpark. See RFC 0038 for full detail; each remaining phase gets its own just-in-time
+    RFC before it starts.
   - *Output:* `ekos/docs/rfcs/0038-code-knowledge-expansion-roadmap.md`; six follow-up RFCs as each
     phase starts.
   - *Test/Validate:* Per-phase, detailed in each phase's own RFC.

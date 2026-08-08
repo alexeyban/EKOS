@@ -34,6 +34,7 @@ ekos-plugin-github = { path = "../../plugins/github" }
 ekos-plugin-confluence = { path = "../../plugins/confluence" }
 ekos-plugin-localdocs = { path = "../../plugins/localdocs" }
 ekos-plugin-pentaho = { path = "../../plugins/pentaho" }
+ekos-plugin-python = { path = "../../plugins/python" }
 clap.workspace = true
 uuid.workspace = true
 tokio.workspace = true

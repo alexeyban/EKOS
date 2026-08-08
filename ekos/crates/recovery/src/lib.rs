@@ -15,6 +15,7 @@ pub mod llm_json;
 pub mod local_docs_analyzer;
 pub mod ollama;
 pub mod pentaho_analyzer;
+pub mod python_analyzer;
 pub mod sql_analyzer;
 pub mod sql_dialect_registry;
 pub mod sql_transform_analyzer;
@@ -33,6 +34,7 @@ pub use llm_json::strip_json_fences;
 pub use local_docs_analyzer::LocalDocAnalyzerPass;
 pub use ollama::OllamaProvider;
 pub use pentaho_analyzer::{PentahoAnalyzerPass, PentahoStats};
+pub use python_analyzer::{PythonAnalyzerPass, PythonStats};
 pub use sql_analyzer::{SqlAnalyzerPass, parse_ddl_structural};
 pub use sql_dialect_registry::{
     DialectRule, GenericDialectParser, build_dialect_registry, resolve_dialect_name,

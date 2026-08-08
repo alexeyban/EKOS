@@ -9,8 +9,9 @@ use ekos_recovery::{
     ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass, DialectRule,
     DocumentSemanticsAnalyzerPass, DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass,
     LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, PentahoAnalyzerPass, PentahoStats,
-    SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
-    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
+    PythonAnalyzerPass, PythonStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
+    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
+    llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -297,9 +298,25 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(pentaho_pass));
     }
 
+    // ── Python .py artifacts (RFC 0038/0040 Phase 2) ──────────────────────
+    let python_artifact_ids = collect_python_artifact_ids(&*artifact_store);
+    let python_count = python_artifact_ids.len();
+    let mut python_stats: Option<Arc<std::sync::Mutex<PythonStats>>> = None;
+    if !python_artifact_ids.is_empty() {
+        let python_pass = PythonAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            python_artifact_ids,
+        );
+        python_stats = Some(python_pass.stats_handle());
+        pass_manager.register(Box::new(python_pass));
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, or Pentaho jobs found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, Pentaho jobs, or Python files found)."
         );
         return Ok(());
     }
@@ -353,6 +370,17 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         let s = *stats.lock().unwrap();
         println!(
             "  Transformation IR nodes (Pentaho): {} total, {:.0}% mapped (non-Unmapped)",
+            s.nodes_total,
+            s.coverage_percent()
+        );
+    }
+    if python_count > 0 {
+        println!("  Python files analysed: {python_count}");
+    }
+    if let Some(stats) = &python_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Transformation IR nodes (Python): {} total, {:.0}% mapped (non-Unmapped)",
             s.nodes_total,
             s.coverage_percent()
         );
@@ -524,6 +552,28 @@ fn collect_pentaho_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
                 .ok()
                 .flatten()
                 .is_some_and(|json| json["connector_name"].as_str() == Some("pentaho"))
+        })
+        .collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
+/// Collect ArtifactIds for every Python `.py` artifact currently in the store (RFC 0038/0040
+/// Phase 2).
+fn collect_python_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("python"))
         })
         .collect();
     ids.sort_by_key(|id| id.to_string());

@@ -1,0 +1,21 @@
+[package]
+name = "ekos-plugin-python"
+description = "Python (.py) observer plugin (RFC 0038/0040 Phase 2)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-observation-sdk.workspace = true
+ekos-artifact.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

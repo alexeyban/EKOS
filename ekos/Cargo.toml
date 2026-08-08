@@ -31,6 +31,7 @@ members = [
     "plugins/github",
     "plugins/confluence",
     "plugins/pentaho",
+    "plugins/python",
     "plugins/sql-dialect-mysql",
     "plugins/sql-dialect-postgres",
     "plugins/sql-dialect-snowflake",
@@ -113,6 +114,11 @@ sqlparser = "0.53"
 
 # XML parsing (Pentaho .ktr/.kjb — RFC 0027 Phase 3)
 roxmltree = "0.20"
+
+# Python parsing (RFC 0038/0040 Phase 2) — pure Rust, no C-dependency class (rejected
+# tree-sitter-python for the same reason RFC 0031 rejected pg_query)
+rustpython-parser = "0.4"
+rustpython-ast = "0.4"
 
 # HTTP client (LLM API calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
