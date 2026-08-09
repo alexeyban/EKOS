@@ -1784,19 +1784,28 @@ These items have no single phase — they must be maintained and grown throughou
     validation criterion.
 
 - [ ] **Secrets management and sensitive-data policy**
-  - *What:* Connectors need DB passwords and API tokens (Postgres, Salesforce, SAP). Standardise:
-    all secrets are referenced by env-var name in `ekos.toml` (e.g., `password_env = "PG_PASSWORD"`),
-    never as literal values; `ekos doctor` verifies referenced vars exist. Separately — and more
-    seriously — evidence fragments can capture sensitive data (PII in SQL rows, secrets in commit
-    diffs) into an append-only ledger that by design never deletes. Define a redaction pass
-    (configurable patterns: emails, credentials, national IDs) applied before evidence is written,
-    and write an RFC covering data retention and erasure obligations (e.g., GDPR right-to-erasure
-    vs. the append-only guarantee).
-  - *Output:* Env-var-only secret loading in `observation-sdk`; a redaction pass in the pipeline;
-    an accepted RFC on data retention/erasure.
-  - *Test/Validate:* A config containing a literal `password = "..."` fails validation with a clear
-    error. A fixture SQL dump containing an email address produces stored evidence with the address
-    redacted.
+  - [x] *Redaction pass* — RFC 0043 (`ekos/docs/rfcs/0043-secrets-and-pii-redaction.md`,
+    devlog_43). A built-in, non-disable-able pattern table (AWS/GitHub/Slack/Google/Stripe token
+    shapes, PEM private-key blocks, JWTs, generic `key/secret/password/token = value` assignments)
+    redacts matched spans from all observed content before it reaches the artifact store or the
+    ledger (`ekos_common::redaction`, wired into `build.rs`'s central artifact loop and
+    `recover.rs`'s four direct-file-read blocks); a built-in excluded-file glob list (`.env`,
+    `*.pem`, `id_rsa*`, …) drops near-100%-secret files entirely rather than redacting them.
+    `[security]` in `ekos.toml` only extends the baseline (`extra-patterns`,
+    `extra-excluded-globs`) — no way to disable it. Scope note: this is emails/national-IDs-style
+    *generic* PII in free text — email addresses in prose are not yet covered (only credential-
+    shaped secrets); structured connector-modeled PII (git commit author name/email) is
+    intentionally exempt, see the RFC's Non-goals.
+  - [ ] *Env-var-only connector secrets* — not yet done. Connectors need DB passwords and API
+    tokens (Postgres, Salesforce, SAP). Standardise: all secrets referenced by env-var name in
+    `ekos.toml` (e.g., `password_env = "PG_PASSWORD"`), never as literal values; `ekos doctor`
+    verifies referenced vars exist.
+  - [ ] *Data retention/erasure RFC* — not yet done. GDPR right-to-erasure vs. the append-only
+    ledger guarantee is still an open tension RFC 0043 explicitly did not resolve (redaction stops
+    *new* secrets from being stored; it does not provide a way to erase something already
+    committed before this RFC shipped).
+  - *Test/Validate (remaining):* A config containing a literal `password = "..."` fails validation
+    with a clear error (env-var-only secrets, not yet built).
 
 - [ ] **`docs/rfcs/` — RFC per feature, accepted before implementation**
   - *What:* Maintain the RFC process from Phase -1 throughout the project. New RFCs follow the

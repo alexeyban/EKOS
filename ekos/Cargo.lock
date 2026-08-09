@@ -771,7 +771,9 @@ name = "ekos-common"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "glob",
  "hex",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.10.9",

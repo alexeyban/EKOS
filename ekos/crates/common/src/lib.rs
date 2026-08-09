@@ -1,4 +1,5 @@
 pub mod compress;
+pub mod redaction;
 
 use sha2::{Digest, Sha256};
 

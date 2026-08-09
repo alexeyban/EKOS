@@ -129,3 +129,123 @@ fn clean_removes_artifacts_not_ledger() {
         "ledger should survive clean"
     );
 }
+
+// ── RFC 0043 — global secrets/PII redaction ─────────────────────────────────
+
+#[tokio::test]
+async fn build_redacts_a_fake_secret_from_the_observed_excerpt() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("src/config.rs"),
+        b"const AWS_KEY: &str = \"AKIAABCDEFGHIJKLMNOP\";\nfn main() {}",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("ekos.toml"),
+        b"[workspace]\nroot = \".\"\n\n[observe]\npaths = [\"src\"]\nignore-patterns = [\".ekos\"]\n",
+    )
+    .unwrap();
+
+    let config = load_config(dir);
+    ekos::commands::init::run(&config, dir).unwrap();
+    ekos::commands::build::run(&config, dir).await.unwrap();
+
+    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let results = ledger.find_objects("config*").unwrap();
+    assert!(!results.is_empty(), "expected to find config.rs object");
+    let obj = ledger.get_object(&results[0].0).unwrap().unwrap();
+
+    let excerpt = obj.properties.get("excerpt").and_then(|v| v.as_str());
+    if let Some(excerpt) = excerpt {
+        assert!(
+            !excerpt.contains("AKIAABCDEFGHIJKLMNOP"),
+            "fake AWS key leaked into the ledger unredacted: {excerpt}"
+        );
+        assert!(
+            excerpt.contains("[REDACTED:aws-access-key-id]"),
+            "expected a redaction placeholder in the excerpt: {excerpt}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn build_excludes_dotenv_files_entirely() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/main.rs"), b"fn main() {}").unwrap();
+    std::fs::write(dir.join("src/.env"), b"DATABASE_PASSWORD=hunter2fake\n").unwrap();
+    std::fs::write(
+        dir.join("ekos.toml"),
+        b"[workspace]\nroot = \".\"\n\n[observe]\npaths = [\"src\"]\nignore-patterns = [\".ekos\"]\n",
+    )
+    .unwrap();
+
+    let config = load_config(dir);
+    ekos::commands::init::run(&config, dir).unwrap();
+    ekos::commands::build::run(&config, dir).await.unwrap();
+
+    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let results = ledger.find_objects(".env").unwrap();
+    assert!(
+        results.is_empty(),
+        ".env file must never be observed into the ledger, found: {results:?}"
+    );
+
+    // The sibling main.rs must still be observed normally — exclusion is per-file, not
+    // per-directory.
+    let main_results = ledger.find_objects("main*").unwrap();
+    assert!(
+        !main_results.is_empty(),
+        "sibling main.rs must still be observed"
+    );
+}
+
+/// `recover.rs`'s CI/CD workflow file collection (RFC 0042) reads `.github/workflows/*.yml`
+/// directly, bypassing `build.rs`'s artifact-store redaction pass entirely — this exercises that
+/// separate direct-read call site's own redaction wiring (RFC 0043).
+#[tokio::test]
+async fn recover_redacts_a_fake_secret_from_a_cicd_workflow_step() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    std::fs::create_dir_all(dir.join(".github/workflows")).unwrap();
+    std::fs::write(
+        dir.join(".github/workflows/ci.yml"),
+        b"name: CI\non: push\njobs:\n  deploy:\n    steps:\n      - run: |\n          curl -H AKIAABCDEFGHIJKLMNOP https://example.com\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("ekos.toml"),
+        b"[workspace]\nroot = \".\"\n\n[observe]\npaths = [\".\"]\nignore-patterns = [\".ekos\", \".git\"]\n",
+    )
+    .unwrap();
+
+    let config = load_config(dir);
+    ekos::commands::init::run(&config, dir).unwrap();
+    ekos::commands::build::run(&config, dir).await.unwrap();
+    ekos::commands::recover::run(&config, dir, false)
+        .await
+        .unwrap();
+    ekos::commands::compile::run(&config, dir).await.unwrap();
+    ekos::commands::commit::run(&config, dir).unwrap();
+
+    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let results = ledger.find_objects("CI").unwrap();
+    assert!(
+        !results.is_empty(),
+        "expected to find the CI Pipeline object"
+    );
+    let obj = ledger.get_object(&results[0].0).unwrap().unwrap();
+    let jobs = obj.properties.get("jobs").unwrap().to_string();
+
+    assert!(
+        !jobs.contains("AKIAABCDEFGHIJKLMNOP"),
+        "fake secret leaked into the committed Pipeline object's jobs property: {jobs}"
+    );
+    assert!(
+        jobs.contains("[REDACTED:aws-access-key-id]"),
+        "expected a redaction placeholder in the jobs property: {jobs}"
+    );
+}

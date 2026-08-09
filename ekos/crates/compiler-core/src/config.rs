@@ -18,6 +18,8 @@ pub struct EkosConfig {
     pub marketing: MarketingConfig,
     #[serde(default)]
     pub recover: RecoverConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +188,27 @@ pub struct SqlDialectRuleConfig {
     pub dialect: String,
 }
 
+/// RFC 0043: additive-only extension of the built-in secrets/PII redaction baseline
+/// (`ekos_common::redaction`). `[security]` in `ekos.toml`. Deliberately no `enabled` flag — the
+/// built-in baseline (AWS/GitHub/Slack/... token shapes, PEM key blocks, `.env`/`*.pem`/... file
+/// exclusion) always runs; this section can only add patterns/exclusions on top of it, matching
+/// the "global limitation, not an opt-in feature" requirement behind this RFC.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SecurityConfig {
+    #[serde(default)]
+    pub extra_patterns: Vec<SecretPatternConfig>,
+    #[serde(default)]
+    pub extra_excluded_globs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SecretPatternConfig {
+    pub label: String,
+    pub regex: String,
+}
+
 /// Publishing is off by default — `ekos marketing publish` without `enabled = true` always
 /// behaves as `--dry-run`, so opting in requires an explicit, visible config change.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -208,6 +231,7 @@ impl Default for EkosConfig {
             document_semantics: DocumentSemanticsConfig::default(),
             marketing: MarketingConfig::default(),
             recover: RecoverConfig::default(),
+            security: SecurityConfig::default(),
         }
     }
 }
@@ -238,6 +262,21 @@ impl EkosConfig {
     /// Absolute path to the .ekos/ metadata directory.
     pub fn ekos_dir(&self, cwd: &Path) -> PathBuf {
         cwd.join(".ekos")
+    }
+
+    /// RFC 0043: the `[security]` config translated into the additive-only
+    /// `ekos_common::redaction::RedactionConfig` every raw-content entry point
+    /// (`build.rs`, `recover.rs`) checks before persisting anything.
+    pub fn redaction_config(&self) -> ekos_common::redaction::RedactionConfig {
+        ekos_common::redaction::RedactionConfig {
+            extra_patterns: self
+                .security
+                .extra_patterns
+                .iter()
+                .map(|p| (p.label.clone(), p.regex.clone()))
+                .collect(),
+            extra_excluded_globs: self.security.extra_excluded_globs.clone(),
+        }
     }
 
     /// Absolute path to the artifact cache.

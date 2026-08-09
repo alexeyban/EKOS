@@ -80,6 +80,11 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 - **AI systems** consume reconstructed knowledge through the Runtime; they never touch raw enterprise systems directly.
 - Every compiler pass is **deterministic** and **side-effect-free**.
 - Every artifact is **content-addressable** (id + checksum + metadata + dependencies + version).
+- **Secrets and PII are never observed or stored** (RFC 0043) — a built-in baseline redacts known
+  secret shapes (AWS/GitHub/Slack/Google/Stripe tokens, private keys, JWTs, generic
+  key/password assignments) from all observed content, and excludes files like `.env`/`*.pem`/
+  `id_rsa` entirely. `ekos.toml`'s `[security]` section can only extend this baseline, never
+  disable it.
 
 ## Implementation
 

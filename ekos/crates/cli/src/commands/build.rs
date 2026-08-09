@@ -140,6 +140,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let mut connectors_rescanned = 0usize;
     let mut connectors_skipped_cached = 0usize;
     let mut index_entries: HashMap<String, ekos_artifact::ArtifactId> = HashMap::new();
+    let redaction_config = config.redaction_config();
 
     for base in &observe_paths {
         let ctx =
@@ -155,13 +156,25 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
 
         for observer in &observers {
             connectors_rescanned += 1;
-            let package = match observer.scan(&ctx).await {
+            let mut package = match observer.scan(&ctx).await {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::warn!(observer = observer.name(), "scan failed: {e}");
                     continue;
                 }
             };
+
+            // RFC 0043: the single central choke point every observer's artifacts pass through
+            // before persistence — files matching a built-in/configured secret-file glob (`.env`,
+            // `*.pem`, …) are dropped entirely; every other artifact's content gets its matched
+            // secret spans redacted in place. This protects every current and future connector
+            // without relying on each one remembering to sanitize its own output.
+            package.artifacts.retain(|a| {
+                !ekos_common::redaction::is_excluded_path(&a.content.target, &redaction_config)
+            });
+            for artifact in &mut package.artifacts {
+                ekos_common::redaction::redact_json(&mut artifact.content.data, &redaction_config);
+            }
 
             for artifact in &package.artifacts {
                 let artifact_json = serde_json::to_value(artifact)?;

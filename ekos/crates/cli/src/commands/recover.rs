@@ -41,6 +41,10 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     };
 
     let ignore = &config.observe.ignore_patterns;
+    // RFC 0043: shared by every direct-file-read block below (SQL scan, dependency-scan,
+    // crate-topology, CI/CD) — these bypass `build.rs`'s artifact-store redaction pass entirely,
+    // so each needs its own exclusion check + redaction before content reaches an analyzer pass.
+    let redaction_config = config.redaction_config();
     let mut sql_count = 0usize;
     let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
 
@@ -86,6 +90,20 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 continue;
             }
 
+            // Workspace-relative, not base-relative: with multiple observe
+            // paths, two projects can hold the same base-relative SQL path
+            // (e.g. `schema.sql`), and pass names must be unique.
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let rel_str = rel.to_string_lossy().into_owned();
+
+            // RFC 0043: never read a file matching the built-in/configured secret-file exclusion
+            // list at all (bypasses the artifact store, so `build.rs`'s central redaction pass
+            // never sees this content).
+            if ekos_common::redaction::is_excluded_path(&rel_str, &redaction_config) {
+                tracing::debug!(path = %rel_str, "skipping: matched security exclusion pattern");
+                continue;
+            }
+
             let sql = match std::fs::read_to_string(path) {
                 Ok(s) => s,
                 Err(e) => {
@@ -93,12 +111,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                     continue;
                 }
             };
-
-            // Workspace-relative, not base-relative: with multiple observe
-            // paths, two projects can hold the same base-relative SQL path
-            // (e.g. `schema.sql`), and pass names must be unique.
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
-            let rel_str = rel.to_string_lossy().into_owned();
+            let sql = ekos_common::redaction::redact(&sql, &redaction_config);
 
             // Resolve which dialect this file parses with (RFC 0031): first matching
             // `[[recover.sql.dialect-rules]]` wins, else `default-dialect` ("generic" — the
@@ -174,6 +187,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             if !is_candidate {
                 continue;
             }
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
 
             let content = match std::fs::read_to_string(path) {
                 Ok(s) => s,
@@ -182,8 +200,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                     continue;
                 }
             };
-
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let content = ekos_common::redaction::redact(&content, &redaction_config);
             dep_files.push((rel.to_string_lossy().replace('\\', "/"), content));
         }
     }
@@ -350,6 +367,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 continue;
             }
             let path = entry.path();
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
             let content = match std::fs::read_to_string(path) {
                 Ok(s) => s,
                 Err(e) => {
@@ -357,7 +379,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                     continue;
                 }
             };
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let content = ekos_common::redaction::redact(&content, &redaction_config);
             cargo_manifests.push((rel.to_string_lossy().replace('\\', "/"), content));
         }
     }
@@ -405,6 +427,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             if !is_yaml || !under_workflows {
                 continue;
             }
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
             let content = match std::fs::read_to_string(path) {
                 Ok(s) => s,
                 Err(e) => {
@@ -412,7 +439,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                     continue;
                 }
             };
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let content = ekos_common::redaction::redact(&content, &redaction_config);
             cicd_workflows.push((rel.to_string_lossy().replace('\\', "/"), content));
         }
     }
