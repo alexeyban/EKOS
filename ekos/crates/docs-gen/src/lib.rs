@@ -436,12 +436,19 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
     }
 }
 
-/// Collision-free file name for every object in `objects`, keyed by id. [`page_file_name`] alone
-/// collides whenever two objects of the same kind share a bare name — routine at program-entity
-/// scale (RFC 0042): two different modules can each declare a `fn new`, and both would otherwise
-/// render to `rustsymbol-new.md`. The first occurrence (in a stable `id`-sorted order, so this
-/// never depends on caller iteration order) keeps the plain name; every later collision gets an
-/// 8-hex-character id suffix appended so it never overwrites the first.
+/// Collision-free, GitHub-browsable relative *path* for every object in `objects`, keyed by id —
+/// `entities/<kind>/<2-char shard>/<name>.<ext>`. Two levels of directory nesting exist for a
+/// concrete, hit-in-practice reason (RFC 0042): a flat `doc/` directory holding one page per
+/// `RustSymbol` in a real ~1300-symbol codebase blows past GitHub's 1,000-entries-per-directory
+/// listing cap — confirmed live after first shipping curated docs with everything flat in `doc/`.
+/// Sharding by the first two characters of the slugified name keeps every directory small
+/// regardless of how many objects of one kind exist, without needing a source-tree-aware grouping
+/// key (which not every kind has — e.g. `Technology`/`Pipeline` have no natural "folder").
+/// [`page_file_name`] alone also collides whenever two objects of the same kind share a bare name
+/// — routine at program-entity scale: two different files can each declare a `fn new`. The first
+/// occurrence (in a stable `id`-sorted order, so this never depends on caller iteration order)
+/// keeps the plain name; every later collision gets an 8-hex-character id suffix appended so it
+/// never overwrites the first.
 pub fn unique_page_file_names(objects: &[KirObject], ext: &str) -> HashMap<KirId, String> {
     let mut sorted: Vec<&KirObject> = objects.iter().collect();
     sorted.sort_by_key(|o| o.id.0);
@@ -449,16 +456,19 @@ pub fn unique_page_file_names(objects: &[KirObject], ext: &str) -> HashMap<KirId
     let mut used: HashSet<String> = HashSet::new();
     let mut out = HashMap::with_capacity(objects.len());
     for o in sorted {
-        let base = page_file_name(&o.kind, &o.name, ext);
+        let kind_slug = slugify(&o.kind.to_string());
+        let name_slug = slugify(&o.name);
+        let shard: String = if name_slug.is_empty() {
+            "misc".to_string()
+        } else {
+            name_slug.chars().take(2).collect()
+        };
+        let base = format!("entities/{kind_slug}/{shard}/{name_slug}.{ext}");
         let name = if used.insert(base.clone()) {
             base
         } else {
             let suffix = &o.id.0.simple().to_string()[..8];
-            format!(
-                "{}-{}.{ext}",
-                slugify(&format!("{}-{}", o.kind, o.name)),
-                suffix
-            )
+            format!("entities/{kind_slug}/{shard}/{name_slug}-{suffix}.{ext}")
         };
         used.insert(name.clone());
         out.insert(o.id, name);

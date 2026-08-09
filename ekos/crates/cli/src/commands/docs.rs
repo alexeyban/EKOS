@@ -341,6 +341,13 @@ fn render_er_diagram_page(
 
 fn write_page(output: &Path, page: &RenderedPage) -> Result<()> {
     let path = output.join(&page.file_name);
+    // Entity pages nest under `entities/<kind>/<shard>/` (RFC 0042, `unique_page_file_names`) to
+    // stay under GitHub's per-directory listing cap — the flat `--layout objects` pages never
+    // have a directory component in their name, so this is a no-op for that path.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create directory {}", parent.display()))?;
+    }
     std::fs::write(&path, &page.content).with_context(|| format!("cannot write {}", path.display()))
 }
 
@@ -894,9 +901,11 @@ mod tests {
 
         assert!(
             output
-                .join("rustsymbol-build-object-page-model.md")
+                .join("entities/rustsymbol/bu/build-object-page-model.md")
                 .exists(),
-            "entity detail page for the RustSymbol must be written alongside the four curated files"
+            "entity detail page for the RustSymbol must be written alongside the four curated \
+             files, nested under entities/<kind>/<shard>/ so no directory blows past GitHub's \
+             1,000-entries listing cap at real-codebase scale (RFC 0042)"
         );
 
         let api = std::fs::read_to_string(output.join("API.md")).unwrap();
