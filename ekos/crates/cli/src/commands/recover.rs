@@ -6,12 +6,13 @@ use ekos_compiler_core::{
     scheduler::FailureMode,
 };
 use ekos_recovery::{
-    ConfluenceAnalyzerPass, CryptoAnalyzerPass, DependencyAnalyzerPass, DialectRule,
-    DocumentSemanticsAnalyzerPass, DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass,
-    LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, PentahoAnalyzerPass, PentahoStats,
-    PythonAnalyzerPass, PythonStats, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
-    SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
-    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
+    CicdAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
+    DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass, DocumentSemanticsStats,
+    GitAnalyzerPass, GitHubAnalyzerPass, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
+    PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass, PythonStats, RustAnalyzerPass,
+    RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
+    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
+    llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -330,9 +331,105 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(rust_pass));
     }
 
+    // ── Cargo.toml crate/workspace topology (RFC 0042) ────────────────────
+    let mut cargo_manifests: Vec<(String, String)> = Vec::new();
+    for base in &observe_paths {
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_str().unwrap_or("");
+                    return !ignore.iter().any(|p| name == p.as_str());
+                }
+                true
+            })
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "Cargo.toml" {
+                continue;
+            }
+            let path = entry.path();
+            let content = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            cargo_manifests.push((rel.to_string_lossy().replace('\\', "/"), content));
+        }
+    }
+    if !cargo_manifests.is_empty() {
+        let crate_topology_pass = CrateTopologyAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            cargo_manifests,
+        );
+        pass_manager.register(Box::new(crate_topology_pass));
+    }
+
+    // ── GitHub Actions CI/CD workflows (RFC 0042) ─────────────────────────
+    let mut cicd_workflows: Vec<(String, String)> = Vec::new();
+    for base in &observe_paths {
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_str().unwrap_or("");
+                    return !ignore.iter().any(|p| name == p.as_str());
+                }
+                true
+            })
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let is_yaml = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("yml") || e.eq_ignore_ascii_case("yaml"))
+                .unwrap_or(false);
+            let under_workflows = path
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|w| w[0] == ".github" && w[1] == "workflows");
+            if !is_yaml || !under_workflows {
+                continue;
+            }
+            let content = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            cicd_workflows.push((rel.to_string_lossy().replace('\\', "/"), content));
+        }
+    }
+    if !cicd_workflows.is_empty() {
+        let cicd_pass = CicdAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            cicd_workflows,
+        );
+        pass_manager.register(Box::new(cicd_pass));
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, Pentaho jobs, Python files, or Rust files found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, or CI/CD workflows found)."
         );
         return Ok(());
     }

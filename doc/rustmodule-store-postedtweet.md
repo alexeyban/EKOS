@@ -1,0 +1,24 @@
+# store::PostedTweet (RustModule)
+
+## Properties
+
+_No compiled properties._
+
+## Relationships
+
+### DependsOn
+
+- ← ekos/crates/marketing/src/lib.rs (`8cd87fe5-4192-5e8c-807b-1bdf11296172`)
+
+## Diagram
+
+```mermaid
+graph TD
+    nb6f010feba1750a1ac0a8635b3568117["store::PostedTweet"]
+    n8cd87fe541925e8c807b1bdf11296172["ekos/crates/marketing/src/lib.rs"]
+    n8cd87fe541925e8c807b1bdf11296172 -->|DependsOn| nb6f010feba1750a1ac0a8635b3568117
+```
+
+## Evidence
+
+_No evidence cited._

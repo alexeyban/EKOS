@@ -4,7 +4,9 @@
 
 pub mod anthropic;
 pub mod cache;
+pub mod cicd_analyzer;
 pub mod confluence_analyzer;
+pub mod crate_topology_analyzer;
 pub mod crypto_analyzer;
 pub mod dependency_analyzer;
 pub mod document_semantics_analyzer;
@@ -24,7 +26,9 @@ mod statement_repair;
 
 pub use anthropic::AnthropicProvider;
 pub use cache::CachedLlmProvider;
+pub use cicd_analyzer::CicdAnalyzerPass;
 pub use confluence_analyzer::ConfluenceAnalyzerPass;
+pub use crate_topology_analyzer::CrateTopologyAnalyzerPass;
 pub use crypto_analyzer::CryptoAnalyzerPass;
 pub use dependency_analyzer::DependencyAnalyzerPass;
 pub use document_semantics_analyzer::{DocumentSemanticsAnalyzerPass, DocumentSemanticsStats};

@@ -283,7 +283,18 @@ impl IdentityResolver for DefaultResolver {
             // already deterministically identified by (file path, qualified name) — no two
             // distinct source-code symbols/imports can legitimately be the same real-world entity
             // — so this is a blanket kind exclusion, matching Section/TransformNode exactly.
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule")
+            //
+            // `Custom("Crate")` (RFC 0042) is the same failure shape yet again, caught the same
+            // way — by running `crate_topology_analyzer` against this repo's own ~40-crate
+            // workspace and finding only 1 of 39 `Crate` objects survived `ekos compile`. Crate
+            // names share a long common prefix (`ekos-cli`, `ekos-compiler-core`, `ekos-common`,
+            // …), and every `Crate` object has the same property shape (`path`/`description`/
+            // `version`, no `columns`), so `structural_score`'s same-kind 1.0 fallback pushed
+            // nearly every crate pair over threshold and collapsed the whole workspace's crate
+            // topology into one canonical object. Each `Crate` is already deterministically
+            // identified by its manifest directory — no two distinct crates can legitimately be
+            // the same real-world entity.
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate")
             {
                 continue;
             }
@@ -805,6 +816,28 @@ mod tests {
         assert!(
             result.proposals.is_empty(),
             "RustSymbol objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    /// Regression test for a real bug found live while regenerating EKOS's own curated docs
+    /// (RFC 0042): `Custom("Crate")` objects sharing the workspace's common `ekos-` name prefix
+    /// scored above the merge threshold on name similarity alone (`structural_score`'s same-kind
+    /// 1.0 fallback, no `columns` property to differentiate on) — the identical failure shape as
+    /// `Section`/`TransformNode`/`RustSymbol`. Before the fix, 39 real crates collapsed into 1
+    /// canonical object, silently dropping the entire crate/workspace dependency topology.
+    #[test]
+    fn crate_objects_are_never_merged_even_with_shared_name_prefix() {
+        let crate_kind = ObjectKind::Custom("Crate".to_string());
+        let g = make_graph(&[
+            ("ekos-cli", crate_kind.clone()),
+            ("ekos-common", crate_kind.clone()),
+            ("ekos-compiler-core", crate_kind),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "Crate objects must never be merge candidates, got {:?}",
             result.proposals
         );
     }

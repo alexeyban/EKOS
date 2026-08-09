@@ -1,0 +1,26 @@
+# MockFabricClient::list_items (RustSymbol)
+
+## Properties
+
+| Key | Value |
+|---|---|
+| `kind` | method |
+
+## Relationships
+
+### Contains
+
+- ← ekos/plugins/fabric/src/lib.rs (`ea3988ed-2565-56db-b0cf-09b6d4594525`)
+
+## Diagram
+
+```mermaid
+graph TD
+    n022edeeec84352b1aab6639e35df562e["MockFabricClient::list_items"]
+    nea3988ed256556dbb0cf09b6d4594525["ekos/plugins/fabric/src/lib.rs"]
+    nea3988ed256556dbb0cf09b6d4594525 -->|Contains| n022edeeec84352b1aab6639e35df562e
+```
+
+## Evidence
+
+_No evidence cited._

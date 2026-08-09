@@ -1,1571 +1,1717 @@
 # API
 
-_Symbol names only, extracted via a lightweight text scan for declaration-line prefixes (`fn `, `def `, `class `, `func `, `interface `) — not a parsed API spec. Real `Api`/`Service` objects, if ever compiled, would render here directly; none are compiled today._
-
-## TODO.md
-
-- `the`
-- `boundary`
+_Program entities (functions, structs, enums, traits, classes, …) compiled from real Rust/Python source analysis, grouped by containing file. Each entity links to its own detail page (relationships, evidence, 1-hop diagram), written alongside this file. Real `Api`/`Service` objects, if a future connector ever compiles them, would render here directly._
 
 ## benchmark/benches/fact_ledger.rs
 
-- `object`
-- `bench_fact_ledger`
+- `function` [`bench_fact_ledger`](rustsymbol-bench-fact-ledger.md)
+- `function` [`object`](rustsymbol-object.md)
 
 ## benchmark/benches/fact_model.rs
 
-- `realistic_object`
-- `bench_fact_model`
+- `function` [`bench_fact_model`](rustsymbol-bench-fact-model.md)
+- `function` [`realistic_object`](rustsymbol-realistic-object-0dcf9d8f.md)
 
 ## benchmark/benches/identity_resolver.rs
 
-- `fixture_graph`
-- `bench_identity_resolver`
+- `function` [`bench_identity_resolver`](rustsymbol-bench-identity-resolver.md)
+- `function` [`fixture_graph`](rustsymbol-fixture-graph-e3802af0.md)
 
 ## benchmark/benches/index_runs.rs
 
-- `build_indexes`
-- `bench_index_runs`
+- `function` [`bench_index_runs`](rustsymbol-bench-index-runs.md)
+- `function` [`build_indexes`](rustsymbol-build-indexes.md)
 
 ## benchmark/benches/ledger_write.rs
 
-- `bench_ledger_write`
+- `function` [`bench_ledger_write`](rustsymbol-bench-ledger-write.md)
 
 ## benchmark/benches/observation_git.rs
 
-- `fixture_repo`
-- `bench_observation_git`
+- `function` [`bench_observation_git`](rustsymbol-bench-observation-git.md)
+- `function` [`fixture_repo`](rustsymbol-fixture-repo.md)
 
 ## benchmark/benches/runtime_load_neighborhood.rs
 
-- `seed_ledger`
-- `bench_load_neighborhood`
+- `function` [`bench_load_neighborhood`](rustsymbol-bench-load-neighborhood.md)
+- `function` [`seed_ledger`](rustsymbol-seed-ledger.md)
 
 ## benchmark/benches/segment_store.rs
 
-- `ops`
-- `bench_segment_store`
+- `function` [`bench_segment_store`](rustsymbol-bench-segment-store.md)
+- `function` [`ops`](rustsymbol-ops.md)
 
 ## benchmark/benches/semantic_compiler.rs
 
-- `fixture_graph`
-- `bench_semantic_compiler`
+- `function` [`bench_semantic_compiler`](rustsymbol-bench-semantic-compiler.md)
+- `function` [`fixture_graph`](rustsymbol-fixture-graph.md)
 
 ## benchmark/benches/sql_analyzer.rs
 
-- `bench_sql_analyzer`
+- `function` [`bench_sql_analyzer`](rustsymbol-bench-sql-analyzer.md)
 
 ## benchmark/benches/storage_compaction.rs
 
-- `realistic_object`
-- `ledger_file_bytes`
-- `populated_ledger`
-- `bench_storage`
-
-## docs/rfcs/0001-compiler-core.md
-
-- `name`
-- `dependencies`
-
-## docs/rfcs/0002-artifact-system.md
-
-- `id`
-- `artifact_type`
-- `dependencies`
-- `schema_version`
-
-## docs/rfcs/0006-observation-sdk.md
-
-- `name`
-
-## docs/rfcs/0008-llm-policy.md
-
-- `model_name`
-
-## docs/rfcs/0011-optimizer.md
-
-- `version`
-
-## docs/rfcs/0012-enterprise-connectors-scaffold.md
-
-- `name`
-
-## docs/rfcs/0017-crypto-connector.md
-
-- `name`
-
-## docs/rfcs/0023-local-document-connector.md
-
-- `supported_extension`
-- `parse`
-- `recognize`
+- `function` [`bench_storage`](rustsymbol-bench-storage.md)
+- `function` [`ledger_file_bytes`](rustsymbol-ledger-file-bytes.md)
+- `function` [`populated_ledger`](rustsymbol-populated-ledger.md)
+- `function` [`realistic_object`](rustsymbol-realistic-object.md)
 
 ## docs/spikes/recovery_spike.py
 
-- `call_claude`
-- `evaluate`
-- `main`
+- `function` [`call_claude`](pythonsymbol-call-claude.md)
+- `function` [`evaluate`](pythonsymbol-evaluate.md)
+- `function` [`main`](pythonsymbol-main.md)
 
 ## ekos/crates/artifact/src/lib.rs
 
-- `fmt`
-- `canonicalize`
-- `compute_content_id`
-- `default`
-- `same_content_same_id`
-- `different_content_different_id`
-- `volatile_metadata_excluded_from_id`
-- `observation_artifact_round_trip`
-- `index_artifact_round_trip`
-- `canonicalize_sorts_keys`
+- `struct` [`ArtifactId`](rustsymbol-artifactid.md)
+- `method` [`ArtifactId::as_str`](rustsymbol-artifactid-as-str.md)
+- `method` [`ArtifactId::compute`](rustsymbol-artifactid-compute.md)
+- `method` [`ArtifactId::fmt`](rustsymbol-artifactid-fmt.md)
+- `method` [`ArtifactId::prefix`](rustsymbol-artifactid-prefix.md)
+- `struct` [`ArtifactMeta`](rustsymbol-artifactmeta.md)
+- `method` [`ArtifactMeta::default`](rustsymbol-artifactmeta-default.md)
+- `method` [`ArtifactMeta::new`](rustsymbol-artifactmeta-new.md)
+- `enum` [`ArtifactType`](rustsymbol-artifacttype.md)
+- `struct` [`DiagnosticArtifact`](rustsymbol-diagnosticartifact.md)
+- `method` [`DiagnosticArtifact::new`](rustsymbol-diagnosticartifact-new.md)
+- `struct` [`DiagnosticContent`](rustsymbol-diagnosticcontent.md)
+- `struct` [`DiagnosticRecord`](rustsymbol-diagnosticrecord.md)
+- `struct` [`EvidenceArtifact`](rustsymbol-evidenceartifact.md)
+- `method` [`EvidenceArtifact::new`](rustsymbol-evidenceartifact-new.md)
+- `struct` [`EvidenceContent`](rustsymbol-evidencecontent.md)
+- `struct` [`IndexArtifact`](rustsymbol-indexartifact.md)
+- `method` [`IndexArtifact::new`](rustsymbol-indexartifact-new.md)
+- `struct` [`IndexContent`](rustsymbol-indexcontent.md)
+- `struct` [`KnowledgeArtifact`](rustsymbol-knowledgeartifact.md)
+- `method` [`KnowledgeArtifact::new`](rustsymbol-knowledgeartifact-new.md)
+- `struct` [`KnowledgeContent`](rustsymbol-knowledgecontent.md)
+- `struct` [`ObservationArtifact`](rustsymbol-observationartifact.md)
+- `method` [`ObservationArtifact::new`](rustsymbol-observationartifact-new.md)
+- `method` [`ObservationArtifact::with_producer`](rustsymbol-observationartifact-with-producer.md)
+- `struct` [`ObservationContent`](rustsymbol-observationcontent.md)
+- `function` [`canonicalize`](rustsymbol-canonicalize.md)
+- `function` [`compute_content_id`](rustsymbol-compute-content-id.md)
 
 ## ekos/crates/artifact/src/pack.rs
 
-- `segment_path`
-- `loose_path`
-- `write_packed`
-- `drop`
-- `write`
-- `read`
-- `exists`
-- `list`
-- `compress_frame_body`
-- `hex_id_to_raw`
-- `segment_paths`
-- `scan_segment`
-- `prune_empty_dirs`
-- `id_of`
-- `sample`
-- `write_read_round_trip_and_cache_hit`
-- `index_survives_reopen_without_sidecar`
-- `torn_tail_is_truncated_and_prior_frames_survive`
-- `corrupt_frame_body_is_detected_on_read`
-- `reads_fall_back_to_loose_files_and_repack_migrates_them`
-- `packed_storage_is_smaller_than_loose`
-- `walk_bytes`
+- `struct` [`FrameLoc`](rustsymbol-frameloc.md)
+- `struct` [`PackArtifactStore`](rustsymbol-packartifactstore.md)
+- `method` [`PackArtifactStore::drop`](rustsymbol-packartifactstore-drop.md)
+- `method` [`PackArtifactStore::exists`](rustsymbol-packartifactstore-exists.md)
+- `method` [`PackArtifactStore::list`](rustsymbol-packartifactstore-list.md)
+- `method` [`PackArtifactStore::loose_path`](rustsymbol-packartifactstore-loose-path.md)
+- `method` [`PackArtifactStore::open`](rustsymbol-packartifactstore-open.md)
+- `method` [`PackArtifactStore::packed_count`](rustsymbol-packartifactstore-packed-count.md)
+- `method` [`PackArtifactStore::read`](rustsymbol-packartifactstore-read.md)
+- `method` [`PackArtifactStore::repack_loose`](rustsymbol-packartifactstore-repack-loose.md)
+- `method` [`PackArtifactStore::segment_path`](rustsymbol-packartifactstore-segment-path.md)
+- `method` [`PackArtifactStore::sync`](rustsymbol-packartifactstore-sync.md)
+- `method` [`PackArtifactStore::write`](rustsymbol-packartifactstore-write.md)
+- `method` [`PackArtifactStore::write_packed`](rustsymbol-packartifactstore-write-packed.md)
+- `struct` [`PackInner`](rustsymbol-packinner.md)
+- `function` [`compress_frame_body`](rustsymbol-compress-frame-body.md)
+- `function` [`hex_id_to_raw`](rustsymbol-hex-id-to-raw.md)
+- `function` [`prune_empty_dirs`](rustsymbol-prune-empty-dirs.md)
+- `function` [`scan_segment`](rustsymbol-scan-segment.md)
+- `function` [`segment_paths`](rustsymbol-segment-paths.md)
 
 ## ekos/crates/artifact/src/store.rs
 
-- `write`
-- `read`
-- `exists`
-- `list`
-- `artifact_path`
-- `write`
-- `read`
-- `exists`
-- `list`
-- `make_store`
-- `write_and_read_round_trip`
-- `second_write_is_cache_hit`
-- `read_missing_returns_none`
-- `git_object_layout`
-- `list_returns_stored_ids`
+- `trait` [`ArtifactStore`](rustsymbol-artifactstore.md)
+- `struct` [`FileSystemArtifactStore`](rustsymbol-filesystemartifactstore.md)
+- `method` [`FileSystemArtifactStore::artifact_path`](rustsymbol-filesystemartifactstore-artifact-path.md)
+- `method` [`FileSystemArtifactStore::exists`](rustsymbol-filesystemartifactstore-exists.md)
+- `method` [`FileSystemArtifactStore::list`](rustsymbol-filesystemartifactstore-list.md)
+- `method` [`FileSystemArtifactStore::new`](rustsymbol-filesystemartifactstore-new.md)
+- `method` [`FileSystemArtifactStore::read`](rustsymbol-filesystemartifactstore-read.md)
+- `method` [`FileSystemArtifactStore::root`](rustsymbol-filesystemartifactstore-root.md)
+- `method` [`FileSystemArtifactStore::write`](rustsymbol-filesystemartifactstore-write.md)
+- `enum` [`StoreError`](rustsymbol-storeerror.md)
+
+## ekos/crates/cli/src/bin/ekos.rs
+
+- `enum` [`ArtifactCommands`](rustsymbol-artifactcommands.md)
+- `enum` [`BranchCommands`](rustsymbol-branchcommands.md)
+- `struct` [`Cli`](rustsymbol-cli.md)
+- `enum` [`Commands`](rustsymbol-commands.md)
+- `enum` [`DbtCommands`](rustsymbol-dbtcommands.md)
+- `enum` [`DocsCommands`](rustsymbol-docscommands.md)
+- `enum` [`IdentityCommands`](rustsymbol-identitycommands.md)
+- `enum` [`LedgerCommands`](rustsymbol-ledgercommands.md)
+- `enum` [`MarketingCommands`](rustsymbol-marketingcommands.md)
+- `enum` [`McpCommands`](rustsymbol-mcpcommands.md)
+- `enum` [`QueryCommands`](rustsymbol-querycommands.md)
+- `function` [`main`](rustsymbol-main-caa3d7b4.md)
+
+## ekos/crates/cli/src/commands/artifact.rs
+
+- `function` [`repack`](rustsymbol-repack.md)
 
 ## ekos/crates/cli/src/commands/ask.rs
 
-- `ask_selects_ollama_provider_when_configured`
+- `function` [`ai_config`](rustsymbol-ai-config.md)
+- `function` [`run`](rustsymbol-run-9c8ba43a.md)
 
 ## ekos/crates/cli/src/commands/branch.rs
 
-- `branch_path`
-- `open_branch`
+- `function` [`branch_path`](rustsymbol-branch-path.md)
+- `function` [`create`](rustsymbol-create.md)
+- `function` [`delete`](rustsymbol-delete.md)
+- `function` [`list`](rustsymbol-list.md)
+- `function` [`merge`](rustsymbol-merge.md)
+- `function` [`open_branch`](rustsymbol-open-branch.md)
 
 ## ekos/crates/cli/src/commands/build.rs
 
-- `load_fingerprints`
-- `save_fingerprints`
-- `prune_snapshots`
+- `function` [`load_fingerprints`](rustsymbol-load-fingerprints.md)
+- `function` [`prune_snapshots`](rustsymbol-prune-snapshots.md)
+- `function` [`run`](rustsymbol-run-d09318f4.md)
+- `function` [`save_fingerprints`](rustsymbol-save-fingerprints.md)
+
+## ekos/crates/cli/src/commands/clean.rs
+
+- `function` [`run`](rustsymbol-run-20c4c150.md)
 
 ## ekos/crates/cli/src/commands/commit.rs
 
-- `open_ledger`
-- `ckm_rel_to_kir`
-- `ckm_object_to_kir`
-- `evidence_record_to_kir`
+- `function` [`ckm_object_to_kir`](rustsymbol-ckm-object-to-kir.md)
+- `function` [`ckm_rel_to_kir`](rustsymbol-ckm-rel-to-kir.md)
+- `function` [`evidence_record_to_kir`](rustsymbol-evidence-record-to-kir.md)
+- `function` [`open_ledger`](rustsymbol-open-ledger.md)
+- `function` [`run`](rustsymbol-run-5eff14dd.md)
 
 ## ekos/crates/cli/src/commands/compile.rs
 
-- `knowledge_artifact_ids`
+- `function` [`knowledge_artifact_ids`](rustsymbol-knowledge-artifact-ids.md)
+- `function` [`run`](rustsymbol-run.md)
 
 ## ekos/crates/cli/src/commands/dbt.rs
 
-- `write_model`
-- `transform_node`
-- `resolve_output_dir_defaults_to_dbt_generated`
+- `function` [`generate`](rustsymbol-generate.md)
+- `function` [`resolve_output_dir`](rustsymbol-resolve-output-dir-730ab45b.md)
+- `function` [`write_model`](rustsymbol-write-model.md)
+
+## ekos/crates/cli/src/commands/diff.rs
+
+- `function` [`run`](rustsymbol-run-b769e9f2.md)
 
 ## ekos/crates/cli/src/commands/docs.rs
 
-- `estimate_prompt_tokens`
-- `confirm_prose_spend`
-- `select_llm_provider_for_prose`
-- `render_er_diagram_page`
-- `write_page`
-- `generate_curated`
-- `resolve_output_dir_defaults_to_docs_generated`
-- `format_parse_accepts_md_markdown_and_html_rejects_unknown`
-- `estimate_prompt_tokens_grows_with_model_content`
-- `confirm_prose_spend_auto_skips_the_prompt`
-- `layout_parse_accepts_objects_and_curated_rejects_unknown`
+- `enum` [`Format`](rustsymbol-format.md)
+- `method` [`Format::parse`](rustsymbol-format-parse.md)
+- `enum` [`Layout`](rustsymbol-layout.md)
+- `method` [`Layout::parse`](rustsymbol-layout-parse.md)
+- `function` [`confirm_prose_spend`](rustsymbol-confirm-prose-spend.md)
+- `function` [`enrich_with_prose`](rustsymbol-enrich-with-prose.md)
+- `function` [`estimate_prompt_tokens`](rustsymbol-estimate-prompt-tokens.md)
+- `function` [`generate`](rustsymbol-generate-9628a7cf.md)
+- `function` [`generate_curated`](rustsymbol-generate-curated.md)
+- `function` [`render_er_diagram_page`](rustsymbol-render-er-diagram-page.md)
+- `function` [`resolve_output_dir`](rustsymbol-resolve-output-dir.md)
+- `function` [`select_llm_provider_for_prose`](rustsymbol-select-llm-provider-for-prose.md)
+- `function` [`write_page`](rustsymbol-write-page.md)
 
 ## ekos/crates/cli/src/commands/doctor.rs
 
-- `ok`
-- `fail`
+- `struct` [`Check`](rustsymbol-check.md)
+- `method` [`Check::fail`](rustsymbol-check-fail.md)
+- `method` [`Check::ok`](rustsymbol-check-ok.md)
+- `function` [`run`](rustsymbol-run-a0c94dcf.md)
 
 ## ekos/crates/cli/src/commands/ekl.rs
 
-- `render_cell`
+- `function` [`render_cell`](rustsymbol-render-cell.md)
+- `function` [`run`](rustsymbol-run-682eaf6b.md)
 
 ## ekos/crates/cli/src/commands/identity.rs
 
-- `seed_table`
-- `scan_writes_unconfirmed_same_as_relationships`
-- `rescan_does_not_duplicate_known_candidates`
-- `scan_on_empty_ledger_writes_nothing`
+- `function` [`scan`](rustsymbol-scan.md)
+
+## ekos/crates/cli/src/commands/init.rs
+
+- `function` [`run`](rustsymbol-run-2a325902.md)
 
 ## ekos/crates/cli/src/commands/ledger.rs
 
-- `migrate_v3`
-- `print_storage_report`
+- `function` [`dir_size`](rustsymbol-dir-size.md)
+- `function` [`human_bytes`](rustsymbol-human-bytes.md)
+- `function` [`migrate`](rustsymbol-migrate.md)
+- `function` [`migrate_v3`](rustsymbol-migrate-v3.md)
+- `function` [`print_storage_report`](rustsymbol-print-storage-report.md)
+- `function` [`status`](rustsymbol-status.md)
 
 ## ekos/crates/cli/src/commands/marketing.rs
 
-- `select_llm_provider`
-- `resolve_devlog_path`
-- `approve`
-- `log_line`
-- `dotenv_file_populates_the_process_environment`
-- `dotenv_file_never_overrides_an_already_set_var`
-- `missing_dotenv_file_is_a_silent_no_op`
-- `resolve_devlog_path_none_finds_latest`
-- `resolve_devlog_path_accepts_bare_number`
-- `resolve_devlog_path_bare_number_missing_file_is_none`
-- `resolve_devlog_path_accepts_explicit_relative_path`
-- `approve_with_auto_true_skips_prompt`
+- `function` [`approve`](rustsymbol-approve.md)
+- `function` [`log_line`](rustsymbol-log-line.md)
+- `function` [`publish`](rustsymbol-publish.md)
+- `function` [`resolve_devlog_path`](rustsymbol-resolve-devlog-path.md)
+- `function` [`select_llm_provider`](rustsymbol-select-llm-provider.md)
 
 ## ekos/crates/cli/src/commands/mcp.rs
 
-- `ok_response`
-- `error_response`
-- `initialize_result`
-- `tool_definitions`
-- `tools_call`
-- `call_tool`
-- `transformation_chain`
-- `explain_node`
-- `node_summary`
-- `node_comparable`
-- `diff_chains`
-- `bucket`
-- `set_diff`
-- `required_str`
-- `required_id`
-- `req`
-- `parse`
-- `initialize_echoes_protocol_version_and_names_server`
-- `notifications_are_never_answered`
-- `unknown_method_returns_method_not_found`
-- `tools_list_exposes_the_runtime_tools`
-- `dependents_of_unknown_object_is_a_tool_error`
-- `impact_of_unknown_object_is_a_tool_error`
-- `seeded_ledger`
-- `impact_traces_multi_hop_dependents`
-- `impact_with_invalid_direction_is_a_tool_error`
-- `diff_on_fresh_workspace_reports_nothing_changed`
-- `diff_with_bad_timestamp_is_a_tool_error`
-- `status_works_on_a_fresh_workspace`
-- `search_returns_empty_matches_on_a_fresh_workspace`
-- `ekl_syntax_error_is_a_tool_error_not_a_protocol_error`
-- `unknown_tool_is_reported_as_tool_error`
-- `malformed_json_returns_parse_error_with_null_id`
-- `seeded_transformation_ledger`
-- `explain_walks_the_full_chain_with_evidence`
-- `explain_of_unknown_object_is_a_tool_error`
-- `diff_detects_added_and_removed_filter`
-- `diff_of_identical_chains_reports_no_differences`
-- `seeded_same_as_relationship`
-- `identity_review_confirms_a_candidate_and_writes_an_event`
-- `identity_review_rejects_a_candidate`
-- `identity_review_with_invalid_decision_is_a_tool_error`
-- `identity_review_of_non_same_as_relationship_is_a_tool_error`
-- `identity_review_of_unknown_relationship_is_a_tool_error`
+- `function` [`call_tool`](rustsymbol-call-tool.md)
+- `function` [`diff_chains`](rustsymbol-diff-chains.md)
+- `function` [`error_response`](rustsymbol-error-response.md)
+- `function` [`explain_node`](rustsymbol-explain-node.md)
+- `function` [`handle_message`](rustsymbol-handle-message.md)
+- `function` [`initialize_result`](rustsymbol-initialize-result.md)
+- `function` [`node_comparable`](rustsymbol-node-comparable.md)
+- `function` [`node_summary`](rustsymbol-node-summary.md)
+- `function` [`ok_response`](rustsymbol-ok-response.md)
+- `function` [`required_id`](rustsymbol-required-id.md)
+- `function` [`required_str`](rustsymbol-required-str.md)
+- `function` [`run`](rustsymbol-run-6891f75c.md)
+- `function` [`tool_definitions`](rustsymbol-tool-definitions.md)
+- `function` [`tools_call`](rustsymbol-tools-call.md)
+- `function` [`transformation_chain`](rustsymbol-transformation-chain.md)
+
+## ekos/crates/cli/src/commands/mod.rs
+
+- `function` [`init_logging`](rustsymbol-init-logging.md)
+- `function` [`init_logging_stderr`](rustsymbol-init-logging-stderr.md)
 
 ## ekos/crates/cli/src/commands/query.rs
 
-- `open_ledger`
+- `function` [`find`](rustsymbol-find.md)
+- `function` [`neighbourhood`](rustsymbol-neighbourhood.md)
+- `function` [`object`](rustsymbol-object-b6e1ea7f.md)
+- `function` [`open_ledger`](rustsymbol-open-ledger-fce4a499.md)
 
 ## ekos/crates/cli/src/commands/recover.rs
 
-- `collect_git_artifact_ids`
-- `collect_crypto_artifact_ids`
-- `collect_github_artifact_ids`
-- `collect_confluence_artifact_ids`
-- `collect_localdocs_artifact_ids`
-- `collect_pentaho_artifact_ids`
-- `collect_python_artifact_ids`
-- `collect_rust_artifact_ids`
-- `should_register_document_semantics`
-- `document_semantics_pass_not_registered_when_config_absent`
-- `document_semantics_pass_not_registered_when_explicitly_disabled`
-- `document_semantics_pass_not_registered_without_local_documents`
-- `document_semantics_pass_registered_when_enabled_with_local_documents`
-- `ollama_provider_selected_when_configured`
-- `non_ollama_provider_falls_back_to_existing_chain`
+- `function` [`build_llm_provider`](rustsymbol-build-llm-provider.md)
+- `function` [`collect_confluence_artifact_ids`](rustsymbol-collect-confluence-artifact-ids.md)
+- `function` [`collect_crypto_artifact_ids`](rustsymbol-collect-crypto-artifact-ids.md)
+- `function` [`collect_git_artifact_ids`](rustsymbol-collect-git-artifact-ids.md)
+- `function` [`collect_github_artifact_ids`](rustsymbol-collect-github-artifact-ids.md)
+- `function` [`collect_localdocs_artifact_ids`](rustsymbol-collect-localdocs-artifact-ids.md)
+- `function` [`collect_pentaho_artifact_ids`](rustsymbol-collect-pentaho-artifact-ids.md)
+- `function` [`collect_python_artifact_ids`](rustsymbol-collect-python-artifact-ids.md)
+- `function` [`collect_rust_artifact_ids`](rustsymbol-collect-rust-artifact-ids.md)
+- `function` [`run`](rustsymbol-run-786d5225.md)
+- `function` [`should_register_document_semantics`](rustsymbol-should-register-document-semantics.md)
 
 ## ekos/crates/cli/src/commands/resolve.rs
 
-- `merge_into`
+- `function` [`merge_into`](rustsymbol-merge-into.md)
+- `function` [`run`](rustsymbol-run-e9261342.md)
+
+## ekos/crates/cli/src/commands/store.rs
+
+- `function` [`facts_dir`](rustsymbol-facts-dir.md)
+- `function` [`open_store`](rustsymbol-open-store.md)
+- `function` [`store_display`](rustsymbol-store-display.md)
+- `function` [`uses_fact_engine`](rustsymbol-uses-fact-engine.md)
 
 ## ekos/crates/cli/tests/mcp_session.rs
 
-- `setup_workspace`
-- `load_config`
-- `call_tool`
+- `function` [`call_tool`](rustsymbol-call-tool-79df7d9c.md)
+- `function` [`claude_code_session_over_mcp`](rustsymbol-claude-code-session-over-mcp.md)
+- `function` [`load_config`](rustsymbol-load-config.md)
+- `function` [`setup_workspace`](rustsymbol-setup-workspace.md)
 
 ## ekos/crates/cli/tests/skeleton.rs
 
-- `setup_workspace`
-- `load_config`
-- `init_creates_ekos_directory`
-- `clean_removes_artifacts_not_ledger`
+- `function` [`build_is_idempotent`](rustsymbol-build-is-idempotent.md)
+- `function` [`build_observes_files_and_writes_ledger`](rustsymbol-build-observes-files-and-writes-ledger.md)
+- `function` [`clean_removes_artifacts_not_ledger`](rustsymbol-clean-removes-artifacts-not-ledger.md)
+- `function` [`init_creates_ekos_directory`](rustsymbol-init-creates-ekos-directory.md)
+- `function` [`load_config`](rustsymbol-load-config-d1e71ee3.md)
+- `function` [`query_object_returns_known_file`](rustsymbol-query-object-returns-known-file.md)
+- `function` [`setup_workspace`](rustsymbol-setup-workspace-f8f102ad.md)
 
 ## ekos/crates/cli/tests/transformation_benchmark.rs
 
-- `setup_workspace`
-- `load_config`
-- `call_tool`
+- `function` [`call_tool`](rustsymbol-call-tool-a762a492.md)
+- `function` [`load_config`](rustsymbol-load-config-c16a7ca3.md)
+- `function` [`phase7_benchmark_recover_explain_diff_over_mcp_only`](rustsymbol-phase7-benchmark-recover-explain-diff-over-mcp-only.md)
+- `function` [`setup_workspace`](rustsymbol-setup-workspace-e8ff1e4b.md)
 
 ## ekos/crates/common/src/compress.rs
 
-- `round_trip_compressed`
-- `read_auto_prefers_zst_and_falls_back_to_plain`
-- `compressed_is_smaller_than_plain_on_repetitive_json`
+- `enum` [`CompressError`](rustsymbol-compresserror.md)
+- `function` [`read_json_auto`](rustsymbol-read-json-auto.md)
+- `function` [`read_json_zst`](rustsymbol-read-json-zst.md)
+- `function` [`resolve_auto`](rustsymbol-resolve-auto.md)
+- `function` [`write_json_zst`](rustsymbol-write-json-zst.md)
+- `function` [`zst_sibling`](rustsymbol-zst-sibling.md)
 
 ## ekos/crates/common/src/lib.rs
 
-- `fmt`
-- `same_content_same_hash`
-- `different_content_different_hash`
+- `struct` [`ContentHash`](rustsymbol-contenthash.md)
+- `method` [`ContentHash::as_str`](rustsymbol-contenthash-as-str.md)
+- `method` [`ContentHash::fmt`](rustsymbol-contenthash-fmt.md)
+- `method` [`ContentHash::of`](rustsymbol-contenthash-of.md)
+- `method` [`ContentHash::of_str`](rustsymbol-contenthash-of-str.md)
 
 ## ekos/crates/compiler-core/src/cache.rs
 
-- `manifest_path`
-- `name`
-- `version`
-- `cache_inputs`
-- `no_manifest_means_recompute`
-- `unchanged_identity_skips_recompute`
-- `changed_config_hash_forces_recompute`
-- `changed_inputs_forces_recompute`
-- `changed_version_forces_recompute`
+- `struct` [`PassManifest`](rustsymbol-passmanifest.md)
+- `function` [`config_hash`](rustsymbol-config-hash.md)
+- `function` [`manifest_path`](rustsymbol-manifest-path.md)
+- `function` [`record_manifest`](rustsymbol-record-manifest.md)
+- `function` [`should_recompute`](rustsymbol-should-recompute.md)
 
 ## ekos/crates/compiler-core/src/compiler.rs
 
-- `name`
+- `struct` [`Compiler`](rustsymbol-compiler.md)
+- `method` [`Compiler::new`](rustsymbol-compiler-new.md)
+- `method` [`Compiler::register_pass`](rustsymbol-compiler-register-pass.md)
+- `method` [`Compiler::run`](rustsymbol-compiler-run.md)
+- `method` [`Compiler::with_failure_mode`](rustsymbol-compiler-with-failure-mode.md)
+- `enum` [`CompilerError`](rustsymbol-compilererror.md)
 
 ## ekos/crates/compiler-core/src/config.rs
 
-- `default_root`
-- `default_log_level`
-- `default_log_format`
-- `default`
-- `default_ignore_patterns`
-- `default`
-- `default_github`
-- `default_hashtags`
-- `default`
-- `default_sql_dialect`
-- `default`
-- `default`
-- `parse_minimal_config`
-- `default_config_is_valid`
-- `document_semantics_defaults_to_disabled`
-- `document_semantics_parses_from_kebab_case_table`
-- `marketing_defaults_to_disabled_with_sensible_defaults`
-- `sql_recover_defaults_to_generic_with_no_rules`
-- `sql_recover_parses_dialect_rules_from_kebab_case_table`
-- `marketing_parses_from_kebab_case_table`
+- `struct` [`AiConfig`](rustsymbol-aiconfig.md)
+- `struct` [`DocumentSemanticsConfig`](rustsymbol-documentsemanticsconfig.md)
+- `struct` [`EkosConfig`](rustsymbol-ekosconfig.md)
+- `method` [`EkosConfig::artifact_dir`](rustsymbol-ekosconfig-artifact-dir.md)
+- `method` [`EkosConfig::branch_ledger_path`](rustsymbol-ekosconfig-branch-ledger-path.md)
+- `method` [`EkosConfig::default`](rustsymbol-ekosconfig-default.md)
+- `method` [`EkosConfig::ekos_dir`](rustsymbol-ekosconfig-ekos-dir.md)
+- `method` [`EkosConfig::from_file`](rustsymbol-ekosconfig-from-file.md)
+- `method` [`EkosConfig::from_file_or_default`](rustsymbol-ekosconfig-from-file-or-default.md)
+- `method` [`EkosConfig::ledger_dir`](rustsymbol-ekosconfig-ledger-dir.md)
+- `method` [`EkosConfig::ledger_path`](rustsymbol-ekosconfig-ledger-path.md)
+- `struct` [`LlmConfig`](rustsymbol-llmconfig.md)
+- `struct` [`MarketingConfig`](rustsymbol-marketingconfig.md)
+- `method` [`MarketingConfig::default`](rustsymbol-marketingconfig-default.md)
+- `struct` [`ObserveConfig`](rustsymbol-observeconfig.md)
+- `method` [`ObserveConfig::default`](rustsymbol-observeconfig-default.md)
+- `struct` [`RecoverConfig`](rustsymbol-recoverconfig.md)
+- `struct` [`SqlDialectRuleConfig`](rustsymbol-sqldialectruleconfig.md)
+- `struct` [`SqlRecoverConfig`](rustsymbol-sqlrecoverconfig.md)
+- `method` [`SqlRecoverConfig::default`](rustsymbol-sqlrecoverconfig-default.md)
+- `struct` [`TwitterConfig`](rustsymbol-twitterconfig.md)
+- `struct` [`WorkspaceConfig`](rustsymbol-workspaceconfig.md)
+- `method` [`WorkspaceConfig::default`](rustsymbol-workspaceconfig-default.md)
+- `function` [`default_github`](rustsymbol-default-github.md)
+- `function` [`default_hashtags`](rustsymbol-default-hashtags.md)
+- `function` [`default_ignore_patterns`](rustsymbol-default-ignore-patterns.md)
+- `function` [`default_log_format`](rustsymbol-default-log-format.md)
+- `function` [`default_log_level`](rustsymbol-default-log-level.md)
+- `function` [`default_root`](rustsymbol-default-root.md)
+- `function` [`default_sql_dialect`](rustsymbol-default-sql-dialect.md)
 
 ## ekos/crates/compiler-core/src/diagnostics.rs
 
-- `sink_collects_and_filters`
+- `struct` [`Diagnostic`](rustsymbol-diagnostic.md)
+- `method` [`Diagnostic::at`](rustsymbol-diagnostic-at.md)
+- `method` [`Diagnostic::error`](rustsymbol-diagnostic-error.md)
+- `method` [`Diagnostic::info`](rustsymbol-diagnostic-info.md)
+- `method` [`Diagnostic::warning`](rustsymbol-diagnostic-warning.md)
+- `struct` [`DiagnosticSink`](rustsymbol-diagnosticsink.md)
+- `method` [`DiagnosticSink::diagnostics`](rustsymbol-diagnosticsink-diagnostics.md)
+- `method` [`DiagnosticSink::emit`](rustsymbol-diagnosticsink-emit.md)
+- `method` [`DiagnosticSink::error`](rustsymbol-diagnosticsink-error.md)
+- `method` [`DiagnosticSink::errors`](rustsymbol-diagnosticsink-errors.md)
+- `method` [`DiagnosticSink::has_errors`](rustsymbol-diagnosticsink-has-errors.md)
+- `method` [`DiagnosticSink::has_warnings`](rustsymbol-diagnosticsink-has-warnings.md)
+- `method` [`DiagnosticSink::info`](rustsymbol-diagnosticsink-info.md)
+- `method` [`DiagnosticSink::warning`](rustsymbol-diagnosticsink-warning.md)
+- `method` [`DiagnosticSink::warning_count`](rustsymbol-diagnosticsink-warning-count.md)
+- `enum` [`Severity`](rustsymbol-severity.md)
+- `struct` [`SourceLocation`](rustsymbol-sourcelocation.md)
 
 ## ekos/crates/compiler-core/src/pass.rs
 
-- `name`
-- `dependencies`
-- `version`
-- `cache_inputs`
-- `check_unique_names`
-- `default`
-- `name`
-- `dependencies`
-- `topological_order_a_b_c`
-- `cycle_detected`
-- `unknown_dependency`
-- `duplicate_pass_names_are_diagnosed_not_reported_as_cycle`
-- `zero_passes_empty_order`
-- `name`
-- `name`
-- `execution_levels_groups_independent_passes_together`
-- `execution_levels_detects_cycle`
-- `name`
+- `trait` [`CompilerPass`](rustsymbol-compilerpass.md)
+- `struct` [`PassContext`](rustsymbol-passcontext.md)
+- `method` [`PassContext::new`](rustsymbol-passcontext-new.md)
+- `method` [`PassContext::with_artifact_store`](rustsymbol-passcontext-with-artifact-store.md)
+- `enum` [`PassError`](rustsymbol-passerror.md)
+- `method` [`PassError::failed`](rustsymbol-passerror-failed.md)
+- `struct` [`PassManager`](rustsymbol-passmanager.md)
+- `method` [`PassManager::check_unique_names`](rustsymbol-passmanager-check-unique-names.md)
+- `method` [`PassManager::default`](rustsymbol-passmanager-default.md)
+- `method` [`PassManager::execution_levels`](rustsymbol-passmanager-execution-levels.md)
+- `method` [`PassManager::execution_order`](rustsymbol-passmanager-execution-order.md)
+- `method` [`PassManager::is_empty`](rustsymbol-passmanager-is-empty.md)
+- `method` [`PassManager::len`](rustsymbol-passmanager-len.md)
+- `method` [`PassManager::new`](rustsymbol-passmanager-new.md)
+- `method` [`PassManager::register`](rustsymbol-passmanager-register.md)
+- `method` [`PassManager::run_all`](rustsymbol-passmanager-run-all.md)
+- `method` [`PassManager::run_all_parallel`](rustsymbol-passmanager-run-all-parallel.md)
+- `enum` [`SchedulerError`](rustsymbol-schedulererror.md)
+
+## ekos/crates/compiler-core/src/scheduler.rs
+
+- `struct` [`ExecutionReport`](rustsymbol-executionreport.md)
+- `method` [`ExecutionReport::error_count`](rustsymbol-executionreport-error-count.md)
+- `method` [`ExecutionReport::error_outcomes`](rustsymbol-executionreport-error-outcomes.md)
+- `method` [`ExecutionReport::has_errors`](rustsymbol-executionreport-has-errors.md)
+- `method` [`ExecutionReport::passes_run`](rustsymbol-executionreport-passes-run.md)
+- `method` [`ExecutionReport::passes_skipped`](rustsymbol-executionreport-passes-skipped.md)
+- `enum` [`FailureMode`](rustsymbol-failuremode.md)
+- `struct` [`PassOutcome`](rustsymbol-passoutcome.md)
+- `method` [`PassOutcome::ran`](rustsymbol-passoutcome-ran.md)
+- `method` [`PassOutcome::skipped`](rustsymbol-passoutcome-skipped.md)
+- `struct` [`Scheduler`](rustsymbol-scheduler.md)
+- `method` [`Scheduler::new`](rustsymbol-scheduler-new.md)
+- `method` [`Scheduler::register`](rustsymbol-scheduler-register.md)
+- `method` [`Scheduler::run`](rustsymbol-scheduler-run.md)
+- `method` [`Scheduler::run_parallel`](rustsymbol-scheduler-run-parallel.md)
 
 ## ekos/crates/dbt-gen/src/lib.rs
 
-- `slugify_snake`
-- `get_str`
-- `get_str_vec`
-- `get_pairs`
-- `get_aggs`
-- `comment_block`
-- `no_upstream_placeholder`
-- `render_source`
-- `render_sink`
-- `render_join`
-- `render_aggregate`
-- `render_filter`
-- `render_calculate`
-- `render_unmapped`
-- `node`
-- `dbt_model_name_slugifies_source_path_and_index`
-- `is_transform_node_matches_only_the_custom_kind`
-- `is_feeds_into_matches_only_the_custom_kind`
-- `source_node_renders_select_from_source_macro`
-- `source_node_with_no_columns_selects_star`
-- `sink_node_selects_star_from_its_upstream_ref`
-- `sink_node_with_no_upstream_renders_an_honest_placeholder_not_a_panic`
-- `join_node_renders_real_keys_and_kind`
-- `join_node_never_double_qualifies_already_aliased_sql_source_keys`
-- `join_node_with_no_keys_renders_honest_true_condition`
-- `aggregate_node_renders_real_group_by_and_agg_funcs`
-- `filter_node_inlines_raw_condition_flagged_as_unverified`
-- `calculate_node_inlines_raw_expr_flagged_as_unverified`
-- `unmapped_node_preserves_raw_and_reason_as_comments_and_still_chains_ref`
-- `unmapped_node_with_no_upstream_still_renders_valid_sql_not_a_panic`
-- `upstream_model_names_resolves_via_feeds_into_not_join_fields`
-- `upstream_model_names_skips_edges_to_unresolved_nodes`
-- `feeds_into_chain_resolves_correctly_through_an_unmapped_node`
-- `schema_yml_lists_deduplicated_sources_and_sorted_models`
-- `schema_yml_on_empty_input_is_honest_not_invalid_yaml`
+- `struct` [`AggExprRow`](rustsymbol-aggexprrow.md)
+- `struct` [`DbtModelFile`](rustsymbol-dbtmodelfile.md)
+- `function` [`comment_block`](rustsymbol-comment-block.md)
+- `function` [`dbt_model_name`](rustsymbol-dbt-model-name.md)
+- `function` [`get_aggs`](rustsymbol-get-aggs.md)
+- `function` [`get_pairs`](rustsymbol-get-pairs.md)
+- `function` [`get_str`](rustsymbol-get-str.md)
+- `function` [`get_str_vec`](rustsymbol-get-str-vec.md)
+- `function` [`is_feeds_into`](rustsymbol-is-feeds-into-af2f1802.md)
+- `function` [`is_transform_node`](rustsymbol-is-transform-node.md)
+- `function` [`no_upstream_placeholder`](rustsymbol-no-upstream-placeholder.md)
+- `function` [`render_aggregate`](rustsymbol-render-aggregate.md)
+- `function` [`render_calculate`](rustsymbol-render-calculate.md)
+- `function` [`render_dbt_model`](rustsymbol-render-dbt-model.md)
+- `function` [`render_filter`](rustsymbol-render-filter.md)
+- `function` [`render_join`](rustsymbol-render-join.md)
+- `function` [`render_schema_yml`](rustsymbol-render-schema-yml.md)
+- `function` [`render_sink`](rustsymbol-render-sink.md)
+- `function` [`render_source`](rustsymbol-render-source.md)
+- `function` [`render_unmapped`](rustsymbol-render-unmapped.md)
+- `function` [`slugify_snake`](rustsymbol-slugify-snake.md)
+- `function` [`upstream_model_names`](rustsymbol-upstream-model-names.md)
 
 ## ekos/crates/docs-gen/src/lib.rs
 
-- `page_file_name`
-- `mermaid_node_id`
-- `mermaid_escape_label`
-- `mermaid_arrow`
-- `html_escape`
-- `strip_mermaid_fence`
-- `html_document`
-- `format_value`
-- `slugify`
-- `is_feeds_into`
-- `count_by_kind`
-- `render_relationship_kind_graph`
-- `transform_node_origin`
-- `sequence_participant_line`
-- `sample_table`
-- `renders_name_kind_and_properties`
-- `empty_object_renders_honest_placeholders_not_panics`
-- `relationship_with_resolved_evidence_cites_the_fragment`
-- `relationship_citing_unresolved_evidence_says_so_honestly`
-- `relationships_group_by_kind_without_dropping_non_foreign_key`
-- `slugify_handles_dots_and_mixed_case`
-- `incoming_relationship_renders_reverse_arrow`
-- `relationship_with_resolved_name_shows_name_not_just_id`
-- `column_is_not_significant_but_every_other_kind_is`
-- `non_table_kinds_render_pages_with_kind_prefixed_file_names`
-- `different_kinds_sharing_a_name_do_not_collide_on_file_name`
-- `index_page_groups_by_kind_and_links_every_page`
-- `index_page_on_empty_set_is_honest_not_empty_file`
-- `index_page_lists_diagrams_ahead_of_object_groups`
-- `index_page_with_no_diagrams_omits_the_diagrams_section`
-- `object_page_embeds_a_diagram_section_with_a_fenced_mermaid_block`
-- `mermaid_graph_labels_edges_with_relationship_kind_and_direction`
-- `mermaid_graph_dashes_coupled_with_edges_to_signal_a_derived_relationship`
-- `mermaid_graph_unresolved_neighbor_falls_back_to_id_not_dropped`
-- `mermaid_graph_escapes_quotes_in_labels`
-- `er_diagram_renders_foreign_key_edges_between_given_tables`
-- `er_diagram_excludes_foreign_keys_to_objects_outside_the_table_set`
-- `er_diagram_ignores_non_foreign_key_relationships`
-- `er_diagram_quotes_entity_names_containing_spaces`
-- `model_and_markdown_page_agree_with_the_direct_render_object_page_wrapper`
-- `html_page_has_correct_file_extension_and_is_a_full_document`
-- `html_page_escapes_dangerous_characters_in_object_derived_text`
-- `html_page_embeds_mermaid_source_without_markdown_fence`
-- `html_page_on_empty_object_renders_honest_placeholders`
-- `html_index_lists_diagrams_and_groups_pages_by_kind`
-- `html_index_on_empty_set_is_honest_not_blank`
-- `strip_mermaid_fence_removes_fence_but_keeps_body`
-- `html_er_diagram_page_has_correct_file_name_and_embeds_source`
-- `build_object_page_model_initializes_prose_to_none`
-- `markdown_page_embeds_prose_and_its_citations_ahead_of_properties`
+- `struct` [`EvidenceRow`](rustsymbol-evidencerow.md)
+- `struct` [`ObjectPageModel`](rustsymbol-objectpagemodel.md)
+- `struct` [`ProseSection`](rustsymbol-prosesection.md)
+- `struct` [`RelationshipRow`](rustsymbol-relationshiprow.md)
+- `struct` [`RenderedPage`](rustsymbol-renderedpage.md)
+- `enum` [`RowEvidence`](rustsymbol-rowevidence.md)
+- `function` [`build_object_page_model`](rustsymbol-build-object-page-model.md)
+- `function` [`components_cross_reference`](rustsymbol-components-cross-reference.md)
+- `function` [`count_by_kind`](rustsymbol-count-by-kind.md)
+- `function` [`format_value`](rustsymbol-format-value.md)
+- `function` [`html_document`](rustsymbol-html-document.md)
+- `function` [`html_escape`](rustsymbol-html-escape.md)
+- `function` [`is_feeds_into`](rustsymbol-is-feeds-into.md)
+- `function` [`is_module_kind`](rustsymbol-is-module-kind.md)
+- `function` [`is_significant`](rustsymbol-is-significant.md)
+- `function` [`is_symbol_kind`](rustsymbol-is-symbol-kind.md)
+- `function` [`mermaid_arrow`](rustsymbol-mermaid-arrow.md)
+- `function` [`mermaid_escape_label`](rustsymbol-mermaid-escape-label.md)
+- `function` [`mermaid_node_id`](rustsymbol-mermaid-node-id.md)
+- `function` [`page_file_name`](rustsymbol-page-file-name.md)
+- `function` [`render_api`](rustsymbol-render-api.md)
+- `function` [`render_api_from_legacy_file_symbols`](rustsymbol-render-api-from-legacy-file-symbols.md)
+- `function` [`render_architecture`](rustsymbol-render-architecture.md)
+- `function` [`render_call_sequences_section`](rustsymbol-render-call-sequences-section.md)
+- `function` [`render_er_diagram`](rustsymbol-render-er-diagram.md)
+- `function` [`render_html_er_diagram_page`](rustsymbol-render-html-er-diagram-page.md)
+- `function` [`render_html_index_page`](rustsymbol-render-html-index-page.md)
+- `function` [`render_html_object_page`](rustsymbol-render-html-object-page.md)
+- `function` [`render_index_page`](rustsymbol-render-index-page.md)
+- `function` [`render_markdown_object_page`](rustsymbol-render-markdown-object-page.md)
+- `function` [`render_mermaid_graph`](rustsymbol-render-mermaid-graph.md)
+- `function` [`render_object_page`](rustsymbol-render-object-page.md)
+- `function` [`render_readme`](rustsymbol-render-readme.md)
+- `function` [`render_relationship_kind_graph`](rustsymbol-render-relationship-kind-graph.md)
+- `function` [`render_sequence_diagrams`](rustsymbol-render-sequence-diagrams.md)
+- `function` [`sequence_participant_line`](rustsymbol-sequence-participant-line.md)
+- `function` [`slugify`](rustsymbol-slugify.md)
+- `function` [`strip_mermaid_fence`](rustsymbol-strip-mermaid-fence.md)
+- `function` [`transform_node_origin`](rustsymbol-transform-node-origin.md)
+- `function` [`unique_page_file_names`](rustsymbol-unique-page-file-names.md)
 
 ## ekos/crates/ekl/src/interpreter.rs
 
-- `candidate_rows`
-- `resolve_anchor`
-- `expand_from_anchor`
-- `object_row`
-- `relationship_row`
-- `project`
-- `value_to_string`
-- `value_as_f64`
-- `literal_as_f64`
-- `literal_to_string`
-- `value_eq`
-- `eval_predicate`
-- `compare_rows`
-- `fixture`
-- `run`
-- `example_1_all_tables`
-- `example_2_return_name_only`
-- `example_3_exact_name_match`
-- `example_4_contains_predicate`
-- `example_5_order_by_and_limit`
-- `example_6_all_foreign_keys`
-- `example_7_relationships_from_anchor`
-- `example_8_object_neighbourhood`
-- `example_9_no_matches`
-- `example_10_return_projection_with_limit`
-- `via_kind_filters_and_traces_dependencies`
-- `depth_without_via_generalizes_single_hop_default`
-- `unknown_anchor_returns_error`
-- `finds_objects_of_a_newly_added_object_kind`
-- `finds_relationships_of_a_custom_kind`
+- `enum` [`EklError`](rustsymbol-eklerror.md)
+- `struct` [`EklInterpreter`](rustsymbol-eklinterpreter.md)
+- `method` [`EklInterpreter::candidate_rows`](rustsymbol-eklinterpreter-candidate-rows.md)
+- `method` [`EklInterpreter::execute`](rustsymbol-eklinterpreter-execute.md)
+- `method` [`EklInterpreter::expand_from_anchor`](rustsymbol-eklinterpreter-expand-from-anchor.md)
+- `method` [`EklInterpreter::new`](rustsymbol-eklinterpreter-new.md)
+- `method` [`EklInterpreter::resolve_anchor`](rustsymbol-eklinterpreter-resolve-anchor.md)
+- `struct` [`EklResult`](rustsymbol-eklresult.md)
+- `function` [`compare_rows`](rustsymbol-compare-rows.md)
+- `function` [`default_returns`](rustsymbol-default-returns.md)
+- `function` [`eval_predicate`](rustsymbol-eval-predicate.md)
+- `function` [`literal_as_f64`](rustsymbol-literal-as-f64.md)
+- `function` [`literal_to_string`](rustsymbol-literal-to-string.md)
+- `function` [`object_row`](rustsymbol-object-row.md)
+- `function` [`project`](rustsymbol-project-990853c7.md)
+- `function` [`relationship_row`](rustsymbol-relationship-row.md)
+- `function` [`value_as_f64`](rustsymbol-value-as-f64.md)
+- `function` [`value_eq`](rustsymbol-value-eq.md)
+- `function` [`value_to_string`](rustsymbol-value-to-string.md)
 
 ## ekos/crates/ekl/src/parser.rs
 
-- `fmt`
-- `new`
-- `tokenize`
-- `skip_whitespace`
-- `match_symbol_op`
-- `read_string`
-- `read_number`
-- `read_ident`
-- `new`
-- `peek`
-- `peek_pos`
-- `advance`
-- `expect_keyword`
-- `peek_keyword`
-- `expect_ident`
-- `expect_string`
-- `expect_num`
-- `parse_query`
-- `parse_entity`
-- `parse_predicate`
-- `parse_op`
-- `parse_literal`
-- `describe`
-- `parses_minimal_find_object`
-- `parses_return_clause`
-- `parses_relationship_with_from`
-- `parses_order_by_and_limit`
-- `parses_order_by_desc`
-- `parses_and_chained_predicates`
-- `parses_query_with_no_where`
-- `parses_numeric_comparison_operators`
-- `parses_via_and_depth`
-- `depth_alone_generalizes_from_without_via`
-- `queries_without_via_or_depth_default_to_none`
-- `rejects_via_without_from`
-- `rejects_unknown_entity`
-- `rejects_missing_find_keyword`
-- `rejects_unterminated_string`
-- `rejects_trailing_garbage`
-- `fuzz_random_strings_never_panic`
+- `struct` [`EklAst`](rustsymbol-eklast.md)
+- `enum` [`Entity`](rustsymbol-entity.md)
+- `struct` [`Lexer`](rustsymbol-lexer.md)
+- `method` [`Lexer::match_symbol_op`](rustsymbol-lexer-match-symbol-op.md)
+- `method` [`Lexer::new`](rustsymbol-lexer-new.md)
+- `method` [`Lexer::read_ident`](rustsymbol-lexer-read-ident.md)
+- `method` [`Lexer::read_number`](rustsymbol-lexer-read-number.md)
+- `method` [`Lexer::read_string`](rustsymbol-lexer-read-string.md)
+- `method` [`Lexer::skip_whitespace`](rustsymbol-lexer-skip-whitespace.md)
+- `method` [`Lexer::tokenize`](rustsymbol-lexer-tokenize.md)
+- `enum` [`Literal`](rustsymbol-literal.md)
+- `enum` [`Op`](rustsymbol-op.md)
+- `enum` [`Order`](rustsymbol-order.md)
+- `struct` [`ParseError`](rustsymbol-parseerror.md)
+- `method` [`ParseError::fmt`](rustsymbol-parseerror-fmt.md)
+- `struct` [`Parser`](rustsymbol-parser.md)
+- `method` [`Parser::advance`](rustsymbol-parser-advance.md)
+- `method` [`Parser::expect_ident`](rustsymbol-parser-expect-ident.md)
+- `method` [`Parser::expect_keyword`](rustsymbol-parser-expect-keyword.md)
+- `method` [`Parser::expect_num`](rustsymbol-parser-expect-num.md)
+- `method` [`Parser::expect_string`](rustsymbol-parser-expect-string.md)
+- `method` [`Parser::new`](rustsymbol-parser-new.md)
+- `method` [`Parser::parse_entity`](rustsymbol-parser-parse-entity.md)
+- `method` [`Parser::parse_literal`](rustsymbol-parser-parse-literal.md)
+- `method` [`Parser::parse_op`](rustsymbol-parser-parse-op.md)
+- `method` [`Parser::parse_predicate`](rustsymbol-parser-parse-predicate.md)
+- `method` [`Parser::parse_query`](rustsymbol-parser-parse-query.md)
+- `method` [`Parser::peek`](rustsymbol-parser-peek.md)
+- `method` [`Parser::peek_keyword`](rustsymbol-parser-peek-keyword.md)
+- `method` [`Parser::peek_pos`](rustsymbol-parser-peek-pos.md)
+- `struct` [`Predicate`](rustsymbol-predicate.md)
+- `enum` [`Token`](rustsymbol-token.md)
+- `function` [`describe`](rustsymbol-describe.md)
+- `function` [`ekl_parse`](rustsymbol-ekl-parse.md)
 
 ## ekos/crates/identity/src/cross_system.rs
 
-- `matchable_name`
-- `normalize_cross_system`
-- `type_family`
-- `column_types`
-- `type_compat_score`
-- `column_overlap_score`
-- `combine_signals`
-- `table`
-- `transform_source`
-- `transform_sink`
-- `normalize_strips_schema_prefix_and_etl_affixes`
-- `column_overlap_scores_shared_column_names`
-- `type_compat_none_when_either_side_untyped`
-- `type_compat_scores_matching_families`
-- `three_system_customer_table_scenario_produces_candidates`
-- `transform_node_source_and_table_can_match`
-- `unrelated_tables_do_not_produce_a_candidate`
-- `non_table_like_objects_are_ignored`
-- `identical_names_are_not_proposed_as_candidates`
-- `exact_name_match_across_kinds_is_proposed_at_max_confidence`
-- `exact_name_match_same_kind_is_still_skipped`
+- `struct` [`CrossSystemCandidate`](rustsymbol-crosssystemcandidate.md)
+- `struct` [`CrossSystemSignals`](rustsymbol-crosssystemsignals.md)
+- `function` [`column_overlap_score`](rustsymbol-column-overlap-score.md)
+- `function` [`column_types`](rustsymbol-column-types.md)
+- `function` [`combine_signals`](rustsymbol-combine-signals.md)
+- `function` [`find_cross_system_candidates`](rustsymbol-find-cross-system-candidates.md)
+- `function` [`matchable_name`](rustsymbol-matchable-name.md)
+- `function` [`normalize_cross_system`](rustsymbol-normalize-cross-system.md)
+- `function` [`type_compat_score`](rustsymbol-type-compat-score.md)
+- `function` [`type_family`](rustsymbol-type-family.md)
 
 ## ekos/crates/identity/src/lib.rs
 
-- `resolve`
-- `default`
-- `default`
-- `threshold_for`
-- `score`
-- `resolve`
-- `structural_score`
-- `new`
-- `find`
-- `union`
-- `make_graph`
-- `empty_graph_returns_empty`
-- `single_object_no_merge`
-- `exact_case_difference_proposes_merge`
-- `plural_singular_proposes_merge`
-- `underscore_variant_proposes_merge`
-- `dissimilar_names_no_merge`
-- `table_with_columns`
-- `prefix_sharing_tables_with_disjoint_columns_do_not_merge`
-- `similar_names_with_overlapping_columns_still_merge`
-- `different_kind_same_name_conflict`
-- `newly_added_object_kind_participates_in_conflict_detection`
-- `unrelated_documents_sharing_a_folder_prefix_do_not_all_merge`
-- `distinct_pdf_tables_in_one_document_do_not_all_merge`
-- `three_way_transitivity_single_proposal`
-- `stats_counts_pairs_and_candidates`
-- `custom_threshold_prevents_merge`
-- `result_is_serializable`
-- `section_objects_are_never_merged_even_with_near_identical_names`
-- `transform_node_objects_are_never_merged_even_with_shared_source_prefix`
-- `rust_symbol_objects_are_never_merged_even_with_shared_name_suffix`
-- `concept_same_real_entity_across_two_documents_merges`
-- `concept_generic_short_names_across_unrelated_documents_do_not_all_merge`
-- `other_custom_kinds_still_resolve_normally`
+- `enum` [`ConflictKind`](rustsymbol-conflictkind.md)
+- `struct` [`ConflictReport`](rustsymbol-conflictreport.md)
+- `struct` [`DefaultResolver`](rustsymbol-defaultresolver.md)
+- `method` [`DefaultResolver::default`](rustsymbol-defaultresolver-default.md)
+- `method` [`DefaultResolver::new`](rustsymbol-defaultresolver-new.md)
+- `method` [`DefaultResolver::resolve`](rustsymbol-defaultresolver-resolve.md)
+- `method` [`DefaultResolver::score`](rustsymbol-defaultresolver-score.md)
+- `method` [`DefaultResolver::threshold_for`](rustsymbol-defaultresolver-threshold-for.md)
+- `method` [`DefaultResolver::with_kind_threshold`](rustsymbol-defaultresolver-with-kind-threshold.md)
+- `method` [`DefaultResolver::with_threshold`](rustsymbol-defaultresolver-with-threshold.md)
+- `trait` [`IdentityResolver`](rustsymbol-identityresolver.md)
+- `struct` [`MergeProposal`](rustsymbol-mergeproposal.md)
+- `struct` [`ResolutionResult`](rustsymbol-resolutionresult.md)
+- `struct` [`ResolutionStats`](rustsymbol-resolutionstats.md)
+- `struct` [`ResolverConfig`](rustsymbol-resolverconfig.md)
+- `method` [`ResolverConfig::default`](rustsymbol-resolverconfig-default.md)
+- `struct` [`SimilarityScore`](rustsymbol-similarityscore.md)
+- `struct` [`UnionFind`](rustsymbol-unionfind.md)
+- `method` [`UnionFind::find`](rustsymbol-unionfind-find.md)
+- `method` [`UnionFind::new`](rustsymbol-unionfind-new.md)
+- `method` [`UnionFind::union`](rustsymbol-unionfind-union.md)
+- `function` [`structural_score`](rustsymbol-structural-score.md)
 
 ## ekos/crates/identity/src/similarity.rs
 
-- `jaro_winkler_identical`
-- `jaro_winkler_empty_strings`
-- `jaro_winkler_orders_vs_order`
-- `jaro_winkler_dissimilar`
-- `normalize_strips_underscores`
-- `normalize_lowercases`
-- `normalize_strips_tbl_prefix_not_suffix`
-- `normalize_preserves_distinct_names`
+- `function` [`column_names`](rustsymbol-column-names.md)
+- `function` [`jaccard`](rustsymbol-jaccard.md)
+- `function` [`jaro`](rustsymbol-jaro.md)
+- `function` [`jaro_winkler`](rustsymbol-jaro-winkler.md)
+- `function` [`normalize`](rustsymbol-normalize.md)
 
 ## ekos/crates/kir/src/lib.rs
 
-- `default`
-- `fmt`
-- `from_str`
-- `fmt`
-- `fmt`
-- `from_str`
-- `kir_object_round_trip`
-- `indexed_content_includes_ocr_text`
-- `indexed_content_concatenates_excerpt_symbols_and_ocr_text`
-- `indexed_content_empty_when_no_relevant_properties`
-- `object_kind_taxonomy_round_trips`
-- `object_kind_custom_fallback_still_works`
-- `kir_evidence_round_trip`
-- `kir_graph_add_and_get`
-- `sample_graph`
-- `kir_graph_full_round_trip`
-- `kir_relationship_serializes_from_to`
-- `kir_event_round_trip`
-- `knowledge_artifact_embeds_kir_graph`
+- `enum` [`EventKind`](rustsymbol-eventkind.md)
+- `struct` [`KirEvent`](rustsymbol-kirevent.md)
+- `struct` [`KirEvidence`](rustsymbol-kirevidence.md)
+- `method` [`KirEvidence::new`](rustsymbol-kirevidence-new.md)
+- `method` [`KirEvidence::with_confidence`](rustsymbol-kirevidence-with-confidence.md)
+- `struct` [`KirGraph`](rustsymbol-kirgraph.md)
+- `method` [`KirGraph::add_evidence`](rustsymbol-kirgraph-add-evidence.md)
+- `method` [`KirGraph::add_object`](rustsymbol-kirgraph-add-object.md)
+- `method` [`KirGraph::add_relationship`](rustsymbol-kirgraph-add-relationship.md)
+- `method` [`KirGraph::get_evidence`](rustsymbol-kirgraph-get-evidence.md)
+- `method` [`KirGraph::get_object`](rustsymbol-kirgraph-get-object.md)
+- `method` [`KirGraph::new`](rustsymbol-kirgraph-new.md)
+- `struct` [`KirId`](rustsymbol-kirid.md)
+- `method` [`KirId::as_str`](rustsymbol-kirid-as-str.md)
+- `method` [`KirId::default`](rustsymbol-kirid-default.md)
+- `method` [`KirId::fmt`](rustsymbol-kirid-fmt.md)
+- `method` [`KirId::from_str`](rustsymbol-kirid-from-str.md)
+- `method` [`KirId::new`](rustsymbol-kirid-new.md)
+- `struct` [`KirObject`](rustsymbol-kirobject.md)
+- `method` [`KirObject::indexed_content`](rustsymbol-kirobject-indexed-content.md)
+- `method` [`KirObject::new`](rustsymbol-kirobject-new.md)
+- `method` [`KirObject::with_evidence`](rustsymbol-kirobject-with-evidence.md)
+- `method` [`KirObject::with_property`](rustsymbol-kirobject-with-property.md)
+- `struct` [`KirRelationship`](rustsymbol-kirrelationship.md)
+- `method` [`KirRelationship::is_pending_review`](rustsymbol-kirrelationship-is-pending-review.md)
+- `method` [`KirRelationship::new`](rustsymbol-kirrelationship-new.md)
+- `enum` [`ObjectKind`](rustsymbol-objectkind.md)
+- `method` [`ObjectKind::fmt`](rustsymbol-objectkind-fmt.md)
+- `enum` [`RelationshipKind`](rustsymbol-relationshipkind.md)
+- `method` [`RelationshipKind::fmt`](rustsymbol-relationshipkind-fmt.md)
+- `method` [`RelationshipKind::from_str`](rustsymbol-relationshipkind-from-str.md)
+- `struct` [`SourceLocation`](rustsymbol-sourcelocation-f4972231.md)
+- `method` [`SourceLocation::at`](rustsymbol-sourcelocation-at.md)
+- `method` [`SourceLocation::file`](rustsymbol-sourcelocation-file.md)
 
 ## ekos/crates/ledger/src/fact.rs
 
-- `escape_segment`
-- `split_path`
-- `canonical_uuid`
-- `flatten`
-- `type_name`
-- `value_to_json`
-- `insert_path`
-- `round_trip`
-- `assert_parity`
-- `object_round_trips_with_signature_parity`
-- `relationship_and_evidence_round_trip`
-- `typed_reconstruction_is_lossless`
-- `numeric_fidelity_edge_cases`
-- `dotted_keys_stay_distinct_from_nesting`
-- `empty_containers_and_arrays_round_trip`
-- `evidence_order_is_preserved`
-- `non_canonical_ref_values_fall_back_verbatim`
-- `diff_of_property_change_is_two_facts`
-- `registry_ids_are_stable_and_reindexable`
-- `reconstruction_is_order_independent`
+- `struct` [`AttrId`](rustsymbol-attrid.md)
+- `struct` [`AttributeRegistry`](rustsymbol-attributeregistry.md)
+- `method` [`AttributeRegistry::get`](rustsymbol-attributeregistry-get.md)
+- `method` [`AttributeRegistry::intern`](rustsymbol-attributeregistry-intern.md)
+- `method` [`AttributeRegistry::is_empty`](rustsymbol-attributeregistry-is-empty.md)
+- `method` [`AttributeRegistry::len`](rustsymbol-attributeregistry-len.md)
+- `method` [`AttributeRegistry::name`](rustsymbol-attributeregistry-name.md)
+- `method` [`AttributeRegistry::new`](rustsymbol-attributeregistry-new.md)
+- `method` [`AttributeRegistry::reindex`](rustsymbol-attributeregistry-reindex.md)
+- `struct` [`Fact`](rustsymbol-fact.md)
+- `enum` [`FactError`](rustsymbol-facterror.md)
+- `enum` [`FactOp`](rustsymbol-factop.md)
+- `enum` [`FactValue`](rustsymbol-factvalue.md)
+- `struct` [`TxId`](rustsymbol-txid.md)
+- `function` [`canonical_uuid`](rustsymbol-canonical-uuid.md)
+- `function` [`decompose`](rustsymbol-decompose.md)
+- `function` [`diff`](rustsymbol-diff.md)
+- `function` [`escape_segment`](rustsymbol-escape-segment.md)
+- `function` [`flatten`](rustsymbol-flatten.md)
+- `function` [`insert_path`](rustsymbol-insert-path.md)
+- `function` [`reconstruct`](rustsymbol-reconstruct.md)
+- `function` [`split_path`](rustsymbol-split-path.md)
+- `function` [`type_name`](rustsymbol-type-name.md)
+- `function` [`value_to_json`](rustsymbol-value-to-json.md)
 
 ## ekos/crates/ledger/src/fact_ledger.rs
 
-- `from`
-- `kind_of_payload`
-- `append_payload`
-- `append_inner`
-- `typed_current`
-- `all_of_kind`
-- `self_counts`
-- `all_current_payloads`
-- `entity_entries`
-- `state_at`
-- `reconstruct_at`
-- `current_sig`
-- `entities_with_attr`
-- `relationship_candidates`
-- `flush_memtable`
-- `runs_dir`
-- `index_object`
-- `tx_at`
-- `fold_state`
-- `copy_dir`
-- `temp_ledger`
-- `append_and_retrieve_object`
-- `all_objects_and_relationships_are_listed`
-- `append_is_idempotent`
-- `get_unknown_object_returns_none`
-- `evidence_round_trips_and_is_not_an_object`
-- `event_round_trips_and_is_not_an_object`
-- `updating_creates_new_version_and_keeps_latest_current`
-- `object_at_returns_true_historical_version_after_update`
-- `relationships_for_returns_both_directions`
-- `relationships_at_filters_by_time`
-- `fts_semantics_prefix_content_and_ranking`
-- `fts_finds_objects_by_harvested_symbol`
-- `fts_follows_object_updates`
-- `diff_reports_updated_object_as_added_and_others_unchanged`
-- `branch_copy_is_readable_and_merges_like_sqlite`
-- `state_survives_reopen`
-- `reads_serve_from_runs_after_seal_and_reopen`
-- `search_index_rebuilds_after_deletion`
-- `cross_backend_parity_with_sqlite_ledger`
+- `enum` [`EntityKind`](rustsymbol-entitykind.md)
+- `struct` [`FactLedger`](rustsymbol-factledger.md)
+- `method` [`FactLedger::all_objects`](rustsymbol-factledger-all-objects.md)
+- `method` [`FactLedger::all_of_kind`](rustsymbol-factledger-all-of-kind.md)
+- `method` [`FactLedger::all_relationships`](rustsymbol-factledger-all-relationships.md)
+- `method` [`FactLedger::append_event`](rustsymbol-factledger-append-event.md)
+- `method` [`FactLedger::append_evidence`](rustsymbol-factledger-append-evidence.md)
+- `method` [`FactLedger::append_inner`](rustsymbol-factledger-append-inner.md)
+- `method` [`FactLedger::append_object`](rustsymbol-factledger-append-object.md)
+- `method` [`FactLedger::append_payload`](rustsymbol-factledger-append-payload.md)
+- `method` [`FactLedger::append_relationship`](rustsymbol-factledger-append-relationship.md)
+- `method` [`FactLedger::append_version`](rustsymbol-factledger-append-version.md)
+- `method` [`FactLedger::current_signature`](rustsymbol-factledger-current-signature.md)
+- `method` [`FactLedger::diff`](rustsymbol-factledger-diff.md)
+- `method` [`FactLedger::entry_count`](rustsymbol-factledger-entry-count.md)
+- `method` [`FactLedger::find_objects`](rustsymbol-factledger-find-objects.md)
+- `method` [`FactLedger::get_event`](rustsymbol-factledger-get-event.md)
+- `method` [`FactLedger::get_evidence`](rustsymbol-factledger-get-evidence.md)
+- `method` [`FactLedger::get_object`](rustsymbol-factledger-get-object.md)
+- `method` [`FactLedger::get_relationship`](rustsymbol-factledger-get-relationship.md)
+- `method` [`FactLedger::merge_from`](rustsymbol-factledger-merge-from.md)
+- `method` [`FactLedger::object_at`](rustsymbol-factledger-object-at.md)
+- `method` [`FactLedger::object_count`](rustsymbol-factledger-object-count.md)
+- `method` [`FactLedger::open`](rustsymbol-factledger-open.md)
+- `method` [`FactLedger::open_with_seal_threshold`](rustsymbol-factledger-open-with-seal-threshold.md)
+- `method` [`FactLedger::relationship_count`](rustsymbol-factledger-relationship-count.md)
+- `method` [`FactLedger::relationships_at`](rustsymbol-factledger-relationships-at.md)
+- `method` [`FactLedger::relationships_for`](rustsymbol-factledger-relationships-for.md)
+- `method` [`FactLedger::run_count`](rustsymbol-factledger-run-count.md)
+- `method` [`FactLedger::seal_and_flush`](rustsymbol-factledger-seal-and-flush.md)
+- `method` [`FactLedger::set_segment_dictionary`](rustsymbol-factledger-set-segment-dictionary.md)
+- `method` [`FactLedger::typed_current`](rustsymbol-factledger-typed-current.md)
+- `method` [`FactLedger::vacuum_into`](rustsymbol-factledger-vacuum-into.md)
+- `struct` [`Inner`](rustsymbol-inner.md)
+- `method` [`Inner::all_current_payloads`](rustsymbol-inner-all-current-payloads.md)
+- `method` [`Inner::current_sig`](rustsymbol-inner-current-sig.md)
+- `method` [`Inner::entities_with_attr`](rustsymbol-inner-entities-with-attr.md)
+- `method` [`Inner::entity_entries`](rustsymbol-inner-entity-entries.md)
+- `method` [`Inner::flush_memtable`](rustsymbol-inner-flush-memtable.md)
+- `method` [`Inner::index_object`](rustsymbol-inner-index-object.md)
+- `method` [`Inner::reconstruct_at`](rustsymbol-inner-reconstruct-at.md)
+- `method` [`Inner::relationship_candidates`](rustsymbol-inner-relationship-candidates.md)
+- `method` [`Inner::runs_dir`](rustsymbol-inner-runs-dir.md)
+- `method` [`Inner::state_at`](rustsymbol-inner-state-at.md)
+- `method` [`Inner::tx_at`](rustsymbol-inner-tx-at.md)
+- `method` [`LedgerError::from`](rustsymbol-ledgererror-from.md)
+- `function` [`copy_dir`](rustsymbol-copy-dir.md)
+- `function` [`fold_state`](rustsymbol-fold-state.md)
+- `function` [`kind_of_payload`](rustsymbol-kind-of-payload.md)
+- `function` [`self_counts`](rustsymbol-self-counts.md)
 
 ## ekos/crates/ledger/src/index.rs
 
-- `prefix`
-- `push_escaped`
-- `value_order_key`
-- `push_pos`
-- `order`
-- `bytes`
-- `in_prefix`
-- `stores_values`
-- `project`
-- `write_run_raw`
-- `encode_block`
-- `decode_block`
-- `corrupt`
-- `read_block_raw`
-- `scan`
-- `all_raw`
-- `store_with_objects`
-- `eavt_scan_returns_one_entitys_facts`
-- `avet_scan_finds_entity_by_ref_value`
-- `aevt_scan_lists_every_entity_with_attribute`
-- `scans_merge_across_runs_and_survive_compaction`
-- `indexes_rebuild_from_segments`
-- `value_keys_with_embedded_zeros_and_prefixes_stay_ordered`
-- `block_pruning_still_finds_entries_across_blocks`
+- `struct` [`BlockMeta`](rustsymbol-blockmeta.md)
+- `struct` [`FactIndexes`](rustsymbol-factindexes.md)
+- `method` [`FactIndexes::add_runs`](rustsymbol-factindexes-add-runs.md)
+- `method` [`FactIndexes::build_from_batches`](rustsymbol-factindexes-build-from-batches.md)
+- `method` [`FactIndexes::merge_runs`](rustsymbol-factindexes-merge-runs.md)
+- `method` [`FactIndexes::open`](rustsymbol-factindexes-open.md)
+- `method` [`FactIndexes::run_count`](rustsymbol-factindexes-run-count.md)
+- `method` [`FactIndexes::runs_of`](rustsymbol-factindexes-runs-of.md)
+- `method` [`FactIndexes::scan`](rustsymbol-factindexes-scan.md)
+- `struct` [`IndexEntry`](rustsymbol-indexentry.md)
+- `method` [`IndexEntry::from_fact`](rustsymbol-indexentry-from-fact.md)
+- `struct` [`IndexRun`](rustsymbol-indexrun.md)
+- `method` [`IndexRun::all`](rustsymbol-indexrun-all.md)
+- `method` [`IndexRun::all_raw`](rustsymbol-indexrun-all-raw.md)
+- `method` [`IndexRun::entry_count`](rustsymbol-indexrun-entry-count.md)
+- `method` [`IndexRun::open`](rustsymbol-indexrun-open.md)
+- `method` [`IndexRun::order`](rustsymbol-indexrun-order.md)
+- `method` [`IndexRun::read_block_raw`](rustsymbol-indexrun-read-block-raw.md)
+- `method` [`IndexRun::scan`](rustsymbol-indexrun-scan.md)
+- `struct` [`RunDirectory`](rustsymbol-rundirectory.md)
+- `enum` [`ScanPrefix`](rustsymbol-scanprefix.md)
+- `method` [`ScanPrefix::bytes`](rustsymbol-scanprefix-bytes.md)
+- `method` [`ScanPrefix::order`](rustsymbol-scanprefix-order.md)
+- `enum` [`SortOrder`](rustsymbol-sortorder.md)
+- `method` [`SortOrder::prefix`](rustsymbol-sortorder-prefix.md)
+- `function` [`decode_block`](rustsymbol-decode-block.md)
+- `function` [`encode_block`](rustsymbol-encode-block.md)
+- `function` [`encode_key`](rustsymbol-encode-key.md)
+- `function` [`entries_from_batches`](rustsymbol-entries-from-batches.md)
+- `function` [`in_prefix`](rustsymbol-in-prefix.md)
+- `function` [`project`](rustsymbol-project.md)
+- `function` [`push_escaped`](rustsymbol-push-escaped.md)
+- `function` [`push_pos`](rustsymbol-push-pos.md)
+- `function` [`stores_values`](rustsymbol-stores-values.md)
+- `function` [`value_order_key`](rustsymbol-value-order-key.md)
+- `function` [`write_run`](rustsymbol-write-run.md)
+- `function` [`write_run_raw`](rustsymbol-write-run-raw.md)
 
 ## ekos/crates/ledger/src/lib.rs
 
-- `zstd`
-- `compress`
-- `decompress`
-- `create_v2`
-- `migrate_fts_v2`
-- `id_param`
-- `sig_param`
-- `ts_param`
-- `payload_to_string`
-- `payload_param`
-- `query_payloads`
-- `index_object_fts_v1`
-- `index_object_fts_v2`
-- `append_versioned`
-- `find_objects_v1`
-- `find_objects_v2`
-- `versions_in_window`
-- `init_schema_v2`
-- `load_dictionary`
-- `id_value_to_string`
-- `sig_value_to_hex`
-- `ts_value_to_datetime`
-- `all_objects_with_rowids`
-- `payload_samples`
-- `sibling_path`
-- `append_object`
-- `append_evidence`
-- `append_relationship`
-- `append_event`
-- `get_object`
-- `get_evidence`
-- `get_relationship`
-- `get_event`
-- `all_objects`
-- `all_relationships`
-- `relationships_for`
-- `object_at`
-- `relationships_at`
-- `find_objects`
-- `entry_count`
-- `object_count`
-- `relationship_count`
-- `vacuum_into`
-- `diff`
-- `append_object`
-- `append_evidence`
-- `append_relationship`
-- `append_event`
-- `get_object`
-- `get_evidence`
+- `enum` [`Codec`](rustsymbol-codec.md)
+- `method` [`Codec::compress`](rustsymbol-codec-compress.md)
+- `method` [`Codec::decompress`](rustsymbol-codec-decompress.md)
+- `method` [`Codec::zstd`](rustsymbol-codec-zstd.md)
+- `struct` [`Dict`](rustsymbol-dict.md)
+- `enum` [`EntryType`](rustsymbol-entrytype.md)
+- `method` [`EntryType::as_str`](rustsymbol-entrytype-as-str.md)
+- `method` [`FactLedger::diff_impl`](rustsymbol-factledger-diff-impl.md)
+- `enum` [`Format`](rustsymbol-format-2bc470e0.md)
+- `trait` [`KnowledgeStore`](rustsymbol-knowledgestore.md)
+- `struct` [`Ledger`](rustsymbol-ledger.md)
+- `method` [`Ledger::all_objects`](rustsymbol-ledger-all-objects.md)
+- `method` [`Ledger::all_objects_with_rowids`](rustsymbol-ledger-all-objects-with-rowids.md)
+- `method` [`Ledger::all_relationships`](rustsymbol-ledger-all-relationships.md)
+- `method` [`Ledger::append`](rustsymbol-ledger-append.md)
+- `method` [`Ledger::append_event`](rustsymbol-ledger-append-event.md)
+- `method` [`Ledger::append_evidence`](rustsymbol-ledger-append-evidence.md)
+- `method` [`Ledger::append_object`](rustsymbol-ledger-append-object.md)
+- `method` [`Ledger::append_relationship`](rustsymbol-ledger-append-relationship.md)
+- `method` [`Ledger::append_versioned`](rustsymbol-ledger-append-versioned.md)
+- `method` [`Ledger::create_v2`](rustsymbol-ledger-create-v2.md)
+- `method` [`Ledger::diff_impl`](rustsymbol-ledger-diff-impl.md)
+- `method` [`Ledger::entry_count`](rustsymbol-ledger-entry-count.md)
+- `method` [`Ledger::export_versions`](rustsymbol-ledger-export-versions.md)
+- `method` [`Ledger::find_objects`](rustsymbol-ledger-find-objects.md)
+- `method` [`Ledger::find_objects_v1`](rustsymbol-ledger-find-objects-v1.md)
+- `method` [`Ledger::find_objects_v2`](rustsymbol-ledger-find-objects-v2.md)
+- `method` [`Ledger::get_event`](rustsymbol-ledger-get-event.md)
+- `method` [`Ledger::get_evidence`](rustsymbol-ledger-get-evidence.md)
+- `method` [`Ledger::get_object`](rustsymbol-ledger-get-object.md)
+- `method` [`Ledger::get_relationship`](rustsymbol-ledger-get-relationship.md)
+- `method` [`Ledger::id_param`](rustsymbol-ledger-id-param.md)
+- `method` [`Ledger::index_object_fts_v1`](rustsymbol-ledger-index-object-fts-v1.md)
+- `method` [`Ledger::index_object_fts_v2`](rustsymbol-ledger-index-object-fts-v2.md)
+- `method` [`Ledger::migrate_fts_v2`](rustsymbol-ledger-migrate-fts-v2.md)
+- `method` [`Ledger::object_at`](rustsymbol-ledger-object-at.md)
+- `method` [`Ledger::object_count`](rustsymbol-ledger-object-count.md)
+- `method` [`Ledger::open`](rustsymbol-ledger-open.md)
+- `method` [`Ledger::payload_param`](rustsymbol-ledger-payload-param.md)
+- `method` [`Ledger::payload_to_string`](rustsymbol-ledger-payload-to-string.md)
+- `method` [`Ledger::query_payloads`](rustsymbol-ledger-query-payloads.md)
+- `method` [`Ledger::relationship_count`](rustsymbol-ledger-relationship-count.md)
+- `method` [`Ledger::relationships_at`](rustsymbol-ledger-relationships-at.md)
+- `method` [`Ledger::relationships_for`](rustsymbol-ledger-relationships-for.md)
+- `method` [`Ledger::sig_param`](rustsymbol-ledger-sig-param.md)
+- `method` [`Ledger::storage_stats`](rustsymbol-ledger-storage-stats.md)
+- `method` [`Ledger::ts_param`](rustsymbol-ledger-ts-param.md)
+- `method` [`Ledger::vacuum_into`](rustsymbol-ledger-vacuum-into.md)
+- `method` [`Ledger::versions_in_window`](rustsymbol-ledger-versions-in-window.md)
+- `struct` [`LedgerDiff`](rustsymbol-ledgerdiff.md)
+- `struct` [`LedgerEntry`](rustsymbol-ledgerentry.md)
+- `struct` [`LedgerEntryId`](rustsymbol-ledgerentryid.md)
+- `enum` [`LedgerError`](rustsymbol-ledgererror.md)
+- `struct` [`MergeConflict`](rustsymbol-mergeconflict.md)
+- `struct` [`MergeReport`](rustsymbol-mergereport.md)
+- `struct` [`MigrateReport`](rustsymbol-migratereport.md)
+- `struct` [`MigrateV3Report`](rustsymbol-migratev3report.md)
+- `struct` [`VersionRow`](rustsymbol-versionrow.md)
+- `function` [`content_signature`](rustsymbol-content-signature.md)
+- `function` [`diff_ledger`](rustsymbol-diff-ledger.md)
+- `function` [`dir_bytes`](rustsymbol-dir-bytes.md)
+- `function` [`id_value_to_string`](rustsymbol-id-value-to-string.md)
+- `function` [`init_schema_v2`](rustsymbol-init-schema-v2.md)
+- `function` [`load_dictionary`](rustsymbol-load-dictionary.md)
+- `function` [`merge_branch`](rustsymbol-merge-branch.md)
+- `function` [`merge_stores`](rustsymbol-merge-stores.md)
+- `function` [`migrate_to_v2`](rustsymbol-migrate-to-v2.md)
+- `function` [`migrate_to_v3`](rustsymbol-migrate-to-v3.md)
+- `function` [`payload_samples`](rustsymbol-payload-samples.md)
+- `function` [`sibling_path`](rustsymbol-sibling-path.md)
+- `function` [`sig_value_to_hex`](rustsymbol-sig-value-to-hex.md)
+- `function` [`ts_value_to_datetime`](rustsymbol-ts-value-to-datetime.md)
 
 ## ekos/crates/ledger/src/search.rs
 
-- `terr`
+- `struct` [`SearchIndex`](rustsymbol-searchindex.md)
+- `method` [`SearchIndex::commit`](rustsymbol-searchindex-commit.md)
+- `method` [`SearchIndex::open`](rustsymbol-searchindex-open.md)
+- `method` [`SearchIndex::query`](rustsymbol-searchindex-query.md)
+- `method` [`SearchIndex::upsert`](rustsymbol-searchindex-upsert.md)
+- `function` [`terr`](rustsymbol-terr.md)
 
 ## ekos/crates/ledger/src/segment/map.rs
 
-- `maps_sealed_file_and_verifies_length`
+- `struct` [`MappedSegment`](rustsymbol-mappedsegment.md)
+- `method` [`MappedSegment::bytes`](rustsymbol-mappedsegment-bytes.md)
+- `method` [`MappedSegment::open`](rustsymbol-mappedsegment-open.md)
 
 ## ekos/crates/ledger/src/segment/mod.rs
 
-- `build_dict`
-- `read_active_committed`
-- `active_batches`
-- `encode_frame`
-- `walk_frames`
-- `scan_slice`
-- `scan_batches_filtered`
-- `scan_headers_slice`
-- `decode_header`
-- `decode_frame`
-- `segment_path`
-- `load_manifest`
-- `save_manifest`
-- `write_head`
-- `atomic_write`
-- `hash_file`
-- `sample_ops`
-- `append_and_replay_across_reopen`
-- `seal_rolls_to_new_segment_and_verifies`
-- `torn_tail_is_truncated_and_prior_batches_survive`
-- `valid_frames_past_stale_watermark_are_recovered`
-- `corrupted_sealed_segment_fails_verification`
-- `manifest_attribute_registry_round_trips`
-- `batch_round_trip_preserves_ops_exactly`
+- `struct` [`Batch`](rustsymbol-batch.md)
+- `struct` [`Head`](rustsymbol-head.md)
+- `struct` [`Manifest`](rustsymbol-manifest.md)
+- `struct` [`SealedSegment`](rustsymbol-sealedsegment.md)
+- `struct` [`SegDict`](rustsymbol-segdict.md)
+- `enum` [`SegmentError`](rustsymbol-segmenterror.md)
+- `struct` [`SegmentStore`](rustsymbol-segmentstore.md)
+- `method` [`SegmentStore::active_batches`](rustsymbol-segmentstore-active-batches.md)
+- `method` [`SegmentStore::append`](rustsymbol-segmentstore-append.md)
+- `method` [`SegmentStore::append_with_seal`](rustsymbol-segmentstore-append-with-seal.md)
+- `method` [`SegmentStore::batch_headers`](rustsymbol-segmentstore-batch-headers.md)
+- `method` [`SegmentStore::batches`](rustsymbol-segmentstore-batches.md)
+- `method` [`SegmentStore::batches_after`](rustsymbol-segmentstore-batches-after.md)
+- `method` [`SegmentStore::committed_len`](rustsymbol-segmentstore-committed-len.md)
+- `method` [`SegmentStore::encode_frame`](rustsymbol-segmentstore-encode-frame.md)
+- `method` [`SegmentStore::next_tx`](rustsymbol-segmentstore-next-tx.md)
+- `method` [`SegmentStore::open`](rustsymbol-segmentstore-open.md)
+- `method` [`SegmentStore::open_with_seal_threshold`](rustsymbol-segmentstore-open-with-seal-threshold.md)
+- `method` [`SegmentStore::persist_manifest`](rustsymbol-segmentstore-persist-manifest.md)
+- `method` [`SegmentStore::read_active_committed`](rustsymbol-segmentstore-read-active-committed.md)
+- `method` [`SegmentStore::root`](rustsymbol-segmentstore-root.md)
+- `method` [`SegmentStore::seal_active`](rustsymbol-segmentstore-seal-active.md)
+- `method` [`SegmentStore::set_dictionary`](rustsymbol-segmentstore-set-dictionary.md)
+- `method` [`SegmentStore::verify_sealed`](rustsymbol-segmentstore-verify-sealed.md)
+- `function` [`atomic_write`](rustsymbol-atomic-write.md)
+- `function` [`build_dict`](rustsymbol-build-dict.md)
+- `function` [`decode_frame`](rustsymbol-decode-frame.md)
+- `function` [`decode_header`](rustsymbol-decode-header.md)
+- `function` [`hash_file`](rustsymbol-hash-file.md)
+- `function` [`load_manifest`](rustsymbol-load-manifest.md)
+- `function` [`save_manifest`](rustsymbol-save-manifest.md)
+- `function` [`scan_batches_filtered`](rustsymbol-scan-batches-filtered.md)
+- `function` [`scan_headers_slice`](rustsymbol-scan-headers-slice.md)
+- `function` [`scan_slice`](rustsymbol-scan-slice.md)
+- `function` [`segment_path`](rustsymbol-segment-path.md)
+- `function` [`walk_frames`](rustsymbol-walk-frames.md)
+- `function` [`write_head`](rustsymbol-write-head.md)
 
 ## ekos/crates/ledger/tests/estate_migration.rs
 
-- `dir_bytes`
-- `mb`
-- `migrate_estate_and_report_sizes`
+- `function` [`dir_bytes`](rustsymbol-dir-bytes-a1c5e8ff.md)
+- `function` [`mb`](rustsymbol-mb.md)
+- `function` [`migrate_estate_and_report_sizes`](rustsymbol-migrate-estate-and-report-sizes.md)
 
 ## ekos/crates/marketing/src/devlog.rs
 
-- `split_once_any_dash`
-- `extract_section`
-- `parses_number_title_date_from_real_format`
-- `extracts_summary_body_only`
-- `section_titles_excludes_meta_sections_only`
-- `missing_summary_is_an_error`
-- `missing_title_heading_is_an_error`
-- `number_from_filename_handles_path_and_bare_name`
-- `find_latest_picks_highest_numbered_devlog`
-- `find_latest_returns_none_when_no_devlogs_exist`
+- `enum` [`DevlogParseError`](rustsymbol-devlogparseerror.md)
+- `struct` [`DevlogSummary`](rustsymbol-devlogsummary.md)
+- `function` [`extract_section`](rustsymbol-extract-section.md)
+- `function` [`find_latest`](rustsymbol-find-latest.md)
+- `function` [`number_from_filename`](rustsymbol-number-from-filename.md)
+- `function` [`parse`](rustsymbol-parse.md)
+- `function` [`split_once_any_dash`](rustsymbol-split-once-any-dash.md)
 
 ## ekos/crates/marketing/src/importance.rs
 
-- `devlog`
-- `pure_chore_devlog_is_low`
-- `devlog_mentioning_an_rfc_is_high`
-- `ordinary_feature_improvement_is_medium`
-- `low_signal_words_with_a_feature_signal_stay_medium`
+- `enum` [`Importance`](rustsymbol-importance.md)
+- `function` [`classify`](rustsymbol-classify.md)
 
 ## ekos/crates/marketing/src/oauth1.rs
 
-- `normalized_param_string`
-- `sign`
-- `percent_encode_leaves_unreserved_characters_alone`
-- `percent_encode_escapes_reserved_characters`
-- `hmac_sha1_matches_rfc2202_test_vector_1`
-- `creds`
-- `base_params`
-- `signature_is_deterministic_for_identical_inputs`
-- `signature_changes_when_any_single_input_changes`
-- `authorization_header_has_oauth_scheme_and_all_required_params`
-- `nonce_is_reasonably_unique_across_calls`
+- `struct` [`OauthCredentials`](rustsymbol-oauthcredentials.md)
+- `function` [`authorization_header`](rustsymbol-authorization-header.md)
+- `function` [`generate_nonce`](rustsymbol-generate-nonce.md)
+- `function` [`normalized_param_string`](rustsymbol-normalized-param-string.md)
+- `function` [`percent_encode`](rustsymbol-percent-encode.md)
+- `function` [`sign`](rustsymbol-sign.md)
+- `function` [`signature_base_string`](rustsymbol-signature-base-string.md)
+- `function` [`unix_timestamp`](rustsymbol-unix-timestamp.md)
 
 ## ekos/crates/marketing/src/prompt.rs
 
-- `overage_from_too_long_reason`
-- `config`
-- `devlog`
-- `system_prompt_encodes_every_hard_rule`
-- `user_prompt_embeds_summary_github_and_hashtags`
-- `retry_suffix_carries_the_rejection_reason`
-- `retry_suffix_states_exact_overage_for_too_long_drafts`
-- `retry_suffix_falls_back_without_overage_for_other_rejections`
+- `function` [`build_retry_suffix`](rustsymbol-build-retry-suffix.md)
+- `function` [`build_user_prompt`](rustsymbol-build-user-prompt.md)
+- `function` [`overage_from_too_long_reason`](rustsymbol-overage-from-too-long-reason.md)
 
 ## ekos/crates/marketing/src/publisher.rs
 
-- `from_env_reports_which_var_is_missing`
+- `struct` [`NoopPublisher`](rustsymbol-nooppublisher.md)
+- `method` [`NoopPublisher::publish`](rustsymbol-nooppublisher-publish.md)
+- `enum` [`PublishError`](rustsymbol-publisherror.md)
+- `trait` [`Publisher`](rustsymbol-publisher.md)
+- `struct` [`TweetCreateData`](rustsymbol-tweetcreatedata.md)
+- `struct` [`TweetCreateResponse`](rustsymbol-tweetcreateresponse.md)
+- `struct` [`TwitterPublisher`](rustsymbol-twitterpublisher.md)
+- `method` [`TwitterPublisher::from_env`](rustsymbol-twitterpublisher-from-env.md)
+- `method` [`TwitterPublisher::new`](rustsymbol-twitterpublisher-new.md)
+- `method` [`TwitterPublisher::publish`](rustsymbol-twitterpublisher-publish.md)
 
 ## ekos/crates/marketing/src/store.rs
 
-- `load_missing_file_is_an_empty_store`
-- `record_then_save_then_reload_roundtrips`
-- `is_posted_is_false_for_a_different_devlog_number`
-- `tweets_json_file_lands_at_marketing_posted_tweets_json`
+- `struct` [`PostedStore`](rustsymbol-postedstore.md)
+- `method` [`PostedStore::is_posted`](rustsymbol-postedstore-is-posted.md)
+- `method` [`PostedStore::load`](rustsymbol-postedstore-load.md)
+- `method` [`PostedStore::record`](rustsymbol-postedstore-record.md)
+- `method` [`PostedStore::save`](rustsymbol-postedstore-save.md)
+- `struct` [`PostedTweet`](rustsymbol-postedtweet.md)
+- `enum` [`StoreError`](rustsymbol-storeerror-e1b41824.md)
 
 ## ekos/crates/marketing/src/tweet.rs
 
-- `config`
-- `devlog`
-- `valid_tweet_passes`
-- `rejects_tweet_over_280_chars`
-- `rejects_tweet_missing_ekos_mention`
-- `rejects_tweet_missing_github_link`
-- `rejects_tweet_with_too_many_hashtags`
-- `rejects_empty_tweet`
+- `struct` [`LlmTweetOutput`](rustsymbol-llmtweetoutput.md)
+- `enum` [`MarketingError`](rustsymbol-marketingerror.md)
+- `struct` [`TweetDraft`](rustsymbol-tweetdraft.md)
+- `enum` [`TweetValidationError`](rustsymbol-tweetvalidationerror.md)
+- `function` [`draft_once`](rustsymbol-draft-once.md)
+- `function` [`generate_tweet`](rustsymbol-generate-tweet.md)
+- `function` [`validate_tweet`](rustsymbol-validate-tweet.md)
 
 ## ekos/crates/observation-sdk/src/lib.rs
 
-- `name`
-- `is_ignored_catches_prefix_segments`
-- `observation_package_counts`
-- `fingerprint_stable_across_repeated_scans`
-- `fingerprint_changes_on_new_file`
-- `fingerprint_ignores_ignored_paths`
+- `struct` [`ConnectorConfig`](rustsymbol-connectorconfig.md)
+- `method` [`ConnectorConfig::get_bool`](rustsymbol-connectorconfig-get-bool.md)
+- `method` [`ConnectorConfig::get_str`](rustsymbol-connectorconfig-get-str.md)
+- `struct` [`Fingerprint`](rustsymbol-fingerprint.md)
+- `struct` [`ObservationPackage`](rustsymbol-observationpackage.md)
+- `method` [`ObservationPackage::is_empty`](rustsymbol-observationpackage-is-empty.md)
+- `method` [`ObservationPackage::len`](rustsymbol-observationpackage-len.md)
+- `method` [`ObservationPackage::new`](rustsymbol-observationpackage-new.md)
+- `method` [`ObservationPackage::push`](rustsymbol-observationpackage-push.md)
+- `enum` [`ObserveError`](rustsymbol-observeerror.md)
+- `method` [`ObserveError::connector`](rustsymbol-observeerror-connector.md)
+- `trait` [`Observer`](rustsymbol-observer.md)
+- `struct` [`PackageMeta`](rustsymbol-packagemeta.md)
+- `struct` [`ScanContext`](rustsymbol-scancontext.md)
+- `method` [`ScanContext::is_ignored`](rustsymbol-scancontext-is-ignored.md)
+- `method` [`ScanContext::new`](rustsymbol-scancontext-new.md)
+- `method` [`ScanContext::with_config`](rustsymbol-scancontext-with-config.md)
+- `method` [`ScanContext::with_ignore_patterns`](rustsymbol-scancontext-with-ignore-patterns.md)
+- `function` [`source_fingerprint`](rustsymbol-source-fingerprint.md)
 
 ## ekos/crates/recovery/src/anthropic.rs
 
-- `model_name`
+- `struct` [`AnthropicProvider`](rustsymbol-anthropicprovider.md)
+- `method` [`AnthropicProvider::complete`](rustsymbol-anthropicprovider-complete.md)
+- `method` [`AnthropicProvider::from_env`](rustsymbol-anthropicprovider-from-env.md)
+- `method` [`AnthropicProvider::from_env_var`](rustsymbol-anthropicprovider-from-env-var.md)
+- `method` [`AnthropicProvider::model_name`](rustsymbol-anthropicprovider-model-name.md)
+- `method` [`AnthropicProvider::new`](rustsymbol-anthropicprovider-new.md)
+- `struct` [`ApiContent`](rustsymbol-apicontent.md)
+- `struct` [`ApiMessage`](rustsymbol-apimessage.md)
+- `struct` [`ApiRequest`](rustsymbol-apirequest-d7b913bf.md)
+- `struct` [`ApiResponse`](rustsymbol-apiresponse.md)
+- `struct` [`ApiUsage`](rustsymbol-apiusage.md)
 
 ## ekos/crates/recovery/src/cache.rs
 
-- `cache_key`
-- `cache_path`
-- `model_name`
-- `model_name`
+- `struct` [`CachedLlmProvider`](rustsymbol-cachedllmprovider.md)
+- `method` [`CachedLlmProvider::cache_root`](rustsymbol-cachedllmprovider-cache-root.md)
+- `method` [`CachedLlmProvider::complete`](rustsymbol-cachedllmprovider-complete.md)
+- `method` [`CachedLlmProvider::model_name`](rustsymbol-cachedllmprovider-model-name.md)
+- `method` [`CachedLlmProvider::new`](rustsymbol-cachedllmprovider-new.md)
+- `function` [`cache_key`](rustsymbol-cache-key.md)
+- `function` [`cache_path`](rustsymbol-cache-path.md)
+
+## ekos/crates/recovery/src/cicd_analyzer.rs
+
+- `struct` [`CicdAnalyzerPass`](rustsymbol-cicdanalyzerpass.md)
+- `method` [`CicdAnalyzerPass::cache_inputs`](rustsymbol-cicdanalyzerpass-cache-inputs.md)
+- `method` [`CicdAnalyzerPass::name`](rustsymbol-cicdanalyzerpass-name.md)
+- `method` [`CicdAnalyzerPass::new`](rustsymbol-cicdanalyzerpass-new.md)
+- `method` [`CicdAnalyzerPass::run`](rustsymbol-cicdanalyzerpass-run.md)
+- `function` [`extract_jobs`](rustsymbol-extract-jobs.md)
+- `function` [`extract_triggers`](rustsymbol-extract-triggers.md)
+- `function` [`pipeline_kir_id`](rustsymbol-pipeline-kir-id.md)
 
 ## ekos/crates/recovery/src/confluence_analyzer.rs
 
-- `page_kir_id`
-- `body_excerpt`
-- `find_linked_titles`
-- `name`
-- `cache_inputs`
-- `ctx`
-- `seed_page`
-- `finds_content_title_links`
-- `ignores_body_with_no_links`
+- `struct` [`ConfluenceAnalyzerPass`](rustsymbol-confluenceanalyzerpass.md)
+- `method` [`ConfluenceAnalyzerPass::cache_inputs`](rustsymbol-confluenceanalyzerpass-cache-inputs.md)
+- `method` [`ConfluenceAnalyzerPass::name`](rustsymbol-confluenceanalyzerpass-name.md)
+- `method` [`ConfluenceAnalyzerPass::new`](rustsymbol-confluenceanalyzerpass-new.md)
+- `method` [`ConfluenceAnalyzerPass::run`](rustsymbol-confluenceanalyzerpass-run.md)
+- `struct` [`PageData`](rustsymbol-pagedata.md)
+- `function` [`body_excerpt`](rustsymbol-body-excerpt.md)
+- `function` [`find_linked_titles`](rustsymbol-find-linked-titles.md)
+- `function` [`page_kir_id`](rustsymbol-page-kir-id.md)
+
+## ekos/crates/recovery/src/crate_topology_analyzer.rs
+
+- `struct` [`CrateTopologyAnalyzerPass`](rustsymbol-cratetopologyanalyzerpass.md)
+- `method` [`CrateTopologyAnalyzerPass::cache_inputs`](rustsymbol-cratetopologyanalyzerpass-cache-inputs.md)
+- `method` [`CrateTopologyAnalyzerPass::name`](rustsymbol-cratetopologyanalyzerpass-name.md)
+- `method` [`CrateTopologyAnalyzerPass::new`](rustsymbol-cratetopologyanalyzerpass-new.md)
+- `method` [`CrateTopologyAnalyzerPass::run`](rustsymbol-cratetopologyanalyzerpass-run.md)
+- `enum` [`DepResolution`](rustsymbol-depresolution.md)
+- `enum` [`WorkspaceDep`](rustsymbol-workspacedep.md)
+- `function` [`crate_kir_id`](rustsymbol-crate-kir-id.md)
+- `function` [`normalize_rel_path`](rustsymbol-normalize-rel-path.md)
+- `function` [`resolve_dep_entry`](rustsymbol-resolve-dep-entry.md)
+- `function` [`technology_kir_id`](rustsymbol-technology-kir-id-84387622.md)
 
 ## ekos/crates/recovery/src/crypto_analyzer.rs
 
-- `name`
-- `cache_inputs`
-- `deterministic_id`
-- `parse_attrs`
-- `make_ctx`
-- `seed_batch_artifact`
-- `sample_batch_json`
+- `struct` [`BatchData`](rustsymbol-batchdata.md)
+- `struct` [`CryptoAnalyzerPass`](rustsymbol-cryptoanalyzerpass.md)
+- `method` [`CryptoAnalyzerPass::cache_inputs`](rustsymbol-cryptoanalyzerpass-cache-inputs.md)
+- `method` [`CryptoAnalyzerPass::name`](rustsymbol-cryptoanalyzerpass-name.md)
+- `method` [`CryptoAnalyzerPass::new`](rustsymbol-cryptoanalyzerpass-new.md)
+- `method` [`CryptoAnalyzerPass::run`](rustsymbol-cryptoanalyzerpass-run.md)
+- `struct` [`EntityRow`](rustsymbol-entityrow.md)
+- `struct` [`EvidenceRow`](rustsymbol-evidencerow-21ccac89.md)
+- `struct` [`RelationshipRow`](rustsymbol-relationshiprow-5e78a376.md)
+- `function` [`deterministic_id`](rustsymbol-deterministic-id.md)
+- `function` [`parse_attrs`](rustsymbol-parse-attrs.md)
 
 ## ekos/crates/recovery/src/dependency_analyzer.rs
 
-- `technology_kir_id`
-- `file_kir_id`
-- `name`
-- `cache_inputs`
-- `ctx`
+- `struct` [`DependencyAnalyzerPass`](rustsymbol-dependencyanalyzerpass.md)
+- `method` [`DependencyAnalyzerPass::cache_inputs`](rustsymbol-dependencyanalyzerpass-cache-inputs.md)
+- `method` [`DependencyAnalyzerPass::name`](rustsymbol-dependencyanalyzerpass-name.md)
+- `method` [`DependencyAnalyzerPass::new`](rustsymbol-dependencyanalyzerpass-new.md)
+- `method` [`DependencyAnalyzerPass::run`](rustsymbol-dependencyanalyzerpass-run.md)
+- `function` [`file_kir_id`](rustsymbol-file-kir-id.md)
+- `function` [`technology_kir_id`](rustsymbol-technology-kir-id.md)
 
 ## ekos/crates/recovery/src/document_semantics_analyzer.rs
 
-- `concept_kir_id`
-- `normalize_concept_name`
-- `collect_sections`
-- `sections_from_graph`
-- `name`
-- `dependencies`
-- `ctx`
-- `read_output`
-- `two_concept_response`
-- `declares_its_local_docs_pass_as_a_dependency`
+- `struct` [`DocumentSemanticsAnalyzerPass`](rustsymbol-documentsemanticsanalyzerpass.md)
+- `method` [`DocumentSemanticsAnalyzerPass::collect_sections`](rustsymbol-documentsemanticsanalyzerpass-collect-sections.md)
+- `method` [`DocumentSemanticsAnalyzerPass::dependencies`](rustsymbol-documentsemanticsanalyzerpass-dependencies.md)
+- `method` [`DocumentSemanticsAnalyzerPass::name`](rustsymbol-documentsemanticsanalyzerpass-name.md)
+- `method` [`DocumentSemanticsAnalyzerPass::new`](rustsymbol-documentsemanticsanalyzerpass-new.md)
+- `method` [`DocumentSemanticsAnalyzerPass::run`](rustsymbol-documentsemanticsanalyzerpass-run.md)
+- `method` [`DocumentSemanticsAnalyzerPass::stats_handle`](rustsymbol-documentsemanticsanalyzerpass-stats-handle.md)
+- `method` [`DocumentSemanticsAnalyzerPass::with_max_sections`](rustsymbol-documentsemanticsanalyzerpass-with-max-sections.md)
+- `struct` [`DocumentSemanticsStats`](rustsymbol-documentsemanticsstats.md)
+- `struct` [`LlmConcept`](rustsymbol-llmconcept.md)
+- `struct` [`LlmOutput`](rustsymbol-llmoutput.md)
+- `struct` [`LlmRelationship`](rustsymbol-llmrelationship-a8e764aa.md)
+- `struct` [`SectionInput`](rustsymbol-sectioninput.md)
+- `function` [`concept_kir_id`](rustsymbol-concept-kir-id.md)
+- `function` [`normalize_concept_name`](rustsymbol-normalize-concept-name.md)
+- `function` [`sections_from_graph`](rustsymbol-sections-from-graph.md)
 
 ## ekos/crates/recovery/src/git_analyzer.rs
 
-- `name`
-- `version`
-- `cache_inputs`
-- `contributor_kir_id`
-- `make_commit_artifact`
-- `make_ctx_with_store`
-- `seed_artifact`
-- `read_knowledge_graph`
-- `make_repo_artifact`
-- `contributor_kir_id_is_stable`
+- `struct` [`GitAnalyzerPass`](rustsymbol-gitanalyzerpass.md)
+- `method` [`GitAnalyzerPass::cache_inputs`](rustsymbol-gitanalyzerpass-cache-inputs.md)
+- `method` [`GitAnalyzerPass::name`](rustsymbol-gitanalyzerpass-name.md)
+- `method` [`GitAnalyzerPass::new`](rustsymbol-gitanalyzerpass-new.md)
+- `method` [`GitAnalyzerPass::run`](rustsymbol-gitanalyzerpass-run.md)
+- `method` [`GitAnalyzerPass::version`](rustsymbol-gitanalyzerpass-version.md)
+- `method` [`GitAnalyzerPass::with_max_coupling_commit_files`](rustsymbol-gitanalyzerpass-with-max-coupling-commit-files.md)
+- `method` [`GitAnalyzerPass::with_min_coupling`](rustsymbol-gitanalyzerpass-with-min-coupling.md)
+- `function` [`contributor_kir_id`](rustsymbol-contributor-kir-id.md)
 
 ## ekos/crates/recovery/src/github_analyzer.rs
 
-- `item_kir_id`
-- `file_kir_id`
-- `find_closed_issue_numbers`
-- `body_excerpt`
-- `name`
-- `cache_inputs`
-- `ctx`
-- `seed_item`
-- `finds_closes_keyword_case_insensitively`
-- `ignores_unrecognized_phrasing`
+- `struct` [`GitHubAnalyzerPass`](rustsymbol-githubanalyzerpass.md)
+- `method` [`GitHubAnalyzerPass::cache_inputs`](rustsymbol-githubanalyzerpass-cache-inputs.md)
+- `method` [`GitHubAnalyzerPass::name`](rustsymbol-githubanalyzerpass-name.md)
+- `method` [`GitHubAnalyzerPass::new`](rustsymbol-githubanalyzerpass-new.md)
+- `method` [`GitHubAnalyzerPass::run`](rustsymbol-githubanalyzerpass-run.md)
+- `struct` [`ItemData`](rustsymbol-itemdata.md)
+- `function` [`body_excerpt`](rustsymbol-body-excerpt-4f4ffc8a.md)
+- `function` [`file_kir_id`](rustsymbol-file-kir-id-d36e01ce.md)
+- `function` [`find_closed_issue_numbers`](rustsymbol-find-closed-issue-numbers.md)
+- `function` [`item_kir_id`](rustsymbol-item-kir-id.md)
 
 ## ekos/crates/recovery/src/llm.rs
 
-- `model_name`
-- `model_name`
+- `enum` [`LlmError`](rustsymbol-llmerror.md)
+- `method` [`LlmError::other`](rustsymbol-llmerror-other.md)
+- `trait` [`LlmProvider`](rustsymbol-llmprovider.md)
+- `struct` [`LlmRequest`](rustsymbol-llmrequest.md)
+- `struct` [`LlmResponse`](rustsymbol-llmresponse.md)
+- `struct` [`MockLlmProvider`](rustsymbol-mockllmprovider.md)
+- `method` [`MockLlmProvider::complete`](rustsymbol-mockllmprovider-complete.md)
+- `method` [`MockLlmProvider::model_name`](rustsymbol-mockllmprovider-model-name.md)
+- `method` [`MockLlmProvider::new`](rustsymbol-mockllmprovider-new.md)
 
 ## ekos/crates/recovery/src/llm_json.rs
 
-- `bare_json_is_unchanged`
-- `json_fence_is_stripped`
-- `bare_fence_is_stripped`
-- `surrounding_whitespace_is_trimmed`
+- `function` [`strip_json_fences`](rustsymbol-strip-json-fences.md)
 
 ## ekos/crates/recovery/src/local_docs_analyzer.rs
 
-- `document_kir_id`
-- `table_kir_id`
-- `section_kir_id`
-- `name`
-- `cache_inputs`
-- `ctx`
-- `seed_doc`
-- `seed_doc_with_sections`
+- `struct` [`DocumentData`](rustsymbol-documentdata.md)
+- `struct` [`LocalDocAnalyzerPass`](rustsymbol-localdocanalyzerpass.md)
+- `method` [`LocalDocAnalyzerPass::cache_inputs`](rustsymbol-localdocanalyzerpass-cache-inputs.md)
+- `method` [`LocalDocAnalyzerPass::name`](rustsymbol-localdocanalyzerpass-name.md)
+- `method` [`LocalDocAnalyzerPass::new`](rustsymbol-localdocanalyzerpass-new.md)
+- `method` [`LocalDocAnalyzerPass::run`](rustsymbol-localdocanalyzerpass-run.md)
+- `struct` [`SectionData`](rustsymbol-sectiondata.md)
+- `struct` [`TableData`](rustsymbol-tabledata.md)
+- `function` [`document_kir_id`](rustsymbol-document-kir-id.md)
+- `function` [`section_kir_id`](rustsymbol-section-kir-id.md)
+- `function` [`table_kir_id`](rustsymbol-table-kir-id.md)
 
 ## ekos/crates/recovery/src/ollama.rs
 
-- `build_request`
-- `model_name`
-- `model_name_reflects_construction`
-- `from_env_falls_back_to_defaults_when_unset`
-- `request_always_sets_temperature_zero`
+- `struct` [`ApiMessage`](rustsymbol-apimessage-e405f66b.md)
+- `struct` [`ApiOptions`](rustsymbol-apioptions.md)
+- `struct` [`ApiRequest`](rustsymbol-apirequest.md)
+- `struct` [`ApiResponse`](rustsymbol-apiresponse-57f09378.md)
+- `struct` [`ApiResponseMessage`](rustsymbol-apiresponsemessage.md)
+- `struct` [`OllamaProvider`](rustsymbol-ollamaprovider.md)
+- `method` [`OllamaProvider::build_request`](rustsymbol-ollamaprovider-build-request.md)
+- `method` [`OllamaProvider::complete`](rustsymbol-ollamaprovider-complete.md)
+- `method` [`OllamaProvider::from_env`](rustsymbol-ollamaprovider-from-env.md)
+- `method` [`OllamaProvider::model_name`](rustsymbol-ollamaprovider-model-name.md)
+- `method` [`OllamaProvider::new`](rustsymbol-ollamaprovider-new.md)
 
 ## ekos/crates/recovery/src/pentaho_analyzer.rs
 
-- `name`
-- `cache_inputs`
-- `parse_kettle_xml`
-- `parse_kjb`
-- `parse_ktr`
-- `map_step`
-- `extract_filter_condition`
-- `extract_calculator`
-- `extract_join`
-- `extract_join_keys`
-- `extract_stream_lookup`
-- `extract_group_by`
-- `child_text`
-- `xml_slice`
-- `extract_table_from_sql`
-- `sample_graph`
-- `maps_table_input_to_source`
-- `maps_table_input_columns_from_row_meta`
-- `maps_filter_rows_to_filter_with_readable_condition`
-- `maps_calculator_to_calculate`
-- `maps_group_by_to_aggregate`
-- `maps_table_output_to_sink`
-- `hops_become_graph_edges_in_step_order`
-- `unrecognized_step_type_becomes_unmapped_with_raw_xml_preserved`
-- `maps_stream_lookup_to_left_join`
-- `maps_merge_join_keys_from_keys_1_keys_2`
-- `kjb_job_entries_become_unmapped`
-- `coverage_percent_counts_non_unmapped_nodes`
+- `struct` [`PentahoAnalyzerPass`](rustsymbol-pentahoanalyzerpass.md)
+- `method` [`PentahoAnalyzerPass::cache_inputs`](rustsymbol-pentahoanalyzerpass-cache-inputs.md)
+- `method` [`PentahoAnalyzerPass::name`](rustsymbol-pentahoanalyzerpass-name.md)
+- `method` [`PentahoAnalyzerPass::new`](rustsymbol-pentahoanalyzerpass-new.md)
+- `method` [`PentahoAnalyzerPass::run`](rustsymbol-pentahoanalyzerpass-run.md)
+- `method` [`PentahoAnalyzerPass::stats_handle`](rustsymbol-pentahoanalyzerpass-stats-handle.md)
+- `struct` [`PentahoArtifactData`](rustsymbol-pentahoartifactdata.md)
+- `struct` [`PentahoStats`](rustsymbol-pentahostats.md)
+- `method` [`PentahoStats::coverage_percent`](rustsymbol-pentahostats-coverage-percent.md)
+- `function` [`child_text`](rustsymbol-child-text.md)
+- `function` [`extract_calculator`](rustsymbol-extract-calculator.md)
+- `function` [`extract_filter_condition`](rustsymbol-extract-filter-condition.md)
+- `function` [`extract_group_by`](rustsymbol-extract-group-by.md)
+- `function` [`extract_join`](rustsymbol-extract-join.md)
+- `function` [`extract_join_keys`](rustsymbol-extract-join-keys.md)
+- `function` [`extract_stream_lookup`](rustsymbol-extract-stream-lookup.md)
+- `function` [`extract_table_from_sql`](rustsymbol-extract-table-from-sql.md)
+- `function` [`map_step`](rustsymbol-map-step.md)
+- `function` [`parse_kettle_xml`](rustsymbol-parse-kettle-xml.md)
+- `function` [`parse_kjb`](rustsymbol-parse-kjb.md)
+- `function` [`parse_ktr`](rustsymbol-parse-ktr.md)
+- `function` [`xml_slice`](rustsymbol-xml-slice.md)
 
 ## ekos/crates/recovery/src/python_analyzer.rs
 
-- `name`
-- `cache_inputs`
-- `parse_python_file`
-- `python_module_kir_id`
-- `add_import`
-- `add_symbol`
-- `walk_top_level_statement`
-- `try_recognize_chain_statement`
-- `linearize_chain`
-- `string_constant`
-- `positional_string_arg`
-- `keyword_arg`
-- `source_slice`
-- `join_keys_from_on`
-- `join_kind_from_how`
-- `agg_expr_from_arg`
-- `calls_to_nodes`
-- `parse`
-- `recognizes_imports_as_depends_on`
-- `recognizes_function_and_class_defs_as_symbols`
-- `table_read_becomes_source_node`
-- `read_format_load_becomes_source_node`
-- `real_join_and_select_chain_becomes_join_node`
-- `join_with_string_on_key_and_left_how`
-- `with_column_becomes_calculate_node`
-- `multi_step_chain_produces_linked_nodes`
-- `group_by_agg_becomes_aggregate_node`
-- `write_save_as_table_becomes_sink_node`
-- `spark_sql_call_is_honestly_unmapped_never_parsed_as_sql`
-- `plain_statement_with_no_recognized_chain_produces_no_graph`
-- `databricks_notebook_comment_markers_do_not_break_parsing`
+- `struct` [`PythonAnalyzerPass`](rustsymbol-pythonanalyzerpass.md)
+- `method` [`PythonAnalyzerPass::cache_inputs`](rustsymbol-pythonanalyzerpass-cache-inputs.md)
+- `method` [`PythonAnalyzerPass::name`](rustsymbol-pythonanalyzerpass-name.md)
+- `method` [`PythonAnalyzerPass::new`](rustsymbol-pythonanalyzerpass-new.md)
+- `method` [`PythonAnalyzerPass::run`](rustsymbol-pythonanalyzerpass-run.md)
+- `method` [`PythonAnalyzerPass::stats_handle`](rustsymbol-pythonanalyzerpass-stats-handle.md)
+- `struct` [`PythonArtifactData`](rustsymbol-pythonartifactdata.md)
+- `struct` [`PythonFileResult`](rustsymbol-pythonfileresult.md)
+- `struct` [`PythonStats`](rustsymbol-pythonstats.md)
+- `method` [`PythonStats::coverage_percent`](rustsymbol-pythonstats-coverage-percent.md)
+- `struct` [`RawCall`](rustsymbol-rawcall.md)
+- `function` [`add_import`](rustsymbol-add-import-89c6ca8d.md)
+- `function` [`add_symbol`](rustsymbol-add-symbol-458e9ef2.md)
+- `function` [`agg_expr_from_arg`](rustsymbol-agg-expr-from-arg.md)
+- `function` [`calls_to_nodes`](rustsymbol-calls-to-nodes.md)
+- `function` [`join_keys_from_on`](rustsymbol-join-keys-from-on.md)
+- `function` [`join_kind_from_how`](rustsymbol-join-kind-from-how.md)
+- `function` [`keyword_arg`](rustsymbol-keyword-arg.md)
+- `function` [`linearize_chain`](rustsymbol-linearize-chain.md)
+- `function` [`parse_python_file`](rustsymbol-parse-python-file.md)
+- `function` [`positional_string_arg`](rustsymbol-positional-string-arg.md)
+- `function` [`python_module_kir_id`](rustsymbol-python-module-kir-id.md)
+- `function` [`source_slice`](rustsymbol-source-slice.md)
+- `function` [`string_constant`](rustsymbol-string-constant.md)
+- `function` [`try_recognize_chain_statement`](rustsymbol-try-recognize-chain-statement.md)
+- `function` [`walk_top_level_statement`](rustsymbol-walk-top-level-statement.md)
 
 ## ekos/crates/recovery/src/rust_analyzer.rs
 
-- `name`
-- `cache_inputs`
-- `parse_rust_file`
-- `type_name`
-- `flatten_use_tree`
-- `rust_module_kir_id`
-- `add_import`
-- `add_symbol`
-- `visit_expr_call`
-- `visit_expr_method_call`
-- `parse`
-- `recognizes_use_imports_as_depends_on`
-- `recognizes_fn_struct_enum_trait_as_symbols`
-- `same_file_function_call_becomes_calls_edge`
-- `call_to_external_or_std_function_is_not_recorded`
-- `same_file_method_call_becomes_calls_edge`
-- `self_colon_colon_associated_call_resolves_via_impl_type`
-- `ambiguous_method_name_across_two_types_is_not_recorded`
-- `call_inside_macro_invocation_is_not_recorded`
+- `struct` [`CallVisitor`](rustsymbol-callvisitor.md)
+- `method` [`CallVisitor::visit_expr_call`](rustsymbol-callvisitor-visit-expr-call.md)
+- `method` [`CallVisitor::visit_expr_method_call`](rustsymbol-callvisitor-visit-expr-method-call.md)
+- `struct` [`RustAnalyzerPass`](rustsymbol-rustanalyzerpass.md)
+- `method` [`RustAnalyzerPass::cache_inputs`](rustsymbol-rustanalyzerpass-cache-inputs.md)
+- `method` [`RustAnalyzerPass::name`](rustsymbol-rustanalyzerpass-name.md)
+- `method` [`RustAnalyzerPass::new`](rustsymbol-rustanalyzerpass-new.md)
+- `method` [`RustAnalyzerPass::run`](rustsymbol-rustanalyzerpass-run.md)
+- `method` [`RustAnalyzerPass::stats_handle`](rustsymbol-rustanalyzerpass-stats-handle.md)
+- `struct` [`RustArtifactData`](rustsymbol-rustartifactdata.md)
+- `struct` [`RustFileResult`](rustsymbol-rustfileresult.md)
+- `struct` [`RustStats`](rustsymbol-ruststats.md)
+- `function` [`add_import`](rustsymbol-add-import.md)
+- `function` [`add_symbol`](rustsymbol-add-symbol.md)
+- `function` [`flatten_use_tree`](rustsymbol-flatten-use-tree.md)
+- `function` [`parse_rust_file`](rustsymbol-parse-rust-file.md)
+- `function` [`rust_module_kir_id`](rustsymbol-rust-module-kir-id.md)
+- `function` [`type_name`](rustsymbol-type-name-b2c88510.md)
 
 ## ekos/crates/recovery/src/sql_analyzer.rs
 
-- `name`
-- `cache_inputs`
-- `add_fk_relationship`
-- `col_names`
-- `columns_json`
-- `apply_llm_enrichment`
-- `make_ctx`
-- `structural_parse_extracts_six_tables`
-- `structural_parse_extracts_fk_relationships`
-- `northwind_structural_parse_extracts_thirteen_tables`
-- `northwind_structural_parse_extracts_deep_fk_graph`
-- `northwind_structural_parse_finds_order_details_composite_pk_table`
-- `structural_parse_table_has_columns`
-- `generic_dialect_fails_on_real_mysql_hash_comments_fixture`
-- `mysql_dialect_parses_real_mysql_hash_comments_fixture`
-- `recovers_tables_from_ddl_script_missing_semicolons_between_statements`
-- `llm_enrichment_applies_entity_names`
+- `struct` [`LlmEntity`](rustsymbol-llmentity.md)
+- `struct` [`LlmOutput`](rustsymbol-llmoutput-771440cb.md)
+- `struct` [`LlmRelationship`](rustsymbol-llmrelationship.md)
+- `struct` [`SqlAnalyzerPass`](rustsymbol-sqlanalyzerpass.md)
+- `method` [`SqlAnalyzerPass::cache_inputs`](rustsymbol-sqlanalyzerpass-cache-inputs.md)
+- `method` [`SqlAnalyzerPass::name`](rustsymbol-sqlanalyzerpass-name.md)
+- `method` [`SqlAnalyzerPass::new`](rustsymbol-sqlanalyzerpass-new.md)
+- `method` [`SqlAnalyzerPass::run`](rustsymbol-sqlanalyzerpass-run.md)
+- `function` [`add_fk_relationship`](rustsymbol-add-fk-relationship.md)
+- `function` [`apply_llm_enrichment`](rustsymbol-apply-llm-enrichment.md)
+- `function` [`col_names`](rustsymbol-col-names.md)
+- `function` [`columns_json`](rustsymbol-columns-json.md)
+- `function` [`parse_ddl_structural`](rustsymbol-parse-ddl-structural.md)
 
 ## ekos/crates/recovery/src/sql_dialect_registry.rs
 
-- `name`
-- `sqlparser_dialect`
-- `registry_contains_generic_mysql_and_postgres`
-- `registry_contains_snowflake_and_databricks`
-- `registry_contains_mssql_aliases`
-- `resolve_dialect_name_falls_back_to_default_with_no_rules`
-- `resolve_dialect_name_matches_first_rule_by_path_glob`
-- `resolve_dialect_name_handles_mixed_dialect_workspace`
+- `struct` [`DialectRule`](rustsymbol-dialectrule.md)
+- `struct` [`GenericDialectParser`](rustsymbol-genericdialectparser.md)
+- `method` [`GenericDialectParser::name`](rustsymbol-genericdialectparser-name.md)
+- `method` [`GenericDialectParser::sqlparser_dialect`](rustsymbol-genericdialectparser-sqlparser-dialect.md)
+- `function` [`build_dialect_registry`](rustsymbol-build-dialect-registry.md)
+- `function` [`resolve_dialect_name`](rustsymbol-resolve-dialect-name.md)
 
 ## ekos/crates/recovery/src/sql_transform_analyzer.rs
 
-- `name`
-- `cache_inputs`
-- `source_kind_for`
-- `dispatch_one_statement`
-- `parse_sql_statement_by_statement`
-- `push`
-- `query_to_graph`
-- `select_to_graph`
-- `table_factor_node`
-- `join_node`
-- `extract_equi_keys`
-- `collect_equi_keys`
-- `is_plain_column`
-- `as_aggregate_function`
-- `extract_aggregates`
-- `calculated_projection`
-- `procedure_body_to_graph`
-- `function_to_graph`
-- `function_body_text`
-- `append_fragment`
-- `graphs`
-- `recovers_statements_from_script_missing_semicolons_between_them`
-- `simple_select_with_where`
-- `select_with_join`
-- `select_with_group_by`
-- `view_wrapping_multi_table_query_gets_a_sink`
-- `stored_procedure_with_embedded_select_and_control_flow`
-- `independent_statement_survives_when_another_procedure_in_the_same_file_has_unparseable_control_flow`
-- `function_with_dollar_quoted_body_extracts_embedded_select`
-- `calculated_projection_becomes_calculate_node`
-- `left_join_maps_to_left_join_kind`
-- `cte_query_becomes_unmapped_not_dropped`
-- `informix_falls_back_to_generic_dialect_and_still_parses_simple_select`
-- `databricks_dialect_parses_simple_select`
-- `mysql_dialect_parses_simple_select`
-- `mysql_dialect_parses_hash_comment_that_generic_dialect_rejects`
-- `ddl_statements_produce_no_transform_graphs`
-- `coverage_percent_reflects_unmapped_ratio`
+- `struct` [`SqlTransformAnalyzerPass`](rustsymbol-sqltransformanalyzerpass.md)
+- `method` [`SqlTransformAnalyzerPass::cache_inputs`](rustsymbol-sqltransformanalyzerpass-cache-inputs.md)
+- `method` [`SqlTransformAnalyzerPass::name`](rustsymbol-sqltransformanalyzerpass-name.md)
+- `method` [`SqlTransformAnalyzerPass::new`](rustsymbol-sqltransformanalyzerpass-new.md)
+- `method` [`SqlTransformAnalyzerPass::run`](rustsymbol-sqltransformanalyzerpass-run.md)
+- `method` [`SqlTransformAnalyzerPass::stats_handle`](rustsymbol-sqltransformanalyzerpass-stats-handle.md)
+- `struct` [`SqlTransformStats`](rustsymbol-sqltransformstats.md)
+- `method` [`SqlTransformStats::coverage_percent`](rustsymbol-sqltransformstats-coverage-percent.md)
+- `function` [`append_fragment`](rustsymbol-append-fragment.md)
+- `function` [`as_aggregate_function`](rustsymbol-as-aggregate-function.md)
+- `function` [`calculated_projection`](rustsymbol-calculated-projection.md)
+- `function` [`collect_equi_keys`](rustsymbol-collect-equi-keys.md)
+- `function` [`dispatch_one_statement`](rustsymbol-dispatch-one-statement.md)
+- `function` [`extract_aggregates`](rustsymbol-extract-aggregates.md)
+- `function` [`extract_equi_keys`](rustsymbol-extract-equi-keys.md)
+- `function` [`function_body_text`](rustsymbol-function-body-text.md)
+- `function` [`function_to_graph`](rustsymbol-function-to-graph.md)
+- `function` [`is_plain_column`](rustsymbol-is-plain-column.md)
+- `function` [`join_node`](rustsymbol-join-node.md)
+- `function` [`parse_sql_statement_by_statement`](rustsymbol-parse-sql-statement-by-statement.md)
+- `function` [`parse_sql_to_transform_graphs`](rustsymbol-parse-sql-to-transform-graphs.md)
+- `function` [`procedure_body_to_graph`](rustsymbol-procedure-body-to-graph.md)
+- `function` [`push`](rustsymbol-push.md)
+- `function` [`query_to_graph`](rustsymbol-query-to-graph.md)
+- `function` [`select_to_graph`](rustsymbol-select-to-graph.md)
+- `function` [`source_kind_for`](rustsymbol-source-kind-for.md)
+- `function` [`table_factor_node`](rustsymbol-table-factor-node.md)
 
 ## ekos/crates/recovery/src/statement_repair.rs
 
-- `ends_with_set_op_keyword`
-- `starts_with_keyword`
-- `inserts_semicolons_between_statements_missing_them`
-- `leaves_already_well_formed_multi_statement_sql_unchanged_in_effect`
-- `does_not_split_a_union_chain_across_lines`
-- `does_not_split_inside_open_parens`
+- `function` [`ends_with_set_op_keyword`](rustsymbol-ends-with-set-op-keyword.md)
+- `function` [`ensure_statement_separators`](rustsymbol-ensure-statement-separators.md)
+- `function` [`starts_with_keyword`](rustsymbol-starts-with-keyword.md)
 
 ## ekos/crates/runtime/src/ai.rs
 
-- `default`
-- `gather_context`
-- `extract_citations`
-- `temp_ledger`
-- `seed`
+- `struct` [`AiAnswer`](rustsymbol-aianswer.md)
+- `enum` [`AiError`](rustsymbol-aierror.md)
+- `struct` [`AiRuntime`](rustsymbol-airuntime.md)
+- `method` [`AiRuntime::ask`](rustsymbol-airuntime-ask.md)
+- `method` [`AiRuntime::gather_context`](rustsymbol-airuntime-gather-context.md)
+- `method` [`AiRuntime::new`](rustsymbol-airuntime-new.md)
+- `struct` [`AiRuntimeConfig`](rustsymbol-airuntimeconfig.md)
+- `method` [`AiRuntimeConfig::default`](rustsymbol-airuntimeconfig-default.md)
+- `struct` [`CitationBlock`](rustsymbol-citationblock.md)
+- `function` [`extract_citations`](rustsymbol-extract-citations.md)
 
 ## ekos/crates/runtime/src/lib.rs
 
-- `temp_ledger`
-- `obj`
-- `fk`
-- `same_as_unconfirmed`
-- `same_as_confirmed`
-- `load_object_unknown_returns_none`
-- `relationships_for_returns_both_directions`
-- `load_object_known_returns_object`
-- `load_neighborhood_depth_0_is_root_only`
-- `load_neighborhood_excludes_unconfirmed_same_as_but_keeps_confirmed`
-- `load_neighborhood_depth_1_returns_direct_neighbours`
-- `load_neighborhood_depth_2_returns_two_hops`
-- `load_neighborhood_handles_cycles`
-- `trace_impact_dependents_and_dependencies_are_disjoint`
-- `trace_impact_excludes_unconfirmed_same_as_but_keeps_confirmed`
-- `trace_impact_filters_by_kind`
-- `trace_impact_handles_cycles`
-- `trace_impact_max_hops_bounds_traversal`
-- `reconstruct_state_returns_object_rels_evidence`
-- `reconstruct_state_at_before_write_returns_none`
-- `find_objects_matches_by_name_prefix`
-- `find_objects_no_match_returns_empty`
-- `list_objects_returns_every_object`
-- `list_relationships_returns_every_relationship`
-- `reconstruct_state_at_after_write_returns_state`
+- `enum` [`ImpactDirection`](rustsymbol-impactdirection.md)
+- `struct` [`ImpactHop`](rustsymbol-impacthop.md)
+- `struct` [`ObjectState`](rustsymbol-objectstate.md)
+- `struct` [`Runtime`](rustsymbol-runtime.md)
+- `method` [`Runtime::find_objects`](rustsymbol-runtime-find-objects.md)
+- `method` [`Runtime::list_objects`](rustsymbol-runtime-list-objects.md)
+- `method` [`Runtime::list_relationships`](rustsymbol-runtime-list-relationships.md)
+- `method` [`Runtime::load_neighborhood`](rustsymbol-runtime-load-neighborhood.md)
+- `method` [`Runtime::load_object`](rustsymbol-runtime-load-object.md)
+- `method` [`Runtime::new`](rustsymbol-runtime-new.md)
+- `method` [`Runtime::over`](rustsymbol-runtime-over.md)
+- `method` [`Runtime::reconstruct_state`](rustsymbol-runtime-reconstruct-state.md)
+- `method` [`Runtime::reconstruct_state_at`](rustsymbol-runtime-reconstruct-state-at.md)
+- `method` [`Runtime::relationships_for`](rustsymbol-runtime-relationships-for.md)
+- `method` [`Runtime::trace_impact`](rustsymbol-runtime-trace-impact.md)
+- `enum` [`RuntimeError`](rustsymbol-runtimeerror.md)
 
 ## ekos/crates/semantic/src/lib.rs
 
-- `name`
-- `cache_inputs`
-- `cache_inputs_are_declared_and_sorted`
-- `two_object_graph`
-- `build_ckm_produces_correct_counts`
-- `build_ckm_embeds_evidence_in_objects`
-- `validate_passes_on_valid_ckm`
-- `validate_catches_dangling_relationship`
-- `dedup_relationships_merges_duplicate`
-- `apply_merges_remaps_relationship_ids`
-- `apply_merges_deduplicates_relationships`
-- `ckm_is_serializable`
+- `struct` [`CkModel`](rustsymbol-ckmodel.md)
+- `method` [`CkModel::validate`](rustsymbol-ckmodel-validate.md)
+- `struct` [`CkmObject`](rustsymbol-ckmobject.md)
+- `struct` [`CkmRelationship`](rustsymbol-ckmrelationship.md)
+- `struct` [`EvidenceRecord`](rustsymbol-evidencerecord-dba444b3.md)
+- `struct` [`SemanticCompilerPass`](rustsymbol-semanticcompilerpass.md)
+- `method` [`SemanticCompilerPass::cache_inputs`](rustsymbol-semanticcompilerpass-cache-inputs.md)
+- `method` [`SemanticCompilerPass::name`](rustsymbol-semanticcompilerpass-name.md)
+- `method` [`SemanticCompilerPass::new`](rustsymbol-semanticcompilerpass-new.md)
+- `method` [`SemanticCompilerPass::run`](rustsymbol-semanticcompilerpass-run.md)
+- `method` [`SemanticCompilerPass::with_cache_inputs`](rustsymbol-semanticcompilerpass-with-cache-inputs.md)
+- `function` [`apply_merges`](rustsymbol-apply-merges.md)
+- `function` [`build_ckm`](rustsymbol-build-ckm.md)
+- `function` [`dedup_relationships`](rustsymbol-dedup-relationships.md)
+- `function` [`merge_graphs`](rustsymbol-merge-graphs.md)
 
 ## ekos/crates/semantic/src/transform_ir.rs
 
-- `content_id`
-- `source_node_serializes_deterministically`
-- `filter_node_serializes_deterministically`
-- `join_node_serializes_deterministically`
-- `aggregate_node_serializes_deterministically`
-- `calculate_node_serializes_deterministically`
-- `sink_node_serializes_deterministically`
-- `unmapped_node_serializes_deterministically`
-- `origin`
-- `sample_graph`
-- `transform_node_kir_id_is_stable_across_repeated_lowering`
-- `transform_node_kir_id_differs_by_index_and_source_path`
-- `lower_to_kir_produces_one_object_per_node_with_evidence`
-- `lower_to_kir_sets_node_type_property`
-- `lower_to_kir_indexes_filter_condition_as_excerpt`
-- `lower_to_kir_produces_feeds_into_edges_matching_graph_edges`
-- `lower_to_kir_is_idempotent_across_repeated_runs`
-- `transform_nodes_round_trip_through_ledger_versioning`
-- `lower_to_kir_unmapped_node_preserves_raw_and_reason`
-- `node_type`
-- `evidence_fragment`
-- `properties`
-- `transform_evidence_kir_id`
+- `struct` [`AggExpr`](rustsymbol-aggexpr.md)
+- `enum` [`JoinKind`](rustsymbol-joinkind.md)
+- `struct` [`NodeId`](rustsymbol-nodeid.md)
+- `struct` [`TransformGraph`](rustsymbol-transformgraph.md)
+- `enum` [`TransformNode`](rustsymbol-transformnode.md)
+- `method` [`TransformNode::evidence_fragment`](rustsymbol-transformnode-evidence-fragment.md)
+- `method` [`TransformNode::node_type`](rustsymbol-transformnode-node-type.md)
+- `method` [`TransformNode::properties`](rustsymbol-transformnode-properties.md)
+- `struct` [`TransformOrigin`](rustsymbol-transformorigin.md)
+- `function` [`lower_to_kir`](rustsymbol-lower-to-kir.md)
+- `function` [`transform_evidence_kir_id`](rustsymbol-transform-evidence-kir-id.md)
+- `function` [`transform_node_kir_id`](rustsymbol-transform-node-kir-id.md)
 
 ## ekos/crates/sql-dialect-sdk/src/lib.rs
 
-- `name`
-- `sqlparser_dialect`
-- `preprocess`
-
-## ekos/docs/rfcs/0025-additional-document-formats.md
-
-- `supported_extension`
-- `supported_extensions`
-
-## ekos/docs/rfcs/0026-document-semantics-extraction.md
-
-- `dependencies`
-- `concept_kir_id`
-
-## ekos/docs/rfcs/0027-unified-transformation-semantics.md
-
-- `transform_node_kir_id`
-
-## ekos/docs/rfcs/0031-pluggable-sql-dialects.md
-
-- `name`
-- `sqlparser_dialect`
-- `preprocess`
-- `build_dialect_registry`
+- `trait` [`SqlDialectParser`](rustsymbol-sqldialectparser.md)
 
 ## ekos/plugins/confluence/src/lib.rs
 
-- `request`
-- `name`
-- `page`
+- `struct` [`ConfluenceApiClient`](rustsymbol-confluenceapiclient.md)
+- `method` [`ConfluenceApiClient::list_pages`](rustsymbol-confluenceapiclient-list-pages.md)
+- `method` [`ConfluenceApiClient::new`](rustsymbol-confluenceapiclient-new.md)
+- `method` [`ConfluenceApiClient::request`](rustsymbol-confluenceapiclient-request.md)
+- `trait` [`ConfluenceClient`](rustsymbol-confluenceclient.md)
+- `enum` [`ConfluenceClientError`](rustsymbol-confluenceclienterror.md)
+- `struct` [`ConfluenceObserver`](rustsymbol-confluenceobserver.md)
+- `method` [`ConfluenceObserver::name`](rustsymbol-confluenceobserver-name.md)
+- `method` [`ConfluenceObserver::new`](rustsymbol-confluenceobserver-new.md)
+- `method` [`ConfluenceObserver::scan`](rustsymbol-confluenceobserver-scan.md)
+- `struct` [`ConfluencePage`](rustsymbol-confluencepage.md)
+- `struct` [`MockConfluenceClient`](rustsymbol-mockconfluenceclient.md)
+- `method` [`MockConfluenceClient::list_pages`](rustsymbol-mockconfluenceclient-list-pages.md)
+- `method` [`MockConfluenceClient::new`](rustsymbol-mockconfluenceclient-new.md)
 
 ## ekos/plugins/crypto/src/lib.rs
 
-- `latest_batch_dir`
-- `read_entities`
-- `read_relationships`
-- `read_evidence`
-- `read_rows`
-- `get_string`
-- `get_string_list`
-- `name`
-- `sample_batch`
+- `trait` [`CryptoExportReader`](rustsymbol-cryptoexportreader.md)
+- `struct` [`CryptoObserver`](rustsymbol-cryptoobserver.md)
+- `method` [`CryptoObserver::name`](rustsymbol-cryptoobserver-name.md)
+- `method` [`CryptoObserver::new`](rustsymbol-cryptoobserver-new.md)
+- `method` [`CryptoObserver::scan`](rustsymbol-cryptoobserver-scan.md)
+- `enum` [`CryptoReaderError`](rustsymbol-cryptoreadererror.md)
+- `struct` [`EntityRecord`](rustsymbol-entityrecord.md)
+- `struct` [`EvidenceRecord`](rustsymbol-evidencerecord.md)
+- `struct` [`ExportBatch`](rustsymbol-exportbatch.md)
+- `struct` [`MockCryptoExportReader`](rustsymbol-mockcryptoexportreader.md)
+- `method` [`MockCryptoExportReader::new`](rustsymbol-mockcryptoexportreader-new.md)
+- `method` [`MockCryptoExportReader::read_latest_batch`](rustsymbol-mockcryptoexportreader-read-latest-batch.md)
+- `struct` [`ParquetExportReader`](rustsymbol-parquetexportreader.md)
+- `method` [`ParquetExportReader::latest_batch_dir`](rustsymbol-parquetexportreader-latest-batch-dir.md)
+- `method` [`ParquetExportReader::read_entities`](rustsymbol-parquetexportreader-read-entities.md)
+- `method` [`ParquetExportReader::read_evidence`](rustsymbol-parquetexportreader-read-evidence.md)
+- `method` [`ParquetExportReader::read_latest_batch`](rustsymbol-parquetexportreader-read-latest-batch.md)
+- `method` [`ParquetExportReader::read_relationships`](rustsymbol-parquetexportreader-read-relationships.md)
+- `struct` [`RelationshipRecord`](rustsymbol-relationshiprecord.md)
+- `function` [`get_string`](rustsymbol-get-string.md)
+- `function` [`get_string_list`](rustsymbol-get-string-list.md)
+- `function` [`read_rows`](rustsymbol-read-rows.md)
 
 ## ekos/plugins/fabric/src/lib.rs
 
-- `name`
-- `lakehouse`
-- `sample_workspace_items`
+- `struct` [`FabricApiClient`](rustsymbol-fabricapiclient.md)
+- `method` [`FabricApiClient::items_for_workspace`](rustsymbol-fabricapiclient-items-for-workspace.md)
+- `method` [`FabricApiClient::list_items`](rustsymbol-fabricapiclient-list-items.md)
+- `method` [`FabricApiClient::new`](rustsymbol-fabricapiclient-new.md)
+- `trait` [`FabricClient`](rustsymbol-fabricclient.md)
+- `enum` [`FabricClientError`](rustsymbol-fabricclienterror.md)
+- `struct` [`FabricItem`](rustsymbol-fabricitem.md)
+- `struct` [`FabricObserver`](rustsymbol-fabricobserver.md)
+- `method` [`FabricObserver::name`](rustsymbol-fabricobserver-name.md)
+- `method` [`FabricObserver::new`](rustsymbol-fabricobserver-new.md)
+- `method` [`FabricObserver::scan`](rustsymbol-fabricobserver-scan.md)
+- `struct` [`MockFabricClient`](rustsymbol-mockfabricclient.md)
+- `method` [`MockFabricClient::list_items`](rustsymbol-mockfabricclient-list-items.md)
+- `method` [`MockFabricClient::new`](rustsymbol-mockfabricclient-new.md)
 
 ## ekos/plugins/file/src/lib.rs
 
-- `default`
-- `name`
-- `text_excerpt`
-- `harvest_symbols`
-- `harvest_symbols_finds_known_declaration_kinds`
-- `harvest_symbols_ignores_lines_without_a_declaration`
-- `harvest_symbols_is_capped`
+- `struct` [`FileObserver`](rustsymbol-fileobserver.md)
+- `method` [`FileObserver::default`](rustsymbol-fileobserver-default.md)
+- `method` [`FileObserver::name`](rustsymbol-fileobserver-name.md)
+- `method` [`FileObserver::new`](rustsymbol-fileobserver-new.md)
+- `method` [`FileObserver::scan`](rustsymbol-fileobserver-scan.md)
+- `function` [`harvest_symbols`](rustsymbol-harvest-symbols.md)
+- `function` [`text_excerpt`](rustsymbol-text-excerpt.md)
 
 ## ekos/plugins/git/src/lib.rs
 
-- `default`
-- `name`
-- `parse_stat_summary`
-- `make_git_repo`
-- `parse_stat_extracts_numbers`
-- `parse_stat_insertions_only`
+- `struct` [`GitObserver`](rustsymbol-gitobserver.md)
+- `method` [`GitObserver::default`](rustsymbol-gitobserver-default.md)
+- `method` [`GitObserver::name`](rustsymbol-gitobserver-name.md)
+- `method` [`GitObserver::new`](rustsymbol-gitobserver-new.md)
+- `method` [`GitObserver::scan`](rustsymbol-gitobserver-scan.md)
+- `method` [`GitObserver::with_max_commits`](rustsymbol-gitobserver-with-max-commits.md)
+- `function` [`git_output`](rustsymbol-git-output.md)
+- `function` [`is_git_repo`](rustsymbol-is-git-repo.md)
+- `function` [`parse_stat_summary`](rustsymbol-parse-stat-summary.md)
 
 ## ekos/plugins/github/src/lib.rs
 
-- `request`
-- `name`
-- `issue`
-- `pr`
+- `struct` [`GitHubApiClient`](rustsymbol-githubapiclient.md)
+- `method` [`GitHubApiClient::list_files`](rustsymbol-githubapiclient-list-files.md)
+- `method` [`GitHubApiClient::list_items`](rustsymbol-githubapiclient-list-items.md)
+- `method` [`GitHubApiClient::new`](rustsymbol-githubapiclient-new.md)
+- `method` [`GitHubApiClient::request`](rustsymbol-githubapiclient-request.md)
+- `trait` [`GitHubClient`](rustsymbol-githubclient.md)
+- `enum` [`GitHubClientError`](rustsymbol-githubclienterror.md)
+- `struct` [`GitHubItem`](rustsymbol-githubitem.md)
+- `struct` [`GitHubObserver`](rustsymbol-githubobserver.md)
+- `method` [`GitHubObserver::name`](rustsymbol-githubobserver-name.md)
+- `method` [`GitHubObserver::new`](rustsymbol-githubobserver-new.md)
+- `method` [`GitHubObserver::scan`](rustsymbol-githubobserver-scan.md)
+- `struct` [`MockGitHubClient`](rustsymbol-mockgithubclient.md)
+- `method` [`MockGitHubClient::list_items`](rustsymbol-mockgithubclient-list-items.md)
+- `method` [`MockGitHubClient::new`](rustsymbol-mockgithubclient-new.md)
 
 ## ekos/plugins/localdocs/src/docx.rs
 
-- `supported_extension`
-- `parse`
-- `paragraph_text`
-- `table_rows`
-- `extract_media_images`
-- `parses_paragraph_text_and_table_rows`
+- `struct` [`DocxParser`](rustsymbol-docxparser.md)
+- `method` [`DocxParser::parse`](rustsymbol-docxparser-parse.md)
+- `method` [`DocxParser::supported_extension`](rustsymbol-docxparser-supported-extension.md)
+- `function` [`extract_media_images`](rustsymbol-extract-media-images.md)
+- `function` [`paragraph_text`](rustsymbol-paragraph-text.md)
+- `function` [`table_rows`](rustsymbol-table-rows.md)
 
 ## ekos/plugins/localdocs/src/email.rs
 
-- `supported_extension`
-- `parse`
-- `header_block`
-- `render_address`
-- `body_text`
-- `supported_extension_is_eml`
-- `first_section_is_the_header_block`
-- `body_sections_follow_the_header_with_sequential_indexes`
-- `text_plain_part_is_preferred_over_the_html_alternative`
-- `html_body_is_used_when_no_text_plain_part_exists`
-- `no_tables_images_or_page_count`
-- `malformed_input_returns_parse_error_rather_than_panicking`
+- `struct` [`EmailParser`](rustsymbol-emailparser.md)
+- `method` [`EmailParser::parse`](rustsymbol-emailparser-parse.md)
+- `method` [`EmailParser::supported_extension`](rustsymbol-emailparser-supported-extension.md)
+- `function` [`body_text`](rustsymbol-body-text.md)
+- `function` [`header_block`](rustsymbol-header-block.md)
+- `function` [`render_address`](rustsymbol-render-address.md)
 
 ## ekos/plugins/localdocs/src/html.rs
 
-- `supported_extension`
-- `parse`
-- `extension_is_whatever_the_parser_was_constructed_with`
-- `nested_tags_are_flattened_into_prose_without_markup`
-- `table_content_survives_as_prose_but_no_structured_table_is_extracted`
-- `sections_have_no_page_and_respect_the_budget`
-- `truncated_markup_degrades_gracefully_rather_than_panicking`
+- `struct` [`HtmlParser`](rustsymbol-htmlparser.md)
+- `method` [`HtmlParser::new`](rustsymbol-htmlparser-new.md)
+- `method` [`HtmlParser::parse`](rustsymbol-htmlparser-parse.md)
+- `method` [`HtmlParser::supported_extension`](rustsymbol-htmlparser-supported-extension.md)
+- `function` [`html_to_text`](rustsymbol-html-to-text.md)
 
 ## ekos/plugins/localdocs/src/lib.rs
 
-- `supported_extension`
-- `supported_extensions`
-- `parse`
-- `recognize`
-- `parser_for`
-- `name`
-- `supported_extension`
-- `parse`
-- `supported_extension`
-- `parse`
-- `recognize`
-- `recognize`
-- `default_parsers`
-- `silent_ocr`
-- `with_defaults_registers_a_parser_for_every_rfc_0025_extension`
-- `extension_lookup_is_case_insensitive`
+- `trait` [`DocumentParser`](rustsymbol-documentparser.md)
+- `struct` [`DocumentSection`](rustsymbol-documentsection.md)
+- `struct` [`EmbeddedImage`](rustsymbol-embeddedimage.md)
+- `struct` [`ExtractedTable`](rustsymbol-extractedtable.md)
+- `enum` [`ImageFormat`](rustsymbol-imageformat.md)
+- `struct` [`LocalDocsObserver`](rustsymbol-localdocsobserver.md)
+- `method` [`LocalDocsObserver::name`](rustsymbol-localdocsobserver-name.md)
+- `method` [`LocalDocsObserver::new`](rustsymbol-localdocsobserver-new.md)
+- `method` [`LocalDocsObserver::parser_for`](rustsymbol-localdocsobserver-parser-for.md)
+- `method` [`LocalDocsObserver::scan`](rustsymbol-localdocsobserver-scan.md)
+- `method` [`LocalDocsObserver::with_defaults`](rustsymbol-localdocsobserver-with-defaults.md)
+- `trait` [`OcrEngine`](rustsymbol-ocrengine.md)
+- `enum` [`OcrError`](rustsymbol-ocrerror.md)
+- `enum` [`ParseError`](rustsymbol-parseerror-cfecf937.md)
+- `struct` [`ParsedDocument`](rustsymbol-parseddocument.md)
 
 ## ekos/plugins/localdocs/src/ocr.rs
 
-- `recognize`
-- `recognize`
-- `mock_ocr_returns_fixed_text`
-- `missing_tesseract_binary_is_soft_skippable`
+- `struct` [`MockOcr`](rustsymbol-mockocr.md)
+- `method` [`MockOcr::new`](rustsymbol-mockocr-new.md)
+- `method` [`MockOcr::recognize`](rustsymbol-mockocr-recognize.md)
+- `struct` [`TesseractOcr`](rustsymbol-tesseractocr.md)
+- `method` [`TesseractOcr::recognize`](rustsymbol-tesseractocr-recognize.md)
 
 ## ekos/plugins/localdocs/src/pdf.rs
 
-- `supported_extension`
-- `parse`
-- `parse_inner`
-- `extract_sections`
-- `extract_tables`
-- `has_uniform_column_count`
-- `split_table_row`
-- `real_justified_prose_produces_no_table`
-- `real_toc_fragment_is_still_detected_as_a_table`
-- `has_uniform_column_count_rejects_mismatched_rows`
-- `split_table_row_requires_two_space_gap`
-- `extract_tables_groups_contiguous_rows`
-- `extract_tables_ignores_single_row_matches`
-- `extract_sections_returns_empty_on_garbage_bytes_without_panicking`
-- `parse_real_multipage_pdf_produces_one_section_per_page`
-- `build_two_page_pdf`
+- `struct` [`PdfParser`](rustsymbol-pdfparser.md)
+- `method` [`PdfParser::parse`](rustsymbol-pdfparser-parse.md)
+- `method` [`PdfParser::parse_inner`](rustsymbol-pdfparser-parse-inner.md)
+- `method` [`PdfParser::supported_extension`](rustsymbol-pdfparser-supported-extension.md)
+- `function` [`extract_sections`](rustsymbol-extract-sections.md)
+- `function` [`extract_tables`](rustsymbol-extract-tables.md)
+- `function` [`has_uniform_column_count`](rustsymbol-has-uniform-column-count.md)
+- `function` [`split_table_row`](rustsymbol-split-table-row.md)
 
 ## ekos/plugins/localdocs/src/sanitize.rs
 
-- `is_sanitized_char`
-- `strips_zero_width_characters`
-- `strips_unicode_tag_block`
-- `leaves_ordinary_text_untouched`
-- `empty_input_is_a_no_op`
+- `struct` [`Sanitized`](rustsymbol-sanitized.md)
+- `function` [`is_sanitized_char`](rustsymbol-is-sanitized-char.md)
+- `function` [`sanitize_text`](rustsymbol-sanitize-text.md)
 
 ## ekos/plugins/localdocs/src/text.rs
 
-- `supported_extension`
-- `parse`
-- `split_to_budget`
-- `extension_is_whatever_the_parser_was_constructed_with`
-- `supported_extensions_defaults_to_the_single_extension`
-- `plain_text_round_trips_into_text_and_one_section`
-- `invalid_utf8_degrades_to_replacement_chars_rather_than_failing`
-- `markdown_headings_are_kept_as_literal_text`
-- `chunking_respects_the_budget_and_indexes_sequentially`
-- `a_single_line_longer_than_the_budget_is_split_not_overflowed`
-- `multibyte_text_splits_on_char_boundaries`
-- `sections_are_capped_at_sections_max`
-- `whitespace_only_input_produces_no_sections`
+- `struct` [`TextParser`](rustsymbol-textparser.md)
+- `method` [`TextParser::new`](rustsymbol-textparser-new.md)
+- `method` [`TextParser::parse`](rustsymbol-textparser-parse.md)
+- `method` [`TextParser::supported_extension`](rustsymbol-textparser-supported-extension.md)
+- `function` [`chunk_text`](rustsymbol-chunk-text.md)
+- `function` [`split_to_budget`](rustsymbol-split-to-budget.md)
 
 ## ekos/plugins/oracle/src/lib.rs
 
-- `name`
-- `orders_table`
-- `fk_constraint`
+- `struct` [`ColumnMetadata`](rustsymbol-columnmetadata.md)
+- `struct` [`ConstraintMetadata`](rustsymbol-constraintmetadata.md)
+- `struct` [`MockOracleClient`](rustsymbol-mockoracleclient.md)
+- `method` [`MockOracleClient::list_constraints`](rustsymbol-mockoracleclient-list-constraints.md)
+- `method` [`MockOracleClient::list_tables`](rustsymbol-mockoracleclient-list-tables.md)
+- `method` [`MockOracleClient::list_views`](rustsymbol-mockoracleclient-list-views.md)
+- `method` [`MockOracleClient::new`](rustsymbol-mockoracleclient-new.md)
+- `trait` [`OracleClient`](rustsymbol-oracleclient.md)
+- `enum` [`OracleClientError`](rustsymbol-oracleclienterror.md)
+- `struct` [`OracleDbClient`](rustsymbol-oracledbclient.md)
+- `method` [`OracleDbClient::list_constraints`](rustsymbol-oracledbclient-list-constraints.md)
+- `method` [`OracleDbClient::list_tables`](rustsymbol-oracledbclient-list-tables.md)
+- `method` [`OracleDbClient::list_views`](rustsymbol-oracledbclient-list-views.md)
+- `method` [`OracleDbClient::new`](rustsymbol-oracledbclient-new.md)
+- `struct` [`OracleObserver`](rustsymbol-oracleobserver.md)
+- `method` [`OracleObserver::name`](rustsymbol-oracleobserver-name.md)
+- `method` [`OracleObserver::new`](rustsymbol-oracleobserver-new.md)
+- `method` [`OracleObserver::scan`](rustsymbol-oracleobserver-scan.md)
+- `struct` [`TableMetadata`](rustsymbol-tablemetadata.md)
+- `struct` [`ViewMetadata`](rustsymbol-viewmetadata.md)
 
 ## ekos/plugins/pentaho/src/lib.rs
 
-- `kettle_kind`
-- `name`
+- `struct` [`PentahoObserver`](rustsymbol-pentahoobserver.md)
+- `method` [`PentahoObserver::name`](rustsymbol-pentahoobserver-name.md)
+- `method` [`PentahoObserver::new`](rustsymbol-pentahoobserver-new.md)
+- `method` [`PentahoObserver::scan`](rustsymbol-pentahoobserver-scan.md)
+- `function` [`kettle_kind`](rustsymbol-kettle-kind.md)
 
 ## ekos/plugins/python/src/lib.rs
 
-- `name`
+- `struct` [`PythonObserver`](rustsymbol-pythonobserver.md)
+- `method` [`PythonObserver::name`](rustsymbol-pythonobserver-name.md)
+- `method` [`PythonObserver::new`](rustsymbol-pythonobserver-new.md)
+- `method` [`PythonObserver::scan`](rustsymbol-pythonobserver-scan.md)
 
 ## ekos/plugins/rust/src/lib.rs
 
-- `name`
+- `struct` [`RustObserver`](rustsymbol-rustobserver.md)
+- `method` [`RustObserver::name`](rustsymbol-rustobserver-name.md)
+- `method` [`RustObserver::new`](rustsymbol-rustobserver-new.md)
+- `method` [`RustObserver::scan`](rustsymbol-rustobserver-scan.md)
 
 ## ekos/plugins/salesforce/src/lib.rs
 
-- `name`
-- `account`
-- `contact`
+- `struct` [`MockSalesforceClient`](rustsymbol-mocksalesforceclient.md)
+- `method` [`MockSalesforceClient::list_sobjects`](rustsymbol-mocksalesforceclient-list-sobjects.md)
+- `method` [`MockSalesforceClient::new`](rustsymbol-mocksalesforceclient-new.md)
+- `struct` [`SObjectField`](rustsymbol-sobjectfield.md)
+- `struct` [`SObjectMetadata`](rustsymbol-sobjectmetadata.md)
+- `struct` [`SalesforceApiClient`](rustsymbol-salesforceapiclient.md)
+- `method` [`SalesforceApiClient::describe`](rustsymbol-salesforceapiclient-describe.md)
+- `method` [`SalesforceApiClient::list_sobjects`](rustsymbol-salesforceapiclient-list-sobjects.md)
+- `method` [`SalesforceApiClient::new`](rustsymbol-salesforceapiclient-new.md)
+- `trait` [`SalesforceClient`](rustsymbol-salesforceclient.md)
+- `enum` [`SalesforceClientError`](rustsymbol-salesforceclienterror.md)
+- `struct` [`SalesforceObserver`](rustsymbol-salesforceobserver.md)
+- `method` [`SalesforceObserver::name`](rustsymbol-salesforceobserver-name.md)
+- `method` [`SalesforceObserver::new`](rustsymbol-salesforceobserver-new.md)
+- `method` [`SalesforceObserver::scan`](rustsymbol-salesforceobserver-scan.md)
 
 ## ekos/plugins/sap/src/lib.rs
 
-- `name`
-- `sample_bo`
-- `gwsample_basic_business_objects`
-- `sample_org_unit`
-- `sample_org_hierarchy`
+- `struct` [`BusinessObject`](rustsymbol-businessobject.md)
+- `struct` [`MockSapClient`](rustsymbol-mocksapclient.md)
+- `method` [`MockSapClient::list_business_objects`](rustsymbol-mocksapclient-list-business-objects.md)
+- `method` [`MockSapClient::list_organizational_units`](rustsymbol-mocksapclient-list-organizational-units.md)
+- `method` [`MockSapClient::new`](rustsymbol-mocksapclient-new.md)
+- `struct` [`OrganizationalUnit`](rustsymbol-organizationalunit.md)
+- `trait` [`SapClient`](rustsymbol-sapclient.md)
+- `enum` [`SapClientError`](rustsymbol-sapclienterror.md)
+- `struct` [`SapODataClient`](rustsymbol-sapodataclient.md)
+- `method` [`SapODataClient::get_json`](rustsymbol-sapodataclient-get-json.md)
+- `method` [`SapODataClient::list_business_objects`](rustsymbol-sapodataclient-list-business-objects.md)
+- `method` [`SapODataClient::list_organizational_units`](rustsymbol-sapodataclient-list-organizational-units.md)
+- `method` [`SapODataClient::new`](rustsymbol-sapodataclient-new.md)
+- `struct` [`SapObserver`](rustsymbol-sapobserver.md)
+- `method` [`SapObserver::name`](rustsymbol-sapobserver-name.md)
+- `method` [`SapObserver::new`](rustsymbol-sapobserver-new.md)
+- `method` [`SapObserver::scan`](rustsymbol-sapobserver-scan.md)
 
 ## ekos/plugins/snowflake/src/lib.rs
 
-- `name`
-- `orders_table`
-- `sample_account_objects`
+- `struct` [`MockSnowflakeClient`](rustsymbol-mocksnowflakeclient.md)
+- `method` [`MockSnowflakeClient::list_schema_objects`](rustsymbol-mocksnowflakeclient-list-schema-objects.md)
+- `method` [`MockSnowflakeClient::new`](rustsymbol-mocksnowflakeclient-new.md)
+- `struct` [`SchemaObject`](rustsymbol-schemaobject.md)
+- `struct` [`SnowflakeApiClient`](rustsymbol-snowflakeapiclient.md)
+- `method` [`SnowflakeApiClient::list_schema_objects`](rustsymbol-snowflakeapiclient-list-schema-objects.md)
+- `method` [`SnowflakeApiClient::new`](rustsymbol-snowflakeapiclient-new.md)
+- `method` [`SnowflakeApiClient::run_statement`](rustsymbol-snowflakeapiclient-run-statement.md)
+- `trait` [`SnowflakeClient`](rustsymbol-snowflakeclient.md)
+- `enum` [`SnowflakeClientError`](rustsymbol-snowflakeclienterror.md)
+- `struct` [`SnowflakeObserver`](rustsymbol-snowflakeobserver.md)
+- `method` [`SnowflakeObserver::name`](rustsymbol-snowflakeobserver-name.md)
+- `method` [`SnowflakeObserver::new`](rustsymbol-snowflakeobserver-new.md)
+- `method` [`SnowflakeObserver::scan`](rustsymbol-snowflakeobserver-scan.md)
 
 ## ekos/plugins/sql-dialect-databricks/src/lib.rs
 
-- `name`
-- `sqlparser_dialect`
-- `name_is_databricks`
-- `preprocess_is_identity`
-- `databricks_dialect_parses_backtick_delimited_identifiers`
+- `struct` [`DatabricksDialectParser`](rustsymbol-databricksdialectparser.md)
+- `method` [`DatabricksDialectParser::name`](rustsymbol-databricksdialectparser-name.md)
+- `method` [`DatabricksDialectParser::sqlparser_dialect`](rustsymbol-databricksdialectparser-sqlparser-dialect.md)
 
 ## ekos/plugins/sql-dialect-mssql/src/lib.rs
 
-- `name`
-- `sqlparser_dialect`
-- `name_reports_the_configured_alias`
-- `preprocess_is_identity`
-- `mssql_dialect_parses_create_procedure_with_begin_end_body`
+- `struct` [`MsSqlDialectParser`](rustsymbol-mssqldialectparser.md)
+- `method` [`MsSqlDialectParser::name`](rustsymbol-mssqldialectparser-name.md)
+- `method` [`MsSqlDialectParser::new`](rustsymbol-mssqldialectparser-new.md)
+- `method` [`MsSqlDialectParser::sqlparser_dialect`](rustsymbol-mssqldialectparser-sqlparser-dialect.md)
 
 ## ekos/plugins/sql-dialect-mysql/src/lib.rs
 
-- `name`
-- `sqlparser_dialect`
-- `preprocess`
-- `strip_delimiter_directives`
-- `name_is_mysql`
-- `preprocess_is_identity_when_no_delimiter_directive_present`
-- `preprocess_strips_delimiter_directives_and_restores_semicolons`
-- `mysql_dialect_parses_hash_comment_that_generic_dialect_rejects`
+- `struct` [`MySqlDialectParser`](rustsymbol-mysqldialectparser.md)
+- `method` [`MySqlDialectParser::name`](rustsymbol-mysqldialectparser-name.md)
+- `method` [`MySqlDialectParser::preprocess`](rustsymbol-mysqldialectparser-preprocess.md)
+- `method` [`MySqlDialectParser::sqlparser_dialect`](rustsymbol-mysqldialectparser-sqlparser-dialect.md)
+- `function` [`strip_delimiter_directives`](rustsymbol-strip-delimiter-directives.md)
 
 ## ekos/plugins/sql-dialect-postgres/src/lib.rs
 
-- `name`
-- `sqlparser_dialect`
-- `name_is_postgres`
-- `preprocess_is_identity`
-- `postgres_dialect_parses_dollar_quoted_function_body`
+- `struct` [`PostgresDialectParser`](rustsymbol-postgresdialectparser.md)
+- `method` [`PostgresDialectParser::name`](rustsymbol-postgresdialectparser-name.md)
+- `method` [`PostgresDialectParser::sqlparser_dialect`](rustsymbol-postgresdialectparser-sqlparser-dialect.md)
 
 ## ekos/plugins/sql-dialect-snowflake/src/lib.rs
 
-- `name`
-- `sqlparser_dialect`
-- `name_is_snowflake`
-- `preprocess_is_identity`
-- `snowflake_dialect_parses_trailing_comma_in_projection`
+- `struct` [`SnowflakeDialectParser`](rustsymbol-snowflakedialectparser.md)
+- `method` [`SnowflakeDialectParser::name`](rustsymbol-snowflakedialectparser-name.md)
+- `method` [`SnowflakeDialectParser::sqlparser_dialect`](rustsymbol-snowflakedialectparser-sqlparser-dialect.md)
 
-## ekos_todo.md
+## tests/fixtures/sample_project/src/lib.rs
 
-- `scan`
+- `function` [`add`](rustsymbol-add.md)
 
 ## tests/fixtures/sample_project/src/main.rs
 
-- `main`
+- `function` [`main`](rustsymbol-main.md)
 
 ## tests/integration/tests/integration.rs
 
-- `fixtures_dir`
-- `table_count`
-- `copy_dir`
+- `function` [`copy_dir`](rustsymbol-copy-dir-7496161f.md)
+- `function` [`ecommerce_pipeline_end_to_end`](rustsymbol-ecommerce-pipeline-end-to-end.md)
+- `function` [`fixtures_dir`](rustsymbol-fixtures-dir.md)
+- `function` [`northwind_pipeline_end_to_end`](rustsymbol-northwind-pipeline-end-to-end.md)
+- `function` [`odoo_git_fixture_pipeline_end_to_end`](rustsymbol-odoo-git-fixture-pipeline-end-to-end.md)
+- `function` [`run_pipeline`](rustsymbol-run-pipeline.md)
+- `function` [`table_count`](rustsymbol-table-count.md)
 

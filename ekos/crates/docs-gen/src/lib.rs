@@ -14,7 +14,7 @@
 //! choice researched earlier in the same project.
 
 use ekos_kir::{KirEvidence, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// One generated documentation page.
 #[derive(Debug, Clone, PartialEq)]
@@ -411,6 +411,59 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
 /// `orders`, for instance).
 fn page_file_name(kind: &ObjectKind, name: &str, ext: &str) -> String {
     format!("{}-{}.{ext}", slugify(&kind.to_string()), slugify(name))
+}
+
+/// Whether curated (`--layout curated`, RFC 0042) writes an individual detail page for `kind` —
+/// the single source of truth both `generate_curated`'s page-writing loop and every renderer's
+/// link-generation (`render_architecture`'s Components/Dependency-Graph-sample links, `render_api`)
+/// must agree on, so a link is never emitted to a page that was never written (or vice versa: a
+/// page written that nothing links to).
+pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
+    match kind {
+        ObjectKind::Custom(s) => {
+            matches!(
+                s.as_str(),
+                "Crate"
+                    | "RustModule"
+                    | "RustSymbol"
+                    | "PythonModule"
+                    | "PythonSymbol"
+                    | "Technology"
+            )
+        }
+        ObjectKind::Pipeline => true,
+        _ => false,
+    }
+}
+
+/// Collision-free file name for every object in `objects`, keyed by id. [`page_file_name`] alone
+/// collides whenever two objects of the same kind share a bare name — routine at program-entity
+/// scale (RFC 0042): two different modules can each declare a `fn new`, and both would otherwise
+/// render to `rustsymbol-new.md`. The first occurrence (in a stable `id`-sorted order, so this
+/// never depends on caller iteration order) keeps the plain name; every later collision gets an
+/// 8-hex-character id suffix appended so it never overwrites the first.
+pub fn unique_page_file_names(objects: &[KirObject], ext: &str) -> HashMap<KirId, String> {
+    let mut sorted: Vec<&KirObject> = objects.iter().collect();
+    sorted.sort_by_key(|o| o.id.0);
+
+    let mut used: HashSet<String> = HashSet::new();
+    let mut out = HashMap::with_capacity(objects.len());
+    for o in sorted {
+        let base = page_file_name(&o.kind, &o.name, ext);
+        let name = if used.insert(base.clone()) {
+            base
+        } else {
+            let suffix = &o.id.0.simple().to_string()[..8];
+            format!(
+                "{}-{}.{ext}",
+                slugify(&format!("{}-{}", o.kind, o.name)),
+                suffix
+            )
+        };
+        used.insert(name.clone());
+        out.insert(o.id, name);
+    }
+    out
 }
 
 // ── Phase 3 — Mermaid diagrams ──────────────────────────────────────────────
@@ -842,18 +895,36 @@ pub fn render_readme(objects: &[KirObject]) -> RenderedPage {
     }
 }
 
-/// Render `Architecture.md`: component counts, real `Custom("Technology")` dependencies
-/// (`dependency_analyzer.rs`), the existing ER diagram when `Table`/`ForeignKey` data exists, and
-/// one small Mermaid graph per *structural* relationship kind. `Custom("FeedsInto")` edges are
-/// deliberately excluded here — pipeline-internal step wiring belongs in `SequenceDiagrams.md`; a
-/// real Pentaho workspace has dozens of `TransformNode`s, so inlining that here would make the
-/// diagram unreadable. Splitting by relationship *purpose* is this RFC's answer to RFC 0035's
-/// still-open "diagram size" question, for the curated layout.
+/// Kinds documented in depth elsewhere in the curated set (individual detail pages written
+/// alongside `Architecture.md`/`API.md` by `--layout curated`, RFC 0042) — the `## Components`
+/// count for these links out to where the real per-entity listing/diagram already lives instead
+/// of dumping a potentially thousand-line inline list into `Architecture.md` itself.
+fn components_cross_reference(kind: &str) -> Option<&'static str> {
+    match kind {
+        "RustModule" | "RustSymbol" | "PythonModule" | "PythonSymbol" => Some("[API.md](API.md)"),
+        "Crate" => Some("below, `## Crate & Workspace Topology`"),
+        "Technology" => Some("below, `## Technologies`"),
+        "Pipeline" => Some("below, `## CI/CD Pipelines`"),
+        _ => None,
+    }
+}
+
+/// Render `Architecture.md`: component counts (linked out to the section/page where a kind's
+/// real detail lives, RFC 0042), the crate/workspace dependency topology and external-technology
+/// list (`crate_topology_analyzer.rs`), CI/CD pipelines (`cicd_analyzer.rs`), the existing ER
+/// diagram when `Table`/`ForeignKey` data exists, and one small Mermaid graph per *structural*
+/// relationship kind. `Custom("FeedsInto")` edges are deliberately excluded here — pipeline-
+/// internal step wiring belongs in `SequenceDiagrams.md`; a real Pentaho workspace has dozens of
+/// `TransformNode`s, so inlining that here would make the diagram unreadable. Splitting by
+/// relationship *purpose* is this RFC's answer to RFC 0035's still-open "diagram size" question,
+/// for the curated layout.
 pub fn render_architecture(
     objects: &[KirObject],
     relationships: &[KirRelationship],
 ) -> RenderedPage {
     let mut out = String::from("# Architecture\n\n");
+    let page_names = unique_page_file_names(objects, "md");
+    let kind_by_id: HashMap<KirId, &ObjectKind> = objects.iter().map(|o| (o.id, &o.kind)).collect();
 
     out.push_str("## Components\n\n");
     let counts = count_by_kind(objects, is_significant);
@@ -861,8 +932,42 @@ pub fn render_architecture(
         out.push_str("_No compiled objects yet._\n\n");
     } else {
         for (kind, count) in &counts {
-            out.push_str(&format!("- **{kind}**: {count}\n"));
+            match components_cross_reference(kind) {
+                Some(link) => out.push_str(&format!("- **{kind}**: {count} — see {link}\n")),
+                None => out.push_str(&format!("- **{kind}**: {count}\n")),
+            }
         }
+        out.push('\n');
+    }
+
+    out.push_str("## Crate & Workspace Topology\n\n");
+    let crates: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .collect();
+    let crate_ids: HashSet<KirId> = crates.iter().map(|c| c.id).collect();
+    let crate_name_by_id: HashMap<KirId, &str> =
+        crates.iter().map(|c| (c.id, c.name.as_str())).collect();
+    let crate_edges: Vec<&KirRelationship> = relationships
+        .iter()
+        .filter(|r| {
+            matches!(r.kind, RelationshipKind::DependsOn)
+                && crate_ids.contains(&r.from)
+                && crate_ids.contains(&r.to)
+        })
+        .collect();
+    if crates.is_empty() {
+        out.push_str("_No crate/workspace manifests compiled._\n\n");
+    } else if crate_edges.is_empty() {
+        out.push_str(
+            "_No internal (path) crate dependencies compiled among the discovered manifests._\n\n",
+        );
+    } else {
+        out.push_str(&render_relationship_kind_graph(
+            "DependsOn",
+            &crate_edges,
+            &crate_name_by_id,
+        ));
         out.push('\n');
     }
 
@@ -890,6 +995,43 @@ pub fn render_architecture(
             out.push_str(&format!("- **{}** — used by: {used_by}\n", tech.name));
         }
         out.push('\n');
+    }
+
+    out.push_str("## CI/CD Pipelines\n\n");
+    let pipelines: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Pipeline)
+        .collect();
+    if pipelines.is_empty() {
+        out.push_str("_No CI/CD pipeline definitions compiled._\n\n");
+    } else {
+        for pipeline in &pipelines {
+            out.push_str(&format!("### {}\n\n", pipeline.name));
+            if let Some(triggers) = pipeline
+                .properties
+                .get("triggers")
+                .and_then(|v| v.as_array())
+            {
+                let names: Vec<&str> = triggers.iter().filter_map(|v| v.as_str()).collect();
+                if !names.is_empty() {
+                    out.push_str(&format!("Triggers: `{}`\n\n", names.join("`, `")));
+                }
+            }
+            if let Some(jobs) = pipeline.properties.get("jobs").and_then(|v| v.as_array()) {
+                for job in jobs {
+                    let job_name = job.get("name").and_then(|v| v.as_str()).unwrap_or("job");
+                    out.push_str(&format!("- **{job_name}**\n"));
+                    if let Some(steps) = job.get("steps").and_then(|v| v.as_array()) {
+                        for step in steps {
+                            if let Some(s) = step.as_str() {
+                                out.push_str(&format!("  - {s}\n"));
+                            }
+                        }
+                    }
+                }
+            }
+            out.push('\n');
+        }
     }
 
     out.push_str("## Entity Relationships\n\n");
@@ -929,12 +1071,44 @@ pub fn render_architecture(
             // pages/sections) produced 74 edges. Excluding `FeedsInto` wasn't enough; the cap
             // applies per kind, not just to the one kind known in advance to be large.
             const MAX_GRAPH_EDGES: usize = 20;
+            // A page-count budget, not a hard cap: for oversized kinds this still prints a real
+            // linked sample instead of only a sentence pointing at a different CLI invocation —
+            // each endpoint links to that object's own detail page (written alongside this file
+            // by `--layout curated`, RFC 0042), which shows its full relationship list.
+            const SAMPLE_EDGES: usize = 15;
             if rels.len() > MAX_GRAPH_EDGES {
                 out.push_str(&format!(
                     "_{} `{kind}` relationships compiled — diagram omitted, too large to render \
-                     usefully. See `ekos docs generate --layout objects` for per-object detail._\n\n",
-                    rels.len()
+                     usefully. First {} shown below; every object's own detail page (linked) \
+                     lists its full relationship set._\n\n",
+                    rels.len(),
+                    rels.len().min(SAMPLE_EDGES)
                 ));
+                for rel in rels.iter().take(SAMPLE_EDGES) {
+                    let from_label = name_by_id.get(&rel.from).copied().unwrap_or("unknown");
+                    let to_label = name_by_id.get(&rel.to).copied().unwrap_or("unknown");
+                    // Only link when curated actually writes a page for that endpoint's kind
+                    // (`is_entity_page_kind`) — e.g. `File`/`Person` endpoints never get one, so
+                    // linking them here would point at a file that was never written.
+                    let from_link = kind_by_id
+                        .get(&rel.from)
+                        .filter(|k| is_entity_page_kind(k))
+                        .and_then(|_| page_names.get(&rel.from));
+                    let to_link = kind_by_id
+                        .get(&rel.to)
+                        .filter(|k| is_entity_page_kind(k))
+                        .and_then(|_| page_names.get(&rel.to));
+                    let from_md = match from_link {
+                        Some(f) => format!("[{from_label}]({f})"),
+                        None => from_label.to_string(),
+                    };
+                    let to_md = match to_link {
+                        Some(f) => format!("[{to_label}]({f})"),
+                        None => to_label.to_string(),
+                    };
+                    out.push_str(&format!("- {from_md} → {to_md}\n"));
+                }
+                out.push('\n');
             } else {
                 out.push_str(&render_relationship_kind_graph(kind, rels, &name_by_id));
                 out.push('\n');
@@ -980,16 +1154,91 @@ fn render_relationship_kind_graph(
     out
 }
 
-/// Render `API.md`: real `File` objects carrying a `symbols` property (bare identifier names
-/// harvested by a substring scan for declaration-line prefixes — `plugins/file/src/lib.rs`),
-/// grouped by file. Explicitly caveated as symbol names only, not a parsed API spec, since no
-/// analyzer compiles `ObjectKind::Api`/`ObjectKind::Service` objects today.
-pub fn render_api(objects: &[KirObject]) -> RenderedPage {
+fn is_symbol_kind(kind: &ObjectKind) -> bool {
+    matches!(kind, ObjectKind::Custom(s) if s == "RustSymbol" || s == "PythonSymbol")
+}
+
+/// Render `API.md`: real `Custom("RustSymbol")`/`Custom("PythonSymbol")` program-entity objects
+/// (`rust_analyzer.rs`/`python_analyzer.rs`, RFC 0041/0038-0040) — each carrying a `kind` property
+/// (function/struct/enum/trait/class/…) — grouped by their containing *file* via `Contains` edges
+/// (`rust_analyzer.rs`/`python_analyzer.rs` both emit `Contains` from the defining `File`, not
+/// from `Custom("RustModule")`/`Custom("PythonModule")` — those two kinds represent `use`/import
+/// targets instead, a different relationship entirely: `DependsOn` from the file, not `Contains`
+/// into it). Each symbol links to its own detail page (written alongside this file by
+/// `--layout curated`, RFC 0042). Falls back to the legacy `File.symbols` text-scan (bare
+/// identifier names, no `kind`, no links) only when zero real symbol objects are compiled, so a
+/// non-Rust/Python workspace still gets *something* rather than an empty page.
+pub fn render_api(objects: &[KirObject], relationships: &[KirRelationship]) -> RenderedPage {
     let mut out = String::from(
-        "# API\n\n_Symbol names only, extracted via a lightweight text scan for \
-         declaration-line prefixes (`fn `, `def `, `class `, `func `, `interface `) — not a \
-         parsed API spec. Real `Api`/`Service` objects, if ever compiled, would render here \
-         directly; none are compiled today._\n\n",
+        "# API\n\n_Program entities (functions, structs, enums, traits, classes, …) compiled \
+         from real Rust/Python source analysis, grouped by containing file. Each entity links \
+         to its own detail page (relationships, evidence, 1-hop diagram), written alongside this \
+         file. Real `Api`/`Service` objects, if a future connector ever compiles them, would \
+         render here directly._\n\n",
+    );
+
+    let symbols: Vec<&KirObject> = objects.iter().filter(|o| is_symbol_kind(&o.kind)).collect();
+
+    if symbols.is_empty() {
+        return render_api_from_legacy_file_symbols(objects, out);
+    }
+
+    let page_names = unique_page_file_names(objects, "md");
+    let file_by_id: HashMap<KirId, &KirObject> = objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::File)
+        .map(|o| (o.id, o))
+        .collect();
+    let mut containing_file: HashMap<KirId, KirId> = HashMap::new();
+    for rel in relationships {
+        if matches!(rel.kind, RelationshipKind::Contains) && file_by_id.contains_key(&rel.from) {
+            containing_file.insert(rel.to, rel.from);
+        }
+    }
+
+    let mut by_module: BTreeMap<String, Vec<&KirObject>> = BTreeMap::new();
+    for sym in &symbols {
+        let module_name = containing_file
+            .get(&sym.id)
+            .and_then(|fid| file_by_id.get(fid))
+            .map(|f| f.name.clone())
+            .unwrap_or_else(|| "(containing file not compiled)".to_string());
+        by_module.entry(module_name).or_default().push(sym);
+    }
+
+    for (module_name, mut syms) in by_module {
+        out.push_str(&format!("## {module_name}\n\n"));
+        syms.sort_by(|a, b| a.name.cmp(&b.name));
+        for sym in syms {
+            let entity_kind = sym
+                .properties
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("symbol");
+            match page_names.get(&sym.id) {
+                Some(link) => {
+                    out.push_str(&format!("- `{entity_kind}` [`{}`]({link})\n", sym.name))
+                }
+                None => out.push_str(&format!("- `{entity_kind}` `{}`\n", sym.name)),
+            }
+        }
+        out.push('\n');
+    }
+
+    RenderedPage {
+        file_name: "API.md".to_string(),
+        content: out,
+    }
+}
+
+/// RFC 0037's original renderer: bare identifier names from `File.symbols` (a text scan for
+/// declaration-line prefixes, `plugins/file/src/lib.rs`). Kept only as a fallback for workspaces
+/// with no compiled `RustSymbol`/`PythonSymbol` data — see [`render_api`]'s doc comment.
+fn render_api_from_legacy_file_symbols(objects: &[KirObject], mut out: String) -> RenderedPage {
+    out.push_str(
+        "_No `RustSymbol`/`PythonSymbol` data compiled — falling back to symbol names only, \
+         extracted via a lightweight text scan for declaration-line prefixes (`fn `, `def `, \
+         `class `, `func `, `interface `). Not a parsed API spec, no links._\n\n",
     );
 
     let mut files_with_symbols: Vec<&KirObject> = objects
@@ -1045,19 +1294,22 @@ fn sequence_participant_line(node: &KirObject) -> String {
     )
 }
 
-/// Render `SequenceDiagrams.md`: one Mermaid `sequenceDiagram` per compiled Transformation IR
-/// pipeline (grouped by origin), one message per `FeedsInto` edge within that origin, labeled
-/// with the target node's `node_type`. Explicitly labeled as a **data-flow** sequence, not a code
-/// call sequence — no analyzer compiles `RelationshipKind::Calls` data today, so this renders the
-/// only real *ordered* flow data that exists rather than fabricating one.
+/// Render `SequenceDiagrams.md`: two independent sections. `## Data-Flow Sequences` is one
+/// Mermaid `sequenceDiagram` per compiled Transformation IR pipeline (grouped by origin), one
+/// message per `FeedsInto` edge within that origin, labeled with the target node's `node_type` —
+/// explicitly labeled as data flow, not a code call sequence. `## Call Sequences` (RFC 0042) is
+/// the genuine code call sequence RFC 0037 didn't have data for: real `RelationshipKind::Calls`
+/// edges (`rust_analyzer.rs`'s `CallVisitor`), grouped by the caller's containing module, one
+/// small `sequenceDiagram` per module with calls.
 pub fn render_sequence_diagrams(
     objects: &[KirObject],
     relationships: &[KirRelationship],
 ) -> RenderedPage {
-    let mut out = String::from(
-        "# Sequence Diagrams\n\n_Rendered from Transformation IR `FeedsInto` edges — a \
-         data-flow sequence between compiled pipeline steps, not a code call sequence. EKOS does \
-         not compile call-graph data today._\n\n",
+    let mut out = String::from("# Sequence Diagrams\n\n");
+
+    out.push_str(
+        "## Data-Flow Sequences\n\n_Rendered from Transformation IR `FeedsInto` edges — a \
+         data-flow sequence between compiled pipeline steps, not a code call sequence._\n\n",
     );
 
     let nodes: Vec<&KirObject> = objects
@@ -1065,11 +1317,8 @@ pub fn render_sequence_diagrams(
         .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "TransformNode"))
         .collect();
     if nodes.is_empty() {
-        out.push_str("_No transformation pipelines compiled._\n");
-        return RenderedPage {
-            file_name: "SequenceDiagrams.md".to_string(),
-            content: out,
-        };
+        out.push_str("_No transformation pipelines compiled._\n\n");
+        return render_call_sequences_section(objects, relationships, out);
     }
 
     let id_to_node: HashMap<KirId, &KirObject> = nodes.iter().map(|o| (o.id, *o)).collect();
@@ -1136,6 +1385,109 @@ pub fn render_sequence_diagrams(
             ));
         }
         out.push('\n');
+    }
+
+    render_call_sequences_section(objects, relationships, out)
+}
+
+/// The `## Call Sequences` section appended to `SequenceDiagrams.md` (RFC 0042): real
+/// `RelationshipKind::Calls` edges, grouped by the caller's containing module (via `Contains`
+/// edges module→symbol, the same association `render_api` uses), one small `sequenceDiagram` per
+/// module — capped the same way `render_architecture`'s `## Dependency Graph` caps an oversized
+/// relationship kind, so one module with hundreds of internal calls can't make the whole page
+/// unreadable.
+fn render_call_sequences_section(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+    mut out: String,
+) -> RenderedPage {
+    out.push_str(
+        "## Call Sequences\n\n_Rendered from real `Calls` edges (function/method call graph, \
+         RFC 0041) — grouped by the caller's containing module. A genuine code call sequence, \
+         distinct from the data-flow sequences above._\n\n",
+    );
+
+    let call_edges: Vec<&KirRelationship> = relationships
+        .iter()
+        .filter(|r| matches!(r.kind, RelationshipKind::Calls))
+        .collect();
+    if call_edges.is_empty() {
+        out.push_str("_No `Calls` relationships compiled._\n");
+        return RenderedPage {
+            file_name: "SequenceDiagrams.md".to_string(),
+            content: out,
+        };
+    }
+
+    // Grouped by containing *file*, not `Custom("RustModule")`/`Custom("PythonModule")` — those
+    // two kinds are `use`/import targets (`DependsOn` from the file), not containers; the real
+    // `Contains` edge into a symbol comes from its defining `File` (see `render_api`'s doc
+    // comment for the same distinction).
+    let file_ids: HashSet<KirId> = objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::File)
+        .map(|o| o.id)
+        .collect();
+    let file_name_by_id: HashMap<KirId, &str> = objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::File)
+        .map(|o| (o.id, o.name.as_str()))
+        .collect();
+    let mut symbol_file: HashMap<KirId, KirId> = HashMap::new();
+    for rel in relationships {
+        if matches!(rel.kind, RelationshipKind::Contains) && file_ids.contains(&rel.from) {
+            symbol_file.insert(rel.to, rel.from);
+        }
+    }
+    let symbol_name_by_id: HashMap<KirId, &str> = objects
+        .iter()
+        .filter(|o| is_symbol_kind(&o.kind))
+        .map(|o| (o.id, o.name.as_str()))
+        .collect();
+
+    let mut by_module: BTreeMap<&str, Vec<&KirRelationship>> = BTreeMap::new();
+    for edge in &call_edges {
+        let file_name = symbol_file
+            .get(&edge.from)
+            .and_then(|fid| file_name_by_id.get(fid))
+            .copied()
+            .unwrap_or("(file unknown)");
+        by_module.entry(file_name).or_default().push(edge);
+    }
+
+    const MAX_CALL_EDGES: usize = 20;
+    for (module_name, edges) in by_module {
+        out.push_str(&format!("### {module_name}\n\n"));
+        if edges.len() > MAX_CALL_EDGES {
+            out.push_str(&format!(
+                "_{} `Calls` edges compiled for this module — diagram omitted, too large to \
+                 render usefully._\n\n",
+                edges.len()
+            ));
+            continue;
+        }
+        out.push_str("```mermaid\nsequenceDiagram\n");
+        let mut seen: HashSet<KirId> = HashSet::new();
+        for edge in &edges {
+            for id in [edge.from, edge.to] {
+                if seen.insert(id) {
+                    let label = symbol_name_by_id.get(&id).copied().unwrap_or("unknown");
+                    out.push_str(&format!(
+                        "    participant {} as \"{}\"\n",
+                        mermaid_node_id(&id),
+                        mermaid_escape_label(label)
+                    ));
+                }
+            }
+        }
+        for edge in &edges {
+            out.push_str(&format!(
+                "    {}->>{}: calls\n",
+                mermaid_node_id(&edge.from),
+                mermaid_node_id(&edge.to)
+            ));
+        }
+        out.push_str("```\n\n");
     }
 
     RenderedPage {
@@ -1707,6 +2059,48 @@ mod tests {
             page.content
                 .contains("No structural relationships compiled.")
         );
+        assert!(
+            page.content
+                .contains("No crate/workspace manifests compiled.")
+        );
+        assert!(
+            page.content
+                .contains("No CI/CD pipeline definitions compiled.")
+        );
+    }
+
+    #[test]
+    fn architecture_renders_crate_topology_and_links_components_to_api() {
+        let kir = KirObject::new("ekos-kir", ObjectKind::Custom("Crate".to_string()));
+        let cli = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let dep = KirRelationship::new(RelationshipKind::DependsOn, cli.id, kir.id);
+        let symbol = KirObject::new("run", ObjectKind::Custom("RustSymbol".to_string()));
+
+        let page = render_architecture(&[kir, cli, symbol], &[dep]);
+        assert!(page.content.contains("## Crate & Workspace Topology"));
+        assert!(page.content.contains("ekos-cli"));
+        assert!(page.content.contains("ekos-kir"));
+        assert!(
+            page.content
+                .contains("**RustSymbol**: 1 — see [API.md](API.md)")
+        );
+    }
+
+    #[test]
+    fn architecture_renders_cicd_pipelines() {
+        let pipeline = KirObject::new("CI", ObjectKind::Pipeline)
+            .with_property("triggers", serde_json::json!(["push"]))
+            .with_property(
+                "jobs",
+                serde_json::json!([{"name": "build", "steps": ["Checkout", "Test"]}]),
+            );
+
+        let page = render_architecture(&[pipeline], &[]);
+        assert!(page.content.contains("## CI/CD Pipelines"));
+        assert!(page.content.contains("### CI"));
+        assert!(page.content.contains("Triggers: `push`"));
+        assert!(page.content.contains("**build**"));
+        assert!(page.content.contains("Checkout"));
     }
 
     #[test]
@@ -1759,6 +2153,16 @@ mod tests {
                 .contains("diagram omitted, too large to render usefully")
         );
         assert!(!page.content.contains("```mermaid\ngraph TD\n    n"));
+        assert!(
+            page.content.contains("- doc.pdf → section-0"),
+            "File/Section endpoints get no curated detail page, so the overflow sample must \
+             render plain text, not a dangling markdown link — got: {}",
+            page.content
+        );
+        assert!(
+            !page.content.contains("[doc.pdf]("),
+            "must never link an endpoint kind curated never writes a page for"
+        );
     }
 
     #[test]
@@ -1778,19 +2182,37 @@ mod tests {
             "symbols",
             serde_json::json!(["handle_request", "parse_body"]),
         );
-        let page = render_api(&[file]);
+        let page = render_api(&[file], &[]);
         assert_eq!(page.file_name, "API.md");
         assert!(page.content.contains("## service.py"));
         assert!(page.content.contains("- `handle_request`"));
         assert!(page.content.contains("- `parse_body`"));
-        assert!(page.content.contains("Symbol names only"));
+        assert!(page.content.contains("falling back to symbol names only"));
     }
 
     #[test]
     fn api_on_no_symbols_is_honest_not_a_fabricated_surface() {
         let file = KirObject::new("empty.py", ObjectKind::File);
-        let page = render_api(&[file]);
+        let page = render_api(&[file], &[]);
         assert!(page.content.contains("No API surface data compiled."));
+    }
+
+    #[test]
+    fn api_prefers_real_rust_symbol_objects_over_the_legacy_file_symbols_fallback() {
+        let file = KirObject::new("crates/kir/src/lib.rs", ObjectKind::File);
+        let function = KirObject::new(
+            "build_object_page_model",
+            ObjectKind::Custom("RustSymbol".to_string()),
+        )
+        .with_property("kind", serde_json::json!("function"));
+        let contains = KirRelationship::new(RelationshipKind::Contains, file.id, function.id);
+
+        let page = render_api(&[file.clone(), function], &[contains]);
+        assert_eq!(page.file_name, "API.md");
+        assert!(page.content.contains(&format!("## {}", file.name)));
+        assert!(page.content.contains("`function`"));
+        assert!(page.content.contains("build_object_page_model"));
+        assert!(!page.content.contains("falling back to symbol names only"));
     }
 
     #[test]
@@ -1839,6 +2261,29 @@ mod tests {
             page.content
                 .contains("No transformation pipelines compiled.")
         );
+        assert!(page.content.contains("No `Calls` relationships compiled."));
+    }
+
+    #[test]
+    fn sequence_diagrams_renders_call_sequences_grouped_by_caller_module() {
+        let file = KirObject::new("crates/kir/src/lib.rs", ObjectKind::File);
+        let caller = KirObject::new(
+            "build_object_page_model",
+            ObjectKind::Custom("RustSymbol".to_string()),
+        );
+        let callee = KirObject::new(
+            "render_markdown_object_page",
+            ObjectKind::Custom("RustSymbol".to_string()),
+        );
+        let contains = KirRelationship::new(RelationshipKind::Contains, file.id, caller.id);
+        let calls = KirRelationship::new(RelationshipKind::Calls, caller.id, callee.id);
+
+        let page = render_sequence_diagrams(&[file.clone(), caller, callee], &[contains, calls]);
+        assert!(page.content.contains("## Call Sequences"));
+        assert!(page.content.contains(&format!("### {}", file.name)));
+        assert!(page.content.contains("build_object_page_model"));
+        assert!(page.content.contains("render_markdown_object_page"));
+        assert!(page.content.contains("sequenceDiagram"));
     }
 
     #[test]

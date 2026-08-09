@@ -362,11 +362,58 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
 
     let readme = ekos_docs_gen::render_readme(&objects);
     let architecture = ekos_docs_gen::render_architecture(&objects, &relationships);
-    let api = ekos_docs_gen::render_api(&objects);
+    let api = ekos_docs_gen::render_api(&objects, &relationships);
     let sequence_diagrams = ekos_docs_gen::render_sequence_diagrams(&objects, &relationships);
 
     for page in [&readme, &architecture, &api, &sequence_diagrams] {
         write_page(output, page)?;
+    }
+
+    // RFC 0042: per-entity detail pages for the crate/program-entity/technology/pipeline kinds
+    // `Architecture.md`/`API.md` now link to — reusing the exact same object-page renderer
+    // `--layout objects` uses (`build_object_page_model`/`render_markdown_object_page`), not a
+    // new one, so every link the curated files emit resolves to a file written in this same run.
+    // File names are taken from `unique_page_file_names` (the same collision-free naming the
+    // linking renderers used to build those links) rather than the plain `page_file_name` a
+    // standalone `render_markdown_object_page` call would otherwise use, so two entities sharing
+    // a bare name (e.g. two `fn new` in different modules) never overwrite each other on disk.
+    // `is_entity_page_kind` is the single source of truth shared with `render_architecture`'s/
+    // `render_api`'s own link-generation, so a link is never emitted to a page that isn't written
+    // here (or vice versa).
+    let object_names: HashMap<_, _> = objects.iter().map(|o| (o.id, o.name.clone())).collect();
+    let unique_file_names = ekos_docs_gen::unique_page_file_names(&objects, "md");
+    let mut entity_pages_written = 0usize;
+    for object in objects
+        .iter()
+        .filter(|o| ekos_docs_gen::is_entity_page_kind(&o.kind))
+    {
+        let obj_relationships: Vec<KirRelationship> = relationships
+            .iter()
+            .filter(|r| r.from == object.id || r.to == object.id)
+            .cloned()
+            .collect();
+        let mut evidence = Vec::new();
+        for id in object
+            .evidence
+            .iter()
+            .chain(obj_relationships.iter().flat_map(|r| r.evidence.iter()))
+        {
+            if let Some(ev) = ledger.get_evidence(id)? {
+                evidence.push(ev);
+            }
+        }
+        let model = ekos_docs_gen::build_object_page_model(
+            object,
+            &obj_relationships,
+            &evidence,
+            &object_names,
+        );
+        let mut page = ekos_docs_gen::render_markdown_object_page(&model);
+        if let Some(name) = unique_file_names.get(&object.id) {
+            page.file_name = name.clone();
+        }
+        write_page(output, &page)?;
+        entity_pages_written += 1;
     }
 
     println!("Curated documentation generated.");
@@ -375,6 +422,7 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
         "  Files: {}, {}, {}, {}",
         readme.file_name, architecture.file_name, api.file_name, sequence_diagrams.file_name
     );
+    println!("  Entity detail pages written: {entity_pages_written}");
     println!("  Output: {}", output.display());
 
     Ok(())
@@ -812,6 +860,55 @@ mod tests {
 
         let readme = std::fs::read_to_string(output.join("README.md")).unwrap();
         assert!(readme.contains("**Table**: 1"));
+    }
+
+    #[tokio::test]
+    async fn generate_curated_writes_entity_pages_and_every_api_link_resolves_on_disk() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+
+        let file = KirObject::new("crates/kir/src/lib.rs", ObjectKind::File);
+        let function = KirObject::new(
+            "build_object_page_model",
+            ObjectKind::Custom("RustSymbol".to_string()),
+        )
+        .with_property("kind", serde_json::json!("function"));
+        ledger.append_object(&file).unwrap();
+        ledger.append_object(&function).unwrap();
+        let contains = KirRelationship::new(RelationshipKind::Contains, file.id, function.id);
+        ledger.append_relationship(&contains).unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            output
+                .join("rustsymbol-build-object-page-model.md")
+                .exists(),
+            "entity detail page for the RustSymbol must be written alongside the four curated files"
+        );
+
+        let api = std::fs::read_to_string(output.join("API.md")).unwrap();
+        assert!(api.contains("build_object_page_model"));
+        // Every `](...)` link API.md emits must resolve to a file `generate_curated` actually wrote.
+        for link in api.split("](").skip(1) {
+            let file_name = link.split(')').next().unwrap();
+            assert!(
+                output.join(file_name).exists(),
+                "API.md links to {file_name}, which was never written"
+            );
+        }
     }
 
     #[tokio::test]
