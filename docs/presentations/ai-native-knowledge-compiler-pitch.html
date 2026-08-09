@@ -178,9 +178,9 @@ Object :1  node_type: <span class="k">"Sink"</span>
   <div class="eyebrow">Why a technical buyer should trust this codebase</div>
   <h2>RFC-first. Test-first. Append-only. Zero shortcuts on the ledger's invariants.</h2>
   <div class="stat-grid">
-    <div class="stat"><div class="num">548</div><div class="label">tests passing, 0 failing</div></div>
-    <div class="stat"><div class="num">30</div><div class="label">accepted RFCs</div></div>
-    <div class="stat"><div class="num">31</div><div class="label">devlogs — full build history</div></div>
+    <div class="stat"><div class="num">738</div><div class="label">tests passing, 0 failing</div></div>
+    <div class="stat"><div class="num">43</div><div class="label">accepted RFCs</div></div>
+    <div class="stat"><div class="num">43</div><div class="label">devlogs — full build history</div></div>
     <div class="stat"><div class="num">0</div><div class="label"><span class="mono">unsafe</span> without a written justification</div></div>
   </div>
   <p class="lede" style="margin-top:2.2rem;">Every capability is designed in writing before it's
@@ -208,9 +208,11 @@ Object :1  node_type: <span class="k">"Sink"</span>
   <p class="lede">EKOS is early-stage and open source — this deck's own §05–06 is the point: the
   product is far enough along to be genuinely useful, and immature enough that testing it against
   real, uncontrolled data still finds real bugs, which get fixed in the open. Real/tested
-  connectors today: file, Git, GitHub, Confluence, local docs (PDF/DOCX/etc.), Pentaho, crypto.
+  connectors today: file, Git, GitHub, Confluence, local docs (PDF/DOCX/etc.), Pentaho, crypto,
+  Python/PySpark (real AST + DataFrame chains), Rust source (real AST + function-call graph).
   Several more (Salesforce, SAP, Oracle, Snowflake, Fabric) are scaffolded but not yet proven
-  against live accounts.</p>
+  against live accounts. A built-in secrets/PII redaction baseline (RFC 0043) runs on every
+  connector automatically, on by default, not something a workspace can turn off.</p>
   <div class="hero-diagram" style="margin-top:2.2rem;">
     <span class="chip hot">Design partners wanted</span><span class="sep mono">·</span>
     <span class="chip hot">Contributors wanted</span><span class="sep mono">·</span>

@@ -13,7 +13,7 @@
 <nav class="rail" aria-hidden="true">
   <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
   <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
-  <a href="#s10"></a><a href="#s11"></a><a href="#s12"></a><a href="#s13"></a>
+  <a href="#s10"></a><a href="#s11"></a><a href="#s12"></a><a href="#s12b"></a><a href="#s13"></a>
 </nav>
 
 <div class="deck">
@@ -377,6 +377,40 @@ ai.ask(<span class="s">&amp;model.name</span>)</pre>
   </div>
 </section>
 
+<section class="slide" id="s12b">
+  <div class="stage-num mono">§ 11.5 / the shape a developer actually expects</div>
+  <div class="eyebrow"><code class="mono" style="font-family:inherit;">--layout curated</code> — RFC 0037/0042, added since this deck's first slides</div>
+  <h2>Not just one page per object. README, Architecture, API, sequence diagrams — with real crate topology and CI/CD.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — real, unedited (this repo, self-run)</div>
+<pre style="margin:0;">$ ekos docs generate --layout curated --output doc
+Curated documentation generated.
+  Objects considered: 4267
+  Files: README.md, Architecture.md, API.md,
+         SequenceDiagrams.md
+  Entity detail pages written: 1855
+  Output: doc</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      <code class="mono">Architecture.md</code> now includes a real crate/workspace dependency
+      graph parsed from every <code class="mono">Cargo.toml</code> (not guessed), real CI/CD
+      pipelines parsed from <code class="mono">.github/workflows/*.yml</code>, and
+      <code class="mono">API.md</code> links every real function/struct/enum/trait
+      (<code class="mono">RustSymbol</code>/<code class="mono">PythonSymbol</code>) to its own
+      detail page — 1,855 of them for this repo alone, nested under
+      <code class="mono">entities/&lt;kind&gt;/&lt;shard&gt;/</code> so the page count never blows
+      past GitHub's per-directory listing cap. Same zero-LLM, zero-cost rendering this whole deck
+      already demonstrated — just a different, more opinionated shape.
+    </p>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real generated docs for this exact repo:
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/Architecture.md" style="color:var(--accent-a);">Architecture.md</a> ·
+    <a href="https://github.com/alexeyban/EKOS/blob/main/doc/API.md" style="color:var(--accent-a);">API.md</a> ·
+    <a href="https://alexeyban.github.io/EKOS/presentations/cross-project-documentation.html" style="color:var(--accent-a);">the full three-project deck</a>
+  </div>
+</section>
+
 <section class="slide cta" id="s13">
   <div class="eyebrow">Try it</div>
   <h2>Point it at anything EKOS has already compiled.</h2>
@@ -387,11 +421,12 @@ $ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos com
 
 <span class="c"># deterministic, zero LLM, zero cost</span>
 $ ekos docs generate --format html
+$ ekos docs generate --layout curated --output doc
 
 <span class="c"># opt-in, citation-validated overview per page</span>
 $ ekos docs generate --prose</pre>
   </div>
-  <div class="fineprint">EKOS · RFC 0035 (Generated Documentation) · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+  <div class="fineprint">EKOS · RFC 0035/0037/0042 (Generated Documentation) · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
 </section>
 
 </div>

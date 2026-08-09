@@ -3,30 +3,28 @@
 **Prompt:** Where is authentication implemented in my estate? Then, if I replace PostgreSQL with Cosmos DB, what breaks?
 
 ```
-## Authentication — as compiled from the ledger (last build 2026-07-17)
+## Where authentication lives
 
-Two genuinely different implementations exist across the estate, plus a cluster of auth flows that aren't user-authentication at all:
+Per the EKOS ledger (project: `serbian-legal-adviser`), there are two independent auth mechanisms, each duplicated across a legacy top-level layout and a newer `components/*` monorepo layout (same code, two paths — worth flagging as drift risk):
 
-**`serbian-legal-adviser`** — self-rolled, Postgres-backed
-- `src/api/auth/dependencies.py` — FastAPI bearer-token dependency, validates via `validate_api_key()`, pulled through a SQLAlchemy `AsyncSession` (`src/db/connection.py`)
-- `src/db/connection.py` — `create_async_engine(settings.database_url)`, i.e. a plain Postgres SQLAlchemy engine
-- `src/admin/auth.py` — a *separate*, DB-free path: static `ADMIN_TOKEN` env var checked via `HTTPBearer`, used only for admin endpoints (`src/admin/routes/{users,stats,crawl}.py`)
-- Consumers: `src/api/routes/v1/{keys,subscriptions,profile}.py`
+1. **API auth** — `src/api/auth/dependencies.py` (+ `components/api/src/api/auth/dependencies.py`)
+   FastAPI dependency-injected Bearer auth. `get_auth_context()` pulls a `AsyncSession` via `Depends(get_session)` and validates the token against the DB through `src.api.auth.api_key.validate_api_key`.
 
-**`lingualoop`** — delegates to Supabase Auth
-- `backend/routers/auth.py` explicitly documents: *"Supabase Auth handles registration, login, magic-link delivery, and email verification."* The app only upserts a local user row from Supabase JWT claims (`/api/auth/sync`), serves `/api/auth/me`, and does GDPR erasure across **app DB + Supabase + Blob Storage**.
-- The app's own Postgres (Azure Flexible Server, provisioned in `infra/terraform/modules/database`) stores app data, not credentials — Supabase owns the actual identity store.
+2. **Admin auth** — `src/admin/auth.py` (+ `components/admin/src/admin/auth.py`)
+   Simpler static-token check: `require_admin()` reads `ADMIN_TOKEN` from env and compares against the bearer token. No DB lookup itself, but it gates routes (`admin/routes/users.py`, `admin/routes/stats.py`, `admin/routes/crawl.py`) that do hit the DB.
 
-**`openclaw`** — not app auth, provider OAuth
-- `github-copilot-auth.ts`, `gemini-auth.ts`, `qwen-portal-auth/`, `mobile-reauth.sh`, etc. — these authenticate the *tool* against AI provider APIs, unrelated to end-user login.
+Both routes back onto `src/db/connection.py`, which builds an **async SQLAlchemy engine directly from `settings.database_url`** (`src/config.py`, built from `postgres_user/password/db/host/port`, default port 5432). The `users`/`api_keys`/`subscriptions` tables that back auth are defined in `alembic/versions/007_users_and_subscriptions.py`.
 
-Caveat: the ledger's relationships here are git co-change evidence (`CoupledWith`), not a live import graph — good for "what tends to change together," not a substitute for reading the code directly for exact call chains.
+## What breaks if PostgreSQL → Cosmos DB
 
-## If PostgreSQL is replaced with Cosmos DB
+The migration `007_users_and_subscriptions.py` is not portable SQL — it's Postgres-native:
 
-- **`serbian-legal-adviser` breaks hardest.** Every layer assumes relational Postgres: `db/connection.py`'s SQLAlchemy async engine, `db/models.py` ORM models, Alembic migrations (`alembic/env.py`), and — critically — auth itself, since `dependencies.py` validates API keys through that same session. Auth, billing (`subscriptions.py`, `keys.py`), and profile routes all go dark unless rewritten against a document/NoSQL driver. Azure's "Cosmos DB for PostgreSQL" (Citus) flavor would be far less disruptive than the NoSQL/Mongo API flavor, since it's wire-compatible with Postgres.
-- **`lingualoop`'s login itself is safe** — Supabase manages its own backing Postgres independently of your infra. But the app-side Postgres (`infra/terraform/modules/database`) is coupled (co-change evidence, 12 dependents) to `modules/network`, `modules/storage`, `modules/containers`, and `modules/ai` — replacing it means touching that whole Terraform surface, plus rewriting the GDPR-erasure path that currently deletes rows from "app DB."
-- **A wider blast radius exists beyond these two projects.** The estate also has a `components/{api,admin,bot,scraper,scheduler,reasoning-engine,knowledge-graph,vector-db}` cluster, each with its own `db/connection.py` + `db/models.py` + Alembic env + Postgres `docker-compose.yml`. Notably `tests/test_tkg/test_age_schema.py` implies use of **Apache AGE**, a Postgres graph extension — that has no Cosmos DB equivalent and would be a hard blocker, not just a migration effort, for that component.
+- **`sa.UUID()` with `server_default=sa.text("gen_random_uuid()")`** — Postgres server-side UUID generation function; Cosmos has no equivalent server-side default.
+- **`sqlalchemy.dialects.postgresql.JSONB`** — dialect-specific type; doesn't exist outside Postgres.
+- The whole stack is **SQLAlchemy + Alembic**, which assume a relational/SQL engine. Cosmos DB (document/NoSQL, even via its SQL API) is not a SQLAlchemy dialect target without a from-scratch data-access rewrite — `get_session()`, every `AsyncSession`-typed route, and Alembic's entire migration chain (`alembic/versions/*`) would need to be replaced, not adapted.
+- `src/config.py`'s `postgres_*` settings and `database_url` construction are Postgres-shaped connection params — Cosmos uses account URI + key/AAD, so config and `src/db/connection.py`'s engine construction both break.
+- Anything coupled to `src/config.py` by co-change history in the ledger (18 dependency edges, mostly `infra/terraform/modules/database/*`, `infra/terraform/main.tf`, `modules/containers`, `modules/ai`) — i.e., the Terraform database module provisioning Postgres — would need a parallel Cosmos module; nothing in Terraform currently provisions Cosmos.
+- Both API-key auth (`validate_api_key`, queries `api_keys`/`users` tables) and admin routes (`users.py`, `stats.py`, `crawl.py`) go through this same session/engine, so **all authentication and authorization is blocked** until the data layer is ported — this isn't an isolated auth-only change.
 
-I didn't reconstruct exact schema-level FK dependents (the ledger's `Table` objects returned were mostly sample-db schemas like Northwind, not these apps' live models) — if you want a precise column/FK blast radius before actually migrating, worth running `ekos build && ekos recover && ekos compile && ekos commit` on `serbian-legal-adviser` and the components cluster specifically, then re-querying `ekos_dependents` on the resulting `Table` objects.
+Bottom line: it's not a config swap. Auth (API-key and admin) both depend transitively on SQLAlchemy/Alembic/Postgres-dialect code, and that dependency is duplicated in two source trees (`src/` and `components/*`), doubling the surface to migrate.
 ```

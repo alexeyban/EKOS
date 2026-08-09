@@ -31,36 +31,38 @@
     <span class="chip">Compiled ledger</span><span class="sep mono">→</span>
     <span class="chip hot">README / Architecture / API / SequenceDiagrams</span>
   </div>
-  <div class="byline"><span class="dot"></span> RFC 0035/0037 — <code class="mono">ekos docs generate --layout curated</code></div>
+  <div class="byline"><span class="dot"></span> RFC 0035/0037/0042/0043 — <code class="mono">ekos docs generate --layout curated</code></div>
 </section>
 
 <section class="slide" id="s2">
   <div class="stage-num mono">§ 01 / dogfood — EKOS on itself</div>
   <div class="eyebrow">The same product, pointed at its own source tree</div>
-  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:28ch;">751 files. 3,334 compiled objects. 733 real function-call edges.</h2>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:28ch;">2,192 files. 39 real crates. 749 real function-call edges.</h2>
   <div class="two-col">
     <div class="codeblock">
-      <div class="tag">terminal — real, unedited</div>
+      <div class="tag">terminal — real, unedited (RFC 0042 self-run)</div>
 <pre style="margin:0;">Build complete.
-  Files observed (new): 751
+  Files observed (new): 2192
 
 Recover complete.
-  Git commits analysed: 102
-  Local documents analysed: 536
+  Git commits analysed: 105
+  Local documents analysed: 1995
   Rust files analysed: 132
-  Rust symbols recovered: 1301 total, 733 Calls edges
-  Transformation IR nodes (SQL): 34 total
+  Rust symbols recovered: 1324 total, 749 Calls edges
+  crate-topology-analyzer: crates=39 technologies=41 edges=368
+  cicd-analyzer: pipelines=2
 
-Compile complete.
-  Objects:       3334
-  Relationships: 5335</pre>
+Documentation generated.
+  Entity detail pages written: 1855</pre>
     </div>
     <p class="lede" style="margin-top:0;">
-      733 real <code class="mono">RelationshipKind::Calls</code> edges — the Rust source analyzer
-      (RFC 0041) shipped this same session, verified against this exact repo. 1,518
-      <code class="mono">Section</code> objects from the project's own devlogs and RFCs, 441
-      <code class="mono">RustModule</code> import edges, 19 <code class="mono">Table</code>
-      objects from the SQL test fixtures — the compiler documenting the compiler.
+      A real crate/workspace dependency graph parsed straight from every <code class="mono">Cargo.toml</code>
+      (RFC 0042) — no more guessing at the architecture by hand. Two real CI/CD pipelines parsed
+      from <code class="mono">.github/workflows/*.yml</code>. 749 real
+      <code class="mono">RelationshipKind::Calls</code> edges (RFC 0041). Test/demo fixtures
+      (<code class="mono">tests/fixtures/*.sql</code>, presentation-deck example data) are
+      explicitly excluded from this self-run — a real bug found live: they were rendering as if
+      they were EKOS's own production schema.
     </p>
   </div>
   <div class="tag" style="margin-top:0.8rem;">Open the real generated docs:
@@ -92,7 +94,9 @@ Compile complete.
   <code class="mono">PythonModule</code> import edges, real DataFrame method chains recovered from
   the shared <code class="mono">src/dp/</code> library — not the notebooks, which mostly delegate
   by function call (RFC 0040's own real-data finding, reproduced here on a second, independent
-  run).</p>
+  run). 297 individual entity detail pages (RFC 0042) — every function/class in
+  <code class="mono">API.md</code> links to its own page with real relationships, evidence, and a
+  1-hop diagram, generated from this exact run, not a separate command.</p>
   <div class="tag" style="margin-top:0.8rem;">Open the real generated docs:
     <a href="https://github.com/alexeyban/EKOS/blob/main/doc/databricks/README.md" style="color:var(--accent-a);">README</a> ·
     <a href="https://github.com/alexeyban/EKOS/blob/main/doc/databricks/Architecture.md" style="color:var(--accent-a);">Architecture</a> ·
@@ -193,11 +197,15 @@ graph TD</span>
 <section class="slide" id="s7">
   <div class="stage-num mono">§ 06 / honest limits</div>
   <div class="eyebrow">What this deck won't overclaim</div>
-  <h2>Two real, disclosed gaps — not smoothed over.</h2>
+  <h2>Real, disclosed gaps — not smoothed over.</h2>
   <ul class="facts" style="margin-top:0;">
     <li><span class="k">No ADF connector yet</span><span class="v">Real pipeline/dataset/linkedService JSON in <code class="mono">adf-pipelines</code> is captured as plain files, not parsed into pipeline/activity objects — RFC 0038 Phase 5, not yet built.</span></li>
-    <li><span class="k">API.md predates the new analyzers</span><span class="v">The curated <code class="mono">API.md</code> page still uses a legacy heuristic text-scan for symbol names, not the richer <code class="mono">RustSymbol</code>/<code class="mono">PythonSymbol</code> KIR objects RFC 0040/0041 added — a known follow-up, not fixed in this pass.</span></li>
+    <li><span class="k">Redaction is a fixed pattern table, not a guarantee</span><span class="v">RFC 0043's built-in secrets/PII baseline (AWS/GitHub/Slack/Google/Stripe token shapes, PEM keys, JWTs, generic key/password assignments) runs on every one of these three doc-generation passes automatically — but it's a known, transparent list, not statistical/entropy-based detection. A secret shaped like none of those patterns won't be caught. Stated as a limit, not hidden.</span></li>
   </ul>
+  <p class="lede" style="margin-top:1rem;">The previous gap this deck disclosed here — <code class="mono">API.md</code> using a legacy
+  text-scan instead of real <code class="mono">RustSymbol</code>/<code class="mono">PythonSymbol</code>
+  objects — is fixed as of RFC 0042: every <code class="mono">API.md</code> above now links real
+  program entities, not scanned identifier strings.</p>
 </section>
 
 <section class="slide cta" id="s8">
@@ -211,7 +219,7 @@ $ ekos build &amp;&amp; ekos recover &amp;&amp; ekos compile &amp;&amp; ekos com
 <span class="c"># deterministic, zero LLM, zero cost</span>
 $ ekos docs generate --layout curated</pre>
   </div>
-  <div class="fineprint">EKOS · RFC 0035/0037/0040/0041 · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+  <div class="fineprint">EKOS · RFC 0035/0037/0040/0041/0042/0043 · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
 </section>
 
 </div>

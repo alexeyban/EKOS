@@ -3,67 +3,30 @@
 **Prompt:** Design a CDC architecture for ingesting order data into a lakehouse. Base it on my past work — my prior CDC projects, my mistakes, my lessons.
 
 ```
-The design is grounded in your own three prior CDC builds. Here's the full architecture:
+The estate-architect agent found **three prior CDC implementations** in your ledger and built the design directly on top of them, rather than from generic best practice. Here's the design:
 
-# CDC Architecture for Order Data into a Lakehouse
+## Prior art it found
+1. **`databricks-lab` (gitlab)** — full production-grade lab: Debezium/Kafka/Postgres → Bronze → Silver → Data Vault 2.0 → Gold, with DQ monitoring, schema-drift policy engine, and GDPR/PII erasure pipeline.
+2. **`opncodetest`** — orders-specific: Debezium → Kafka → Bronze → Silver (`silver_orders`) → dbt Gold, with a metadata-driven refactor history.
+3. **`azure-data-project`** — same Debezium pattern, but transported via Azure Event Hub (Kafka protocol, SASL_SSL) instead of local Kafka.
 
-Grounded in evidence from three prior projects:
-- **`opncodetest`** — metadata-driven Kafka→Bronze→Silver pipeline, Silver notebook literally titled "Silver Layer - Orders Processing," plus a `cdc_gold/` dbt project with order revenue models and tests.
-- **`databricks-lab`** — Debezium→Kafka→Bronze→Silver→Data Vault 2.0→dbt Gold, including a generated `HUB_ORDERS`/`sat_orders_core`/`sat_orders_pricing` Data Vault model.
-- **`ai-data-platform-engineer`** — an earlier, cruder CDC build plus a hard-won postmortem (`AI_Session_Analysis_Report.md`) documenting real production bugs.
+## Proposed architecture (grounded)
 
-No prior EKOS/Pentaho-based CDC work was found — everything below is sourced from the three repos above, explicitly labeled where it's new ground.
+**1. Capture** — Debezium `pgoutput` logical replication on Postgres (exact connector config reused from `opncodetest`/`postgres-connector.json`), with `heartbeat.interval.ms=30000` from the Azure variant to detect stalled slots.
 
----
+**2. Transport** — Kafka Connect. Scar to avoid: `databricks-lab/ROADMAP.md` documents that direct `spark.readStream.format("kafka")` couldn't reach Docker-hosted Kafka from Databricks Serverless (ngrok tunnel limitation) — they had to build a Kafka→Volume producer + Auto Loader workaround. Plan for that decoupling upfront if targeting Serverless, or move straight to cloud Kafka (Confluent/MSK) as the roadmap recommends.
 
-## 1. Source Capture
-**Reuse: Debezium logical replication** (`databricks-lab/docs/architecture.md`) — PostgreSQL `wal_level=logical`, Kafka Connect, `pgoutput`, one topic per table for `orders`, `order_items`, and dimension tables.
-**Lesson baked in:** a missing `topic.prefix` silently prevented topic creation before (`AI_Session_Analysis_Report.md` E11) — it's now mandatory in the connector template.
+**3. Bronze** — Envelope validation with quarantine (not silent drops), `mergeSchema=true` paired with a separate drift-validation gate, 30-day TTL, and volume-anomaly detection (WARN <50% of 7-day avg, FAIL at zero rows) — all lifted directly from `NB_ingest_to_bronze.ipynb`.
 
-## 2. Transport / Streaming
-**Reuse: Kafka + Spark Structured Streaming** with `subscribePattern` (`cdc.public.*`) so new order-adjacent tables auto-attach without redeploy.
-**Known gotcha:** Databricks Serverless can't reach a local ngrok-tunneled Kafka — the proven fallback is the `kafka-to-volume` Docker profile (Auto Loader off a Volume instead of direct Kafka).
-**No prior art:** cloud-managed Kafka (MSK/Confluent Cloud) production topology — only ever mentioned, never built. Use general best practice here.
+**4. Silver / dedup** — **Key lesson**: `SILVER_METADATA_REFACTOR.md` and `DQ_INCIDENT_RUNBOOK.md` document a real production incident — deduping on `event_time` alone caused `pk_uniqueness FAIL` from duplicate PKs in MERGE, because event timestamps aren't guaranteed unique/monotonic. The fix already adopted: order by `(event_time, event_ts_ms, bronze_offset)` — Kafka offset as tie-breaker. Use the three-column version, not `opncodetest`'s original one-column version.
 
-## 3. Landing/Staging (Bronze)
-**Reuse:** raw Debezium envelope, append-only, one Delta table per source table, `mergeSchema=true`, schema-drift check before write.
-**Explicitly avoid:** the earlier `cdc_to_delta_gold.py` pattern of batch `overwrite` reads instead of streaming `foreachBatch`/MERGE — that repo's own postmortem documents this as buggy and non-idempotent.
+**5. Schema evolution** — Reuse the `additive_only` policy engine (`NB_schema_drift_helpers.ipynb`): new columns pass through, removals/type changes hard-block the pipeline. Also reuse the already-solved Debezium decimal decoding (base64 + scale) for `price` fields.
 
-## 4. Schema Evolution
-**Reuse:** the `NB_schema_drift_helpers.ipynb` module (already validated against `bronze.orders` in its own example) — `additive_only` policy, hard-stops on breaking drift, logs to `monitoring.schema_drift_log`.
-**Real precedent to design around:** order data actually had a column rename (`product`→`product_id`) mid-project, handled via `coalesce()` across old/new names. Build that coalesce-across-renames pattern into Silver from day one — renames, not just additions, are the realistic risk.
+**6. Gold** — Start with `opncodetest`'s simpler Silver→Gold dbt shape (with freshness SLAs) rather than `databricks-lab`'s full Data Vault 2.0 layer — that layer was built for a 15-table normalized schema and is overkill unless you're conforming multiple order-adjacent sources.
 
-## 5. Deduplication / Upsert
-**Reuse:** window function (`row_number()` over `event_time desc`, partitioned by order key) → keep latest → `MERGE INTO` Delta.
-**Mistake to avoid:** the earlier build used `dropDuplicates()`, which can keep an arbitrary version of a row rather than the latest — wrong for order status/price updates. Watermark late arrivals (`withWatermark`, ~10 min, matching prior usage).
+**7. Monitoring** — Reuse `DQ_INCIDENT_RUNBOOK.md` wholesale: quarantine categories, escalation SLAs (Silver PK-uniqueness failure → 1hr response), and a Gold reconciliation test modeled on the existing payment-totals check.
 
-## 6. Medallion Layering
-Bronze → Silver → (optional Data Vault) → Gold, exactly as built twice already. Gold built with dbt, reusing the `total_products_order.sql` join pattern and its grain-uniqueness/positive-amount test patterns.
-**Real design choice, not automatic:** Data Vault adds real cost/complexity (13 hubs/19 links/15 sats in the prior build) for audit/time-travel value — skip it if full historization isn't required, as `opncodetest` itself does.
+**Explicitly flagged as new ground, not history**: Postgres replication-slot/WAL disk-growth monitoring (no prior evidence of this being solved), and whether to add the DV2.0 conformance layer for a single-source orders pipeline (a scope call, not a pattern from your past work).
 
-## 7. Backfill Strategy
-**Reuse:** full-reset-with-dry-run notebook pattern (`NB_reset_tables.ipynb`) for nuclear resets; Debezium **signal table** for incremental/partial backfills without connector restart.
-**No prior art:** precise point-in-time replay via Delta time-travel + Kafka offset rewind — never done here, design fresh with general best practice.
-
-## 8. Monitoring / Data Quality
-**Reuse:** `monitoring` schema — `schema_drift_log`, `dq_results`, `pii_column_registry` (order data has PII — register those columns immediately).
-**Lessons baked in:** don't trust subprocess/Spark exit codes as success signals (Spark can exit 1 on successful runs); verify via row counts/`_delta_log`. Make all setup/registration scripts idempotent — non-idempotent Debezium/bucket/BI setup broke on re-run before.
-
----
-
-### Mistakes explicitly not being repeated
-| Past mistake | Fix in this design |
-|---|---|
-| Missing `topic.prefix` | Hardcoded in connector template |
-| `dropDuplicates()` instead of latest-wins merge | Windowed row_number + MERGE |
-| Trusting exit codes | Row-count/_delta_log verification |
-| Non-idempotent setup scripts | Check-before-create everywhere |
-| Serverless/ngrok Kafka incompatibility | `kafka-to-volume` fallback called out upfront |
-| Silent break on column rename | Coalesce-across-renames in Silver |
-
-### Marked "no prior art — general best practice"
-- Cloud-managed Kafka production topology/IAM
-- Point-in-time replay via Delta time-travel + Kafka offset rewind
-
-Full file citations available if you want to go pull the actual notebooks/SQL referenced (e.g. `opncodetest/notebooks/silver/NB_process_to_silver.ipynb`, `databricks-lab/docs/architecture.md`, `ai-data-platform-engineer/AI_Session_Analysis_Report.md`).
+Want me to write this up as an RFC under `docs/rfcs/` per this repo's workflow, or is it meant for one of those other projects (`opncodetest`/`databricks-lab`)?
 ```

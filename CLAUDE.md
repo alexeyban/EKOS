@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
-Read `devlog_*.md` (root, numbered chronologically, `devlog_30.md` is latest) before starting
+Read `devlog_*.md` (root, numbered chronologically, `devlog_43.md` is latest) before starting
 non-trivial work: they are the project's long-term memory and record what shipped, why, and what
 was learned. `TODO.md` tracks the phase-by-phase roadmap; RFCs are split across two locations for
 historical reasons, not a meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -45,6 +45,8 @@ cargo run -p ekos -- ask "<question>"
 cargo run -p ekos -- identity scan          # cross-system candidate matches (RFC 0029)
 cargo run -p ekos -- marketing publish      # devlog -> tweet -> approval -> X (RFC 0030)
 cargo run -p ekos -- mcp serve --workspace <dir>
+cargo run -p ekos -- docs generate --layout curated --output doc   # README/Architecture/API/
+                                             # SequenceDiagrams + per-entity pages (RFC 0035/0037/0042)
 ```
 
 CI (`.github/workflows/ci.yml`) runs build+test+clippy+fmt from `ekos/` and `cargo bench` from
@@ -75,23 +77,35 @@ verb is a compiler stage, run in that order, writing artifacts the next stage co
 | `observation-sdk` | `Observer` trait — the contract every connector implements, returning an `ObservationPackage` of content-addressable `ObservationArtifact`s |
 | `artifact` | Artifact types + `ArtifactStore` (loose JSON, or packed segments post RFC 0015) |
 | `kir` | Knowledge Intermediate Representation — the typed output of knowledge-recovery passes, input to the semantic compiler |
-| `recovery` | Knowledge-recovery passes: one analyzer per source kind (`sql_analyzer` — DDL, `sql_transform_analyzer` — SELECT/VIEW/procedures into the Transformation IR, `pentaho_analyzer`, `git_analyzer`, `github_analyzer`, `confluence_analyzer`, `local_docs_analyzer`, `document_semantics_analyzer`, `crypto_analyzer`, `dependency_analyzer`), plus LLM provider glue (`anthropic.rs`, `ollama.rs`, `llm.rs`) |
-| `identity` | Identity Resolution — `DefaultResolver` merges same-source-kind duplicates before the CKM exists (RFC 0007); `cross_system.rs` separately scores cross-system candidate matches (RFC 0029), written as reviewable `unconfirmed` relationships, never auto-merged |
+| `recovery` | Knowledge-recovery passes: one analyzer per source kind (`sql_analyzer` — DDL, `sql_transform_analyzer` — SELECT/VIEW/procedures into the Transformation IR, `pentaho_analyzer`, `git_analyzer`, `github_analyzer`, `confluence_analyzer`, `local_docs_analyzer`, `document_semantics_analyzer`, `crypto_analyzer`, `dependency_analyzer`, `python_analyzer` — RFC 0038/0040, `rust_analyzer` — real AST + `Calls` graph, RFC 0041, `crate_topology_analyzer`/`cicd_analyzer` — `Cargo.toml`/GitHub Actions structural parsing, RFC 0042), plus LLM provider glue (`anthropic.rs`, `ollama.rs`, `llm.rs`) |
+| `identity` | Identity Resolution — `DefaultResolver` merges same-source-kind duplicates before the CKM exists (RFC 0007); `cross_system.rs` separately scores cross-system candidate matches (RFC 0029), written as reviewable `unconfirmed` relationships, never auto-merged. **New `ObjectKind::Custom(_)` variants that are self-identified by a structural key (file path, manifest dir, source+index) must be added to `DefaultResolver`'s blanket kind-exclusion list** — `Section`/`TransformNode`/`RustSymbol`/`RustModule`/`PythonSymbol`/`PythonModule`/`Crate` have all hit the same over-merge failure (name-prefix similarity + the same-kind structural-score fallback of 1.0), each found live by real-data testing, not by inspection |
 | `semantic` | Semantic compiler: KIR + resolved identities → CKM; `transform_ir.rs` is the shared Transformation IR (RFC 0027) every legacy-format parser (Pentaho, SQL) compiles into |
 | `ledger` | Append-only Semantic Knowledge Ledger — `fact.rs`/`fact_ledger.rs` (facts), `index.rs`, `search.rs`; SQLite-backed by default, RFC 0016 fact-segment engine (tantivy + mmap) is an opt-in `--v3` migration |
 | `runtime` | Read-only state reconstruction and context projection; `ai.rs` is the surface AI agents query |
 | `ekl` | Enterprise Knowledge Language — `parser.rs` + `interpreter.rs` for the `ekos ekl` query command |
+| `docs-gen` | Deterministic Markdown/HTML rendering from the compiled ledger (RFC 0035) — `render_object_page` (`--layout objects`, one page per significant object) and `render_readme`/`render_architecture`/`render_api`/`render_sequence_diagrams` (`--layout curated`, RFC 0037/0042) — zero LLM calls; `--prose` (opt-in) is the one path that layers an LLM overview on top, via `ekos ask`'s own grounding+citation pipeline |
+| `dbt-gen` | Renders the Transformation IR (RFC 0027) into executable dbt SQL models with `ref()` semantics |
 | `marketing` | Devlog → tweet → human approval → X publish (RFC 0030) — auxiliary tooling outside the compiler pipeline, not a `CompilerPass`/`Observer` |
 | `cli` | `commands/` — one file per CLI subcommand, dispatched from `crates/cli/src/bin/ekos.rs`; also hosts the MCP server (`commands/mcp.rs`) |
-| `common`, `scheduler` | Shared utilities; pass scheduling primitives |
+| `common` | Shared utilities — `ContentHash`, zstd compression, and `redaction` (RFC 0043: built-in, non-disable-able secrets/PII pattern table + excluded-file globs, the single module both `build.rs` and `recover.rs`'s direct-file-read blocks call before anything reaches the artifact store or ledger) |
+| `scheduler`, `sql-dialect-sdk` | Pass scheduling primitives; the `SqlDialectParser` trait every `plugins/sql-dialect-*` crate implements (RFC 0031) |
 
 ### Connectors (`ekos/plugins/`)
 
 Each plugin implements `Observer` from `observation-sdk` and is registered independently in
 `ekos/Cargo.toml`'s workspace members. Real/tested: `file`, `git`, `github`, `confluence`,
-`localdocs` (PDF/DOCX/text/Markdown/HTML/email), `pentaho` (`.ktr`/`.kjb`, RFC 0027), `crypto`.
+`localdocs` (PDF/DOCX/text/Markdown/HTML/email), `pentaho` (`.ktr`/`.kjb`, RFC 0027), `crypto`,
+`python` (real AST + PySpark DataFrame chains into the Transformation IR, RFC 0038/0040), `rust`
+(real AST + the first real `Calls` function-call graph, RFC 0041).
 Scaffolded proof-of-concept only (mock API shapes, not exercised against live accounts):
 `salesforce`, `sap`, `oracle`, `fabric`, `snowflake`.
+
+`crate_topology_analyzer`/`cicd_analyzer` (RFC 0042, in `recovery`, not `plugins/`) and the
+dependency-scan block in `recover.rs` are a second, separate raw-content entry point — they walk
+`observe_paths` and call `std::fs::read_to_string` directly rather than going through an
+`Observer`/`ArtifactStore` round-trip. Both entry points (the `Observer`-based one and this direct
+one) independently run RFC 0043's redaction pass before any content is persisted — see `common`'s
+crate-map entry.
 
 ### Key invariants (enforced by review, not just convention)
 
@@ -103,6 +117,11 @@ Scaffolded proof-of-concept only (mock API shapes, not exercised against live ac
   RFC 0013) — they never touch raw enterprise systems directly.
 - Compiler passes must be **deterministic** and **side-effect-free**.
 - Artifacts are **content-addressable** (id + checksum + metadata + dependencies + version).
+- **Secrets/PII are never observed or stored** (RFC 0043) — a built-in redaction baseline
+  (`ekos_common::redaction`) runs at every raw-content entry point; `ekos.toml`'s `[security]`
+  section can only extend it, never disable it. Because the ledger is append-only, this has to be
+  a prevention control, not a cleanup step — there is no way to un-commit something already
+  ledgered (confirmed: no object-level delete/tombstone exists anywhere in the codebase).
 
 ### AI agent access (MCP)
 
@@ -171,7 +190,7 @@ into the next substantive one.
 
 ### Filename
 
-Increment from the highest existing `devlog_N.md`: `devlog_30.md` → `devlog_31.md`, etc.
+Increment from the highest existing `devlog_N.md`: `devlog_43.md` → `devlog_44.md`, etc.
 
 ### Required sections
 

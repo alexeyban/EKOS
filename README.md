@@ -224,6 +224,32 @@ talk to. `ekos ask` honors `[llm] provider = "ollama"` the same way `ekos recove
 commands select the LLM provider through one shared function, so a workspace configured for local
 Ollama works identically for recovery and for querying.
 
+### Documentation generation (RFC 0035/0037/0042)
+
+`ekos docs generate` renders the compiled ledger straight into Markdown/HTML documentation —
+zero LLM calls, every claim traceable to real compiled evidence. Two layouts:
+
+```bash
+ekos docs generate                              # --layout objects (default): one page per
+                                                  # significant object, plus an index and ER diagram
+ekos docs generate --layout curated --output doc # README.md/Architecture.md/API.md/
+                                                  # SequenceDiagrams.md — the shape a developer
+                                                  # actually expects, plus one detail page per
+                                                  # crate/technology/pipeline/program-entity object
+```
+
+`--layout curated`'s `Architecture.md` includes a real crate/workspace dependency graph (parsed
+`Cargo.toml`, not guessed), external technology dependencies, CI/CD pipelines (parsed
+`.github/workflows/*.yml`), and an entity-relationship diagram; `API.md` lists real functions/
+structs/enums/traits (from `RustSymbol`/`PythonSymbol` objects, RFC 0038/0040/0041) grouped by
+file, each linked to its own detail page; `SequenceDiagrams.md` covers both Transformation-IR
+data-flow sequences and real function-call sequences (RFC 0041's `Calls` graph). Per-entity pages
+nest under `entities/<kind>/<2-char shard>/` so a large codebase's page count never blows past
+GitHub's per-directory file-listing cap — this repo's own `doc/` (generated from EKOS's own
+source) is the running example. `--prose` (opt-in) layers an LLM-written overview onto each
+object page, reusing `ekos ask`'s exact grounding+citation pipeline, with a token-cost estimate
+shown before any call.
+
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
@@ -264,7 +290,7 @@ true` is set explicitly.
 
 ### Demo: skills + custom subagents
 
-`demo/` contains a rehearsable, 10-act demo of EKOS's Claude Code integration, run against
+`demo/` contains a rehearsable, twelve-act demo of EKOS's Claude Code integration, run against
 a real compiled workspace — two skills (`ekos-knowledge`, `memory`) and six custom
 subagents, each embodying one capability:
 
@@ -289,10 +315,12 @@ Then in Claude Code, run `/agents` and confirm all six appear.
 `ekos.toml`) and follow the acts in [`demo/DEMO.md`](demo/DEMO.md), which gives the exact
 prompt, expected MCP calls, and payoff line for each act.
 
-**Run it headless** (rehearsal, transcripts, or a live-demo fallback):
+**Run it headless** (rehearsal, transcripts, or a live-demo fallback) — automates Acts 1–8
+(the skill/single-agent acts); Acts 9–12 (multi-agent chains that each need their own scratch
+workspace built first, RFC 0018/0027-0029 scenarios) are presented live only:
 
 ```bash
-sh demo/headless.sh          # generate a transcript for all 7 acts
+sh demo/headless.sh          # generate a transcript for acts 1-8
 sh demo/headless.sh 2 7      # just specific acts
 ```
 

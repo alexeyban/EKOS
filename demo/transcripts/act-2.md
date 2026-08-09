@@ -3,31 +3,25 @@
 **Prompt:** Use the estate-scout agent: find every database table related to orders across my estate, and show me what one of them is connected to.
 
 ```
-## Order-related tables found
+Found 6 order-related tables in the ledger, all coming from test/demo fixtures rather than your real production estate:
 
-**E-commerce fixture** (`EKOS/tests/fixtures/ecommerce.sql`)
-- `orders`, `order_items`
+| Table | Source | Notes |
+|---|---|---|
+| `orders` | `tests/fixtures/ecommerce.sql` | Central order header (status, totals, fulfillment timestamps) |
+| `order_items` | `tests/fixtures/ecommerce.sql` | Order line items |
+| `Orders` | `tests/fixtures/northwind.sql` | Northwind-style, with shipping/employee/shipper fields (2 compiled instances) |
+| `"Order Details"` | `tests/fixtures/northwind.sql` | Northwind line items w/ discount (2 compiled instances) |
 
-**Northwind fixture** (`EKOS/tests/fixtures/northwind.sql`)
-- `Orders` (×2 — appears twice, likely from repeated compilation), `"Order Details"` (×2)
+**Neighborhood of the `orders` table (ecommerce.sql, id `69f1afa9-505f-4ed0-99f0-a6c077076cbd`):**
 
-## Neighborhood of `orders` (e-commerce)
+- **Upstream:** `customers` — via `orders.customer_id → customers.id`
+- **Downstream (1 hop):**
+  - `order_items` — via `order_items.order_id → orders.id`
+  - `payments` — via `payments.order_id → orders.id`
+- **Downstream (2 hops):**
+  - `products` — via `order_items.product_id → products.id`
 
-```
-customers (parent)
-    ↓ FK customer_id
-  orders  ←────────────── central table
-    ├─ order_items  ← FK order_id
-    │     └─ products  ← FK product_id (via order_items)
-    └─ payments     ← FK order_id
-```
+So it's a standard e-commerce shape: `customers → orders → order_items → products`, with `payments` hanging off `orders` directly. All 4 FK relationships carry evidence IDs traceable back to the source SQL DDL.
 
-- `orders.customer_id → customers.id`
-- `order_items.order_id → orders.id`
-- `order_items.product_id → products.id`
-- `payments.order_id → orders.id`
-
-Every edge is backed by a `ForeignKey` relationship in the ledger with cited fragment evidence from `ecommerce.sql`. `orders` sits at the hub of the e-commerce domain — tying customer identity, line-item/product detail, and payment records together.
-
-One caveat: the found tables are all from test fixtures (`tests/fixtures/ecommerce.sql`, `tests/fixtures/northwind.sql`), not a production estate — if you have real production databases compiled into the ledger, let me know which project/workspace and I can re-scope the search.
+One thing worth flagging: everything found lives under `tests/fixtures/`, not a real production system — so this is demo/fixture data in the ledger, not your actual estate's order tables. If you have real order tables elsewhere (a production Postgres, Databricks, etc.) that haven't been observed/compiled into EKOS yet, they won't show up here.
 ```
