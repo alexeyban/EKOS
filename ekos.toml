@@ -13,6 +13,12 @@ ignore-patterns = [
     "target",
     "node_modules",
     "*.lock",
+    # Test/demo fixtures — real content (Northwind/ecommerce SQL, Pentaho/PDF presentation
+    # examples used to validate other RFCs' analyzers), but not EKOS's own architecture. Excluded
+    # so `ekos docs generate` documents EKOS itself, not the fixture data other analyzers were
+    # tested against.
+    "fixtures",
+    "examples",
 ]
 
 [llm]

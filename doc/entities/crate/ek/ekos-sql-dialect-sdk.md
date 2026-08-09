@@ -42,10 +42,10 @@ graph TD
 
 ## Evidence
 
-- `472b70e1-187d-4369-917d-2558396f0378` — ekos-sql-dialect-sdk depends on sqlparser 0.53 (confidence: 1.00)
-- `12e13c40-f18b-4ba2-bb10-bd1dceb2b12e` — ekos-recovery depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
-- `72ab73b1-7288-4551-a812-fb4d3cde32f6` — ekos-plugin-sql-dialect-mssql depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
-- `ae41ad0e-b874-4502-b208-daa8bbb40f1c` — ekos-plugin-sql-dialect-databricks depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
-- `d86874ba-1706-4ef3-84ac-d8e9334eaf84` — ekos-plugin-sql-dialect-postgres depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
-- `c0c1933b-4eca-474f-9d9f-700402b7123a` — ekos-plugin-sql-dialect-mysql depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
-- `a9e942e1-28dd-4e53-90ec-19954e1a04e7` — ekos-plugin-sql-dialect-snowflake depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `3f0d0f1e-c266-4993-8b8a-fec7ec6b6959` — ekos-sql-dialect-sdk depends on sqlparser 0.53 (confidence: 1.00)
+- `8d407b28-bcb4-49b5-b705-4669c07d90f0` — ekos-recovery depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `0ada9dad-353a-4f76-97b5-0b6e3204a2a3` — ekos-plugin-sql-dialect-mssql depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `ccc55b4a-d6e9-4880-89c8-52aa896e77a1` — ekos-plugin-sql-dialect-databricks depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `bc938656-155b-473f-8027-31f18ea9fe69` — ekos-plugin-sql-dialect-postgres depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `2f0254db-5fb1-4399-bdef-369d426326b4` — ekos-plugin-sql-dialect-mysql depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `fe4d1d0f-dd0b-4ac7-8bb4-90bf627cb13a` — ekos-plugin-sql-dialect-snowflake depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)

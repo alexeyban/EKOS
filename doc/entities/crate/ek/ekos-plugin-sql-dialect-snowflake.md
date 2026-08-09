@@ -30,6 +30,6 @@ graph TD
 
 ## Evidence
 
-- `30ba465f-398b-435c-bb04-c2e060d7e9e0` — ekos-recovery depends on ekos-plugin-sql-dialect-snowflake (path dependency) (confidence: 1.00)
-- `a9e942e1-28dd-4e53-90ec-19954e1a04e7` — ekos-plugin-sql-dialect-snowflake depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
-- `f894a679-f117-46b1-b4f2-98ffee34152a` — ekos-plugin-sql-dialect-snowflake depends on sqlparser 0.53 (confidence: 1.00)
+- `76b7d1a3-2e2d-4782-bc00-73097981877f` — ekos-recovery depends on ekos-plugin-sql-dialect-snowflake (path dependency) (confidence: 1.00)
+- `fe4d1d0f-dd0b-4ac7-8bb4-90bf627cb13a` — ekos-plugin-sql-dialect-snowflake depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `5ce4771a-83b6-4584-ac21-a456bc84ff6b` — ekos-plugin-sql-dialect-snowflake depends on sqlparser 0.53 (confidence: 1.00)

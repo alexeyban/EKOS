@@ -42,11 +42,11 @@ graph TD
 
 ## Evidence
 
-- `69cb530d-c41b-49e1-acf8-a87221d16ffc` — ekos-benchmark depends on sqlparser 0.53 (confidence: 1.00)
-- `472b70e1-187d-4369-917d-2558396f0378` — ekos-sql-dialect-sdk depends on sqlparser 0.53 (confidence: 1.00)
-- `5fb7afb3-5c7b-41a1-86c7-9fad96a53f97` — ekos-recovery depends on sqlparser 0.53 (confidence: 1.00)
-- `4b0385d2-27b5-4fd6-9bfb-804f15a24974` — ekos-plugin-sql-dialect-mssql depends on sqlparser 0.53 (confidence: 1.00)
-- `3c107eb4-6c22-4b6c-bcae-065367852530` — ekos-plugin-sql-dialect-databricks depends on sqlparser 0.53 (confidence: 1.00)
-- `910625ff-6132-4bf4-8ab0-2ac9f7b2f6d7` — ekos-plugin-sql-dialect-postgres depends on sqlparser 0.53 (confidence: 1.00)
-- `ffee3073-6877-4fec-a8a2-4891ddd1c30d` — ekos-plugin-sql-dialect-mysql depends on sqlparser 0.53 (confidence: 1.00)
-- `f894a679-f117-46b1-b4f2-98ffee34152a` — ekos-plugin-sql-dialect-snowflake depends on sqlparser 0.53 (confidence: 1.00)
+- `02841957-4d1d-41dc-8919-b01fcbfa184a` — ekos-benchmark depends on sqlparser 0.53 (confidence: 1.00)
+- `3f0d0f1e-c266-4993-8b8a-fec7ec6b6959` — ekos-sql-dialect-sdk depends on sqlparser 0.53 (confidence: 1.00)
+- `15cecb9c-c7eb-489c-b3d1-dd6410815e3a` — ekos-recovery depends on sqlparser 0.53 (confidence: 1.00)
+- `6e9911da-3bad-45a3-812b-c65ffca71267` — ekos-plugin-sql-dialect-mssql depends on sqlparser 0.53 (confidence: 1.00)
+- `4f3db0ae-aeb3-4054-a11b-9dd91cd16ca9` — ekos-plugin-sql-dialect-databricks depends on sqlparser 0.53 (confidence: 1.00)
+- `32d8c775-8ae3-4c4a-8341-a1aac614e861` — ekos-plugin-sql-dialect-postgres depends on sqlparser 0.53 (confidence: 1.00)
+- `b8cc034f-cf82-430e-b802-44b72c8bd062` — ekos-plugin-sql-dialect-mysql depends on sqlparser 0.53 (confidence: 1.00)
+- `5ce4771a-83b6-4584-ac21-a456bc84ff6b` — ekos-plugin-sql-dialect-snowflake depends on sqlparser 0.53 (confidence: 1.00)

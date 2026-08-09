@@ -10,8 +10,8 @@
 
 ### Calls
 
-- → ArtifactMeta::default (`75608e6d-ce35-5321-97af-f8b9d4f486b2`)
 - → compute_content_id (`68328ad4-597d-5947-afb0-8d5a0804e3dd`)
+- → ArtifactMeta::default (`75608e6d-ce35-5321-97af-f8b9d4f486b2`)
 
 ### Contains
 
@@ -24,10 +24,10 @@ graph TD
     n08ac6aa919bb50b59291fc045349dd29["IndexArtifact::new"]
     n918532b1739051288de5faf4f7a91daf["ekos/crates/artifact/src/lib.rs"]
     n918532b1739051288de5faf4f7a91daf -->|Contains| n08ac6aa919bb50b59291fc045349dd29
-    n75608e6dce35532197aff8b9d4f486b2["ArtifactMeta::default"]
-    n08ac6aa919bb50b59291fc045349dd29 -->|Calls| n75608e6dce35532197aff8b9d4f486b2
     n68328ad4597d5947afb08d5a0804e3dd["compute_content_id"]
     n08ac6aa919bb50b59291fc045349dd29 -->|Calls| n68328ad4597d5947afb08d5a0804e3dd
+    n75608e6dce35532197aff8b9d4f486b2["ArtifactMeta::default"]
+    n08ac6aa919bb50b59291fc045349dd29 -->|Calls| n75608e6dce35532197aff8b9d4f486b2
 ```
 
 ## Evidence

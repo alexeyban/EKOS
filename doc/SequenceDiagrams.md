@@ -4,311 +4,7 @@
 
 _Rendered from Transformation IR `FeedsInto` edges — a data-flow sequence between compiled pipeline steps, not a code call sequence._
 
-## docs/presentations/examples/dbt/join-mergejoin-fact_sales_ktr_4.sql#0
-
-```mermaid
-sequenceDiagram
-    participant n5c54faf599865dd39eeb35ebb5fd6a34 as "docs/presentations/examples/dbt/join-mergejoin-fact_sales_ktr_4.sql#0:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## docs/presentations/examples/dbt/join-streamlookup-fact_sales_ktr_10.sql#0
-
-```mermaid
-sequenceDiagram
-    participant n4dae24e750025de3986bcfb251b8977c as "docs/presentations/examples/dbt/join-streamlookup-fact_sales_ktr_10.sql#0:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## docs/presentations/examples/dbt/sink-dim_date_ktr_10.sql#0
-
-```mermaid
-sequenceDiagram
-    participant ncfa0a9a0c2695d9288ac465232d3818a as "docs/presentations/examples/dbt/sink-dim_date_ktr_10.sql#0:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## docs/presentations/examples/dbt/source-dim_customer_ktr_6.sql#0
-
-```mermaid
-sequenceDiagram
-    participant ne65e788628515cb998b0ec768419864f as "docs/presentations/examples/dbt/source-dim_customer_ktr_6.sql#0:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## docs/presentations/examples/dbt/unmapped-dim_customer_ktr_1.sql#0
-
-```mermaid
-sequenceDiagram
-    participant na25c9aa969f85081828d9935188552b2 as "docs/presentations/examples/dbt/unmapped-dim_customer_ktr_1.sql#0:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#0
-
-```mermaid
-sequenceDiagram
-    participant n43a830c1deb65a03979a9dc94449499e as "tests/fixtures/mysql_hash_comments.sql#0:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#1
-
-```mermaid
-sequenceDiagram
-    participant ned232cab60975df7be0b350881256d4e as "tests/fixtures/mysql_hash_comments.sql#1:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#10
-
-```mermaid
-sequenceDiagram
-    participant n9ee34b2ae37e534587317fa62b2d530a as "tests/fixtures/mysql_hash_comments.sql#10:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#11
-
-```mermaid
-sequenceDiagram
-    participant nf2dd7207e6bb50ea8d1f7ef383832cda as "tests/fixtures/mysql_hash_comments.sql#11:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#12
-
-```mermaid
-sequenceDiagram
-    participant n5982250e1cd654f3ac77c19a84a6e970 as "tests/fixtures/mysql_hash_comments.sql#12:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#13
-
-```mermaid
-sequenceDiagram
-    participant n4d97e49bbcba52a3ae26590d28b80913 as "tests/fixtures/mysql_hash_comments.sql#13:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#14
-
-```mermaid
-sequenceDiagram
-    participant ncae716fe8d2454abbe8ac15162e805ef as "tests/fixtures/mysql_hash_comments.sql#14:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#15
-
-```mermaid
-sequenceDiagram
-    participant n40b444e9df635f66a618c9b4c7d56842 as "tests/fixtures/mysql_hash_comments.sql#15:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#16
-
-```mermaid
-sequenceDiagram
-    participant n6e3b751bea175ca0a074a74842b085eb as "tests/fixtures/mysql_hash_comments.sql#16:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#17
-
-```mermaid
-sequenceDiagram
-    participant na803db80a9ed5dc3ac653a1aa303847d as "tests/fixtures/mysql_hash_comments.sql#17:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#18
-
-```mermaid
-sequenceDiagram
-    participant nccf9956882385ac29bbe50ec51ce48ca as "tests/fixtures/mysql_hash_comments.sql#18:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#19
-
-```mermaid
-sequenceDiagram
-    participant n083a9e34f2c556dab862173fe7c2a923 as "tests/fixtures/mysql_hash_comments.sql#19:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#2
-
-```mermaid
-sequenceDiagram
-    participant n8645972049bd507e89145644bb1e3317 as "tests/fixtures/mysql_hash_comments.sql#2:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#20
-
-```mermaid
-sequenceDiagram
-    participant nf6336bf6b5df5abdac0589e57c1888cc as "tests/fixtures/mysql_hash_comments.sql#20:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#21
-
-```mermaid
-sequenceDiagram
-    participant n778475c7c01a5357a75d40457dd8627a as "tests/fixtures/mysql_hash_comments.sql#21:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#22
-
-```mermaid
-sequenceDiagram
-    participant nffbe33b8c0d752b2b51ceaed9a433ed2 as "tests/fixtures/mysql_hash_comments.sql#22:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#23
-
-```mermaid
-sequenceDiagram
-    participant n86a56e37b15b5253919a45e7cbf240c1 as "tests/fixtures/mysql_hash_comments.sql#23:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#24
-
-```mermaid
-sequenceDiagram
-    participant ne8d4dfd6301155f0b09aeab4f3f62244 as "tests/fixtures/mysql_hash_comments.sql#24:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#25
-
-```mermaid
-sequenceDiagram
-    participant n304ca48fc57254249e1ab7cb7bec6028 as "tests/fixtures/mysql_hash_comments.sql#25:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#26
-
-```mermaid
-sequenceDiagram
-    participant n512b6961d3fe500e8ee173840b4bdea2 as "tests/fixtures/mysql_hash_comments.sql#26:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#27
-
-```mermaid
-sequenceDiagram
-    participant ne3dee45a1d1650e8abe79cad9b34b081 as "tests/fixtures/mysql_hash_comments.sql#27:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#28
-
-```mermaid
-sequenceDiagram
-    participant nec4c18505e7851deb94fd7aa66f89c27 as "tests/fixtures/mysql_hash_comments.sql#28:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#3
-
-```mermaid
-sequenceDiagram
-    participant n7071c023a90a5aa6ac27cfd73ddce67d as "tests/fixtures/mysql_hash_comments.sql#3:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#4
-
-```mermaid
-sequenceDiagram
-    participant nb7cd0006cf575456bae6415bb5452a16 as "tests/fixtures/mysql_hash_comments.sql#4:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#5
-
-```mermaid
-sequenceDiagram
-    participant nbf569a7051ac523780908bf76900dab1 as "tests/fixtures/mysql_hash_comments.sql#5:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#6
-
-```mermaid
-sequenceDiagram
-    participant n826b8249996555469f345390023760b3 as "tests/fixtures/mysql_hash_comments.sql#6:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#7
-
-```mermaid
-sequenceDiagram
-    participant n4943221524b85ee78760150f65310d1f as "tests/fixtures/mysql_hash_comments.sql#7:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#8
-
-```mermaid
-sequenceDiagram
-    participant ne3845bc312ad5dfa885cb64f2ae861fa as "tests/fixtures/mysql_hash_comments.sql#8:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
-
-## tests/fixtures/mysql_hash_comments.sql#9
-
-```mermaid
-sequenceDiagram
-    participant n5c4fb3a7f755514fad2c4981d3251e27 as "tests/fixtures/mysql_hash_comments.sql#9:0"
-```
-
-_(1 step — no `FeedsInto` edges compiled for this pipeline)_
+_No transformation pipelines compiled._
 
 ## Call Sequences
 
@@ -419,14 +115,14 @@ sequenceDiagram
     n75608e6dce35532197aff8b9d4f486b2->>n6db558a350a35ee5ab5bf5a80e5f5e63: calls
     nd3b06dcb6b00578cbb032ed93735d399->>n75608e6dce35532197aff8b9d4f486b2: calls
     nd3b06dcb6b00578cbb032ed93735d399->>n68328ad4597d5947afb08d5a0804e3dd: calls
-    n6a696ea8bbb457e28ac4cd7e7cf5c452->>n68328ad4597d5947afb08d5a0804e3dd: calls
     n6a696ea8bbb457e28ac4cd7e7cf5c452->>n75608e6dce35532197aff8b9d4f486b2: calls
+    n6a696ea8bbb457e28ac4cd7e7cf5c452->>n68328ad4597d5947afb08d5a0804e3dd: calls
     n4b6ad77717f75a0d9b47e2a5fc581d02->>n68328ad4597d5947afb08d5a0804e3dd: calls
     n4b6ad77717f75a0d9b47e2a5fc581d02->>n75608e6dce35532197aff8b9d4f486b2: calls
-    n3529a593008c5745a14d524906d6cbd2->>n68328ad4597d5947afb08d5a0804e3dd: calls
     n3529a593008c5745a14d524906d6cbd2->>n75608e6dce35532197aff8b9d4f486b2: calls
-    n08ac6aa919bb50b59291fc045349dd29->>n75608e6dce35532197aff8b9d4f486b2: calls
+    n3529a593008c5745a14d524906d6cbd2->>n68328ad4597d5947afb08d5a0804e3dd: calls
     n08ac6aa919bb50b59291fc045349dd29->>n68328ad4597d5947afb08d5a0804e3dd: calls
+    n08ac6aa919bb50b59291fc045349dd29->>n75608e6dce35532197aff8b9d4f486b2: calls
 ```
 
 ### ekos/crates/artifact/src/pack.rs
@@ -438,16 +134,16 @@ _22 `Calls` edges compiled for this module — diagram omitted, too large to ren
 ```mermaid
 sequenceDiagram
     participant ncb393b412582587ca703fa1a655dc611 as "FileSystemArtifactStore::write"
-    participant n09a9951a1e355a79ae5c2c9793ae4e34 as "FileSystemArtifactStore::exists"
     participant n9de3c96ca7155997a1562a4c8c0b7d70 as "FileSystemArtifactStore::artifact_path"
+    participant n09a9951a1e355a79ae5c2c9793ae4e34 as "FileSystemArtifactStore::exists"
     participant nd58044fe30155aa0be868031721cf915 as "FileSystemArtifactStore::read"
     participant nc92e2e6519d65c97be3a8f52696b3fc3 as "FileSystemArtifactStore::list"
-    ncb393b412582587ca703fa1a655dc611->>n09a9951a1e355a79ae5c2c9793ae4e34: calls
     ncb393b412582587ca703fa1a655dc611->>n9de3c96ca7155997a1562a4c8c0b7d70: calls
+    ncb393b412582587ca703fa1a655dc611->>n09a9951a1e355a79ae5c2c9793ae4e34: calls
     nd58044fe30155aa0be868031721cf915->>n9de3c96ca7155997a1562a4c8c0b7d70: calls
     nd58044fe30155aa0be868031721cf915->>n09a9951a1e355a79ae5c2c9793ae4e34: calls
-    n09a9951a1e355a79ae5c2c9793ae4e34->>n09a9951a1e355a79ae5c2c9793ae4e34: calls
     n09a9951a1e355a79ae5c2c9793ae4e34->>n9de3c96ca7155997a1562a4c8c0b7d70: calls
+    n09a9951a1e355a79ae5c2c9793ae4e34->>n09a9951a1e355a79ae5c2c9793ae4e34: calls
     nc92e2e6519d65c97be3a8f52696b3fc3->>n09a9951a1e355a79ae5c2c9793ae4e34: calls
 ```
 
@@ -470,8 +166,8 @@ sequenceDiagram
     participant nbc49dd2ce377511cb06c9550959f7e15 as "open_branch"
     participant n0f40d4c6e61e5823888b1d2fe90124dc as "delete"
     n1aeccd3cded559159cccbc3f4dd027b6->>n9275fae1e6525cb3a56cd0e45a28067e: calls
-    n419d1f8f21a4549e9c0fd83a9c18265c->>n9275fae1e6525cb3a56cd0e45a28067e: calls
     n419d1f8f21a4549e9c0fd83a9c18265c->>nbc49dd2ce377511cb06c9550959f7e15: calls
+    n419d1f8f21a4549e9c0fd83a9c18265c->>n9275fae1e6525cb3a56cd0e45a28067e: calls
     n0f40d4c6e61e5823888b1d2fe90124dc->>n9275fae1e6525cb3a56cd0e45a28067e: calls
 ```
 
@@ -480,12 +176,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant nd09318f4bb3c5be79348151887565314 as "run"
-    participant nf9f6018526ce5298b38717a129857d00 as "prune_snapshots"
     participant nb7ee036914d25ac7a8b9893ebb6644d7 as "save_fingerprints"
     participant nab00e3322b4e50ad9ea7b0178ac4cd6b as "load_fingerprints"
-    nd09318f4bb3c5be79348151887565314->>nf9f6018526ce5298b38717a129857d00: calls
+    participant nf9f6018526ce5298b38717a129857d00 as "prune_snapshots"
     nd09318f4bb3c5be79348151887565314->>nb7ee036914d25ac7a8b9893ebb6644d7: calls
     nd09318f4bb3c5be79348151887565314->>nab00e3322b4e50ad9ea7b0178ac4cd6b: calls
+    nd09318f4bb3c5be79348151887565314->>nf9f6018526ce5298b38717a129857d00: calls
 ```
 
 ### ekos/crates/cli/src/commands/commit.rs
@@ -493,14 +189,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n5eff14dd0262599c99883daeffd5ed67 as "run"
-    participant n1bc6e585c4e85dc5a6c993aadb6ac859 as "open_ledger"
-    participant n5d82f3c19c9a501b8527e3d1a1305aa7 as "ckm_object_to_kir"
     participant nd4e53d27cd915290b888f803751ddc3e as "ckm_rel_to_kir"
+    participant n5d82f3c19c9a501b8527e3d1a1305aa7 as "ckm_object_to_kir"
     participant n888fe357b8045d098f1e26c4d5c7a9f3 as "evidence_record_to_kir"
-    n5eff14dd0262599c99883daeffd5ed67->>n1bc6e585c4e85dc5a6c993aadb6ac859: calls
-    n5eff14dd0262599c99883daeffd5ed67->>n5d82f3c19c9a501b8527e3d1a1305aa7: calls
+    participant n1bc6e585c4e85dc5a6c993aadb6ac859 as "open_ledger"
     n5eff14dd0262599c99883daeffd5ed67->>nd4e53d27cd915290b888f803751ddc3e: calls
+    n5eff14dd0262599c99883daeffd5ed67->>n5d82f3c19c9a501b8527e3d1a1305aa7: calls
     n5eff14dd0262599c99883daeffd5ed67->>n888fe357b8045d098f1e26c4d5c7a9f3: calls
+    n5eff14dd0262599c99883daeffd5ed67->>n1bc6e585c4e85dc5a6c993aadb6ac859: calls
 ```
 
 ### ekos/crates/cli/src/commands/compile.rs
@@ -526,18 +222,18 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n9628a7cf316d540082616b2216ee01f1 as "generate"
-    participant n6672efa94ce85c9ca0963c74f2963490 as "write_page"
-    participant n76d267df6bbf58bb86825bd99c95a7c2 as "render_er_diagram_page"
-    participant n3cdfa189a68e5bf7a3c80f7579e2fc62 as "enrich_with_prose"
-    participant ne9f6c65618e651d4a612415a39136d77 as "select_llm_provider_for_prose"
     participant n5a70d7a9bb4c59dca7cd00be6ab7f553 as "generate_curated"
     participant na41df42a331658c582d0b80aedac6aad as "confirm_prose_spend"
-    n9628a7cf316d540082616b2216ee01f1->>n6672efa94ce85c9ca0963c74f2963490: calls
-    n9628a7cf316d540082616b2216ee01f1->>n76d267df6bbf58bb86825bd99c95a7c2: calls
-    n9628a7cf316d540082616b2216ee01f1->>n3cdfa189a68e5bf7a3c80f7579e2fc62: calls
-    n9628a7cf316d540082616b2216ee01f1->>ne9f6c65618e651d4a612415a39136d77: calls
+    participant ne9f6c65618e651d4a612415a39136d77 as "select_llm_provider_for_prose"
+    participant n3cdfa189a68e5bf7a3c80f7579e2fc62 as "enrich_with_prose"
+    participant n6672efa94ce85c9ca0963c74f2963490 as "write_page"
+    participant n76d267df6bbf58bb86825bd99c95a7c2 as "render_er_diagram_page"
     n9628a7cf316d540082616b2216ee01f1->>n5a70d7a9bb4c59dca7cd00be6ab7f553: calls
     n9628a7cf316d540082616b2216ee01f1->>na41df42a331658c582d0b80aedac6aad: calls
+    n9628a7cf316d540082616b2216ee01f1->>ne9f6c65618e651d4a612415a39136d77: calls
+    n9628a7cf316d540082616b2216ee01f1->>n3cdfa189a68e5bf7a3c80f7579e2fc62: calls
+    n9628a7cf316d540082616b2216ee01f1->>n6672efa94ce85c9ca0963c74f2963490: calls
+    n9628a7cf316d540082616b2216ee01f1->>n76d267df6bbf58bb86825bd99c95a7c2: calls
     n5a70d7a9bb4c59dca7cd00be6ab7f553->>n6672efa94ce85c9ca0963c74f2963490: calls
 ```
 
@@ -573,14 +269,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant ne7c2f511275951deb835a5aa57064c4f as "publish"
-    participant n9b3a010569f6541dab3c6c9ae99908ff as "log_line"
-    participant n76efc638276d5610966b18f8fc582a09 as "approve"
-    participant n824776cf10305c02acf6961e14b329e1 as "select_llm_provider"
     participant n8cf1b866178a5ca7b5dd40b1aa8e7de7 as "resolve_devlog_path"
-    ne7c2f511275951deb835a5aa57064c4f->>n9b3a010569f6541dab3c6c9ae99908ff: calls
-    ne7c2f511275951deb835a5aa57064c4f->>n76efc638276d5610966b18f8fc582a09: calls
-    ne7c2f511275951deb835a5aa57064c4f->>n824776cf10305c02acf6961e14b329e1: calls
+    participant n9b3a010569f6541dab3c6c9ae99908ff as "log_line"
+    participant n824776cf10305c02acf6961e14b329e1 as "select_llm_provider"
+    participant n76efc638276d5610966b18f8fc582a09 as "approve"
     ne7c2f511275951deb835a5aa57064c4f->>n8cf1b866178a5ca7b5dd40b1aa8e7de7: calls
+    ne7c2f511275951deb835a5aa57064c4f->>n9b3a010569f6541dab3c6c9ae99908ff: calls
+    ne7c2f511275951deb835a5aa57064c4f->>n824776cf10305c02acf6961e14b329e1: calls
+    ne7c2f511275951deb835a5aa57064c4f->>n76efc638276d5610966b18f8fc582a09: calls
 ```
 
 ### ekos/crates/cli/src/commands/mcp.rs
@@ -589,27 +285,27 @@ sequenceDiagram
 sequenceDiagram
     participant n6891f75cd8b956a39f17a6ae5a79a3b7 as "run"
     participant n98d3a1757e2f5ae182edc0036ee6a6f5 as "handle_message"
-    participant n45c28e0c51c3541d899dfdef70b6efb8 as "initialize_result"
     participant n75923916379c5b98a9b4c4b9264c6d2d as "ok_response"
-    participant n524402504db85d198d69bf98b9de4bd1 as "tools_call"
     participant n6e38d86221345ff9917b9c7c56f49a8e as "error_response"
+    participant n45c28e0c51c3541d899dfdef70b6efb8 as "initialize_result"
+    participant n524402504db85d198d69bf98b9de4bd1 as "tools_call"
     participant n0e48bbfe32495440a944a03fcd474757 as "call_tool"
-    participant n0ebfd1d7051f56b49112e5305fb697e3 as "explain_node"
-    participant n34ebe6e367295e55a0e8f85730f2eb99 as "required_str"
-    participant nd8d4e4a86e9d5b6da699fe2d97a8071c as "required_id"
     participant nfc9051fdc6d95f7496465a2260a739f1 as "transformation_chain"
+    participant n0ebfd1d7051f56b49112e5305fb697e3 as "explain_node"
+    participant nd8d4e4a86e9d5b6da699fe2d97a8071c as "required_id"
+    participant n34ebe6e367295e55a0e8f85730f2eb99 as "required_str"
     participant n750bae0db9bf5689a59ab667bb555db9 as "diff_chains"
     participant n265648c299ce59f8936986d9653d0ccb as "node_comparable"
     n6891f75cd8b956a39f17a6ae5a79a3b7->>n98d3a1757e2f5ae182edc0036ee6a6f5: calls
-    n98d3a1757e2f5ae182edc0036ee6a6f5->>n45c28e0c51c3541d899dfdef70b6efb8: calls
     n98d3a1757e2f5ae182edc0036ee6a6f5->>n75923916379c5b98a9b4c4b9264c6d2d: calls
-    n98d3a1757e2f5ae182edc0036ee6a6f5->>n524402504db85d198d69bf98b9de4bd1: calls
     n98d3a1757e2f5ae182edc0036ee6a6f5->>n6e38d86221345ff9917b9c7c56f49a8e: calls
+    n98d3a1757e2f5ae182edc0036ee6a6f5->>n45c28e0c51c3541d899dfdef70b6efb8: calls
+    n98d3a1757e2f5ae182edc0036ee6a6f5->>n524402504db85d198d69bf98b9de4bd1: calls
     n524402504db85d198d69bf98b9de4bd1->>n0e48bbfe32495440a944a03fcd474757: calls
-    n0e48bbfe32495440a944a03fcd474757->>n0ebfd1d7051f56b49112e5305fb697e3: calls
-    n0e48bbfe32495440a944a03fcd474757->>n34ebe6e367295e55a0e8f85730f2eb99: calls
-    n0e48bbfe32495440a944a03fcd474757->>nd8d4e4a86e9d5b6da699fe2d97a8071c: calls
     n0e48bbfe32495440a944a03fcd474757->>nfc9051fdc6d95f7496465a2260a739f1: calls
+    n0e48bbfe32495440a944a03fcd474757->>n0ebfd1d7051f56b49112e5305fb697e3: calls
+    n0e48bbfe32495440a944a03fcd474757->>nd8d4e4a86e9d5b6da699fe2d97a8071c: calls
+    n0e48bbfe32495440a944a03fcd474757->>n34ebe6e367295e55a0e8f85730f2eb99: calls
     n750bae0db9bf5689a59ab667bb555db9->>n265648c299ce59f8936986d9653d0ccb: calls
     nd8d4e4a86e9d5b6da699fe2d97a8071c->>n34ebe6e367295e55a0e8f85730f2eb99: calls
 ```
@@ -632,26 +328,26 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n786d52250ff95fff99f92f5d73858f4a as "run"
-    participant n56a3b0e71cb15f189df7efc98e4101ea as "collect_git_artifact_ids"
-    participant nbbd7195e79995c519ff2ec42bdfd3e44 as "collect_crypto_artifact_ids"
-    participant n4be5dd1369c554619846b55f29c40344 as "collect_localdocs_artifact_ids"
-    participant n474da60918e5510787b2e73fc37fc787 as "should_register_document_semantics"
     participant na83c0280990b556cb3750073c876d6af as "build_llm_provider"
-    participant n06cf6e29711c5b58949fe8676b97964e as "collect_pentaho_artifact_ids"
+    participant n56a3b0e71cb15f189df7efc98e4101ea as "collect_git_artifact_ids"
     participant n0b2fc479d8da54ca969377523aa07f09 as "collect_github_artifact_ids"
+    participant n474da60918e5510787b2e73fc37fc787 as "should_register_document_semantics"
+    participant n4be5dd1369c554619846b55f29c40344 as "collect_localdocs_artifact_ids"
+    participant n831dd074421950b5aebb5d99e3558e4d as "collect_rust_artifact_ids"
+    participant n06cf6e29711c5b58949fe8676b97964e as "collect_pentaho_artifact_ids"
+    participant nbbd7195e79995c519ff2ec42bdfd3e44 as "collect_crypto_artifact_ids"
     participant nca09688ef94c5ba29780d3ebdc04f0e9 as "collect_confluence_artifact_ids"
     participant n37874b81bb325d9989578edf985f969f as "collect_python_artifact_ids"
-    participant n831dd074421950b5aebb5d99e3558e4d as "collect_rust_artifact_ids"
-    n786d52250ff95fff99f92f5d73858f4a->>n56a3b0e71cb15f189df7efc98e4101ea: calls
-    n786d52250ff95fff99f92f5d73858f4a->>nbbd7195e79995c519ff2ec42bdfd3e44: calls
-    n786d52250ff95fff99f92f5d73858f4a->>n4be5dd1369c554619846b55f29c40344: calls
-    n786d52250ff95fff99f92f5d73858f4a->>n474da60918e5510787b2e73fc37fc787: calls
     n786d52250ff95fff99f92f5d73858f4a->>na83c0280990b556cb3750073c876d6af: calls
-    n786d52250ff95fff99f92f5d73858f4a->>n06cf6e29711c5b58949fe8676b97964e: calls
+    n786d52250ff95fff99f92f5d73858f4a->>n56a3b0e71cb15f189df7efc98e4101ea: calls
     n786d52250ff95fff99f92f5d73858f4a->>n0b2fc479d8da54ca969377523aa07f09: calls
+    n786d52250ff95fff99f92f5d73858f4a->>n474da60918e5510787b2e73fc37fc787: calls
+    n786d52250ff95fff99f92f5d73858f4a->>n4be5dd1369c554619846b55f29c40344: calls
+    n786d52250ff95fff99f92f5d73858f4a->>n831dd074421950b5aebb5d99e3558e4d: calls
+    n786d52250ff95fff99f92f5d73858f4a->>n06cf6e29711c5b58949fe8676b97964e: calls
+    n786d52250ff95fff99f92f5d73858f4a->>nbbd7195e79995c519ff2ec42bdfd3e44: calls
     n786d52250ff95fff99f92f5d73858f4a->>nca09688ef94c5ba29780d3ebdc04f0e9: calls
     n786d52250ff95fff99f92f5d73858f4a->>n37874b81bb325d9989578edf985f969f: calls
-    n786d52250ff95fff99f92f5d73858f4a->>n831dd074421950b5aebb5d99e3558e4d: calls
 ```
 
 ### ekos/crates/cli/src/commands/resolve.rs
@@ -674,8 +370,8 @@ sequenceDiagram
     n10d67e5ac7545199915e23349038a6f5->>n83873731f1485047ad68b92b7feef390: calls
     nce911a52305556e0bea7c15a5ff1d773->>n83873731f1485047ad68b92b7feef390: calls
     nce911a52305556e0bea7c15a5ff1d773->>n10d67e5ac7545199915e23349038a6f5: calls
-    n713ed7cc5c75533e89bc0a3cd1e3b880->>n10d67e5ac7545199915e23349038a6f5: calls
     n713ed7cc5c75533e89bc0a3cd1e3b880->>n83873731f1485047ad68b92b7feef390: calls
+    n713ed7cc5c75533e89bc0a3cd1e3b880->>n10d67e5ac7545199915e23349038a6f5: calls
 ```
 
 ### ekos/crates/cli/tests/mcp_session.rs
@@ -696,22 +392,22 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n83a765f710045a659fda0e393a6a043b as "init_creates_ekos_directory"
-    participant nd1e71ee34e17505081bd5dd6a8cafafe as "load_config"
     participant nf8f102adbfb458548fb62200db5a7daf as "setup_workspace"
+    participant nd1e71ee34e17505081bd5dd6a8cafafe as "load_config"
     participant n8381b3cfb4ab5e24b22325b1e3647ee2 as "build_observes_files_and_writes_ledger"
     participant n41345ca495295fa7994e937f12f58595 as "query_object_returns_known_file"
     participant n05d0403048875de2ab44dff63a787efd as "build_is_idempotent"
     participant nc8408593f6d85b7083013485d093719e as "clean_removes_artifacts_not_ledger"
-    n83a765f710045a659fda0e393a6a043b->>nd1e71ee34e17505081bd5dd6a8cafafe: calls
     n83a765f710045a659fda0e393a6a043b->>nf8f102adbfb458548fb62200db5a7daf: calls
+    n83a765f710045a659fda0e393a6a043b->>nd1e71ee34e17505081bd5dd6a8cafafe: calls
     n8381b3cfb4ab5e24b22325b1e3647ee2->>nd1e71ee34e17505081bd5dd6a8cafafe: calls
     n8381b3cfb4ab5e24b22325b1e3647ee2->>nf8f102adbfb458548fb62200db5a7daf: calls
     n41345ca495295fa7994e937f12f58595->>nd1e71ee34e17505081bd5dd6a8cafafe: calls
     n41345ca495295fa7994e937f12f58595->>nf8f102adbfb458548fb62200db5a7daf: calls
     n05d0403048875de2ab44dff63a787efd->>nf8f102adbfb458548fb62200db5a7daf: calls
     n05d0403048875de2ab44dff63a787efd->>nd1e71ee34e17505081bd5dd6a8cafafe: calls
-    nc8408593f6d85b7083013485d093719e->>nd1e71ee34e17505081bd5dd6a8cafafe: calls
     nc8408593f6d85b7083013485d093719e->>nf8f102adbfb458548fb62200db5a7daf: calls
+    nc8408593f6d85b7083013485d093719e->>nd1e71ee34e17505081bd5dd6a8cafafe: calls
 ```
 
 ### ekos/crates/cli/tests/transformation_benchmark.rs
@@ -719,11 +415,11 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n145f01d3407353caa5a60bd6ebdbdb45 as "phase7_benchmark_recover_explain_diff_over_mcp_only"
-    participant na762a492344253ed993e68a448c9584b as "call_tool"
     participant nc16a7ca309be58b0be2c7ec5f46b0f15 as "load_config"
+    participant na762a492344253ed993e68a448c9584b as "call_tool"
     participant ne8ff1e4b762557dabfa2e10ecf154d62 as "setup_workspace"
-    n145f01d3407353caa5a60bd6ebdbdb45->>na762a492344253ed993e68a448c9584b: calls
     n145f01d3407353caa5a60bd6ebdbdb45->>nc16a7ca309be58b0be2c7ec5f46b0f15: calls
+    n145f01d3407353caa5a60bd6ebdbdb45->>na762a492344253ed993e68a448c9584b: calls
     n145f01d3407353caa5a60bd6ebdbdb45->>ne8ff1e4b762557dabfa2e10ecf154d62: calls
 ```
 
@@ -773,14 +469,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n86487b2d47d65105807b404b12767a95 as "WorkspaceConfig::default"
-    participant n09665155ef9e5259b3798452b328264d as "default_log_level"
-    participant n08ad7fde95bd5d738bc48cb5a70b8fd9 as "default_log_format"
     participant n7b4baf1da71f5879b16260a8f58bb004 as "default_root"
+    participant n08ad7fde95bd5d738bc48cb5a70b8fd9 as "default_log_format"
+    participant n09665155ef9e5259b3798452b328264d as "default_log_level"
     participant ndb53c97e788e587ba5d4fbff7497f34e as "ObserveConfig::default"
     participant n8365dc187a685b6cbb0bfcddf13ef488 as "default_ignore_patterns"
     participant n3fa1fe515c40500ea4afe9b3dfeb907f as "MarketingConfig::default"
-    participant n88f766d2969355798cf3a2624f967bc2 as "default_hashtags"
     participant n81f7cad33ade55cba07f9d2c85cbcc12 as "default_github"
+    participant n88f766d2969355798cf3a2624f967bc2 as "default_hashtags"
     participant nfe38f3bea4fa5373ba201201a822e6d3 as "SqlRecoverConfig::default"
     participant n45785f2021e05b649864611d05aa98b7 as "default_sql_dialect"
     participant n96f3be9497615db0b99a0c705c9c55d0 as "EkosConfig::default"
@@ -791,16 +487,16 @@ sequenceDiagram
     participant n3356e33800e25af6ae588eab5122377b as "EkosConfig::ledger_dir"
     participant n07b8455917ba5a9b9464d009a63af093 as "EkosConfig::ledger_path"
     participant nb05f3338a437555aa05036a4731498a1 as "EkosConfig::branch_ledger_path"
-    n86487b2d47d65105807b404b12767a95->>n09665155ef9e5259b3798452b328264d: calls
-    n86487b2d47d65105807b404b12767a95->>n08ad7fde95bd5d738bc48cb5a70b8fd9: calls
     n86487b2d47d65105807b404b12767a95->>n7b4baf1da71f5879b16260a8f58bb004: calls
+    n86487b2d47d65105807b404b12767a95->>n08ad7fde95bd5d738bc48cb5a70b8fd9: calls
+    n86487b2d47d65105807b404b12767a95->>n09665155ef9e5259b3798452b328264d: calls
     ndb53c97e788e587ba5d4fbff7497f34e->>n8365dc187a685b6cbb0bfcddf13ef488: calls
-    n3fa1fe515c40500ea4afe9b3dfeb907f->>n88f766d2969355798cf3a2624f967bc2: calls
     n3fa1fe515c40500ea4afe9b3dfeb907f->>n81f7cad33ade55cba07f9d2c85cbcc12: calls
+    n3fa1fe515c40500ea4afe9b3dfeb907f->>n88f766d2969355798cf3a2624f967bc2: calls
     nfe38f3bea4fa5373ba201201a822e6d3->>n45785f2021e05b649864611d05aa98b7: calls
+    n96f3be9497615db0b99a0c705c9c55d0->>n3fa1fe515c40500ea4afe9b3dfeb907f: calls
     n96f3be9497615db0b99a0c705c9c55d0->>n86487b2d47d65105807b404b12767a95: calls
     n96f3be9497615db0b99a0c705c9c55d0->>ndb53c97e788e587ba5d4fbff7497f34e: calls
-    n96f3be9497615db0b99a0c705c9c55d0->>n3fa1fe515c40500ea4afe9b3dfeb907f: calls
     n5c036ac3203e5c5988f2d79a35ccf921->>n6c6a765c3f26501e8d3a8393454e9273: calls
     n5c036ac3203e5c5988f2d79a35ccf921->>n96f3be9497615db0b99a0c705c9c55d0: calls
     n40a21a837f2459519ce3be90d0e89682->>n2ae501da572c53d984c5837ab91b23f9: calls
@@ -844,12 +540,12 @@ sequenceDiagram
     n35af390358195ec3939611a8a343a41c->>n35af390358195ec3939611a8a343a41c: calls
     n621f7d1a9bff502d9e321f7cbefd68e8->>n621f7d1a9bff502d9e321f7cbefd68e8: calls
     n523e017fa17a520e925d295f0abfb465->>n621f7d1a9bff502d9e321f7cbefd68e8: calls
-    n293e83a5d93e54cf957a3cc539a369fe->>n621f7d1a9bff502d9e321f7cbefd68e8: calls
     n293e83a5d93e54cf957a3cc539a369fe->>n523e017fa17a520e925d295f0abfb465: calls
+    n293e83a5d93e54cf957a3cc539a369fe->>n621f7d1a9bff502d9e321f7cbefd68e8: calls
     n3e578779ba09580a9d6d8319115114de->>n293e83a5d93e54cf957a3cc539a369fe: calls
-    n5b7ff059a0b154d791b16fd5a3bbfe85->>n621f7d1a9bff502d9e321f7cbefd68e8: calls
-    n5b7ff059a0b154d791b16fd5a3bbfe85->>n523e017fa17a520e925d295f0abfb465: calls
     n5b7ff059a0b154d791b16fd5a3bbfe85->>n35af390358195ec3939611a8a343a41c: calls
+    n5b7ff059a0b154d791b16fd5a3bbfe85->>n523e017fa17a520e925d295f0abfb465: calls
+    n5b7ff059a0b154d791b16fd5a3bbfe85->>n621f7d1a9bff502d9e321f7cbefd68e8: calls
     nf64251fc07c75863b0060419e9c2f655->>n5b7ff059a0b154d791b16fd5a3bbfe85: calls
     nc4a39ee90abd58b5b650aa1f99ead86c->>nd6d716a59b995556bde53d655c5ebc5b: calls
 ```
@@ -868,39 +564,39 @@ _26 `Calls` edges compiled for this module — diagram omitted, too large to ren
 
 ### ekos/crates/docs-gen/src/lib.rs
 
-_33 `Calls` edges compiled for this module — diagram omitted, too large to render usefully._
+_32 `Calls` edges compiled for this module — diagram omitted, too large to render usefully._
 
 ### ekos/crates/ekl/src/interpreter.rs
 
 ```mermaid
 sequenceDiagram
     participant nfeb95d3d5916525d86e3ad4cee4ff906 as "EklInterpreter::execute"
-    participant n990853c78608562baea0df03bfbfaa73 as "project"
     participant n9f9ddd90331357729e6b1a6c3050ad11 as "EklInterpreter::candidate_rows"
-    participant ndb424b5e3b63590d8e63197b48efa89a as "eval_predicate"
-    participant n9166302681cb5c5e912c7ffe203d4ed6 as "compare_rows"
     participant ne8072521557d545eb833f3d849872856 as "default_returns"
-    participant n45d98e4bc62c5838b3ac7fd7122795a1 as "EklInterpreter::expand_from_anchor"
+    participant n990853c78608562baea0df03bfbfaa73 as "project"
+    participant n9166302681cb5c5e912c7ffe203d4ed6 as "compare_rows"
+    participant ndb424b5e3b63590d8e63197b48efa89a as "eval_predicate"
     participant n822748c3c82a526c993b53255d03a372 as "EklInterpreter::resolve_anchor"
+    participant n45d98e4bc62c5838b3ac7fd7122795a1 as "EklInterpreter::expand_from_anchor"
     participant n92f877896991562bb87673c822722296 as "value_eq"
-    participant n2b431c16e2995ca5b60a18aac4ca949f as "value_to_string"
     participant n8613a3d6558353a9907cc715f59b736e as "value_as_f64"
+    participant n2b431c16e2995ca5b60a18aac4ca949f as "value_to_string"
     participant n89a4f30680735546b7d3c1c55d138bcf as "literal_as_f64"
     participant nb99e9e6115dd5ac5be47b6a1955b3f88 as "literal_to_string"
-    nfeb95d3d5916525d86e3ad4cee4ff906->>n990853c78608562baea0df03bfbfaa73: calls
     nfeb95d3d5916525d86e3ad4cee4ff906->>n9f9ddd90331357729e6b1a6c3050ad11: calls
-    nfeb95d3d5916525d86e3ad4cee4ff906->>ndb424b5e3b63590d8e63197b48efa89a: calls
-    nfeb95d3d5916525d86e3ad4cee4ff906->>n9166302681cb5c5e912c7ffe203d4ed6: calls
     nfeb95d3d5916525d86e3ad4cee4ff906->>ne8072521557d545eb833f3d849872856: calls
-    n9f9ddd90331357729e6b1a6c3050ad11->>n45d98e4bc62c5838b3ac7fd7122795a1: calls
+    nfeb95d3d5916525d86e3ad4cee4ff906->>n990853c78608562baea0df03bfbfaa73: calls
+    nfeb95d3d5916525d86e3ad4cee4ff906->>n9166302681cb5c5e912c7ffe203d4ed6: calls
+    nfeb95d3d5916525d86e3ad4cee4ff906->>ndb424b5e3b63590d8e63197b48efa89a: calls
     n9f9ddd90331357729e6b1a6c3050ad11->>n822748c3c82a526c993b53255d03a372: calls
-    n92f877896991562bb87673c822722296->>n2b431c16e2995ca5b60a18aac4ca949f: calls
+    n9f9ddd90331357729e6b1a6c3050ad11->>n45d98e4bc62c5838b3ac7fd7122795a1: calls
     n92f877896991562bb87673c822722296->>n8613a3d6558353a9907cc715f59b736e: calls
-    ndb424b5e3b63590d8e63197b48efa89a->>n8613a3d6558353a9907cc715f59b736e: calls
-    ndb424b5e3b63590d8e63197b48efa89a->>n2b431c16e2995ca5b60a18aac4ca949f: calls
+    n92f877896991562bb87673c822722296->>n2b431c16e2995ca5b60a18aac4ca949f: calls
     ndb424b5e3b63590d8e63197b48efa89a->>n89a4f30680735546b7d3c1c55d138bcf: calls
-    ndb424b5e3b63590d8e63197b48efa89a->>n92f877896991562bb87673c822722296: calls
     ndb424b5e3b63590d8e63197b48efa89a->>nb99e9e6115dd5ac5be47b6a1955b3f88: calls
+    ndb424b5e3b63590d8e63197b48efa89a->>n2b431c16e2995ca5b60a18aac4ca949f: calls
+    ndb424b5e3b63590d8e63197b48efa89a->>n8613a3d6558353a9907cc715f59b736e: calls
+    ndb424b5e3b63590d8e63197b48efa89a->>n92f877896991562bb87673c822722296: calls
     n9166302681cb5c5e912c7ffe203d4ed6->>n2b431c16e2995ca5b60a18aac4ca949f: calls
 ```
 
@@ -917,16 +613,16 @@ sequenceDiagram
     participant n2057164104cb5dd0846a7cb921b2e2be as "type_compat_score"
     participant n9dd46d310b3f54f29bc5f4deee8ca431 as "find_cross_system_candidates"
     participant n70e3e344be1f53b0b84ded93f29ff4e4 as "normalize_cross_system"
-    participant n443f6bee357654369013bb79b5867fd2 as "column_overlap_score"
     participant n890f9527fef55556bf1c41613f51627e as "matchable_name"
+    participant n443f6bee357654369013bb79b5867fd2 as "column_overlap_score"
     participant n6522c3f25c8a5d3281c9b0e4f61a4750 as "combine_signals"
     nc13aa3d42f6956d78b30c643c78450ea->>n49576809e7125bd491a2edf1ee60a47d: calls
     n2057164104cb5dd0846a7cb921b2e2be->>nc13aa3d42f6956d78b30c643c78450ea: calls
     n9dd46d310b3f54f29bc5f4deee8ca431->>n70e3e344be1f53b0b84ded93f29ff4e4: calls
-    n9dd46d310b3f54f29bc5f4deee8ca431->>n443f6bee357654369013bb79b5867fd2: calls
-    n9dd46d310b3f54f29bc5f4deee8ca431->>n890f9527fef55556bf1c41613f51627e: calls
-    n9dd46d310b3f54f29bc5f4deee8ca431->>n6522c3f25c8a5d3281c9b0e4f61a4750: calls
     n9dd46d310b3f54f29bc5f4deee8ca431->>n2057164104cb5dd0846a7cb921b2e2be: calls
+    n9dd46d310b3f54f29bc5f4deee8ca431->>n890f9527fef55556bf1c41613f51627e: calls
+    n9dd46d310b3f54f29bc5f4deee8ca431->>n443f6bee357654369013bb79b5867fd2: calls
+    n9dd46d310b3f54f29bc5f4deee8ca431->>n6522c3f25c8a5d3281c9b0e4f61a4750: calls
 ```
 
 ### ekos/crates/identity/src/lib.rs
@@ -940,17 +636,17 @@ sequenceDiagram
     participant nca326423f662526786b4e5c13edbb31e as "structural_score"
     participant n3372ccc3126352f488b9a8efc6cfa069 as "DefaultResolver::resolve"
     participant n05a77ab3acf05cc3bd0147e0d0e8d612 as "UnionFind::new"
-    participant n023832e4adcc5b45b48d5c2f435f0546 as "UnionFind::find"
-    participant na78faae37f4c569995bfef8c6cf855a5 as "UnionFind::union"
     participant n49b695e3042f57e09d1af94a899ecc0b as "DefaultResolver::threshold_for"
+    participant na78faae37f4c569995bfef8c6cf855a5 as "UnionFind::union"
+    participant n023832e4adcc5b45b48d5c2f435f0546 as "UnionFind::find"
     n8ebf139e19c95366962e629a07f4ba8a->>n25292dbc1c305a868ff3294f57ebba26: calls
     n25292dbc1c305a868ff3294f57ebba26->>n57f25bef7b5c5595b59e6f07dc10f99b: calls
     nbabffd19f87153c080bded8ef0920e33->>nca326423f662526786b4e5c13edbb31e: calls
-    n3372ccc3126352f488b9a8efc6cfa069->>n05a77ab3acf05cc3bd0147e0d0e8d612: calls
-    n3372ccc3126352f488b9a8efc6cfa069->>n023832e4adcc5b45b48d5c2f435f0546: calls
-    n3372ccc3126352f488b9a8efc6cfa069->>na78faae37f4c569995bfef8c6cf855a5: calls
     n3372ccc3126352f488b9a8efc6cfa069->>nbabffd19f87153c080bded8ef0920e33: calls
+    n3372ccc3126352f488b9a8efc6cfa069->>n05a77ab3acf05cc3bd0147e0d0e8d612: calls
     n3372ccc3126352f488b9a8efc6cfa069->>n49b695e3042f57e09d1af94a899ecc0b: calls
+    n3372ccc3126352f488b9a8efc6cfa069->>na78faae37f4c569995bfef8c6cf855a5: calls
+    n3372ccc3126352f488b9a8efc6cfa069->>n023832e4adcc5b45b48d5c2f435f0546: calls
     n023832e4adcc5b45b48d5c2f435f0546->>n023832e4adcc5b45b48d5c2f435f0546: calls
     na78faae37f4c569995bfef8c6cf855a5->>n023832e4adcc5b45b48d5c2f435f0546: calls
 ```
@@ -1041,12 +737,12 @@ sequenceDiagram
     participant nd047fc97d00759118fb57f43a79a6b03 as "sign"
     participant n26cd4cad2e8c57aa8742f30a3e5eea61 as "signature_base_string"
     participant nf41ca41a496150d1925e01ca53aaa086 as "authorization_header"
-    participant nc15fbd69b60d5004b3056a836bf18ebd as "generate_nonce"
     participant nc3d5f345a13451fe84fae2d08acd4eaa as "unix_timestamp"
+    participant nc15fbd69b60d5004b3056a836bf18ebd as "generate_nonce"
     nd047fc97d00759118fb57f43a79a6b03->>n26cd4cad2e8c57aa8742f30a3e5eea61: calls
     nf41ca41a496150d1925e01ca53aaa086->>nd047fc97d00759118fb57f43a79a6b03: calls
-    nf41ca41a496150d1925e01ca53aaa086->>nc15fbd69b60d5004b3056a836bf18ebd: calls
     nf41ca41a496150d1925e01ca53aaa086->>nc3d5f345a13451fe84fae2d08acd4eaa: calls
+    nf41ca41a496150d1925e01ca53aaa086->>nc15fbd69b60d5004b3056a836bf18ebd: calls
 ```
 
 ### ekos/crates/marketing/src/prompt.rs
@@ -1084,12 +780,12 @@ sequenceDiagram
 sequenceDiagram
     participant nec52b091354f563d907203c8ef3092bf as "source_fingerprint"
     participant n8b666d113ab852b18b717cb270682a0b as "ScanContext::is_ignored"
-    participant nb4e4cbd9d9f35d02a4dc0c11bdbedc05 as "ObservationPackage::len"
     participant ndd106f4a4759564d835a4d25afcf840e as "ObservationPackage::push"
+    participant nb4e4cbd9d9f35d02a4dc0c11bdbedc05 as "ObservationPackage::len"
     participant nc64247bb7cbc57b1974d10145b2b6ebf as "ObservationPackage::is_empty"
     nec52b091354f563d907203c8ef3092bf->>n8b666d113ab852b18b717cb270682a0b: calls
-    nec52b091354f563d907203c8ef3092bf->>nb4e4cbd9d9f35d02a4dc0c11bdbedc05: calls
     nec52b091354f563d907203c8ef3092bf->>ndd106f4a4759564d835a4d25afcf840e: calls
+    nec52b091354f563d907203c8ef3092bf->>nb4e4cbd9d9f35d02a4dc0c11bdbedc05: calls
     ndd106f4a4759564d835a4d25afcf840e->>ndd106f4a4759564d835a4d25afcf840e: calls
     nb4e4cbd9d9f35d02a4dc0c11bdbedc05->>nb4e4cbd9d9f35d02a4dc0c11bdbedc05: calls
     nc64247bb7cbc57b1974d10145b2b6ebf->>nc64247bb7cbc57b1974d10145b2b6ebf: calls
@@ -1112,13 +808,13 @@ sequenceDiagram
 sequenceDiagram
     participant n2d44742b555e5c97898bb162cdb09a8d as "CachedLlmProvider::model_name"
     participant na17b95302256592a8e822db4eb42b103 as "CachedLlmProvider::complete"
-    participant n220594e19d9d53fcbe8d24c63db12040 as "cache_path"
     participant nd78c6cd61f3151d0a15f292fb28c8614 as "cache_key"
+    participant n220594e19d9d53fcbe8d24c63db12040 as "cache_path"
     n2d44742b555e5c97898bb162cdb09a8d->>n2d44742b555e5c97898bb162cdb09a8d: calls
-    na17b95302256592a8e822db4eb42b103->>n220594e19d9d53fcbe8d24c63db12040: calls
+    na17b95302256592a8e822db4eb42b103->>na17b95302256592a8e822db4eb42b103: calls
     na17b95302256592a8e822db4eb42b103->>n2d44742b555e5c97898bb162cdb09a8d: calls
     na17b95302256592a8e822db4eb42b103->>nd78c6cd61f3151d0a15f292fb28c8614: calls
-    na17b95302256592a8e822db4eb42b103->>na17b95302256592a8e822db4eb42b103: calls
+    na17b95302256592a8e822db4eb42b103->>n220594e19d9d53fcbe8d24c63db12040: calls
 ```
 
 ### ekos/crates/recovery/src/cicd_analyzer.rs
@@ -1126,12 +822,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n1f592577a349504ebf9b846299c8c7c8 as "CicdAnalyzerPass::run"
+    participant nffa32f72651f58b68100f32b4d3997aa as "extract_jobs"
     participant n630ff87b5416525db949e50b8c6ac173 as "pipeline_kir_id"
     participant nbe0f7bcd58dd5d248de96a2e0f2bc9ec as "extract_triggers"
-    participant nffa32f72651f58b68100f32b4d3997aa as "extract_jobs"
+    n1f592577a349504ebf9b846299c8c7c8->>nffa32f72651f58b68100f32b4d3997aa: calls
     n1f592577a349504ebf9b846299c8c7c8->>n630ff87b5416525db949e50b8c6ac173: calls
     n1f592577a349504ebf9b846299c8c7c8->>nbe0f7bcd58dd5d248de96a2e0f2bc9ec: calls
-    n1f592577a349504ebf9b846299c8c7c8->>nffa32f72651f58b68100f32b4d3997aa: calls
 ```
 
 ### ekos/crates/recovery/src/confluence_analyzer.rs
@@ -1139,10 +835,10 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n7079f27d7ef3582d8cfac696ab54fdc1 as "ConfluenceAnalyzerPass::run"
-    participant naddac786859752598bf278f31115f76e as "find_linked_titles"
     participant n1d9e83b8ef1a5452b0522e7be1fa2877 as "page_kir_id"
-    n7079f27d7ef3582d8cfac696ab54fdc1->>naddac786859752598bf278f31115f76e: calls
+    participant naddac786859752598bf278f31115f76e as "find_linked_titles"
     n7079f27d7ef3582d8cfac696ab54fdc1->>n1d9e83b8ef1a5452b0522e7be1fa2877: calls
+    n7079f27d7ef3582d8cfac696ab54fdc1->>naddac786859752598bf278f31115f76e: calls
 ```
 
 ### ekos/crates/recovery/src/crate_topology_analyzer.rs
@@ -1150,12 +846,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant ne74171d268385b428c9cd0ccae64f581 as "CrateTopologyAnalyzerPass::run"
-    participant n50c7b5b692565beeb6fa0f18e3741230 as "resolve_dep_entry"
     participant n08bc079b7ef25b049e662a954215d662 as "normalize_rel_path"
+    participant n50c7b5b692565beeb6fa0f18e3741230 as "resolve_dep_entry"
     participant n5f964700d62f5814a893d9efb38f6406 as "crate_kir_id"
     participant n84387622498c55ae81590d590e168971 as "technology_kir_id"
-    ne74171d268385b428c9cd0ccae64f581->>n50c7b5b692565beeb6fa0f18e3741230: calls
     ne74171d268385b428c9cd0ccae64f581->>n08bc079b7ef25b049e662a954215d662: calls
+    ne74171d268385b428c9cd0ccae64f581->>n50c7b5b692565beeb6fa0f18e3741230: calls
     ne74171d268385b428c9cd0ccae64f581->>n5f964700d62f5814a893d9efb38f6406: calls
     ne74171d268385b428c9cd0ccae64f581->>n84387622498c55ae81590d590e168971: calls
 ```
@@ -1212,11 +908,11 @@ sequenceDiagram
 sequenceDiagram
     participant n6f41602541585830aaf27ed224a7f3a1 as "GitHubAnalyzerPass::run"
     participant nc279a0e04f7a52d08dab45aa0ac4e0e7 as "item_kir_id"
-    participant n5f490787c05753eb80ed4287e50a0a04 as "find_closed_issue_numbers"
     participant nd36e01ce4f20520aa2b9c3630d65e0e1 as "file_kir_id"
+    participant n5f490787c05753eb80ed4287e50a0a04 as "find_closed_issue_numbers"
     n6f41602541585830aaf27ed224a7f3a1->>nc279a0e04f7a52d08dab45aa0ac4e0e7: calls
-    n6f41602541585830aaf27ed224a7f3a1->>n5f490787c05753eb80ed4287e50a0a04: calls
     n6f41602541585830aaf27ed224a7f3a1->>nd36e01ce4f20520aa2b9c3630d65e0e1: calls
+    n6f41602541585830aaf27ed224a7f3a1->>n5f490787c05753eb80ed4287e50a0a04: calls
 ```
 
 ### ekos/crates/recovery/src/local_docs_analyzer.rs
@@ -1224,12 +920,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n86bb576403f35bb998460c13a60e457f as "LocalDocAnalyzerPass::run"
+    participant nf9e9a153221e53f1a9b05b9b4bdef2c5 as "document_kir_id"
     participant n9b2041177aa056cb99f1254336e5f1e6 as "table_kir_id"
     participant nba226e6057f35450a94e6e019dd7ac3a as "section_kir_id"
-    participant nf9e9a153221e53f1a9b05b9b4bdef2c5 as "document_kir_id"
+    n86bb576403f35bb998460c13a60e457f->>nf9e9a153221e53f1a9b05b9b4bdef2c5: calls
     n86bb576403f35bb998460c13a60e457f->>n9b2041177aa056cb99f1254336e5f1e6: calls
     n86bb576403f35bb998460c13a60e457f->>nba226e6057f35450a94e6e019dd7ac3a: calls
-    n86bb576403f35bb998460c13a60e457f->>nf9e9a153221e53f1a9b05b9b4bdef2c5: calls
 ```
 
 ### ekos/crates/recovery/src/ollama.rs
@@ -1257,8 +953,8 @@ sequenceDiagram
     participant n36a795d037885433a3692571af84e340 as "walk_top_level_statement"
     participant n89c6ca8d85385378962bdd78b293813c as "add_import"
     participant n12d0dd1220c557daaca4f87c55d80182 as "python_module_kir_id"
-    participant n1c28e11791f6543a95284a070d7a4528 as "try_recognize_chain_statement"
     participant n458e9ef20f1a57ae89657f762081285d as "add_symbol"
+    participant n1c28e11791f6543a95284a070d7a4528 as "try_recognize_chain_statement"
     participant n73d9612b4af45e0fb10fddfc27015e27 as "calls_to_nodes"
     participant n9a16b56cb8625655af9728a49dc6c15c as "linearize_chain"
     participant n340e949592d156c4adb1a881b61f5e07 as "join_keys_from_on"
@@ -1271,9 +967,9 @@ sequenceDiagram
     nb3870c36783f55a988e9eb68c0023f88->>n72ff02a8b7ba5481b85dc5b408ab50e4: calls
     n72ff02a8b7ba5481b85dc5b408ab50e4->>n36a795d037885433a3692571af84e340: calls
     n89c6ca8d85385378962bdd78b293813c->>n12d0dd1220c557daaca4f87c55d80182: calls
-    n36a795d037885433a3692571af84e340->>n1c28e11791f6543a95284a070d7a4528: calls
     n36a795d037885433a3692571af84e340->>n458e9ef20f1a57ae89657f762081285d: calls
     n36a795d037885433a3692571af84e340->>n89c6ca8d85385378962bdd78b293813c: calls
+    n36a795d037885433a3692571af84e340->>n1c28e11791f6543a95284a070d7a4528: calls
     n1c28e11791f6543a95284a070d7a4528->>n73d9612b4af45e0fb10fddfc27015e27: calls
     n1c28e11791f6543a95284a070d7a4528->>n9a16b56cb8625655af9728a49dc6c15c: calls
     n9a16b56cb8625655af9728a49dc6c15c->>n9a16b56cb8625655af9728a49dc6c15c: calls
@@ -1281,10 +977,10 @@ sequenceDiagram
     n340e949592d156c4adb1a881b61f5e07->>nde2abe1c32b15b408fe73fcfe125a6e5: calls
     n50c6eef6d1fe5900af7a31a4ef604197->>nd64243b2605e5af29373b2f6483c166a: calls
     naf6d61cf82a15958997debec6bf9b6f3->>nc82e0ed6c5175eb489874cf896e0b597: calls
-    n73d9612b4af45e0fb10fddfc27015e27->>n2af471f9745a5e899438e13d5973a397: calls
+    n73d9612b4af45e0fb10fddfc27015e27->>n50c6eef6d1fe5900af7a31a4ef604197: calls
     n73d9612b4af45e0fb10fddfc27015e27->>n340e949592d156c4adb1a881b61f5e07: calls
     n73d9612b4af45e0fb10fddfc27015e27->>nc82e0ed6c5175eb489874cf896e0b597: calls
-    n73d9612b4af45e0fb10fddfc27015e27->>n50c6eef6d1fe5900af7a31a4ef604197: calls
+    n73d9612b4af45e0fb10fddfc27015e27->>n2af471f9745a5e899438e13d5973a397: calls
 ```
 
 ### ekos/crates/recovery/src/rust_analyzer.rs
@@ -1293,14 +989,14 @@ sequenceDiagram
 sequenceDiagram
     participant n8fb40c0918b35b5abc8a00f048756585 as "RustAnalyzerPass::run"
     participant n4cb8c94112525ba3be3cb7d55f1a595d as "parse_rust_file"
-    participant nb2c88510792a5dc78c04f5e81cf9e666 as "type_name"
     participant n18bb973a8ef0557c961ed46286fcab0f as "add_symbol"
+    participant nb2c88510792a5dc78c04f5e81cf9e666 as "type_name"
     participant n40de02d00c8a590797bf6f15ecb5b18e as "add_import"
     participant n5a57188e56405c408eb908eda1c1a388 as "flatten_use_tree"
     participant n22873165bc325c38a21922586895465f as "rust_module_kir_id"
     n8fb40c0918b35b5abc8a00f048756585->>n4cb8c94112525ba3be3cb7d55f1a595d: calls
-    n4cb8c94112525ba3be3cb7d55f1a595d->>nb2c88510792a5dc78c04f5e81cf9e666: calls
     n4cb8c94112525ba3be3cb7d55f1a595d->>n18bb973a8ef0557c961ed46286fcab0f: calls
+    n4cb8c94112525ba3be3cb7d55f1a595d->>nb2c88510792a5dc78c04f5e81cf9e666: calls
     n4cb8c94112525ba3be3cb7d55f1a595d->>n40de02d00c8a590797bf6f15ecb5b18e: calls
     n4cb8c94112525ba3be3cb7d55f1a595d->>n5a57188e56405c408eb908eda1c1a388: calls
     n5a57188e56405c408eb908eda1c1a388->>n5a57188e56405c408eb908eda1c1a388: calls
@@ -1312,16 +1008,16 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n9650fe076a5c57dc9a45705995b82a4a as "SqlAnalyzerPass::run"
-    participant n42cf8fb18f3d51ceb3c71b465fd82f18 as "apply_llm_enrichment"
     participant n627d6f75f3e852778b29ff55036731c3 as "parse_ddl_structural"
+    participant n42cf8fb18f3d51ceb3c71b465fd82f18 as "apply_llm_enrichment"
+    participant n1a03d4720f175c60ac70af44732a3110 as "add_fk_relationship"
     participant n60432b6b485852ab8fa54825c5600764 as "col_names"
     participant n01ed4254b1355b4ea18add6e9163f9ce as "columns_json"
-    participant n1a03d4720f175c60ac70af44732a3110 as "add_fk_relationship"
-    n9650fe076a5c57dc9a45705995b82a4a->>n42cf8fb18f3d51ceb3c71b465fd82f18: calls
     n9650fe076a5c57dc9a45705995b82a4a->>n627d6f75f3e852778b29ff55036731c3: calls
+    n9650fe076a5c57dc9a45705995b82a4a->>n42cf8fb18f3d51ceb3c71b465fd82f18: calls
+    n627d6f75f3e852778b29ff55036731c3->>n1a03d4720f175c60ac70af44732a3110: calls
     n627d6f75f3e852778b29ff55036731c3->>n60432b6b485852ab8fa54825c5600764: calls
     n627d6f75f3e852778b29ff55036731c3->>n01ed4254b1355b4ea18add6e9163f9ce: calls
-    n627d6f75f3e852778b29ff55036731c3->>n1a03d4720f175c60ac70af44732a3110: calls
 ```
 
 ### ekos/crates/recovery/src/sql_transform_analyzer.rs
@@ -1344,10 +1040,10 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant nd454db52b9775cf88af96f5559a47666 as "AiRuntime::ask"
-    participant n8512d06f0c175396a99fc7ab9a8705d4 as "extract_citations"
     participant ne0e5f206042c5a818e861b9fbc4ab976 as "AiRuntime::gather_context"
-    nd454db52b9775cf88af96f5559a47666->>n8512d06f0c175396a99fc7ab9a8705d4: calls
+    participant n8512d06f0c175396a99fc7ab9a8705d4 as "extract_citations"
     nd454db52b9775cf88af96f5559a47666->>ne0e5f206042c5a818e861b9fbc4ab976: calls
+    nd454db52b9775cf88af96f5559a47666->>n8512d06f0c175396a99fc7ab9a8705d4: calls
 ```
 
 ### ekos/crates/runtime/src/lib.rs
@@ -1374,13 +1070,13 @@ sequenceDiagram
     participant ncef5cb16665a5648bfaa23750b333ccf as "dedup_relationships"
     participant nc6428a28088e5899b6d1f734e97ebbbe as "SemanticCompilerPass::run"
     participant nde0b1febdf365b3d89ad69c32f6bb7c2 as "CkModel::validate"
-    participant n2629dd982de4577c97295674e1bef671 as "build_ckm"
     participant naf354743f94c501c89070a51ccdae017 as "merge_graphs"
+    participant n2629dd982de4577c97295674e1bef671 as "build_ckm"
     n0fe2ab6b10b650bfbe74c6ec8ad47104->>ncef5cb16665a5648bfaa23750b333ccf: calls
     nc6428a28088e5899b6d1f734e97ebbbe->>nde0b1febdf365b3d89ad69c32f6bb7c2: calls
-    nc6428a28088e5899b6d1f734e97ebbbe->>n2629dd982de4577c97295674e1bef671: calls
-    nc6428a28088e5899b6d1f734e97ebbbe->>naf354743f94c501c89070a51ccdae017: calls
     nc6428a28088e5899b6d1f734e97ebbbe->>n0fe2ab6b10b650bfbe74c6ec8ad47104: calls
+    nc6428a28088e5899b6d1f734e97ebbbe->>naf354743f94c501c89070a51ccdae017: calls
+    nc6428a28088e5899b6d1f734e97ebbbe->>n2629dd982de4577c97295674e1bef671: calls
 ```
 
 ### ekos/crates/semantic/src/transform_ir.rs
@@ -1388,16 +1084,16 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n937c6e2defa65b74bfcb3bee881ee4ab as "lower_to_kir"
+    participant nacdcb5e6413e57b0bb0bd519a247e071 as "transform_evidence_kir_id"
     participant n3b4e509842ef5a21894dac9ebe86762a as "transform_node_kir_id"
     participant nd4c1c00fb0505363b81a6b984bd7812f as "TransformNode::node_type"
-    participant nacdcb5e6413e57b0bb0bd519a247e071 as "transform_evidence_kir_id"
-    participant n2e58103d045e5409bf85e4e0a21186c3 as "TransformNode::properties"
     participant n98f701d7665e562587e127a9028c2efe as "TransformNode::evidence_fragment"
+    participant n2e58103d045e5409bf85e4e0a21186c3 as "TransformNode::properties"
+    n937c6e2defa65b74bfcb3bee881ee4ab->>nacdcb5e6413e57b0bb0bd519a247e071: calls
     n937c6e2defa65b74bfcb3bee881ee4ab->>n3b4e509842ef5a21894dac9ebe86762a: calls
     n937c6e2defa65b74bfcb3bee881ee4ab->>nd4c1c00fb0505363b81a6b984bd7812f: calls
-    n937c6e2defa65b74bfcb3bee881ee4ab->>nacdcb5e6413e57b0bb0bd519a247e071: calls
-    n937c6e2defa65b74bfcb3bee881ee4ab->>n2e58103d045e5409bf85e4e0a21186c3: calls
     n937c6e2defa65b74bfcb3bee881ee4ab->>n98f701d7665e562587e127a9028c2efe: calls
+    n937c6e2defa65b74bfcb3bee881ee4ab->>n2e58103d045e5409bf85e4e0a21186c3: calls
 ```
 
 ### ekos/plugins/confluence/src/lib.rs
@@ -1423,14 +1119,14 @@ sequenceDiagram
     participant n438cce02db5c56f5ac38615fa7bb51bc as "ParquetExportReader::latest_batch_dir"
     nf0b31d244edc544e96acfc790b32605d->>n2bca7d5fe4555aeab4d1308424636e35: calls
     nf0b31d244edc544e96acfc790b32605d->>nf54fbe87d44857108990eee46048c1d4: calls
-    nc79b4df578e25990a6272851c1a75901->>n2bca7d5fe4555aeab4d1308424636e35: calls
     nc79b4df578e25990a6272851c1a75901->>nf54fbe87d44857108990eee46048c1d4: calls
     nc79b4df578e25990a6272851c1a75901->>n0e16c45a8f3d5203b28e9c2b4e5ca6f2: calls
+    nc79b4df578e25990a6272851c1a75901->>n2bca7d5fe4555aeab4d1308424636e35: calls
     n52ef400c3e0857e7993727669b2386fa->>nf54fbe87d44857108990eee46048c1d4: calls
     n52ef400c3e0857e7993727669b2386fa->>n2bca7d5fe4555aeab4d1308424636e35: calls
-    n573d78a3871e5467b795efe45e871700->>n438cce02db5c56f5ac38615fa7bb51bc: calls
-    n573d78a3871e5467b795efe45e871700->>n52ef400c3e0857e7993727669b2386fa: calls
     n573d78a3871e5467b795efe45e871700->>nc79b4df578e25990a6272851c1a75901: calls
+    n573d78a3871e5467b795efe45e871700->>n52ef400c3e0857e7993727669b2386fa: calls
+    n573d78a3871e5467b795efe45e871700->>n438cce02db5c56f5ac38615fa7bb51bc: calls
     n573d78a3871e5467b795efe45e871700->>nf0b31d244edc544e96acfc790b32605d: calls
 ```
 
@@ -1465,12 +1161,12 @@ sequenceDiagram
     participant n320b790e767152d0a2c1cd1e7f86c9e6 as "GitObserver::new"
     participant nef656cf7720b5f34ba8aa732bfe51c32 as "GitObserver::scan"
     participant n4fea6a2a9edd5378abd5b37ded47b483 as "git_output"
-    participant ncded5a1e14f659b080abc13dc8216049 as "is_git_repo"
     participant n2c446572839f53629f0599e568697d62 as "parse_stat_summary"
+    participant ncded5a1e14f659b080abc13dc8216049 as "is_git_repo"
     ne8c063f4283f5d5bb3059a7eb6bd7e5f->>n320b790e767152d0a2c1cd1e7f86c9e6: calls
     nef656cf7720b5f34ba8aa732bfe51c32->>n4fea6a2a9edd5378abd5b37ded47b483: calls
-    nef656cf7720b5f34ba8aa732bfe51c32->>ncded5a1e14f659b080abc13dc8216049: calls
     nef656cf7720b5f34ba8aa732bfe51c32->>n2c446572839f53629f0599e568697d62: calls
+    nef656cf7720b5f34ba8aa732bfe51c32->>ncded5a1e14f659b080abc13dc8216049: calls
 ```
 
 ### ekos/plugins/github/src/lib.rs
@@ -1490,12 +1186,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant n183af0c4fe425273beff98b642123c3e as "DocxParser::parse"
-    participant n6e44c2bdfcda5588b6b00796a82e8fc7 as "extract_media_images"
-    participant na86ca4ac57eb51f7be2fad53d6c6ee3d as "paragraph_text"
     participant n69fa56db88c654878895f8907d29dee8 as "table_rows"
-    n183af0c4fe425273beff98b642123c3e->>n6e44c2bdfcda5588b6b00796a82e8fc7: calls
-    n183af0c4fe425273beff98b642123c3e->>na86ca4ac57eb51f7be2fad53d6c6ee3d: calls
+    participant na86ca4ac57eb51f7be2fad53d6c6ee3d as "paragraph_text"
+    participant n6e44c2bdfcda5588b6b00796a82e8fc7 as "extract_media_images"
     n183af0c4fe425273beff98b642123c3e->>n69fa56db88c654878895f8907d29dee8: calls
+    n183af0c4fe425273beff98b642123c3e->>na86ca4ac57eb51f7be2fad53d6c6ee3d: calls
+    n183af0c4fe425273beff98b642123c3e->>n6e44c2bdfcda5588b6b00796a82e8fc7: calls
     n69fa56db88c654878895f8907d29dee8->>na86ca4ac57eb51f7be2fad53d6c6ee3d: calls
 ```
 
@@ -1623,14 +1319,14 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant na57c4f646fb858beaa297c411ae6f5ad as "ecommerce_pipeline_end_to_end"
-    participant n6bb7df902b2150fa9dc1ddde4307ef92 as "run_pipeline"
-    participant n5fe11438f6845c87b6028ed880979203 as "fixtures_dir"
     participant n7496161f1e515c7cbb5a03d64200bb13 as "copy_dir"
+    participant n5fe11438f6845c87b6028ed880979203 as "fixtures_dir"
+    participant n6bb7df902b2150fa9dc1ddde4307ef92 as "run_pipeline"
     participant n2cb9f53ef55a510fab721dcea04bc856 as "northwind_pipeline_end_to_end"
     participant n35626c5643f6547a8944e9bd07e4852a as "odoo_git_fixture_pipeline_end_to_end"
-    na57c4f646fb858beaa297c411ae6f5ad->>n6bb7df902b2150fa9dc1ddde4307ef92: calls
-    na57c4f646fb858beaa297c411ae6f5ad->>n5fe11438f6845c87b6028ed880979203: calls
     na57c4f646fb858beaa297c411ae6f5ad->>n7496161f1e515c7cbb5a03d64200bb13: calls
+    na57c4f646fb858beaa297c411ae6f5ad->>n5fe11438f6845c87b6028ed880979203: calls
+    na57c4f646fb858beaa297c411ae6f5ad->>n6bb7df902b2150fa9dc1ddde4307ef92: calls
     n2cb9f53ef55a510fab721dcea04bc856->>n6bb7df902b2150fa9dc1ddde4307ef92: calls
     n2cb9f53ef55a510fab721dcea04bc856->>n5fe11438f6845c87b6028ed880979203: calls
     n35626c5643f6547a8944e9bd07e4852a->>n5fe11438f6845c87b6028ed880979203: calls

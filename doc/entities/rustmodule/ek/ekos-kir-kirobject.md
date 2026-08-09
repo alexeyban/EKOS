@@ -14,35 +14,35 @@ _No compiled properties._
 - ← ekos/crates/recovery/src/crypto_analyzer.rs (`c5652a0f-42a3-5e1c-82d4-0cf4d37fab34`)
 - ← ekos/crates/semantic/src/transform_ir.rs (`b4fdd24c-8184-5879-9136-f0a70208955e`)
 - ← benchmark/benches/runtime_load_neighborhood.rs (`ea98c002-3a2b-5dd6-9aee-01db9fa9bde1`)
-- ← ekos/crates/docs-gen/src/lib.rs (`6ca4fba0-18e5-59b7-9876-7dae72e2ce0e`)
 - ← ekos/crates/ledger/src/lib.rs (`21938f45-b767-5933-9e71-12e15ff53eb1`)
 - ← ekos/crates/cli/src/commands/dbt.rs (`d3579ceb-9751-53ad-b6be-693f17509a70`)
 - ← ekos/crates/ledger/src/fact_ledger.rs (`eadcb59e-818f-5d1e-af87-ff29aba11423`)
 - ← ekos/crates/cli/src/commands/build.rs (`306def2e-bd5a-5784-9453-692c119e8d43`)
 - ← ekos/crates/recovery/src/sql_analyzer.rs (`cd768c5e-1640-51c3-b6ec-cb7ac78ade6d`)
 - ← ekos/crates/dbt-gen/src/lib.rs (`20d45ed0-c411-592d-8034-6486682f898c`)
+- ← ekos/crates/cli/src/commands/docs.rs (`5503d15b-112f-541f-8189-8be05a060beb`)
 - ← ekos/crates/recovery/src/local_docs_analyzer.rs (`d4eeb831-bfb8-592d-ad11-0e13adad2090`)
 - ← ekos/crates/identity/src/cross_system.rs (`44d130a8-ca02-506d-bc1a-21b037fb492c`)
 - ← benchmark/benches/identity_resolver.rs (`98a76aee-0267-55e8-941f-d3a106eb2053`)
 - ← ekos/crates/recovery/src/dependency_analyzer.rs (`9baa718a-d61d-554c-a791-7798003ba6c4`)
 - ← benchmark/benches/segment_store.rs (`d038c7b7-05b2-5c5c-8f62-c4ea6f2529ee`)
 - ← ekos/crates/recovery/src/rust_analyzer.rs (`50cde56d-1f82-53a6-bc71-b5b2f7c711bc`)
+- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
+- ← ekos/crates/identity/src/lib.rs (`c958282a-6d42-50ab-9cf9-8533976f0820`)
 - ← ekos/crates/ekl/src/interpreter.rs (`9c2cb6e4-ee09-503f-8cf5-ccfaf23ecd79`)
 - ← benchmark/benches/fact_ledger.rs (`51ded36f-c9b2-5f8a-97c1-43fa4d7a63a1`)
-- ← ekos/crates/identity/src/lib.rs (`c958282a-6d42-50ab-9cf9-8533976f0820`)
 - ← benchmark/benches/storage_compaction.rs (`7c6dcc8e-035b-5a69-89a6-a45e962f93d8`)
 - ← benchmark/benches/ledger_write.rs (`6b35bf13-a69a-59b1-8971-1df6156a8388`)
+- ← ekos/crates/recovery/src/cicd_analyzer.rs (`b6532a21-993c-5d28-8d99-891c30d70063`)
 - ← ekos/crates/cli/src/commands/commit.rs (`f48ae11b-a9a7-54f0-8cc6-a192b1641436`)
 - ← ekos/crates/recovery/src/confluence_analyzer.rs (`d1b7d840-ae82-5a26-b381-06fb944d4e3c`)
 - ← benchmark/benches/fact_model.rs (`8764eb55-7e1c-540c-b1d2-6545dcef6699`)
 - ← ekos/crates/identity/src/similarity.rs (`e66f3285-3368-5aa7-be23-fe2abc068cad`)
-- ← ekos/crates/cli/src/commands/docs.rs (`5503d15b-112f-541f-8189-8be05a060beb`)
+- ← ekos/crates/docs-gen/src/lib.rs (`6ca4fba0-18e5-59b7-9876-7dae72e2ce0e`)
 - ← ekos/crates/recovery/src/document_semantics_analyzer.rs (`62e92526-f096-5ed2-bc72-0bdae8703aa3`)
 - ← ekos/crates/runtime/src/lib.rs (`7d8cf6bd-fac1-56d9-a742-4db7a455ab7c`)
 - ← benchmark/benches/semantic_compiler.rs (`95222458-b6a4-5b9c-bcc9-0e2e1909eb44`)
 - ← benchmark/benches/index_runs.rs (`3efee357-ff49-5ace-8153-f8ad82f0cd57`)
-- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
-- ← ekos/crates/recovery/src/cicd_analyzer.rs (`b6532a21-993c-5d28-8d99-891c30d70063`)
 
 ## Diagram
 
@@ -61,8 +61,6 @@ graph TD
     nb4fdd24c818458799136f0a70208955e -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     nea98c0023a2b5dd69aee01db9fa9bde1["benchmark/benches/runtime_load_neighborhood.rs"]
     nea98c0023a2b5dd69aee01db9fa9bde1 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
-    n6ca4fba018e559b798767dae72e2ce0e["ekos/crates/docs-gen/src/lib.rs"]
-    n6ca4fba018e559b798767dae72e2ce0e -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n21938f45b76759339e7112e15ff53eb1["ekos/crates/ledger/src/lib.rs"]
     n21938f45b76759339e7112e15ff53eb1 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     nd3579ceb975153adb6be693f17509a70["ekos/crates/cli/src/commands/dbt.rs"]
@@ -75,6 +73,8 @@ graph TD
     ncd768c5e164051c3b6eccb7ac78ade6d -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n20d45ed0c411592d80346486682f898c["ekos/crates/dbt-gen/src/lib.rs"]
     n20d45ed0c411592d80346486682f898c -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
+    n5503d15b112f541f81898be05a060beb["ekos/crates/cli/src/commands/docs.rs"]
+    n5503d15b112f541f81898be05a060beb -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     nd4eeb831bfb8592dad110e13adad2090["ekos/crates/recovery/src/local_docs_analyzer.rs"]
     nd4eeb831bfb8592dad110e13adad2090 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n44d130a8ca02506dbc1a21b037fb492c["ekos/crates/identity/src/cross_system.rs"]
@@ -87,16 +87,20 @@ graph TD
     nd038c7b705b25c5c8f62c4ea6f2529ee -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n50cde56d1f8253a6bc71b5b2f7c711bc["ekos/crates/recovery/src/rust_analyzer.rs"]
     n50cde56d1f8253a6bc71b5b2f7c711bc -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
+    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
+    n83764758111554dfbb754a49e7334245 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
+    nc958282a6d4250ab9cf98533976f0820["ekos/crates/identity/src/lib.rs"]
+    nc958282a6d4250ab9cf98533976f0820 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n9c2cb6e4ee09503f8cf5ccfaf23ecd79["ekos/crates/ekl/src/interpreter.rs"]
     n9c2cb6e4ee09503f8cf5ccfaf23ecd79 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n51ded36fc9b25f8a97c143fa4d7a63a1["benchmark/benches/fact_ledger.rs"]
     n51ded36fc9b25f8a97c143fa4d7a63a1 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
-    nc958282a6d4250ab9cf98533976f0820["ekos/crates/identity/src/lib.rs"]
-    nc958282a6d4250ab9cf98533976f0820 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n7c6dcc8e035b5a6989a6a45e962f93d8["benchmark/benches/storage_compaction.rs"]
     n7c6dcc8e035b5a6989a6a45e962f93d8 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n6b35bf13a69a59b189711df6156a8388["benchmark/benches/ledger_write.rs"]
     n6b35bf13a69a59b189711df6156a8388 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
+    nb6532a21993c5d288d99891c30d70063["ekos/crates/recovery/src/cicd_analyzer.rs"]
+    nb6532a21993c5d288d99891c30d70063 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     nf48ae11ba9a754f08cc6a192b1641436["ekos/crates/cli/src/commands/commit.rs"]
     nf48ae11ba9a754f08cc6a192b1641436 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     nd1b7d840ae825a26b38106fb944d4e3c["ekos/crates/recovery/src/confluence_analyzer.rs"]
@@ -105,8 +109,8 @@ graph TD
     n8764eb557e1c540cb1d26545dcef6699 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     ne66f328533685aa7be23fe2abc068cad["ekos/crates/identity/src/similarity.rs"]
     ne66f328533685aa7be23fe2abc068cad -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
-    n5503d15b112f541f81898be05a060beb["ekos/crates/cli/src/commands/docs.rs"]
-    n5503d15b112f541f81898be05a060beb -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
+    n6ca4fba018e559b798767dae72e2ce0e["ekos/crates/docs-gen/src/lib.rs"]
+    n6ca4fba018e559b798767dae72e2ce0e -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n62e92526f0965ed2bc720bdae8703aa3["ekos/crates/recovery/src/document_semantics_analyzer.rs"]
     n62e92526f0965ed2bc720bdae8703aa3 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n7d8cf6bdfac156d9a7424db7a455ab7c["ekos/crates/runtime/src/lib.rs"]
@@ -115,10 +119,6 @@ graph TD
     n95222458b6a45b9cbcc90e2e1909eb44 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
     n3efee357ff495ace8153f8ad82f0cd57["benchmark/benches/index_runs.rs"]
     n3efee357ff495ace8153f8ad82f0cd57 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
-    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
-    n83764758111554dfbb754a49e7334245 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
-    nb6532a21993c5d288d99891c30d70063["ekos/crates/recovery/src/cicd_analyzer.rs"]
-    nb6532a21993c5d288d99891c30d70063 -->|DependsOn| n3e5a56c5b9ef510bb93973a0160df17e
 ```
 
 ## Evidence

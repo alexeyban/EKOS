@@ -17,11 +17,11 @@ _No compiled properties._
 - ← ekos/crates/recovery/src/local_docs_analyzer.rs (`d4eeb831-bfb8-592d-ad11-0e13adad2090`)
 - ← ekos/crates/cli/src/commands/identity.rs (`f6e3418b-d664-536b-8a69-b723a534ff1a`)
 - ← ekos/crates/recovery/src/dependency_analyzer.rs (`9baa718a-d61d-554c-a791-7798003ba6c4`)
+- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
+- ← ekos/crates/recovery/src/cicd_analyzer.rs (`b6532a21-993c-5d28-8d99-891c30d70063`)
 - ← ekos/crates/cli/src/commands/commit.rs (`f48ae11b-a9a7-54f0-8cc6-a192b1641436`)
 - ← ekos/crates/recovery/src/confluence_analyzer.rs (`d1b7d840-ae82-5a26-b381-06fb944d4e3c`)
 - ← ekos/crates/recovery/src/document_semantics_analyzer.rs (`62e92526-f096-5ed2-bc72-0bdae8703aa3`)
-- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
-- ← ekos/crates/recovery/src/cicd_analyzer.rs (`b6532a21-993c-5d28-8d99-891c30d70063`)
 
 ## Diagram
 
@@ -46,16 +46,16 @@ graph TD
     nf6e3418bd664536b8a69b723a534ff1a -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
     n9baa718ad61d554ca7917798003ba6c4["ekos/crates/recovery/src/dependency_analyzer.rs"]
     n9baa718ad61d554ca7917798003ba6c4 -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
+    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
+    n83764758111554dfbb754a49e7334245 -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
+    nb6532a21993c5d288d99891c30d70063["ekos/crates/recovery/src/cicd_analyzer.rs"]
+    nb6532a21993c5d288d99891c30d70063 -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
     nf48ae11ba9a754f08cc6a192b1641436["ekos/crates/cli/src/commands/commit.rs"]
     nf48ae11ba9a754f08cc6a192b1641436 -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
     nd1b7d840ae825a26b38106fb944d4e3c["ekos/crates/recovery/src/confluence_analyzer.rs"]
     nd1b7d840ae825a26b38106fb944d4e3c -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
     n62e92526f0965ed2bc720bdae8703aa3["ekos/crates/recovery/src/document_semantics_analyzer.rs"]
     n62e92526f0965ed2bc720bdae8703aa3 -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
-    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
-    n83764758111554dfbb754a49e7334245 -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
-    nb6532a21993c5d288d99891c30d70063["ekos/crates/recovery/src/cicd_analyzer.rs"]
-    nb6532a21993c5d288d99891c30d70063 -->|DependsOn| n5a83346a0d5f537e9c89ff4fa2768e33
 ```
 
 ## Evidence

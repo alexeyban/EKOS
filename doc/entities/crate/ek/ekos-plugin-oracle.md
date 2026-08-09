@@ -45,12 +45,12 @@ graph TD
 
 ## Evidence
 
-- `68bf8cde-67ad-4d38-a4d1-6be8d6bd2ae9` — ekos-plugin-oracle depends on async-trait 0.1 (confidence: 1.00)
-- `a6109b2e-506d-4317-a915-1d4fe72cdc88` — ekos-plugin-oracle depends on ekos-artifact (path dependency) (confidence: 1.00)
-- `bd27334b-c162-4bde-867e-a7d11cec45fe` — ekos-plugin-oracle depends on ekos-common (path dependency) (confidence: 1.00)
-- `df4f3c1c-fa35-47d2-a735-6b0125d939fc` — ekos-plugin-oracle depends on ekos-observation-sdk (path dependency) (confidence: 1.00)
-- `1087b570-c614-49d4-a6ef-a7d13ed43535` — ekos-plugin-oracle depends on serde 1 (confidence: 1.00)
-- `ba15c31f-76ae-4d97-93bd-233d42cd3705` — ekos-plugin-oracle depends on serde_json 1 (confidence: 1.00)
-- `1b71385b-5b37-4704-9d43-5b77813b8110` — ekos-plugin-oracle depends on thiserror 2 (confidence: 1.00)
-- `4c3e95f9-9b26-4032-abc5-6fa75c1715e5` — ekos-plugin-oracle depends on tokio 1 (confidence: 1.00)
-- `97f260b1-bab3-4b83-93f4-837064202095` — ekos-plugin-oracle depends on tracing 0.1 (confidence: 1.00)
+- `ff65d7ab-2eb3-4de0-aae2-37f159bae28d` — ekos-plugin-oracle depends on async-trait 0.1 (confidence: 1.00)
+- `69812900-81d7-43e7-9704-0522c763264d` — ekos-plugin-oracle depends on ekos-artifact (path dependency) (confidence: 1.00)
+- `625b9d18-150b-4455-9337-1ae51e1f15ea` — ekos-plugin-oracle depends on ekos-common (path dependency) (confidence: 1.00)
+- `646ad105-c8b3-4a04-8dce-317947611594` — ekos-plugin-oracle depends on ekos-observation-sdk (path dependency) (confidence: 1.00)
+- `18ead294-3631-429b-9ae9-51f810d14005` — ekos-plugin-oracle depends on serde 1 (confidence: 1.00)
+- `8b493c96-9f9e-4377-aa8c-473b2d63bb2c` — ekos-plugin-oracle depends on serde_json 1 (confidence: 1.00)
+- `665d23dd-5924-4ff1-9430-951892284fab` — ekos-plugin-oracle depends on thiserror 2 (confidence: 1.00)
+- `356a4006-7e94-4aaa-8f5f-bd75510ef137` — ekos-plugin-oracle depends on tokio 1 (confidence: 1.00)
+- `5611533b-f302-43f6-b9c6-dcb7f431c411` — ekos-plugin-oracle depends on tracing 0.1 (confidence: 1.00)

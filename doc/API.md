@@ -143,7 +143,7 @@ _Program entities (functions, structs, enums, traits, classes, …) compiled fro
 - `enum` [`MarketingCommands`](entities/rustsymbol/ma/marketingcommands.md)
 - `enum` [`McpCommands`](entities/rustsymbol/mc/mcpcommands.md)
 - `enum` [`QueryCommands`](entities/rustsymbol/qu/querycommands.md)
-- `function` [`main`](entities/rustsymbol/ma/main-caa3d7b4.md)
+- `function` [`main`](entities/rustsymbol/ma/main.md)
 
 ## ekos/crates/cli/src/commands/artifact.rs
 
@@ -495,8 +495,8 @@ _Program entities (functions, structs, enums, traits, classes, …) compiled fro
 - `function` [`format_value`](entities/rustsymbol/fo/format-value.md)
 - `function` [`html_document`](entities/rustsymbol/ht/html-document.md)
 - `function` [`html_escape`](entities/rustsymbol/ht/html-escape.md)
+- `function` [`is_entity_page_kind`](entities/rustsymbol/is/is-entity-page-kind.md)
 - `function` [`is_feeds_into`](entities/rustsymbol/is/is-feeds-into.md)
-- `function` [`is_module_kind`](entities/rustsymbol/is/is-module-kind.md)
 - `function` [`is_significant`](entities/rustsymbol/is/is-significant.md)
 - `function` [`is_symbol_kind`](entities/rustsymbol/is/is-symbol-kind.md)
 - `function` [`mermaid_arrow`](entities/rustsymbol/me/mermaid-arrow.md)
@@ -1696,14 +1696,6 @@ _Program entities (functions, structs, enums, traits, classes, …) compiled fro
 - `struct` [`SnowflakeDialectParser`](entities/rustsymbol/sn/snowflakedialectparser.md)
 - `method` [`SnowflakeDialectParser::name`](entities/rustsymbol/sn/snowflakedialectparser-name.md)
 - `method` [`SnowflakeDialectParser::sqlparser_dialect`](entities/rustsymbol/sn/snowflakedialectparser-sqlparser-dialect.md)
-
-## tests/fixtures/sample_project/src/lib.rs
-
-- `function` [`add`](entities/rustsymbol/ad/add.md)
-
-## tests/fixtures/sample_project/src/main.rs
-
-- `function` [`main`](entities/rustsymbol/ma/main.md)
 
 ## tests/integration/tests/integration.rs
 

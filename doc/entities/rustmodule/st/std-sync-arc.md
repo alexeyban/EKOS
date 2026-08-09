@@ -18,7 +18,6 @@ _No compiled properties._
 - ← ekos/crates/recovery/src/pentaho_analyzer.rs (`ce3d2f1b-e1c6-55d7-92bc-c1b69f76dbca`)
 - ← ekos/crates/cli/src/commands/build.rs (`306def2e-bd5a-5784-9453-692c119e8d43`)
 - ← ekos/crates/recovery/src/sql_analyzer.rs (`cd768c5e-1640-51c3-b6ec-cb7ac78ade6d`)
-- ← ekos/crates/cli/src/commands/recover.rs (`7e02bcf9-a7b4-5099-8255-130d9ef401bb`)
 - ← ekos/plugins/sap/src/lib.rs (`8ce136d7-2eb9-53fd-90c2-7d0d00aeb27d`)
 - ← ekos/plugins/fabric/src/lib.rs (`ea3988ed-2565-56db-b0cf-09b6d4594525`)
 - ← ekos/crates/recovery/src/rust_analyzer.rs (`50cde56d-1f82-53a6-bc71-b5b2f7c711bc`)
@@ -26,6 +25,7 @@ _No compiled properties._
 - ← ekos/plugins/crypto/src/lib.rs (`83728c61-df4d-5ad6-81c7-5bf50ff761fb`)
 - ← ekos/crates/recovery/src/sql_transform_analyzer.rs (`987e3fbb-31ec-576d-b794-7e801336e8c8`)
 - ← ekos/plugins/oracle/src/lib.rs (`affbb6cf-64eb-5dd5-805d-01cf2bd08c7f`)
+- ← ekos/crates/cli/src/commands/recover.rs (`7e02bcf9-a7b4-5099-8255-130d9ef401bb`)
 - ← ekos/plugins/snowflake/src/lib.rs (`1f09ad6b-972d-56d7-9597-8641b250abce`)
 - ← ekos/crates/cli/src/commands/marketing.rs (`e4550c2d-5dcf-5779-b25d-ac86e4019342`)
 - ← ekos/plugins/localdocs/src/lib.rs (`1ed81bd1-9be1-5cda-9158-9ad4f1980e3d`)
@@ -56,8 +56,6 @@ graph TD
     n306def2ebd5a57849453692c119e8d43 -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
     ncd768c5e164051c3b6eccb7ac78ade6d["ekos/crates/recovery/src/sql_analyzer.rs"]
     ncd768c5e164051c3b6eccb7ac78ade6d -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
-    n7e02bcf9a7b450998255130d9ef401bb["ekos/crates/cli/src/commands/recover.rs"]
-    n7e02bcf9a7b450998255130d9ef401bb -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
     n8ce136d72eb953fd90c27d0d00aeb27d["ekos/plugins/sap/src/lib.rs"]
     n8ce136d72eb953fd90c27d0d00aeb27d -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
     nea3988ed256556dbb0cf09b6d4594525["ekos/plugins/fabric/src/lib.rs"]
@@ -72,6 +70,8 @@ graph TD
     n987e3fbb31ec576db7947e801336e8c8 -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
     naffbb6cf64eb5dd5805d01cf2bd08c7f["ekos/plugins/oracle/src/lib.rs"]
     naffbb6cf64eb5dd5805d01cf2bd08c7f -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
+    n7e02bcf9a7b450998255130d9ef401bb["ekos/crates/cli/src/commands/recover.rs"]
+    n7e02bcf9a7b450998255130d9ef401bb -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
     n1f09ad6b972d56d795978641b250abce["ekos/plugins/snowflake/src/lib.rs"]
     n1f09ad6b972d56d795978641b250abce -->|DependsOn| n24c9b1b50fcc57c5a21060f98e10aef0
     ne4550c2d5dcf5779b25dac86e4019342["ekos/crates/cli/src/commands/marketing.rs"]

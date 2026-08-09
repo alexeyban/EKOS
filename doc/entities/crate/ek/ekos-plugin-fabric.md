@@ -48,13 +48,13 @@ graph TD
 
 ## Evidence
 
-- `725818f1-cda7-437c-9c6b-3eefcdb9d0f9` — ekos-plugin-fabric depends on async-trait 0.1 (confidence: 1.00)
-- `c60068ed-3f43-4af4-b887-d7f49a35b30e` — ekos-plugin-fabric depends on ekos-artifact (path dependency) (confidence: 1.00)
-- `77760696-fab5-4d5f-83c4-a4bdea82267b` — ekos-plugin-fabric depends on ekos-common (path dependency) (confidence: 1.00)
-- `400ef1d1-9b60-442e-aac1-3df84bf22508` — ekos-plugin-fabric depends on ekos-observation-sdk (path dependency) (confidence: 1.00)
-- `d77d4418-5c44-498a-b74d-811f5b0b8ac8` — ekos-plugin-fabric depends on reqwest 0.12 (confidence: 1.00)
-- `6de3c2d2-c349-402d-a7df-56a83ce41daa` — ekos-plugin-fabric depends on serde 1 (confidence: 1.00)
-- `e52346cd-c208-4f69-b3a0-168c38375dd3` — ekos-plugin-fabric depends on serde_json 1 (confidence: 1.00)
-- `af6e9d46-2bce-4f9e-af61-0a429249cd36` — ekos-plugin-fabric depends on thiserror 2 (confidence: 1.00)
-- `55de6671-d7c1-4785-b2fe-4f716411a38b` — ekos-plugin-fabric depends on tokio 1 (confidence: 1.00)
-- `0d2aec66-bbb2-4d3d-bb91-6fcf3daa1fe7` — ekos-plugin-fabric depends on tracing 0.1 (confidence: 1.00)
+- `eac15bc5-d07d-42fb-8b7a-8734c263f3d1` — ekos-plugin-fabric depends on async-trait 0.1 (confidence: 1.00)
+- `8b09bbae-f723-4f05-827d-f9e7d6ffb1d9` — ekos-plugin-fabric depends on ekos-artifact (path dependency) (confidence: 1.00)
+- `08e641a4-f08e-4722-9eb4-b827adca90dc` — ekos-plugin-fabric depends on ekos-common (path dependency) (confidence: 1.00)
+- `4ae8cf7d-ad9b-479e-8c3c-6163a4edd540` — ekos-plugin-fabric depends on ekos-observation-sdk (path dependency) (confidence: 1.00)
+- `796ce75c-ad04-4f75-89d2-171e70b675bf` — ekos-plugin-fabric depends on reqwest 0.12 (confidence: 1.00)
+- `ef8c049c-3bea-41d8-8cf6-ab233cd60dfe` — ekos-plugin-fabric depends on serde 1 (confidence: 1.00)
+- `73047e9d-0d42-4c39-8083-a89cfab908f9` — ekos-plugin-fabric depends on serde_json 1 (confidence: 1.00)
+- `b8e7fe4f-81e1-4665-8dd3-0c311885da51` — ekos-plugin-fabric depends on thiserror 2 (confidence: 1.00)
+- `2da8232b-2025-45bd-bbce-133c5237e31b` — ekos-plugin-fabric depends on tokio 1 (confidence: 1.00)
+- `d2697fb0-2638-4dca-b7d9-cb89de4f6dfa` — ekos-plugin-fabric depends on tracing 0.1 (confidence: 1.00)

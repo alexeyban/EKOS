@@ -12,7 +12,6 @@
 
 - ← render_markdown_object_page (`b7354e77-e209-5c90-af84-82da91505df4`)
 - ← render_html_object_page (`2c4b2f66-239c-55ad-bcda-4a963de9d84f`)
-- ← unique_page_file_names (`136d1c6d-e6f6-5cda-97d8-3454bbc0d5e7`)
 
 ### Contains
 
@@ -29,8 +28,6 @@ graph TD
     nb7354e77e2095c90af8482da91505df4 -->|Calls| nd8b69d99022e532f988b43e4370b5981
     n2c4b2f66239c55adbcda4a963de9d84f["render_html_object_page"]
     n2c4b2f66239c55adbcda4a963de9d84f -->|Calls| nd8b69d99022e532f988b43e4370b5981
-    n136d1c6de6f65cda97d83454bbc0d5e7["unique_page_file_names"]
-    n136d1c6de6f65cda97d83454bbc0d5e7 -->|Calls| nd8b69d99022e532f988b43e4370b5981
 ```
 
 ## Evidence

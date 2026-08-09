@@ -10,8 +10,8 @@
 
 ### Calls
 
-- → load_config (`d1e71ee3-4e17-5050-81bd-5dd6a8cafafe`)
 - → setup_workspace (`f8f102ad-bfb4-5854-8fb6-2200db5a7daf`)
+- → load_config (`d1e71ee3-4e17-5050-81bd-5dd6a8cafafe`)
 
 ### Contains
 
@@ -24,10 +24,10 @@ graph TD
     nc8408593f6d85b7083013485d093719e["clean_removes_artifacts_not_ledger"]
     nc39b7026a2235e82b5c87ed254f6ba84["ekos/crates/cli/tests/skeleton.rs"]
     nc39b7026a2235e82b5c87ed254f6ba84 -->|Contains| nc8408593f6d85b7083013485d093719e
-    nd1e71ee34e17505081bd5dd6a8cafafe["load_config"]
-    nc8408593f6d85b7083013485d093719e -->|Calls| nd1e71ee34e17505081bd5dd6a8cafafe
     nf8f102adbfb458548fb62200db5a7daf["setup_workspace"]
     nc8408593f6d85b7083013485d093719e -->|Calls| nf8f102adbfb458548fb62200db5a7daf
+    nd1e71ee34e17505081bd5dd6a8cafafe["load_config"]
+    nc8408593f6d85b7083013485d093719e -->|Calls| nd1e71ee34e17505081bd5dd6a8cafafe
 ```
 
 ## Evidence

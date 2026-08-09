@@ -30,6 +30,6 @@ graph TD
 
 ## Evidence
 
-- `3a8d4e93-53cd-4657-a5c3-13f1ad242519` — ekos-recovery depends on ekos-plugin-sql-dialect-mysql (path dependency) (confidence: 1.00)
-- `c0c1933b-4eca-474f-9d9f-700402b7123a` — ekos-plugin-sql-dialect-mysql depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
-- `ffee3073-6877-4fec-a8a2-4891ddd1c30d` — ekos-plugin-sql-dialect-mysql depends on sqlparser 0.53 (confidence: 1.00)
+- `afd606fb-6783-4a18-b847-6f3ba4610fa6` — ekos-recovery depends on ekos-plugin-sql-dialect-mysql (path dependency) (confidence: 1.00)
+- `2f0254db-5fb1-4399-bdef-369d426326b4` — ekos-plugin-sql-dialect-mysql depends on ekos-sql-dialect-sdk (path dependency) (confidence: 1.00)
+- `b8cc034f-cf82-430e-b802-44b72c8bd062` — ekos-plugin-sql-dialect-mysql depends on sqlparser 0.53 (confidence: 1.00)

@@ -42,11 +42,11 @@ graph TD
 
 ## Evidence
 
-- `89c44ae5-c279-4cf1-bb37-c00de88cdba9` — ekos-marketing depends on reqwest 0.12 (confidence: 1.00)
-- `c60f0ed3-aa03-4c4a-b8a3-656b4c6073fa` — ekos-recovery depends on reqwest 0.12 (confidence: 1.00)
-- `4876f5a7-d44a-4117-9047-9f24d780fdcc` — ekos-plugin-confluence depends on reqwest 0.12 (confidence: 1.00)
-- `226b6785-ddc0-4511-9e0e-3f6e9712b851` — ekos-plugin-sap depends on reqwest 0.12 (confidence: 1.00)
-- `5beb9d35-b629-4748-b24b-e23b8f96f3ae` — ekos-plugin-github depends on reqwest 0.12 (confidence: 1.00)
-- `d77d4418-5c44-498a-b74d-811f5b0b8ac8` — ekos-plugin-fabric depends on reqwest 0.12 (confidence: 1.00)
-- `0289d506-4fee-43a5-9641-5b3cacd896f6` — ekos-plugin-snowflake depends on reqwest 0.12 (confidence: 1.00)
-- `1fca7b4d-c867-40c1-8d8e-f57d66497e90` — ekos-plugin-salesforce depends on reqwest 0.12 (confidence: 1.00)
+- `7257d2c7-fbed-4f96-a3a3-0ab4772d9c57` — ekos-marketing depends on reqwest 0.12 (confidence: 1.00)
+- `b8e228e9-6f95-420e-964f-15a4aabab58e` — ekos-recovery depends on reqwest 0.12 (confidence: 1.00)
+- `c74486c5-cdf3-4705-aa91-7a50d824ffb8` — ekos-plugin-confluence depends on reqwest 0.12 (confidence: 1.00)
+- `6f26415f-26d0-442a-87c3-cef2af7c9e03` — ekos-plugin-sap depends on reqwest 0.12 (confidence: 1.00)
+- `aec8e510-daa5-49c2-b47d-6dfa772c3a82` — ekos-plugin-github depends on reqwest 0.12 (confidence: 1.00)
+- `796ce75c-ad04-4f75-89d2-171e70b675bf` — ekos-plugin-fabric depends on reqwest 0.12 (confidence: 1.00)
+- `031bae78-7f6c-4cdd-91ff-96ef5a2d3761` — ekos-plugin-snowflake depends on reqwest 0.12 (confidence: 1.00)
+- `e4ebca17-7708-41c7-956a-b80d37997e5c` — ekos-plugin-salesforce depends on reqwest 0.12 (confidence: 1.00)

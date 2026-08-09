@@ -27,12 +27,12 @@ _No compiled properties._
 - ← ekos/plugins/fabric/src/lib.rs (`ea3988ed-2565-56db-b0cf-09b6d4594525`)
 - ← ekos/crates/recovery/src/rust_analyzer.rs (`50cde56d-1f82-53a6-bc71-b5b2f7c711bc`)
 - ← ekos/crates/semantic/src/lib.rs (`54021a72-4846-550c-960f-e63303e4d103`)
+- ← ekos/crates/identity/src/lib.rs (`c958282a-6d42-50ab-9cf9-8533976f0820`)
 - ← ekos/crates/compiler-core/src/cache.rs (`01ec80b2-6c80-5000-979c-acb288ff920a`)
 - ← ekos/crates/runtime/src/ai.rs (`e85e734d-ef58-5185-835a-34896d2da3f1`)
 - ← ekos/plugins/crypto/src/lib.rs (`83728c61-df4d-5ad6-81c7-5bf50ff761fb`)
 - ← ekos/crates/recovery/src/anthropic.rs (`2b1d458b-2cbb-5b8a-9932-9c15c981a99e`)
 - ← ekos/crates/ledger/src/fact.rs (`7837f9fa-7178-5151-a068-e75361336c37`)
-- ← ekos/crates/identity/src/lib.rs (`c958282a-6d42-50ab-9cf9-8533976f0820`)
 - ← ekos/crates/compiler-core/src/config.rs (`d0747f34-25e1-5426-80eb-a54fffcac598`)
 - ← ekos/crates/ledger/src/index.rs (`a43fa387-2cac-5166-bfc2-ae4c965fc2ac`)
 - ← ekos/crates/marketing/src/store.rs (`87860e47-e5db-5450-a233-7e7fe0c46d89`)
@@ -85,6 +85,8 @@ graph TD
     n50cde56d1f8253a6bc71b5b2f7c711bc -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
     n54021a724846550c960fe63303e4d103["ekos/crates/semantic/src/lib.rs"]
     n54021a724846550c960fe63303e4d103 -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
+    nc958282a6d4250ab9cf98533976f0820["ekos/crates/identity/src/lib.rs"]
+    nc958282a6d4250ab9cf98533976f0820 -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
     n01ec80b26c805000979cacb288ff920a["ekos/crates/compiler-core/src/cache.rs"]
     n01ec80b26c805000979cacb288ff920a -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
     ne85e734def585185835a34896d2da3f1["ekos/crates/runtime/src/ai.rs"]
@@ -95,8 +97,6 @@ graph TD
     n2b1d458b2cbb5b8a99329c15c981a99e -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
     n7837f9fa71785151a068e75361336c37["ekos/crates/ledger/src/fact.rs"]
     n7837f9fa71785151a068e75361336c37 -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
-    nc958282a6d4250ab9cf98533976f0820["ekos/crates/identity/src/lib.rs"]
-    nc958282a6d4250ab9cf98533976f0820 -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
     nd0747f3425e1542680eba54fffcac598["ekos/crates/compiler-core/src/config.rs"]
     nd0747f3425e1542680eba54fffcac598 -->|DependsOn| nc07ef46ba3ef54d49e1253bf2c5866fc
     na43fa3872cac5166bfc2ae4c965fc2ac["ekos/crates/ledger/src/index.rs"]

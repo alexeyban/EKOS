@@ -3,18 +3,16 @@
 ## Components
 
 - **Crate**: 39 — see below, `## Crate & Workspace Topology`
-- **Document**: 13
-- **File**: 767
+- **Document**: 12
+- **File**: 2192
 - **Person**: 2
 - **Pipeline**: 2 — see below, `## CI/CD Pipelines`
 - **PythonModule**: 3 — see [API.md](API.md)
 - **PythonSymbol**: 3 — see [API.md](API.md)
 - **RustModule**: 446 — see [API.md](API.md)
-- **RustSymbol**: 1326 — see [API.md](API.md)
-- **Section**: 1577
-- **Table**: 19
+- **RustSymbol**: 1324 — see [API.md](API.md)
+- **Section**: 2706
 - **Technology**: 36 — see below, `## Technologies`
-- **TransformNode**: 34
 
 ## Crate & Workspace Topology
 
@@ -256,34 +254,13 @@ Triggers: `push`, `pull_request`
 
 ## Entity Relationships
 
-```mermaid
-erDiagram
-    "categories" }o--|| "categories" : references
-    "products" }o--|| "categories" : references
-    "orders" }o--|| "customers" : references
-    "order_items" }o--|| "orders" : references
-    "order_items" }o--|| "products" : references
-    "payments" }o--|| "orders" : references
-    "Employees" }o--|| "Employees" : references
-    "Orders" }o--|| "Customers" : references
-    "Orders" }o--|| "Employees" : references
-    "Orders" }o--|| "Shippers" : references
-    "Products" }o--|| "Categories" : references
-    "Products" }o--|| "Suppliers" : references
-    "'Order Details'" }o--|| "Orders" : references
-    "'Order Details'" }o--|| "Products" : references
-    "Territories" }o--|| "Region" : references
-    "EmployeeTerritories" }o--|| "Employees" : references
-    "EmployeeTerritories" }o--|| "Territories" : references
-    "CustomerCustomerDemo" }o--|| "Customers" : references
-    "CustomerCustomerDemo" }o--|| "CustomerDemographics" : references
-```
+_No table foreign-key relationships compiled._
 
 ## Dependency Graph
 
 ### Calls
 
-_750 `Calls` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
+_749 `Calls` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
 
 - [GitHubApiClient::list_files](entities/rustsymbol/gi/githubapiclient-list-files.md) → [GitHubApiClient::request](entities/rustsymbol/gi/githubapiclient-request.md)
 - [GitHubApiClient::list_items](entities/rustsymbol/gi/githubapiclient-list-items.md) → [GitHubApiClient::list_files](entities/rustsymbol/gi/githubapiclient-list-files.md)
@@ -291,9 +268,9 @@ _750 `Calls` relationships compiled — diagram omitted, too large to render use
 - [PythonAnalyzerPass::run](entities/rustsymbol/py/pythonanalyzerpass-run.md) → [parse_python_file](entities/rustsymbol/pa/parse-python-file.md)
 - [parse_python_file](entities/rustsymbol/pa/parse-python-file.md) → [walk_top_level_statement](entities/rustsymbol/wa/walk-top-level-statement.md)
 - [add_import](entities/rustsymbol/ad/add-import-89c6ca8d.md) → [python_module_kir_id](entities/rustsymbol/py/python-module-kir-id.md)
-- [walk_top_level_statement](entities/rustsymbol/wa/walk-top-level-statement.md) → [try_recognize_chain_statement](entities/rustsymbol/tr/try-recognize-chain-statement.md)
 - [walk_top_level_statement](entities/rustsymbol/wa/walk-top-level-statement.md) → [add_symbol](entities/rustsymbol/ad/add-symbol-458e9ef2.md)
 - [walk_top_level_statement](entities/rustsymbol/wa/walk-top-level-statement.md) → [add_import](entities/rustsymbol/ad/add-import-89c6ca8d.md)
+- [walk_top_level_statement](entities/rustsymbol/wa/walk-top-level-statement.md) → [try_recognize_chain_statement](entities/rustsymbol/tr/try-recognize-chain-statement.md)
 - [try_recognize_chain_statement](entities/rustsymbol/tr/try-recognize-chain-statement.md) → [calls_to_nodes](entities/rustsymbol/ca/calls-to-nodes.md)
 - [try_recognize_chain_statement](entities/rustsymbol/tr/try-recognize-chain-statement.md) → [linearize_chain](entities/rustsymbol/li/linearize-chain.md)
 - [linearize_chain](entities/rustsymbol/li/linearize-chain.md) → [linearize_chain](entities/rustsymbol/li/linearize-chain.md)
@@ -303,9 +280,8 @@ _750 `Calls` relationships compiled — diagram omitted, too large to render use
 
 ### Contains
 
-_2906 `Contains` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
+_4033 `Contains` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
 
-- tests/fixtures/sample_project/src/main.rs → [main](entities/rustsymbol/ma/main.md)
 - ekos/plugins/github/src/lib.rs → [GitHubItem](entities/rustsymbol/gi/githubitem.md)
 - ekos/plugins/github/src/lib.rs → [GitHubClientError](entities/rustsymbol/gi/githubclienterror.md)
 - ekos/plugins/github/src/lib.rs → [GitHubClient](entities/rustsymbol/gi/githubclient.md)
@@ -320,26 +296,27 @@ _2906 `Contains` relationships compiled — diagram omitted, too large to render
 - ekos/plugins/github/src/lib.rs → [GitHubObserver](entities/rustsymbol/gi/githubobserver.md)
 - ekos/plugins/github/src/lib.rs → [GitHubObserver::new](entities/rustsymbol/gi/githubobserver-new.md)
 - ekos/plugins/github/src/lib.rs → [GitHubObserver::name](entities/rustsymbol/gi/githubobserver-name.md)
+- ekos/plugins/github/src/lib.rs → [GitHubObserver::scan](entities/rustsymbol/gi/githubobserver-scan.md)
 
 ### CoupledWith
 
-_744 `CoupledWith` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
+_372 `CoupledWith` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
 
-- demo/transcripts/act-1.md → demo/transcripts/act-4.md
-- ekos/crates/compiler-core/src/pass.rs → ekos/crates/semantic/src/lib.rs
-- ekos/Cargo.lock → ekos/crates/identity/src/lib.rs
-- demo/headless.sh → demo/transcripts/act-4.md
-- README.md → ekos/plugins/localdocs/Cargo.toml
-- TODO.md → ekos/crates/cli/src/commands/build.rs
-- ekos/crates/identity/src/lib.rs → ekos/crates/recovery/src/git_analyzer.rs
-- benchmark/benches/ledger_write.rs → benchmark/benches/observation_git.rs
-- docs/index.html → docs/presentations.html
-- ekos/crates/recovery/src/lib.rs → ekos/plugins/localdocs/src/lib.rs
-- ekos/Cargo.lock → ekos/crates/cli/src/commands/mod.rs
-- docs/index.html → ekos/crates/identity/src/cross_system.rs
-- ekos/crates/recovery/src/local_docs_analyzer.rs → ekos/plugins/localdocs/Cargo.toml
-- ekos/Cargo.lock → ekos/crates/recovery/src/sql_transform_analyzer.rs
-- benchmark/Cargo.lock → ekos/crates/ledger/src/fact_ledger.rs
+- ekos/crates/cli/src/commands/recover.rs → ekos/plugins/localdocs/src/lib.rs
+- demo/DEMO.md → demo/transcripts/act-2.md
+- TODO.md → devlog_18.md
+- ekos/Cargo.toml → ekos/crates/ledger/src/lib.rs
+- TODO.md → ekos/crates/recovery/src/sql_analyzer.rs
+- ekos/crates/cli/src/commands/compile.rs → ekos/crates/cli/src/commands/recover.rs
+- README.md → docs/index.html
+- README.md → ekos/Cargo.toml
+- demo/transcripts/act-2.md → demo/transcripts/act-7.md
+- ekos/crates/recovery/Cargo.toml → ekos/crates/recovery/src/sql_transform_analyzer.rs
+- ekos/crates/cli/src/commands/mcp.rs → ekos/crates/semantic/src/lib.rs
+- ekos/crates/cli/src/commands/build.rs → ekos/plugins/file/src/lib.rs
+- ekos/plugins/salesforce/src/lib.rs → ekos/plugins/snowflake/src/lib.rs
+- ekos/Cargo.lock → ekos/plugins/localdocs/Cargo.toml
+- ekos/crates/cli/Cargo.toml → ekos/crates/cli/src/commands/mod.rs
 
 ### DependsOn
 
@@ -361,53 +338,9 @@ _1666 `DependsOn` relationships compiled — diagram omitted, too large to rende
 - ekos/crates/recovery/src/python_analyzer.rs → [ekos_compiler_core::pass::PassContext](entities/rustmodule/ek/ekos-compiler-core-pass-passcontext.md)
 - ekos/crates/recovery/src/python_analyzer.rs → [ekos_compiler_core::pass::PassError](entities/rustmodule/ek/ekos-compiler-core-pass-passerror.md)
 
-### ForeignKey
-
-```mermaid
-graph TD
-    n6794f52865834e8d89842358f199ce12["categories"]
-    n6794f52865834e8d89842358f199ce12 -->|ForeignKey| n6794f52865834e8d89842358f199ce12
-    n7c2e13d4535e435d992e0db2d71e2c6d["products"]
-    n7c2e13d4535e435d992e0db2d71e2c6d -->|ForeignKey| n6794f52865834e8d89842358f199ce12
-    nad94b10656104be3905ecf114df00129["orders"]
-    ndc844ed6954d4cca8ae89597873eb56e["customers"]
-    nad94b10656104be3905ecf114df00129 -->|ForeignKey| ndc844ed6954d4cca8ae89597873eb56e
-    n08a0316015ed4f15bbc297c816faf313["order_items"]
-    n08a0316015ed4f15bbc297c816faf313 -->|ForeignKey| nad94b10656104be3905ecf114df00129
-    n08a0316015ed4f15bbc297c816faf313 -->|ForeignKey| n7c2e13d4535e435d992e0db2d71e2c6d
-    nc663212aa5f94534a3a5a47fa4f31a9b["payments"]
-    nc663212aa5f94534a3a5a47fa4f31a9b -->|ForeignKey| nad94b10656104be3905ecf114df00129
-    n18ddc966658845b18a845a6ff92a9460["Employees"]
-    n18ddc966658845b18a845a6ff92a9460 -->|ForeignKey| n18ddc966658845b18a845a6ff92a9460
-    ncd8c2d9d78e5430daf8816be08817b86["Orders"]
-    ne0c56e7596774432b53e177fb7ecbad3["Customers"]
-    ncd8c2d9d78e5430daf8816be08817b86 -->|ForeignKey| ne0c56e7596774432b53e177fb7ecbad3
-    ncd8c2d9d78e5430daf8816be08817b86 -->|ForeignKey| n18ddc966658845b18a845a6ff92a9460
-    nb40ad1cbc0184fbb8cdc0ec91049655f["Shippers"]
-    ncd8c2d9d78e5430daf8816be08817b86 -->|ForeignKey| nb40ad1cbc0184fbb8cdc0ec91049655f
-    n42110141a81c441a97c1094420890bed["Products"]
-    ncb4c8bc084294ee9b5778dfe6a4bedb7["Categories"]
-    n42110141a81c441a97c1094420890bed -->|ForeignKey| ncb4c8bc084294ee9b5778dfe6a4bedb7
-    nd7162ea30ab240b6b4e3a4d788138303["Suppliers"]
-    n42110141a81c441a97c1094420890bed -->|ForeignKey| nd7162ea30ab240b6b4e3a4d788138303
-    naad094bf64d5428b99a64192cef78a08["'Order Details'"]
-    naad094bf64d5428b99a64192cef78a08 -->|ForeignKey| ncd8c2d9d78e5430daf8816be08817b86
-    naad094bf64d5428b99a64192cef78a08 -->|ForeignKey| n42110141a81c441a97c1094420890bed
-    nf1d6c69d10954e1ba7dbca8a1fd33179["Territories"]
-    na98521ec744f4127b06f59f94062bf33["Region"]
-    nf1d6c69d10954e1ba7dbca8a1fd33179 -->|ForeignKey| na98521ec744f4127b06f59f94062bf33
-    nad1c159d481547e6993863834ea6bd1a["EmployeeTerritories"]
-    nad1c159d481547e6993863834ea6bd1a -->|ForeignKey| n18ddc966658845b18a845a6ff92a9460
-    nad1c159d481547e6993863834ea6bd1a -->|ForeignKey| nf1d6c69d10954e1ba7dbca8a1fd33179
-    n06b01f7296b14a439e148b0abb2b8d14["CustomerCustomerDemo"]
-    n06b01f7296b14a439e148b0abb2b8d14 -->|ForeignKey| ne0c56e7596774432b53e177fb7ecbad3
-    nd3d7c029bf964160bb9c732b5f01fe2d["CustomerDemographics"]
-    n06b01f7296b14a439e148b0abb2b8d14 -->|ForeignKey| nd3d7c029bf964160bb9c732b5f01fe2d
-```
-
 ### OwnedBy
 
-_205 `OwnedBy` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
+_105 `OwnedBy` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
 
 - unknown → alexeyban
 - unknown → alexeyban

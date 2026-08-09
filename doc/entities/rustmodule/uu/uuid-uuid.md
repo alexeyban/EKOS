@@ -21,13 +21,13 @@ _No compiled properties._
 - ← ekos/crates/recovery/src/local_docs_analyzer.rs (`d4eeb831-bfb8-592d-ad11-0e13adad2090`)
 - ← ekos/crates/recovery/src/dependency_analyzer.rs (`9baa718a-d61d-554c-a791-7798003ba6c4`)
 - ← ekos/crates/recovery/src/rust_analyzer.rs (`50cde56d-1f82-53a6-bc71-b5b2f7c711bc`)
+- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
 - ← ekos/crates/ledger/src/fact.rs (`7837f9fa-7178-5151-a068-e75361336c37`)
 - ← ekos/crates/ledger/src/index.rs (`a43fa387-2cac-5166-bfc2-ae4c965fc2ac`)
+- ← ekos/crates/recovery/src/cicd_analyzer.rs (`b6532a21-993c-5d28-8d99-891c30d70063`)
 - ← ekos/crates/recovery/src/confluence_analyzer.rs (`d1b7d840-ae82-5a26-b381-06fb944d4e3c`)
 - ← ekos/crates/recovery/src/document_semantics_analyzer.rs (`62e92526-f096-5ed2-bc72-0bdae8703aa3`)
 - ← benchmark/benches/index_runs.rs (`3efee357-ff49-5ace-8153-f8ad82f0cd57`)
-- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
-- ← ekos/crates/recovery/src/cicd_analyzer.rs (`b6532a21-993c-5d28-8d99-891c30d70063`)
 
 ## Diagram
 
@@ -60,20 +60,20 @@ graph TD
     n9baa718ad61d554ca7917798003ba6c4 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
     n50cde56d1f8253a6bc71b5b2f7c711bc["ekos/crates/recovery/src/rust_analyzer.rs"]
     n50cde56d1f8253a6bc71b5b2f7c711bc -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
+    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
+    n83764758111554dfbb754a49e7334245 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
     n7837f9fa71785151a068e75361336c37["ekos/crates/ledger/src/fact.rs"]
     n7837f9fa71785151a068e75361336c37 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
     na43fa3872cac5166bfc2ae4c965fc2ac["ekos/crates/ledger/src/index.rs"]
     na43fa3872cac5166bfc2ae4c965fc2ac -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
+    nb6532a21993c5d288d99891c30d70063["ekos/crates/recovery/src/cicd_analyzer.rs"]
+    nb6532a21993c5d288d99891c30d70063 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
     nd1b7d840ae825a26b38106fb944d4e3c["ekos/crates/recovery/src/confluence_analyzer.rs"]
     nd1b7d840ae825a26b38106fb944d4e3c -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
     n62e92526f0965ed2bc720bdae8703aa3["ekos/crates/recovery/src/document_semantics_analyzer.rs"]
     n62e92526f0965ed2bc720bdae8703aa3 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
     n3efee357ff495ace8153f8ad82f0cd57["benchmark/benches/index_runs.rs"]
     n3efee357ff495ace8153f8ad82f0cd57 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
-    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
-    n83764758111554dfbb754a49e7334245 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
-    nb6532a21993c5d288d99891c30d70063["ekos/crates/recovery/src/cicd_analyzer.rs"]
-    nb6532a21993c5d288d99891c30d70063 -->|DependsOn| n2b86b71f5ad8518e9bf40bc0ee14c94d
 ```
 
 ## Evidence

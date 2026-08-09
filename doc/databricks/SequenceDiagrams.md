@@ -1,435 +1,437 @@
 # Sequence Diagrams
 
-_Rendered from Transformation IR `FeedsInto` edges — a data-flow sequence between compiled pipeline steps, not a code call sequence. EKOS does not compile call-graph data today._
+## Data-Flow Sequences
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/macros/generate_schema_name.sql#0
+_Rendered from Transformation IR `FeedsInto` edges — a data-flow sequence between compiled pipeline steps, not a code call sequence._
+
+## dbt/macros/generate_schema_name.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant ne76bdd1c82705a9f9ddae0c6bd32a3ab as "/home/legion/PycharmProjects/azure-databricks-project/dbt/macros/generate_schema_name.sql#0:0"
+    participant n7cbcc1421af0545cbf4a337bc2047168 as "dbt/macros/generate_schema_name.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_customer_lifetime_value.sql#0
+## dbt/models/gold/gold_customer_lifetime_value.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n871bd37f8cab5f079d96c8309777e3b8 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_customer_lifetime_value.sql#0:0"
+    participant n2fbc5adbd6dc54169c202c302a878327 as "dbt/models/gold/gold_customer_lifetime_value.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_film_performance.sql#0
+## dbt/models/gold/gold_film_performance.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n29e7b7eb3b125afeb9143bfbf48dabef as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_film_performance.sql#0:0"
+    participant nd51fe3f4335c553bbbc0eca318ca6d01 as "dbt/models/gold/gold_film_performance.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_inventory_availability.sql#0
+## dbt/models/gold/gold_inventory_availability.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n23268b224b6e5ff998d48ac778a145b1 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_inventory_availability.sql#0:0"
+    participant nbf3a5dc5ec025698a3a5475edc54e279 as "dbt/models/gold/gold_inventory_availability.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_store_revenue.sql#0
+## dbt/models/gold/gold_store_revenue.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n92258351f3c95bc09c925c2d004d9b19 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/gold/gold_store_revenue.sql#0:0"
+    participant nb889b1c5caef5efeac63200824eb4ad5 as "dbt/models/gold/gold_store_revenue.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/quarantine/quarantine_customer_no_payments.sql#0
+## dbt/models/quarantine/quarantine_customer_no_payments.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n60b50dcafd5252909f84b185714d7748 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/quarantine/quarantine_customer_no_payments.sql#0:0"
+    participant n2f2b95146338521f8391e1b933ba7cc3 as "dbt/models/quarantine/quarantine_customer_no_payments.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/quarantine/quarantine_rental_duplicate_open.sql#0
+## dbt/models/quarantine/quarantine_rental_duplicate_open.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n85685149a29b57daab3607dc1ea64cf2 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/quarantine/quarantine_rental_duplicate_open.sql#0:0"
+    participant n21085d2cc3bc5f4da4d261ff576565a4 as "dbt/models/quarantine/quarantine_rental_duplicate_open.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/quarantine/quarantine_rental_duplicate_open.sql#1
+## dbt/models/quarantine/quarantine_rental_duplicate_open.sql#1
 
 ```mermaid
 sequenceDiagram
-    participant nbfc9cdaeff885839abd09f9e5cfe3c92 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/quarantine/quarantine_rental_duplicate_open.sql#1:0"
+    participant n644b3eea91c1548da38d79699f3fe22f as "dbt/models/quarantine/quarantine_rental_duplicate_open.sql#1:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/entity_v.sql#0
+## dbt/models/semantic/entity_v.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n03ee5b81527b550e88c7fcf4bbb2907e as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/entity_v.sql#0:0"
+    participant ncb47b0c2ac095c4dbd395fba72d70ca3 as "dbt/models/semantic/entity_v.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/relationship_v.sql#0
+## dbt/models/semantic/relationship_v.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n33ae33a545975bd48ba2aa1737217865 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/relationship_v.sql#0:0"
+    participant n83c774f7696d552ebdb05ce3a5be2dff as "dbt/models/semantic/relationship_v.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_actor_entity.sql#0
+## dbt/models/semantic/sem_actor_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant nd6919bda0d1f53aa85c9c82eab468007 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_actor_entity.sql#0:0"
+    participant n9df5417433f2538bb198d8375fe143ab as "dbt/models/semantic/sem_actor_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_address_entity.sql#0
+## dbt/models/semantic/sem_address_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n299b68b83ada5deebe21d6fc7809ca92 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_address_entity.sql#0:0"
+    participant nfcc4e187bef859a6bdda7478f015d124 as "dbt/models/semantic/sem_address_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_category_entity.sql#0
+## dbt/models/semantic/sem_category_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n1a83390464205d128b0ea2ae40643ace as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_category_entity.sql#0:0"
+    participant n96b587fe85a154498fe9436d0729f590 as "dbt/models/semantic/sem_category_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_customer_context.sql#0
+## dbt/models/semantic/sem_customer_context.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant nc872e60da7ab5f8eaaf9d5ec62e5924e as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_customer_context.sql#0:0"
+    participant n673e3547b16657159f6fbf0244b45a3d as "dbt/models/semantic/sem_customer_context.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_customer_entity.sql#0
+## dbt/models/semantic/sem_customer_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant ncd836be423b05e988874a2f9d1f636d1 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_customer_entity.sql#0:0"
+    participant n1198195202ac5f3b844592071f4352b0 as "dbt/models/semantic/sem_customer_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_document_chunk.sql#0
+## dbt/models/semantic/sem_document_chunk.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant nbb80dd241a9e56d8bf38f03f092696d9 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_document_chunk.sql#0:0"
+    participant n3225e63ceb3f53aebc57ccbb7f33b831 as "dbt/models/semantic/sem_document_chunk.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_document_chunk.sql#1
+## dbt/models/semantic/sem_document_chunk.sql#1
 
 ```mermaid
 sequenceDiagram
-    participant n7012eb1c9213505da41a0045ce2a0947 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_document_chunk.sql#1:0"
+    participant n10c2f9d8407d5fd7ab0379c4c7756c36 as "dbt/models/semantic/sem_document_chunk.sql#1:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_actor_rel.sql#0
+## dbt/models/semantic/sem_film_actor_rel.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant nd0426ee088a95e6a8a8a8713b173935e as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_actor_rel.sql#0:0"
+    participant nc74bae5f25c553929bedd9e73c0eb458 as "dbt/models/semantic/sem_film_actor_rel.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_category_rel.sql#0
+## dbt/models/semantic/sem_film_category_rel.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n77573548e1b15750892e7692bea1fffd as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_category_rel.sql#0:0"
+    participant nd69f2c72ec8e55ff810ee2fe1a2cf75b as "dbt/models/semantic/sem_film_category_rel.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_context.sql#0
+## dbt/models/semantic/sem_film_context.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant nd92bfa349193525e99d6dddf8b17c2ef as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_context.sql#0:0"
+    participant nb0792a31bbfc5c8a840950e69f992157 as "dbt/models/semantic/sem_film_context.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_entity.sql#0
+## dbt/models/semantic/sem_film_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant ndb42ad9d8eb75cd7b20bd30765e21e4d as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_film_entity.sql#0:0"
+    participant na59efc1d754356a78d10f810e28991d3 as "dbt/models/semantic/sem_film_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_graph_metrics.sql#0
+## dbt/models/semantic/sem_graph_metrics.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n181354e598f752a1af12f11f281d6277 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_graph_metrics.sql#0:0"
+    participant na6e660f889325f7597ede756f9ce46d9 as "dbt/models/semantic/sem_graph_metrics.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_inventory_entity.sql#0
+## dbt/models/semantic/sem_inventory_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant nb82097b225485f27990210283a54f53d as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_inventory_entity.sql#0:0"
+    participant nd01ec7f9c6425b6091f1d340845cd358 as "dbt/models/semantic/sem_inventory_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_language_entity.sql#0
+## dbt/models/semantic/sem_language_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant ncfef2e1c431d559bb83f8bd5afadffa3 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_language_entity.sql#0:0"
+    participant nfa0ad03839ce551eba0d5030be860407 as "dbt/models/semantic/sem_language_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_payment_fact.sql#0
+## dbt/models/semantic/sem_payment_fact.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n1bc1e3ccb7705d18877c730a14b6b84a as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_payment_fact.sql#0:0"
+    participant ne61057eee3535dcf99970fc9994e15ca as "dbt/models/semantic/sem_payment_fact.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_rental_fact.sql#0
+## dbt/models/semantic/sem_rental_fact.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n88104cb74f3c551d9c777a3897a5ae87 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_rental_fact.sql#0:0"
+    participant n90d7934b733a54cb815596a86947ddce as "dbt/models/semantic/sem_rental_fact.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_rental_inventory_rel.sql#0
+## dbt/models/semantic/sem_rental_inventory_rel.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n8d07f97d5f055169aa52334e9c553d61 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_rental_inventory_rel.sql#0:0"
+    participant n960e8d5fd65e5988b32b043faa84cf10 as "dbt/models/semantic/sem_rental_inventory_rel.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_staff_entity.sql#0
+## dbt/models/semantic/sem_staff_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n8f43644bd16e5de786e1201341198bbd as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_staff_entity.sql#0:0"
+    participant nafadeb1c932f5efea74f3dab8fa7a654 as "dbt/models/semantic/sem_staff_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_store_context.sql#0
+## dbt/models/semantic/sem_store_context.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n32cd8034412050448aa08da257ddb8c8 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_store_context.sql#0:0"
+    participant nf3c97ade70b556938580eb59028d74aa as "dbt/models/semantic/sem_store_context.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_store_entity.sql#0
+## dbt/models/semantic/sem_store_entity.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant na499282b41e05f1794b1201eea0575de as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/semantic/sem_store_entity.sql#0:0"
+    participant n0356f22d8b915b0e803f8b3de5f22313 as "dbt/models/semantic/sem_store_entity.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_actor.sql#0
+## dbt/models/silver/silver_actor.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n8b09cbbac32850e499bb6e32861f633c as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_actor.sql#0:0"
+    participant n0864d24e48fe543f8404da7430684d5c as "dbt/models/silver/silver_actor.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_address.sql#0
+## dbt/models/silver/silver_address.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant na490efdec7e0584392e6c8e33ee25f62 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_address.sql#0:0"
+    participant nbd9619ca391654dcaab09b86a9830531 as "dbt/models/silver/silver_address.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_category.sql#0
+## dbt/models/silver/silver_category.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n3774ea89843151dc8e4ebc1c6953d01f as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_category.sql#0:0"
+    participant n5c2873764a8c5d72b334527a699dcf4a as "dbt/models/silver/silver_category.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_city.sql#0
+## dbt/models/silver/silver_city.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n4c7dce8b82d45f61bf0c6fd4422c631c as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_city.sql#0:0"
+    participant n1197a764478750b2a9697f4254481fa6 as "dbt/models/silver/silver_city.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_country.sql#0
+## dbt/models/silver/silver_country.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n73dc5905724e5982b84b10643ddba9b9 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_country.sql#0:0"
+    participant n6bf44c6a4d0e5a348f1966e3110f5557 as "dbt/models/silver/silver_country.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_customer.sql#0
+## dbt/models/silver/silver_customer.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n08fa4446cfa2524f87dd49561dda7d4d as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_customer.sql#0:0"
+    participant n0d699fc5d4a456829f1e71bca4403e09 as "dbt/models/silver/silver_customer.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_customer.sql#1
+## dbt/models/silver/silver_customer.sql#1
 
 ```mermaid
 sequenceDiagram
-    participant n4df03069521b53aabbdcb3e6703aa93f as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_customer.sql#1:0"
+    participant n122c775da46d5abc91b5219753552dbb as "dbt/models/silver/silver_customer.sql#1:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film.sql#0
+## dbt/models/silver/silver_film.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n0e60f5e733ea59edb8eda6800e54f673 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film.sql#0:0"
+    participant n7fff740469835a1088ce5f5d7c224983 as "dbt/models/silver/silver_film.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film.sql#1
+## dbt/models/silver/silver_film.sql#1
 
 ```mermaid
 sequenceDiagram
-    participant n189342df792856d4a3eb6eba3f3e318e as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film.sql#1:0"
+    participant n2d571f9d3d4559e9829392785b45b399 as "dbt/models/silver/silver_film.sql#1:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film_actor.sql#0
+## dbt/models/silver/silver_film_actor.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n9158f650e8e158f1a11d3dd19a9bb1c3 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film_actor.sql#0:0"
+    participant n27bca2961ebf5a869eebc12e46c22988 as "dbt/models/silver/silver_film_actor.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film_category.sql#0
+## dbt/models/silver/silver_film_category.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n53714249c152582aab7c5b4f79302621 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_film_category.sql#0:0"
+    participant nbfb42f6389635c51bf82d211da4391b1 as "dbt/models/silver/silver_film_category.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_inventory.sql#0
+## dbt/models/silver/silver_inventory.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n6c7f5215e4bf5b5fa5405750de40ee6c as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_inventory.sql#0:0"
+    participant n43ef75e956235ef5af4fa495e7659235 as "dbt/models/silver/silver_inventory.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_language.sql#0
+## dbt/models/silver/silver_language.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant ndae0fa456b9e58b6aaa70058cb8063ff as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_language.sql#0:0"
+    participant nff5c360e421a546997fd93d7da1d05f4 as "dbt/models/silver/silver_language.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_payment.sql#0
+## dbt/models/silver/silver_payment.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n0bbe2e53c4765cb6bb40ce1eee3796fd as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_payment.sql#0:0"
+    participant na0bbb75cce755894ae399b1cb0b0290d as "dbt/models/silver/silver_payment.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_rental.sql#0
+## dbt/models/silver/silver_rental.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n4976f2690dbf590cbd3cd219b784a3d5 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_rental.sql#0:0"
+    participant na0275dec1cfa526a9e7ef07c6840cfb7 as "dbt/models/silver/silver_rental.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_rental.sql#1
+## dbt/models/silver/silver_rental.sql#1
 
 ```mermaid
 sequenceDiagram
-    participant n5af9d02fd1895d99af1207b5106707f1 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_rental.sql#1:0"
+    participant n3a1ea512bd0c5b7e965e3aa049dce819 as "dbt/models/silver/silver_rental.sql#1:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_staff.sql#0
+## dbt/models/silver/silver_staff.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant naa6949e3910b50cc9e05ed6f9e9eeadb as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_staff.sql#0:0"
+    participant nfda012ba9e235ff5bb7ad09c089bd77a as "dbt/models/silver/silver_staff.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
-## /home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_store.sql#0
+## dbt/models/silver/silver_store.sql#0
 
 ```mermaid
 sequenceDiagram
-    participant n920e2d68ce9f54c39beb7f7e58a64fb2 as "/home/legion/PycharmProjects/azure-databricks-project/dbt/models/silver/silver_store.sql#0:0"
+    participant n47f968edb7a85755913ff50ed3608bfc as "dbt/models/silver/silver_store.sql#0:0"
 ```
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
@@ -865,3 +867,8 @@ sequenceDiagram
 
 _(1 step — no `FeedsInto` edges compiled for this pipeline)_
 
+## Call Sequences
+
+_Rendered from real `Calls` edges (function/method call graph, RFC 0041) — grouped by the caller's containing module. A genuine code call sequence, distinct from the data-flow sequences above._
+
+_No `Calls` relationships compiled._

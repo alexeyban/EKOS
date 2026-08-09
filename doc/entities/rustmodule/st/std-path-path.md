@@ -25,15 +25,16 @@ _No compiled properties._
 - ← ekos/crates/ledger/src/fact_ledger.rs (`eadcb59e-818f-5d1e-af87-ff29aba11423`)
 - ← ekos/crates/cli/src/commands/build.rs (`306def2e-bd5a-5784-9453-692c119e8d43`)
 - ← ekos/crates/cli/tests/skeleton.rs (`c39b7026-a223-5e82-b5c8-7ed254f6ba84`)
+- ← ekos/crates/cli/src/commands/docs.rs (`5503d15b-112f-541f-8189-8be05a060beb`)
 - ← ekos/crates/cli/src/commands/resolve.rs (`6b6902bf-7bb5-59f8-a210-ce0acd18d7ec`)
 - ← ekos/crates/cli/src/commands/branch.rs (`8ae8543c-ebb4-545a-b5fe-5735e3953e88`)
 - ← ekos/crates/cli/src/commands/doctor.rs (`117003db-05ca-5009-9ea3-90c845aff5f4`)
 - ← ekos/crates/cli/src/commands/identity.rs (`f6e3418b-d664-536b-8a69-b723a534ff1a`)
-- ← ekos/crates/cli/src/commands/recover.rs (`7e02bcf9-a7b4-5099-8255-130d9ef401bb`)
 - ← ekos/crates/cli/src/commands/diff.rs (`162a5e91-5e60-5951-9a1c-14c60cd6109b`)
 - ← ekos/crates/cli/tests/transformation_benchmark.rs (`6f5dc4e7-3ce8-5dd3-ad8f-f66bbb5fabf5`)
 - ← ekos/crates/ledger/tests/estate_migration.rs (`ea07674a-8ab1-54ed-a18a-f016992a8c48`)
 - ← ekos/crates/cli/src/commands/query.rs (`76b10d14-834f-5bcb-8858-f46092b1989c`)
+- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
 - ← ekos/crates/compiler-core/src/cache.rs (`01ec80b2-6c80-5000-979c-acb288ff920a`)
 - ← ekos/crates/cli/src/commands/clean.rs (`0ccb7d47-8c4d-5547-bbd5-24f7701fb4e7`)
 - ← ekos/crates/cli/tests/mcp_session.rs (`201efc61-073b-5bcd-a5a8-a6c476333729`)
@@ -43,14 +44,13 @@ _No compiled properties._
 - ← benchmark/benches/storage_compaction.rs (`7c6dcc8e-035b-5a69-89a6-a45e962f93d8`)
 - ← ekos/crates/ledger/src/index.rs (`a43fa387-2cac-5166-bfc2-ae4c965fc2ac`)
 - ← ekos/crates/marketing/src/store.rs (`87860e47-e5db-5450-a233-7e7fe0c46d89`)
+- ← ekos/crates/cli/src/commands/recover.rs (`7e02bcf9-a7b4-5099-8255-130d9ef401bb`)
 - ← ekos/crates/common/src/compress.rs (`99637da4-0489-5fca-ba15-b1144f48c3cc`)
 - ← ekos/crates/cli/src/commands/commit.rs (`f48ae11b-a9a7-54f0-8cc6-a192b1641436`)
 - ← ekos/crates/cli/src/commands/mcp.rs (`ff76bb73-9285-5295-927c-5cb33a5bbc25`)
 - ← ekos/crates/recovery/src/cache.rs (`0b06681a-4e07-5e02-a8d6-433ccf4aadc4`)
 - ← ekos/crates/cli/src/commands/marketing.rs (`e4550c2d-5dcf-5779-b25d-ac86e4019342`)
 - ← ekos/crates/marketing/src/devlog.rs (`4ca01e5b-d21d-5312-ac99-c6aa65d7d8d0`)
-- ← ekos/crates/cli/src/commands/docs.rs (`5503d15b-112f-541f-8189-8be05a060beb`)
-- ← ekos/crates/recovery/src/crate_topology_analyzer.rs (`83764758-1115-54df-bb75-4a49e7334245`)
 
 ## Diagram
 
@@ -91,6 +91,8 @@ graph TD
     n306def2ebd5a57849453692c119e8d43 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     nc39b7026a2235e82b5c87ed254f6ba84["ekos/crates/cli/tests/skeleton.rs"]
     nc39b7026a2235e82b5c87ed254f6ba84 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
+    n5503d15b112f541f81898be05a060beb["ekos/crates/cli/src/commands/docs.rs"]
+    n5503d15b112f541f81898be05a060beb -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n6b6902bf7bb559f8a210ce0acd18d7ec["ekos/crates/cli/src/commands/resolve.rs"]
     n6b6902bf7bb559f8a210ce0acd18d7ec -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n8ae8543cebb4545ab5fe5735e3953e88["ekos/crates/cli/src/commands/branch.rs"]
@@ -99,8 +101,6 @@ graph TD
     n117003db05ca50099ea390c845aff5f4 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     nf6e3418bd664536b8a69b723a534ff1a["ekos/crates/cli/src/commands/identity.rs"]
     nf6e3418bd664536b8a69b723a534ff1a -->|DependsOn| n629768ea69c75c579968511daa1f0a17
-    n7e02bcf9a7b450998255130d9ef401bb["ekos/crates/cli/src/commands/recover.rs"]
-    n7e02bcf9a7b450998255130d9ef401bb -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n162a5e915e6059519a1c14c60cd6109b["ekos/crates/cli/src/commands/diff.rs"]
     n162a5e915e6059519a1c14c60cd6109b -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n6f5dc4e73ce85dd3ad8ff66bbb5fabf5["ekos/crates/cli/tests/transformation_benchmark.rs"]
@@ -109,6 +109,8 @@ graph TD
     nea07674a8ab154eda18af016992a8c48 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n76b10d14834f5bcb8858f46092b1989c["ekos/crates/cli/src/commands/query.rs"]
     n76b10d14834f5bcb8858f46092b1989c -->|DependsOn| n629768ea69c75c579968511daa1f0a17
+    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
+    n83764758111554dfbb754a49e7334245 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n01ec80b26c805000979cacb288ff920a["ekos/crates/compiler-core/src/cache.rs"]
     n01ec80b26c805000979cacb288ff920a -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n0ccb7d478c4d5547bbd524f7701fb4e7["ekos/crates/cli/src/commands/clean.rs"]
@@ -127,6 +129,8 @@ graph TD
     na43fa3872cac5166bfc2ae4c965fc2ac -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n87860e47e5db5450a2337e7fe0c46d89["ekos/crates/marketing/src/store.rs"]
     n87860e47e5db5450a2337e7fe0c46d89 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
+    n7e02bcf9a7b450998255130d9ef401bb["ekos/crates/cli/src/commands/recover.rs"]
+    n7e02bcf9a7b450998255130d9ef401bb -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n99637da404895fcaba15b1144f48c3cc["ekos/crates/common/src/compress.rs"]
     n99637da404895fcaba15b1144f48c3cc -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     nf48ae11ba9a754f08cc6a192b1641436["ekos/crates/cli/src/commands/commit.rs"]
@@ -139,10 +143,6 @@ graph TD
     ne4550c2d5dcf5779b25dac86e4019342 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
     n4ca01e5bd21d5312ac99c6aa65d7d8d0["ekos/crates/marketing/src/devlog.rs"]
     n4ca01e5bd21d5312ac99c6aa65d7d8d0 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
-    n5503d15b112f541f81898be05a060beb["ekos/crates/cli/src/commands/docs.rs"]
-    n5503d15b112f541f81898be05a060beb -->|DependsOn| n629768ea69c75c579968511daa1f0a17
-    n83764758111554dfbb754a49e7334245["ekos/crates/recovery/src/crate_topology_analyzer.rs"]
-    n83764758111554dfbb754a49e7334245 -->|DependsOn| n629768ea69c75c579968511daa1f0a17
 ```
 
 ## Evidence

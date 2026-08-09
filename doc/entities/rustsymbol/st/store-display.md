@@ -10,8 +10,8 @@
 
 ### Calls
 
-- → uses_fact_engine (`10d67e5a-c754-5199-915e-23349038a6f5`)
 - → facts_dir (`83873731-f148-5047-ad68-b92b7feef390`)
+- → uses_fact_engine (`10d67e5a-c754-5199-915e-23349038a6f5`)
 
 ### Contains
 
@@ -24,10 +24,10 @@ graph TD
     n713ed7cc5c75533e89bc0a3cd1e3b880["store_display"]
     nce2ed2172b4257609d2ee2ca1574a517["ekos/crates/cli/src/commands/store.rs"]
     nce2ed2172b4257609d2ee2ca1574a517 -->|Contains| n713ed7cc5c75533e89bc0a3cd1e3b880
-    n10d67e5ac7545199915e23349038a6f5["uses_fact_engine"]
-    n713ed7cc5c75533e89bc0a3cd1e3b880 -->|Calls| n10d67e5ac7545199915e23349038a6f5
     n83873731f1485047ad68b92b7feef390["facts_dir"]
     n713ed7cc5c75533e89bc0a3cd1e3b880 -->|Calls| n83873731f1485047ad68b92b7feef390
+    n10d67e5ac7545199915e23349038a6f5["uses_fact_engine"]
+    n713ed7cc5c75533e89bc0a3cd1e3b880 -->|Calls| n10d67e5ac7545199915e23349038a6f5
 ```
 
 ## Evidence
