@@ -429,6 +429,7 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     | "PythonModule"
                     | "PythonSymbol"
                     | "Technology"
+                    | "Rollup"
             )
         }
         ObjectKind::Pipeline => true,
@@ -915,6 +916,7 @@ fn components_cross_reference(kind: &str) -> Option<&'static str> {
         "Crate" => Some("below, `## Crate & Workspace Topology`"),
         "Technology" => Some("below, `## Technologies`"),
         "Pipeline" => Some("below, `## CI/CD Pipelines`"),
+        "Rollup" => Some("below, `## Subsystems`"),
         _ => None,
     }
 }
@@ -946,6 +948,37 @@ pub fn render_architecture(
                 Some(link) => out.push_str(&format!("- **{kind}**: {count} — see {link}\n")),
                 None => out.push_str(&format!("- **{kind}**: {count}\n")),
             }
+        }
+        out.push('\n');
+    }
+
+    out.push_str("## Subsystems\n\n");
+    out.push_str(
+        "_Deterministic rollups (RFC 0044) — one per directory/project group with ≥2 member \
+         files, zero LLM. Each links to a detail page with real member counts and boundary \
+         relationships, so a subsystem can be understood without walking every file inside it._\n\n",
+    );
+    let rollups: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Rollup"))
+        .collect();
+    if rollups.is_empty() {
+        out.push_str("_No subsystem rollups compiled._\n\n");
+    } else {
+        let mut sorted_rollups = rollups;
+        sorted_rollups.sort_by(|a, b| a.name.cmp(&b.name));
+        for rollup in sorted_rollups {
+            let member_count = rollup
+                .properties
+                .get("member_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let link = page_names.get(&rollup.id);
+            let label = match link {
+                Some(f) => format!("[{}]({f})", rollup.name),
+                None => rollup.name.clone(),
+            };
+            out.push_str(&format!("- {label} — {member_count} member file(s)\n"));
         }
         out.push('\n');
     }
@@ -2076,6 +2109,22 @@ mod tests {
         assert!(
             page.content
                 .contains("No CI/CD pipeline definitions compiled.")
+        );
+        assert!(page.content.contains("No subsystem rollups compiled."));
+    }
+
+    #[test]
+    fn architecture_renders_subsystem_rollups_and_links_components_to_them() {
+        let rollup = KirObject::new("ekos/crates/kir", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(2))
+            .with_property("group_key", serde_json::json!("dir:ekos/crates/kir"));
+
+        let page = render_architecture(std::slice::from_ref(&rollup), &[]);
+        assert!(page.content.contains("## Subsystems"));
+        assert!(page.content.contains("2 member file(s)"));
+        assert!(
+            page.content
+                .contains("**Rollup**: 1 — see below, `## Subsystems`")
         );
     }
 

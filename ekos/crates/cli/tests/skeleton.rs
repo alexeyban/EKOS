@@ -249,3 +249,86 @@ async fn recover_redacts_a_fake_secret_from_a_cicd_workflow_step() {
         "expected a redaction placeholder in the jobs property: {jobs}"
     );
 }
+
+// ── RFC 0044 Phase 1 — project-qualified object identity ───────────────────
+
+/// Regression test for a real bug found designing multi-project/estate-scale support: two
+/// unrelated projects that each happen to have a same-relatively-named file used to silently
+/// collide into one merged `KirObject`, since `build.rs` hashed the bare within-project relative
+/// path with no project component. `[observe] paths` with more than one entry must now keep them
+/// distinct.
+#[tokio::test]
+async fn build_keeps_same_named_files_in_different_projects_distinct() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    std::fs::create_dir_all(dir.join("proj-a/src")).unwrap();
+    std::fs::create_dir_all(dir.join("proj-b/src")).unwrap();
+    std::fs::write(
+        dir.join("proj-a/src/main.rs"),
+        b"fn main() { /* project A */ }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("proj-b/src/main.rs"),
+        b"fn main() { /* project B */ }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("ekos.toml"),
+        b"[workspace]\nroot = \".\"\n\n[observe]\npaths = [\"proj-a\", \"proj-b\"]\nignore-patterns = [\".ekos\"]\n",
+    )
+    .unwrap();
+
+    let config = load_config(dir);
+    ekos::commands::init::run(&config, dir).unwrap();
+    ekos::commands::build::run(&config, dir).await.unwrap();
+
+    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let results = ledger.find_objects("main*").unwrap();
+    assert_eq!(
+        results.len(),
+        2,
+        "expected two distinct main.rs objects (one per project), got: {results:?}"
+    );
+
+    let mut projects: Vec<String> = results
+        .iter()
+        .map(|(id, _)| {
+            let obj = ledger.get_object(id).unwrap().unwrap();
+            obj.properties
+                .get("project")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+    projects.sort();
+    assert_eq!(
+        projects,
+        vec!["proj-a".to_string(), "proj-b".to_string()],
+        "each object's `project` property must identify which observe path it came from"
+    );
+}
+
+/// The common case (`paths = ["."]`, the config every other test in this file uses) must produce
+/// byte-identical ids to before this fix — no `project` property, no migration for existing
+/// single-project ledgers.
+#[tokio::test]
+async fn build_single_project_workspace_has_no_project_property() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    setup_workspace(dir);
+
+    let config = load_config(dir);
+    ekos::commands::init::run(&config, dir).unwrap();
+    ekos::commands::build::run(&config, dir).await.unwrap();
+
+    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let results = ledger.find_objects("main*").unwrap();
+    assert!(!results.is_empty(), "expected to find main.rs object");
+    let obj = ledger.get_object(&results[0].0).unwrap().unwrap();
+    assert!(
+        obj.properties.get("project").is_none(),
+        "single-path workspaces must not gain a `project` property"
+    );
+}

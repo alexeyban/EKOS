@@ -9,10 +9,62 @@
 - **Pipeline**: 2 — see below, `## CI/CD Pipelines`
 - **PythonModule**: 3 — see [API.md](API.md)
 - **PythonSymbol**: 3 — see [API.md](API.md)
+- **Rollup**: 46 — see below, `## Subsystems`
 - **RustModule**: 446 — see [API.md](API.md)
 - **RustSymbol**: 1324 — see [API.md](API.md)
 - **Section**: 2706
 - **Technology**: 36 — see below, `## Technologies`
+
+## Subsystems
+
+_Deterministic rollups (RFC 0044) — one per directory/project group with ≥2 member files, zero LLM. Each links to a detail page with real member counts and boundary relationships, so a subsystem can be understood without walking every file inside it._
+
+- [.serena/cache/rust](entities/rollup/se/serena-cache-rust.md) — 2 member file(s)
+- [doc/entities/crate](entities/rollup/do/doc-entities-crate.md) — 39 member file(s)
+- [doc/entities/pipeline](entities/rollup/do/doc-entities-pipeline.md) — 2 member file(s)
+- [doc/entities/pythonmodule](entities/rollup/do/doc-entities-pythonmodule.md) — 3 member file(s)
+- [doc/entities/pythonsymbol](entities/rollup/do/doc-entities-pythonsymbol.md) — 3 member file(s)
+- [doc/entities/rustmodule](entities/rollup/do/doc-entities-rustmodule.md) — 446 member file(s)
+- [doc/entities/rustsymbol](entities/rollup/do/doc-entities-rustsymbol.md) — 1326 member file(s)
+- [doc/entities/technology](entities/rollup/do/doc-entities-technology.md) — 36 member file(s)
+- [ekos/crates/artifact](entities/rollup/ek/ekos-crates-artifact.md) — 4 member file(s)
+- [ekos/crates/cli](entities/rollup/ek/ekos-crates-cli.md) — 28 member file(s)
+- [ekos/crates/common](entities/rollup/ek/ekos-crates-common.md) — 3 member file(s)
+- [ekos/crates/compiler-core](entities/rollup/ek/ekos-crates-compiler-core.md) — 8 member file(s)
+- [ekos/crates/compiler-sdk](entities/rollup/ek/ekos-crates-compiler-sdk.md) — 2 member file(s)
+- [ekos/crates/dbt-gen](entities/rollup/ek/ekos-crates-dbt-gen.md) — 2 member file(s)
+- [ekos/crates/docs-gen](entities/rollup/ek/ekos-crates-docs-gen.md) — 2 member file(s)
+- [ekos/crates/ekl](entities/rollup/ek/ekos-crates-ekl.md) — 4 member file(s)
+- [ekos/crates/identity](entities/rollup/ek/ekos-crates-identity.md) — 4 member file(s)
+- [ekos/crates/kir](entities/rollup/ek/ekos-crates-kir.md) — 2 member file(s)
+- [ekos/crates/ledger](entities/rollup/ek/ekos-crates-ledger.md) — 9 member file(s)
+- [ekos/crates/marketing](entities/rollup/ek/ekos-crates-marketing.md) — 9 member file(s)
+- [ekos/crates/observation-sdk](entities/rollup/ek/ekos-crates-observation-sdk.md) — 2 member file(s)
+- [ekos/crates/recovery](entities/rollup/ek/ekos-crates-recovery.md) — 23 member file(s)
+- [ekos/crates/runtime](entities/rollup/ek/ekos-crates-runtime.md) — 3 member file(s)
+- [ekos/crates/scheduler](entities/rollup/ek/ekos-crates-scheduler.md) — 2 member file(s)
+- [ekos/crates/semantic](entities/rollup/ek/ekos-crates-semantic.md) — 3 member file(s)
+- [ekos/crates/sql-dialect-sdk](entities/rollup/ek/ekos-crates-sql-dialect-sdk.md) — 2 member file(s)
+- [ekos/docs/rfcs](entities/rollup/ek/ekos-docs-rfcs.md) — 18 member file(s)
+- [ekos/plugins/confluence](entities/rollup/ek/ekos-plugins-confluence.md) — 2 member file(s)
+- [ekos/plugins/crypto](entities/rollup/ek/ekos-plugins-crypto.md) — 2 member file(s)
+- [ekos/plugins/fabric](entities/rollup/ek/ekos-plugins-fabric.md) — 2 member file(s)
+- [ekos/plugins/file](entities/rollup/ek/ekos-plugins-file.md) — 2 member file(s)
+- [ekos/plugins/git](entities/rollup/ek/ekos-plugins-git.md) — 2 member file(s)
+- [ekos/plugins/github](entities/rollup/ek/ekos-plugins-github.md) — 2 member file(s)
+- [ekos/plugins/localdocs](entities/rollup/ek/ekos-plugins-localdocs.md) — 9 member file(s)
+- [ekos/plugins/oracle](entities/rollup/ek/ekos-plugins-oracle.md) — 2 member file(s)
+- [ekos/plugins/pentaho](entities/rollup/ek/ekos-plugins-pentaho.md) — 2 member file(s)
+- [ekos/plugins/python](entities/rollup/ek/ekos-plugins-python.md) — 2 member file(s)
+- [ekos/plugins/rust](entities/rollup/ek/ekos-plugins-rust.md) — 2 member file(s)
+- [ekos/plugins/salesforce](entities/rollup/ek/ekos-plugins-salesforce.md) — 2 member file(s)
+- [ekos/plugins/sap](entities/rollup/ek/ekos-plugins-sap.md) — 2 member file(s)
+- [ekos/plugins/snowflake](entities/rollup/ek/ekos-plugins-snowflake.md) — 2 member file(s)
+- [ekos/plugins/sql-dialect-databricks](entities/rollup/ek/ekos-plugins-sql-dialect-databricks.md) — 2 member file(s)
+- [ekos/plugins/sql-dialect-mssql](entities/rollup/ek/ekos-plugins-sql-dialect-mssql.md) — 2 member file(s)
+- [ekos/plugins/sql-dialect-mysql](entities/rollup/ek/ekos-plugins-sql-dialect-mysql.md) — 2 member file(s)
+- [ekos/plugins/sql-dialect-postgres](entities/rollup/ek/ekos-plugins-sql-dialect-postgres.md) — 2 member file(s)
+- [ekos/plugins/sql-dialect-snowflake](entities/rollup/ek/ekos-plugins-sql-dialect-snowflake.md) — 2 member file(s)
 
 ## Crate & Workspace Topology
 
@@ -280,23 +332,23 @@ _749 `Calls` relationships compiled — diagram omitted, too large to render use
 
 ### Contains
 
-_4033 `Contains` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
+_6065 `Contains` relationships compiled — diagram omitted, too large to render usefully. First 15 shown below; every object's own detail page (linked) lists its full relationship set._
 
-- ekos/plugins/github/src/lib.rs → [GitHubItem](entities/rustsymbol/gi/githubitem.md)
-- ekos/plugins/github/src/lib.rs → [GitHubClientError](entities/rustsymbol/gi/githubclienterror.md)
-- ekos/plugins/github/src/lib.rs → [GitHubClient](entities/rustsymbol/gi/githubclient.md)
-- ekos/plugins/github/src/lib.rs → [GitHubApiClient](entities/rustsymbol/gi/githubapiclient.md)
-- ekos/plugins/github/src/lib.rs → [GitHubApiClient::new](entities/rustsymbol/gi/githubapiclient-new.md)
-- ekos/plugins/github/src/lib.rs → [GitHubApiClient::request](entities/rustsymbol/gi/githubapiclient-request.md)
-- ekos/plugins/github/src/lib.rs → [GitHubApiClient::list_files](entities/rustsymbol/gi/githubapiclient-list-files.md)
-- ekos/plugins/github/src/lib.rs → [GitHubApiClient::list_items](entities/rustsymbol/gi/githubapiclient-list-items.md)
-- ekos/plugins/github/src/lib.rs → [MockGitHubClient](entities/rustsymbol/mo/mockgithubclient.md)
-- ekos/plugins/github/src/lib.rs → [MockGitHubClient::new](entities/rustsymbol/mo/mockgithubclient-new.md)
-- ekos/plugins/github/src/lib.rs → [MockGitHubClient::list_items](entities/rustsymbol/mo/mockgithubclient-list-items.md)
-- ekos/plugins/github/src/lib.rs → [GitHubObserver](entities/rustsymbol/gi/githubobserver.md)
-- ekos/plugins/github/src/lib.rs → [GitHubObserver::new](entities/rustsymbol/gi/githubobserver-new.md)
-- ekos/plugins/github/src/lib.rs → [GitHubObserver::name](entities/rustsymbol/gi/githubobserver-name.md)
-- ekos/plugins/github/src/lib.rs → [GitHubObserver::scan](entities/rustsymbol/gi/githubobserver-scan.md)
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/ma/main.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/va/validate-tweet.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/ll/llmerror.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/di/dir-bytes.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/crate/ek/ekos-plugin-fabric.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/crate/ek/ekos-plugin-fabric.md: section 2
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/pa/parse-sql-statement-by-statement.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/ki/kirobject-indexed-content.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/at/attributeregistry-get.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustmodule/cr/crate-prompt-build-user-prompt.md: section 1
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustmodule/cr/crate-parseddocument.md: section 1
+- VISION.md → VISION.md: section 1
+- VISION.md → VISION.md: section 2
+- VISION.md → VISION.md: section 3
+- docs/rfcs/0022-confluence-connector.md → doc/entities/rustsymbol/pa/passcontext-with-artifact-store.md: section 1
 
 ### CoupledWith
 

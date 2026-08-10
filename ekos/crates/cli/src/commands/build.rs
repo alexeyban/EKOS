@@ -143,6 +143,22 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let redaction_config = config.redaction_config();
 
     for base in &observe_paths {
+        // RFC 0044 Phase 1: distinguishes objects from different projects when `[observe] paths`
+        // lists more than one entry — empty for the overwhelmingly common single-path case, so
+        // existing single-project ledgers keep byte-identical ids (no migration needed there).
+        // Without this, two unrelated projects that each happen to have e.g. `src/main.rs` at the
+        // same relative path silently collided into one merged `KirObject` — ids below were
+        // hashed from the bare within-project relative path only, with no project component. A
+        // real bug found designing multi-project/estate-scale support, not a hypothetical.
+        let project_key = if observe_paths.len() > 1 {
+            base.strip_prefix(cwd)
+                .unwrap_or(base)
+                .to_string_lossy()
+                .replace('\\', "/")
+        } else {
+            String::new()
+        };
+
         let ctx =
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
 
@@ -188,10 +204,18 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
             if observer.name() == "file" {
                 for artifact in &package.artifacts {
                     let rel_str = &artifact.content.target;
-                    let obj_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, rel_str.as_bytes()));
+                    // Project-qualify the id hash input only (never `rel_str` itself — that stays
+                    // the plain within-project path for `content.target`/display/`abs_path`
+                    // below); see the `project_key` comment above the outer loop.
+                    let id_key = if project_key.is_empty() {
+                        rel_str.clone()
+                    } else {
+                        format!("{project_key}:{rel_str}")
+                    };
+                    let obj_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, id_key.as_bytes()));
                     let ev_id = KirId(Uuid::new_v5(
                         &Uuid::NAMESPACE_URL,
-                        format!("ev:{rel_str}").as_bytes(),
+                        format!("ev:{id_key}").as_bytes(),
                     ));
 
                     let size = artifact.content.data["size_bytes"].as_u64().unwrap_or(0);
@@ -211,6 +235,15 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
                             serde_json::Value::String(artifact.id.to_string()),
                         )
                         .with_evidence(ev_id);
+                    // RFC 0044 Phase 1: lets a future rollup/grouping pass (or any query) filter
+                    // or group by originating project in a multi-project estate; absent entirely
+                    // for the common single-path workspace, matching `project_key`'s emptiness.
+                    if !project_key.is_empty() {
+                        obj = obj.with_property(
+                            "project",
+                            serde_json::Value::String(project_key.clone()),
+                        );
+                    }
                     // RFC 0014: the excerpt rides on the object so the ledger
                     // can index file *content*, not just names.
                     if let Some(excerpt) = artifact.content.data["excerpt"].as_str() {

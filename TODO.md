@@ -1807,6 +1807,38 @@ These items have no single phase — they must be maintained and grown throughou
   - *Test/Validate (remaining):* A config containing a literal `password = "..."` fails validation
     with a clear error (env-var-only secrets, not yet built).
 
+- [ ] **Multi-project/estate-scale follow-ups (RFC 0044)**
+  - [x] *Object-identity fix* — `build.rs`'s `File` objects are now project-qualified
+    (`"project"` property + id-hash qualification) when `[observe] paths` lists more than one
+    entry, closing a real silent-merge bug for two projects sharing a same-relative-path file.
+  - [x] *Hierarchical rollups* — `ekos_semantic::rollup` synthesizes one `Rollup` object per
+    directory/project group (≥2 members), run in `ekos commit` (not `ekos compile` — see
+    devlog_44 for why the first placement produced zero real rollups against this repo's own
+    ledger despite passing every unit test). Deterministic, zero-LLM: real member counts +
+    boundary-relationship counts + `Contains` links to every member. Surfaced in
+    `Architecture.md`'s new `## Subsystems` section (RFC 0042's curated docs).
+  - [ ] *Analyzer-owned id-collision risk beyond `File`* — not yet done. `github_analyzer.rs`,
+    `local_docs_analyzer.rs`, `rust_analyzer.rs`/`python_analyzer.rs` (via an embedded `data.path`
+    field), and git's `CoupledWith` file-pair ids all derive from the same
+    `ScanContext.workspace_root`-relative path convention `plugins/file/src/lib.rs` uses, and share
+    the identical multi-project collision risk `build.rs` had. Two viable fixes not yet built:
+    qualify `ObservationArtifact.content.target` centrally at RFC 0043's redaction choke point in
+    `build.rs`, or fix each analyzer's id derivation individually.
+  - [ ] *Per-sub-project curated docs* — not yet done. `ekos docs generate` (any layout) reads the
+    whole ledger; there's no way to scope curated output to one project within a shared estate
+    ledger. Today this requires N separate `ekos.toml`/`.ekos` setups (confirmed this session for
+    Databricks/ADF). The `"project"` property RFC 0044 added is exactly what this would key off of.
+  - [ ] *Opt-in LLM prose per rollup* — not yet done. Mirror `docs-gen`'s `--prose` (RFC 0035
+    Phase 5) exactly: one `AiRuntime::ask`-shaped, citation-validated call per rollup, cost estimate
+    shown and confirmed before spending.
+  - [ ] *`ekos_summarize` MCP tool* — not yet done. A tool that jumps straight to the nearest
+    enclosing rollup for a given object id. Not blocking — rollups are ordinary `KirObject`s, so
+    `ekos_search`/`ekos_neighborhood`/EKL already surface them for free.
+  - *Test/Validate (remaining):* Same-relatively-named-file collision test extended to a non-`File`
+    kind (e.g. two projects each with a `RustSymbol` at the same qualified name) to prove the
+    analyzer-owned fix once built; `ekos docs generate --layout curated --project <name>` (or
+    equivalent) produces output scoped to one project's objects only.
+
 - [ ] **`docs/rfcs/` — RFC per feature, accepted before implementation**
   - *What:* Maintain the RFC process from Phase -1 throughout the project. New RFCs follow the
     `0000-template.md`. An RFC is merged only when: all open questions are answered, at least one

@@ -4,6 +4,7 @@
 //! of the compiler pipeline. Downstream consumers (Ledger, Runtime, AI) always
 //! read from the CKM, never from raw KIR.
 
+pub mod rollup;
 pub mod transform_ir;
 
 use async_trait::async_trait;
@@ -345,6 +346,14 @@ impl CompilerPass for SemanticCompilerPass {
         // ── Apply merges ──────────────────────────────────────────────────────
         let resolved = apply_merges(combined, &resolution.proposals);
 
+        // Hierarchical rollups (RFC 0044) intentionally do NOT run here: `File` objects — the
+        // only kind rollups group by directly — are written straight to the ledger by `ekos
+        // build` (`cli/src/commands/build.rs`), never through a `KnowledgeArtifact` this pass
+        // reads. `combined`/`resolved` above only ever contain recovery-pass output, so rollup
+        // synthesis runs in `ekos commit` instead, against the ledger's full post-commit object
+        // set (which by then includes both `ekos build`'s `File` objects and this pass's own
+        // CKM output) — see `cli/src/commands/commit.rs`.
+
         // ── Build CKM ────────────────────────────────────────────────────────
         let model = build_ckm(&resolved);
 
@@ -384,8 +393,7 @@ impl CompilerPass for SemanticCompilerPass {
 mod tests {
     use super::*;
     use ekos_kir::{
-        EventKind, KirEvent, KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind,
-        SourceLocation,
+        KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
     };
     use tempfile::TempDir;
 

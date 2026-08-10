@@ -250,6 +250,20 @@ source) is the running example. `--prose` (opt-in) layers an LLM-written overvie
 object page, reusing `ekos ask`'s exact grounding+citation pipeline, with a token-cost estimate
 shown before any call.
 
+### Hierarchical rollups (RFC 0044)
+
+Every other context-saving mechanism in EKOS (capped search results, hop-bounded graph walks) is
+*retrieval*-limiting — fewer raw facts, never a synthesized higher-level one. `ekos commit` now
+also synthesizes deterministic, zero-LLM `Rollup` objects: one per directory subtree (crate-level
+by default) or, in a multi-project `[observe] paths` estate, one per project — each carrying real
+member counts, a kind breakdown, and boundary-relationship counts (what crosses in/out of the
+subsystem), linked to every member via the same `Contains` relationship everything else already
+uses. This is exactly what closes the "huge project/many projects" context-window gap: an agent
+asking about a whole subsystem gets one condensed, evidence-linked object instead of personally
+synthesizing meaning from dozens of raw facts. Surfaced automatically in `Architecture.md`'s new
+`## Subsystems` section (see above) — this repo's own `doc/Architecture.md` shows 46 real ones,
+one per crate/plugin, generated from EKOS's own source.
+
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
