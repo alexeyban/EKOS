@@ -1922,6 +1922,24 @@ These items have no single phase — they must be maintained and grown throughou
   - *Test/Validate (remaining):* Re-run the same four confirmed-bad EKOS-self terms after the fix
     and confirm a real (possibly partial) answer instead of an API error.
 
+- [ ] **Evidence citations show absolute filesystem paths, not repo-relative ones**
+  - *What:* Found rehearsing the RFC 0045 demo end-to-end (Playwright screenshots, real `/ask`
+    calls): EKOS-self's citations render clean (`TODO.md`), but `fd`'s render as the full
+    workspace path (e.g. `/tmp/claude-.../scratchpad/demo-repo-spike/fd/./src/error.rs` instead of
+    `src/error.rs`). Both repos went through the identical bake pipeline; the only difference is
+    `fd`'s workspace lived under a long `/tmp` scratch path while EKOS-self's is the repo root
+    itself — suggests `KirEvidence`/`SourceLocation.path` is (at least sometimes) populated from an
+    absolute path rather than the plain within-project relative path RFC 0044's devlog describes
+    elsewhere (`content.target`/`abs_path` vs. the display `"path"` property). Not yet root-caused
+    to a specific file/line — only confirmed as a real, visible, reproducible symptom.
+  - *Output:* Not yet started. A real demo-polish issue: showing a peer a citation with an internal
+    `/tmp/...` path instead of a clean repo-relative one undercuts the "polished product"
+    impression, independent of whether the underlying answer is correct.
+  - *Test/Validate (remaining):* Root-cause which evidence-construction path uses an absolute vs.
+    relative path (likely `plugins/*` observers or a recovery analyzer's `SourceLocation::file(...)`
+    call site), fix it there, and confirm citations render repo-relative for a workspace at an
+    arbitrary (not repo-root) path — `fd`'s baked ledger is a ready-made repro case.
+
 - [ ] **Identity-resolution over-merge — real hits found against `ripgrep`/`bat`, still unfixed**
   - *What:* The repo-selection spike for RFC 0045 (devlog_45) baked `BurntSushi/ripgrep` and
     `sharkdp/bat` end-to-end and both hit the same identity-over-merge failure class CLAUDE.md
