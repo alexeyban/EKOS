@@ -1,0 +1,40 @@
+[package]
+name = "ekos-demo-server"
+description = "RFC 0045 — hosted, read-only demo server: static curated docs + one evidence-cited /ask endpoint, over a fixed two-repo catalog"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ekos_demo_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "demo-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "prerender"
+path = "src/bin/prerender.rs"
+
+[dependencies]
+ekos = { workspace = true }
+ekos-compiler-core.workspace = true
+ekos-runtime.workspace = true
+ekos-ledger.workspace = true
+ekos-kir.workspace = true
+ekos-recovery.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+pulldown-cmark.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+walkdir.workspace = true
+dotenvy.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

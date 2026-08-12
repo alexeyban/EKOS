@@ -19,6 +19,7 @@ members = [
     "crates/docs-gen",
     "crates/dbt-gen",
     "crates/cli",
+    "crates/demo-server",
     "plugins/file",
     "plugins/localdocs",
     "plugins/git",
@@ -68,6 +69,7 @@ ekos-ekl       = { path = "crates/ekl" }
 ekos-marketing = { path = "crates/marketing" }
 ekos-docs-gen  = { path = "crates/docs-gen" }
 ekos-dbt-gen   = { path = "crates/dbt-gen" }
+ekos           = { path = "crates/cli" }
 
 # Async
 tokio      = { version = "1", features = ["full"] }
@@ -140,3 +142,11 @@ rand = "0.8"
 
 # .env loading (RFC 0030 — marketing/.env, never overrides already-set env vars)
 dotenvy = "0.15"
+
+# HTTP server (RFC 0045 — hosted demo server) — the one new HTTP-framework dependency in the
+# workspace; everything else only ever needed an HTTP *client* (reqwest, above)
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["fs", "trace"] }
+
+# Markdown -> static HTML pre-render, offline bake step only (RFC 0045)
+pulldown-cmark = "0.12"

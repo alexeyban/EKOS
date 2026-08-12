@@ -264,6 +264,27 @@ synthesizing meaning from dozens of raw facts. Surfaced automatically in `Archit
 `## Subsystems` section (see above) — this repo's own `doc/Architecture.md` shows 46 real ones,
 one per crate/plugin, generated from EKOS's own source.
 
+### Hosted demo server (RFC 0045, experimental)
+
+`ekos/crates/demo-server` is a small, read-only web server over a **fixed two-repo catalog** —
+built to answer a strategic question, not a roadmap phase: pick EKOS's single most painful task
+(making sense of a codebase without hitting an LLM's context-window ceiling) and put it in front of
+peers in a 5–10 minute demo, without anyone installing the CLI. Two binaries:
+
+```bash
+cargo run -p ekos-demo-server --bin prerender -- <curated-markdown-dir> <output-html-dir>  # bake step
+cargo run -p ekos-demo-server --bin demo-server -- catalog.toml                            # serve
+```
+
+`prerender` pre-renders `ekos docs generate --layout curated`'s Markdown output to static HTML once,
+offline (curated HTML isn't a general `docs-gen` feature yet — see the RFC). `demo-server` serves
+that pre-rendered output plus a `POST /ask` endpoint that reuses `AiRuntime::ask` unmodified,
+refusing to start rather than degrading silently if `ANTHROPIC_API_KEY` isn't set. Not general
+self-serve ingestion — a fixed, pre-baked catalog only. **Not yet demo-ready**: implemented and
+verified against a placeholder key (routing, boot check, rate limiting, static serving all confirmed
+correct), but live-question answer quality is unverified pending a real API key and a rehearsed run
+— see `devlog_45.md` and `TODO.md`.
+
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol

@@ -9,8 +9,8 @@ use ekos_recovery::{
     CicdAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
     DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass, DocumentSemanticsStats,
     GitAnalyzerPass, GitHubAnalyzerPass, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
-    PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass, PythonStats, RustAnalyzerPass,
-    RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
+    OpenAiProvider, PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass, PythonStats,
+    RustAnalyzerPass, RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
     anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
     llm::LlmProvider, resolve_dialect_name,
 };
@@ -758,12 +758,17 @@ fn should_register_document_semantics(config: &EkosConfig, localdocs_count: usiz
     config.document_semantics.enabled && localdocs_count > 0
 }
 
-/// Choose LLM provider (RFC 0021): `[llm] provider = "ollama"` in
+/// Choose LLM provider (RFC 0021, RFC 0046): `[llm] provider = "ollama"` in
 /// `ekos.toml` routes to a local Ollama daemon (no key required —
 /// unreachability surfaces as an ordinary error on first use, not here);
-/// anything else tries Anthropic with cache if an API key is present, mock
-/// otherwise.
-pub(crate) fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
+/// `provider = "openai"` routes to OpenAI (key + cache, mock if unset,
+/// mirroring the Anthropic path exactly); anything else tries Anthropic with
+/// cache if an API key is present, mock otherwise.
+///
+/// `pub` (not `pub(crate)`) because RFC 0045's demo server reuses this exact
+/// selection logic as a library dependency rather than duplicating it — see
+/// `ekos/crates/demo-server`.
+pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
     let cache_dir = artifact_dir
         .parent()
         .unwrap_or(artifact_dir)
@@ -783,6 +788,23 @@ pub(crate) fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Ar
         .api_key_env
         .as_deref()
         .unwrap_or("ANTHROPIC_API_KEY");
+
+    if config.llm.provider.as_deref() == Some("openai") {
+        return match OpenAiProvider::from_env_var(key_env) {
+            Ok(provider) => {
+                tracing::info!("using OpenAI provider with disk cache");
+                Arc::new(CachedLlmProvider::new(provider, cache_dir))
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "{key_env} not set — using structural analysis only (LLM enrichment skipped)"
+                );
+                Arc::new(MockLlmProvider::new(
+                    r#"{"entities":[],"relationships":[]}"#,
+                ))
+            }
+        };
+    }
 
     match AnthropicProvider::from_env_var(key_env) {
         Ok(provider) => {

@@ -1856,6 +1856,86 @@ These items have no single phase — they must be maintained and grown throughou
   - *Test/Validate:* Add `#![deny(missing_docs)]` to each crate's `lib.rs`. CI runs `cargo doc
     --workspace --no-deps 2>&1 | grep warning` and fails if any match is found.
 
+- [ ] **RFC 0045 — hosted demo server (peer-validation MVP)**
+  - *What:* A small, fixed two-repo hosted demo (`ekos/crates/demo-server`): pre-baked, pre-rendered
+    curated docs for EKOS-self and one clean external repo (`sharkdp/fd`), plus one evidence-cited
+    `POST /ask` endpoint (a thin adapter around `AiRuntime::ask`, unmodified). Built to answer a
+    strategic question, not a roadmap phase: narrow EKOS to one painful task (making sense of a
+    codebase without hitting an LLM's context-window ceiling, devlog_44's framing) and get it in
+    front of ~20 peer architects/senior engineers in a 5–10 minute demo. See `devlog_45.md` and
+    `ekos/docs/rfcs/0045-hosted-demo-server.md`. Deliberately not general self-serve ingestion — a
+    fixed catalog only, see the RFC's Non-goals.
+  - *Output:* `ekos/crates/demo-server/` (axum server + `prerender` bake binary); `cli`'s
+    `build_llm_provider`/`ai_config` widened `pub(crate)` → `pub` for reuse.
+  - *Status:* Implemented and, as of RFC 0046/devlog_46, **live-tested end to end with a real
+    OpenAI key** — build/test/clippy/fmt clean across the workspace; boot-time key-check, rate
+    limiting, static doc serving, unknown-repo handling, and real `/ask` calls against both baked
+    ledgers all confirmed working. A real, reproducible pre-vetted question list now exists (see
+    devlog_46's table). **Still not fully demo-ready**: the 5–10 minute script hasn't been
+    rehearsed against a real person — that's the one remaining step, and it needs a live human.
+  - *Test/Validate (remaining):* Time the full script against someone unfamiliar with EKOS, under
+    10 minutes including one live question — use a question from devlog_46's confirmed-good list,
+    not an untested one; the same session's live testing found real per-question variance (see the
+    two new follow-up items below).
+
+- [ ] **RFC 0046 — OpenAI LLM provider**
+  - *What:* `OpenAiProvider` (`ekos/crates/recovery/src/openai.rs`), wired into
+    `build_llm_provider`'s existing provider-selection `match` (RFC 0021's extension point) via
+    `config.llm.provider = "openai"`. Built specifically to unblock RFC 0045's demo server when no
+    `ANTHROPIC_API_KEY` was available. See `ekos/docs/rfcs/0046-openai-llm-provider.md` and
+    `devlog_46.md`.
+  - *Output:* `recovery/src/openai.rs`; `demo-server`'s `RepoEntry` gained `llm_provider`/
+    `llm_api_key_env`/`ai_max_tokens` catalog-level overrides (so the demo can force OpenAI without
+    editing EKOS-self's real `ekos.toml`); `.env` loading in `demo-server` matching the existing
+    `marketing/.env` pattern.
+  - *Status:* Done. Live-verified against both catalog repos with a real key.
+  - *Test/Validate:* `OpenAiProvider` unit tests (`model_name`, `temperature: 0`); `build_llm_provider`
+    provider-selection test; `demo-server`'s boot-check test extended for the `"openai"` branch;
+    full workspace `cargo build/test/clippy/fmt` clean.
+
+- [ ] **`ai.rs::extract_citations` can't distinguish "cited nothing" from "nothing to cite"**
+  - *What:* Found live-testing RFC 0046 against real OpenAI responses (devlog_46): when the
+    trailing `{"cited_evidence": [...]}` block parses as valid JSON but the array is empty,
+    `extract_citations` (`crates/runtime/src/ai.rs`) returns an empty diagnostics list — identical
+    to a genuinely well-cited answer's shape minus the citations themselves. Roughly half of
+    reasonable single-keyword questions tested against `gpt-4o-mini` hit this: a real, grounded,
+    factually-correct answer with zero citations, no warning surfaced anywhere. The system prompt
+    was evidently tuned/tested primarily against Claude; not yet confirmed whether Claude exhibits
+    the same gap, since no `ANTHROPIC_API_KEY` was available to test against directly.
+  - *Output:* Not yet started. Candidate fix: treat a successfully-parsed-but-empty
+    `cited_evidence` array as its own diagnostic case (distinct from "block missing/malformed"),
+    so a caller (CLI, MCP, `demo-server`'s `/ask`) can tell the difference.
+  - *Test/Validate (remaining):* Re-run devlog_46's confirmed-bad question list (`walk`,
+    `filesystem`, `config`, `dir_entry` for `fd`; `prerender`, `bake`, `sanitize` for EKOS-self)
+    after the fix and confirm each now surfaces a distinct diagnostic instead of silence.
+
+- [ ] **`gather_context` doesn't bound request size against broad/hub-like search terms**
+  - *What:* Found live-testing RFC 0046 (devlog_46): `AiRuntime::gather_context` (`ai.rs:130`) caps
+    seed-match count (`max_matches`) and hop depth (`neighborhood_depth`), but not the size of what
+    a single hop pulls in. Querying EKOS-self's larger (~7,500-object) ledger for broad/hub terms
+    (`artifact`, `openai`, `catalog`, `ollama`) produced real OpenAI API failures —
+    `context_length_exceeded` for one, `rate_limit_exceeded` (one request alone requesting 209,852
+    tokens against a 200,000 TPM limit) for the others. Reproduced consistently, not a fluke.
+  - *Output:* Not yet started. Candidate fix: a size/token budget check in `gather_context` that
+    trims or truncates the gathered `ObjectState`s before serializing them into the prompt, rather
+    than sending an unbounded neighborhood and letting the provider reject the request.
+  - *Test/Validate (remaining):* Re-run the same four confirmed-bad EKOS-self terms after the fix
+    and confirm a real (possibly partial) answer instead of an API error.
+
+- [ ] **Identity-resolution over-merge — real hits found against `ripgrep`/`bat`, still unfixed**
+  - *What:* The repo-selection spike for RFC 0045 (devlog_45) baked `BurntSushi/ripgrep` and
+    `sharkdp/bat` end-to-end and both hit the same identity-over-merge failure class CLAUDE.md
+    already documents for `Section`/`TransformNode`/`RustSymbol`/`RustModule`/`Crate`: common-word
+    crate/module names (`ignore`, `pcre2`, `bat` itself) flagged as multiple kinds via
+    name-prefix similarity plus the same-kind structural-score fallback of 1.0. `fd` was chosen for
+    the demo specifically because it was the one candidate that baked clean — this is a genuine,
+    still-open product gap, not a demo-prep footnote.
+  - *Output:* Not yet started. A structural fix to `identity`'s resolver (the recurring root cause),
+    not another one-off exclusion-list entry — see `identity/src/cross_system.rs` and
+    `DefaultResolver`'s blanket kind-exclusion list (`CLAUDE.md`'s `identity` crate-map entry).
+  - *Test/Validate (remaining):* Re-run the RFC 0045 bake against `ripgrep` and `bat` and confirm
+    zero identity conflicts, without introducing a new over-merge in the other direction.
+
 - [ ] **`examples/` — at least one runnable example per crate**
   - *What:* Each crate under `crates/` has at least one file in its `examples/` directory that
     demonstrates the primary use case with real (non-mock) objects. Examples must compile and run
