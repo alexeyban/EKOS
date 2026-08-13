@@ -17,7 +17,9 @@ pub mod marketing;
 pub mod mcp;
 pub mod query;
 pub mod recover;
+pub mod replay;
 pub mod resolve;
+pub mod simulate;
 pub mod store;
 
 use ekos_compiler_core::EkosConfig;

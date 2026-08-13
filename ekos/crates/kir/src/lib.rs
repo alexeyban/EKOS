@@ -298,6 +298,18 @@ pub struct KirRelationship {
     #[serde(default)]
     pub evidence: Vec<KirId>,
     pub created_at: DateTime<Utc>,
+    /// Domain-time validity window (RFC 0047) — when this relationship was/is
+    /// *true*, independent of when the ledger *observed* it. Distinct from
+    /// `object_at`/`relationships_at`'s point-in-time reconstruction, which
+    /// answers "what did the ledger know as of T" (an observation-time cut
+    /// over append history), not "was this fact true during T". `None` on
+    /// either bound means unbounded in that direction — today's implicit
+    /// always-valid behavior, made explicit. `#[serde(default)]` so every
+    /// relationship already persisted in a live ledger deserializes unchanged.
+    #[serde(default)]
+    pub valid_from: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub valid_until: Option<DateTime<Utc>>,
 }
 
 impl KirRelationship {
@@ -310,22 +322,50 @@ impl KirRelationship {
             properties: HashMap::new(),
             evidence: Vec::new(),
             created_at: Utc::now(),
+            valid_from: None,
+            valid_until: None,
         }
     }
 
-    /// True for a cross-system identity candidate (RFC 0029) that hasn't been
-    /// confirmed by a human/agent via `ekos_identity_review` yet — a
-    /// hypothesis, not an observed fact. Graph traversal (`ekos_dependents`,
-    /// `ekos_impact`, `ekos_neighborhood`, EKL's `FROM` anchor) must exclude
-    /// these by default: RFC 0029 requires an unconfirmed match to stay
+    /// Set the domain-time validity window (RFC 0047). See the field docs on
+    /// `valid_from`/`valid_until` for how this differs from the ledger's
+    /// observation-time history.
+    pub fn with_validity(
+        mut self,
+        from: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> Self {
+        self.valid_from = from;
+        self.valid_until = until;
+        self
+    }
+
+    /// True for a claim that isn't a confirmed fact — a hypothesis (or a
+    /// reviewed-and-rejected candidate), never silently treated as an
+    /// observed one. Originally scoped to cross-system identity candidates
+    /// only (RFC 0029, `Custom("SameAs")`, whose `properties["status"]` is
+    /// always exactly `"unconfirmed"`, `"confirmed"`, or `"rejected"` —
+    /// `ekos_identity_review`'s only two valid `decision` values plus the
+    /// initial state); generalized (RFC 0047) to any relationship kind that
+    /// adopts the same `status` convention, so an arbitrary claim
+    /// (`Custom("Opposes")`, `Custom("Believes")`, ...) gets the same
+    /// treatment without its own special case. A relationship carrying no
+    /// `status` property at all — every compiler-derived fact today
+    /// (`ForeignKey`, `Custom("FeedsInto")`, etc., none of which have ever
+    /// touched this property) — always passes, unaffected by this
+    /// generalization. Graph traversal (`ekos_dependents`, `ekos_impact`,
+    /// `ekos_neighborhood`, EKL's `FROM` anchor) must exclude anything this
+    /// returns `true` for: RFC 0029 requires an unconfirmed match to stay
     /// "structurally distinguishable from an observed fact, never
     /// indistinguishable" — silently walking it as if it were a real edge
-    /// breaks that guarantee. Every other relationship kind (`ForeignKey`,
-    /// `Custom("FeedsInto")`, etc.) is a compiler-derived fact and always
-    /// passes.
+    /// breaks that guarantee, and the same reasoning applies to a rejected
+    /// candidate (still not a fact) and to any other kind of unconfirmed
+    /// claim.
     pub fn is_pending_review(&self) -> bool {
-        matches!(&self.kind, RelationshipKind::Custom(k) if k == "SameAs")
-            && self.properties.get("status").and_then(|v| v.as_str()) != Some("confirmed")
+        match self.properties.get("status").and_then(|v| v.as_str()) {
+            None => false,
+            Some(status) => status != "confirmed",
+        }
     }
 }
 
@@ -350,6 +390,15 @@ pub enum EventKind {
     Migrated,
     Deployed,
     Merged,
+    /// Escape hatch (RFC 0048), same pattern as `ObjectKind`/`RelationshipKind`
+    /// (`:113-114`, `:139-140`) — for event shapes the fixed variants above
+    /// don't cover, e.g. a simulated action (`Custom("Accuse")`,
+    /// `Custom("PostMessage")`) that isn't a compiler-observed lifecycle
+    /// transition. No code in this workspace exhaustively matches over
+    /// `EventKind` today (confirmed by direct search), so adding this variant
+    /// can't silently break an existing `match`.
+    #[serde(untagged)]
+    Custom(String),
 }
 
 /// Container for all KIR nodes produced by one compilation run.
@@ -559,6 +608,102 @@ mod tests {
         assert_eq!(back.kind, RelationshipKind::Calls);
     }
 
+    // ── RFC 0047: valid_from/valid_until + generalized is_pending_review ──────
+
+    #[test]
+    fn valid_from_until_default_to_none_and_round_trip() {
+        let rel = KirRelationship::new(RelationshipKind::DependsOn, KirId::new(), KirId::new());
+        assert_eq!(rel.valid_from, None);
+        assert_eq!(rel.valid_until, None);
+
+        let from = Utc::now();
+        let until = from + chrono::Duration::days(30);
+        let rel = rel.with_validity(Some(from), Some(until));
+        let json = serde_json::to_string(&rel).unwrap();
+        let back: KirRelationship = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.valid_from, Some(from));
+        assert_eq!(back.valid_until, Some(until));
+    }
+
+    #[test]
+    fn relationship_json_predating_rfc_0047_still_deserializes() {
+        // A relationship persisted before valid_from/valid_until existed —
+        // #[serde(default)] must let it load as None/None, not fail to parse.
+        let from = KirId::new();
+        let to = KirId::new();
+        let old_json = serde_json::json!({
+            "id": KirId::new(),
+            "kind": "DependsOn",
+            "from": from,
+            "to": to,
+            "properties": {},
+            "evidence": [],
+            "created_at": Utc::now(),
+        });
+        let back: KirRelationship = serde_json::from_value(old_json).unwrap();
+        assert_eq!(back.valid_from, None);
+        assert_eq!(back.valid_until, None);
+    }
+
+    #[test]
+    fn is_pending_review_regression_same_as_unconfirmed_and_confirmed() {
+        // RFC 0029's own behavior, pinned exactly: unconfirmed excluded,
+        // confirmed passes.
+        let mut rel = KirRelationship::new(
+            RelationshipKind::Custom("SameAs".to_string()),
+            KirId::new(),
+            KirId::new(),
+        );
+        rel.properties
+            .insert("status".into(), serde_json::json!("unconfirmed"));
+        assert!(rel.is_pending_review());
+
+        rel.properties
+            .insert("status".into(), serde_json::json!("confirmed"));
+        assert!(!rel.is_pending_review());
+    }
+
+    #[test]
+    fn is_pending_review_excludes_rejected_not_just_unconfirmed() {
+        // A reviewed-and-rejected candidate must stay excluded from traversal
+        // too — narrowing the check to only "unconfirmed" would silently let
+        // a rejected identity match leak back in as if it were a real edge.
+        let mut rel = KirRelationship::new(
+            RelationshipKind::Custom("SameAs".to_string()),
+            KirId::new(),
+            KirId::new(),
+        );
+        rel.properties
+            .insert("status".into(), serde_json::json!("rejected"));
+        assert!(rel.is_pending_review());
+    }
+
+    #[test]
+    fn is_pending_review_generalizes_beyond_same_as() {
+        // RFC 0047: any kind adopting the same status convention gets the
+        // same hypothesis/fact distinction, not just RFC 0029's SameAs.
+        let mut rel = KirRelationship::new(
+            RelationshipKind::Custom("Opposes".to_string()),
+            KirId::new(),
+            KirId::new(),
+        );
+        rel.properties
+            .insert("status".into(), serde_json::json!("unconfirmed"));
+        assert!(rel.is_pending_review());
+
+        rel.properties
+            .insert("status".into(), serde_json::json!("confirmed"));
+        assert!(!rel.is_pending_review());
+    }
+
+    #[test]
+    fn is_pending_review_false_when_no_status_property() {
+        // Every compiler-derived fact today (ForeignKey, Contains, DependsOn,
+        // ...) never touches "status" at all — must be entirely unaffected.
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, KirId::new(), KirId::new());
+        assert!(!rel.is_pending_review());
+    }
+
     #[test]
     fn kir_event_round_trip() {
         let subject = KirId::new();
@@ -575,6 +720,36 @@ mod tests {
         assert_eq!(back.subject, subject);
         assert_eq!(back.kind, EventKind::Deployed);
         assert_eq!(back.payload["env"], "prod");
+    }
+
+    #[test]
+    fn event_kind_custom_round_trips_alongside_named_variants() {
+        // RFC 0048: a simulation-shaped action doesn't fit any fixed variant.
+        let ev = KirEvent {
+            id: KirId::new(),
+            kind: EventKind::Custom("Accuse".to_string()),
+            subject: KirId::new(),
+            payload: serde_json::json!({"target": "bob"}),
+            evidence: Vec::new(),
+            occurred_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let back: KirEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.kind, EventKind::Custom("Accuse".to_string()));
+
+        // Named variants are unaffected by the new variant's presence.
+        for kind in [
+            EventKind::Created,
+            EventKind::Modified,
+            EventKind::Deleted,
+            EventKind::Migrated,
+            EventKind::Deployed,
+            EventKind::Merged,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: EventKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, kind);
+        }
     }
 
     #[test]

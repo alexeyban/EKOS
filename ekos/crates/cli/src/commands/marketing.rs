@@ -90,9 +90,13 @@ pub async fn publish(
     };
     log_line(&marketing_dir, "Approved");
 
-    let publisher: Box<dyn Publisher> = if dry_run {
-        Box::new(NoopPublisher)
-    } else if config.marketing.twitter.enabled && !config.marketing.twitter.dry_run {
+    // Whether this run actually reaches X, not just whether --dry-run was passed: the
+    // config gate ([marketing.twitter] enabled/dry-run) can also force a no-op publish, and
+    // the dedup record below must track the real outcome, not the CLI flag alone — otherwise
+    // a config-gated no-op run gets recorded as posted and blocks every real run after it.
+    let publishes_for_real =
+        !dry_run && config.marketing.twitter.enabled && !config.marketing.twitter.dry_run;
+    let publisher: Box<dyn Publisher> = if publishes_for_real {
         Box::new(TwitterPublisher::from_env().map_err(|e| anyhow!("{e} — cannot publish to X"))?)
     } else {
         Box::new(NoopPublisher)
@@ -105,8 +109,7 @@ pub async fn publish(
     println!("Published. Tweet id: {tweet_id}");
     log_line(&marketing_dir, &format!("Published. Tweet ID {tweet_id}"));
 
-    // Dry runs never mark the devlog as posted, so a real run afterward isn't blocked by dedup.
-    if !dry_run {
+    if publishes_for_real {
         store.record(
             devlog.number,
             tweet_id,

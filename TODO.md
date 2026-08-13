@@ -1893,6 +1893,302 @@ These items have no single phase — they must be maintained and grown throughou
     provider-selection test; `demo-server`'s boot-check test extended for the `"openai"` branch;
     full workspace `cargo build/test/clippy/fmt` clean.
 
+- [x] **RFC 0047 — Claims and temporal validity (graph layer)**
+  - *What:* The graph-layer slice of `EKOS_World_Engine_Development_Plan.md` (a much larger,
+    not-yet-decided proposal to pivot EKOS toward a general knowledge-graph + multi-agent
+    simulation platform — see this session's written analysis and `devlog_47.md`). Three additive
+    extensions to existing types, no new primitives: `valid_from`/`valid_until` on
+    `KirRelationship`; `is_pending_review()` generalized from RFC 0029's hardcoded
+    `Custom("SameAs")` to any relationship kind carrying the same `status` convention;
+    `object_history`/`relationship_history` on both `KnowledgeStore` backends and `Runtime`. See
+    `ekos/docs/rfcs/0047-claims-and-temporal-validity.md`.
+  - *Output:* `kir/src/lib.rs`, `ledger/src/lib.rs`, `ledger/src/fact_ledger.rs`,
+    `runtime/src/lib.rs`, `runtime/tests/graph_layer_fixture.rs` (5-person/3-org/10-event/
+    15-relationship/5-claim fixture, both ledger backends).
+  - *Status:* Done. A real bug in the first draft of the generalized `is_pending_review()` was
+    caught before merge — narrowing the check to `== "unconfirmed"` would have let a *rejected*
+    identity candidate leak back into traversal, since `ekos_identity_review`'s `decision` is
+    `"confirmed"` or `"rejected"`, not just `"unconfirmed"`/`"confirmed"`. Fixed to
+    `!= "confirmed"`, matching the original's actual (safer) semantics.
+  - *Test/Validate:* 16 new unit tests across `kir`/`ledger`/`fact_ledger`/`runtime` plus the
+    2-backend integration fixture; full workspace `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:* no new
+    `KirClaim` type, no claim-review MCP tool, no `valid_from`/`valid_until` on `KirObject`, and no
+    World Model / Agent Model / Simulation Engine code — the source document's Phase 3 onward
+    remains an open strategic decision, not started.
+
+- [x] **RFC 0048 — World Model**
+  - *What:* The next step in `EKOS_World_Engine_Development_Plan.md`'s own recommended
+    development order (§44), immediately after RFC 0047's graph-layer/temporal-state work — user
+    confirmed continuing toward the World Engine vision, one RFC at a time. `EventKind` gains a
+    `Custom(String)` escape hatch (mirroring `ObjectKind`/`RelationshipKind`); a new `World`
+    read-model (`runtime/src/lib.rs`, alongside `ObjectState`/`ImpactHop`) plus
+    `Runtime::build_world` compute the induced subgraph over a scoped entity set, current or
+    historical. Resources and channels are documented `properties`/`Custom("Channel")` conventions,
+    not new primitives. See `ekos/docs/rfcs/0048-world-model.md` and `devlog_48.md`.
+  - *Output:* `kir/src/lib.rs`, `runtime/src/lib.rs`, `runtime/tests/graph_layer_fixture.rs`
+    (extended with a `Channel` object + 2 new World-scoped tests, both ledger backends).
+  - *Status:* Done. Deliberately **no new storage** — `World` is a computed projection over
+    existing `KnowledgeStore` queries, not a persisted entity, matching the existing
+    `ObjectState`/`ImpactHop` read-model pattern rather than the source document's literal
+    "world is a stored graph+state structure" framing.
+  - *Test/Validate:* 5 new unit tests (`kir` + `runtime`) plus 2 new integration tests extending
+    RFC 0047's fixture; full workspace `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:* no Agent
+    Model / Decision Engine / Action System / Simulation Engine code; no `World` persistence path;
+    no `ekos world create`/`ekos simulate` CLI commands; no dedicated `ekos-world` crate.
+
+- [x] **RFC 0049 — Agent Model (definitions, beliefs, knowledge, observation)**
+  - *What:* The next step in `EKOS_World_Engine_Development_Plan.md`'s own recommended development
+    order (§44), immediately after RFC 0048's World Model — user confirmed continuing toward the
+    World Engine vision, one RFC at a time. `ObjectKind::Custom("SimulatedAgent")` (a distinct kind
+    from the pre-existing `ObjectKind::Agent`, which means something else — a discovered AI agent
+    definition artifact, not a simulation participant) with `role`/`goals`/`fears`/`resources`
+    `properties` conventions; beliefs reuse RFC 0047's claim machinery unmodified
+    (`Custom("Trusts")`/etc. for beliefs about existing entities, `Custom("Proposition")` +
+    `Custom("Believes")` for free-form propositional beliefs — closing a limitation RFC 0047 had
+    explicitly named as deferred); knowledge as `RelationshipKind::Custom("Knows")`, a confirmed
+    (non-claim) fact; `Runtime::agent_observation` built directly on RFC 0048's `build_world`. See
+    `ekos/docs/rfcs/0049-agent-model.md` and `devlog_49.md`.
+  - *Output:* `runtime/src/lib.rs` (`World.events` field + `build_world` event fallback,
+    `Runtime::agent_observation`), `runtime/tests/graph_layer_fixture.rs` (extended with `Knows`
+    edges from two fixture people to different event subsets, both ledger backends).
+  - *Status:* Done. Found and fixed a real gap in RFC 0048's own `build_world` while implementing
+    this RFC: it only ever tried `get_object`/`object_at` for scope ids, silently dropping any id
+    that resolved to an event instead. This RFC's own worked example (agents that `Know` about
+    events, not just objects) exercised the gap immediately. Fixed by adding
+    `events: Vec<KirEvent>` to `World` and a `get_event` fallback in `build_world`, filtered by
+    `occurred_at <= at` when historical.
+  - *Test/Validate:* 5 new unit tests (`runtime`) plus 2 new integration tests extending RFC 0047/
+    0048's fixture, both ledger backends; full workspace `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:* no
+    Decision Engine / Action System / Simulation Engine code; no memory-type taxonomy
+    (short-term/long-term, belief revision over simulation rounds); no `ekos agent create`/
+    `ekos interview` CLI commands; no enforcement of internally-consistent agent beliefs. Also not
+    done: a dedicated test constructing `SimulatedAgent`/`Proposition`/`Believes` end-to-end (the
+    RFC argues, correctly per RFC 0047's generalization, that these need no new code — but no test
+    in this diff proves it beyond argument; noted as still open in `devlog_49.md`).
+
+- [x] **RFC 0050 — Decision Engine, Action System, Simulation Engine**
+  - *What:* Phases 5-7 of `EKOS_World_Engine_Development_Plan.md` in one RFC — the user's explicit
+    choice, after being told this is the first fork in the continuation with zero prior art
+    anywhere in EKOS (unlike RFC 0047-0049, each a small extension of something that already
+    existed). New crate `ekos-simulation`: a closed 12-action vocabulary (`ActionKind`, no
+    `Custom()` escape hatch — a scope decision, not a taxonomy) with structural validation plus one
+    real precondition (`FormAlliance` requires `Trusts` value `> 0.4`, the source document's own
+    worked example); a provider-independent `DecisionEngine` trait (mirrors `LlmProvider`'s shape)
+    with two deterministic reference engines (`AlwaysDoNothing`, `RuleBasedAgent` — no LLM call
+    anywhere in this crate); a round-based `Simulation::run_round` implementing the full
+    observe/decide/validate/resolve/execute/persist/update-world/update-memory lifecycle, reusing
+    RFC 0048/0049's `Runtime::agent_observation`/`build_world` for every read and writing through
+    `KnowledgeStore` directly (not `Runtime`, which stays read-only per RFC 0005 — unchanged by
+    this RFC). See `ekos/docs/rfcs/0050-decision-action-simulation-engine.md` and `devlog_50.md`.
+  - *Output:* `crates/simulation/` (new workspace member): `action.rs`, `decision.rs`,
+    `simulation.rs`, `lib.rs`; `crates/simulation/tests/simulation_fixture.rs` (new, self-contained
+    3-agent integration test, both ledger backends).
+  - *Status:* Done. The RFC's original Testing section assumed `crates/simulation`'s test could
+    "reuse" `runtime/tests/graph_layer_fixture.rs`'s fixture loader — not expressible in Rust
+    (a crate's `tests/` code isn't part of its public API, and `ekos-simulation` depends on
+    `ekos-runtime`, not the reverse). Caught while writing the test; `simulation_fixture.rs` ships
+    its own small fixture instead, and the RFC's Testing/Acceptance-Criteria sections were
+    corrected to match.
+  - *Test/Validate:* 11 new unit tests (`ekos-simulation`) plus 3 new integration tests (one round
+    end-to-end on both backends, plus a same-starting-state determinism check); full workspace
+    `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:* Phase 8
+    (Parallel Agent Execution — this RFC's ordering already produces the same order-independent
+    semantics Phase 8 wants); Phase 9 (Conflict Resolution: priority rules, resource constraints,
+    `--seed` — nothing in this loop is stochastic yet); any Phase 10+ work (scenarios, replay,
+    metrics, turning points, reports, Monte Carlo, counterfactuals, web UI, video); an LLM-backed
+    `DecisionEngine`; per-kind action effects beyond `FormAlliance`'s one worked example; an
+    `ekos simulate` CLI command; any new `KnowledgeStore` trait methods.
+
+- [x] **RFC 0051 — Scenario Definition**
+  - *What:* Phase 10 of `EKOS_World_Engine_Development_Plan.md` — the user's explicit choice over
+    deepening the engine further (Phase 9 Conflict Resolution), specifically to close a gap named
+    three RFCs running: nothing built in RFC 0047-0050 was runnable by anyone who wasn't editing
+    this codebase. `AgentDefinition`/`ScenarioDefinition` YAML schemas (source document §9.1/§15),
+    reusing every RFC 0049/0050 convention unmodified; a two-pass `load_scenario`/
+    `load_scenario_from_path` loader resolving scenario-local name references (with a fallback to
+    existing-ledger-id resolution); a new `ekos simulate <scenario.yaml>` CLI command. One
+    safety-relevant decision shaped the RFC: `ekos simulate` writes to a dedicated
+    `.ekos/simulations/<scenario-id>/ledger.db` by default, never the real workspace ledger — the
+    ledger has no delete/tombstone mechanism anywhere in this codebase (RFC 0043), so fictional
+    simulation entities must not become permanent neighbors of real compiled knowledge.
+    `--ledger <path>` opts back in explicitly. See
+    `ekos/docs/rfcs/0051-scenario-definition.md` and `devlog_51.md`.
+  - *Output:* `crates/simulation/src/scenario.rs` (new), `crates/simulation/src/action.rs`
+    (`ActionKind::all()`), `crates/simulation/tests/scenario_fixture.rs` (new),
+    `crates/cli/src/commands/simulate.rs` (new), `bin/ekos.rs` (`Commands::Simulate`).
+  - *Status:* Done. Found and fixed a real gotcha while writing this RFC's own test fixture:
+    `RuleBasedAgent`'s `support:<name>`/`oppose:<name>` goal convention matches a target's `name`
+    field exactly and case-sensitively, distinct from a scenario's own (often differently-cased)
+    lowercase reference id — silently produced `DoNothing` with no error the first time the test
+    fixture mismatched case. Fixed the test data and strengthened `RuleBasedAgent`'s own doc
+    comment so a scenario author hits documentation, not silent confusion. Also fixed a
+    `clippy::large_enum_variant` on `AgentRef` by boxing the inline variant.
+  - *Test/Validate:* 12 new unit tests (`scenario.rs`) plus 3 new integration tests (multi-file
+    scenario end-to-end, inline agents, unknown-reference error path); a manual CLI smoke test
+    against a real 3-file scenario confirming both the decisions produced and that only
+    `.ekos/simulations/<id>/ledger.db` was created (never `.ekos/ledger/`); full workspace
+    `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:*
+    `world.sources` document ingestion (scenario `knowledge:` references stay scoped to
+    scenario-local names, a minimal scenario-authored `events:` section, or existing ledger ids);
+    Phase 11 (Virtual Social Environment); `--seed`-driven randomness (parses, prints a visible
+    no-op notice); per-agent decision-engine selection in YAML (every agent gets `RuleBasedAgent`);
+    scenario linting beyond structural/reference errors; a scenario ledger cleanup command.
+
+- [x] **RFC 0052 — Conflict Resolution**
+  - *What:* Phase 9 of `EKOS_World_Engine_Development_Plan.md` — the user's explicit choice over
+    Phase 11 (Virtual Social Environment) or `world.sources` document ingestion, closing a gap RFC
+    0050 named twice: `SimulationConfig` had no seed, and "resolve conflicts" was a documented
+    no-op. Tracing the source document's own worked example (`Alice SUPPORT Bob` /
+    `Charlie OPPOSE Bob`) through the actual engine found it produces no real collision under the
+    current effect model (no shared mutation target) — so this RFC built the one genuine same-round
+    collision the engine can currently produce instead: two agents racing for a shared, scarce
+    `Custom("Channel")` `resources.capacity`. `SimulationConfig.seed`; priority ordering by
+    `Decision.confidence` descending (reusing an existing, previously-unread field) with a seeded,
+    reproducible tie-break for equal-confidence ties (the common case); opt-in per-agent
+    `resources.energy` costs on every non-`DoNothing` action; `RoundResult.conflict_failures`,
+    distinct from `validation_failures` (lost a same-round race vs. was never reasonable);
+    `ekos simulate --seed`. See `ekos/docs/rfcs/0052-conflict-resolution.md` and `devlog_52.md`.
+  - *Output:* `crates/simulation/src/simulation.rs` (seeded ordering, resource consumption,
+    conflict detection), `crates/simulation/src/scenario.rs` (seed wiring),
+    `crates/simulation/tests/conflict_fixture.rs` (new), `crates/cli/src/commands/simulate.rs`
+    (`--seed`), `bin/ekos.rs` (`Commands::Simulate.seed`).
+  - *Status:* Done. Verified live with `ekos simulate scenario.yaml --seed 99` (prints
+    `Seed:     99`, runs normally). All 25 pre-RFC-0052 tests continue to pass unmodified — resource
+    checks are opt-in (`NoSuchResource` when a `resources` key is absent), so no existing fixture's
+    behavior changed; only the two `SimulationConfig` struct literals needed a mechanical `seed`
+    field added.
+  - *Test/Validate:* 10 new unit tests (`simulation.rs`: priority ordering determinism/tie-break/
+    round-variance, `try_consume_resource`'s three outcomes) plus 3 new integration tests
+    (`conflict_fixture.rs`: exactly-one-winner, same-seed-same-winner, different-seeds-can-differ —
+    the last two seed values, 1 and 2, empirically confirmed to differ, not guessed); full workspace
+    `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:*
+    per-action-kind differentiated resource costs (one uniform constant for all 11 non-`DoNothing`
+    kinds); YAML-authorable costs; richer conflict rules beyond the one worked shared-capacity
+    example; Phase 8 Parallel Agent Execution; any randomness in `DecisionEngine` behavior itself
+    (the seed governs only tie-break ordering, never what an agent decides); a relationship effect
+    for `Support`/`Oppose` (confirmed, not built, that the source document's own literal example
+    doesn't need one under the current effect model).
+
+- [x] **RFC 0053 — Virtual Social Environment**
+  - *What:* Phase 11 of `EKOS_World_Engine_Development_Plan.md` — the user's explicit next step
+    ("go next phase 11"). A `VirtualForum` (`create_channel`/`publish_message`/`like`/`follow`/
+    `share`/`read_messages`) built as a direct API over `&dyn KnowledgeStore`, deliberately without
+    reopening RFC 0050's closed, escape-hatch-free `ActionKind` vocabulary: checked each of the
+    source document's seven capabilities structurally before designing and found none actually
+    needs a 13th action kind — `reply` is a message with a parent pointer (`Action.reply_to`,
+    additive, not a new kind); `like`/`follow`/`share` are relationship-shaped social facts
+    (`Custom("Likes")`/`Custom("Follows")`/`Custom("Shares")`), the same posture RFC 0049 gave
+    `Knows`. `read_messages` needed a new `Custom("PostedIn")` relationship index (message event →
+    channel) because `KnowledgeStore` has no bulk "every event" query — confirmed by re-reading the
+    trait before assuming otherwise — reusing the same "a relationship can point at an event"
+    pattern RFC 0049's `Knows` edges already established. See
+    `ekos/docs/rfcs/0053-virtual-social-environment.md` and `devlog_53.md`.
+  - *Output:* `crates/simulation/src/action.rs` (`Action.reply_to`), `crates/simulation/src/
+    forum.rs` (new: `VirtualForum`, `ForumError`), `crates/simulation/src/simulation.rs`
+    (`try_consume_resource` made `pub(crate)`, `PostedIn` indexing wired into the round-based
+    `PostMessage` path), `crates/simulation/tests/forum_fixture.rs` (new).
+  - *Status:* Done. The source document's own worked loop (§16: Alice posts → Bob observes → Bob
+    decides → Bob replies) runs end-to-end through the real, unmodified Decision/Action/Simulation
+    Engine — Bob's "observing" Alice's post is exactly RFC 0050's existing public-action `Knows`
+    fanout, no forum-specific observation logic added.
+  - *Test/Validate:* 5 new unit tests (`forum.rs`: channel creation, capacity + indexing, non-
+    channel rejection, like/follow/share idempotency, read-order/scoping) plus 1 new integration
+    test (`forum_fixture.rs`: the full two-round post-observe-decide-reply loop, plus a
+    direct-API-seeded third message proving `read_messages` sees both origin paths against the
+    same channel); full workspace `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:* round-based
+    `Like`/`Follow`/`Share` actions (`ActionKind` unchanged at exactly 12 variants — reaffirmed,
+    not reopened); any real platform (X/Reddit) integration, per the source document's own
+    instruction; a nested-thread-reconstruction helper (`reply_to` is a flat pointer only); any new
+    `KnowledgeStore` trait method; moderation/rate-limiting semantics.
+
+- [x] **RFC 0054 — Event Store (closing Phase 12) and Simulation Replay (Phase 13)**
+  - *What:* The user's chosen path after RFC 0053: close Phase 12 honestly, then build Phase 13 on
+    top of it. Phase 12 turned out almost entirely satisfied already by the existing
+    `ActionExecuted` event shape (id/round/timestamp/actor/action/target/content); the one real gap,
+    `observed_by`, closed as a derived query (`observed_by()`) over existing `Knows` edges, not new
+    storage. A durable per-ledger `SimulationLog` (`Custom("LoggedIn")` indexing every executed
+    action, all 12 kinds including `DoNothing`) was the real, necessary prerequisite Phase 13
+    needed — `RoundResult` only ever existed in memory before this, gone once the process exited.
+    `Replay` (`open`/`rounds`/`events_in_round`/`jump_to`/`inspect_agent`/`inspect_graph`/
+    `observed_by`) reuses RFC 0048/0049's point-in-time reconstruction machinery entirely, adding
+    only the "which timestamp is which round" lookup nothing could answer before. New
+    `ekos replay <scenario.yaml> [--round N]` CLI command, read-only by construction. See
+    `ekos/docs/rfcs/0054-event-store-and-replay.md` and `devlog_54.md`.
+  - *Output:* `crates/simulation/src/simulation.rs` (log indexing, `observed_by`),
+    `crates/simulation/src/replay.rs` (new), `crates/simulation/tests/replay_fixture.rs` (new),
+    `crates/cli/src/commands/replay.rs` (new). Plus, outside the original plan: `crates/ledger/
+    src/lib.rs` and `crates/ledger/src/fact_ledger.rs`.
+  - *Status:* Done. Found and fixed a real, pre-existing bug in **both** ledger backends while
+    writing `Replay`'s own historical-reconstruction test: `relationships_at` (SQLite and
+    `FactLedger` alike) only ever reconstructed a relationship's *current* version filtered by
+    timestamp, never a genuinely historical one — a documented RFC 0011 limitation, "kept for
+    parity" between backends rather than fixed, that nothing before this RFC happened to query in a
+    way that exposed it (needs a relationship updated more than once, queried at a point in time
+    before its current version). Fixed both backends to match `object_at`'s already-correct
+    per-version reconstruction pattern. Also found and corrected a smaller assumption in this RFC's
+    own first test draft: `jump_to(round)` resolves to that round's *pre-round* snapshot (matching
+    `Simulation::run_round`'s own Observe-step invariant), not a post-round one — doc comments
+    updated to state this explicitly.
+  - *Test/Validate:* 2 new unit tests (`simulation.rs`: log idempotency, `observed_by` regression
+    against RFC 0050's own visibility fanout) plus 4 new unit tests (`replay.rs`) plus 2 new
+    integration tests (`replay_fixture.rs`, both ledger backends) plus 2 new regression tests
+    directly in `ekos-ledger` (one per backend) pinning the `relationships_at` fix; a live CLI check
+    confirming `ekos replay` left the scenario ledger's entry count unchanged (21 before, 21 after);
+    full workspace `cargo build/test/clippy/fmt` clean (91 passing test-result blocks).
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:* an
+    interactive replay session (`start`/`pause`/`next round` as literal REPL commands — `Replay`'s
+    methods are the primitives such a UI would be built from, not the UI); `observed_by` baked into
+    the event payload (derived query only); metrics, turning-point detection, or report generation
+    (Phases 14-16); video/report rendering of a replay.
+
+- [x] **RFC 0055 — `world.sources` Document Ingestion**
+  - *What:* The user's explicit choice, closing the one remaining named fork from RFC 0051: real
+    documents seeding a scenario's starting world, instead of only hand-authored `events:` YAML.
+    The first RFC in this continuation to reach outside the graph/simulation layer into the real
+    compiler pipeline — `ScenarioDefinition.world.sources` wires the actual `ekos-plugin-localdocs`
+    connector and `LocalDocAnalyzerPass` (pure structural, no LLM, confirmed by its own module doc)
+    into scenario loading, scoped to exactly one connector and one pass, not the full `ekos build`/
+    `ekos recover` machinery (SQL/Git/GitHub/Confluence/crypto observers, dialect registries,
+    fingerprint caching, `PassManager` DAG scheduling — none of it wired). RFC 0043's redaction
+    baseline applies at this entry point with the same choke-point treatment `build.rs` already
+    gives every observer artifact. Ingested `Document`/`Section`/`Table` objects join the scenario's
+    existing name registry (RFC 0051) by their own path-derived names, so an agent's `knowledge:`
+    can reference `world.sources: [reports/report_01.md]` by that same string. See
+    `ekos/docs/rfcs/0055-world-sources-document-ingestion.md` and `devlog_55.md`.
+  - *Output:* `crates/simulation/src/ingest.rs` (new), `crates/simulation/src/scenario.rs`
+    (`WorldDefinition`, `load_scenario`'s `world_objects` parameter), 6 new Cargo dependencies.
+  - *Status:* Done. Found and fixed two real issues along the way, neither caught by the first
+    green test run: (1) `LocalDocsObserver::scan` computes each artifact's path via
+    `strip_prefix(root)`, so pointing `ScanContext` at a single source file directly (the natural
+    first design) would have silently produced an empty document name — caught by reading the
+    connector's own scan loop before writing ingestion code, fixed by scanning the scenario
+    directory once and filtering to the exact requested allowlist. (2) A genuine runtime-nesting
+    bug: `ingest_sources`'s original sync-to-async bridge unconditionally built a fresh Tokio
+    runtime and called `block_on`, which works from a plain `#[test]` fn (no runtime active) but
+    panics ("Cannot start a runtime from within a runtime") when called from `ekos simulate`'s own
+    `#[tokio::main]` entry point — invisible to every automated test, since none of them run inside
+    an active Tokio runtime; only found by actually running the CLI by hand. Fixed by branching on
+    `tokio::runtime::Handle::try_current()`, using `tokio::task::block_in_place` when already inside
+    a runtime.
+  - *Test/Validate:* 4 new unit tests (`ingest.rs`: real markdown ingestion, missing-source error,
+    allowlist exactness, redaction) plus 1 new end-to-end integration test (`scenario_fixture.rs`);
+    live-verified against the real `ekos simulate` CLI command after the runtime fix (log line
+    confirmed `objects=2 edges=1` real ingestion output); full workspace
+    `cargo build/test/clippy/fmt` clean.
+  - *Explicitly not done, per the RFC's own Non-goals and the user's confirmed scope:*
+    `DocumentSemanticsAnalyzerPass` (LLM-based Concept extraction — real, deferred, opt-in the same
+    way it already is upstream); any observer besides `localdocs`; dialect registries, fingerprint
+    caching, `PassManager` DAG scheduling; workspace `[security]` redaction extensions (built-in
+    baseline only); incremental/cached re-ingestion (every scenario load re-runs the pipeline
+    fresh, matching RFC 0051's existing posture for agents/relationships).
+
 - [ ] **`ai.rs::extract_citations` can't distinguish "cited nothing" from "nothing to cite"**
   - *What:* Found live-testing RFC 0046 against real OpenAI responses (devlog_46): when the
     trailing `{"cited_evidence": [...]}` block parses as valid JSON but the array is empty,

@@ -123,6 +123,10 @@ fn ckm_rel_to_kir(rel: &CkmRelationship) -> KirRelationship {
         properties: rel.properties.clone(),
         evidence: rel.evidence.iter().map(|e| e.id).collect(),
         created_at: Utc::now(),
+        // CKM relationships don't carry temporal validity yet (RFC 0047 scoped this to
+        // KIR/ledger/runtime, not the semantic compiler) — always unbounded for now.
+        valid_from: None,
+        valid_until: None,
     }
 }
 

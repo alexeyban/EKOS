@@ -323,6 +323,39 @@ publishing requires `TWITTER_API_KEY`/`TWITTER_API_SECRET`/`TWITTER_ACCESS_TOKEN
 `TWITTER_ACCESS_SECRET` in the environment and stays off until `[marketing.twitter] enabled =
 true` is set explicitly.
 
+### World Engine simulation (RFC 0047-0055, experimental)
+
+Auxiliary, opt-in tooling built on top of the same ledger, kept deliberately separate from the
+compiler pipeline above: multi-agent scenarios with beliefs, goals, deterministic round-based
+decision-making, seed-reproducible priority/resource conflict resolution, a `VirtualForum`
+(channels, replies, likes, follows, shares), a durable, replayable event log, and `world.sources`
+document ingestion (real files, via the actual `localdocs` connector) — layered additively over the
+existing graph (see `ekos/docs/rfcs/0047`-`0055` and `devlog_47.md`-`devlog_55.md`). Define a
+scenario and its agents in YAML (source-document-style `agent.yaml`/`scenario.yaml` shapes), run
+it, and read it back afterward:
+
+```bash
+ekos simulate scenario.yaml             # runs scenario.yaml's own simulation.rounds
+ekos simulate scenario.yaml --rounds 5  # override the round count
+ekos simulate scenario.yaml --seed 42   # override the round's priority/resource-conflict seed
+ekos replay scenario.yaml               # read back every recorded round, read-only
+ekos replay scenario.yaml --round 2     # narrow to one round
+```
+
+A scenario's `world: { sources: [reports/report_01.md] }` ingests real documents (PDF/DOCX/text/
+Markdown/HTML/email) into its starting world; an agent's `knowledge:`/`relationships:` can
+reference an ingested document by that same path string.
+
+By default `simulate` writes to a dedicated `.ekos/simulations/<scenario-id>/ledger.db`, **never**
+the real workspace ledger — simulated agents and events are fictional and regenerated on every run,
+and because the ledger has no delete/tombstone mechanism (RFC 0043), they should never permanently
+commingle with real, evidence-backed compiled knowledge. `--ledger <path>` opts back into a
+different target explicitly, including the real workspace ledger, if a caller wants that.
+
+This is a distinct capability from the "compiler for enterprise knowledge" positioning above, not
+a replacement for it — kept intentionally separate rather than blended into one pitch. Whether it
+grows into its own product surface is an open question, still being decided one RFC at a time.
+
 ### Demo: skills + custom subagents
 
 `demo/` contains a rehearsable, twelve-act demo of EKOS's Claude Code integration, run against

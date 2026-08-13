@@ -805,7 +805,9 @@ dependencies = [
  "ekos-recovery",
  "ekos-runtime",
  "ekos-semantic",
+ "ekos-simulation",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "tokio",
  "toml",
@@ -1379,6 +1381,29 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "ekos-simulation"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ekos-artifact",
+ "ekos-common",
+ "ekos-compiler-core",
+ "ekos-kir",
+ "ekos-ledger",
+ "ekos-observation-sdk",
+ "ekos-plugin-localdocs",
+ "ekos-recovery",
+ "ekos-runtime",
+ "rand 0.8.7",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

@@ -87,7 +87,10 @@ pub async fn generate_tweet(
         Ok(()) => Ok(first),
         Err(e) => {
             tracing::warn!("first tweet draft failed validation ({e}); retrying once");
-            let retry_prompt = format!("{base_user_prompt}{}", build_retry_suffix(&e.to_string()));
+            let retry_prompt = format!(
+                "{base_user_prompt}{}",
+                build_retry_suffix(&e.to_string(), &first.text)
+            );
             let second = draft_once(llm, &retry_prompt).await?;
             validate_tweet(&second.text, config)?;
             Ok(second)

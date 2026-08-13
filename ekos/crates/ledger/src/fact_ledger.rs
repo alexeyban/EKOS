@@ -370,28 +370,63 @@ impl FactLedger {
         }
     }
 
-    /// Relationships involving `id` whose **current version** was committed
-    /// at or before `at` — the same pointer-table semantics as the SQLite
-    /// backend (RFC 0011 limitation, kept for parity).
+    /// Relationships involving `id`, each reconstructed as it actually was
+    /// *at* `at` — true multi-version history, the same guarantee
+    /// `object_at` already gives (RFC 0054: found necessary once `Replay`
+    /// needed correct historical reconstruction across relationships
+    /// updated more than once; the SQLite backend's own `relationships_at`
+    /// had the identical bug, fixed the same way, in the same RFC). This
+    /// used to filter on whether a relationship's *current* version's tx was
+    /// at-or-before the cut, then reconstruct its *latest* state regardless
+    /// (`RFC 0011`, "kept for parity" with a since-fixed SQLite limitation)
+    /// — silently excluding, or showing the wrong version of, any
+    /// relationship updated after `at`. `reconstruct_at(rel, cut)` mirrors
+    /// `object_at`'s own call exactly: `None` when the entity had no facts
+    /// yet by `cut`, the historically-correct snapshot otherwise.
     pub fn relationships_at(
         &self,
         id: &KirId,
         at: DateTime<Utc>,
     ) -> Result<Vec<KirRelationship>, LedgerError> {
         let inner = self.inner.lock().unwrap();
-        let cut = inner.tx_at(at);
+        let Some(cut) = inner.tx_at(at) else {
+            return Ok(Vec::new());
+        };
         let mut out = Vec::new();
         for rel in inner.relationship_candidates(id.0)? {
-            let latest = inner.entity_entries(rel)?.iter().map(|e| e.tx).max();
-            let visible = matches!((latest, cut), (Some(t), Some(c)) if t <= c);
-            if visible
-                && let Some(payload) = inner.reconstruct_at(rel, TxId(u64::MAX))?
+            if let Some(payload) = inner.reconstruct_at(rel, cut)?
                 && kind_of_payload(&payload) == EntityKind::Relationship
             {
                 out.push(serde_json::from_value(payload)?);
             }
         }
         Ok(out)
+    }
+
+    /// Every historical version of the object at `id`, oldest to newest
+    /// (RFC 0047).
+    pub fn object_history(&self, id: &KirId) -> Result<Vec<KirObject>, LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .entity_history(id.0)?
+            .into_iter()
+            .filter(|p| kind_of_payload(p) == EntityKind::Object)
+            .map(|p| serde_json::from_value(p).map_err(Into::into))
+            .collect()
+    }
+
+    /// Every historical version of the relationship at `id`, oldest to
+    /// newest (RFC 0047) — scoped to the relationship's own id, not every
+    /// relationship touching it as an endpoint (that's
+    /// `relationship_candidates`/`relationships_at`'s job).
+    pub fn relationship_history(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .entity_history(id.0)?
+            .into_iter()
+            .filter(|p| kind_of_payload(p) == EntityKind::Relationship)
+            .map(|p| serde_json::from_value(p).map_err(Into::into))
+            .collect()
     }
 
     // ── Search (tantivy, RFC 0016 Phase 5) ────────────────────────────────
@@ -608,6 +643,35 @@ impl Inner {
         let mut entries = self.runs.scan(&ScanPrefix::Entity { entity, attr: None })?;
         entries.extend(self.memtable.iter().filter(|e| e.entity == entity).cloned());
         Ok(entries)
+    }
+
+    /// Every distinct whole-entity snapshot across this entity's history,
+    /// oldest to newest (RFC 0047) — one entry per `tx` at which *any* fact
+    /// about it changed, each reconstructed by folding history up to that
+    /// tx. Facts are per-attribute here (unlike the SQLite backend's
+    /// whole-object rows), so a "version" is defined as the state
+    /// immediately after each point where something changed, not a stored
+    /// snapshot — the same notion `object_at`/`reconstruct_at` already use
+    /// for a single point-in-time cut, just walked across every cut instead
+    /// of one. O(versions × entries) — fine for this RFC's scope (a small
+    /// fixture), not optimized for entities with very long histories.
+    fn entity_history(&self, entity: Uuid) -> Result<Vec<serde_json::Value>, LedgerError> {
+        let entries = self.entity_entries(entity)?;
+        let mut txs: Vec<TxId> = entries.iter().map(|e| e.tx).collect();
+        txs.sort();
+        txs.dedup();
+
+        let mut out = Vec::new();
+        for cut in txs {
+            let facts = fold_state(entity, &entries, Some(cut));
+            if facts.is_empty() {
+                continue;
+            }
+            let payload = reconstruct(&facts, &self.store.manifest.attributes)
+                .map_err(|e| LedgerError::Corrupt(e.to_string()))?;
+            out.push(payload);
+        }
+        Ok(out)
     }
 
     /// Fold an entity's history (up to `cut`, if given) into its live fact
@@ -1003,6 +1067,100 @@ mod tests {
         assert!(ledger.relationships_at(&a, before).unwrap().is_empty());
         let after = Utc::now() + Duration::seconds(60);
         assert_eq!(ledger.relationships_at(&a, after).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn relationships_at_reconstructs_a_past_version_of_a_relationship_updated_since() {
+        // RFC 0054: mirrors the SQLite backend's own regression test for the
+        // identical bug — relationships_at previously reconstructed a
+        // relationship's *current* state once it passed an (also
+        // incorrect) visibility check, rather than its state at `at`.
+        let (ledger, _dir) = temp_ledger();
+        let a = KirId::new();
+        let b = KirId::new();
+
+        let mut rel = KirRelationship::new(RelationshipKind::Custom("Trusts".to_string()), a, b);
+        rel.properties
+            .insert("value".to_string(), serde_json::json!(0.5));
+        ledger.append_relationship(&rel).unwrap();
+        let after_first_write = Utc::now();
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        rel.properties
+            .insert("value".to_string(), serde_json::json!(0.9));
+        ledger.append_relationship(&rel).unwrap();
+
+        let historical = ledger.relationships_at(&a, after_first_write).unwrap();
+        assert_eq!(
+            historical.len(),
+            1,
+            "the relationship must still be found at this point in time"
+        );
+        assert_eq!(historical[0].properties["value"], serde_json::json!(0.5));
+
+        let current = ledger.relationships_at(&a, Utc::now()).unwrap();
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].properties["value"], serde_json::json!(0.9));
+    }
+
+    // ── RFC 0047: object_history / relationship_history ────────────────────
+
+    #[test]
+    fn object_history_returns_every_version_oldest_to_newest() {
+        let (ledger, _dir) = temp_ledger();
+        let mut obj = KirObject::new("orders", ObjectKind::Table);
+        let id = obj.id;
+        ledger.append_object(&obj).unwrap();
+
+        obj.properties
+            .insert("row_count".into(), serde_json::json!(1));
+        ledger.append_object(&obj).unwrap();
+
+        obj.properties
+            .insert("row_count".into(), serde_json::json!(2));
+        ledger.append_object(&obj).unwrap();
+
+        let history = ledger.object_history(&id).unwrap();
+        assert_eq!(history.len(), 3);
+        assert!(!history[0].properties.contains_key("row_count"));
+        assert_eq!(history[1].properties["row_count"], serde_json::json!(1));
+        assert_eq!(history[2].properties["row_count"], serde_json::json!(2));
+    }
+
+    #[test]
+    fn object_history_empty_for_unknown_id() {
+        let (ledger, _dir) = temp_ledger();
+        assert!(ledger.object_history(&KirId::new()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn relationship_history_returns_every_version_oldest_to_newest() {
+        let (ledger, _dir) = temp_ledger();
+        let (a, b) = (KirId::new(), KirId::new());
+        let mut rel = KirRelationship::new(RelationshipKind::DependsOn, a, b);
+        let id = rel.id;
+        ledger.append_relationship(&rel).unwrap();
+
+        rel.properties.insert("weight".into(), serde_json::json!(1));
+        ledger.append_relationship(&rel).unwrap();
+
+        let history = ledger.relationship_history(&id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(!history[0].properties.contains_key("weight"));
+        assert_eq!(history[1].properties["weight"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn relationship_history_is_scoped_to_the_relationships_own_id_not_its_endpoints() {
+        let (ledger, _dir) = temp_ledger();
+        let (a, b, c) = (KirId::new(), KirId::new(), KirId::new());
+        let rel1 = KirRelationship::new(RelationshipKind::DependsOn, a, b);
+        let rel2 = KirRelationship::new(RelationshipKind::DependsOn, a, c);
+        ledger.append_relationship(&rel1).unwrap();
+        ledger.append_relationship(&rel2).unwrap();
+
+        assert_eq!(ledger.relationship_history(&rel1.id).unwrap().len(), 1);
+        assert_eq!(ledger.relationship_history(&rel2.id).unwrap().len(), 1);
     }
 
     #[test]

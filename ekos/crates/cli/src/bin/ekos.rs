@@ -105,6 +105,39 @@ enum Commands {
         #[command(subcommand)]
         subcommand: DbtCommands,
     },
+    /// Load and run a World Engine scenario (RFC 0051)
+    Simulate {
+        /// Path to the scenario YAML file
+        scenario: PathBuf,
+        /// Override the scenario's own simulation.rounds
+        #[arg(long)]
+        rounds: Option<u32>,
+        /// Write to this ledger instead of the default scenario-scoped one
+        /// at .ekos/simulations/<scenario-id>/ledger.db — WARNING: passing
+        /// the real workspace ledger here permanently commingles fictional
+        /// simulation entities with real compiled knowledge (no delete/
+        /// tombstone mechanism exists anywhere in this codebase, RFC 0043).
+        #[arg(long)]
+        ledger: Option<PathBuf>,
+        /// Override the scenario's own simulation.seed (RFC 0052) — governs
+        /// reproducible priority tie-breaking and resource-contention
+        /// ordering, never what an agent decides to do.
+        #[arg(long)]
+        seed: Option<u64>,
+    },
+    /// Read back a previously recorded simulation (RFC 0054) — read-only,
+    /// does not run any new rounds
+    Replay {
+        /// Path to the scenario YAML file (used only to resolve the
+        /// scenario-scoped ledger path and names, never re-run)
+        scenario: PathBuf,
+        /// Show only this round instead of every recorded round
+        #[arg(long)]
+        round: Option<u32>,
+        /// Read from this ledger instead of the default scenario-scoped one
+        #[arg(long)]
+        ledger: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -338,5 +371,16 @@ async fn main() -> Result<()> {
                 ekos::commands::dbt::generate(&cwd, &output, &config).await
             }
         },
+        Commands::Simulate {
+            scenario,
+            rounds,
+            ledger,
+            seed,
+        } => ekos::commands::simulate::run(&config, &cwd, &scenario, rounds, ledger, seed),
+        Commands::Replay {
+            scenario,
+            round,
+            ledger,
+        } => ekos::commands::replay::run(&config, &cwd, &scenario, round, ledger),
     }
 }

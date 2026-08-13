@@ -11,6 +11,7 @@ members = [
     "crates/sql-dialect-sdk",
     "crates/ledger",
     "crates/runtime",
+    "crates/simulation",
     "crates/identity",
     "crates/recovery",
     "crates/ekl",
@@ -55,6 +56,7 @@ ekos-artifact  = { path = "crates/artifact" }
 ekos-compiler-core = { path = "crates/compiler-core" }
 ekos-ledger    = { path = "crates/ledger" }
 ekos-runtime   = { path = "crates/runtime" }
+ekos-simulation = { path = "crates/simulation" }
 ekos-identity  = { path = "crates/identity" }
 ekos-semantic  = { path = "crates/semantic" }
 ekos-observation-sdk = { path = "crates/observation-sdk" }

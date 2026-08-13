@@ -1,0 +1,26 @@
+[package]
+name = "ekos-simulation"
+description = "Deterministic multi-round simulation engine: agent decisions, actions, and world updates over the ledger (RFC 0050)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-ledger.workspace = true
+ekos-runtime.workspace = true
+# RFC 0055: world.sources document ingestion reuses the real Observer/
+# recovery pipeline rather than reimplementing document parsing.
+ekos-common.workspace = true
+ekos-artifact.workspace = true
+ekos-compiler-core.workspace = true
+ekos-observation-sdk.workspace = true
+ekos-recovery.workspace = true
+ekos-plugin-localdocs = { path = "../../plugins/localdocs" }
+chrono.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tempfile = "3"

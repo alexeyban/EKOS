@@ -7,10 +7,12 @@
 pub mod ai;
 
 use chrono::{DateTime, Utc};
-use ekos_kir::{KirEvidence, KirGraph, KirId, KirObject, KirRelationship, RelationshipKind};
+use ekos_kir::{
+    KirEvent, KirEvidence, KirGraph, KirId, KirObject, KirRelationship, RelationshipKind,
+};
 use ekos_ledger::{KnowledgeStore, LedgerError};
-use serde::Serialize;
-use std::collections::{HashSet, VecDeque};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
 pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig};
@@ -47,6 +49,33 @@ pub struct ImpactHop {
     pub hop: u32,
     pub object: KirObject,
     pub via: KirRelationship,
+}
+
+/// A named, time-scoped, entity-scoped view over the ledger (RFC 0048) — the
+/// induced subgraph over a chosen set of entities, as of a point in time. Not
+/// new storage: computed from existing `KnowledgeStore` queries every time,
+/// the same "read-model built by querying the ledger" shape `ObjectState`/
+/// `ImpactHop` already are. `resources` (per-entity numeric pools) and
+/// `channels` (communication venues) are conventions read off `KirObject`
+/// properties and `ObjectKind::Custom("Channel")` respectively — see this
+/// RFC's Design section — not separate fields here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct World {
+    pub name: String,
+    pub time: DateTime<Utc>,
+    pub round: Option<u32>,
+    pub objects: Vec<KirObject>,
+    pub relationships: Vec<KirRelationship>,
+    /// Events whose id was in scope and (when `at` was given) had already
+    /// occurred by then. Added by RFC 0049 — a real gap found while building
+    /// agent knowledge on top of `World`: the source document's own
+    /// "knowledge: - event_001" example means a scope id can name an event,
+    /// not just an object, and the initial RFC 0048 implementation only ever
+    /// tried `get_object`, silently dropping any event id from the world.
+    #[serde(default)]
+    pub events: Vec<KirEvent>,
+    #[serde(default)]
+    pub metadata: HashMap<String, serde_json::Value>,
 }
 
 /// Read-only view over the Knowledge Ledger. Backend-agnostic since
@@ -271,6 +300,116 @@ impl<'a> Runtime<'a> {
             evidence,
         }))
     }
+
+    /// Every historical version of one object's own id, oldest to newest
+    /// (RFC 0047) — the full version sequence, not a single point-in-time
+    /// cut like `reconstruct_state_at`.
+    pub fn object_history(&self, id: &KirId) -> Result<Vec<KirObject>, RuntimeError> {
+        Ok(self.ledger.object_history(id)?)
+    }
+
+    /// Every historical version of one relationship's own id, oldest to
+    /// newest (RFC 0047).
+    pub fn relationship_history(&self, id: &KirId) -> Result<Vec<KirRelationship>, RuntimeError> {
+        Ok(self.ledger.relationship_history(id)?)
+    }
+
+    /// Build a [`World`] (RFC 0048): the induced subgraph over `entity_ids` —
+    /// every requested object that exists, plus every relationship between
+    /// two objects *both* in the scope (an edge to something outside
+    /// `entity_ids` is not part of this world). `at` selects historical state
+    /// via the same point-in-time machinery `reconstruct_state_at` already
+    /// uses (`None` means current state, `Utc::now()` is recorded as the
+    /// world's own `time`). An unconfirmed claim between two in-scope objects
+    /// is excluded, same rationale as `load_neighborhood`/`trace_impact`: a
+    /// hypothesis isn't part of the world's confirmed state.
+    pub fn build_world(
+        &self,
+        name: impl Into<String>,
+        entity_ids: &[KirId],
+        at: Option<DateTime<Utc>>,
+        round: Option<u32>,
+    ) -> Result<World, RuntimeError> {
+        let scope: HashSet<KirId> = entity_ids.iter().copied().collect();
+
+        // Object and event ids are disjoint by construction (payload shape
+        // decides entity kind — `subject`/`fragment`/`from`+`to` vs. neither
+        // — never both), so trying object first and falling back to event
+        // for anything it misses is unambiguous, not a guess.
+        let mut objects = Vec::new();
+        let mut events = Vec::new();
+        for id in entity_ids {
+            let object = match at {
+                Some(t) => self.ledger.object_at(id, t)?,
+                None => self.ledger.get_object(id)?,
+            };
+            match object {
+                Some(object) => objects.push(object),
+                None => {
+                    if let Some(event) = self.ledger.get_event(id)?
+                        && at.is_none_or(|t| event.occurred_at <= t)
+                    {
+                        events.push(event);
+                    }
+                }
+            }
+        }
+
+        let mut relationships = Vec::new();
+        let mut seen: HashSet<KirId> = HashSet::new();
+        for id in entity_ids {
+            let rels = match at {
+                Some(t) => self.ledger.relationships_at(id, t)?,
+                None => self.ledger.relationships_for(id)?,
+            };
+            for rel in rels {
+                if rel.is_pending_review() {
+                    continue;
+                }
+                let other = if rel.from == *id { rel.to } else { rel.from };
+                if !scope.contains(&other) {
+                    continue;
+                }
+                if seen.insert(rel.id) {
+                    relationships.push(rel);
+                }
+            }
+        }
+
+        Ok(World {
+            name: name.into(),
+            time: at.unwrap_or_else(Utc::now),
+            round,
+            objects,
+            relationships,
+            events,
+            metadata: HashMap::new(),
+        })
+    }
+
+    /// An agent's observation of the world (RFC 0049, source document §9.3):
+    /// the world scoped to exactly what `agent_id` has a `Knows` edge to,
+    /// plus the agent itself. Built directly on `build_world` — an
+    /// observation *is* a world, just scoped by the agent's own knowledge
+    /// instead of a caller-supplied id list, so it inherits the same
+    /// unconfirmed-claim exclusion and event support for free.
+    pub fn agent_observation(
+        &self,
+        agent_id: &KirId,
+        at: Option<DateTime<Utc>>,
+    ) -> Result<World, RuntimeError> {
+        let rels = match at {
+            Some(t) => self.ledger.relationships_at(agent_id, t)?,
+            None => self.ledger.relationships_for(agent_id)?,
+        };
+        let mut scope = vec![*agent_id];
+        scope.extend(rels.iter().filter_map(|r| {
+            let knows = matches!(&r.kind, RelationshipKind::Custom(k) if k == "Knows")
+                && !r.is_pending_review();
+            (r.from == *agent_id && knows).then_some(r.to)
+        }));
+        self.build_world(format!("{agent_id}-observation"), &scope, at, None)
+    }
 }
 
 #[cfg(test)]
@@ -278,7 +417,8 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use ekos_kir::{
-        KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
+        EventKind, KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind,
+        SourceLocation,
     };
     use tempfile::TempDir;
 
@@ -309,6 +449,9 @@ mod tests {
         rel.properties
             .insert("status".into(), serde_json::json!("confirmed"));
         rel
+    }
+    fn knows(agent: KirId, target: KirId) -> KirRelationship {
+        KirRelationship::new(RelationshipKind::Custom("Knows".to_string()), agent, target)
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -691,5 +834,226 @@ mod tests {
 
         let rt = Runtime::new(&ledger);
         assert!(rt.reconstruct_state_at(&id, after).unwrap().is_some());
+    }
+
+    // ── RFC 0047: object_history / relationship_history ────────────────────
+
+    #[test]
+    fn object_history_returns_every_version_through_the_runtime() {
+        let (ledger, _dir) = temp_ledger();
+        let mut o = obj("orders");
+        let id = o.id;
+        ledger.append_object(&o).unwrap();
+        o.properties
+            .insert("row_count".into(), serde_json::json!(1));
+        ledger.append_object(&o).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let history = rt.object_history(&id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(!history[0].properties.contains_key("row_count"));
+        assert_eq!(history[1].properties["row_count"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn relationship_history_returns_every_version_through_the_runtime() {
+        let (ledger, _dir) = temp_ledger();
+        let (a, b) = (KirId::new(), KirId::new());
+        let mut rel = fk(a, b);
+        let id = rel.id;
+        ledger.append_relationship(&rel).unwrap();
+        rel.properties.insert("weight".into(), serde_json::json!(5));
+        ledger.append_relationship(&rel).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let history = rt.relationship_history(&id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(!history[0].properties.contains_key("weight"));
+        assert_eq!(history[1].properties["weight"], serde_json::json!(5));
+    }
+
+    // ── RFC 0048: World / build_world ───────────────────────────────────────
+
+    #[test]
+    fn build_world_returns_induced_subgraph_only() {
+        // a-b in scope, c outside: the a-c edge must not appear even though
+        // both a and c individually exist in the ledger.
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("alice");
+        let b = obj("bob");
+        let c = obj("charlie");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_object(&c).unwrap();
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+        ledger.append_relationship(&fk(a.id, c.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let world = rt
+            .build_world("test-world", &[a.id, b.id], None, Some(1))
+            .unwrap();
+
+        assert_eq!(world.objects.len(), 2);
+        assert_eq!(world.relationships.len(), 1);
+        assert_eq!(world.relationships[0].to, b.id);
+        assert_eq!(world.round, Some(1));
+    }
+
+    #[test]
+    fn build_world_excludes_unconfirmed_claims() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("alice");
+        let b = obj("bob");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+        ledger
+            .append_relationship(&same_as_unconfirmed(a.id, b.id))
+            .unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let world = rt
+            .build_world("test-world", &[a.id, b.id], None, None)
+            .unwrap();
+
+        assert_eq!(
+            world.relationships.len(),
+            1,
+            "the unconfirmed claim must not appear in the world"
+        );
+    }
+
+    #[test]
+    fn build_world_skips_unknown_ids() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("alice");
+        ledger.append_object(&a).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let world = rt
+            .build_world("test-world", &[a.id, KirId::new()], None, None)
+            .unwrap();
+        assert_eq!(world.objects.len(), 1);
+    }
+
+    #[test]
+    fn build_world_serializes_and_reloads() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("alice");
+        let b = obj("bob");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let world = rt
+            .build_world("test-world", &[a.id, b.id], None, Some(3))
+            .unwrap();
+
+        let json = serde_json::to_string(&world).unwrap();
+        let back: World = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "test-world");
+        assert_eq!(back.round, Some(3));
+        assert_eq!(back.objects.len(), 2);
+        assert_eq!(back.relationships.len(), 1);
+    }
+
+    #[test]
+    fn build_world_includes_events_in_scope() {
+        let (ledger, _dir) = temp_ledger();
+        let subject = obj("alice");
+        ledger.append_object(&subject).unwrap();
+        let event = KirEvent {
+            id: KirId::new(),
+            kind: EventKind::Custom("Accuse".to_string()),
+            subject: subject.id,
+            payload: serde_json::json!({"target": "bob"}),
+            evidence: Vec::new(),
+            occurred_at: Utc::now(),
+        };
+        ledger.append_event(&event).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let world = rt
+            .build_world("test-world", &[subject.id, event.id], None, None)
+            .unwrap();
+        assert_eq!(world.objects.len(), 1);
+        assert_eq!(world.events.len(), 1);
+        assert_eq!(world.events[0].id, event.id);
+    }
+
+    // ── RFC 0049: agent_observation ─────────────────────────────────────────
+
+    #[test]
+    fn agent_observation_is_scoped_to_its_own_knows_edges() {
+        let (ledger, _dir) = temp_ledger();
+        let alice = obj("alice");
+        let known = obj("known-thing");
+        let unknown = obj("unknown-thing");
+        ledger.append_object(&alice).unwrap();
+        ledger.append_object(&known).unwrap();
+        ledger.append_object(&unknown).unwrap();
+        ledger
+            .append_relationship(&knows(alice.id, known.id))
+            .unwrap();
+        // No Knows edge to `unknown` -- it must not appear in the observation
+        // even though it exists in the ledger.
+
+        let rt = Runtime::new(&ledger);
+        let observation = rt.agent_observation(&alice.id, None).unwrap();
+
+        let object_ids: Vec<KirId> = observation.objects.iter().map(|o| o.id).collect();
+        assert!(object_ids.contains(&alice.id), "the agent observes itself");
+        assert!(object_ids.contains(&known.id));
+        assert!(!object_ids.contains(&unknown.id));
+    }
+
+    #[test]
+    fn agent_observation_excludes_unconfirmed_knows_edge() {
+        // Defense in depth: Knows is specified as always-confirmed by
+        // convention, but the exclusion path is still exercised in case a
+        // caller ever constructs one with status set anyway.
+        let (ledger, _dir) = temp_ledger();
+        let alice = obj("alice");
+        let maybe_known = obj("maybe-known-thing");
+        ledger.append_object(&alice).unwrap();
+        ledger.append_object(&maybe_known).unwrap();
+        let mut unconfirmed_knows = knows(alice.id, maybe_known.id);
+        unconfirmed_knows
+            .properties
+            .insert("status".into(), serde_json::json!("unconfirmed"));
+        ledger.append_relationship(&unconfirmed_knows).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let observation = rt.agent_observation(&alice.id, None).unwrap();
+        let object_ids: Vec<KirId> = observation.objects.iter().map(|o| o.id).collect();
+        assert!(!object_ids.contains(&maybe_known.id));
+    }
+
+    #[test]
+    fn two_agents_with_different_knows_edges_observe_different_worlds() {
+        // The source document's own Alice/Bob/Charlie asymmetric-observation
+        // example, at the Runtime level.
+        let (ledger, _dir) = temp_ledger();
+        let alice = obj("alice");
+        let bob = obj("bob");
+        let theft_event = obj("theft-event"); // stand-in "thing that happened"
+        ledger.append_object(&alice).unwrap();
+        ledger.append_object(&bob).unwrap();
+        ledger.append_object(&theft_event).unwrap();
+        ledger
+            .append_relationship(&knows(alice.id, theft_event.id))
+            .unwrap();
+        // Bob has no Knows edge to the event at all.
+
+        let rt = Runtime::new(&ledger);
+        let alice_view = rt.agent_observation(&alice.id, None).unwrap();
+        let bob_view = rt.agent_observation(&bob.id, None).unwrap();
+
+        assert!(alice_view.objects.iter().any(|o| o.id == theft_event.id));
+        assert!(
+            !bob_view.objects.iter().any(|o| o.id == theft_event.id),
+            "Bob never gets what he didn't observe"
+        );
     }
 }

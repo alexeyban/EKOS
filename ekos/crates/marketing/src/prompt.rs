@@ -43,11 +43,32 @@ pub fn build_user_prompt(devlog: &DevlogSummary, config: &MarketingConfig) -> St
 
 /// Appended to the user prompt on a regeneration retry after `validate_tweet` rejects the
 /// first draft (RFC 0030's "Tweet too long → Regenerate" error-handling rule).
-pub fn build_retry_suffix(reason: &str) -> String {
-    format!(
-        "\n\nYour previous draft was rejected: {reason}. Write a new draft that fixes this \
-         while still following all the rules above."
-    )
+///
+/// For the too-long case specifically, trimming a word or two is not enough in practice —
+/// the model needs to be told the exact overage and shown the rejected draft, or it tends to
+/// shave off only a couple of characters and fail validation again.
+pub fn build_retry_suffix(reason: &str, previous_draft: &str) -> String {
+    if let Some(over_by) = overage_from_too_long_reason(reason, previous_draft) {
+        format!(
+            "\n\nYour previous draft was rejected: {reason}. It was {over_by} characters too \
+             long. Rewrite it substantially shorter (cut a clause or shorten the summary, not \
+             just a word or two) so the final tweet has clear margin under the 280 character \
+             limit. Previous draft for reference:\n{previous_draft}"
+        )
+    } else {
+        format!(
+            "\n\nYour previous draft was rejected: {reason}. Write a new draft that fixes this \
+             while still following all the rules above."
+        )
+    }
+}
+
+fn overage_from_too_long_reason(reason: &str, previous_draft: &str) -> Option<usize> {
+    if !reason.contains("maximum is 280") {
+        return None;
+    }
+    let len = previous_draft.trim().chars().count();
+    len.checked_sub(280).filter(|&over| over > 0)
 }
 
 #[cfg(test)]
@@ -93,7 +114,22 @@ mod tests {
 
     #[test]
     fn retry_suffix_carries_the_rejection_reason() {
-        let suffix = build_retry_suffix("tweet was 312 characters, max is 280");
+        let suffix = build_retry_suffix("tweet was 312 characters, max is 280", "some draft");
         assert!(suffix.contains("312 characters"));
+    }
+
+    #[test]
+    fn retry_suffix_states_exact_overage_for_too_long_drafts() {
+        let previous = "a".repeat(294);
+        let suffix = build_retry_suffix("tweet was 294 characters, maximum is 280", &previous);
+        assert!(suffix.contains("14 characters too long"));
+        assert!(suffix.contains(&previous));
+    }
+
+    #[test]
+    fn retry_suffix_falls_back_without_overage_for_other_rejections() {
+        let suffix = build_retry_suffix("tweet does not mention EKOS", "some draft");
+        assert!(!suffix.contains("too long"));
+        assert!(suffix.contains("does not mention EKOS"));
     }
 }
