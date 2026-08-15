@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
-Read `devlog_*.md` (root, numbered chronologically, `devlog_43.md` is latest) before starting
+Read `devlog_*.md` (root, numbered chronologically, `devlog_55.md` is latest) before starting
 non-trivial work: they are the project's long-term memory and record what shipped, why, and what
 was learned. `TODO.md` tracks the phase-by-phase roadmap; RFCs are split across two locations for
 historical reasons, not a meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -47,6 +47,8 @@ cargo run -p ekos -- marketing publish      # devlog -> tweet -> approval -> X (
 cargo run -p ekos -- mcp serve --workspace <dir>
 cargo run -p ekos -- docs generate --layout curated --output doc   # README/Architecture/API/
                                              # SequenceDiagrams + per-entity pages (RFC 0035/0037/0042)
+cargo run -p ekos -- simulate <scenario.yaml>       # World Engine: load + run a scenario (RFC 0047-0055)
+cargo run -p ekos -- replay <scenario.yaml>         # read back a previously recorded simulation, read-only
 ```
 
 CI (`.github/workflows/ci.yml`) runs build+test+clippy+fmt from `ekos/` and `cargo bench` from
@@ -86,6 +88,7 @@ verb is a compiler stage, run in that order, writing artifacts the next stage co
 | `docs-gen` | Deterministic Markdown/HTML rendering from the compiled ledger (RFC 0035) — `render_object_page` (`--layout objects`, one page per significant object) and `render_readme`/`render_architecture`/`render_api`/`render_sequence_diagrams` (`--layout curated`, RFC 0037/0042) — zero LLM calls; `--prose` (opt-in) is the one path that layers an LLM overview on top, via `ekos ask`'s own grounding+citation pipeline |
 | `dbt-gen` | Renders the Transformation IR (RFC 0027) into executable dbt SQL models with `ref()` semantics |
 | `marketing` | Devlog → tweet → human approval → X publish (RFC 0030) — auxiliary tooling outside the compiler pipeline, not a `CompilerPass`/`Observer` |
+| `simulation` | World Engine (RFC 0047-0055) — auxiliary, opt-in, deliberately separate from the compiler pipeline above: `action.rs`/`decision.rs`/`simulation.rs` (a closed 12-action vocabulary, a provider-independent `DecisionEngine` trait, a deterministic round-based loop with seeded priority/resource conflict resolution), `scenario.rs` (YAML scenario/agent definitions, `ekos simulate`'s loader), `forum.rs` (channels/replies/likes/follows/shares), `replay.rs` (a durable per-ledger event log + point-in-time reconstruction, `ekos replay`), `ingest.rs` (`world.sources`: real documents via the actual `localdocs` connector + `LocalDocAnalyzerPass`, no LLM). Writes through `&dyn KnowledgeStore` directly, the same access level `commit.rs` has — `Runtime` stays read-only throughout, unmodified by this crate. Every RFC in this crate builds additively on existing KIR/ledger primitives (`Custom()` escape hatches, `properties` conventions) rather than inventing new storage |
 | `cli` | `commands/` — one file per CLI subcommand, dispatched from `crates/cli/src/bin/ekos.rs`; also hosts the MCP server (`commands/mcp.rs`) |
 | `common` | Shared utilities — `ContentHash`, zstd compression, and `redaction` (RFC 0043: built-in, non-disable-able secrets/PII pattern table + excluded-file globs, the single module both `build.rs` and `recover.rs`'s direct-file-read blocks call before anything reaches the artifact store or ledger) |
 | `scheduler`, `sql-dialect-sdk` | Pass scheduling primitives; the `SqlDialectParser` trait every `plugins/sql-dialect-*` crate implements (RFC 0031) |

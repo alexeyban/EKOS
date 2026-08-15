@@ -91,8 +91,9 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 **Language:** Rust (2024 edition), Cargo workspace.
 
 **Crates (`ekos/crates/`):** `compiler-core`, `compiler-sdk`, `observation-sdk`, `artifact`, `kir`,
-`scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `marketing`, `common`,
-`cli`.
+`scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `marketing`, `docs-gen`,
+`dbt-gen`, `common`, `cli`, `demo-server`, and `simulation` (RFC 0047-0055's opt-in World Engine —
+see below).
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
 (PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), Pentaho Kettle (`.ktr`/`.kjb` —
