@@ -1,0 +1,30 @@
+[package]
+name = "ekos-clickhouse-query"
+description = "Live NL-to-SQL query engine over a compiled ClickHouse schema (RFC 0056, Stage 2)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-ledger.workspace = true
+ekos-runtime.workspace = true
+ekos-recovery.workspace = true
+ekos-common.workspace = true
+ekos-sql-dialect-sdk.workspace = true
+ekos-plugin-sql-dialect-clickhouse.workspace = true
+sqlparser.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+tempfile = "3"

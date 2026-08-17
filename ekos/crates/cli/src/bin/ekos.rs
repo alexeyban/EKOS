@@ -57,6 +57,12 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Live NL-to-SQL query engine over a compiled ClickHouse schema (RFC 0056)
+    #[command(name = "clickhouse")]
+    ClickHouse {
+        #[command(subcommand)]
+        subcommand: ClickHouseCommands,
+    },
     /// Run an Enterprise Knowledge Language query against the ledger
     Ekl {
         query: String,
@@ -211,6 +217,17 @@ enum McpCommands {
 }
 
 #[derive(Subcommand)]
+enum ClickHouseCommands {
+    /// Ask a natural-language question, answered by an LLM-built SQL query run live against
+    /// ClickHouse (SELECT-only, validated before execution — RFC 0056)
+    Ask {
+        question: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum IdentityCommands {
     /// Scan the ledger for candidate cross-system matches (e.g. Informix
     /// `cust_mstr` vs. Postgres `customers`); written as unconfirmed until
@@ -326,6 +343,11 @@ async fn main() -> Result<()> {
         Commands::Ask { question, json } => {
             ekos::commands::ask::run(&config, &cwd, &question, json).await
         }
+        Commands::ClickHouse { subcommand } => match subcommand {
+            ClickHouseCommands::Ask { question, json } => {
+                ekos::commands::clickhouse::ask(&config, &cwd, &question, json).await
+            }
+        },
         Commands::Ekl { query, json } => ekos::commands::ekl::run(&config, &cwd, &query, json),
         Commands::Diff { from, to } => ekos::commands::diff::run(&config, &cwd, from, to),
         Commands::Branch { subcommand } => match subcommand {
@@ -382,5 +404,27 @@ async fn main() -> Result<()> {
             round,
             ledger,
         } => ekos::commands::replay::run(&config, &cwd, &scenario, round, ledger),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// RFC 0056: clap auto-kebab-cases `ClickHouse` to `click-house` by default (splitting on
+    /// the internal case boundary) — every doc/README/RFC reference uses the one-word
+    /// `ekos clickhouse ask`, so the variant needs an explicit `#[command(name = "clickhouse")]`
+    /// override. Found live: `ekos clickhouse ask "..."` failed with "unrecognized subcommand
+    /// 'clickhouse'" (suggesting 'click-house') the first time this was actually run from a
+    /// shell, not caught by any unit test until this one was added.
+    #[test]
+    fn clickhouse_ask_parses_as_one_word_not_kebab_cased() {
+        let cli = Cli::try_parse_from(["ekos", "clickhouse", "ask", "how many orders?"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::ClickHouse {
+                subcommand: ClickHouseCommands::Ask { .. }
+            }
+        ));
     }
 }

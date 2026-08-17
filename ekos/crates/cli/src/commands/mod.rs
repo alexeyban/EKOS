@@ -3,6 +3,7 @@ pub mod ask;
 pub mod branch;
 pub mod build;
 pub mod clean;
+pub mod clickhouse;
 pub mod commit;
 pub mod compile;
 pub mod dbt;

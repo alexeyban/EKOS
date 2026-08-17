@@ -29,6 +29,7 @@ members = [
     "plugins/oracle",
     "plugins/fabric",
     "plugins/snowflake",
+    "plugins/clickhouse",
     "plugins/crypto",
     "plugins/github",
     "plugins/confluence",
@@ -40,6 +41,8 @@ members = [
     "plugins/sql-dialect-snowflake",
     "plugins/sql-dialect-databricks",
     "plugins/sql-dialect-mssql",
+    "plugins/sql-dialect-clickhouse",
+    "crates/clickhouse-query",
 ]
 
 [workspace.package]
@@ -66,6 +69,9 @@ ekos-plugin-sql-dialect-postgres = { path = "plugins/sql-dialect-postgres" }
 ekos-plugin-sql-dialect-snowflake = { path = "plugins/sql-dialect-snowflake" }
 ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks" }
 ekos-plugin-sql-dialect-mssql = { path = "plugins/sql-dialect-mssql" }
+ekos-plugin-sql-dialect-clickhouse = { path = "plugins/sql-dialect-clickhouse" }
+ekos-plugin-clickhouse = { path = "plugins/clickhouse" }
+ekos-clickhouse-query = { path = "crates/clickhouse-query" }
 ekos-recovery       = { path = "crates/recovery" }
 ekos-ekl       = { path = "crates/ekl" }
 ekos-marketing = { path = "crates/marketing" }

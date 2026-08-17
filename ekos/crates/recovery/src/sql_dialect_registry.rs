@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use ekos_plugin_sql_dialect_clickhouse::ClickHouseDialectParser;
 use ekos_plugin_sql_dialect_databricks::DatabricksDialectParser;
 use ekos_plugin_sql_dialect_mssql::MsSqlDialectParser;
 use ekos_plugin_sql_dialect_mysql::MySqlDialectParser;
@@ -52,6 +53,10 @@ pub fn build_dialect_registry() -> HashMap<String, Box<dyn SqlDialectParser>> {
     registry.insert("postgresql".to_string(), Box::new(PostgresDialectParser));
     registry.insert("snowflake".to_string(), Box::new(SnowflakeDialectParser));
     registry.insert("databricks".to_string(), Box::new(DatabricksDialectParser));
+    // RFC 0056: registered here for consistency with every other dialect (and for file-based
+    // `.sql` recovery against ClickHouse), but Stage 2's live query gate constructs
+    // `ClickHouseDialectParser` directly rather than looking it up here.
+    registry.insert("clickhouse".to_string(), Box::new(ClickHouseDialectParser));
     // Same alias set `sql_transform_analyzer.rs`'s old private `dialect_for` recognized —
     // preserved exactly so unifying both passes on this registry doesn't regress existing
     // `dialect = "mssql"`/`"tsql"`/`"synapse"` workspace configs.

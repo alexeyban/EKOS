@@ -67,7 +67,7 @@ pub fn handle_message(config: &EkosConfig, workspace: &Path, line: &str) -> Opti
     let response = match method {
         "initialize" => ok_response(id, initialize_result(&params)),
         "ping" => ok_response(id, json!({})),
-        "tools/list" => ok_response(id, json!({ "tools": tool_definitions() })),
+        "tools/list" => ok_response(id, json!({ "tools": tool_definitions(config) })),
         "tools/call" => ok_response(id, tools_call(config, workspace, &params)),
         other => error_response(id, -32601, &format!("method not found: {other}")),
     };
@@ -96,8 +96,34 @@ fn initialize_result(params: &Value) -> Value {
     })
 }
 
-fn tool_definitions() -> Value {
-    json!([
+/// RFC 0056: `ekos_clickhouse_query` is the one MCP tool that touches a live external system
+/// (every other tool reads only the local ledger). Off by default — only listed when
+/// `[clickhouse].enable-mcp-query = true` is set in `ekos.toml`, so a connected AI agent never
+/// gets live query access unless a human operator explicitly opts the workspace in.
+fn tool_definitions(config: &EkosConfig) -> Vec<Value> {
+    let mut tools = base_tool_definitions();
+    if config.clickhouse.enable_mcp_query {
+        tools.push(clickhouse_query_tool_definition());
+    }
+    tools
+}
+
+fn clickhouse_query_tool_definition() -> Value {
+    json!({
+        "name": "ekos_clickhouse_query",
+        "description": "Live NL-to-SQL query engine over the compiled ClickHouse schema (RFC 0056). Builds a SELECT-only SQL query from the question and the compiled schema, validates it (rejects anything but a single SELECT), runs it live against ClickHouse, and returns the resulting dataset. Unlike every other tool here, this reads a live external system, not just the local ledger — every call is recorded as an Evidence/Event pair in the ledger for audit.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": { "type": "string", "description": "Natural-language question to answer with a live ClickHouse query" }
+            },
+            "required": ["question"]
+        }
+    })
+}
+
+fn base_tool_definitions() -> Vec<Value> {
+    let tools = json!([
         {
             "name": "ekos_search",
             "description": "Full-text search over compiled knowledge objects — names, kinds, and content excerpts — ranked by relevance (name matches first). Use 2-3 keywords, not natural-language questions. Returns matching object ids and names; feed an id to ekos_state or ekos_neighborhood for detail.",
@@ -223,7 +249,8 @@ fn tool_definitions() -> Value {
                 "required": ["relationship_id", "decision"]
             }
         }
-    ])
+    ]);
+    tools.as_array().cloned().unwrap_or_default()
 }
 
 /// Execute a tools/call request. Tool failures (bad query, unknown id,
@@ -513,8 +540,53 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
                 "status": "recorded",
             }))
         }
+        "ekos_clickhouse_query" => {
+            // Defense-in-depth: re-check the gate even though an ungated server never lists
+            // this tool in `tools/list` — a client could still call it by name directly.
+            if !config.clickhouse.enable_mcp_query {
+                anyhow::bail!(
+                    "ekos_clickhouse_query is disabled — set [clickhouse].enable-mcp-query = true in ekos.toml to enable it"
+                );
+            }
+            let question = required_str(args, "question")?;
+            run_clickhouse_query_blocking(config, workspace, question)
+        }
         other => Err(anyhow::anyhow!("unknown tool: {other}")),
     }
+}
+
+/// Bridges `call_tool`'s synchronous context (the stdio serve loop is a blocking `for line in
+/// stdin.lock().lines()`, invoked directly inside `main`'s `#[tokio::main]` runtime, never
+/// spawned onto its own task) into `ekos_clickhouse_query::ask_clickhouse`'s async pipeline.
+/// Same `Handle::try_current()` branch RFC 0055's `ingest_sources` needed for the identical
+/// class of problem — calling `Runtime::block_on` from *inside* an already-running multi-thread
+/// runtime panics ("Cannot start a runtime from within a runtime"), so this bridges via
+/// `block_in_place` instead of assuming no runtime is active.
+fn run_clickhouse_query_blocking(
+    config: &EkosConfig,
+    workspace: &Path,
+    question: &str,
+) -> Result<Value> {
+    let answer = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| {
+            handle.block_on(super::clickhouse::run_query(config, workspace, question))
+        }),
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(super::clickhouse::run_query(config, workspace, question))
+        }
+    }?;
+
+    Ok(json!({
+        "sql": answer.sql,
+        "columns": answer.columns,
+        "rows": answer.rows,
+        "row_count": answer.row_count,
+        "summary": answer.summary,
+        "audit_event_id": answer.audit_event_id.to_string(),
+    }))
 }
 
 /// Walks a Transformation IR chain upstream from `id` (RFC 0027/0028): the
@@ -785,6 +857,49 @@ mod tests {
                 "every tool declares an object schema"
             );
         }
+    }
+
+    /// RFC 0056: `ekos_clickhouse_query` is the one MCP tool that touches a live external
+    /// system — it must be absent from `tools/list` unless a workspace explicitly opts in.
+    #[test]
+    fn clickhouse_query_tool_absent_without_opt_in() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &req(3, "tools/list", json!({}))).unwrap());
+        let tools = resp["result"]["tools"].as_array().unwrap();
+        assert!(
+            tools.iter().all(|t| t["name"] != "ekos_clickhouse_query"),
+            "ekos_clickhouse_query must not be listed with the flag unset"
+        );
+    }
+
+    #[test]
+    fn clickhouse_query_tool_present_with_opt_in() {
+        let mut config = EkosConfig::default();
+        config.clickhouse.enable_mcp_query = true;
+        let tmp = tempfile::tempdir().unwrap();
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &req(3, "tools/list", json!({}))).unwrap());
+        let tools = resp["result"]["tools"].as_array().unwrap();
+        assert!(
+            tools.iter().any(|t| t["name"] == "ekos_clickhouse_query"),
+            "ekos_clickhouse_query must be listed once [clickhouse].enable-mcp-query = true"
+        );
+    }
+
+    /// Defense-in-depth: calling the tool by name directly (bypassing `tools/list`) must still
+    /// be rejected when the gate is off, not merely hidden from discovery.
+    #[test]
+    fn clickhouse_query_call_rejected_when_gate_is_off() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let params = json!({ "name": "ekos_clickhouse_query", "arguments": { "question": "how many orders?" } });
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &req(4, "tools/call", params)).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("disabled"), "unexpected message: {text}");
     }
 
     #[test]

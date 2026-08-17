@@ -22,6 +22,7 @@ ekos-runtime.workspace = true
 ekos-simulation.workspace = true
 ekos-observation-sdk.workspace = true
 ekos-recovery.workspace = true
+ekos-clickhouse-query.workspace = true
 ekos-identity.workspace = true
 ekos-ekl.workspace = true
 ekos-marketing.workspace = true
@@ -33,6 +34,7 @@ ekos-plugin-git  = { path = "../../plugins/git" }
 ekos-plugin-crypto = { path = "../../plugins/crypto" }
 ekos-plugin-github = { path = "../../plugins/github" }
 ekos-plugin-confluence = { path = "../../plugins/confluence" }
+ekos-plugin-clickhouse.workspace = true
 ekos-plugin-localdocs = { path = "../../plugins/localdocs" }
 ekos-plugin-pentaho = { path = "../../plugins/pentaho" }
 ekos-plugin-python = { path = "../../plugins/python" }

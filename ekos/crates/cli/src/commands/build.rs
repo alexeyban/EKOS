@@ -4,6 +4,7 @@ use ekos_artifact::{ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
+use ekos_plugin_clickhouse::{ClickHouseHttpClient, ClickHouseObserver};
 use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
 use ekos_plugin_file::FileObserver;
@@ -43,6 +44,17 @@ const GITHUB_TOKEN_ENV: &str = "EKOS_GITHUB_TOKEN";
 const CONFLUENCE_BASE_URL_ENV: &str = "EKOS_CONFLUENCE_BASE_URL";
 const CONFLUENCE_SPACE_ENV: &str = "EKOS_CONFLUENCE_SPACE";
 const CONFLUENCE_TOKEN_ENV: &str = "EKOS_CONFLUENCE_TOKEN";
+
+/// Env vars naming the ClickHouse HTTP endpoint/database to observe (RFC 0056). URL and
+/// database must both be set — the observer is only added when they are; their absence is a
+/// normal state (most workspaces have no ClickHouse database configured), same soft-skip as the
+/// crypto/GitHub/Confluence connectors above. `EKOS_CLICKHOUSE_USER`/`EKOS_CLICKHOUSE_PASSWORD`
+/// are optional — a server with no auth configured (common for local/dev ClickHouse) works with
+/// empty credentials.
+const CLICKHOUSE_URL_ENV: &str = "EKOS_CLICKHOUSE_URL";
+const CLICKHOUSE_DATABASE_ENV: &str = "EKOS_CLICKHOUSE_DATABASE";
+const CLICKHOUSE_USER_ENV: &str = "EKOS_CLICKHOUSE_USER";
+const CLICKHOUSE_PASSWORD_ENV: &str = "EKOS_CLICKHOUSE_PASSWORD";
 
 /// Load the `.ekos/fingerprints.json` map of observe-path → last-seen source fingerprint.
 fn load_fingerprints(path: &Path) -> HashMap<String, String> {
@@ -128,6 +140,23 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         _ => {
             tracing::debug!(
                 "{CONFLUENCE_BASE_URL_ENV}/{CONFLUENCE_SPACE_ENV} not set — confluence connector skipped (RFC 0022)"
+            );
+        }
+    }
+    match (
+        std::env::var(CLICKHOUSE_URL_ENV),
+        std::env::var(CLICKHOUSE_DATABASE_ENV),
+    ) {
+        (Ok(url), Ok(database)) => {
+            let user = std::env::var(CLICKHOUSE_USER_ENV).unwrap_or_default();
+            let password = std::env::var(CLICKHOUSE_PASSWORD_ENV).unwrap_or_default();
+            observers.push(Box::new(ClickHouseObserver::new(Arc::new(
+                ClickHouseHttpClient::new(url, user, password, database),
+            ))));
+        }
+        _ => {
+            tracing::debug!(
+                "{CLICKHOUSE_URL_ENV}/{CLICKHOUSE_DATABASE_ENV} not set — clickhouse connector skipped (RFC 0056)"
             );
         }
     }

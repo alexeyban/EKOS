@@ -6,13 +6,13 @@ use ekos_compiler_core::{
     scheduler::FailureMode,
 };
 use ekos_recovery::{
-    CicdAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
-    DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass, DocumentSemanticsStats,
-    GitAnalyzerPass, GitHubAnalyzerPass, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
-    OpenAiProvider, PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass, PythonStats,
-    RustAnalyzerPass, RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
-    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
-    llm::LlmProvider, resolve_dialect_name,
+    CicdAnalyzerPass, ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass,
+    CryptoAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
+    DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass, LocalDocAnalyzerPass,
+    MockLlmProvider, OllamaProvider, OpenAiProvider, PentahoAnalyzerPass, PentahoStats,
+    PythonAnalyzerPass, PythonStats, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
+    SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
+    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -273,6 +273,20 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(confluence_pass));
     }
 
+    // ── ClickHouse table artifacts (RFC 0056) ────────────────────────────
+    let clickhouse_artifact_ids = collect_clickhouse_artifact_ids(&*artifact_store);
+    let clickhouse_table_count = clickhouse_artifact_ids.len();
+    if !clickhouse_artifact_ids.is_empty() {
+        let clickhouse_pass = ClickHouseAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            clickhouse_artifact_ids,
+        );
+        pass_manager.register(Box::new(clickhouse_pass));
+    }
+
     // ── Local document artifacts (RFC 0023) ──────────────────────────────
     let localdocs_artifact_ids = collect_localdocs_artifact_ids(&*artifact_store);
     let localdocs_count = localdocs_artifact_ids.len();
@@ -456,7 +470,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
 
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, or CI/CD workflows found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, or CI/CD workflows found)."
         );
         return Ok(());
     }
@@ -492,6 +506,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
     if confluence_page_count > 0 {
         println!("  Confluence pages analysed: {confluence_page_count}");
+    }
+    if clickhouse_table_count > 0 {
+        println!("  ClickHouse tables analysed: {clickhouse_table_count}");
     }
     if localdocs_count > 0 {
         println!("  Local documents analysed: {localdocs_count}");
@@ -638,6 +655,27 @@ fn collect_github_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
                 .ok()
                 .flatten()
                 .is_some_and(|json| json["connector_name"].as_str() == Some("github"))
+        })
+        .collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
+/// Collect ArtifactIds for every ClickHouse table artifact currently in the store (RFC 0056).
+fn collect_clickhouse_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("clickhouse"))
         })
         .collect();
     ids.sort_by_key(|id| id.to_string());

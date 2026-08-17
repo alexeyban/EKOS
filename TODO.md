@@ -2189,6 +2189,46 @@ These items have no single phase — they must be maintained and grown throughou
     baseline only); incremental/cached re-ingestion (every scenario load re-runs the pipeline
     fresh, matching RFC 0051's existing posture for agents/relationships).
 
+- [x] **RFC 0056 — ClickHouse Connector: Compiled Metadata + Live NL-to-SQL Query Engine**
+  - *What:* User request: EKOS+AI answering natural-language questions with an LLM-built SQL query
+    run live against ClickHouse, grounded in EKOS's own compiled metadata. Checked against EKOS's
+    own stated invariant ("AI systems consume knowledge through the Runtime only... they never
+    touch raw enterprise systems directly") before designing — no MCP tool, `AiRuntime`, or
+    connector in this codebase had ever crossed that line before. Split into two stages: Stage 1
+    (`ekos-plugin-clickhouse` + `ClickHouseAnalyzerPass`) compiles ClickHouse table/column metadata
+    into real `ObjectKind::Table` KIR objects — closing the exact `build.rs`/`recover.rs` wiring gap
+    the RFC 0012 Snowflake/Oracle scaffolds never closed — with zero invariant risk. Stage 2
+    (`ekos-clickhouse-query`) is the new auxiliary crate that actually crosses the line: a
+    six-stage question -> compiled-schema-context -> LLM-built SQL -> SELECT-only validation
+    (`ekos-plugin-sql-dialect-clickhouse`, wrapping the real `sqlparser::dialect::ClickHouseDialect`)
+    -> live execution -> redacted, audited dataset pipeline. Exposed via `ekos clickhouse ask`
+    (always available) and a gated `ekos_clickhouse_query` MCP tool (off by default, only listed
+    once `[clickhouse].enable-mcp-query = true` is set in `ekos.toml`). See
+    `ekos/docs/rfcs/0056-clickhouse-connector.md` and `devlog_56.md`.
+  - *Output:* New crates `plugins/clickhouse`, `plugins/sql-dialect-clickhouse`,
+    `crates/clickhouse-query`; `crates/recovery/src/clickhouse_analyzer.rs`; CLI/MCP wiring;
+    `[clickhouse]` config section.
+  - *Status:* Done. The key design decision — reusing `ObjectKind::Table` instead of a new
+    `Custom("ClickHouseTable")` kind — was found by reading `identity::structural_score`'s actual
+    comparison logic before designing: it already compares same-kind objects' `columns` property
+    via Jaccard overlap, so reusing `Table` gets real cross-system identity resolution for free
+    instead of needing the same blanket-exclusion treatment `Section`/`TransformNode`/etc. needed.
+    The MCP tool's sync-to-async bridge reused RFC 0055's exact `Handle::try_current()` +
+    `block_in_place` pattern (`ekos mcp serve`'s stdio loop runs inside `#[tokio::main]`, never
+    spawned onto its own task) — recognized immediately from the prior devlog rather than
+    rediscovered by a live panic.
+  - *Test/Validate:* 60+ new tests across the new/touched crates (plugin: 6, dialect: 4, analyzer:
+    4, clickhouse-query: 16, config: 2, mcp gating: 3, plus existing-suite regressions), all
+    passing; full workspace `cargo build/test/clippy/fmt` clean, including the separate
+    `benchmark/` and `tests/integration/` workspaces.
+  - *Explicitly not done, per the RFC's own Non-goals and named as an open acceptance criterion:*
+    live verification of `ekos clickhouse ask`/the HTTP clients against a real ClickHouse instance
+    — needs an explicit decision to launch a local ClickHouse container (new environment
+    dependency, outside this session's default sandbox); write access to ClickHouse; cross-source
+    joins in one live query; result streaming/pagination beyond a `LIMIT` cap; a multi-turn
+    clarification loop; automatic row-level ledgering; LLM-based business-meaning enrichment of
+    ClickHouse table/column names (the `sql_analyzer.rs`-style optional second stage).
+
 - [ ] **`ai.rs::extract_citations` can't distinguish "cited nothing" from "nothing to cite"**
   - *What:* Found live-testing RFC 0046 against real OpenAI responses (devlog_46): when the
     trailing `{"cited_evidence": [...]}` block parses as valid JSON but the array is empty,

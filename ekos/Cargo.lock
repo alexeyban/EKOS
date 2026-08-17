@@ -783,6 +783,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "ekos-artifact",
+ "ekos-clickhouse-query",
  "ekos-common",
  "ekos-compiler-core",
  "ekos-dbt-gen",
@@ -793,6 +794,7 @@ dependencies = [
  "ekos-ledger",
  "ekos-marketing",
  "ekos-observation-sdk",
+ "ekos-plugin-clickhouse",
  "ekos-plugin-confluence",
  "ekos-plugin-crypto",
  "ekos-plugin-file",
@@ -833,6 +835,32 @@ dependencies = [
  "tracing",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "ekos-clickhouse-query"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ekos-common",
+ "ekos-kir",
+ "ekos-ledger",
+ "ekos-plugin-sql-dialect-clickhouse",
+ "ekos-recovery",
+ "ekos-runtime",
+ "ekos-sql-dialect-sdk",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlparser",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1017,6 +1045,22 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "ekos-plugin-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1261,6 +1305,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-sql-dialect-databricks"
 version = "0.1.0"
 dependencies = [
@@ -1311,6 +1363,7 @@ dependencies = [
  "ekos-common",
  "ekos-compiler-core",
  "ekos-kir",
+ "ekos-plugin-sql-dialect-clickhouse",
  "ekos-plugin-sql-dialect-databricks",
  "ekos-plugin-sql-dialect-mssql",
  "ekos-plugin-sql-dialect-mysql",

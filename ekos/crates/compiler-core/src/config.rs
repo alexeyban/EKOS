@@ -20,6 +20,8 @@ pub struct EkosConfig {
     pub recover: RecoverConfig,
     #[serde(default)]
     pub security: SecurityConfig,
+    #[serde(default)]
+    pub clickhouse: ClickHouseConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,6 +222,20 @@ pub struct TwitterConfig {
     pub dry_run: bool,
 }
 
+/// RFC 0056: gating for the live ClickHouse NL-to-SQL query engine's MCP exposure. `[clickhouse]`
+/// in `ekos.toml`. Off by default — omitting the section (or `enable-mcp-query`) means `ekos mcp
+/// serve` never advertises the `ekos_clickhouse_query` tool, even though `ekos clickhouse ask`
+/// always works from the CLI regardless of this flag. Every existing MCP tool reads only the
+/// local ledger; this one hits a live external system, so — unlike `[document-semantics]`'s
+/// LLM-cost gate — this flag exists purely to control blast radius to connected AI agents, not
+/// cost.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ClickHouseConfig {
+    #[serde(default)]
+    pub enable_mcp_query: bool,
+}
+
 #[allow(clippy::derivable_impls)]
 impl Default for EkosConfig {
     fn default() -> Self {
@@ -232,6 +248,7 @@ impl Default for EkosConfig {
             marketing: MarketingConfig::default(),
             recover: RecoverConfig::default(),
             security: SecurityConfig::default(),
+            clickhouse: ClickHouseConfig::default(),
         }
     }
 }
@@ -395,6 +412,21 @@ dialect = "postgres"
         );
         assert_eq!(cfg.recover.sql.dialect_rules[0].dialect, "mysql");
         assert_eq!(cfg.recover.sql.dialect_rules[1].dialect, "postgres");
+    }
+
+    /// RFC 0056: MCP exposure of the live ClickHouse query tool is off unless a config
+    /// explicitly opts in, even if the `[clickhouse]` table is entirely absent from `ekos.toml`.
+    #[test]
+    fn clickhouse_mcp_query_defaults_to_disabled() {
+        assert!(!EkosConfig::default().clickhouse.enable_mcp_query);
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert!(!cfg.clickhouse.enable_mcp_query);
+    }
+
+    #[test]
+    fn clickhouse_mcp_query_parses_from_kebab_case_table() {
+        let cfg: EkosConfig = toml::from_str("[clickhouse]\nenable-mcp-query = true\n").unwrap();
+        assert!(cfg.clickhouse.enable_mcp_query);
     }
 
     #[test]

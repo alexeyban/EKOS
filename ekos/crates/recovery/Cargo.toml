@@ -33,6 +33,7 @@ ekos-plugin-sql-dialect-postgres.workspace = true
 ekos-plugin-sql-dialect-snowflake.workspace = true
 ekos-plugin-sql-dialect-databricks.workspace = true
 ekos-plugin-sql-dialect-mssql.workspace = true
+ekos-plugin-sql-dialect-clickhouse.workspace = true
 glob.workspace = true
 toml.workspace = true
 serde_yaml.workspace = true

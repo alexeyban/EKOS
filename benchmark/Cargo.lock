@@ -585,6 +585,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-clickhouse"
+version = "0.1.0"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-sql-dialect-databricks"
 version = "0.1.0"
 dependencies = [
@@ -635,6 +643,7 @@ dependencies = [
  "ekos-common",
  "ekos-compiler-core",
  "ekos-kir",
+ "ekos-plugin-sql-dialect-clickhouse",
  "ekos-plugin-sql-dialect-databricks",
  "ekos-plugin-sql-dialect-mssql",
  "ekos-plugin-sql-dialect-mysql",

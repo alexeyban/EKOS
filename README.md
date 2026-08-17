@@ -77,7 +77,7 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 - The **Observation Layer** collects facts only — it never interprets business meaning.
 - The **ledger is append-only** — knowledge is never modified in place.
 - The **Runtime is read-only** — it reconstructs and interprets state, never modifies it.
-- **AI systems** consume reconstructed knowledge through the Runtime; they never touch raw enterprise systems directly.
+- **AI systems** consume reconstructed knowledge through the Runtime; they never touch raw enterprise systems directly. The one explicit, scoped, audited exception is the gated `ekos_clickhouse_query` MCP tool (RFC 0056, off by default) — see below.
 - Every compiler pass is **deterministic** and **side-effect-free**.
 - Every artifact is **content-addressable** (id + checksum + metadata + dependencies + version).
 - **Secrets and PII are never observed or stored** (RFC 0043) — a built-in baseline redacts known
@@ -92,16 +92,17 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 **Crates (`ekos/crates/`):** `compiler-core`, `compiler-sdk`, `observation-sdk`, `artifact`, `kir`,
 `scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `marketing`, `docs-gen`,
-`dbt-gen`, `common`, `cli`, `demo-server`, and `simulation` (RFC 0047-0055's opt-in World Engine —
-see below).
+`dbt-gen`, `common`, `cli`, `demo-server`, `simulation` (RFC 0047-0055's opt-in World Engine — see
+below), and `clickhouse-query` (RFC 0056's opt-in live NL-to-SQL query engine — see below).
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
 (PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), Pentaho Kettle (`.ktr`/`.kjb` —
 RFC 0027), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
 Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
-RFC 0041), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP,
-Oracle, Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against
-a live account). PostgreSQL, SQL Server, and Jira remain planned.
+RFC 0041), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
+0056), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
+Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
+account). PostgreSQL, SQL Server, and Jira remain planned.
 
 ## Installation
 
@@ -294,8 +295,9 @@ server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl`, `ekos_neighbo
 kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_diff` (what changed since T),
 `ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
 explanation and migration diffing — RFC 0028), and `ekos_identity_review` (confirm/reject a
-cross-system identity match — RFC 0029, the one write-capable tool; every other tool is read-only).
-Connect Claude Code with:
+cross-system identity match — RFC 0029, the one write-capable tool; every other tool reads only the
+local ledger). A gated `ekos_clickhouse_query` tool (RFC 0056) is also available, off by default —
+see the ClickHouse connector section below. Connect Claude Code with:
 
 ```bash
 claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace
@@ -356,6 +358,40 @@ different target explicitly, including the real workspace ledger, if a caller wa
 This is a distinct capability from the "compiler for enterprise knowledge" positioning above, not
 a replacement for it — kept intentionally separate rather than blended into one pitch. Whether it
 grows into its own product surface is an open question, still being decided one RFC at a time.
+
+### ClickHouse connector (RFC 0056)
+
+Two independent pieces. **Compiled metadata** — `ekos build`/`ekos recover` observe a configured
+ClickHouse database's `system.tables`/`system.columns` (via ClickHouse's stock HTTP interface, no
+native driver) and compile every table into a real `KirObject(ObjectKind::Table)`, searchable
+through `ekos_search`/`ekos ekl` and cross-system identity-resolvable against same-named tables
+elsewhere in the estate, the same way file-based SQL recovery already is:
+
+```bash
+export EKOS_CLICKHOUSE_URL=http://localhost:8123
+export EKOS_CLICKHOUSE_DATABASE=analytics
+export EKOS_CLICKHOUSE_USER=default        # optional
+export EKOS_CLICKHOUSE_PASSWORD=            # optional
+ekos build && ekos recover
+```
+
+**Live NL-to-SQL query** — the one path in EKOS that intentionally crosses the Key Invariant above:
+an LLM builds a ClickHouse `SELECT` from the compiled schema and the question, the generated SQL is
+parsed and hard-rejected unless it's exactly one `SELECT` (no writes, no multi-statement batches),
+then it's run live, redacted, and returned — every call is recorded as an Evidence/Event pair in the
+ledger for audit, though the row data itself is never ledgered:
+
+```bash
+ekos clickhouse ask "how many orders were placed last week?"
+```
+
+This CLI command is always available. The matching `ekos_clickhouse_query` MCP tool is **off by
+default** — `ekos mcp serve` only lists it once a workspace explicitly opts in:
+
+```toml
+[clickhouse]
+enable-mcp-query = true
+```
 
 ### Demo: skills + custom subagents
 
