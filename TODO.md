@@ -2220,11 +2220,19 @@ These items have no single phase — they must be maintained and grown throughou
   - *Test/Validate:* 60+ new tests across the new/touched crates (plugin: 6, dialect: 4, analyzer:
     4, clickhouse-query: 16, config: 2, mcp gating: 3, plus existing-suite regressions), all
     passing; full workspace `cargo build/test/clippy/fmt` clean, including the separate
-    `benchmark/` and `tests/integration/` workspaces.
-  - *Explicitly not done, per the RFC's own Non-goals and named as an open acceptance criterion:*
-    live verification of `ekos clickhouse ask`/the HTTP clients against a real ClickHouse instance
-    — needs an explicit decision to launch a local ClickHouse container (new environment
-    dependency, outside this session's default sandbox); write access to ClickHouse; cross-source
+    `benchmark/` and `tests/integration/` workspaces. **Live verification against a real
+    ClickHouse instance done in a follow-up session** (the one acceptance criterion left open
+    above): a dedicated `clickhouse/clickhouse-server:24-alpine` container, seeded with real
+    tables/rows, exercised end to end — `build`/`recover`/`resolve`/`compile`/`commit` correctly
+    compiled both tables with correct columns/evidence and made them `ekos query find`-able;
+    `ekos clickhouse ask` (local Ollama `qwen2.5:1.5b`) answered single-table questions correctly
+    against the seed data; a weak-model multi-table join hallucination was cleanly rejected by
+    ClickHouse and surfaced as a pipeline error rather than a crash; the audit trail showed exactly
+    one ledger Event/Evidence pair per successful query and none for failed ones; the MCP gate was
+    confirmed in both directions over a real stdio JSON-RPC session (tool listed+callable with
+    `enable-mcp-query = true`, absent+rejected-by-name otherwise). See
+    `ekos/docs/rfcs/0056-clickhouse-connector.md`'s now-checked Acceptance Criteria.
+  - *Explicitly not done, per the RFC's own Non-goals:* write access to ClickHouse; cross-source
     joins in one live query; result streaming/pagination beyond a `LIMIT` cap; a multi-turn
     clarification loop; automatic row-level ledgering; LLM-based business-meaning enrichment of
     ClickHouse table/column names (the `sql_analyzer.rs`-style optional second stage).

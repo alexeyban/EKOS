@@ -121,6 +121,40 @@ results never touch the ledger as row data at all — they flow straight back to
 them, the first redaction call site in this codebase that scrubs *outbound* data rather than
 inbound.
 
+### Live verification (follow-up, same day)
+
+The RFC's one open acceptance criterion — "verified live against a real ClickHouse instance" —
+was closed in a follow-up session the same day. A dedicated `clickhouse/clickhouse-server:24-alpine`
+container was launched on an isolated port (unrelated pre-existing ClickHouse containers from
+another project were already running on the default 8123/9000 and left untouched), seeded with two
+real tables (`orders`, `customers`) and rows.
+
+Full pipeline exercised end to end against it: `ekos build` → `recover` → `resolve` → `compile` →
+`commit` correctly compiled both tables into real `ObjectKind::Table` KIR objects with correct
+`properties["columns"]`/engine/evidence, found via `ekos query find`/`ekos query object`. `ekos
+clickhouse ask` (using a local Ollama `qwen2.5:1.5b` model, since no Anthropic/OpenAI key was
+configured in this environment) answered single-table questions correctly, checked against the
+actual seed data rather than just "didn't crash" (e.g. "how many orders have status shipped?" →
+`SELECT COUNT(order_id) ... WHERE status = 'shipped'` → `3`, matching the fixture). A multi-table
+join question exposed the small model's weakness — it hallucinated a nonexistent regex comparison
+and, separately, an unqualified column — and ClickHouse's own parser correctly rejected both; the
+pipeline surfaced the real `DB::Exception` cleanly rather than crashing or silently returning a
+wrong answer, which is itself the correct behavior to observe. The audit trail was confirmed real
+against the live ledger (not just unit-tested): exactly one `event`/`evidence` pair was recorded
+per *successful* query (3 recorded), and the 2 failed join attempts correctly left no ledger trace,
+since `record_query_event` only runs after execution succeeds. The MCP gate was verified in both
+directions over an actual stdio JSON-RPC session (not a mocked `call_tool` invocation): with
+`[clickhouse].enable-mcp-query = true`, `ekos_clickhouse_query` appeared in `tools/list` and
+answered correctly when called; with the flag unset in a second workspace, the tool was absent from
+`tools/list` and a direct by-name call was rejected with the expected error text.
+
+One pre-existing, unrelated gap surfaced along the way: `OllamaProvider::from_env()`
+(`crates/recovery/src/ollama.rs`) reads the model name only from the `OLLAMA_MODEL` env var
+(hardcoded default `llama3.1:8b`) and never from `[llm].model` in `ekos.toml`, unlike every other
+provider path in this codebase. Worked around via env var for this session; not fixed, since it's
+orthogonal to RFC 0056 and outside this session's scope — noted here so it isn't rediscovered from
+scratch.
+
 ### Decisions (alternatives considered, why this choice)
 
 - **Fetching ClickHouse metadata live on every question, never ledgered** — rejected per the
@@ -141,6 +175,18 @@ inbound.
 
 ## Knowledge Captured
 
+- **`OllamaProvider::from_env()` (`crates/recovery/src/ollama.rs`) ignores `[llm].model` in
+  `ekos.toml` and only reads `OLLAMA_MODEL`, defaulting to `llama3.1:8b` if unset** — every other
+  provider path in this codebase (Anthropic, OpenAI) respects config first. Discovered live-testing
+  RFC 0056 against an environment with only `qwen2.5:1.5b` pulled locally; worked around with
+  `OLLAMA_MODEL=qwen2.5:1.5b`, not fixed (out of RFC 0056's scope). Anyone testing an Ollama-backed
+  path in this repo should set the env var, not just `ekos.toml`.
+- **When a project's stated "don't claim more than is true" convention leaves an acceptance
+  criterion explicitly unchecked for lack of a live dependency (here: a ClickHouse container), that
+  criterion is real debt, not decoration** — closing it here caught a config gap
+  (`OllamaProvider`'s env-only model selection) that no amount of additional unit testing against
+  mocks would have surfaced, consistent with this project's RFC 0054/0055 experience that live CLI
+  verification finds bugs `cargo test --workspace` alone does not.
 - **When a new object kind needs an identity-resolution decision, read `structural_score`'s actual
   comparison logic before assuming a blanket exclusion is needed.** The exclusion list
   (`Section`/`TransformNode`/`RustSymbol`/`RustModule`/`PythonSymbol`/`PythonModule`/`Crate`) exists

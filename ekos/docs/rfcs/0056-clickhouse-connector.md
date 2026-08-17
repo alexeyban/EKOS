@@ -283,13 +283,20 @@ exists anywhere today, and this RFC doesn't introduce one.
       defense-in-depth rejection test for calling the tool by name with the gate off.
 - [x] Full workspace `cargo build/test/clippy/fmt` clean, including the separate `benchmark/` and
       `tests/integration/` workspaces.
-- [ ] **`ekos clickhouse ask` verified live against a real ClickHouse instance.** Not done this
-      session — `ClickHouseHttpClient`/`ClickHouseHttpQueryClient` are written to ClickHouse's
-      documented HTTP interface and `system.tables`/`system.columns` schema (same "real client,
-      never run against a live server" posture RFC 0012 used for Snowflake/Fabric/SAP) but a
-      local ClickHouse container needs an explicit decision to launch (new environment
-      dependency, outside this session's default sandbox) — named explicitly rather than silently
-      claimed, per this project's established "don't claim more than is true" convention.
+- [x] **`ekos clickhouse ask` verified live against a real ClickHouse instance.** Done in a
+      follow-up session: `clickhouse/clickhouse-server:24-alpine` launched in a dedicated Docker
+      container (isolated port, alongside unrelated pre-existing ClickHouse containers from
+      another project), seeded with two real tables and rows. Full pipeline run against it:
+      `ekos build`/`recover`/`resolve`/`compile`/`commit` compiled both tables into real
+      `ObjectKind::Table` KIR objects, found via `ekos query find`, with correct
+      `properties["columns"]`/evidence. `ekos clickhouse ask` (local Ollama `qwen2.5:1.5b` as the
+      LLM) answered single-table questions correctly (verified against the seed data, not just
+      "didn't crash"); a weak-model multi-table join hallucination was correctly rejected by
+      ClickHouse itself and surfaced as a clean pipeline error rather than a crash or silent wrong
+      answer. Audit trail confirmed real against the live ledger: exactly one Event/Evidence pair
+      per successful query, none for the failed ones. MCP gate verified in both directions over
+      the actual stdio JSON-RPC loop: `ekos_clickhouse_query` present in `tools/list` and callable
+      with `enable-mcp-query = true`, absent from the list and rejected by direct name otherwise.
 
 ## Files Changed
 
