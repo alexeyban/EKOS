@@ -393,6 +393,9 @@ default** — `ekos mcp serve` only lists it once a workspace explicitly opts in
 enable-mcp-query = true
 ```
 
+Deck, verified live against a real ClickHouse container: [ClickHouse: Compiled Metadata + Live
+NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html).
+
 ### Demo: skills + custom subagents
 
 `demo/` contains a rehearsable, twelve-act demo of EKOS's Claude Code integration, run against
@@ -468,6 +471,7 @@ Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presen
 
 - [Claude Code + EKOS](https://alexeyban.github.io/EKOS/presentations/claude-code-with-ekos.html) — how Claude Code searches and analyzes a codebase through EKOS's MCP server instead of raw grep/Read, with a measured with-vs-without comparison and real token/usage numbers.
 - [The AI-Native Enterprise Knowledge Compiler](https://alexeyban.github.io/EKOS/presentations/ai-native-knowledge-compiler-pitch.html) — the startup pitch, audited live by Claude Code using EKOS's own MCP server.
+- [ClickHouse: Compiled Metadata + Live NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html) — the one explicit, audited exception to "AI never touches raw enterprise systems directly," verified live against a real ClickHouse container, honest failures included.
 - [Vision & Token Utility](https://alexeyban.github.io/EKOS/presentations/vision-and-token-utility.html) — why the EKOS token's relevance is designed to grow as a consequence of platform adoption, not a promise of price.
 
 See [alexeyban.github.io/EKOS/presentations.html](https://alexeyban.github.io/EKOS/presentations.html) for the full list.

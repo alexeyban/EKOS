@@ -1,0 +1,15 @@
+$ ekos query find "orders"
+1 result(s) for 'orders':
+  d86ccb36-b2fa-535a-a597-8437fbd91e4a  ekos_test.orders
+
+$ ekos query object d86ccb36-b2fa-535a-a597-8437fbd91e4a
+Object: ekos_test.orders (Table)
+  ID:   d86ccb36-b2fa-535a-a597-8437fbd91e4a
+  Properties:
+    source_system: "clickhouse"
+    engine: "MergeTree"
+    columns: [{"data_type":"UInt64","name":"order_id"},{"data_type":"String","name":"customer_name"},{"data_type":"Decimal(10, 2)","name":"amount"},{"data_type":"String","name":"status"},{"data_type":"DateTime","name":"created_at"}]
+    order_by: ["order_id"]
+    partition_by: []
+  Evidence:
+    [100%] clickhouse:ekos_test.orders — "table ekos_test.orders observed via ClickHouse system.tables/system.columns"

@@ -1,0 +1,33 @@
+$ export EKOS_CLICKHOUSE_URL=http://localhost:8125
+$ export EKOS_CLICKHOUSE_DATABASE=ekos_test
+$ export EKOS_CLICKHOUSE_USER=ekos
+$ export EKOS_CLICKHOUSE_PASSWORD=ekospass
+
+$ ekos build
+Build complete.
+  Files observed (new): 1
+  Total objects in ledger: 1
+  Connectors re-scanned: 7
+  Snapshot: .ekos/snapshots/20260817T200146Z.json.zst
+
+$ ekos recover
+INFO ekos::commands::recover: using local Ollama provider with disk cache
+INFO ekos_compiler_core::pass: running pass pass=clickhouse-analyzer:ch-test-workspace
+INFO ekos_recovery::clickhouse_analyzer: clickhouse-analyzer complete pass=clickhouse-analyzer:ch-test-workspace tables=2
+Recover complete.
+  SQL files analysed: 0
+  Git commits analysed: 0
+  ClickHouse tables analysed: 2
+  Passes run: 1
+
+$ ekos resolve && ekos compile && ekos commit
+Loaded 1 knowledge artifact(s) -> 2 objects, 0 relationships
+No merge proposals (all objects appear to be unique).
+INFO ekos_semantic: identity resolution complete proposals=0 conflicts=0
+INFO ekos_semantic: CKM written objects=2 relationships=0 path=.ekos/ckm/model.json.zst
+Commit complete.
+  Objects written:       2
+  Objects skipped:       0 (already in ledger)
+  Relationships written: 0
+  Evidence records:      2
+  Ledger:                .ekos/ledger/ledger.db

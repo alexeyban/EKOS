@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickHouse: Compiled Metadata + Live NL-to-SQL — EKOS</title>
+<meta name="description" content="RFC 0056: ClickHouse tables compiled into the ledger as real, evidence-backed KIR objects, plus ekos clickhouse ask -- an LLM-built, SELECT-only, redacted, audited live query, the one explicit exception to EKOS's own AI-never-touches-raw-systems invariant. Verified live against a real ClickHouse container, unedited.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+  <a href="#s10"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>AI never touches raw enterprise systems.<br><span class="arrow-word">One exception, and it's audited.</span></h1>
+  <p class="lede">EKOS's Key Invariant says AI consumes knowledge through the Runtime only, never
+  raw systems directly. RFC 0056 is the first place that line gets crossed on purpose: ClickHouse
+  schema compiled into the ledger like any other source, plus <code class="mono">ekos clickhouse
+  ask</code> — an LLM-built, SELECT-only, redacted, ledger-audited live query. Every screen on this
+  page is real output from a real ClickHouse container, unedited, including the queries that failed.</p>
+  <div class="hero-diagram">
+    <span class="chip">ClickHouse system.tables</span><span class="sep mono">→</span>
+    <span class="chip hot">compiled KIR objects</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos clickhouse ask</span><span class="sep mono">→</span>
+    <span class="chip">redacted, audited answer</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0056 — <code class="mono">ekos clickhouse ask</code></div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the invariant</div>
+  <div class="eyebrow">Checked before a line of code was written</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:28ch;">No MCP tool, no connector, had ever crossed this line before.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">EKOS's own stated invariant</div>
+<pre style="margin:0;"><span class="k">AI systems</span> consume reconstructed knowledge
+through the Runtime <span class="s">only</span>; they
+<span class="bad">never</span> touch raw enterprise systems
+directly.</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      A repo-wide read confirmed it, before design started: every MCP tool, the <code
+      class="mono">AiRuntime</code>, and every connector in this codebase only ever touched the
+      local ledger — even <code class="mono">crates/simulation</code>, the closest precedent.
+      RFC 0056 treats the live-query capability as an explicit, scoped, audited
+      <em>exception</em> to that invariant, not a quiet extension of it: SELECT-only, redacted on
+      the way out, and every call recorded as evidence — never a silent second path around the
+      Runtime.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / stage 1 — compiled metadata</div>
+  <div class="eyebrow">Real ClickHouse container, real run, unedited</div>
+  <h2>The same pipeline every other source goes through. Zero invariant risk.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — real container on a live port</div>
+<pre style="margin:0;">$ ekos build
+Build complete.
+  Connectors re-scanned: 7
+
+$ ekos recover
+clickhouse-analyzer complete tables=2
+Recover complete.
+  ClickHouse tables analysed: 2
+
+$ ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+Commit complete.
+  Objects written: 2
+  Evidence records: 2</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      <code class="mono">ClickHouseObserver</code> reads ClickHouse's stock HTTP interface
+      (<code class="mono">system.tables</code>/<code class="mono">system.columns</code>, no
+      native driver) and <code class="mono">ClickHouseAnalyzerPass</code> compiles every table
+      into a real <code class="mono">ObjectKind::Table</code> KIR object — the exact
+      <code class="mono">build.rs</code>/<code class="mono">recover.rs</code> wiring the RFC 0012
+      Snowflake/Oracle scaffolds never got. No LLM call in this stage, no new invariant surface.
+    </p>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/clickhouse/build-recover.txt" style="color:var(--accent-a);">build-recover.txt</a>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / a real compiled object</div>
+  <div class="eyebrow">ekos_test.orders — real, unedited</div>
+  <h2>Real columns. Real evidence. Searchable like anything else EKOS has compiled.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos query object — real, unedited</div>
+<pre style="margin:0;"><span class="k">Object:</span> ekos_test.orders (Table)
+  Properties:
+    source_system: <span class="s">"clickhouse"</span>
+    engine: <span class="s">"MergeTree"</span>
+    columns: [{"data_type":"UInt64","name":"order_id"},
+              {"data_type":"String","name":"customer_name"},
+              {"data_type":"Decimal(10, 2)","name":"amount"},
+              {"data_type":"String","name":"status"},
+              {"data_type":"DateTime","name":"created_at"}]
+  Evidence:
+    [100%] clickhouse:ekos_test.orders — <span class="c">"table ekos_test.orders observed
+    via ClickHouse system.tables/system.columns"</span></pre>
+  </div>
+  <p class="lede">This is the same <code class="mono">ObjectKind::Table</code> kind file-based SQL
+  DDL already compiles to — not a new <code class="mono">Custom("ClickHouseTable")</code> kind. A
+  ClickHouse <code class="mono">orders</code> table and a Postgres <code class="mono">orders</code>
+  table with overlapping columns become real cross-system identity candidates for free, with zero
+  new exclusion-list code in <code class="mono">crates/identity</code>.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/clickhouse/query-object-orders.txt" style="color:var(--accent-a);">query-object-orders.txt</a>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / stage 2 — the pipeline</div>
+  <div class="eyebrow">Six stages, one live-system crossing, all of it audited</div>
+  <h2>Schema-grounded question in. Validated, redacted, audited answer out.</h2>
+  <div class="flow">
+    <div class="node"><div class="l1">01</div><div class="l2">question</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">02</div><div class="l2">compiled schema context</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node active"><div class="l1">03</div><div class="l2">LLM-built SQL</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node active"><div class="l1">04</div><div class="l2">SELECT-only gate</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">05</div><div class="l2">live execution</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">06</div><div class="l2">redact + audit</div></div>
+  </div>
+  <p class="lede" style="margin-top:2.6rem;">Stage 03 grounds the LLM in the real compiled schema
+  from Stage 1, never a guess. Stage 04 parses the generated SQL with
+  <code class="mono">sqlparser</code>'s real <code class="mono">ClickHouseDialect</code> and hard-
+  rejects anything that isn't exactly one <code class="mono">Statement::Query</code> — no
+  <code class="mono">INSERT</code>/<code class="mono">DROP</code>, no multi-statement batches, a
+  <code class="mono">LIMIT</code> injected into the parsed AST if missing. Only SQL that
+  <code class="mono">sqlparser</code> itself parsed and re-emitted ever reaches ClickHouse.</p>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / a real successful query</div>
+  <div class="eyebrow">Checked against the actual seed data, not just "didn't crash"</div>
+  <h2>Correct SQL, correct answer, live.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos clickhouse ask --json — real, unedited</div>
+<pre style="margin:0;">$ ekos clickhouse ask --json "how many orders have status shipped?"
+{
+  <span class="k">"sql"</span>: <span class="s">"SELECT COUNT(order_id) FROM ekos_test.orders WHERE status = 'shipped' LIMIT 1000"</span>,
+  <span class="k">"rows"</span>: [{ "COUNT(order_id)": <span class="s">"3"</span> }],
+  <span class="k">"audit_event_id"</span>: "be4f1866-7fe2-475e-aaf5-32566cbd1d0d"
+}</pre>
+  </div>
+  <p class="lede">Seed data: 5 orders, status <code class="mono">shipped</code> on rows 1, 3, 5 —
+  <strong>3</strong> is the correct answer, verified against the fixture that was actually
+  inserted, not assumed correct because the pipeline didn't error.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real file:
+    <a href="examples/clickhouse/ask-shipped-count.json" style="color:var(--accent-a);">ask-shipped-count.json</a>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / honest, not hidden</div>
+  <div class="eyebrow">A 1.5B local model, a hallucinated filter, a real live rejection</div>
+  <h2>The gate guarantees safety, not correctness. This is what that looks like.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos clickhouse ask — real, unedited failure</div>
+<pre style="margin:0;">$ ekos clickhouse ask "list the 3 highest-amount orders, showing customer_name and amount"
+<span class="bad">Error: query execution failed: api error 404: Code: 47. DB::Exception:
+Unknown expression identifier `name` in scope SELECT name, amount FROM
+(... WHERE status = 'completed') ...  (UNKNOWN_IDENTIFIER)</span></pre>
+  </div>
+  <p class="lede">The model invented a <code class="mono">status = 'completed'</code> filter — that
+  value never existed in the real data — and referenced <code class="mono">name</code> instead of
+  the aliased <code class="mono">customer_name</code>. It's still exactly one well-formed
+  <code class="mono">SELECT</code>, so the safety gate has nothing to reject; ClickHouse's real
+  schema does the rejecting instead. No row returned, no ledger entry written, no confident wrong
+  answer — a plain error surfaced straight through.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/clickhouse/ask-hallucinated-join.txt" style="color:var(--accent-a);">ask-hallucinated-join.txt</a>
+  </div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / the audit trail, for real</div>
+  <div class="eyebrow">Queried straight from the live ledger's own SQLite file</div>
+  <h2>One Event/Evidence pair per successful query. Zero for the failed ones.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">sqlite3 .ekos/ledger/ledger.db — real, unedited</div>
+<pre style="margin:0;">SELECT entry_type, count(*)
+FROM entries GROUP BY entry_type;
+
+event    | <span class="s">3</span>
+evidence | <span class="s">6</span>
+object   | 3</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      3 <code class="mono">event</code> rows for the 3 queries that actually succeeded against
+      ClickHouse — the 2 that errored (a bad join, the hallucinated filter above) left no trace,
+      because <code class="mono">record_query_event</code> only runs after execution succeeds.
+      6 <code class="mono">evidence</code> rows: 2 table evidences from Stage 1, 3 query-SQL
+      evidences from Stage 2, 1 unrelated file evidence. Row data itself is never ledgered — only
+      the fact that a query ran, its SQL, and a content-hash of the result.
+    </p>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/clickhouse/audit-ledger-counts.txt" style="color:var(--accent-a);">audit-ledger-counts.txt</a>
+  </div>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / the MCP gate, both directions</div>
+  <div class="eyebrow">Real stdio JSON-RPC session, not a mocked call_tool()</div>
+  <h2>Off by default. Verified absent <em>and</em> present, over the real protocol.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">[clickhouse].enable-mcp-query = true</div>
+<pre style="margin:0;"><span class="s">tools/list -&gt; contains ekos_clickhouse_query: true
+tools/call -&gt; {"COUNT(order_id)": "3"}</span></pre>
+    </div>
+    <div class="codeblock">
+      <div class="tag">gate unset (default)</div>
+<pre style="margin:0;"><span class="bad">tools/list -&gt; contains ekos_clickhouse_query: false
+tools/call -&gt; isError: true
+  "ekos_clickhouse_query is disabled -- set
+   [clickhouse].enable-mcp-query = true"</span></pre>
+    </div>
+  </div>
+  <p class="lede">The gate is enforced twice, independently: hidden from
+  <code class="mono">tools/list</code> so a well-behaved agent never sees it, and re-checked inside
+  <code class="mono">call_tool</code> so a client calling it by name directly — without ever having
+  listed it — is still rejected.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/clickhouse/mcp-gate-transcript.txt" style="color:var(--accent-a);">mcp-gate-transcript.txt</a>
+  </div>
+</section>
+
+<section class="slide cta" id="s10">
+  <div class="eyebrow">Try it</div>
+  <h2>Point it at any ClickHouse database EKOS has already compiled.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile the schema once</span>
+$ export EKOS_CLICKHOUSE_URL=http://localhost:8123
+$ export EKOS_CLICKHOUSE_DATABASE=analytics
+$ ekos build &amp;&amp; ekos recover
+
+<span class="c"># ask a real question, live, redacted, audited</span>
+$ ekos clickhouse ask "how many orders shipped last week?"</pre>
+  </div>
+  <div class="fineprint">EKOS · RFC 0056 (ClickHouse Connector) · every example on this page is real output, unedited, from a real ClickHouse container · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

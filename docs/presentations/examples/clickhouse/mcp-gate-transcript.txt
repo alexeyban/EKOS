@@ -1,0 +1,30 @@
+# Real stdio JSON-RPC session against `ekos mcp serve`, both directions of the gate.
+
+## Workspace A -- ekos.toml has [clickhouse] enable-mcp-query = true
+
+--> {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
+<-- tools: [..., "ekos_transformation_diff", "ekos_identity_review", "ekos_clickhouse_query"]
+    ekos_clickhouse_query IS listed.
+
+--> {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ekos_clickhouse_query",
+     "arguments":{"question":"how many orders have status shipped?"}}}
+<-- {"id":2,"jsonrpc":"2.0","result":{"content":[{"type":"text","text":
+     "{\n  \"audit_event_id\": \"4ad25752-b4bc-406b-82aa-4b2ecb262604\",\n  \"columns\": [\n
+     \"COUNT(order_id)\"\n  ],\n  \"row_count\": 1,\n  \"rows\": [\n    {\n
+     \"COUNT(order_id)\": \"3\"\n    }\n  ],\n  \"sql\": \"SELECT COUNT(order_id) FROM
+     ekos_test.orders WHERE status = 'shipped' LIMIT 1000\", ... }"}]}}
+    Same live database, same correct answer (3), reached over MCP instead of the CLI.
+
+## Workspace B -- ekos.toml has no [clickhouse] section (gate unset, default off)
+
+--> {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
+<-- tools: [..., "ekos_transformation_diff", "ekos_identity_review"]
+    ekos_clickhouse_query is ABSENT -- never advertised to a connected agent.
+
+--> {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ekos_clickhouse_query",
+     "arguments":{"question":"how many orders?"}}}
+<-- {"id":2,"jsonrpc":"2.0","result":{"content":[{"type":"text","isError":true,
+     "text":"ekos_clickhouse_query is disabled -- set [clickhouse].enable-mcp-query = true in
+     ekos.toml to enable it"}]}}
+    Rejected by name even though it was never listed -- the gate is enforced at both the
+    discovery layer (tools/list) and the execution layer (tools/call), independently.

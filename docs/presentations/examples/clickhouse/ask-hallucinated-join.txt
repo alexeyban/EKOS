@@ -1,0 +1,14 @@
+$ ekos clickhouse ask "list the 3 highest-amount orders, showing customer_name and amount"
+Error: query execution failed: api error 404: Code: 47. DB::Exception: Unknown expression
+identifier `name` in scope SELECT name, amount FROM (SELECT order_id, customer_name, amount,
+ROW_NUMBER() OVER (ORDER BY amount DESC) AS row_num FROM ekos_test.orders WHERE status =
+'completed') AS subquery WHERE row_num <= 3 LIMIT 1000. (UNKNOWN_IDENTIFIER)
+(version 24.10.2.80 (official build))
+
+# What happened: the local 1.5B model invented a `status = 'completed'` filter (the real values
+# are 'shipped'/'pending'/'cancelled' -- 'completed' never existed) and referenced `name` instead
+# of the aliased `customer_name`. This SQL is still exactly one well-formed SELECT statement --
+# the safety gate (single-statement, no writes) has nothing to object to -- so it reached
+# ClickHouse, which rejected it on real schema grounds. No row was ever returned, no ledger entry
+# was written (record_query_event only runs after a successful execution), and the failure came
+# back as a plain, honest error instead of a confident wrong answer.

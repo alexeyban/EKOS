@@ -1,0 +1,15 @@
+$ sqlite3 .ekos/ledger/ledger.db "SELECT entry_type, count(*) FROM entries GROUP BY entry_type;"
+event|3
+evidence|6
+object|3
+
+# object: 2 compiled ClickHouse tables (orders, customers) + 1 unrelated file object from `build`.
+# evidence: 2 table evidences (Stage 1) + 1 file evidence (unrelated) + 3 query evidences, one
+#           SQL-text Evidence record per *successful* clickhouse ask call.
+# event:    3 -- exactly one ClickHouseQueryExecuted event per successful query:
+#             1) "how many orders are there in total?"                 -> 5
+#             2) "what is the total order amount grouped by status?"   -> 0 rows (empty join)
+#             3) "how many orders have status shipped?"                -> 3
+# The 2 queries that errored against ClickHouse (a bad join, a hallucinated filter) left zero
+# trace in the ledger -- record_query_event only runs after execution succeeds, so the audit log
+# is a record of what actually ran against the live system, not of every attempt.
