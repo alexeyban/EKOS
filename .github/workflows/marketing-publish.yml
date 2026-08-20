@@ -1,0 +1,66 @@
+name: Marketing Publish
+
+# RFC 0030: on every devlog_N.md pushed to main, draft a tweet from it and publish
+# automatically (--yes, no human review — a deliberate choice for this workflow; the
+# interactive Y/N/E approval in `ekos marketing publish` is still the default for anyone
+# running the CLI by hand). `ekos marketing publish` with no devlog argument targets
+# whichever devlog_*.md is currently highest-numbered, which is exactly the one this push
+# just added.
+
+on:
+  push:
+    branches: [main]
+    paths: ["devlog_*.md"]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish devlog tweet
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: ${{ runner.os }}-cargo-marketing-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-marketing-
+
+      - name: Build ekos CLI
+        run: cargo build --release -p ekos --manifest-path ekos/Cargo.toml
+
+      - name: Publish (drafts + posts, no human review)
+        env:
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
+          TWITTER_ACCESS_SECRET: ${{ secrets.TWITTER_ACCESS_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: ./ekos/target/release/ekos marketing publish --yes
+
+      - name: Record dedup state (only if something actually posted)
+        run: |
+          if ! git diff --quiet -- marketing/posted/tweets.json marketing/logs/marketing.log; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add marketing/posted/tweets.json marketing/logs/marketing.log
+            git commit -m "chore: record automated marketing publish [skip ci]"
+            git push
+          else
+            echo "No dedup-state change (skipped, already-posted, or low-importance devlog) — nothing to commit."
+          fi
