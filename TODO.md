@@ -2237,6 +2237,114 @@ These items have no single phase — they must be maintained and grown throughou
     clarification loop; automatic row-level ledgering; LLM-based business-meaning enrichment of
     ClickHouse table/column names (the `sql_analyzer.rs`-style optional second stage).
 
+- [x] **RFC 0057 — ClickHouse Dialect: Preprocess `CODEC(...)` Before Parsing**
+  - *What:* Found live while using EKOS to document a real, unmodified open-source repo's
+    (`analytics/`, Plausible Analytics) ClickHouse component for a user: `ekos recover`'s
+    `SqlAnalyzerPass`/`SqlTransformAnalyzerPass`, routed to the `"clickhouse"` dialect (RFC 0031),
+    failed whole-file on `priv/ingest_repo/structure.sql` — `sql parser error: Expected: ',' or
+    ')' after column definition, found: CODEC`. Ruled out a config/stale-binary explanation first
+    (a genuinely separate, real bug: `target/release/ekos` predated RFC 0056's dialect
+    registration, fixed by rebuilding) before confirming the real root cause by reading
+    `sqlparser`'s own source: `CODEC(...)` (ClickHouse's per-column compression clause, used on
+    most columns of most real MergeTree tables) has zero support anywhere in the pinned
+    `sqlparser = "0.53"` — `MATERIALIZED`/`ALIAS`/`EPHEMERAL` are real ClickHouse-specific column
+    options in `parse_optional_column_option`, but `CODEC` was never added, confirmed by a
+    zero-hit grep across the whole vendored crate and cross-checked against the current published
+    API docs (still no `Codec` variant on `ColumnOption`) — a real, still-open upstream gap, not
+    something a version bump would fix.
+  - *Output:* `ClickHouseDialectParser::preprocess` (`plugins/sql-dialect-clickhouse/src/lib.rs`)
+    now strips well-formed `CODEC(...)` clauses — quote-aware (single-quoted strings with
+    backslash-escape, backtick identifiers) and balanced-paren-aware (handles nested forms like
+    `CODEC(ZSTD(3))` and multi-arg `CODEC(Delta(4), LZ4)`) — before the SQL reaches `sqlparser`,
+    the same architectural slot `MySqlDialectParser` already uses for `DELIMITER` stripping. No new
+    dependency (hand-written scanner, matching the `MySqlDialectParser` precedent rather than
+    pulling in `regex` for one clause).
+  - *Status:* Done for its stated scope. 11 tests (6 new preprocessing cases + a regression test
+    using a real excerpt from `analytics/priv/ingest_repo/structure.sql`), full workspace
+    `cargo build/test/clippy/fmt` clean. **Live-verified, partially**: rebuilding and rerunning
+    `ekos recover` against the real `analytics/` repo confirmed the CODEC failure is gone — the
+    reported error moved from line 7 (`CODEC`) to line 49 (`INDEX minmax_timestamp timestamp TYPE
+    minmax GRANULARITY 1`, a table-level secondary-index definition — a separate, unrelated gap).
+    **`structure.sql` still does not produce `Table`/`Column` KIR objects** — `sqlparser`'s
+    `ClickHouseDialect` support for `CREATE TABLE` turned out to be narrower than one clause:
+    `INDEX ... TYPE ... GRANULARITY`, `PARTITION BY` (confirmed gated to `BigQueryDialect |
+    PostgreSqlDialect | GenericDialect`, ClickHouse excluded, `parser/mod.rs:6236`), and `SETTINGS`
+    (no `CREATE TABLE` handling anywhere in the crate) are all still unsupported. Reported to the
+    user rather than silently expanded into a much larger effort — see `ekos/docs/rfcs/0057-clickhouse-codec-preprocessing.md`'s Acceptance Criteria for the full accounting.
+  - *Explicitly not done, per the RFC's own Non-goals:* forking/patching `sqlparser`; filing the
+    real fix upstream (worth doing separately, not controlled by this codebase's timeline);
+    modeling codec choice in the KIR (Stage 1's `properties["columns"]` never captured it either,
+    even from live introspection); the `INDEX`/`PARTITION BY`/`SETTINGS` gaps found alongside this
+    one, deliberately left for their own RFC(s) if the user wants that follow-on work.
+    **Closed by RFC 0058 below, the same session.**
+
+- [x] **RFC 0058 — ClickHouse Dialect: Preprocess `INDEX`/`PARTITION BY`/`SAMPLE BY`/`SETTINGS`/`CREATE DICTIONARY`**
+  - *What:* User asked to close the `INDEX`/`PARTITION BY`/`SETTINGS` gaps RFC 0057 found and
+    reported rather than fixed. Investigating fully before writing code (per the mandated
+    workflow) turned up two more gaps in the same file, not named by the user but necessary to
+    actually reach "the file parses": `SAMPLE BY` (`Keyword::SAMPLE` doesn't exist anywhere in
+    `sqlparser`'s keyword table) and `CREATE DICTIONARY` (an entirely different statement type
+    `sqlparser` has zero grammar for — confirmed by a zero-hit `DICTIONARY` grep across the whole
+    crate). Folded both in rather than reporting yet another partial fix: `SqlAnalyzerPass` parses
+    an entire file in one `Parser::parse_sql` call and discards every table in it if *any*
+    statement anywhere fails — stopping at the three named gaps would still have left the real
+    file (two `CREATE DICTIONARY` statements, `SAMPLE BY` on both event tables) unparseable, which
+    is what "close the gap" actually means operationally.
+  - *Output:* Four new functions in `plugins/sql-dialect-clickhouse/src/lib.rs`, chained after RFC
+    0057's `strip_codec_clauses` in a new `preprocess_clickhouse_ddl` orchestrator:
+    `strip_index_clauses` (removes `INDEX <name> <expr> TYPE <type> GRANULARITY <n>` from the
+    column list, plus one adjacent comma so the list stays well-formed); `strip_keyword_expr_clause`
+    (a single reusable primitive — not three copies — for `<keyword> [<keyword2>] <expr>` clauses
+    terminated by a caller-supplied keyword list, applied to `PARTITION BY`, `SAMPLE BY`, and bare
+    `SETTINGS`); `strip_create_dictionary_statements` (removes whole `CREATE DICTIONARY ... ;`
+    statements — dictionaries were never modeled in the KIR even by RFC 0056 Stage 1's live
+    introspection, so nothing already captured is lost).
+  - *Status:* Done, and this time fully live-verified, not partially. 24 tests total in the crate
+    (16 new), including the strongest regression available: the entire, unmodified real
+    `analytics/priv/ingest_repo/structure.sql` embedded as a fixture
+    (`plugins/sql-dialect-clickhouse/tests/fixtures/analytics-structure.sql`), asserted to parse
+    into exactly 15 `CREATE TABLE` statements. Full workspace `cargo build/test/clippy/fmt` clean.
+    **Live**: rebuilt `target/release/ekos`, reran the full pipeline against `analytics/`.
+    `sql-analyzer` reported `objects=15 relationships=0` with zero parse warnings (previously
+    `falling back to empty graph`). `ekos query find`/`query object` confirmed real
+    `plausible_events_db.sessions_v2`/`events_v2` `Table` objects with all 43 real columns,
+    correct types (`LowCardinality(FixedString(2))`, `Array(STRING)` for the `entry_meta.key`/
+    `.value` pair, every `ALIAS` column), and 100%-confidence Evidence citing
+    `priv/ingest_repo/structure.sql`.
+  - *Explicitly not done, per the RFC's own Non-goals:* modeling `INDEX`/`PARTITION
+    BY`/`SAMPLE BY`/`SETTINGS`/dictionaries in the KIR (same "nothing already captured is lost"
+    reasoning as RFC 0057's `CODEC`); a general ClickHouse-DDL-completeness guarantee (this closes
+    every gap the one real file that motivated it actually hits, not every possible ClickHouse
+    construct); fixing the upstream `sqlparser` crate itself.
+
+- [ ] **`crates/identity`'s `DefaultResolver` over-merges real ClickHouse `imported_*` tables sharing a common base schema**
+  - *What:* Found re-analyzing `analytics/` after RFC 0057/0058 fixed ClickHouse DDL parsing —
+    the first time real ClickHouse `Table` objects with real `properties["columns"]` existed for
+    `crates/identity` to compare. `ekos resolve` merged 6 genuinely distinct tables
+    (`imported_visitors`, `imported_operating_systems`, `imported_exit_pages`,
+    `imported_entry_pages`, `imported_devices`, `imported_browsers`) into one identity at
+    confidence 0.93. Root cause read directly from `crates/identity/src/lib.rs`: `combined = 0.7 *
+    name_similarity + 0.3 * structural_score` (`lib.rs:172`) against a default `merge_threshold` of
+    `0.85` (`lib.rs:121`), no per-kind override for `Table` (only `Concept` gets `0.95`). All six
+    tables share both a name prefix (`imported_*`, high Jaro-Winkler) and a common 8-column
+    "spine" (`site_id, date, visitors, visits, visit_duration, bounces, import_id, pageviews`) —
+    the *opposite* shape from `structural_score`'s own documented motivating case (`Employees` vs.
+    `EmployeeTerritories`: near-zero column overlap despite name similarity). Confirmed real, not
+    cosmetic: `ekos query object` on the surviving identity shows only `imported_visitors`'s own 8
+    columns and 1 evidence entry — the other 5 tables' distinguishing columns
+    (`operating_system`/`exit_page`/`entry_page`/`device`/`browser`) and evidence are gone from
+    that identity entirely.
+  - *Status:* **Not fixed.** Reported to the user rather than silently patched — unlike RFC
+    0057/0058's fix (scoped to one plugin crate), a fix here changes `crates/identity`'s scoring
+    for every same-kind comparison across the whole estate, a materially larger blast radius.
+    Candidate directions, none chosen yet: a per-kind stricter `Table` threshold (mirroring
+    `Concept`'s `0.95`); requiring near-total rather than majority column overlap for
+    high-column-count tables; or something else entirely. See `devlog_59.md` for the full
+    investigation.
+  - *Deck:* `docs/presentations/analytics-clickhouse-after.html` documents the finding with real,
+    unedited transcripts, matching the same "honest, not hidden" convention every other deck in
+    this repo follows.
+
 - [ ] **`ai.rs::extract_citations` can't distinguish "cited nothing" from "nothing to cite"**
   - *What:* Found live-testing RFC 0046 against real OpenAI responses (devlog_46): when the
     trailing `{"cited_evidence": [...]}` block parses as valid JSON but the array is empty,

@@ -1,0 +1,31 @@
+$ cat ekos.toml
+[workspace]
+root = "."
+log-level = "info"
+
+[observe]
+paths = ["."]
+ignore-patterns = [".ekos", ".git", "deps", "_build", "node_modules", "priv/static", "*.lock"]
+
+[recover.sql]
+default-dialect = "generic"
+
+[[recover.sql.dialect-rules]]
+path-glob = "priv/ingest_repo/**"
+dialect = "clickhouse"
+
+[[recover.sql.dialect-rules]]
+path-glob = "priv/repo/**"
+dialect = "postgres"
+
+$ ekos init
+Initialized .ekos/ workspace at /home/legion/PycharmProjects/analytics/.ekos
+  artifacts: /home/legion/PycharmProjects/analytics/.ekos/artifacts
+  ledger:    /home/legion/PycharmProjects/analytics/.ekos/ledger
+
+$ ekos build
+Build complete.
+  Files observed (new): 2022
+  Total objects in ledger: 2022
+  Connectors re-scanned: 6
+  Snapshot: .ekos/snapshots/20260820T110939Z.json.zst

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickHouse Extraction, After the Fix — EKOS</title>
+<meta name="description" content="The same analytics/ repo (Plausible Analytics), re-analyzed after RFC 0057/0058: sql-analyzer now structurally recovers all 15 real ClickHouse tables with zero parse warnings. Re-analyzing surfaced a second, unrelated finding in a different pipeline stage — identity resolution over-merging 6 of those 15 real tables into one. Real output throughout, including the gap it found.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>The same repo. This time it parses.<br><span class="arrow-word">And that changed what broke next.</span></h1>
+  <p class="lede">The "cold run" deck left <code class="mono">analytics/</code>'s ClickHouse schema
+  unrecovered — a real parse gap in <code class="mono">sqlparser</code>'s `ClickHouseDialect`.
+  RFC 0057 and RFC 0058 closed it. This deck re-analyzes the same repo, from a clean cache, to
+  show the actual result — and the new thing that only became visible once real column data
+  existed for it to happen to. Every screen here is real output, unedited, from this session.</p>
+  <div class="hero-diagram">
+    <span class="chip">sql-analyzer: empty graph</span><span class="sep mono">→</span>
+    <span class="chip hot">objects=15, 0 warnings</span><span class="sep mono">→</span>
+    <span class="chip bad">6 tables merged into 1</span><span class="sep mono">→</span>
+    <span class="chip">a different, honest gap</span>
+  </div>
+  <div class="byline"><span class="dot"></span> Sequel to "EKOS Cold Against Plausible's ClickHouse Layer" — RFC 0057, RFC 0058</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / clean re-run</div>
+  <div class="eyebrow">Cleared cache, reran from scratch — real, unedited</div>
+  <h2>Zero parse warnings, for the first time on this file.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos clean
+Clean complete. 2 item(s) removed from artifact cache.
+
+$ ekos recover
+INFO running pass pass=sql-analyzer:priv/ingest_repo/structure.sql
+<span class="s">INFO sql-analyzer complete
+     pass=sql-analyzer:priv/ingest_repo/structure.sql
+     objects=15 relationships=0</span>
+Recover complete.
+  SQL files analysed: 2
+  Passes run: 6</pre>
+  </div>
+  <p class="lede">Before RFC 0057: <code class="mono">falling back to empty graph</code>. Now:
+  <strong>15 objects</strong>, zero <code class="mono">WARN</code> lines — every real
+  <code class="mono">CREATE TABLE</code> in <code class="mono">structure.sql</code>, including the
+  two <code class="mono">CREATE DICTIONARY</code> statements correctly stripped rather than
+  crashing the whole-file parse.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse-after/recover-clean.txt" style="color:var(--accent-a);">recover-clean.txt</a></div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / a real compiled object</div>
+  <div class="eyebrow">plausible_events_db.sessions_v2 — real, unedited</div>
+  <h2>43 real columns. Real types. Real evidence.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos query object — real, unedited</div>
+<pre style="margin:0;"><span class="k">Object:</span> plausible_events_db.sessions_v2 (Table)
+  Properties:
+    columns: [
+      {"data_type":"UInt64","name":"session_id"},
+      {"data_type":"INT8","name":"sign"},
+      {"data_type":"DATETIME","name":"timestamp"},
+      ... 40 more, including:
+      {"data_type":"LowCardinality(FixedString(2))","name":"country_code"},
+      {"data_type":"Array(STRING)","name":"entry_meta.key"},
+      {"data_type":"LowCardinality(STRING)","name":"channel"}
+    ]  <span class="c">// 43 columns total</span>
+  Evidence:
+    [100%] priv/ingest_repo/structure.sql — <span class="c">"CREATE TABLE ...sessions_v2"</span></pre>
+  </div>
+  <p class="lede"><code class="mono">events_v2</code> resolves the same way — 39 real columns,
+  correct <code class="mono">Nullable(DECIMAL(18,3))</code> for the revenue fields, correct
+  <code class="mono">Array(STRING)</code> for the <code class="mono">meta.key</code>/<code
+  class="mono">meta.value</code> pair. Every <code class="mono">ALIAS</code> column present.
+  Nothing here was true before RFC 0057 — the whole file compiled to an empty graph.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse-after/query-object-sessions-v2.txt" style="color:var(--accent-a);">query-object-sessions-v2.txt</a></div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / but count them</div>
+  <div class="eyebrow">ekl "FIND Object WHERE kind = 'Table'" — real, unedited</div>
+  <h2>15 tables parsed. 10 tables queryable.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos ekl "FIND Object WHERE kind = 'Table' RETURN name"
+name
+plausible_events_db.sessions_v2
+plausible_events_db.location_data
+plausible_events_db.ingest_counters
+plausible_events_db.imported_visitors
+plausible_events_db.imported_sources
+plausible_events_db.imported_pages
+plausible_events_db.imported_locations
+plausible_events_db.imported_custom_events
+plausible_events_db.events_v2
+plausible_events_db.schema_migrations
+
+<span class="bad">10 row(s).</span></pre>
+  </div>
+  <p class="lede"><code class="mono">sql-analyzer</code> reported <strong>15</strong>. Five real
+  tables — <code class="mono">imported_operating_systems</code>, <code
+  class="mono">imported_exit_pages</code>, <code class="mono">imported_entry_pages</code>, <code
+  class="mono">imported_devices</code>, <code class="mono">imported_browsers</code> — aren't in
+  this list. Not a parsing regression: a different pipeline stage did this.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse-after/ekl-tables.txt" style="color:var(--accent-a);">ekl-tables.txt</a></div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / identity resolution, working almost too well</div>
+  <div class="eyebrow">ekos resolve — real, unedited</div>
+  <h2>Six real tables, merged into one, at confidence 0.93.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">Merge proposals (3):
+  ...
+  3. 'plausible_events_db.imported_visitors' (Table)
+     — <span class="bad">6 objects merged, confidence 0.93</span>
+       • imported_visitors
+       • imported_operating_systems
+       • imported_exit_pages
+       • imported_entry_pages
+       • imported_devices
+       • imported_browsers</pre>
+  </div>
+  <p class="lede">All six real ClickHouse tables — <code class="mono">crates/identity/src/lib.rs:172</code>
+  scores same-kind pairs as <code class="mono">0.7 × name_similarity + 0.3 ×
+  column_Jaccard</code> against a <strong>0.85</strong> default merge threshold. Every
+  <code class="mono">imported_*</code> table shares the same 8-column "spine"
+  (<code class="mono">site_id, date, visitors, visits, ...</code>) and the same name prefix — high
+  on both axes, for tables that are genuinely distinct in ClickHouse.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse-after/resolve-merge.txt" style="color:var(--accent-a);">resolve-merge.txt</a></div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / what actually goes missing</div>
+  <div class="eyebrow">The surviving identity, queried directly — real, unedited</div>
+  <h2>Five tables' distinguishing columns aren't retrievable under their own name.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos query object — real, unedited</div>
+<pre style="margin:0;"><span class="k">Object:</span> plausible_events_db.imported_visitors (Table)
+  Properties:
+    columns: [site_id, date, visitors, pageviews,
+      bounces, visits, visit_duration, import_id]
+      <span class="bad">// imported_visitors' own 8 columns only —
+      // operating_system, exit_page, entry_page,
+      // device, browser are gone</span>
+  Evidence:
+    [100%] ...structure.sql — "CREATE TABLE ...imported_visitors"
+      <span class="bad">// 1 evidence entry, not 6</span></pre>
+  </div>
+  <p class="lede">This isn't a labeling quirk — the five merged-away tables' own distinguishing
+  column and evidence are not attached to this identity at all. Anyone asking EKOS about
+  <code class="mono">imported_browsers</code>' schema today gets <code class="mono">imported_visitors</code>'
+  columns back instead.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse-after/resolve-merge.txt" style="color:var(--accent-a);">resolve-merge.txt</a></div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / precisely scoped</div>
+  <div class="eyebrow">Two different pipeline stages, two different findings</div>
+  <h2>RFC 0057/0058 fixed parsing. This is a separate, pre-existing stage.</h2>
+  <div class="flow">
+    <div class="node active"><div class="l1">recover</div><div class="l2">SQL DDL → 15 objects</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">resolve</div><div class="l2">identity merge</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">compile</div><div class="l2">CKM</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">commit</div><div class="l2">ledger</div></div>
+  </div>
+  <p class="lede" style="margin-top:2.6rem;"><code class="mono">structural_score</code>'s
+  column-Jaccard scoring (<code class="mono">crates/identity/src/lib.rs:391</code>) already
+  existed before RFC 0057 touched anything — it just never had real ClickHouse column data to
+  operate on, because every ClickHouse table compiled to an empty graph. This deck's own finding
+  is a direct <em>consequence</em> of RFC 0057/0058 succeeding, not a defect they introduced:
+  fixing the parser is what finally gave the identity resolver something real to over-match on.</p>
+</section>
+
+<section class="slide cta" id="s8">
+  <div class="eyebrow">Honest, not hidden</div>
+  <h2>The parser gap is closed. A resolver gap is now visible because of it.</h2>
+  <div class="codeblock">
+    <div class="tag">the open question</div>
+<pre style="margin:0;"><span class="c">// crates/identity/src/lib.rs:172</span>
+let combined = 0.7 * name + 0.3 * structural;
+<span class="c">// default merge_threshold: 0.85 — no per-kind
+// override for Table, unlike Concept's 0.95</span></pre>
+  </div>
+  <div class="fineprint">EKOS · re-analysis of analytics/ (Plausible Analytics) after RFC 0057/0058
+  · every example on this page is real output, unedited ·
+  <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

@@ -96,6 +96,22 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
       <div class="rfc">RFC 0056</div>
     </li>
     <li>
+      <a class="deck" href="presentations/analytics-clickhouse-cold-run.html">EKOS Cold Against Plausible's ClickHouse Layer</a>
+      <p class="desc">Pointed at a real, unmodified open-source repo it had never seen, EKOS
+      compiled its git/CI/dependency knowledge cleanly and found its own gap: sqlparser's
+      ClickHouseDialect can't parse ClickHouse's own CODEC(...) column clause. Documented anyway,
+      gap named plainly.</p>
+      <div class="rfc">RFC 0031 · RFC 0056</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/analytics-clickhouse-after.html">ClickHouse Extraction, After the Fix</a>
+      <p class="desc">The same repo, re-analyzed after RFC 0057/0058 closed the parser gap: all 15
+      real ClickHouse tables now structurally recover with zero warnings — and re-analyzing
+      surfaced a second, unrelated finding in a different pipeline stage, identity resolution
+      over-merging 6 of those 15 tables into one. Reported the same way the first gap was.</p>
+      <div class="rfc">RFC 0057 · RFC 0058</div>
+    </li>
+    <li>
       <a class="deck" href="presentations/vision-and-token-utility.html">Vision &amp; Token Utility</a>
       <p class="desc">Why the EKOS token's relevance is designed to grow as a consequence of
       platform adoption, not a promise of price — the phased ecosystem roadmap from contributor
@@ -103,6 +119,13 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
       <div class="rfc">VISION.md</div>
     </li>
   </ul>
+  <div class="rfc" style="margin-top:2rem; padding-top:1.5rem; border-top:1px solid var(--rule);">
+    Generated documentation and live demos for the analytics/clickhouse case study above:
+    <a href="generated/analytics-clickhouse-component.html" style="color:var(--accent-a);">ClickHouse Component docs</a>,
+    <a href="generated/analytics-referrers-dashboard.html" style="color:var(--accent-a);">Top Referrers Dashboard</a>,
+    <a href="generated/analytics-why-high-day.html" style="color:var(--accent-a);">Why That Day Spiked</a>
+    — all built against <a href="https://github.com/plausible/analytics" style="color:var(--accent-a);">plausible/analytics</a>.
+  </div>
 </div>
 </body>
 </html>

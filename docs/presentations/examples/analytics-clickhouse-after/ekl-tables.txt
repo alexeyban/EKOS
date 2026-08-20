@@ -1,0 +1,17 @@
+$ ekos ekl "FIND Object WHERE kind = 'Table' RETURN name"
+name
+plausible_events_db.sessions_v2
+plausible_events_db.location_data
+plausible_events_db.ingest_counters
+plausible_events_db.imported_visitors
+plausible_events_db.imported_sources
+plausible_events_db.imported_pages
+plausible_events_db.imported_locations
+plausible_events_db.imported_custom_events
+plausible_events_db.events_v2
+plausible_events_db.schema_migrations
+
+10 row(s).
+
+# 15 real CREATE TABLE statements were structurally recovered (sql-analyzer objects=15).
+# Only 10 distinct Table identities remain queryable — see resolve-merge.txt for why.

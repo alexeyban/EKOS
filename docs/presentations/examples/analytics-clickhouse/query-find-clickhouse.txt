@@ -1,0 +1,23 @@
+$ ekos query find "clickhouse"
+50 result(s) for 'clickhouse':
+  3f42ecaf-eb14-593c-9bd0-c1fa7251a42b  lib/plausible/clickhouse_location_data.ex
+  789715e5-6b01-56cd-b364-1c409561cafe  lib/plausible/data_migration/clickhouse_repo.ex
+  f461a269-aec7-5802-9fa7-37872d930530  test/plausible/stats/clickhouse_test.exs
+  12399839-c633-553c-af09-eb4851da94e4  lib/workers/clickhouse_clean_sites.ex
+  b81c5e94-f53f-5c00-9a12-11858a6dba6e  lib/mix/tasks/clean_clickhouse.ex
+  3dd7c27e-b708-52d5-b371-2238a202c82b  test/workers/clickhouse_clean_sites_test.exs
+  85de4ea7-f364-55ef-b7a1-25dd11445674  lib/plausible/clickhouse_repo.ex
+  b6b03eb3-5df9-5d9d-9397-338aaa1134f6  lib/plausible/clickhouse_event_v2.ex
+  b86ecbcb-3104-5965-9927-04155130f42e  lib/plausible/stats/clickhouse.ex
+  753b5b36-4204-59f0-a996-5c33c0e684e9  lib/plausible/clickhouse_session_v2.ex
+  1a1c9427-7e7d-54f1-8490-b0d7cd4195c0  lib/plausible/async_insert_repo.ex
+  b831f4af-b445-5b78-87c9-70d907921446  lib/plausible/migration_utils.ex
+  9d95db0f-bb25-5da3-86b0-bccd0fdb99aa  lib/plausible/ingestion/event.ex
+  22278ed0-35c2-5316-aa9e-768857d7ff69  lib/plausible/imported/csv_importer.ex
+  02f6fed1-e210-5ed8-80c0-3101371b5d41  lib/plausible/ingest_repo.ex
+  ... 35 more (git-analyzer, local-docs-analyzer, cicd-analyzer, dependency-analyzer objects)
+
+$ ekos query find "sessions_v2"
+30 result(s) — every priv/ingest_repo/migrations/*.exs touching sessions_v2, every
+priv/data_migrations/**/sql/*.sql.eex touching it, zero ObjectKind::Table objects
+(structural DDL recovery failed — see recover-after-rebuild.txt)

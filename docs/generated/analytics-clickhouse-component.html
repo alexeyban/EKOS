@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickHouse Component — Plausible Analytics — EKOS</title>
+<meta name="description" content="Full ClickHouse component documentation for plausible/analytics (github.com/plausible/analytics) generated using EKOS's compiled knowledge ledger plus direct source verification: schema, write/read paths, and the staged data-migration framework.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,500&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #f1f3f5;
+    --surface: #ffffff;
+    --surface-2: #e9ecef;
+    --text: #1a1f27;
+    --text-dim: #566072;
+    --text-faint: #8791a1;
+    --border: #d8dde3;
+    --border-strong: #c2c9d1;
+    --ch: #a8631a;
+    --ch-soft: #f3e3cc;
+    --ch-ink: #6e470f;
+    --pg: #2a6b76;
+    --pg-soft: #d9ebee;
+    --pg-ink: #1b4750;
+    --code-bg: #eef1f4;
+    --shadow: 0 1px 2px rgba(20,25,35,0.06), 0 8px 24px -12px rgba(20,25,35,0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151a;
+      --surface: #191d24;
+      --surface-2: #20252d;
+      --text: #e7e9ed;
+      --text-dim: #a3acba;
+      --text-faint: #707a8a;
+      --border: #2b313b;
+      --border-strong: #3a414d;
+      --ch: #e0a75a;
+      --ch-soft: #3a2c15;
+      --ch-ink: #f0c584;
+      --pg: #6fb8c4;
+      --pg-soft: #16333a;
+      --pg-ink: #a3d7de;
+      --code-bg: #1d222a;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px -12px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a;
+    --surface: #191d24;
+    --surface-2: #20252d;
+    --text: #e7e9ed;
+    --text-dim: #a3acba;
+    --text-faint: #707a8a;
+    --border: #2b313b;
+    --border-strong: #3a414d;
+    --ch: #e0a75a;
+    --ch-soft: #3a2c15;
+    --ch-ink: #f0c584;
+    --pg: #6fb8c4;
+    --pg-soft: #16333a;
+    --pg-ink: #a3d7de;
+    --code-bg: #1d222a;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px -12px rgba(0,0,0,0.5);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Archivo", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: "Spectral", ui-serif, Georgia, serif;
+    font-weight: 600;
+    text-wrap: balance;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  code, .mono, td.mono, th.mono, .badge, .kv dt {
+    font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  a { color: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------- shell ---------- */
+  .shell {
+    display: grid;
+    grid-template-columns: 260px minmax(0,1fr);
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    nav.toc { display: none; }
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2.75rem 1.5rem 2rem 2rem;
+    border-right: 1px solid var(--border);
+  }
+  nav.toc .brand {
+    font-family: "Spectral", serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    margin-bottom: .15rem;
+  }
+  nav.toc .brand-sub {
+    color: var(--text-faint);
+    font-size: .78rem;
+    margin-bottom: 1.9rem;
+    letter-spacing: .02em;
+  }
+  nav.toc .group-label {
+    font-size: .68rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin: 1.4rem 0 .5rem;
+  }
+  nav.toc .group-label:first-of-type { margin-top: 0; }
+  nav.toc ul { list-style: none; margin: 0; padding: 0; }
+  nav.toc li a {
+    display: block;
+    text-decoration: none;
+    color: var(--text-dim);
+    font-size: .87rem;
+    padding: .3rem 0;
+    border-left: 2px solid transparent;
+    padding-left: .7rem;
+    margin-left: -.72rem;
+    transition: color .15s, border-color .15s;
+  }
+  nav.toc li a:hover { color: var(--text); border-color: var(--border-strong); }
+
+  main { padding: 3rem clamp(1.25rem, 4vw, 4rem) 6rem; min-width: 0; }
+  .measure { max-width: 68ch; }
+
+  /* ---------- hero ---------- */
+  .hero { max-width: 74ch; margin-bottom: 3.2rem; }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 1rem;
+  }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ch); }
+  .hero h1 { font-size: clamp(2rem, 4vw, 2.7rem); margin: 0 0 .9rem; line-height: 1.08; }
+  .hero p.lede { font-size: 1.1rem; color: var(--text-dim); margin: 0; }
+  .hero p.lede em { font-style: italic; color: var(--text); }
+
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 2.2rem;
+  }
+  .stat-strip div {
+    background: var(--surface);
+    padding: 1rem 1.1rem;
+  }
+  .stat-strip .n { font-family: "IBM Plex Mono", monospace; font-size: 1.5rem; font-weight: 600; }
+  .stat-strip .l { font-size: .74rem; color: var(--text-faint); letter-spacing: .03em; margin-top: .15rem; }
+  @media (max-width: 640px) { .stat-strip { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 4.4rem; scroll-margin-top: 1.5rem; }
+  section > .eyebrow { margin-bottom: .6rem; }
+  section h2 { font-size: 1.55rem; margin: 0 0 .35rem; }
+  section .dek { color: var(--text-dim); margin: 0 0 1.6rem; max-width: 66ch; }
+  h3 { font-size: 1.1rem; margin: 2rem 0 .6rem; }
+  p { margin: 0 0 1rem; }
+  .measure p:last-child { margin-bottom: 0; }
+
+  /* ---------- system pills ---------- */
+  .sys { display: inline-flex; align-items: center; gap: .4em; font-family: "IBM Plex Mono", monospace; font-size: .78em; font-weight: 500; padding: .12em .55em; border-radius: 5px; white-space: nowrap; }
+  .sys.ch { background: var(--ch-soft); color: var(--ch-ink); }
+  .sys.pg { background: var(--pg-soft); color: var(--pg-ink); }
+  .sys .sw { width: 7px; height: 7px; border-radius: 50%; }
+  .sys.ch .sw { background: var(--ch); }
+  .sys.pg .sw { background: var(--pg); }
+
+  /* ---------- split panel ---------- */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 1.6rem 0 2rem;
+  }
+  @media (max-width: 700px) { .split { grid-template-columns: 1fr; } }
+  .split .pane { background: var(--surface); padding: 1.4rem 1.5rem; }
+  .split .pane h4 { margin: 0 0 .8rem; }
+  .split .pane ul { margin: 0; padding-left: 1.1rem; color: var(--text-dim); font-size: .93rem; }
+  .split .pane li { margin-bottom: .35rem; }
+  .split .pane li code { color: var(--text); }
+
+  /* ---------- diagram ---------- */
+  figure.diagram { margin: 1.8rem 0 2.4rem; }
+  figure.diagram .frame {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.4rem 1.2rem .8rem;
+    box-shadow: var(--shadow);
+  }
+  figure.diagram svg { width: 100%; height: auto; display: block; }
+  figure.diagram figcaption { font-size: .82rem; color: var(--text-faint); margin-top: .8rem; max-width: 66ch; }
+
+  /* ---------- tables ---------- */
+  .tbl-wrap { overflow-x: auto; margin: 1.4rem 0 2rem; border: 1px solid var(--border); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .87rem; background: var(--surface); }
+  thead th {
+    text-align: left;
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 500;
+    font-size: .72rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    background: var(--surface-2);
+    padding: .7rem .9rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td { padding: .68rem .9rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td.tname { font-family: "IBM Plex Mono", monospace; font-weight: 600; white-space: nowrap; }
+  tbody td.note { color: var(--text-dim); }
+  .engine { font-family: "IBM Plex Mono", monospace; font-size: .8em; background: var(--code-bg); padding: .12em .45em; border-radius: 4px; white-space: nowrap; }
+
+  code.inline, .kv dt, .file {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .86em;
+    background: var(--code-bg);
+    padding: .08em .38em;
+    border-radius: 4px;
+  }
+  .file { color: var(--text-dim); }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .82rem;
+    line-height: 1.55;
+    margin: 1.2rem 0 1.8rem;
+  }
+
+  /* ---------- case cards ---------- */
+  .cases { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 1.6rem 0; }
+  .case { background: var(--surface); padding: 1.2rem 1.4rem; }
+  .case .head { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; margin-bottom: .35rem; }
+  .case .head code { font-size: .82rem; }
+  .case .head .tag { font-size: .72rem; color: var(--text-faint); letter-spacing: .03em; }
+  .case p { margin: 0; color: var(--text-dim); font-size: .93rem; }
+
+  /* ---------- timeline ---------- */
+  .tl { position: relative; margin: 1.8rem 0 2.2rem; padding-left: 1.6rem; border-left: 2px solid var(--border); }
+  .tl-item { position: relative; padding-bottom: 1.4rem; }
+  .tl-item:last-child { padding-bottom: 0; }
+  .tl-item::before {
+    content: "";
+    position: absolute;
+    left: -1.95rem;
+    top: .35rem;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--ch);
+    border: 2px solid var(--surface);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  .tl-item .when { font-family: "IBM Plex Mono", monospace; font-size: .74rem; color: var(--text-faint); }
+  .tl-item .what { font-size: .93rem; margin-top: .15rem; color: var(--text-dim); }
+  .tl-item .what code { font-size: .87em; }
+
+  /* ---------- kv / footer ---------- */
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: .5rem 1.2rem; font-size: .87rem; margin: 1.4rem 0 2rem; }
+  .kv dt { color: var(--text); }
+  .kv dd { margin: 0; color: var(--text-dim); }
+
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--ch);
+    background: var(--surface);
+    border-radius: 0 10px 10px 0;
+    padding: 1rem 1.2rem;
+    font-size: .9rem;
+    color: var(--text-dim);
+    margin: 1.6rem 0;
+  }
+  .callout strong { color: var(--text); }
+
+  footer.colophon {
+    max-width: 66ch;
+    margin: 5rem 0 0;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+    font-size: .82rem;
+    color: var(--text-faint);
+  }
+  footer.colophon p { margin: 0 0 .7rem; }
+
+  ::selection { background: var(--ch-soft); color: var(--ch-ink); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="toc" aria-label="Table of contents">
+    <div class="brand">The Event Store</div>
+    <div class="brand-sub">ClickHouse in analytics/</div>
+
+    <div class="group-label">Orientation</div>
+    <ul>
+      <li><a href="#split">Two databases</a></li>
+      <li><a href="#connection">Connection layer</a></li>
+    </ul>
+
+    <div class="group-label">Schema</div>
+    <ul>
+      <li><a href="#schema">Table reference</a></li>
+    </ul>
+
+    <div class="group-label">Data flow</div>
+    <ul>
+      <li><a href="#write-path">Write path</a></li>
+      <li><a href="#read-path">Read path</a></li>
+      <li><a href="#imports">Imported data</a></li>
+    </ul>
+
+    <div class="group-label">Change management</div>
+    <ul>
+      <li><a href="#migrations">Data migrations</a></li>
+      <li><a href="#ops">Operational tooling</a></li>
+      <li><a href="#config">Configuration</a></li>
+      <li><a href="#evolution">Schema evolution</a></li>
+    </ul>
+  </nav>
+
+  <main>
+    <div class="hero">
+      <div class="eyebrow"><span class="dot"></span> Component reference &middot; analytics/</div>
+      <h1>The Event Store</h1>
+      <p class="lede">Every pageview Plausible ever records lands in ClickHouse, not Postgres. This is how that
+        column store is wired into the app: <em>four Ecto repos</em> aimed at one cluster, a write buffer that
+        trades durability for throughput, and a second migration system for the schema changes Ecto's DSL
+        can't express on a table with a billion rows.</p>
+
+      <div class="stat-strip">
+        <div><div class="n num">18</div><div class="l">tables &amp; dictionaries</div></div>
+        <div><div class="n num">4</div><div class="l">Ecto repos, one cluster</div></div>
+        <div><div class="n num">54</div><div class="l">schema migrations</div></div>
+        <div><div class="n num">6</div><div class="l">staged data&#8209;migration jobs</div></div>
+      </div>
+      <p class="dek" style="margin-top:1.3rem; font-size:.84rem;">Revision 2. The first version of
+        this page shipped with every schema fact sourced from a direct file read, because EKOS's own
+        ClickHouse SQL parser couldn't compile <span class="file">structure.sql</span> at all. That
+        parser gap is now fixed &mdash; see the note at the end for what changed, and one new caveat
+        the fix itself surfaced.</p>
+    </div>
+
+    <section id="split">
+      <div class="eyebrow">Orientation</div>
+      <h2>Two databases, one app</h2>
+      <p class="dek">Plausible runs Postgres and ClickHouse side by side for the same reason most analytics
+        products eventually do: the data an operator edits and the data a browser fires belong to two
+        different engines.</p>
+
+      <div class="split">
+        <div class="pane">
+          <h4><span class="sys pg"><span class="sw"></span>Postgres &mdash; <code>Plausible.Repo</code></span></h4>
+          <ul>
+            <li>Mutable, low-volume, foreign-keyed &mdash; the shape Postgres is built for</li>
+            <li><code>sites</code>, <code>users</code>, <code>api_keys</code>, <code>goals</code></li>
+            <li><code>funnels</code> / <code>funnel_steps</code>, <code>site_imports</code>, <code>site_memberships</code></li>
+            <li><code>subscriptions</code>, <code>plans</code>, <code>enterprise_plans</code> &mdash; billing</li>
+            <li><code>shield_rules_*</code>, <code>shared_links</code>, <code>google_auth</code>, <code>oban_jobs</code></li>
+            <li>~40 tables, <span class="file">priv/repo/structure.sql</span> (2,738 lines)</li>
+          </ul>
+        </div>
+        <div class="pane">
+          <h4><span class="sys ch"><span class="sw"></span>ClickHouse &mdash; <code>plausible_events_db</code></span></h4>
+          <ul>
+            <li>Append-mostly, high-volume, columnar &mdash; every raw pageview and custom event</li>
+            <li><code>events_v2</code>, <code>sessions_v2</code> &mdash; the live firehose</li>
+            <li><code>imported_*</code> (10 tables) &mdash; backfilled history from GA4 / UA / CSV</li>
+            <li><code>ingest_counters</code>, <code>location_data</code> + dictionary &mdash; support tables</li>
+            <li>No foreign keys; identity is <code>site_id</code>, a plain integer copied from Postgres</li>
+            <li>18 objects, <span class="file">priv/ingest_repo/structure.sql</span> (366 lines)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="connection">
+      <div class="eyebrow">Orientation</div>
+      <h2>Connection layer</h2>
+      <p class="dek">One ClickHouse cluster, reached through <code class="inline">ecto_ch 0.8.6</code> &mdash;
+        which wraps <code class="inline">ch 0.7.1</code>, a pure-Elixir client speaking ClickHouse's native
+        <code class="inline">RowBinary</code> wire format over plain HTTP. No C driver, no NIF. But instead of
+        one shared repo, the app splits ClickHouse across <strong>four Ecto repos</strong>, each with a pool
+        and settings tuned to one job.</p>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr><th>Repo</th><th>Role</th><th>Pool / key settings</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="tname">ClickhouseRepo</td>
+              <td>Dashboard reads. <code class="inline">read_only: true</code>; injects a <code class="inline">log_comment</code> JSON tag (caller + OTel trace id) into every query for log correlation, and offers <code class="inline">parallel_tasks/2</code> for fan-out breakdown queries.</td>
+              <td class="note">queue_target 500ms &middot; timeout 15s &middot; <code class="inline">max_execution_time=20</code> &middot; concurrency 3</td>
+            </tr>
+            <tr>
+              <td class="tname">IngestRepo</td>
+              <td>Target of the event/session write buffers (below). Exposes <code class="inline">clustered_table?/1</code> / <code class="inline">replica_count/1</code>, read from <code class="inline">system.replicas</code>, so migrations know whether to add <code class="inline">ON CLUSTER</code>.</td>
+              <td class="note">flush interval &amp; buffer size configurable</td>
+            </tr>
+            <tr>
+              <td class="tname">AsyncInsertRepo</td>
+              <td>A second connection to the same cluster for fire-and-forget writes.</td>
+              <td class="note"><code class="inline">async_insert=1</code>, <code class="inline">wait_for_async_insert=0</code>, pool_size 1</td>
+            </tr>
+            <tr>
+              <td class="tname">DeletionRepo</td>
+              <td>Site deletions and import-cleanup mutations &mdash; kept off the read/write hot paths.</td>
+              <td class="note">pool_size 2</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dek" style="margin-top:-.6rem">Migrations shared across repos lean on <code class="inline">Plausible.MigrationUtils</code>
+        (<span class="file">lib/plausible/migration_utils.ex</span>) for <code class="inline">on_cluster_statement/1</code>,
+        dictionary connection params, and an <code class="inline">enterprise_edition?/0</code> check that lets a
+        single migration file branch between CE and EE schemas rather than forking into two.</p>
+    </section>
+
+    <section id="schema">
+      <div class="eyebrow">Schema</div>
+      <h2>Table reference</h2>
+      <p class="dek">Read from <span class="file">priv/ingest_repo/structure.sql</span> directly &mdash; EKOS's
+        generic SQL&#8209;DDL recovery pass couldn't parse this file (see the note at the end of this page), so
+        every engine, key, and column claim below is a direct read, not a compiled fact.</p>
+
+      <h3>Live firehose</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Table</th><th>Engine</th><th>Partition / order</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="tname">events_v2</td>
+              <td><span class="engine">MergeTree</span></td>
+              <td class="mono">PART <code>toYYYYMM(timestamp)</code><br>ORDER <code>(site_id, toDate(timestamp), name, user_id, timestamp)</code><br>SAMPLE <code>user_id</code></td>
+              <td class="note">One row per pageview/custom event. <code class="inline">meta.key</code>/<code class="inline">meta.value</code> as parallel <code class="inline">Array(String)</code> for custom-event props; <code class="inline">revenue_reporting_amount</code>/<code class="inline">revenue_source_amount</code> as <code class="inline">Nullable(Decimal(18,3))</code>. 9 <code class="inline">ALIAS</code> columns (country/region/city names via <code class="inline">dictGet</code>).</td>
+            </tr>
+            <tr>
+              <td class="tname">sessions_v2</td>
+              <td><span class="engine">VersionedCollapsingMergeTree(sign, events)</span></td>
+              <td class="mono">PART <code>toYYYYMM(start)</code><br>ORDER <code>(site_id, toDate(start), user_id, session_id)</code><br>SAMPLE <code>user_id</code></td>
+              <td class="note">A session is <em>updated</em> by inserting a −1 row for the old state and a +1 row for the new; ClickHouse collapses the pair at merge time &mdash; no application-side UPDATE. <code class="inline">minmax</code> index on <code class="inline">timestamp</code>. Same alias-column pattern as <code class="inline">events_v2</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Support tables</h3>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Table</th><th>Engine</th><th>Key</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="tname">ingest_counters</td>
+              <td><span class="engine">SummingMergeTree(value)</span></td>
+              <td class="mono">ORDER <code>(domain, toDate(event_timebucket), metric, toStartOfMinute(...))</code></td>
+              <td class="note">Per-minute rollup counters, <code class="inline">site_id Nullable(UInt64)</code>. A later migration adds a materialized projection for site-traffic queries &mdash; which is why its cleanup path (Operational tooling) needs a heavier delete than every other table.</td>
+            </tr>
+            <tr>
+              <td class="tname">location_data</td>
+              <td><span class="engine">MergeTree</span></td>
+              <td class="mono">ORDER <code>(type, id)</code></td>
+              <td class="note">Small reference table (granularity 128). Its <code class="inline">COMMENT '2024-07-09'</code> doubles as a version marker &mdash; the <code>LocationsSync</code> data migration only re-runs when that date is stale.</td>
+            </tr>
+            <tr>
+              <td class="tname">location_data_dict</td>
+              <td><span class="engine">DICTIONARY</span></td>
+              <td class="mono">PK <code>(type, id)</code></td>
+              <td class="note">Backs every <code class="inline">*_name</code> ALIAS column above via <code class="inline">dictGet</code>. <code class="inline">LIFETIME(MIN 0 MAX 0)</code> &mdash; never auto-refreshes; only <code>LocationsSync</code> repopulates it. <code class="inline">LAYOUT(COMPLEX_KEY_CACHE(500,000))</code>.</td>
+            </tr>
+            <tr>
+              <td class="tname">schema_migrations</td>
+              <td><span class="engine">TinyLog</span></td>
+              <td class="mono">&mdash;</td>
+              <td class="note">Ecto's migration-version ledger for <code class="inline">IngestRepo</code>, the ClickHouse equivalent of Postgres's own <code class="inline">schema_migrations</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Imported history <span class="sys ch" style="margin-left:.5em"><span class="sw"></span>10 tables</span></h3>
+      <p class="dek">One table per dimension &mdash; <code class="inline">imported_visitors</code>,
+        <code class="inline">imported_sources</code>, <code class="inline">imported_pages</code>,
+        <code class="inline">imported_entry_pages</code>, <code class="inline">imported_exit_pages</code>,
+        <code class="inline">imported_locations</code>, <code class="inline">imported_devices</code>,
+        <code class="inline">imported_browsers</code>, <code class="inline">imported_operating_systems</code>,
+        <code class="inline">imported_custom_events</code> &mdash; all plain <span class="engine">MergeTree</span>,
+        unpartitioned, ordered <code class="inline">(site_id, date, &hellip;dimension)</code>, and all set
+        <code class="inline">replicated_deduplication_window = 0</code> since bulk backfills reinsert the same
+        rows on retry by design. These are the landing zone for GA4 / Universal Analytics / CSV imports &mdash;
+        see <a href="#imports">Imported data</a>.</p>
+    </section>
+
+    <section id="write-path">
+      <div class="eyebrow">Data flow</div>
+      <h2>Write path</h2>
+      <p class="dek">A pageview never hits ClickHouse directly. It's routed, buffered, and flushed in
+        batches &mdash; the design trades a few seconds of durability for the throughput ClickHouse actually
+        wants (few, large inserts, not one per request).</p>
+
+      <figure class="diagram">
+        <div class="frame">
+          <svg viewBox="0 0 900 420" role="img" aria-label="An event is routed through an Embedded or Remote persistor, buffered by size or a 5-second timer, then flushed as one batched RowBinary insert into events_v2 or sessions_v2 — the same tables a dashboard query reads through ClickhouseRepo's read-only pool.">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+              </marker>
+              <marker id="arrowAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--ch)"></path>
+              </marker>
+            </defs>
+
+            <!-- lane labels -->
+            <text x="20" y="34" font-family="IBM Plex Mono, monospace" font-size="11" letter-spacing="1.5" fill="var(--ch)">WRITE PATH</text>
+            <text x="20" y="272" font-family="IBM Plex Mono, monospace" font-size="11" letter-spacing="1.5" fill="var(--pg)">READ PATH</text>
+
+            <!-- WRITE LANE -->
+            <g font-family="Archivo, sans-serif" font-size="13">
+              <rect x="20" y="46" width="150" height="54" rx="9" fill="none" stroke="currentColor" opacity="0.55"></rect>
+              <text x="95" y="68" text-anchor="middle">Pageview /</text>
+              <text x="95" y="85" text-anchor="middle">custom event</text>
+
+              <rect x="212" y="46" width="168" height="54" rx="9" fill="none" stroke="currentColor" opacity="0.55"></rect>
+              <text x="296" y="68" text-anchor="middle">Persistor</text>
+              <text x="296" y="85" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.65">Embedded / Remote</text>
+
+              <rect x="422" y="40" width="200" height="66" rx="9" fill="var(--ch-soft)" stroke="var(--ch)"></rect>
+              <text x="522" y="63" text-anchor="middle" fill="var(--ch-ink)" font-weight="600">WriteBuffer</text>
+              <text x="522" y="80" text-anchor="middle" font-size="10.5" fill="var(--ch-ink)">flush @ byte-size cap</text>
+              <text x="522" y="94" text-anchor="middle" font-size="10.5" fill="var(--ch-ink)">or every 5s tick</text>
+
+              <line x1="170" y1="73" x2="212" y2="73" stroke="currentColor" opacity="0.55" marker-end="url(#arrow)"></line>
+              <line x1="380" y1="73" x2="422" y2="73" stroke="currentColor" opacity="0.55" marker-end="url(#arrow)"></line>
+            </g>
+
+            <!-- center: tables -->
+            <rect x="700" y="150" width="180" height="120" rx="12" fill="var(--surface-2)" stroke="var(--border-strong)"></rect>
+            <text x="790" y="200" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">events_v2</text>
+            <text x="790" y="219" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">sessions_v2</text>
+            <text x="790" y="241" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10.5" fill="var(--text-faint)">MergeTree family</text>
+
+            <!-- write -> table -->
+            <path d="M522,106 C522,180 620,206 700,208" fill="none" stroke="var(--ch)" stroke-width="1.6" marker-end="url(#arrowAccent)"></path>
+            <text x="600" y="175" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ch-ink)">INSERT &hellip; FORMAT RowBinary</text>
+
+            <!-- READ LANE -->
+            <g font-family="Archivo, sans-serif" font-size="13">
+              <rect x="20" y="284" width="150" height="54" rx="9" fill="none" stroke="currentColor" opacity="0.55"></rect>
+              <text x="95" y="306" text-anchor="middle">Dashboard</text>
+              <text x="95" y="323" text-anchor="middle">query</text>
+
+              <rect x="212" y="284" width="200" height="54" rx="9" fill="none" stroke="currentColor" opacity="0.55"></rect>
+              <text x="312" y="306" text-anchor="middle">Stats query builder</text>
+              <text x="312" y="323" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.65">Query &rarr; Optimizer &rarr; Runner</text>
+
+              <rect x="454" y="278" width="200" height="66" rx="9" fill="var(--pg-soft)" stroke="var(--pg)"></rect>
+              <text x="554" y="301" text-anchor="middle" fill="var(--pg-ink)" font-weight="600">ClickhouseRepo</text>
+              <text x="554" y="318" text-anchor="middle" font-size="10.5" fill="var(--pg-ink)">read_only pool</text>
+              <text x="554" y="332" text-anchor="middle" font-size="10.5" fill="var(--pg-ink)">max_execution_time 20s</text>
+
+              <line x1="170" y1="311" x2="212" y2="311" stroke="currentColor" opacity="0.55" marker-end="url(#arrow)"></line>
+              <line x1="412" y1="311" x2="454" y2="311" stroke="currentColor" opacity="0.55" marker-end="url(#arrow)"></line>
+            </g>
+
+            <path d="M554,278 C554,220 640,212 700,214" fill="none" stroke="var(--pg)" stroke-width="1.6" marker-end="url(#arrow)"></path>
+            <text x="640" y="245" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--pg-ink)">SELECT</text>
+
+            <text x="790" y="292" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" fill="var(--text-faint)">+ AsyncInsertRepo (fire-and-forget)</text>
+            <text x="790" y="308" text-anchor="middle" font-family="Archivo, sans-serif" font-size="10" fill="var(--text-faint)">+ DeletionRepo (site cleanup)</text>
+          </svg>
+        </div>
+        <figcaption>Writes and reads reach the same tables through two different Ecto repos and pools &mdash;
+          a bursty, buffered write path tuned for throughput, and a bounded, read-only path tuned to fail fast
+          rather than hold a connection open.</figcaption>
+      </figure>
+
+      <p>Every event first passes through <code class="inline">Plausible.Ingestion.Persistor</code>
+        (<span class="file">lib/plausible/ingestion/persistor.ex</span>), which routes it to
+        <code class="inline">Embedded</code> or <code class="inline">Remote</code> based on a
+        <code class="inline">backend_percent_enabled</code> rollout percentage, hashed per <code class="inline">user_id</code>
+        with <code class="inline">:erlang.phash2</code> &mdash; an operator can shift ingestion to a remote
+        persistor service gradually rather than all at once. <code class="inline">Embedded</code> resolves the
+        session through <code class="inline">Session.CacheStore</code>, merges it onto the event, and hands both
+        to a <code class="inline">WriteBuffer</code> GenServer per stream (events, sessions).</p>
+
+      <p>The buffer (<span class="file">lib/plausible/ingestion/write_buffer.ex</span>) accumulates
+        <code class="inline">RowBinary</code> iodata and flushes on whichever comes first: the buffered
+        byte-size crossing <code class="inline">CLICKHOUSE_MAX_BUFFER_SIZE_BYTES</code> (default
+        <span class="mono">100,000</span> bytes), or a periodic tick at
+        <code class="inline">CLICKHOUSE_FLUSH_INTERVAL_MS</code> (default <span class="mono">5,000</span>ms).
+        A flush is one <code class="inline">IngestRepo.query!</code> using
+        <code class="inline">FORMAT RowBinaryWithNamesAndTypes</code>, with the insert header built once at
+        compile time from the Ecto schema's field types. The process traps exit signals so a supervised
+        shutdown still flushes whatever's buffered rather than dropping it.</p>
+    </section>
+
+    <section id="read-path">
+      <div class="eyebrow">Data flow</div>
+      <h2>Read path</h2>
+      <p class="dek">Dashboard queries don't hand-write SQL against the tables above &mdash; they go through a
+        24-file query-builder pipeline in <span class="file">lib/plausible/stats/</span>.</p>
+      <p>An API request is parsed into an internal <code class="inline">Query</code> struct
+        (<code class="inline">query_builder.ex</code>, <code class="inline">api_query_parser.ex</code>), passed
+        through <code class="inline">query_optimizer.ex</code>, then executed by
+        <code class="inline">query_runner.ex</code> into a <code class="inline">query_result.ex</code>.
+        <code class="inline">table_decider.ex</code> picks <code class="inline">events_v2</code>,
+        <code class="inline">sessions_v2</code>, or the matching <code class="inline">imported_*</code> table
+        per requested metric; <code class="inline">compare.ex</code> handles period-over-period comparisons.
+        A separate, lower-level module, <code class="inline">Plausible.Stats.Clickhouse</code>
+        (<span class="file">lib/plausible/stats/clickhouse.ex</span>), hand-writes <code class="inline">Ecto.Query</code>s
+        with <code class="inline">fragment/1</code> for ClickHouse-only functions like <code class="inline">toDate</code>
+        and <code class="inline">countIf</code>, and uses <code class="inline">ClickhouseRepo.parallel_tasks/2</code>
+        to fan a large site-ID list out into concurrent chunked queries.</p>
+    </section>
+
+    <section id="imports">
+      <div class="eyebrow">Data flow</div>
+      <h2>Imported data</h2>
+      <p class="dek">History that predates Plausible tracking gets backfilled into the
+        <code class="inline">imported_*</code> tables through a pluggable importer framework
+        (<span class="file">lib/plausible/imported/</span>, 18 files).</p>
+
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Source</th><th>File</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td class="tname">Google Analytics 4</td><td class="file">google_analytics4.ex</td><td class="note">Pulls via the GA4 Data API</td></tr>
+            <tr><td class="tname">Universal Analytics</td><td class="file">universal_analytics.ex</td><td class="note">Legacy GA, sunset upstream but still importable</td></tr>
+            <tr><td class="tname">CSV</td><td class="file">csv_importer.ex</td><td class="note">User-supplied export files</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Ten per-dimension writers (<code class="inline">browser.ex</code>, <code class="inline">device.ex</code>,
+        <code class="inline">page.ex</code>, <code class="inline">location.ex</code> &hellip;) map each source's
+        rows onto the matching <code class="inline">imported_*</code> table, batched through a
+        <code class="inline">buffer.ex</code> writer analogous to the live write buffer. The job itself is
+        tracked in Postgres, not ClickHouse &mdash; <code class="inline">site_import.ex</code> backs the
+        <code class="inline">site_imports</code> table on the app-database side of the split.</p>
+    </section>
+
+    <section id="migrations">
+      <div class="eyebrow">Change management</div>
+      <h2>Data migrations</h2>
+      <p class="dek">Plain Ecto migrations (<span class="file">priv/ingest_repo/migrations/*.exs</span>, 54 files)
+        cover anything expressible as <code class="inline">create table</code> / <code class="inline">alter table</code>
+        or a single <code class="inline">execute</code>. Anything bigger &mdash; a full table rewrite, a staged
+        backfill that has to run for hours against production data &mdash; goes through a second framework:
+        <code class="inline">Plausible.DataMigration</code> (<span class="file">lib/plausible/data_migration.ex</span>).</p>
+      <p>Its <code class="inline">use</code> macro wires <code class="inline">unwrap/2</code>, which loads a
+        <code class="inline">.sql.eex</code> template from <span class="file">priv/data_migrations/&lt;Name&gt;/sql/</span>
+        and EEx-renders it with assigns (cluster-conditional syntax, table names) &mdash; the reason these files
+        carry the <code class="inline">.eex</code> extension and sit outside EKOS's plain-<code class="inline">.sql</code>
+        recovery scan. <code class="inline">run_sql_confirm/3</code> prompts for interactive confirmation before
+        executing, because these are meant to be run by hand from a remote console against production, not
+        applied blindly like a schema migration.</p>
+
+      <div class="cases">
+        <div class="case">
+          <div class="head"><code>VersionedSessions</code><span class="tag">zero-downtime engine change</span></div>
+          <p>Moved <code class="inline">sessions_v2</code> from a plain <code class="inline">CollapsingMergeTree</code>
+            to today's <code class="inline">VersionedCollapsingMergeTree</code>: create a shadow
+            <code class="inline">_tmp_versioned</code> table, dual-write, then <code class="inline">EXCHANGE</code>
+            the two tables atomically &mdash; the only way to change a MergeTree engine on a live table without
+            downtime.</p>
+        </div>
+        <div class="case">
+          <div class="head"><code>NumericIDs</code><span class="tag">non-blocking table rewrite</span></div>
+          <p>Converted string domain keys to numeric <code class="inline">site_id</code> via a
+            create-tmp &rarr; insert-into-tmp &rarr; <code class="inline">ATTACH</code> &rarr; <code class="inline">DROP</code>
+            sequence, avoiding a blocking in-place rewrite of the whole table.</p>
+        </div>
+        <div class="case">
+          <div class="head"><code>AcquisitionChannel</code><span class="tag">staged column backfill</span></div>
+          <p>Adds a materialized <code class="inline">acquisition_channel</code> column to both
+            <code class="inline">events_v2</code> and <code class="inline">sessions_v2</code> as three independent
+            phases &mdash; <code class="inline">add_column</code>, <code class="inline">update_column</code>,
+            <code class="inline">backfill</code> &mdash; so the schema change and the historical recompute can be
+            run and monitored separately.</p>
+        </div>
+        <div class="case">
+          <div class="head"><code>LocationsSync</code><span class="tag">dictionary refresh</span></div>
+          <p>Truncates and repopulates <code class="inline">location_data</code>, rebuilds
+            <code class="inline">location_data_dict</code>, and recreates the ALIAS columns on
+            <code class="inline">events_v2</code> / <code class="inline">sessions_v2</code> / <code class="inline">imported_locations</code>.
+            Idempotent by design: it checks <code class="inline">location_data</code>'s own
+            <code class="inline">COMMENT</code> against the code's current version before doing anything.</p>
+        </div>
+        <div class="case">
+          <div class="head"><code>PopulateEventSessionColumns</code><span class="tag">long-running background job</span></div>
+          <p>Designed to run for hours or days as a background job with its own
+            <code class="inline">report_progress</code>/<code class="inline">kill</code> entry points, not inline
+            in a migration step.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="ops">
+      <div class="eyebrow">Change management</div>
+      <h2>Operational tooling</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Component</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="tname">Workers.ClickhouseCleanSites</td>
+              <td class="note">Oban worker, queue <code class="inline">:clickhouse_clean_sites</code>. Async site deletion:
+                lightweight <code class="inline">DELETE &hellip; IN PARTITION</code> for the partitioned
+                <code class="inline">events_v2</code>/<code class="inline">sessions_v2</code>; plain
+                <code class="inline">DELETE</code> for the ten unpartitioned <code class="inline">imported_*</code>
+                tables; a heavier <code class="inline">ALTER TABLE &hellip; DELETE</code> mutation specifically for
+                <code class="inline">ingest_counters</code>, because ClickHouse refuses lightweight deletes on a
+                table carrying a projection.</td>
+            </tr>
+            <tr>
+              <td class="tname">Mix.Tasks.CleanClickhouse</td>
+              <td class="note">Test-suite helper that truncates every ClickHouse table except migrations and
+                dictionaries; wired into the <code class="inline">test</code> alias in <span class="file">mix.exs</span>.</td>
+            </tr>
+            <tr>
+              <td class="tname">ClickhouseLocationData</td>
+              <td class="note">Thin Ecto schema over <code class="inline">location_data</code>, backing <code class="inline">LocationsSync</code>.</td>
+            </tr>
+            <tr>
+              <td class="tname">debug_controller + clickhouse.html.heex</td>
+              <td class="note">Admin-only debug page surfacing live ClickHouse query/health info for a given site.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="config">
+      <div class="eyebrow">Change management</div>
+      <h2>Configuration</h2>
+      <p class="dek">All four repos share one connection string and diverge in pool shape and query behavior
+        (<span class="file">config/runtime.exs</span>).</p>
+      <dl class="kv">
+        <dt>CLICKHOUSE_DATABASE_URL</dt><dd>Shared connection string for all four repos.</dd>
+        <dt>CLICKHOUSE_FLUSH_INTERVAL_MS</dt><dd>Write-buffer tick interval &mdash; default 5,000ms.</dd>
+        <dt>CLICKHOUSE_MAX_BUFFER_SIZE_BYTES</dt><dd>Write-buffer byte-size flush trigger &mdash; default 100,000 bytes (<code class="inline">CLICKHOUSE_MAX_BUFFER_SIZE</code> is a deprecated alias).</dd>
+        <dt>CLICKHOUSE_DEFAULT_STORAGE_POLICY</dt><dd>Optional ClickHouse storage-policy override for <code class="inline">IngestRepo</code> tables.</dd>
+        <dt>ClickhouseRepo settings</dt><dd><code class="inline">readonly=1</code>, <code class="inline">max_execution_time=20</code>, <code class="inline">join_algorithm="direct,parallel_hash,hash"</code>, <code class="inline">cancel_http_readonly_queries_on_client_close=1</code>.</dd>
+      </dl>
+    </section>
+
+    <section id="evolution">
+      <div class="eyebrow">Change management</div>
+      <h2>Schema evolution</h2>
+      <p class="dek">54 migrations span 2020 to 2026. The checked-in
+        <span class="file">structure.sql</span> is a periodically-regenerated snapshot rather than a per-migration
+        artifact &mdash; it has only two commits in its own git history, and its 32 pre-seeded
+        <code class="inline">schema_migrations</code> rows undercount the 54 files that actually exist today.</p>
+
+      <div class="tl">
+        <div class="tl-item">
+          <div class="when num">2020-09-15</div>
+          <div class="what"><code class="inline">create_events_and_sessions</code> &mdash; the original tables, plain <code class="inline">MergeTree</code>, keyed on <code class="inline">domain</code> (a string), not yet <code class="inline">site_id</code>.</div>
+        </div>
+        <div class="tl-item">
+          <div class="when num">2021-03-23</div>
+          <div class="what">Retrofits <code class="inline">SAMPLE BY user_id</code> onto an already-live table via <code class="inline">ALTER TABLE &hellip; MODIFY SAMPLE BY</code>.</div>
+        </div>
+        <div class="tl-item">
+          <div class="when num">2024-02-22</div>
+          <div class="what">Triggers the <code class="inline">VersionedSessions</code> data migration &mdash; the engine change described above.</div>
+        </div>
+        <div class="tl-item">
+          <div class="when num">2024-11-20</div>
+          <div class="what">Adds the <code class="inline">ingest_counters</code> projection, version-gated for ClickHouse 24.8's <code class="inline">deduplicate_merge_projection_mode</code> setting &mdash; the migration rescues the exception and soft-fails on older ClickHouse.</div>
+        </div>
+        <div class="tl-item">
+          <div class="when num">2025-02-18</div>
+          <div class="what">Creates a ClickHouse user-defined function (<code class="inline">CREATE OR REPLACE FUNCTION</code>) for custom-event array lookups.</div>
+        </div>
+        <div class="tl-item">
+          <div class="when num">2026-06-01</div>
+          <div class="what"><code class="inline">remap_sources_v3</code> &mdash; a large hardcoded referrer-remapping table, including AI-assistant traffic sources (ChatGPT, Claude, DeepSeek, Grok, Copilot).</div>
+        </div>
+        <div class="tl-item">
+          <div class="when num">2026-06-25</div>
+          <div class="what">Most recent migration: renames <code class="inline">recovery_id</code> &rarr; <code class="inline">replay_session_id</code>, gated on <code class="inline">Plausible.MigrationUtils.enterprise_edition?/0</code> &mdash; CE/EE divergence handled inline, not as separate migration files.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="callout">
+      <strong>Revision 2 &mdash; what changed since the first version of this page.</strong>
+      The first version flagged that EKOS's own ClickHouse SQL-DDL recovery pass failed whole-file
+      on <span class="file">priv/ingest_repo/structure.sql</span>: the underlying
+      <code class="inline">sqlparser</code> ClickHouse dialect didn't parse <code class="inline">CODEC(&hellip;)</code>,
+      so every schema fact on this page was sourced from a direct file read instead of compiled
+      knowledge. That gap is now closed, in two RFCs: RFC 0057 fixed <code class="inline">CODEC(&hellip;)</code>;
+      RFC 0058 fixed four more clauses the same file needed &mdash; table-level
+      <code class="inline">INDEX &hellip; TYPE &hellip; GRANULARITY</code>, <code class="inline">PARTITION BY</code>,
+      <code class="inline">SAMPLE BY</code>, <code class="inline">SETTINGS</code>, and whole
+      <code class="inline">CREATE DICTIONARY</code> statements. Re-running the pipeline from a clean cache now
+      compiles <span class="file">structure.sql</span> into 15 real, evidence-backed <code class="inline">Table</code>
+      objects with zero parse warnings &mdash; every fact in the <a href="#schema">Table reference</a> section above
+      is corroborated by the ledger today, not only by the source read that originally produced it.
+      <br><br>
+      <strong>One new caveat the fix itself surfaced.</strong> A separate, pre-existing EKOS subsystem
+      &mdash; identity resolution (<code class="inline">crates/identity</code>), untouched by either RFC &mdash;
+      auto-merges 6 of those 15 real tables into a single identity at confidence 0.93:
+      <code class="inline">imported_visitors</code>, <code class="inline">imported_operating_systems</code>,
+      <code class="inline">imported_exit_pages</code>, <code class="inline">imported_entry_pages</code>,
+      <code class="inline">imported_devices</code>, and <code class="inline">imported_browsers</code> share both a
+      name prefix and the same 8-column base schema, which is enough to clear the default 0.85 merge threshold.
+      Querying EKOS's ledger for, say, <code class="inline">imported_browsers</code>'s columns today returns
+      <code class="inline">imported_visitors</code>'s columns instead. The <a href="#schema">Imported history</a>
+      row above is unaffected &mdash; it was authored from a direct source read, not the ledger &mdash; but anyone
+      querying this schema through EKOS directly should know the five merged-away tables aren't separately
+      retrievable yet. Tracked, not yet fixed: a change here affects identity-resolution scoring for every
+      same-kind object across EKOS's whole compiled estate, not just this repo, so it wasn't made unilaterally.
+    </div>
+
+    <footer class="colophon">
+      <p>Compiled from <span class="file">/home/legion/PycharmProjects/analytics</span> at commit reachable via
+        <code class="inline">git log</code> &mdash; revision 1 on 2026-08-20, revision 2 (this one) later the same
+        day after RFC 0057/0058 landed. A point-in-time reference, not a live schema browser. Re-run the pipeline
+        and re-read the source before trusting specifics against a later commit.</p>
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>

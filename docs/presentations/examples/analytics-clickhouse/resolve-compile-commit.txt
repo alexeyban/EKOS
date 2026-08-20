@@ -1,0 +1,23 @@
+$ ekos resolve
+Stats:
+  Candidates evaluated : 3156
+  Pairs compared       : 1747
+  Merges proposed      : 138
+  Conflicts detected   : 0
+
+$ ekos compile
+INFO ekos_semantic: identity resolution complete proposals=138 conflicts=0
+INFO ekos_semantic: CKM written objects=3074 relationships=3977 path=.ekos/ckm/model.json.zst
+Compile complete.
+  Objects:       3074
+  Relationships: 3977
+  Warnings:      8793 (check logs)
+
+$ ekos commit
+Commit complete.
+  Objects written:       1774
+  Objects skipped:       1300 (already in ledger)
+  Relationships written: 3977
+  Evidence records:      2856
+  Subsystem rollups:     71
+  Ledger:                /home/legion/PycharmProjects/analytics/.ekos/ledger/ledger.db

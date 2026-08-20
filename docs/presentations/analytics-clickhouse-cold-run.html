@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS Cold Against Plausible's ClickHouse Layer — EKOS</title>
+<meta name="description" content="EKOS pointed at analytics/ (Plausible Analytics), a real open-source repo it had never seen, to document its ClickHouse component. The compiler pipeline ran clean on git/CI/dependencies — and a real gap surfaced: sqlparser's ClickHouseDialect can't parse ClickHouse's own CODEC(...) column clause. Every screen on this page is real terminal output, unedited.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Pointed at a repo it had never seen.<br><span class="arrow-word">It found its own gap.</span></h1>
+  <p class="lede">A user asked EKOS to research <code class="mono">analytics/</code> — a real,
+  unmodified clone of Plausible Analytics, a production Elixir/Phoenix app — and document its
+  ClickHouse component. The compiler pipeline had never touched this codebase before. It compiled
+  git history, CI/CD, and dependencies cleanly — and on the one file that actually mattered,
+  ClickHouse's own DDL, it hit a wall that had nothing to do with this session's config. Every
+  screen on this page is real terminal output, unedited, including the failures.</p>
+  <div class="hero-diagram">
+    <span class="chip">analytics/ (Plausible, Elixir)</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos build / recover</span><span class="sep mono">→</span>
+    <span class="chip bad">CODEC parse failure</span><span class="sep mono">→</span>
+    <span class="chip">documented anyway</span>
+  </div>
+  <div class="byline"><span class="dot"></span> Cold run — RFC 0056's ClickHouse dialect, a repo it was never tested against</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / point it at a stranger</div>
+  <div class="eyebrow">Three dialect rules, one repo EKOS had never indexed</div>
+  <h2>Two databases in one repo — route each file to its own SQL dialect.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos init
+Initialized .ekos/ workspace at
+  /home/legion/PycharmProjects/analytics/.ekos
+
+$ ekos build
+Build complete.
+  Files observed (new): 2022
+  Total objects in ledger: 2022
+  Connectors re-scanned: 6</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      Plausible keeps two Ecto repos: Postgres for app/billing state, ClickHouse for the raw
+      event firehose. RFC 0031's <code class="mono">[[recover.sql.dialect-rules]]</code> routes
+      <code class="mono">priv/ingest_repo/**</code> to the <code class="mono">clickhouse</code>
+      dialect and <code class="mono">priv/repo/**</code> to <code class="mono">postgres</code> —
+      no code change, just three lines of config pointed at a repo EKOS had zero prior knowledge of.
+    </p>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse/build.txt" style="color:var(--accent-a);">build.txt</a></div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / the first wall</div>
+  <div class="eyebrow">Not a bug in the code — a stale binary</div>
+  <h2>The release build predated its own dialect registration.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos recover — real, unedited</div>
+<pre style="margin:0;"><span class="bad">WARN unknown dialect "clickhouse" configured for
+     priv/ingest_repo/structure.sql; falling back to generic
+WARN sqlparser failed on priv/ingest_repo/structure.sql:
+     sql parser error: Expected: ',' or ')' after column
+     definition, found: CODEC at Line: 7, Column: 23;
+     falling back to empty graph</span></pre>
+  </div>
+  <p class="lede"><code class="mono">target/release/ekos</code> on disk predated RFC 0056's
+  ClickHouse dialect registration — <code class="mono">cargo build --release -p ekos</code> against
+  current <code class="mono">main</code> fixed the "unknown dialect" warning in under 30 seconds.
+  The second warning, the actual parse failure, didn't move.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse/recover-stale-binary.txt" style="color:var(--accent-a);">recover-stale-binary.txt</a></div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / the second wall</div>
+  <div class="eyebrow">Rebuilt binary. Dialect resolves. Same error, same line.</div>
+  <h2>Not config. <code class="mono">sqlparser</code> itself doesn't know CODEC.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos recover, after a clean rebuild — real, unedited</div>
+<pre style="margin:0;">INFO running pass pass=sql-analyzer:priv/ingest_repo/structure.sql
+<span class="bad">WARN sqlparser failed on priv/ingest_repo/structure.sql:
+     sql parser error: Expected: ',' or ')' after column
+     definition, found: CODEC at Line: 7, Column: 23;
+     falling back to empty graph</span></pre>
+  </div>
+  <p class="lede">"unknown dialect" is gone — proof the fix in §02 worked. The CODEC error is
+  <em>identical</em>, down to the line and column: <code class="mono">`timestamp` DateTime
+  CODEC(Delta(4), LZ4)</code>, line 7 of the real schema. That isolates the fault to
+  <code class="mono">sqlparser::dialect::ClickHouseDialect</code>'s own column-option grammar —
+  it recognizes <code class="mono">MATERIALIZED</code>/<code class="mono">ALIAS</code>/<code
+  class="mono">EPHEMERAL</code> as ClickHouse column options, but <code class="mono">CODEC</code>
+  was never added.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse/recover-after-rebuild.txt" style="color:var(--accent-a);">recover-after-rebuild.txt</a></div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / the rest of the pipeline didn't care</div>
+  <div class="eyebrow">One file failed. Everything else still compiled.</div>
+  <h2>3,074 objects, 3,977 relationships, from a repo touched for the first time.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">500</div><div class="label">git commits analysed</div></div>
+    <div class="stat"><div class="num">124</div><div class="label">contributors identity-resolved</div></div>
+    <div class="stat"><div class="num">138</div><div class="label">duplicate-identity merges</div></div>
+    <div class="stat"><div class="num">3,074</div><div class="label">objects compiled</div></div>
+    <div class="stat"><div class="num">2,856</div><div class="label">evidence records</div></div>
+  </div>
+  <p class="lede" style="margin-top:2.4rem;">Git history, CI/CD (14 GitHub Actions pipelines),
+  local docs, and the dependency graph all recovered cleanly — the CODEC gap only cost the one
+  thing that needed real ClickHouse DDL grammar: structured <code class="mono">Table</code>/<code
+  class="mono">Column</code> objects for the event-store schema itself.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse/resolve-compile-commit.txt" style="color:var(--accent-a);">resolve-compile-commit.txt</a></div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / searchable, minus the schema</div>
+  <div class="eyebrow">ekos query find "clickhouse" — real, unedited</div>
+  <h2>Every ClickHouse-touching file compiled. Zero ClickHouse tables.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos query find "clickhouse"
+50 result(s) for 'clickhouse':
+  <span class="k">lib/plausible/clickhouse_repo.ex</span>
+  <span class="k">lib/plausible/clickhouse_event_v2.ex</span>
+  <span class="k">lib/plausible/stats/clickhouse.ex</span>
+  <span class="k">lib/workers/clickhouse_clean_sites.ex</span>
+  <span class="c">... 46 more — files, migrations, docs, CI</span>
+
+$ ekos query find "sessions_v2"
+30 result(s) — every migration &amp; data-migration file.
+<span class="bad">Zero ObjectKind::Table objects.</span></pre>
+  </div>
+  <p class="lede">Every Elixir module, migration, and doc that <em>mentions</em> ClickHouse is a
+  real compiled object with real git evidence. What's missing is the one thing a database doc
+  actually needs first: the tables themselves.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-clickhouse/query-find-clickhouse.txt" style="color:var(--accent-a);">query-find-clickhouse.txt</a></div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / ledger plus direct read</div>
+  <div class="eyebrow">Honest about which half came from where</div>
+  <h2>Compiled knowledge for the estate. A source-read fork for the one gap.</h2>
+  <div class="flow">
+    <div class="node"><div class="l1">01</div><div class="l2">compiled ledger</div></div>
+    <div class="arrow mono">+</div>
+    <div class="node active"><div class="l1">02</div><div class="l2">direct source read</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node"><div class="l1">03</div><div class="l2">structured findings</div></div>
+    <div class="arrow mono">→</div>
+    <div class="node active"><div class="l1">04</div><div class="l2">component doc</div></div>
+  </div>
+  <p class="lede" style="margin-top:2.6rem;">Git/CI/dependency facts came from the ledger,
+  queryable and evidenced. Every schema claim — engines, partition keys, the write-buffer flush
+  logic, the staged data-migration framework — came from a background research pass reading
+  <code class="mono">structure.sql</code> and the Elixir source directly, because the ledger
+  had nothing structural to hand it for ClickHouse. The delivered doc says which is which,
+  in its own words, not after the fact.</p>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / the deliverable</div>
+  <div class="eyebrow">Published this session</div>
+  <h2>"The Event Store" — the ClickHouse component, documented anyway.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">what it covers</div>
+<pre style="margin:0;">18 tables &amp; dictionaries, fully specced
+4 Ecto repos → 1 ClickHouse cluster
+Write path: buffer, flush, RowBinary
+Read path: query-builder pipeline
+6 staged data-migration case studies
+54-migration schema-evolution timeline</pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      Every engine/partition/order-key claim in the doc was read straight from <code
+      class="mono">priv/ingest_repo/structure.sql</code> and the migration files — and the doc
+      says so, in a callout naming this exact CODEC gap, so a reader knows which facts are
+      ledger-grounded and which are a direct read standing in for it.
+    </p>
+  </div>
+</section>
+
+<section class="slide cta" id="s9">
+  <div class="eyebrow">Same dialect, a repo of your own</div>
+  <h2>Point <code class="mono">[[recover.sql.dialect-rules]]</code> at any file-based ClickHouse DDL.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos.toml</div>
+<pre style="margin:0;"><span class="c"># route ClickHouse-only paths to the clickhouse dialect,</span>
+<span class="c"># everything else stays on generic/ANSI</span>
+[[recover.sql.dialect-rules]]
+path-glob = "priv/ingest_repo/**"
+dialect = "clickhouse"
+
+$ ekos build &amp;&amp; ekos recover</pre>
+  </div>
+  <div class="fineprint">EKOS · a cold run against analytics/ (Plausible Analytics), a real
+  unmodified open-source repo · every example on this page is real output, unedited ·
+  <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

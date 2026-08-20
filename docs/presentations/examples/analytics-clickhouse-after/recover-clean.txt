@@ -1,0 +1,20 @@
+$ ekos clean
+Clean complete. 2 item(s) removed from artifact cache.
+Ledger at /home/legion/PycharmProjects/analytics/.ekos/ledger/ledger.db was not modified.
+
+$ ekos recover
+WARN ekos::commands::recover: ANTHROPIC_API_KEY not set — using structural analysis only (LLM enrichment skipped)
+INFO ekos_compiler_core::pass: running pass pass=sql-analyzer:priv/ingest_repo/structure.sql
+INFO ekos_recovery::sql_analyzer: sql-analyzer complete pass=sql-analyzer:priv/ingest_repo/structure.sql objects=15 relationships=0
+INFO ekos_compiler_core::pass: running pass pass=sql-transform-analyzer:priv/ingest_repo/structure.sql
+INFO ekos_compiler_core::pass: running pass pass=dependency-analyzer:analytics
+INFO ekos_compiler_core::pass: running pass pass=cicd-analyzer:analytics
+INFO ekos_recovery::cicd_analyzer: cicd-analyzer complete pass=cicd-analyzer:analytics pipelines=14
+Recover complete.
+  SQL files analysed: 2
+  Source files scanned for dependencies: 162
+  Passes run: 6
+
+  # zero warnings for priv/ingest_repo/structure.sql — RFC 0057 fixed CODEC, RFC 0058 fixed
+  # INDEX/PARTITION BY/SAMPLE BY/SETTINGS/CREATE DICTIONARY. Before both RFCs, this line read:
+  #   WARN sqlparser failed on priv/ingest_repo/structure.sql: ...; falling back to empty graph

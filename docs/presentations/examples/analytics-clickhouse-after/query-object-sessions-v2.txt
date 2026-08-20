@@ -1,0 +1,28 @@
+$ ekos query object 1a4e9fc1-88f7-4069-af8a-11825a93e737
+Object: plausible_events_db.sessions_v2 (Table)
+  ID:   1a4e9fc1-88f7-4069-af8a-11825a93e737
+  Properties:
+    columns: [
+      {"data_type":"UInt64","name":"session_id"},
+      {"data_type":"INT8","name":"sign"},
+      {"data_type":"UInt64","name":"site_id"},
+      {"data_type":"UInt64","name":"user_id"},
+      {"data_type":"STRING","name":"hostname"},
+      {"data_type":"DATETIME","name":"timestamp"},
+      {"data_type":"DATETIME","name":"start"},
+      ... 36 more real columns, including:
+      {"data_type":"LowCardinality(FixedString(2))","name":"country_code"},
+      {"data_type":"Array(STRING)","name":"entry_meta.key"},
+      {"data_type":"Array(STRING)","name":"entry_meta.value"},
+      {"data_type":"LowCardinality(STRING)","name":"channel"}
+    ]  # 43 columns total
+  Evidence:
+    [100%] priv/ingest_repo/structure.sql — "CREATE TABLE plausible_events_db.sessions_v2"
+
+$ ekos query object ee69e790-ca3a-4333-aaa1-99c2735a4855   # events_v2
+Object: plausible_events_db.events_v2 (Table)
+  Properties:
+    columns: [...]  # 39 columns total, including revenue_reporting_amount:
+                     # Nullable(DECIMAL(18,3)), meta.key/meta.value: Array(STRING)
+  Evidence:
+    [100%] priv/ingest_repo/structure.sql — "CREATE TABLE plausible_events_db.events_v2"

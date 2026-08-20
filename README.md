@@ -375,6 +375,17 @@ export EKOS_CLICKHOUSE_PASSWORD=            # optional
 ekos build && ekos recover
 ```
 
+File-based ClickHouse DDL (`.sql` files routed to the `"clickhouse"` dialect via RFC 0031's
+`[[recover.sql.dialect-rules]]`) goes through the same `sqlparser::dialect::ClickHouseDialect` this
+connector uses for its live SELECT-only gate. `sqlparser` never supported several real ClickHouse
+`CREATE TABLE` clauses at all — `CODEC(...)` (RFC 0057), and `INDEX ... TYPE ... GRANULARITY`,
+`PARTITION BY`, `SAMPLE BY`, `SETTINGS`, and whole `CREATE DICTIONARY` statements (RFC 0058) — found
+and closed while using EKOS to document a real open-source repo's ClickHouse schema
+(Plausible Analytics). `ClickHouseDialectParser::preprocess` strips each, well-formed occurrences
+only, before the SQL reaches `sqlparser`; live-verified against that real repo's full,
+unmodified `structure.sql`, which now compiles into real `Table` KIR objects with zero parse
+warnings.
+
 **Live NL-to-SQL query** — the one path in EKOS that intentionally crosses the Key Invariant above:
 an LLM builds a ClickHouse `SELECT` from the compiled schema and the question, the generated SQL is
 parsed and hard-rejected unless it's exactly one `SELECT` (no writes, no multi-statement batches),
@@ -395,6 +406,37 @@ enable-mcp-query = true
 
 Deck, verified live against a real ClickHouse container: [ClickHouse: Compiled Metadata + Live
 NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html).
+
+A second deck covers the same connector's file-based DDL path, run cold against a real
+open-source repo (Plausible Analytics) EKOS had never seen: [EKOS Cold Against Plausible's
+ClickHouse Layer](https://alexeyban.github.io/EKOS/presentations/analytics-clickhouse-cold-run.html)
+— git/CI/dependency knowledge compiled cleanly, and real gaps surfaced in `sqlparser`'s
+`ClickHouseDialect` (`CODEC`, `INDEX`, `PARTITION BY`, `SAMPLE BY`, `SETTINGS`, `CREATE
+DICTIONARY`), all since closed (RFC 0057, RFC 0058) — that same repo's full `structure.sql` now
+compiles cleanly into real `Table` objects.
+
+A third deck, [ClickHouse Extraction, After the
+Fix](https://alexeyban.github.io/EKOS/presentations/analytics-clickhouse-after.html), re-analyzes
+the same repo after both RFCs: 15/15 real tables now recover with zero parse warnings, but
+re-analyzing surfaced a second, unrelated finding in a different pipeline stage — identity
+resolution (`crates/identity`) over-merging 6 of those 15 real `imported_*` tables into one
+identity at confidence 0.93, because they share both a name prefix and a common 8-column "spine."
+Reported the same way the parser gap was, not silently fixed.
+
+The same case study also produced real generated documentation and two live demos, all against
+[github.com/plausible/analytics](https://github.com/plausible/analytics), a real unmodified
+open-source repo:
+
+- [ClickHouse Component — Generated Documentation](https://alexeyban.github.io/EKOS/generated/analytics-clickhouse-component.html)
+  — full schema, write/read paths, and data-migration framework for the event store, researched
+  using EKOS's compiled ledger plus direct source verification.
+- [Top Referrers Dashboard](https://alexeyban.github.io/EKOS/generated/analytics-referrers-dashboard.html)
+  — a real analytics dashboard reproduced from a screenshot; every number is a live query, built by
+  a local Ollama model against EKOS's compiled schema and run against a real ClickHouse server.
+- [Why That Day Spiked](https://alexeyban.github.io/EKOS/generated/analytics-why-high-day.html) —
+  an open-ended "why" question answered by chaining real `ekos_clickhouse_query` MCP calls over
+  stdio JSON-RPC (including a real failure and retry), plus a technical breakdown of how Claude,
+  MCP, and EKOS's pipeline fit together.
 
 ### Demo: skills + custom subagents
 

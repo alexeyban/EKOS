@@ -1,0 +1,22 @@
+$ cargo build --release -p ekos
+   Compiling ekos-plugin-sql-dialect-clickhouse v0.1.0
+   Compiling ekos-plugin-clickhouse v0.1.0
+   Compiling ekos-recovery v0.1.0
+   Compiling ekos v0.1.0 (crates/cli)
+    Finished `release` profile [optimized] target(s) in 24.91s
+
+$ ekos build
+Build complete.
+  Files observed (new): 0
+  Total objects in ledger: 2022
+  0 connectors re-scanned
+  6 connector(s) skipped (cached)
+
+$ ekos recover
+WARN ekos::commands::recover: ANTHROPIC_API_KEY not set — using structural analysis only (LLM enrichment skipped)
+INFO ekos_compiler_core::pass: running pass pass=sql-analyzer:priv/ingest_repo/structure.sql
+WARN ekos_recovery::sql_analyzer: sqlparser failed on priv/ingest_repo/structure.sql: sql parser error: Expected: ',' or ')' after column definition, found: CODEC at Line: 7, Column: 23; falling back to empty graph
+Recover complete.
+  SQL files analysed: 2
+  Git commits analysed: 500
+  Passes run: 8

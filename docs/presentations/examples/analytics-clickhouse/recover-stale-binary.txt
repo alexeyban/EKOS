@@ -1,0 +1,16 @@
+$ ekos recover
+WARN ekos::commands::recover: ANTHROPIC_API_KEY not set — using structural analysis only (LLM enrichment skipped)
+WARN ekos::commands::recover: unknown dialect "clickhouse" configured for priv/ingest_repo/structure.sql; falling back to generic
+INFO ekos_compiler_core::pass: running pass pass=sql-transform-analyzer:priv/repo/structure.sql
+WARN ekos_recovery::sql_transform_analyzer: sqlparser failed on priv/repo/structure.sql (postgres): sql parser error: Expected: end of statement, found: INCREMENT at Line: 116, Column: 5 — falling back to per-statement recovery
+INFO ekos_recovery::sql_transform_analyzer: sql-transform-analyzer complete pass=sql-transform-analyzer:priv/repo/structure.sql statements=1282 nodes=1282 mapped=1 coverage_pct=0.078
+INFO ekos_compiler_core::pass: running pass pass=sql-analyzer:priv/repo/structure.sql
+WARN ekos_recovery::sql_analyzer: sqlparser failed on priv/repo/structure.sql: sql parser error: Expected: end of statement, found: INCREMENT at Line: 116, Column: 5; falling back to empty graph
+INFO ekos_compiler_core::pass: running pass pass=sql-transform-analyzer:priv/ingest_repo/structure.sql
+WARN ekos_recovery::sql_transform_analyzer: sqlparser failed on priv/ingest_repo/structure.sql (clickhouse): sql parser error: Expected: ',' or ')' after column definition, found: CODEC at Line: 7, Column: 23 — falling back to per-statement recovery
+INFO ekos_compiler_core::pass: running pass pass=sql-analyzer:priv/ingest_repo/structure.sql
+WARN ekos_recovery::sql_analyzer: sqlparser failed on priv/ingest_repo/structure.sql: sql parser error: Expected: ',' or ')' after column definition, found: CODEC at Line: 7, Column: 23; falling back to empty graph
+Recover complete.
+  SQL files analysed: 2
+  Git commits analysed: 500
+  Passes run: 8

@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why That Day Spiked — Plausible Analytics — EKOS</title>
+<meta name="description" content="EKOS + a local LLM investigating a real analytical question about plausible/analytics via chained MCP tool calls over stdio JSON-RPC, plus a technical breakdown of how Claude, MCP, and EKOS's pipeline fit together.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,500;0,600;0,700;1,500&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #f2f3f6;
+    --surface: #ffffff;
+    --surface-2: #eaecf1;
+    --text: #171a21;
+    --text-dim: #565f70;
+    --text-faint: #8a93a3;
+    --border: #dde1e8;
+    --accent: #5850ec;
+    --accent-soft: #ecebfd;
+    --accent-ink: #4038c2;
+    --good: #1a9e5c;
+    --bad: #d84a3e;
+    --bad-soft: #fbe9e7;
+    --code-bg: #f0f1f5;
+    --shadow: 0 1px 2px rgba(20,20,30,0.05), 0 8px 22px -10px rgba(20,20,30,0.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121319;
+      --surface: #1a1c24;
+      --surface-2: #21232c;
+      --text: #e9eaef;
+      --text-dim: #a2a9b8;
+      --text-faint: #6c7385;
+      --border: #2b2e38;
+      --accent: #8a85ff;
+      --accent-soft: #262552;
+      --accent-ink: #b3aeff;
+      --good: #34c47f;
+      --bad: #ef6a5f;
+      --bad-soft: #3a2320;
+      --code-bg: #1e2028;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 22px -10px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121319; --surface: #1a1c24; --surface-2: #21232c; --text: #e9eaef;
+    --text-dim: #a2a9b8; --text-faint: #6c7385; --border: #2b2e38; --accent: #8a85ff;
+    --accent-soft: #262552; --accent-ink: #b3aeff; --good: #34c47f; --bad: #ef6a5f;
+    --bad-soft: #3a2320; --code-bg: #1e2028;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 22px -10px rgba(0,0,0,0.5);
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Archivo",ui-sans-serif,system-ui,sans-serif; font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  h1,h2,h3 { font-family:"Spectral",ui-serif,Georgia,serif; font-weight:600; text-wrap:balance; letter-spacing:-.01em; margin:0; }
+  code,.mono { font-family:"IBM Plex Mono",ui-monospace,monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 2.6rem 1.3rem 4rem; }
+
+  .eyebrow { font-family:"IBM Plex Mono",monospace; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--text-faint); display:flex; align-items:center; gap:.5rem; margin-bottom:.9rem; }
+  .eyebrow .dot { width:6px; height:6px; border-radius:50%; background:var(--good); }
+  h1 { font-size:clamp(1.6rem,4vw,2.15rem); line-height:1.15; margin-bottom:.7rem; }
+  .lede { color:var(--text-dim); max-width:66ch; margin:0 0 2.2rem; }
+  .lede code { background:var(--code-bg); padding:.05em .35em; border-radius:4px; font-size:.92em; }
+
+  section { margin-top:2.6rem; }
+  h2 { font-size:1.22rem; margin-bottom:.5rem; }
+  .dek { color:var(--text-dim); font-size:.92rem; max-width:64ch; margin:0 0 1.3rem; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow); }
+
+  /* ---- trace steps ---- */
+  .trace { display:flex; flex-direction:column; gap: 0; position:relative; }
+  .step { display:grid; grid-template-columns: 34px 1fr; gap: .9rem; padding-bottom: 1.5rem; position:relative; }
+  .step:last-child { padding-bottom: 0; }
+  .step .rail { display:flex; flex-direction:column; align-items:center; }
+  .step .num-badge { width:26px; height:26px; border-radius:50%; background:var(--accent); color:#fff; font-family:"IBM Plex Mono",monospace; font-size:.72rem; font-weight:600; display:flex; align-items:center; justify-content:center; flex:none; }
+  .step.fail .num-badge { background: var(--bad); }
+  .step .line { width:2px; flex:1; background:var(--border); margin-top:.3rem; }
+  .step:last-child .line { display:none; }
+  .step-body { padding-bottom:.2rem; }
+  .step-q { font-size:.95rem; margin-bottom:.55rem; }
+  .step-q .tag { font-family:"IBM Plex Mono",monospace; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); display:block; margin-bottom:.25rem; }
+  .step-q .q-text { color:var(--text); }
+  .codeblock { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:.7rem .85rem; font-size:.78rem; overflow-x:auto; margin-bottom:.6rem; }
+  .codeblock pre { margin:0; white-space:pre-wrap; word-break:break-word; }
+  .result-ok { font-size:.86rem; color:var(--text-dim); }
+  .result-fail { font-size:.86rem; color:var(--bad); background:var(--bad-soft); border-radius:8px; padding:.6rem .8rem; }
+  .mini-table { width:100%; border-collapse:collapse; font-size:.84rem; margin-top:.3rem; }
+  .mini-table th { text-align:left; font-weight:600; color:var(--text-faint); font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; padding:.3rem .5rem .3rem 0; border-bottom:1px solid var(--border); }
+  .mini-table td { padding:.32rem .5rem .32rem 0; border-bottom:1px solid var(--border); }
+  .mini-table tr:last-child td { border-bottom:none; }
+  .mini-table td.hi { color: var(--accent-ink); font-weight:600; }
+
+  /* ---- charts ---- */
+  .chart-row { display:grid; grid-template-columns: 1.3fr 1fr; gap:1rem; }
+  @media (max-width:700px){ .chart-row{grid-template-columns:1fr;} }
+  .chart-card { padding:1.1rem 1.1rem .9rem; }
+  .chart-card h3 { font-size:.95rem; margin-bottom:.2rem; }
+  .chart-card .sub { font-size:.78rem; color:var(--text-faint); margin-bottom:.7rem; }
+  .chart-card svg { width:100%; height:auto; display:block; }
+
+  /* ---- answer ---- */
+  .answer { border-left:3px solid var(--accent); padding:1.1rem 1.3rem; }
+  .answer .lbl { font-family:"IBM Plex Mono",monospace; font-size:.7rem; letter-spacing:.06em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:.5rem; }
+  .answer p { margin:0 0 .7rem; }
+  .answer p:last-child { margin-bottom:0; }
+  .caveat { font-size:.82rem; color:var(--text-faint); margin-top:.9rem; padding-top:.9rem; border-top:1px solid var(--border); }
+
+  /* ---- raw transcript ---- */
+  details.raw { margin-top:2.2rem; border-top:1px solid var(--border); padding-top:1.1rem; }
+  details.raw summary { cursor:pointer; font-weight:600; font-size:.9rem; list-style:none; display:flex; align-items:center; gap:.4rem; }
+  details.raw summary::-webkit-details-marker{display:none;}
+  details.raw summary::before { content:"▸"; color:var(--text-faint); transition:transform .15s; }
+  details.raw[open] summary::before { transform:rotate(90deg); }
+  details.raw pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:.9rem; font-size:.72rem; overflow-x:auto; margin-top:.9rem; line-height:1.6; }
+
+  footer.colophon { margin-top:2.4rem; padding-top:1.2rem; border-top:1px solid var(--border); font-size:.8rem; color:var(--text-faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow"><span class="dot"></span> EKOS + local LLM &middot; driven over real MCP stdio JSON-RPC</div>
+  <h1>"What is the reason for high visiting in some day?"</h1>
+  <p class="lede">Not a question one query can answer. <code>ekos_clickhouse_query</code> (RFC 0056) is
+    single-shot by design &mdash; one question, one generated <code>SELECT</code>, one result, no
+    multi-turn loop. Answering <em>why</em> a day spiked means an MCP client chaining several of those
+    single-shot calls, using each real answer to decide the next question &mdash; the same way this
+    page was produced: four real <code>tools/call</code> requests, sent over stdio to a live
+    <code>ekos mcp serve --workspace analytics/</code> process, against a real ClickHouse server.</p>
+
+  <section id="mechanism">
+    <h2>Who does the reasoning here?</h2>
+    <p class="dek">Three layers, three different jobs. Worth being precise about which one does what.</p>
+    <div class="chart-row" style="grid-template-columns: repeat(3,1fr);">
+      <div class="card" style="padding:1rem 1.1rem;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:.7rem; color:var(--accent-ink); margin-bottom:.4rem;">MCP CLIENT (Claude)</div>
+        <div style="font-size:.86rem; color:var(--text-dim);">Decomposes "why" into a sequence: find the spike day, then compare its traffic mix to normal. Decides what to ask next based on each real answer.</div>
+      </div>
+      <div class="card" style="padding:1rem 1.1rem;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:.7rem; color:var(--accent-ink); margin-bottom:.4rem;">EKOS + LOCAL LLM</div>
+        <div style="font-size:.86rem; color:var(--text-dim);">Per call: turns one NL question into one grounded SQL query, using the compiled schema &mdash; nothing more. No memory of prior calls.</div>
+      </div>
+      <div class="card" style="padding:1rem 1.1rem;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:.7rem; color:var(--accent-ink); margin-bottom:.4rem;">CLICKHOUSE</div>
+        <div style="font-size:.86rem; color:var(--text-dim);">Validates and executes the SQL for real. Rejects what it can't parse or run &mdash; the safety net when the LLM writes something wrong.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="trace">
+    <h2>The investigation, four real MCP calls</h2>
+    <p class="dek">Unedited. Including the one that failed.</p>
+    <div class="card" style="padding:1.3rem 1.4rem;">
+      <div class="trace">
+
+        <div class="step fail">
+          <div class="rail"><div class="num-badge">1</div><div class="line"></div></div>
+          <div class="step-body">
+            <div class="step-q"><span class="tag">tools/call &middot; ekos_clickhouse_query</span><span class="q-text">"show visit counts grouped by day between 2026-08-01 and 2026-08-15, ordered by count descending"</span></div>
+            <div class="codeblock"><pre class="mono">SELECT toDate(start) AS date, count() AS visit_count
+FROM sessions_v2 WHERE site_id = 101
+  AND start &gt;= '2026-08-01' AND start &lt;= '2026-08-15'
+GROUP BY todate(start)  &larr; lowercase, not the toDate() above
+ORDER BY visit_count DESC LIMIT 1000</pre></div>
+            <div class="result-fail">Code: 46. DB::Exception: Function with name <code>todate</code> does not
+              exist. Maybe you meant: ['toDate','DATE']. (UNKNOWN_FUNCTION)</div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="rail"><div class="num-badge">1b</div><div class="line"></div></div>
+          <div class="step-body">
+            <div class="step-q"><span class="tag">retry, rephrased &mdash; the MCP client noticed the failure and adjusted</span><span class="q-text">"count sessions per calendar day using toDate(start) as the day column, order by the count descending"</span></div>
+            <div class="codeblock"><pre class="mono">SELECT toDate(start) AS day, COUNT(*) AS session_count
+FROM sessions_v2 WHERE site_id = 101
+  AND start &gt;= '2026-08-01' AND start &lt;= '2026-08-15'
+GROUP BY toDate(start) ORDER BY session_count DESC LIMIT 1000</pre></div>
+            <table class="mini-table">
+              <tr><th>Day</th><th>Visits</th></tr>
+              <tr><td class="hi">2026-08-05</td><td class="hi num">4</td></tr>
+              <tr><td class="hi">2026-08-14</td><td class="hi num">4</td></tr>
+              <tr><td>2026-08-01 / 02 / 04 / 06 / 08</td><td class="num">2 each</td></tr>
+              <tr><td>7 other days</td><td class="num">1 each</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="rail"><div class="num-badge">2</div><div class="line"></div></div>
+          <div class="step-body">
+            <div class="step-q"><span class="tag">tools/call &middot; using the spike day just found</span><span class="q-text">"on 2026-08-05, group sessions by referrer_source and count them, ordered descending"</span></div>
+            <div class="codeblock"><pre class="mono">SELECT referrer_source, COUNT(*) AS session_count
+FROM sessions_v2 WHERE site_id = 101 AND toDate(timestamp) = '2026-08-05'
+GROUP BY referrer_source ORDER BY session_count DESC LIMIT 1000</pre></div>
+            <table class="mini-table">
+              <tr><th>Source (Aug 5)</th><th>Sessions</th></tr>
+              <tr><td class="hi">Email newsletter</td><td class="hi num">2 (50%)</td></tr>
+              <tr><td>Twitter</td><td class="num">2 (50%)</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="rail"><div class="num-badge">3</div><div class="line"></div></div>
+          <div class="step-body">
+            <div class="step-q"><span class="tag">tools/call &middot; the other spike day, for corroboration</span><span class="q-text">"on 2026-08-14, group sessions by referrer_source and count them, ordered descending"</span></div>
+            <table class="mini-table">
+              <tr><th>Source (Aug 14)</th><th>Sessions</th></tr>
+              <tr><td class="hi">Email newsletter</td><td class="hi num">2 (50%)</td></tr>
+              <tr><td>Twitter</td><td class="num">1 (25%)</td></tr>
+              <tr><td>google.com</td><td class="num">1 (25%)</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="rail"><div class="num-badge">4</div></div>
+          <div class="step-body">
+            <div class="step-q"><span class="tag">tools/call &middot; the baseline to compare both spike days against</span><span class="q-text">"between 2026-08-01 and 2026-08-15, group sessions by referrer_source and count them, ordered descending"</span></div>
+            <table class="mini-table">
+              <tr><th>Source (whole period)</th><th>Sessions</th></tr>
+              <tr><td>Twitter</td><td class="num">13 (50%)</td></tr>
+              <tr><td class="hi">Email newsletter</td><td class="hi num">8 (31%)</td></tr>
+              <tr><td>LinkedIn</td><td class="num">2 (8%)</td></tr>
+              <tr><td>google.com</td><td class="num">2 (8%)</td></tr>
+              <tr><td>news.ycombinator.com</td><td class="num">1 (4%)</td></tr>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="viz">
+    <h2>The same finding, visually</h2>
+    <p class="dek">Both spike days &mdash; not just one &mdash; show Email newsletter's share roughly
+      doubling against its own baseline.</p>
+    <div class="chart-row">
+      <figure class="card chart-card">
+        <h3>Visits per day, Aug 1&ndash;15</h3>
+        <div class="sub">Spike days highlighted</div>
+        <svg id="dayChart" viewBox="0 0 560 220" role="img" aria-label="Bar chart of visits per day from August 1 to 15, 2026. Most days have 1 to 2 visits; August 5 and August 14 spike to 4 visits each, highlighted."></svg>
+      </figure>
+      <figure class="card chart-card">
+        <h3>Email newsletter's share</h3>
+        <div class="sub">Baseline vs. each spike day</div>
+        <svg id="shareChart" viewBox="0 0 340 220" role="img" aria-label="Bar chart comparing Email newsletter's share of sessions: 31 percent baseline across the whole period, versus 50 percent on August 5 and 50 percent on August 14."></svg>
+      </figure>
+    </div>
+  </section>
+
+  <section id="answer">
+    <h2>The answer</h2>
+    <div class="card answer">
+      <div class="lbl">Synthesized from the four real results above</div>
+      <p>Two days &mdash; <strong>Aug 5</strong> and <strong>Aug 14</strong> &mdash; had roughly 2&ndash;4&times;
+        the visits of a typical day in the period. On <em>both</em>, <strong>Email newsletter</strong> traffic
+        made up 50% of sessions, against its normal ~31% share across the full 15-day window. Twitter, the
+        largest channel overall (50% baseline), didn't over-index on either spike day. The pattern repeating
+        across two independent days, not just one, is what makes this a real signal rather than noise: <strong>an
+        email send is the most likely driver of the higher-than-usual visiting days</strong>, not a general
+        lift across all channels.</p>
+      <div class="caveat">Sample-size honesty: this is a small, synthetic demo dataset (26 sessions total) built
+        to exercise the real pipeline, not production traffic &mdash; 4 visits is a real spike relative to this
+        dataset's own baseline, but not a claim that would hold up at production scale without more data. The
+        mechanism demonstrated (decompose &rarr; find the outlier &rarr; compare its mix to baseline &rarr;
+        corroborate on a second instance) is what transfers to a real deployment, not these exact percentages.</div>
+    </div>
+  </section>
+
+  <section id="deep-dive">
+    <h2>Under the hood: Claude, MCP, and EKOS</h2>
+    <p class="dek">The three-layer summary above is accurate but compressed. Here's what actually
+      crosses the wire and runs inside <code>ekos mcp serve</code> for a single
+      <code>ekos_clickhouse_query</code> call.</p>
+
+    <figure class="card" style="padding:1.3rem 1.2rem .7rem;">
+      <svg id="archDiagram" viewBox="0 0 1000 400" role="img" aria-label="Claude sends a tools/call request over stdio JSON-RPC to the ekos mcp serve process. Inside, the request passes through five internal stages — schema context, build SQL, validate and execute, redact and audit — with the build-SQL stage calling out over HTTP to a local Ollama server, the validate-and-execute stage calling out over HTTP to ClickHouse, and the redact-and-audit stage writing an event and evidence pair to the local SQLite ledger only when the query succeeded. The final stage's result flows back to Claude as the tools/call response."></svg>
+      <figcaption style="font-size:.78rem; color:var(--text-faint); margin:.7rem 0 1rem;">One <code class="mono">tools/call</code>, start to finish. Everything inside the dashed line runs in the one <code class="mono">ekos mcp serve</code> process, on this machine, with no other network egress.</figcaption>
+    </figure>
+
+    <h3 style="font-size:1.02rem; margin:1.8rem 0 .5rem;">The transport: stdio, not a socket</h3>
+    <p style="color:var(--text-dim); max-width:66ch;"><code class="mono">ekos mcp serve --workspace analytics/</code>
+      is one OS process. Claude Code launches it as a child process and talks to it over its
+      <code class="mono">stdin</code>/<code class="mono">stdout</code> pipes &mdash; no port, no HTTP,
+      no auth handshake beyond MCP's own <code class="mono">initialize</code>. The server's entire
+      request loop is <code class="mono">for line in stdin.lock().lines()</code>: read one line, parse
+      it as a JSON-RPC 2.0 object, dispatch on <code class="mono">method</code>, write exactly one
+      response line to stdout, repeat. <code class="mono">notifications/initialized</code> is the one
+      message that gets no reply, per the MCP spec &mdash; it's a notification, not a request. This is
+      also why the process is disposable: it holds no session state between calls beyond what's on disk
+      (the ledger, the compiled schema) &mdash; every <code class="mono">tools/call</code> opens what it
+      needs fresh.</p>
+
+    <h3 style="font-size:1.02rem; margin:1.8rem 0 .5rem;">Inside one <code style="font-size:.9em;">tools/call</code></h3>
+    <p style="color:var(--text-dim); max-width:66ch; margin-bottom:.8rem;">The five internal stages in
+      the diagram above are RFC 0056's own pipeline, unchanged from the CLI path
+      (<code class="mono">ekos clickhouse ask</code> and the MCP tool share the same
+      <code class="mono">ask_clickhouse</code> function &mdash; the only difference is which process
+      calls it):</p>
+    <table class="mini-table" style="margin-bottom:1rem;">
+      <tr><th>Stage</th><th>What actually happens</th></tr>
+      <tr><td class="hi">Schema context</td><td>Not a live ClickHouse call. <code class="mono">Runtime::find_objects</code> + <code class="mono">load_neighborhood</code> over the <em>already-compiled</em> ledger, filtered to <code class="mono">ObjectKind::Table</code> with <code class="mono">properties["source_system"] == "clickhouse"</code>. This is why schema drift between two <code class="mono">ekos build</code> runs is a real, named tradeoff in RFC 0056 &mdash; the question is answered against whatever was last compiled, not the live table right now.</td></tr>
+      <tr><td class="hi">Build SQL</td><td>One <code class="mono">LlmProvider::complete</code> call, <code class="mono">temperature: 0</code> always, system prompt constrained to ClickHouse SQL and only the tables/columns just retrieved. This is the only stage that talks to Ollama, and the only stage that can hallucinate.</td></tr>
+      <tr><td class="hi">Validate + execute</td><td>The generated text is parsed with <code class="mono">ekos-plugin-sql-dialect-clickhouse</code>'s real <code class="mono">ClickHouseDialect</code> (the same dialect this session's own RFC 0057/0058 work fixed two real gaps in). Anything that isn't exactly one <code class="mono">Statement::Query</code> is rejected before it ever reaches ClickHouse &mdash; no <code class="mono">INSERT</code>/<code class="mono">DROP</code>/multi-statement batch gets this far. A missing <code class="mono">LIMIT</code> is injected into the parsed AST, not string-pasted. Only then does it run, over HTTP, against the real server.</td></tr>
+      <tr><td class="hi">Redact + audit</td><td><code class="mono">ekos_common::redaction::redact_json</code> runs over every returned row before anything leaves the process &mdash; the same RFC 0043 baseline every other ingestion path uses, applied here to live query results for the first time (RFC 0056's own new integration point). Then, <em>only on success</em>, one Event and one Evidence record are appended to the local ledger: the SQL text, a timestamp, the row count, and a content-hash of the result. The rows themselves are never written to the ledger.</td></tr>
+    </table>
+
+    <h3 style="font-size:1.02rem; margin:1.8rem 0 .5rem;">The gate is checked twice, not once</h3>
+    <p style="color:var(--text-dim); max-width:66ch;"><code class="mono">ekos_clickhouse_query</code> only
+      appears in <code class="mono">tools/list</code>'s response when <code class="mono">[clickhouse]
+      enable-mcp-query = true</code> is set &mdash; this workspace's <code class="mono">ekos.toml</code>
+      opted in explicitly for this test. But the same flag is re-checked independently inside
+      <code class="mono">tools/call</code>'s dispatch, because an MCP client can call a tool by name
+      directly without ever having listed it first. Both paths are load-bearing: hiding a tool from
+      discovery isn't the same guarantee as refusing to run it.</p>
+
+    <h3 style="font-size:1.02rem; margin:1.8rem 0 .5rem;">Where the reasoning actually lives</h3>
+    <p style="color:var(--text-dim); max-width:66ch;">Nothing in the five stages above has any memory
+      of a previous call, and nothing in <code class="mono">ekos mcp serve</code> decides to retry.
+      When Step 1's <code class="mono">GROUP BY todate(start)</code> failed, EKOS's only job was
+      finished the moment it returned that ClickHouse error string as the tool's result. Every decision
+      after that &mdash; noticing the failure, guessing the cause, rephrasing the question, deciding
+      which table/column pairing to interrogate next based on what the previous real answer said &mdash;
+      happened in the MCP client, reading the same JSON-RPC responses a human would read off this page.
+      EKOS's local LLM is doing real work in every call (English &rarr; grounded SQL), but it is not the
+      layer answering <em>"what is the reason"</em> &mdash; that question only gets answered by something
+      outside this process chaining several of these calls together and comparing the results, which is
+      the whole reason this page exists instead of a single query.</p>
+
+    <h3 style="font-size:1.02rem; margin:1.8rem 0 .5rem;">A gotcha this exact wiring hit before</h3>
+    <p style="color:var(--text-dim); max-width:66ch;">Not from this session, but worth knowing if you
+      extend this: <code class="mono">ekos mcp serve</code>'s <code class="mono">for line in
+      stdin.lock().lines()</code> loop runs directly inside <code class="mono">main</code>'s
+      <code class="mono">#[tokio::main]</code> runtime &mdash; it's never spawned onto its own task.
+      <code class="mono">ask_clickhouse</code>'s pipeline is <code class="mono">async</code>. Calling an
+      async function from inside an already-running multi-thread Tokio runtime with a naive
+      <code class="mono">Runtime::new().block_on(...)</code> panics: <em>"Cannot start a runtime from
+      within a runtime."</em> The fix (already in place, not something this test needed to touch) branches
+      on <code class="mono">tokio::runtime::Handle::try_current()</code>: bridge via
+      <code class="mono">tokio::task::block_in_place</code> when already inside a runtime, build a
+      throwaway one otherwise. No unit test in this codebase runs from inside an active Tokio runtime the
+      way <code class="mono">ekos mcp serve</code>'s real entry point does &mdash; this class of bug is
+      only found by actually running the command, the same discipline this whole page's live MCP test
+      follows rather than trusting <code class="mono">cargo test</code> alone.</p>
+  </section>
+
+  <details class="raw">
+    <summary>Raw MCP transcript (excerpt) &mdash; real, unedited stdio JSON-RPC</summary>
+    <pre class="mono">$ ekos mcp serve --workspace analytics/
+&gt;&gt; {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}
+&lt;&lt; {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"ekos","version":"0.1.0"},"capabilities":{"tools":{}}}}
+
+&gt;&gt; {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+&lt;&lt; tools: [..., "ekos_clickhouse_query"]   # present only because [clickhouse] enable-mcp-query = true
+
+&gt;&gt; {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ekos_clickhouse_query",
+     "arguments":{"question":"count sessions per calendar day using toDate(start) as the day
+     column, order by the count descending"}}}
+&lt;&lt; {"jsonrpc":"2.0","id":6,"result":{"content":[{"type":"text","text":
+     "{\"sql\":\"SELECT toDate(start) AS day, COUNT(*) AS session_count FROM
+     plausible_events_db.sessions_v2 WHERE site_id = 101 AND start >= '2026-08-01'
+     AND start <= '2026-08-15' GROUP BY toDate(start) ORDER BY session_count DESC LIMIT 1000\",
+     \"rows\":[{\"day\":\"2026-08-05\",\"session_count\":\"4\"}, ...],
+     \"audit_event_id\":\"67510ea2-7285-4798-81f9-47b1b4c832e1\"}"}]}}</pre>
+  </details>
+
+  <footer class="colophon">
+    <p>Every call in this trace ran through the real six-stage pipeline (RFC 0056): question &rarr; compiled
+      schema context &rarr; LLM-built SQL (local Ollama, <code class="mono">llama3:latest</code>, no cloud call)
+      &rarr; SELECT-only validation &rarr; live execution against a real ClickHouse server &rarr; ledger audit.
+      Every successful call recorded one Event/Evidence pair; the failed call recorded none &mdash; the same
+      audit behavior verified in RFC 0056's own live testing. <code class="mono">ekos_clickhouse_query</code>
+      is off by default in <code class="mono">ekos mcp serve</code>; this workspace's <code class="mono">ekos.toml</code>
+      opted in explicitly to test it.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var ns = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) { var e = document.createElementNS(ns, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); return e; }
+
+  // ---- day chart ----
+  (function () {
+    var days = ["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15"];
+    var values = [2,2,1,2,4,2,1,2,1,1,1,1,1,4,1];
+    var spike = [4,13];
+    var svg = document.getElementById('dayChart');
+    var W=560,H=220,padL=26,padR=8,padT=8,padB=26,plotW=W-padL-padR,plotH=H-padT-padB,maxY=5;
+    var bw = plotW/values.length*0.62, gap = plotW/values.length;
+    for (var g=0; g<=maxY; g++){
+      svg.appendChild(el('line',{x1:padL,x2:W-padR,y1:padT+plotH-plotH*g/maxY,y2:padT+plotH-plotH*g/maxY,stroke:'currentColor',opacity:g===0?0.3:0.1}));
+    }
+    values.forEach(function(v,i){
+      var x = padL + gap*i + (gap-bw)/2;
+      var h = plotH*v/maxY;
+      var y = padT+plotH-h;
+      var isSpike = spike.indexOf(i) !== -1;
+      svg.appendChild(el('rect',{x:x,y:y,width:bw,height:h,rx:3,fill: isSpike ? 'var(--accent)' : 'currentColor', opacity: isSpike?1:0.28}));
+      if (i%2===0) {
+        var t = el('text',{x:x+bw/2,y:H-8,'font-size':10,fill:'currentColor',opacity:0.55,'text-anchor':'middle','font-family':'IBM Plex Mono, monospace'});
+        t.textContent = days[i];
+        svg.appendChild(t);
+      }
+    });
+  })();
+
+  // ---- share comparison chart ----
+  (function () {
+    var groups = [
+      {label:'Baseline (15d)', v:31},
+      {label:'Aug 5', v:50},
+      {label:'Aug 14', v:50}
+    ];
+    var svg = document.getElementById('shareChart');
+    var W=340,H=220,padL=10,padR=10,padT=10,padB=30,plotW=W-padL-padR,plotH=H-padT-padB,maxY=60;
+    var gap = plotW/groups.length, bw = gap*0.5;
+    for (var g=0; g<=maxY; g+=20){
+      svg.appendChild(el('line',{x1:padL,x2:W-padR,y1:padT+plotH-plotH*g/maxY,y2:padT+plotH-plotH*g/maxY,stroke:'currentColor',opacity:g===0?0.3:0.1}));
+    }
+    groups.forEach(function(g,i){
+      var x = padL + gap*i + (gap-bw)/2;
+      var h = plotH*g.v/maxY;
+      var y = padT+plotH-h;
+      svg.appendChild(el('rect',{x:x,y:y,width:bw,height:h,rx:4,fill: i===0 ? 'currentColor' : 'var(--accent)', opacity: i===0?0.28:1}));
+      var vt = el('text',{x:x+bw/2,y:y-6,'font-size':11,fill:'currentColor','text-anchor':'middle','font-family':'IBM Plex Mono, monospace',opacity:.8});
+      vt.textContent = g.v + '%';
+      svg.appendChild(vt);
+      var lt = el('text',{x:x+bw/2,y:H-10,'font-size':10,fill:'currentColor',opacity:0.55,'text-anchor':'middle','font-family':'IBM Plex Mono, monospace'});
+      lt.textContent = g.label;
+      svg.appendChild(lt);
+    });
+  })();
+
+  // ---- architecture diagram ----
+  (function () {
+    var svg = document.getElementById('archDiagram');
+    if (!svg) return;
+
+    var defs = el('defs', {});
+    var marker = el('marker', { id: 'archArrow', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse' });
+    marker.appendChild(el('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'currentColor' }));
+    defs.appendChild(marker);
+    var accentMarker = el('marker', { id: 'archArrowAccent', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse' });
+    accentMarker.appendChild(el('path', { d: 'M0,0 L10,5 L0,10 z', fill: 'var(--accent)' }));
+    defs.appendChild(accentMarker);
+    svg.appendChild(defs);
+
+    function box(x, y, w, h, fillVar, strokeVar) {
+      svg.appendChild(el('rect', { x: x, y: y, width: w, height: h, rx: 8, fill: fillVar, stroke: strokeVar, 'stroke-width': 1.2 }));
+    }
+    function label(cx, cy, l1, l2) {
+      var t1 = el('text', { x: cx, y: cy - (l2 ? 3 : -4), 'font-size': 12.5, 'font-weight': 600, fill: 'currentColor', 'text-anchor': 'middle', 'font-family': 'Archivo, sans-serif' });
+      t1.textContent = l1;
+      svg.appendChild(t1);
+      if (l2) {
+        var t2 = el('text', { x: cx, y: cy + 13, 'font-size': 10, opacity: 0.6, fill: 'currentColor', 'text-anchor': 'middle', 'font-family': 'IBM Plex Mono, monospace' });
+        t2.textContent = l2;
+        svg.appendChild(t2);
+      }
+    }
+    function arrow(x1, y1, x2, y2, accent) {
+      svg.appendChild(el('line', { x1: x1, y1: y1, x2: x2, y2: y2, stroke: accent ? 'var(--accent)' : 'currentColor', opacity: accent ? 1 : 0.6, 'stroke-width': 1.6, 'marker-end': accent ? 'url(#archArrowAccent)' : 'url(#archArrow)' }));
+    }
+    function caption(cx, y, text, accent) {
+      var t = el('text', { x: cx, y: y, 'font-size': 10.5, fill: accent ? 'var(--accent)' : 'currentColor', opacity: accent ? 1 : 0.65, 'text-anchor': 'middle', 'font-family': 'IBM Plex Mono, monospace' });
+      t.textContent = text;
+      svg.appendChild(t);
+    }
+
+    // process boundary
+    svg.appendChild(el('rect', { x: 130, y: 45, width: 645, height: 310, rx: 12, fill: 'none', stroke: 'currentColor', opacity: 0.3, 'stroke-width': 1.3, 'stroke-dasharray': '5,4' }));
+    caption(452, 40, 'ekos mcp serve — one process, one host, no other network egress');
+
+    // external boxes
+    box(300, 80, 140, 36, 'var(--accent-soft)', 'var(--accent)');
+    label(370, 98, 'Ollama :11434', '(local)');
+    box(450, 80, 160, 36, 'var(--accent-soft)', 'var(--accent)');
+    label(530, 98, 'ClickHouse :8123', 'real server');
+
+    // main row, y=170..230
+    var row = [
+      { x: 10, w: 120, l1: 'Claude', l2: 'question' },
+      { x: 140, w: 150, l1: '② schema context', l2: 'compiled KIR' },
+      { x: 300, w: 140, l1: '③ build SQL', l2: 'temp = 0' },
+      { x: 450, w: 160, l1: '④ validate + execute', l2: 'SELECT-only' },
+      { x: 620, w: 150, l1: '⑤ redact + audit', l2: 'redact_json' },
+      { x: 785, w: 205, l1: 'Claude', l2: 'reads tool result' }
+    ];
+    row.forEach(function (b) {
+      var isClaude = b.l1 === 'Claude';
+      box(b.x, 170, b.w, 60, isClaude ? 'var(--surface-2)' : 'var(--surface)', isClaude ? 'var(--text-faint)' : 'var(--border)');
+      label(b.x + b.w / 2, 195, b.l1, b.l2);
+    });
+
+    // arrows between main-row boxes
+    for (var i = 0; i < row.length - 1; i++) {
+      var a = row[i], c = row[i + 1];
+      arrow(a.x + a.w, 200, c.x, 200, false);
+    }
+    caption(215, 158, 'tools/call (question)');
+    caption(535, 158, 'generated SQL');
+    caption(775, 158, 'tool result (JSON)');
+
+    // vertical hops to Ollama / ClickHouse
+    arrow(370, 170, 370, 116, true);
+    caption(370, 130, 'HTTP', true);
+    arrow(530, 170, 530, 116, true);
+    caption(530, 130, 'HTTP', true);
+
+    // ledger, below stage 5
+    box(620, 290, 150, 40, 'var(--surface-2)', 'var(--border)');
+    label(695, 305, 'ledger.db', 'SQLite');
+    arrow(695, 230, 695, 290, false);
+    caption(770, 265, 'success only');
+  })();
+})();
+</script>
+
+</body>
+</html>

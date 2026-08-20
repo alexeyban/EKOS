@@ -1,0 +1,35 @@
+$ ekos resolve
+Merge proposals (3):
+  ...
+  3. 'plausible_events_db.imported_visitors' (Table) — 6 objects merged, confidence 0.93
+       • plausible_events_db.imported_visitors (Table)
+       • plausible_events_db.imported_operating_systems (Table)
+       • plausible_events_db.imported_exit_pages (Table)
+       • plausible_events_db.imported_entry_pages (Table)
+       • plausible_events_db.imported_devices (Table)
+       • plausible_events_db.imported_browsers (Table)
+  ...
+
+Stats:
+  Candidates evaluated : 1311
+  Pairs compared       : 109
+  Merges proposed      : 3
+  Conflicts detected   : 0
+
+$ ekos query object 8efeded6-1301-49af-9cae-f00e0691d781   # the surviving merged identity
+Object: plausible_events_db.imported_visitors (Table)
+  Properties:
+    columns: [
+      {"data_type":"UInt64","name":"site_id"},
+      {"data_type":"DATE","name":"date"},
+      {"data_type":"UInt64","name":"visitors"},
+      {"data_type":"UInt64","name":"pageviews"},
+      {"data_type":"UInt64","name":"bounces"},
+      {"data_type":"UInt64","name":"visits"},
+      {"data_type":"UInt64","name":"visit_duration"},
+      {"data_type":"UInt64","name":"import_id"}
+    ]  # imported_visitors' own 8 columns only — operating_system, exit_page, entry_page,
+       # device, and browser (the columns that made the other 5 tables distinct) are gone.
+  Evidence:
+    [100%] priv/ingest_repo/structure.sql — "CREATE TABLE plausible_events_db.imported_visitors"
+    # 1 evidence entry, not 6 — the other 5 tables' own CREATE TABLE evidence is not attached here.
