@@ -1,0 +1,13 @@
+=== Q1: What columns does imported_browsers have? ===
+grep, best-case targeted (-A15, agent already knows file+line): 122 tokens
+grep, realistic repo-wide (-C3, all 32 real hits):              10357 tokens
+grep, naive (read the whole 366-line containing file):          3651 tokens
+EKOS (ekos_search + ekos_state, full round trip):               1186 tokens
+  vs best-case grep:  EKOS costs 9.7x MORE (grep wins when omniscient)
+  vs realistic grep:  88.5% fewer tokens
+  vs naive full read: 67.5% fewer tokens
+
+=== Q2: What tables exist in the Postgres schema (all 42)? ===
+grep/naive (read the whole 2,738-line schema file): 18995 tokens
+EKOS (single ekl structured query):                 1258 tokens
+  reduction: 93.4% fewer tokens

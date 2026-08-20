@@ -1,0 +1,11 @@
+Commit complete.
+  Objects written:       1529
+  Objects skipped:       0 (already in ledger)
+  Relationships written: 3977
+  Evidence records:      2075
+  Subsystem rollups:     71
+  Ledger:                /home/legion/PycharmProjects/analytics/.ekos/ledger/ledger.db
+
+real	1m11,332s
+user	0m2,280s
+sys	0m1,656s

@@ -1,0 +1,2 @@
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2024-11-05","serverInfo":{"name":"ekos","version":"0.1.0"}}}
+{"id":2,"jsonrpc":"2.0","result":{"content":[{"text":"{\n  \"decision\": \"rejected\",\n  \"relationship_id\": \"1e9360dc-fca0-4e71-86e2-1b3c956f3031\",\n  \"status\": \"recorded\"\n}","type":"text"}],"isError":false}}

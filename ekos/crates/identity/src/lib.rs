@@ -95,6 +95,27 @@ pub trait IdentityResolver: Send + Sync {
 /// so instead of excluding them from resolution they get a higher bar to clear.
 pub const CONCEPT_MERGE_THRESHOLD: f32 = 0.95;
 
+/// Default merge threshold (RFC 0060). Was 0.85 through RFC 0007; raised here after real,
+/// unedited `analytics/` (Plausible Analytics) data showed 0.85 auto-merges genuinely distinct
+/// real objects across every kind that reaches `structural_score`'s "no comparable data" fallback
+/// (`Table`, `Person`, `Document`, `Pipeline` alike — see `structural_score`'s doc comment) — not
+/// a kind-specific defect, a property of the 0.85 operating point itself. Verified against 16 real
+/// pairs read directly from `analytics/`'s git history and compiled schema (8 `Person` merge
+/// proposals — 3 genuinely the same contributor under different git author names/usernames, 5
+/// genuinely different real people; 5 `Table` proposals sharing a common base-schema "spine"; 2
+/// `Document` proposals; 2 `Pipeline` proposals): at 0.85, 16 of 17 known-wrong real merges pass
+/// (only the one with the lowest structural overlap, `shield_rules_country`/`shield_rules_ip`,
+/// happens to already fail); raising to 0.90 keeps all 3 known-correct merges intact while
+/// rejecting 14 of the 17 known-wrong ones. **Not a complete fix** — 3 of the 17 (pairs whose
+/// names alone score higher than some of the correct merges' names, e.g. `Build Private Images
+/// GHCR`/`Build Public Images GHCR`) still incorrectly clear even 0.90, and no single threshold on
+/// this two-term formula separates every real case tested (the known-correct and known-wrong
+/// combined scores genuinely interleave above 0.90) — documented honestly in RFC 0060 rather than
+/// tuned further on a 17-example sample. The residual cases are exactly the class of judgment call
+/// RFC 0029's cross-system `unconfirmed`-until-reviewed flow already exists for; extending that
+/// review step to same-source merges too is future work, not done here.
+pub const DEFAULT_MERGE_THRESHOLD: f32 = 0.90;
+
 /// A `Custom("Concept")` whose normalised name has fewer words than this is
 /// never a blocking candidate — see `MIN_CONCEPT_NAME_CHARS`.
 const MIN_CONCEPT_NAME_WORDS: usize = 2;
@@ -107,7 +128,7 @@ const MIN_CONCEPT_NAME_CHARS: usize = 8;
 
 #[derive(Debug, Clone)]
 pub struct ResolverConfig {
-    /// Minimum combined similarity score to propose a merge. Default: 0.85.
+    /// Minimum combined similarity score to propose a merge. Default: `DEFAULT_MERGE_THRESHOLD`.
     pub merge_threshold: f32,
     /// Per-`ObjectKind` overrides of `merge_threshold`, keyed on the kind's
     /// `Display` form. The lookup itself is kind-agnostic; only the defaults
@@ -118,7 +139,7 @@ pub struct ResolverConfig {
 impl Default for ResolverConfig {
     fn default() -> Self {
         Self {
-            merge_threshold: 0.85,
+            merge_threshold: DEFAULT_MERGE_THRESHOLD,
             kind_thresholds: HashMap::from([("Concept".to_string(), CONCEPT_MERGE_THRESHOLD)]),
         }
     }
@@ -165,8 +186,8 @@ impl DefaultResolver {
     }
 
     fn score(&self, a: &KirObject, b: &KirObject) -> SimilarityScore {
-        let na = similarity::normalize(&a.name);
-        let nb = similarity::normalize(&b.name);
+        let na = similarity::normalize(name_for_similarity(a));
+        let nb = similarity::normalize(name_for_similarity(b));
         let name = similarity::jaro_winkler(&na, &nb);
         let structural = structural_score(a, b);
         let combined = 0.7 * name + 0.3 * structural;
@@ -369,6 +390,33 @@ impl IdentityResolver for DefaultResolver {
             stats,
         }
     }
+}
+
+/// The name text `DefaultResolver::score` compares for the name-similarity term (RFC 0060).
+///
+/// `Table` objects from SQL DDL recovery are named with their full schema/database qualifier
+/// (`plausible_events_db.imported_visitors`, `public.setup_help_emails`) — every table in the
+/// same source shares that qualifier, so comparing full names lets Jaro-Winkler's prefix bonus
+/// count that shared, uninformative text as if it were evidence of similarity (confirmed on real
+/// `analytics/` data: `plausible_events_db.imported_visitors` vs.
+/// `plausible_events_db.imported_browsers` scores 0.9507 name-similarity on the full qualified
+/// name vs. 0.8905 on `imported_visitors`/`imported_browsers` alone — enough of a gap to flip a
+/// merge decision at the 0.90 threshold). The same shape `unrelated_documents_sharing_a_folder_prefix_do_not_all_merge`'s
+/// doc comment already named for file paths ("block on the file basename rather than the full
+/// relative path") — this is that fix, scoped to `Table`'s dotted schema-qualifier convention
+/// specifically, not applied to `Document`/other path-shaped names (which use `/`, not a
+/// database-style `schema.table` dot, and where the fix already came from the threshold change).
+/// Compares only the portion after the last `.` for `Table` objects with a qualifier; every other
+/// kind, and unqualified table names, are unaffected.
+fn name_for_similarity(obj: &KirObject) -> &str {
+    if obj.kind == ObjectKind::Table
+        && !obj.name.contains('/')
+        && let Some((_, local)) = obj.name.rsplit_once('.')
+        && !local.is_empty()
+    {
+        return local;
+    }
+    &obj.name
 }
 
 // ── Structural similarity ───────────────────────────────────────────────────
@@ -574,6 +622,140 @@ mod tests {
         );
     }
 
+    // ── RFC 0060: real over-merges found live against analytics/ (Plausible Analytics) ─────
+
+    #[test]
+    fn real_clickhouse_imported_tables_do_not_merge() {
+        // Real bug (devlog_59/60): 6 genuinely distinct ClickHouse `imported_*` tables share an
+        // 8-column "spine" plus one or two distinguishing columns each. Real column data, real
+        // names, read directly from `analytics/priv/ingest_repo/structure.sql`.
+        let mut g = KirGraph::new();
+        g.add_object(table_with_columns(
+            "plausible_events_db.imported_visitors",
+            &[
+                "site_id",
+                "date",
+                "visitors",
+                "pageviews",
+                "bounces",
+                "visits",
+                "visit_duration",
+                "import_id",
+            ],
+        ));
+        g.add_object(table_with_columns(
+            "plausible_events_db.imported_browsers",
+            &[
+                "site_id",
+                "date",
+                "browser",
+                "visitors",
+                "visits",
+                "visit_duration",
+                "bounces",
+                "import_id",
+                "pageviews",
+                "browser_version",
+            ],
+        ));
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "imported_visitors and imported_browsers are genuinely distinct real tables — got: {:?}",
+            result.proposals
+        );
+    }
+
+    #[test]
+    fn real_postgres_email_template_tables_do_not_merge() {
+        // Real bug (devlog_60): found the moment RFC 0059 made the real Postgres schema
+        // parseable for the first time — `setup_help_emails`/`setup_success_emails` have
+        // *identical* real columns (both track when one email type was sent), differing only by
+        // name. No column-overlap signal can ever distinguish these; the fix has to come from
+        // requiring higher name similarity too, which raising the threshold does here (name
+        // similarity between "setup help emails"/"setup success emails" alone isn't high enough
+        // to clear 0.90 combined with even a perfect 1.0 structural score).
+        let mut g = KirGraph::new();
+        g.add_object(table_with_columns(
+            "public.setup_help_emails",
+            &["id", "site_id", "timestamp"],
+        ));
+        g.add_object(table_with_columns(
+            "public.setup_success_emails",
+            &["id", "site_id", "timestamp"],
+        ));
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "setup_help_emails and setup_success_emails are genuinely distinct real tables despite \
+             identical columns — got: {:?}",
+            result.proposals
+        );
+    }
+
+    #[test]
+    fn real_distinct_contributors_with_similar_names_do_not_merge() {
+        // Real bug (devlog_60): `Niklas Hambüchen <mail@nh2.me>` and `Niklaas Baudet von
+        // Gersdorff <me@niklaas.eu>` are two genuinely different real contributors (confirmed via
+        // `git log --author`) that the old 0.85 threshold merged, silently dropping the second
+        // person's identity and commit from the ledger under their own name.
+        let g = make_graph(&[
+            ("Niklas Hambüchen", ObjectKind::Person),
+            ("Niklaas Baudet von Gersdorff", ObjectKind::Person),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "two different real contributors with similar names must not merge — got: {:?}",
+            result.proposals
+        );
+    }
+
+    #[test]
+    fn real_same_contributor_under_different_git_names_still_merges() {
+        // The other side of the same fix: legitimate same-person merges (nickname/nested-name
+        // variants of one real git author) found in the same `analytics/` resolve run must keep
+        // working after raising the threshold, not just the false positives going away.
+        let g = make_graph(&[
+            ("RobertJoonas", ObjectKind::Person),
+            ("Robert", ObjectKind::Person),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "RobertJoonas and Robert are the same real contributor and should still merge"
+        );
+    }
+
+    #[test]
+    fn name_for_similarity_strips_schema_qualifier_for_tables() {
+        let a = KirObject::new("plausible_events_db.imported_visitors", ObjectKind::Table);
+        assert_eq!(name_for_similarity(&a), "imported_visitors");
+    }
+
+    #[test]
+    fn name_for_similarity_leaves_unqualified_table_names_untouched() {
+        let a = KirObject::new("orders", ObjectKind::Table);
+        assert_eq!(name_for_similarity(&a), "orders");
+    }
+
+    #[test]
+    fn name_for_similarity_does_not_strip_non_table_kinds() {
+        // Document names are file paths ("test/priv/README.md") — the last-`.` heuristic must
+        // not fire for them (it would leave just the extension, e.g. "md").
+        let a = KirObject::new("test/priv/README.md", ObjectKind::Custom("Document".into()));
+        assert_eq!(name_for_similarity(&a), "test/priv/README.md");
+    }
+
+    #[test]
+    fn name_for_similarity_does_not_strip_a_table_name_containing_a_slash() {
+        // Belt and suspenders: a `Table` name that happens to look like a path (defensive —
+        // no real analyzer produces this today) must not be misread as `schema.table`.
+        let a = KirObject::new("path/to/file.sql", ObjectKind::Table);
+        assert_eq!(name_for_similarity(&a), "path/to/file.sql");
+    }
+
     #[test]
     fn different_kind_same_name_conflict() {
         let g = make_graph(&[
@@ -602,32 +784,26 @@ mod tests {
         );
     }
 
-    /// Real bug, found 2026-08-03 rescanning a mixed-format real-content
-    /// workspace with RFC 0025/0026's new mechanics: every file under this
-    /// test's fixture directory shared the literal `docs/` path prefix, and
-    /// `normalize()` never strips path segments — so the blocking key's
-    /// "first 3 normalized chars" rule put every `Document` object in this
-    /// workspace into one block regardless of the files' actual names, and
-    /// `structural_score`'s same-kind 1.0 fallback (Documents have no
-    /// `columns` property) supplied the same free +0.3 floor devlog_27
-    /// already diagnosed for Section — except this hits genuinely unrelated
-    /// documents (a PDF, a Markdown file, an HTML file, a plain-text file,
-    /// an email), not near-duplicate pages of one book. Live repro: 7
-    /// entirely different files — two different PDFs, an RFC, a devlog, a
-    /// license, a doc-generated HTML page, and an email — collapsed into one
-    /// canonical `Document` object at confidence 0.90. `RFC 0024` only
-    /// excluded `Custom("Section")` from blocking; `Document` (and, see the
-    /// next test, PDF/DOCX-derived `Table`) were never covered and remain
-    /// exposed to the exact bug shape devlog_27 already named as
-    /// architecturally guaranteed for any kind sharing this structure. This
-    /// test currently FAILS — it documents the desired behavior (unrelated
-    /// documents in the same folder must not be treated as the same
-    /// real-world entity), pending a follow-up fix (candidates: block on the
-    /// file basename rather than the full relative path, or don't let
-    /// `structural_score` hand out a free floor to kinds with no comparable
-    /// structural property at all).
+    /// Real bug, found 2026-08-03 rescanning a mixed-format real-content workspace with RFC
+    /// 0025/0026's new mechanics: every file under this test's fixture directory shared the
+    /// literal `docs/` path prefix, and `normalize()` never strips path segments — so the
+    /// blocking key's "first 3 normalized chars" rule put every `Document` object in this
+    /// workspace into one block regardless of the files' actual names, and `structural_score`'s
+    /// same-kind 1.0 fallback (Documents have no `columns` property) supplied the same free +0.3
+    /// floor devlog_27 already diagnosed for Section — except this hits genuinely unrelated
+    /// documents (a PDF, a Markdown file, an HTML file, a plain-text file, an email), not
+    /// near-duplicate pages of one book. Live repro: 7 entirely different files collapsed into one
+    /// canonical `Document` object at confidence 0.90.
+    ///
+    /// **Fixed by RFC 0060** (raising `DEFAULT_MERGE_THRESHOLD` from 0.85 to 0.90) — found while
+    /// fixing a separate, worse real over-merge (`analytics/`'s Person/Table/Document proposals,
+    /// devlog_60): re-running this test with the new threshold now passes without any change to
+    /// its own logic. Not a coincidence — this test's 7 documents merged at confidence 0.90 under
+    /// the *old* 0.85 threshold precisely because they cleared it; the new threshold sits exactly
+    /// at that boundary. The "block on basename" and "no free floor for kinds without columns"
+    /// alternatives named below were not needed to close this specific case, though either remains
+    /// available if a future real file pushes a similarly-shaped merge just over 0.90 again.
     #[test]
-    #[ignore = "known bug, tracked for a follow-up fix — see doc comment above"]
     fn unrelated_documents_sharing_a_folder_prefix_do_not_all_merge() {
         let g = make_graph(&[
             (

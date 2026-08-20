@@ -1,0 +1,60 @@
+Loaded 6 knowledge artifact(s) → 340 objects, 3977 relationships
+
+Merge proposals (8):
+  1. 'priv/ua_inspector/ua_inspector.readme.md' (Document) — 2 objects merged, confidence 0.91
+       • priv/ua_inspector/ua_inspector.readme.md (Document)
+       • priv/ref_inspector/ref_inspector.readme.md (Document)
+  2. 'Tracker CI' (Pipeline) — 2 objects merged, confidence 0.93
+       • Tracker CI (Pipeline)
+       • Tracker script update (Pipeline)
+  3. 'Vini Brasil' (Person) — 2 objects merged, confidence 0.92
+       • Vini Brasil (Person)
+       • Vinicius Brasil (Person)
+  4. 'tracker/ARCHITECTURE.md' (Document) — 5 objects merged, confidence 0.96
+       • tracker/npm_package/CHANGELOG.md (Document)
+       • tracker/npm_package/LICENSE.md (Document)
+       • tracker/ARCHITECTURE.md (Document)
+       • tracker/README.md (Document)
+       • tracker/npm_package/README.md (Document)
+  5. 'RobertJoonas' (Person) — 2 objects merged, confidence 0.93
+       • RobertJoonas (Person)
+       • Robert (Person)
+  6. 'tracker/test/fixtures/manual.html' (Document) — 22 objects merged, confidence 0.98
+       • tracker/test/fixtures/manual.html (Document)
+       • tracker/test/fixtures/engagement-pageview-props.html (Document)
+       • tracker/test/fixtures/scroll-depth-slow-window-load.html (Document)
+       • tracker/test/fixtures/cookies-quantcast.html (Document)
+       • tracker/test/fixtures/cookies-onetrust.html (Document)
+       • tracker/test/fixtures/scroll-depth-dynamic-content-load.html (Document)
+       • tracker/test/fixtures/scroll-depth-hash.html (Document)
+       • tracker/test/fixtures/engagement-hash.html (Document)
+       • tracker/test/fixtures/scroll-depth.html (Document)
+       • tracker/test/fixtures/engagement-manual.html (Document)
+       • tracker/test/fixtures/engagement-hash-exclusions.html (Document)
+       • tracker/test/fixtures/revenue.html (Document)
+       • tracker/test/fixtures/no-async.html (Document)
+       • tracker/test/fixtures/engagement-hash-manual.html (Document)
+       • tracker/test/fixtures/file-download-plausible-web.html (Document)
+       • tracker/test/fixtures/legacy-custom-properties.html (Document)
+       • tracker/test/fixtures/scroll-depth-content-onscroll.html (Document)
+       • tracker/test/fixtures/engagement-hash-pageview-props.html (Document)
+       • tracker/test/fixtures/cookies-iubenda.html (Document)
+       • tracker/test/fixtures/legacy-pageview-properties.html (Document)
+       • tracker/test/fixtures/cookies-cookiebot.html (Document)
+       • tracker/test/fixtures/engagement.html (Document)
+  7. 'Build Private Images GHCR' (Pipeline) — 2 objects merged, confidence 0.93
+       • Build Private Images GHCR (Pipeline)
+       • Build Public Images GHCR (Pipeline)
+  8. 'Adam Rutkowski' (Person) — 2 objects merged, confidence 0.90
+       • Adam Rutkowski (Person)
+       • Adam (Person)
+
+Stats:
+  Candidates evaluated : 340
+  Pairs compared       : 1358
+  Merges proposed      : 8
+  Conflicts detected   : 0
+
+real	0m0,084s
+user	0m0,048s
+sys	0m0,037s

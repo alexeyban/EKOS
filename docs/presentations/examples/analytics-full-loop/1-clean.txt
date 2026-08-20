@@ -1,0 +1,6 @@
+Clean complete. 2 item(s) removed from artifact cache.
+Ledger at /home/legion/PycharmProjects/analytics/.ekos/ledger/ledger.db was not modified.
+
+real	0m0,034s
+user	0m0,001s
+sys	0m0,009s

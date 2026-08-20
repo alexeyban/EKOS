@@ -1,0 +1,24 @@
+$ ekos query find imported_browsers
+10 result(s) for 'imported_browsers':
+  023b95fd-7b6e-4594-88f3-282d09ae3ad9  plausible_events_db.imported_browsers
+  d24e8bb9-d998-59fb-a691-6155067dacf4  fixture/ga4_report_imported_browsers.json
+  88fd4663-1cc5-55d1-824f-e2b336a85cf4  priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs
+  bba2e83c-6364-50bb-912c-d9f5d1ec792d  test/support/dev/controllers/e2e_controller.ex
+  687ef8b2-8bdf-5ee3-b450-e6e7b2b270e3  priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs
+  eaafb748-095d-5e78-bb6a-62547e94899e  lib/plausible/imported/browser.ex
+  5f3ae006-67dc-5325-ace7-97f231e04a96  test/plausible/exports_test.exs
+  45017120-2b12-5d2c-8fa7-73bbba9a2cab  priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs
+  a3ad0ccf-e448-5f44-87e9-f6a4716ad4db  test/plausible/imported/csv_importer_test.exs
+  67e35544-9aa6-5357-96e2-1013335a4304  test/support/factory.ex
+
+$ ekos query find Niklaas
+1 result(s) for 'Niklaas':
+  74dae168-9244-586d-bacc-0bcdf29ca0e7  Niklaas Baudet von Gersdorff
+
+$ ekos query object 023b95fd-7b6e-4594-88f3-282d09ae3ad9
+Object: plausible_events_db.imported_browsers (Table)
+  ID:   023b95fd-7b6e-4594-88f3-282d09ae3ad9
+  Properties:
+    columns: [{"data_type":"UInt64","name":"site_id"},{"data_type":"DATE","name":"date"},{"data_type":"STRING","name":"browser"},{"data_type":"UInt64","name":"visitors"},{"data_type":"UInt64","name":"visits"},{"data_type":"UInt64","name":"visit_duration"},{"data_type":"UInt32","name":"bounces"},{"data_type":"UInt64","name":"import_id"},{"data_type":"UInt64","name":"pageviews"},{"data_type":"STRING","name":"browser_version"}]
+  Evidence:
+    [100%] priv/ingest_repo/structure.sql — "CREATE TABLE plausible_events_db.imported_browsers"

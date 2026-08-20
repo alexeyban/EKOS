@@ -1,0 +1,26 @@
+[2m2026-08-20T16:54:24.397430Z[0m [32m INFO[0m [2mekos::commands::recover[0m[2m:[0m using local Ollama provider with disk cache
+[2m2026-08-20T16:54:24.753220Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-transform-analyzer:priv/ingest_repo/structure.sql
+[2m2026-08-20T16:54:24.754197Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mcicd-analyzer:analytics
+[2m2026-08-20T16:54:24.756247Z[0m [32m INFO[0m [2mekos_recovery::cicd_analyzer[0m[2m:[0m cicd-analyzer complete [3mpass[0m[2m=[0mcicd-analyzer:analytics [3mpipelines[0m[2m=[0m14
+[2m2026-08-20T16:54:24.756348Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-analyzer:priv/ingest_repo/structure.sql
+[2m2026-08-20T16:54:24.760509Z[0m [32m INFO[0m [2mekos_recovery::sql_analyzer[0m[2m:[0m sql-analyzer complete [3mpass[0m[2m=[0msql-analyzer:priv/ingest_repo/structure.sql [3mobjects[0m[2m=[0m15 [3mrelationships[0m[2m=[0m0
+[2m2026-08-20T16:54:24.760625Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mdependency-analyzer:analytics
+[2m2026-08-20T16:54:24.762650Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-analyzer:priv/repo/structure.sql
+[2m2026-08-20T16:54:24.773008Z[0m [32m INFO[0m [2mekos_recovery::sql_analyzer[0m[2m:[0m sql-analyzer complete [3mpass[0m[2m=[0msql-analyzer:priv/repo/structure.sql [3mobjects[0m[2m=[0m42 [3mrelationships[0m[2m=[0m0
+[2m2026-08-20T16:54:24.773231Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mlocal-docs-analyzer:analytics
+[2m2026-08-20T16:54:24.779047Z[0m [32m INFO[0m [2mekos_recovery::local_docs_analyzer[0m[2m:[0m local-docs-analyzer complete [3mpass[0m[2m=[0mlocal-docs-analyzer:analytics [3mobjects[0m[2m=[0m140 [3medges[0m[2m=[0m99
+[2m2026-08-20T16:54:24.779305Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-transform-analyzer:priv/repo/structure.sql
+[2m2026-08-20T16:54:24.783983Z[0m [32m INFO[0m [2mekos_recovery::sql_transform_analyzer[0m[2m:[0m sql-transform-analyzer complete [3mpass[0m[2m=[0msql-transform-analyzer:priv/repo/structure.sql [3mstatements[0m[2m=[0m2 [3mnodes[0m[2m=[0m5 [3mmapped[0m[2m=[0m1 [3mcoverage_pct[0m[2m=[0m20.0
+[2m2026-08-20T16:54:24.784110Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mgit-analyzer:analytics
+[2m2026-08-20T16:54:24.879657Z[0m [32m INFO[0m [2mekos_recovery::git_analyzer[0m[2m:[0m git-analyzer complete [3mpass[0m[2m=[0mgit-analyzer:analytics [3mevents[0m[2m=[0m500 [3mcontributors[0m[2m=[0m124
+Recover complete.
+  SQL files analysed: 2
+  Git commits analysed: 500
+  Source files scanned for dependencies: 162
+  Local documents analysed: 41
+  Transformation IR nodes (SQL): 5 total, 20% mapped (non-Unmapped)
+  Passes run: 8
+
+real	0m0,509s
+user	0m0,332s
+sys	0m0,166s

@@ -1,0 +1,9 @@
+[2m2026-08-20T16:55:41.931058Z[0m [32m INFO[0m [2mekos::commands::recover[0m[2m:[0m using local Ollama provider with disk cache
+Niklas Hambüchen is a contributor to this repository, having made 2 commits.
+
+Sources:
+  [100%] git:contributors — "contributor: Niklas Hambüchen"
+
+real	0m57,442s
+user	0m0,006s
+sys	0m0,016s

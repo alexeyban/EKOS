@@ -4,6 +4,8 @@ EKOS is an AI-native platform that continuously reconstructs, compiles, stores a
 
 Unlike traditional enterprise systems that manage data, documents or metadata independently, EKOS treats the entire enterprise as a living knowledge system — a permanently evolving semantic model that can be trusted by both humans and AI.
 
+**First benchmark:** on a real 2,022-file open-source repo ([plausible/analytics](https://github.com/plausible/analytics)), cold ingestion takes 34 seconds, and answering real questions from the compiled ledger costs **67-93% fewer tokens** than raw grep-based search over the source — measured with a standard tokenizer (`tiktoken`), not a hand-rolled estimate, with the one case grep wins included rather than hidden. Full methodology, every command, and every raw output: [The First Benchmark Number](https://alexeyban.github.io/EKOS/presentations/token-benchmark.html).
+
 ## About
 
 EKOS is a **compiler for enterprise knowledge**, not a database or document store. It observes an
@@ -437,6 +439,19 @@ open-source repo:
   an open-ended "why" question answered by chaining real `ekos_clickhouse_query` MCP calls over
   stdio JSON-RPC (including a real failure and retry), plus a technical breakdown of how Claude,
   MCP, and EKOS's pipeline fit together.
+
+A fourth deck, [Proving the Core Loop, Cold, on a Real
+Repo](https://alexeyban.github.io/EKOS/presentations/analytics-full-loop.html), goes past the
+ClickHouse slice: a genuinely cold `init → build → recover → resolve → compile → commit` run over
+the *whole* 2,045-file repo, timed stage by stage (~107s end to end), plus a real `ekos ask` + MCP
+question set graded against ground truth read from the repo itself. It found three new gaps in one
+sitting — a previously-unknown Postgres `sqlparser` failure (`INCREMENT`), identity resolution
+over-merging real people and unrelated documents (not just ClickHouse tables — a real contributor's
+own commit becomes unfindable under their own name), and a retrieval-brittleness bug in `ekos ask`
+itself (full-sentence questions return no context even when the object is trivially findable by
+keyword) — all reported the same honest way, not silently patched or hidden, and all fixed the same
+day (RFC 0059, RFC 0060, RFC 0061 — see `devlog_61.md`), each with a live re-verification against
+the same real repo, not just a passing unit test.
 
 ### Demo: skills + custom subagents
 

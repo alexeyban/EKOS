@@ -1,0 +1,57 @@
+Real commands run against a real, unmodified checkout of
+github.com/plausible/analytics (analytics/) to produce every raw input file
+in this directory. Every grep baseline and EKOS response here is real output
+from these exact commands, run in this order.
+
+--- Q1: "What columns does the imported_browsers table have?" ---
+
+# Baseline 1 -- best-case targeted grep: the agent already knows this is the
+# right file and the right line before searching. Not realistic, included
+# for honesty (it's the one case grep wins).
+$ grep -A 15 "CREATE TABLE plausible_events_db.imported_browsers" \
+    priv/ingest_repo/structure.sql
+  -> saved as q1-grep-targeted.txt
+
+# Baseline 2 -- realistic grep: the agent does not know which file has the
+# real schema, so it searches the whole repo with context lines, the way an
+# agentic coding tool actually would.
+$ grep -rln "imported_browsers" --include="*" . | grep -v '^\./\.ekos'
+  -> 32 real files matched
+$ grep -rn -C3 "imported_browsers" --include="*" . | grep -v '^\./\.ekos'
+  -> saved as q1-grep-realistic-repo-wide.txt
+
+# Baseline 3 -- naive: the agent found the one correct file (structure.sql,
+# via baseline 2's grep) and just reads the whole thing.
+$ wc -l priv/ingest_repo/structure.sql   # 366 lines
+$ wc -c priv/ingest_repo/structure.sql   # 11,962 bytes
+  -> tokenized directly from the real repo file, not copied here
+
+# EKOS side -- the same two-step "I don't know the id yet" reality: search,
+# then fetch state for the match, over real MCP stdio JSON-RPC.
+$ ekos mcp serve --workspace analytics/
+  -> tools/call ekos_search {"query":"imported_browsers"}
+     saved as q1-ekos-search-response.json
+  -> tools/call ekos_state {"id":"<id from the search result above>"}
+     saved as q1-ekos-state-response.json
+
+--- Q2: "What tables exist in the Postgres schema?" ---
+
+# grep/naive baseline -- there is no grep pattern that cleanly extracts
+# "every CREATE TABLE name" without also matching migration files, test
+# fixtures, and ALTER TABLE statements naming the same tables; the realistic
+# way an agent answers this from raw source is reading the whole dump.
+$ wc -l priv/repo/structure.sql   # 2,738 lines
+$ wc -c priv/repo/structure.sql   # 78,793 bytes
+  -> tokenized directly from the real repo file, not copied here
+
+# EKOS side -- one structured query against the already-compiled ledger.
+$ ekos ekl "FIND Object WHERE kind = 'Table' AND name CONTAINS 'public'"
+  -> saved as q2-ekos-ekl-list.txt (42 real tables)
+
+--- Token counting ---
+
+$ python3 count-tokens.py
+  -> saved as count-tokens-output.txt
+
+tiktoken's cl100k_base encoding (GPT-4-class, a standard reference
+tokenizer) was used throughout -- not a hand-rolled words/4 heuristic.

@@ -1,0 +1,9 @@
+[2m2026-08-20T16:56:53.178977Z[0m [32m INFO[0m [2mekos::commands::recover[0m[2m:[0m using local Ollama provider with disk cache
+I can help you with that! Since the JSON context is provided, I'll do my best to answer your questions based on the information given.
+
+What would you like to know about this EKOS Knowledge Runtime assistant?
+warning: LLM response did not include a valid cited_evidence block
+
+real	1m12,175s
+user	0m0,009s
+sys	0m0,025s

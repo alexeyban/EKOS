@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The First Benchmark Number</title>
+<meta name="description" content="EKOS's first published benchmark: analytics/ (Plausible Analytics), 2,022 real files, indexed cold in 34 seconds. Two real questions, answered from raw source (grep, tiktoken-counted) vs from the compiled ledger (MCP, tiktoken-counted): 67-93% fewer tokens for the realistic case -- and one honest exception where grep wins, explained rather than hidden.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>One benchmark number.<br><span class="arrow-word">Rough, real, and reproducible.</span></h1>
+  <p class="lede">Every tool in this space leads with a metric — tokens saved, ingestion time,
+  query latency. EKOS has never published one. This is the first: a real repo, a real question,
+  raw grep vs the compiled ledger, both sides counted with the same standard tokenizer
+  (<code class="mono">tiktoken</code>, not a hand-rolled estimate). It doesn't win every case —
+  the one case grep wins is on this page too, not edited out.</p>
+  <div class="hero-diagram">
+    <span class="chip">2,022 files, cold, 34s</span><span class="sep mono">→</span>
+    <span class="chip hot">67-93% fewer tokens</span><span class="sep mono">→</span>
+    <span class="chip bad">except when grep is psychic</span><span class="sep mono">→</span>
+    <span class="chip">every command included</span>
+  </div>
+  <div class="byline"><span class="dot"></span> analytics/ (github.com/plausible/analytics, AGPL-3.0) · same repo as the full-loop deck · tiktoken cl100k_base</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the ingestion number</div>
+  <div class="eyebrow">real, unedited — reused from the full-loop case study</div>
+  <h2>2,022 files, cold, in 34 seconds.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos init &amp;&amp; time ekos build
+Build complete. Files observed (new): 2022
+<span class="s">real  0m33.587s</span></pre>
+  </div>
+  <p class="lede">A genuinely cold run — the workspace deleted and reinitialized, not a warm-cache
+  rerun — against a real, unmodified 2,022-file open-source repository (Plausible Analytics: Elixir
+  application code, two real SQL schemas, 500 real git commits, 14 real CI pipelines, 41 real
+  documents). The full <code class="mono">observe → compile → ledger</code> pipeline, including
+  identity resolution and commit, finishes in under two minutes total — see the full-loop deck for
+  the complete stage-by-stage timing.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-full-loop/after-1-build.txt" style="color:var(--accent-a);">analytics-full-loop/after-1-build.txt</a></div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / method: three honest grep tiers, not one convenient one</div>
+  <div class="eyebrow">How the raw-source baseline was built</div>
+  <h2>An agent doesn't know where the answer is. That has a token cost too.</h2>
+  <table class="ttable">
+    <thead><tr><th>Tier</th><th>What it assumes</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Best-case</td><td class="desc">The agent already knows the exact file and line to grep — <code>-A15</code> around the one right spot.</td></tr>
+      <tr><td class="tool">Realistic</td><td class="desc">The agent greps the whole repo with context lines, the way an agentic coding tool actually does — every real match, not the lucky one.</td></tr>
+      <tr><td class="tool">Naive</td><td class="desc">The agent found the one correct file and just reads it in full.</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Publishing only the "best-case" number would be the easy, flattering benchmark —
+  and it's the one where <strong>grep wins</strong> (see §04). Every tier here is a real command
+  against the real repo, not a synthetic estimate. On the EKOS side, the same "doesn't know where
+  to look yet" reality applies: the token cost includes an <code class="mono">ekos_search</code>
+  lookup <em>plus</em> the <code class="mono">ekos_state</code> fetch, not just the final answer in
+  isolation.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real commands and script:
+    <a href="examples/token-benchmark/commands.txt" style="color:var(--accent-a);">commands.txt</a>,
+    <a href="examples/token-benchmark/count-tokens.py" style="color:var(--accent-a);">count-tokens.py</a></div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / question 1 — one real table's schema</div>
+  <div class="eyebrow">"What columns does the imported_browsers table have?" — real, unedited</div>
+  <h2>10,357 tokens of realistic grep. 1,186 tokens of EKOS.</h2>
+  <table class="ttable">
+    <thead><tr><th>Path</th><th>Real tokens (tiktoken)</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">grep, realistic (32 real hits, -C3 context)</td><td class="bad">10,357</td></tr>
+      <tr><td class="tool">grep, naive (read the whole 366-line file)</td><td class="bad">3,651</td></tr>
+      <tr><td class="tool">EKOS (<code>ekos_search</code> + <code>ekos_state</code>, real MCP)</td><td class="good">1,186</td></tr>
+    </tbody>
+  </table>
+  <div class="stat-grid" style="margin-top:1.6rem;">
+    <div class="stat"><div class="num">88.5%</div><div class="label">fewer tokens vs. realistic repo-wide grep</div></div>
+    <div class="stat"><div class="num">67.5%</div><div class="label">fewer tokens vs. reading the correct file in full</div></div>
+  </div>
+  <p class="lede">32 real files in this repo mention <code class="mono">imported_browsers</code> —
+  test fixtures, migrations, application code, the one real schema file. A search agent without a
+  compiled ledger has to sift through that; EKOS's <code class="mono">ekos_search</code> ranks the
+  real <code class="mono">Table</code> object first, and <code class="mono">ekos_state</code>
+  returns exactly its 10 real columns, typed, with evidence — nothing else.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/token-benchmark/q1-grep-realistic-repo-wide.txt" style="color:var(--accent-a);">q1-grep-realistic-repo-wide.txt</a>,
+    <a href="examples/token-benchmark/q1-ekos-search-response.json" style="color:var(--accent-a);">q1-ekos-search-response.json</a>,
+    <a href="examples/token-benchmark/q1-ekos-state-response.json" style="color:var(--accent-a);">q1-ekos-state-response.json</a></div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / the honest exception</div>
+  <div class="eyebrow">Same question — real, unedited</div>
+  <h2>When grep already knows the answer, nothing beats grep.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ grep -A 15 "CREATE TABLE plausible_events_db.imported_browsers" \
+    priv/ingest_repo/structure.sql
+<span class="s">CREATE TABLE plausible_events_db.imported_browsers
+(
+    `site_id` UInt64, `date` Date, `browser` String, ...
+)
+ENGINE = MergeTree ORDER BY (site_id, date, browser)
+SETTINGS index_granularity = 8192, ...;</span>
+
+<span class="s">122 tokens.</span>  EKOS's full round trip: 1,186 tokens — <span class="bad">9.7× more.</span></pre>
+  </div>
+  <p class="lede">This is real and stated plainly, not smoothed over: if the agent already knows the
+  exact file and the exact line before it searches, a targeted grep is unbeatably cheap — there was
+  nothing to discover. That's not a realistic starting condition for "what does this table
+  contain?" on a repo the agent hasn't already memorized, which is why §03's realistic and naive
+  tiers are the honest headline number, not this one. A benchmark that only showed this slide would
+  be marketing, not evidence.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/token-benchmark/q1-grep-targeted.txt" style="color:var(--accent-a);">q1-grep-targeted.txt</a></div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / question 2 — enumerate, not just look up</div>
+  <div class="eyebrow">"What tables exist in the Postgres schema?" — real, unedited</div>
+  <h2>18,995 tokens of raw schema. 1,258 tokens of structure.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos ekl "FIND Object WHERE kind = 'Table' AND name CONTAINS 'public'"
+id                                    name                          kind
+951e87a2-...                          public.api_keys               Table
+b26a68a7-...                          public.check_stats_emails     Table
+c5dfe0c6-...                          public.create_site_emails     Table
+...
+<span class="s">42 row(s).                                          1,258 tokens</span></pre>
+  </div>
+  <p class="lede">There's no grep pattern that cleanly lists "every real table" without also
+  matching migrations, tests, and <code class="mono">ALTER TABLE</code> statements naming the same
+  tables — the realistic raw-source path is reading the whole 2,738-line dump.
+  <code class="mono">ekl</code> answers directly from the already-compiled ledger.</p>
+  <div class="stat-grid" style="margin-top:1.6rem;">
+    <div class="stat"><div class="num">93.4%</div><div class="label">fewer tokens than reading the whole schema file</div></div>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/token-benchmark/q2-ekos-ekl-list.txt" style="color:var(--accent-a);">q2-ekos-ekl-list.txt</a></div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / what this number is, and isn't</div>
+  <div class="eyebrow">Scope, stated plainly</div>
+  <h2>One repo, two questions, one honest exception. A start, not a leaderboard.</h2>
+  <table class="ttable">
+    <thead><tr><th>This benchmark</th><th>Does not claim</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Real repo, real questions, real tiktoken counts</td><td class="desc">A comparison against any named competitor's own published numbers — none were reproduced here, none are claimed</td></tr>
+      <tr><td class="tool">67-93% fewer tokens, realistic and naive tiers</td><td class="desc">A win in every case — the best-case grep tier (§04) genuinely costs less</td></tr>
+      <tr><td class="tool">Two representative real questions</td><td class="desc">A statistically broad sample — more questions, more repos, is exactly what "rough" means here</td></tr>
+      <tr><td class="tool">Token cost, tiktoken-measured</td><td class="desc">A latency or wall-clock-per-query benchmark — not measured in this pass</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">The point isn't to win a leaderboard against tools this project hasn't measured —
+  it's to exist, with real numbers a skeptic can rerun themselves against the same public repo.</p>
+</section>
+
+<section class="slide cta" id="s8">
+  <div class="eyebrow">Reproduce it yourself</div>
+  <h2>Same repo. Same commands. Same tokenizer.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ git clone https://github.com/plausible/analytics
+$ cd analytics &amp;&amp; ekos init &amp;&amp; time ekos build
+$ ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+$ ekos mcp serve --workspace .   # try ekos_search + ekos_state yourself
+$ pip install tiktoken           # count the tokens yourself</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Everything behind this deck</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Raw commands, grep outputs, MCP responses</td><td class="desc"><code>docs/presentations/examples/token-benchmark/</code></td></tr>
+      <tr><td class="tool">Token-counting script</td><td class="desc"><code>count-tokens.py</code> — <code>tiktoken</code>, cl100k_base, no hand-rolled estimate</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · first published benchmark, real repo, real tokenizer, one honest exception included · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

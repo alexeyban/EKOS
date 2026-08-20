@@ -1,0 +1,8 @@
+Identity scan complete.
+  Objects scanned: 3645
+  Candidates found: 32
+  New unconfirmed matches written: 32
+
+real	0m0,435s
+user	0m0,060s
+sys	0m0,026s

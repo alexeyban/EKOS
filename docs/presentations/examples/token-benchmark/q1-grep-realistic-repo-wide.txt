@@ -1,0 +1,438 @@
+test/plausible/exports_test.exs-13-      assert queries |> Map.values() |> Enum.all?(&match?(%Ecto.Query{}, &1))
+test/plausible/exports_test.exs-14-
+test/plausible/exports_test.exs-15-      assert Map.keys(queries) == [
+test/plausible/exports_test.exs:16:               "imported_browsers.csv",
+test/plausible/exports_test.exs-17-               "imported_custom_events.csv",
+test/plausible/exports_test.exs-18-               "imported_custom_props.csv",
+test/plausible/exports_test.exs-19-               "imported_devices.csv",
+--
+test/plausible/exports_test.exs-34-        )
+test/plausible/exports_test.exs-35-
+test/plausible/exports_test.exs-36-      assert Map.keys(queries) == [
+test/plausible/exports_test.exs:37:               "imported_browsers_20230101_20240312.csv",
+test/plausible/exports_test.exs-38-               "imported_custom_events_20230101_20240312.csv",
+test/plausible/exports_test.exs-39-               "imported_custom_props_20230101_20240312.csv",
+test/plausible/exports_test.exs-40-               "imported_devices_20230101_20240312.csv",
+--
+test/plausible/exports_test.exs-52-      queries = Plausible.Exports.export_queries(site, extname: ".ch")
+test/plausible/exports_test.exs-53-
+test/plausible/exports_test.exs-54-      assert Map.keys(queries) == [
+test/plausible/exports_test.exs:55:               "imported_browsers.ch",
+test/plausible/exports_test.exs-56-               "imported_custom_events.ch",
+test/plausible/exports_test.exs-57-               "imported_custom_props.ch",
+test/plausible/exports_test.exs-58-               "imported_devices.ch",
+test/plausible/data_migration/site_imports_test.exs-243-        build(:imported_locations, date: ~D[2021-01-08]),
+test/plausible/data_migration/site_imports_test.exs-244-        build(:imported_devices, date: ~D[2021-01-01]),
+test/plausible/data_migration/site_imports_test.exs-245-        build(:imported_devices, date: ~D[2021-01-08]),
+test/plausible/data_migration/site_imports_test.exs:246:        build(:imported_browsers, date: ~D[2021-01-01]),
+test/plausible/data_migration/site_imports_test.exs:247:        build(:imported_browsers, date: ~D[2021-01-08]),
+test/plausible/data_migration/site_imports_test.exs-248-        build(:imported_operating_systems, date: ~D[2021-01-01]),
+test/plausible/data_migration/site_imports_test.exs-249-        build(:imported_operating_systems, date: ~D[2021-01-08])
+test/plausible/data_migration/site_imports_test.exs-250-      ])
+test/plausible/purge_test.exs-33-      build(:imported_custom_events),
+test/plausible/purge_test.exs-34-      build(:imported_locations),
+test/plausible/purge_test.exs-35-      build(:imported_devices),
+test/plausible/purge_test.exs:36:      build(:imported_browsers),
+test/plausible/purge_test.exs-37-      build(:imported_operating_systems)
+test/plausible/purge_test.exs-38-    ])
+test/plausible/purge_test.exs-39-
+--
+test/plausible/purge_test.exs-47-      build(:imported_custom_events),
+test/plausible/purge_test.exs-48-      build(:imported_locations),
+test/plausible/purge_test.exs-49-      build(:imported_devices),
+test/plausible/purge_test.exs:50:      build(:imported_browsers),
+test/plausible/purge_test.exs-51-      build(:imported_operating_systems)
+test/plausible/purge_test.exs-52-    ])
+test/plausible/purge_test.exs-53-
+--
+test/plausible/purge_test.exs-106-      build(:imported_custom_events),
+test/plausible/purge_test.exs-107-      build(:imported_locations),
+test/plausible/purge_test.exs-108-      build(:imported_devices),
+test/plausible/purge_test.exs:109:      build(:imported_browsers),
+test/plausible/purge_test.exs-110-      build(:imported_operating_systems)
+test/plausible/purge_test.exs-111-    ])
+test/plausible/purge_test.exs-112-
+test/support/dev/controllers/e2e_controller.ex-14-                     :imported_exit_pages,
+test/support/dev/controllers/e2e_controller.ex-15-                     :imported_locations,
+test/support/dev/controllers/e2e_controller.ex-16-                     :imported_devices,
+test/support/dev/controllers/e2e_controller.ex:17:                     :imported_browsers,
+test/support/dev/controllers/e2e_controller.ex-18-                     :imported_operating_systems
+test/support/dev/controllers/e2e_controller.ex-19-                   ],
+test/support/dev/controllers/e2e_controller.ex-20-                   fn type ->
+test/plausible/imported/google_analytics4_test.exs-19-                      "fixture/ga4_report_imported_custom_events.json",
+test/plausible/imported/google_analytics4_test.exs-20-                      "fixture/ga4_report_imported_locations.json",
+test/plausible/imported/google_analytics4_test.exs-21-                      "fixture/ga4_report_imported_devices.json",
+test/plausible/imported/google_analytics4_test.exs:22:                      "fixture/ga4_report_imported_browsers.json",
+test/plausible/imported/google_analytics4_test.exs-23-                      "fixture/ga4_report_imported_operating_systems.json"
+test/plausible/imported/google_analytics4_test.exs-24-                    ]
+test/plausible/imported/google_analytics4_test.exs-25-                    |> Enum.map(&File.read!/1)
+--
+test/plausible/imported/google_analytics4_test.exs-97-            "imported_custom_events" -> 56
+test/plausible/imported/google_analytics4_test.exs-98-            "imported_locations" -> 2291
+test/plausible/imported/google_analytics4_test.exs-99-            "imported_devices" -> 93
+test/plausible/imported/google_analytics4_test.exs:100:            "imported_browsers" -> 233
+test/plausible/imported/google_analytics4_test.exs-101-            "imported_operating_systems" -> 1068
+test/plausible/imported/google_analytics4_test.exs-102-          end
+test/plausible/imported/google_analytics4_test.exs-103-
+--
+test/plausible/imported/google_analytics4_test.exs-222-            "imported_exit_pages" -> 0
+test/plausible/imported/google_analytics4_test.exs-223-            "imported_locations" -> 2291
+test/plausible/imported/google_analytics4_test.exs-224-            "imported_devices" -> 93
+test/plausible/imported/google_analytics4_test.exs:225:            "imported_browsers" -> 233
+test/plausible/imported/google_analytics4_test.exs-226-            "imported_operating_systems" -> 1068
+test/plausible/imported/google_analytics4_test.exs-227-            "imported_custom_events" -> 0
+test/plausible/imported/google_analytics4_test.exs-228-          end
+--
+test/plausible/imported/google_analytics4_test.exs-296-            "imported_exit_pages" -> 0
+test/plausible/imported/google_analytics4_test.exs-297-            "imported_locations" -> 0
+test/plausible/imported/google_analytics4_test.exs-298-            "imported_devices" -> 0
+test/plausible/imported/google_analytics4_test.exs:299:            "imported_browsers" -> 0
+test/plausible/imported/google_analytics4_test.exs-300-            "imported_operating_systems" -> 0
+test/plausible/imported/google_analytics4_test.exs-301-            "imported_custom_events" -> 0
+test/plausible/imported/google_analytics4_test.exs-302-          end
+--
+test/plausible/imported/google_analytics4_test.exs-324-            "imported_exit_pages" -> 0
+test/plausible/imported/google_analytics4_test.exs-325-            "imported_locations" -> 2291
+test/plausible/imported/google_analytics4_test.exs-326-            "imported_devices" -> 93
+test/plausible/imported/google_analytics4_test.exs:327:            "imported_browsers" -> 233
+test/plausible/imported/google_analytics4_test.exs-328-            "imported_operating_systems" -> 1068
+test/plausible/imported/google_analytics4_test.exs-329-            "imported_custom_events" -> 56
+test/plausible/imported/google_analytics4_test.exs-330-          end
+--
+test/plausible/imported/google_analytics4_test.exs-419-              "imported_exit_pages" -> 0
+test/plausible/imported/google_analytics4_test.exs-420-              "imported_locations" -> 0
+test/plausible/imported/google_analytics4_test.exs-421-              "imported_devices" -> 0
+test/plausible/imported/google_analytics4_test.exs:422:              "imported_browsers" -> 0
+test/plausible/imported/google_analytics4_test.exs-423-              "imported_operating_systems" -> 0
+test/plausible/imported/google_analytics4_test.exs-424-              "imported_custom_events" -> 0
+test/plausible/imported/google_analytics4_test.exs-425-            end
+--
+test/plausible/imported/google_analytics4_test.exs-447-              "imported_exit_pages" -> 0
+test/plausible/imported/google_analytics4_test.exs-448-              "imported_locations" -> 2291
+test/plausible/imported/google_analytics4_test.exs-449-              "imported_devices" -> 93
+test/plausible/imported/google_analytics4_test.exs:450:              "imported_browsers" -> 233
+test/plausible/imported/google_analytics4_test.exs-451-              "imported_operating_systems" -> 1068
+test/plausible/imported/google_analytics4_test.exs-452-              "imported_custom_events" -> 56
+test/plausible/imported/google_analytics4_test.exs-453-            end
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1725-        build(:pageview, browser: "Chrome", user_id: 1, timestamp: ~N[2021-01-01 00:00:00]),
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1726-        build(:pageview, browser: "Chrome", user_id: 1, timestamp: ~N[2021-01-01 00:03:00]),
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1727-        build(:pageview, browser: "Firefox", timestamp: ~N[2021-01-01 00:00:00]),
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs:1728:        build(:imported_browsers, browser: "Firefox", date: ~D[2021-01-02]),
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs:1729:        build(:imported_browsers,
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1730-          browser: "Chrome",
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1731-          visitors: 1,
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1732-          pageviews: 1,
+--
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1742-          user_id: 2,
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1743-          timestamp: ~N[2021-01-04 00:10:00]
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1744-        ),
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs:1745:        build(:imported_browsers,
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1746-          browser: "Chrome",
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1747-          visitors: 4,
+test/plausible_web/controllers/api/external_stats_controller/timeseries_test.exs-1748-          pageviews: 6,
+test/plausible/stats/query/query_comparisons_test.exs-229-      build(:pageview, browser: "Chrome", timestamp: ~N[2021-01-07 00:00:00]),
+test/plausible/stats/query/query_comparisons_test.exs-230-      build(:pageview, browser: "Chrome", timestamp: ~N[2021-01-07 00:00:00]),
+test/plausible/stats/query/query_comparisons_test.exs-231-      build(:pageview, browser: "Firefox", timestamp: ~N[2021-01-07 00:00:00]),
+test/plausible/stats/query/query_comparisons_test.exs:232:      build(:imported_browsers,
+test/plausible/stats/query/query_comparisons_test.exs-233-        date: ~D[2021-01-01],
+test/plausible/stats/query/query_comparisons_test.exs-234-        browser: "Firefox",
+test/plausible/stats/query/query_comparisons_test.exs-235-        browser_version: "121",
+test/plausible/stats/query/query_comparisons_test.exs-236-        visitors: 50
+test/plausible/stats/query/query_comparisons_test.exs-237-      ),
+test/plausible/stats/query/query_comparisons_test.exs:238:      build(:imported_browsers,
+test/plausible/stats/query/query_comparisons_test.exs-239-        date: ~D[2021-01-01],
+test/plausible/stats/query/query_comparisons_test.exs-240-        browser: "Chrome",
+test/plausible/stats/query/query_comparisons_test.exs-241-        browser_version: "99",
+test/plausible/stats/query/query_comparisons_test.exs-242-        visitors: 39
+test/plausible/stats/query/query_comparisons_test.exs-243-      ),
+test/plausible/stats/query/query_comparisons_test.exs:244:      build(:imported_browsers,
+test/plausible/stats/query/query_comparisons_test.exs-245-        date: ~D[2021-01-01],
+test/plausible/stats/query/query_comparisons_test.exs-246-        browser: "Safari",
+test/plausible/stats/query/query_comparisons_test.exs-247-        browser_version: "99",
+test/plausible_web/controllers/api/stats_controller/dashboard_csv_export_test.exs-547-
+test/plausible_web/controllers/api/stats_controller/dashboard_csv_export_test.exs-548-      populate_stats(site, site_import.id, [
+test/plausible_web/controllers/api/stats_controller/dashboard_csv_export_test.exs-549-        build(:imported_visitors, visitors: 9),
+test/plausible_web/controllers/api/stats_controller/dashboard_csv_export_test.exs:550:        build(:imported_browsers, browser: "Chrome", pageviews: 1),
+test/plausible_web/controllers/api/stats_controller/dashboard_csv_export_test.exs-551-        build(:imported_devices, device: "Desktop", pageviews: 1),
+test/plausible_web/controllers/api/stats_controller/dashboard_csv_export_test.exs-552-        build(:imported_entry_pages, entry_page: "/test", pageviews: 1),
+test/plausible_web/controllers/api/stats_controller/dashboard_csv_export_test.exs-553-        build(:imported_exit_pages, exit_page: "/test", pageviews: 1),
+test/plausible_web/controllers/api/stats_controller/suggestions_test.exs-1389-          build(:pageview, timestamp: ~N[2019-01-01 23:30:01], browser: "Chrome"),
+test/plausible_web/controllers/api/stats_controller/suggestions_test.exs-1390-          build(:pageview, timestamp: ~N[2019-01-01 23:40:01], browser: "Chrome"),
+test/plausible_web/controllers/api/stats_controller/suggestions_test.exs-1391-          build(:pageview, timestamp: ~N[2019-01-01 23:00:01], browser: "Firefox"),
+test/plausible_web/controllers/api/stats_controller/suggestions_test.exs:1392:          build(:imported_browsers, date: ~D[2019-01-01], browser: "Firefox", pageviews: 3)
+test/plausible_web/controllers/api/stats_controller/suggestions_test.exs-1393-        ])
+test/plausible_web/controllers/api/stats_controller/suggestions_test.exs-1394-
+test/plausible_web/controllers/api/stats_controller/suggestions_test.exs-1395-        conn =
+lib/plausible/data_migration/site_imports.ex-42-    "imported_custom_events",
+lib/plausible/data_migration/site_imports.ex-43-    "imported_locations",
+lib/plausible/data_migration/site_imports.ex-44-    "imported_devices",
+lib/plausible/data_migration/site_imports.ex:45:    "imported_browsers",
+lib/plausible/data_migration/site_imports.ex-46-    "imported_operating_systems"
+lib/plausible/data_migration/site_imports.ex-47-  ]
+lib/plausible/data_migration/site_imports.ex-48-
+priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs-9-    imported_exit_pages
+priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs-10-    imported_locations
+priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs-11-    imported_devices
+priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs:12:    imported_browsers
+priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs-13-    imported_operating_systems
+priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs-14-  )
+priv/ingest_repo/migrations/20231017073642_disable_deduplication_window_for_imports.exs-15-
+lib/plausible/stats/imported/base.ex-29-    "visit:region_name" => "imported_locations",
+lib/plausible/stats/imported/base.ex-30-    "visit:city_name" => "imported_locations",
+lib/plausible/stats/imported/base.ex-31-    "visit:device" => "imported_devices",
+lib/plausible/stats/imported/base.ex:32:    "visit:browser" => "imported_browsers",
+lib/plausible/stats/imported/base.ex:33:    "visit:browser_version" => "imported_browsers",
+lib/plausible/stats/imported/base.ex-34-    "visit:os" => "imported_operating_systems",
+lib/plausible/stats/imported/base.ex-35-    "visit:os_version" => "imported_operating_systems",
+lib/plausible/stats/imported/base.ex-36-    "event:page" => "imported_pages",
+lib/plausible/imported/buffer.ex-110-  defp table_schema("imported_custom_events"), do: Plausible.Imported.CustomEvent
+lib/plausible/imported/buffer.ex-111-  defp table_schema("imported_locations"), do: Plausible.Imported.Location
+lib/plausible/imported/buffer.ex-112-  defp table_schema("imported_devices"), do: Plausible.Imported.Device
+lib/plausible/imported/buffer.ex:113:  defp table_schema("imported_browsers"), do: Plausible.Imported.Browser
+lib/plausible/imported/buffer.ex-114-  defp table_schema("imported_operating_systems"), do: Plausible.Imported.OperatingSystem
+lib/plausible/imported/buffer.ex-115-end
+lib/plausible/google/ga4/report_request.ex-142-        ]
+lib/plausible/google/ga4/report_request.ex-143-      },
+lib/plausible/google/ga4/report_request.ex-144-      %__MODULE__{
+lib/plausible/google/ga4/report_request.ex:145:        dataset: "imported_browsers",
+lib/plausible/google/ga4/report_request.ex-146-        dimensions: ["date", "browser"],
+lib/plausible/google/ga4/report_request.ex-147-        metrics: [
+lib/plausible/google/ga4/report_request.ex-148-          "screenPageViews",
+test/support/factory.ex-358-    }
+test/support/factory.ex-359-  end
+test/support/factory.ex-360-
+test/support/factory.ex:361:  def imported_browsers_factory do
+test/support/factory.ex-362-    %{
+test/support/factory.ex:363:      table: "imported_browsers",
+test/support/factory.ex-364-      date: Date.utc_today(),
+test/support/factory.ex-365-      browser: "",
+test/support/factory.ex-366-      visitors: 1,
+test/plausible/imported/csv_importer_test.exs-16-
+test/plausible/imported/csv_importer_test.exs-17-    test "parses job args properly", %{user: user, site: site} do
+test/plausible/imported/csv_importer_test.exs-18-      tables = [
+test/plausible/imported/csv_importer_test.exs:19:        "imported_browsers",
+test/plausible/imported/csv_importer_test.exs-20-        "imported_custom_events",
+test/plausible/imported/csv_importer_test.exs-21-        "imported_devices",
+test/plausible/imported/csv_importer_test.exs-22-        "imported_entry_pages",
+--
+test/plausible/imported/csv_importer_test.exs-89-
+test/plausible/imported/csv_importer_test.exs-90-      csvs = [
+test/plausible/imported/csv_importer_test.exs-91-        %{
+test/plausible/imported/csv_importer_test.exs:92:          name: "imported_browsers_20211230_20211231.csv",
+test/plausible/imported/csv_importer_test.exs-93-          body: """
+test/plausible/imported/csv_importer_test.exs-94-          "date","browser","visitors","visits","visit_duration","bounces"
+test/plausible/imported/csv_importer_test.exs-95-          "2021-12-30","Amazon Silk",2,2,0,2
+--
+test/plausible/imported/csv_importer_test.exs-499-
+test/plausible/imported/csv_importer_test.exs-500-      csvs = [
+test/plausible/imported/csv_importer_test.exs-501-        %{
+test/plausible/imported/csv_importer_test.exs:502:          name: "imported_browsers_20211230_20211231.csv",
+test/plausible/imported/csv_importer_test.exs-503-          body: """
+test/plausible/imported/csv_importer_test.exs-504-          "date","browser","visitors","visits","visit_duration","bounces"
+test/plausible/imported/csv_importer_test.exs-505-          "2021-12-30","Amazon Silk",2,2,0,2
+--
+test/plausible/imported/csv_importer_test.exs-554-               Repo.get_by!(SiteImport, site_id: site.id)
+test/plausible/imported/csv_importer_test.exs-555-
+test/plausible/imported/csv_importer_test.exs-556-      # ensure no browser left behind
+test/plausible/imported/csv_importer_test.exs:557:      imported_browsers_q = from b in "imported_browsers", where: b.import_id == ^import_id
+test/plausible/imported/csv_importer_test.exs:558:      assert await_clickhouse_count(imported_browsers_q, 0)
+test/plausible/imported/csv_importer_test.exs-559-    end
+test/plausible/imported/csv_importer_test.exs-560-  end
+test/plausible/imported/csv_importer_test.exs-561-
+--
+test/plausible/imported/csv_importer_test.exs-906-
+test/plausible/imported/csv_importer_test.exs-907-      # browsers
+test/plausible/imported/csv_importer_test.exs-908-      exported_browsers = breakdown.(exported_site, "visit:browser")
+test/plausible/imported/csv_importer_test.exs:909:      imported_browsers = breakdown.(imported_site, "visit:browser")
+test/plausible/imported/csv_importer_test.exs-910-
+test/plausible/imported/csv_importer_test.exs:911:      pairwise(exported_browsers, imported_browsers, fn exported, imported ->
+test/plausible/imported/csv_importer_test.exs-912-        assert exported["browser"] == imported["browser"]
+test/plausible/imported/csv_importer_test.exs-913-        assert exported["bounce_rate"] == imported["bounce_rate"]
+test/plausible/imported/csv_importer_test.exs-914-        assert exported["visits"] == imported["visits"]
+--
+test/plausible/imported/csv_importer_test.exs-918-
+test/plausible/imported/csv_importer_test.exs-919-      # NOTE: browser breakdown's visitors difference is up to 4%
+test/plausible/imported/csv_importer_test.exs-920-      assert summary(field(exported_browsers, "visitors")) == [1, 1.5, 8.0, 34.0, 572]
+test/plausible/imported/csv_importer_test.exs:921:      assert summary(field(imported_browsers, "visitors")) == [1, 1.5, 8.0, 34.0, 588]
+test/plausible/imported/csv_importer_test.exs-922-
+test/plausible/imported/csv_importer_test.exs-923-      assert summary(
+test/plausible/imported/csv_importer_test.exs:924:               pairwise(exported_browsers, imported_browsers, fn exported, imported ->
+test/plausible/imported/csv_importer_test.exs-925-                 abs(1 - exported["visitors"] / imported["visitors"])
+test/plausible/imported/csv_importer_test.exs-926-               end)
+test/plausible/imported/csv_importer_test.exs-927-             ) == [0.0, 0.0, 0.0, 0.0, 0.037122969837587005]
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-139-    } do
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-140-      populate_stats(site, site_import.id, [
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-141-        build(:pageview, browser: "Chrome"),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:142:        build(:imported_browsers, browser: "Chrome"),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:143:        build(:imported_browsers, browser: "Firefox"),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-144-        build(:imported_visitors, visitors: 2)
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-145-      ])
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-146-
+--
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-165-      site_import: site_import
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-166-    } do
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-167-      populate_stats(site, site_import.id, [
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:168:        build(:imported_browsers, browser: "Chrome", visitors: 0, visits: 14),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:169:        build(:imported_browsers, browser: "Firefox", visitors: 0, visits: 14),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:170:        build(:imported_browsers,
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-171-          browser: "''",
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-172-          visitors: 0,
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-173-          visits: 14,
+--
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-197-             ]
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-198-    end
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-199-
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:200:    test "select empty imported_browsers as (not set), merging with the native (not set)", %{
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-201-      conn: conn,
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-202-      site: site,
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-203-      site_import: site_import
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-204-    } do
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-205-      populate_stats(site, site_import.id, [
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-206-        build(:pageview, user_id: 123),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:207:        build(:imported_browsers, visitors: 1),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-208-        build(:imported_visitors, visitors: 1)
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-209-      ])
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-210-
+--
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-533-          browser_version: "110",
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-534-          timestamp: ~N[2021-01-01 00:00:00]
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-535-        ),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:536:        build(:imported_browsers,
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-537-          date: ~D[2021-01-01],
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-538-          browser: "Chrome",
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-539-          browser_version: "121",
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-540-          visitors: 5
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-541-        ),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:542:        build(:imported_browsers,
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-543-          date: ~D[2021-01-01],
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-544-          browser: "Firefox",
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-545-          browser_version: "121",
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-546-          visitors: 3
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-547-        ),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs:548:        build(:imported_browsers, date: ~D[2021-01-01], visitors: 10),
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-549-        build(:imported_visitors, date: ~D[2021-01-01], visitors: 18)
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-550-      ])
+test/plausible_web/controllers/api/stats_controller/browsers_test.exs-551-
+test/plausible_web/controllers/api/stats_controller/imported_test.exs-1168-          ],
+test/plausible_web/controllers/api/stats_controller/imported_test.exs-1169-          site.id,
+test/plausible_web/controllers/api/stats_controller/imported_test.exs-1170-          import_id,
+test/plausible_web/controllers/api/stats_controller/imported_test.exs:1171:          "imported_browsers"
+test/plausible_web/controllers/api/stats_controller/imported_test.exs-1172-        )
+test/plausible_web/controllers/api/stats_controller/imported_test.exs-1173-
+test/plausible_web/controllers/api/stats_controller/imported_test.exs-1174-        response =
+test/workers/clickhouse_clean_sites_test.exs-27-      build(:imported_exit_pages),
+test/workers/clickhouse_clean_sites_test.exs-28-      build(:imported_locations),
+test/workers/clickhouse_clean_sites_test.exs-29-      build(:imported_devices),
+test/workers/clickhouse_clean_sites_test.exs:30:      build(:imported_browsers),
+test/workers/clickhouse_clean_sites_test.exs-31-      build(:imported_operating_systems)
+test/workers/clickhouse_clean_sites_test.exs-32-    ])
+test/workers/clickhouse_clean_sites_test.exs-33-
+--
+test/workers/clickhouse_clean_sites_test.exs-47-    assert_count(deleted_site, "imported_exit_pages", 0)
+test/workers/clickhouse_clean_sites_test.exs-48-    assert_count(deleted_site, "imported_locations", 0)
+test/workers/clickhouse_clean_sites_test.exs-49-    assert_count(deleted_site, "imported_devices", 0)
+test/workers/clickhouse_clean_sites_test.exs:50:    assert_count(deleted_site, "imported_browsers", 0)
+test/workers/clickhouse_clean_sites_test.exs-51-    assert_count(deleted_site, "imported_operating_systems", 0)
+test/workers/clickhouse_clean_sites_test.exs-52-    # ingest_counters has a projection, so it's cleared via a mutation rather
+test/workers/clickhouse_clean_sites_test.exs-53-    # than a lightweight delete - regression coverage for that special case
+test/plausible_web/controllers/api/external_stats_controller/query_imported_test.exs-677-      site_import = insert(:site_import, site: site)
+test/plausible_web/controllers/api/external_stats_controller/query_imported_test.exs-678-
+test/plausible_web/controllers/api/external_stats_controller/query_imported_test.exs-679-      populate_stats(site, site_import.id, [
+test/plausible_web/controllers/api/external_stats_controller/query_imported_test.exs:680:        build(:imported_browsers, browser: "Chrome", pageviews: 1, date: ~D[2021-01-01]),
+test/plausible_web/controllers/api/external_stats_controller/query_imported_test.exs-681-        build(:imported_devices, device: "Desktop", pageviews: 1, date: ~D[2021-01-01]),
+test/plausible_web/controllers/api/external_stats_controller/query_imported_test.exs-682-        build(:imported_entry_pages, entry_page: "/test", pageviews: 1, date: ~D[2021-01-01]),
+test/plausible_web/controllers/api/external_stats_controller/query_imported_test.exs-683-        build(:imported_exit_pages, exit_page: "/test", pageviews: 1, date: ~D[2021-01-01]),
+test/plausible_web/controllers/api/external_stats_controller/breakdown_test.exs-3333-      site_import = insert(:site_import, site: site)
+test/plausible_web/controllers/api/external_stats_controller/breakdown_test.exs-3334-
+test/plausible_web/controllers/api/external_stats_controller/breakdown_test.exs-3335-      populate_stats(site, site_import.id, [
+test/plausible_web/controllers/api/external_stats_controller/breakdown_test.exs:3336:        build(:imported_browsers, browser: "Chrome", pageviews: 1, date: ~D[2021-01-01]),
+test/plausible_web/controllers/api/external_stats_controller/breakdown_test.exs-3337-        build(:imported_devices, device: "Desktop", pageviews: 1, date: ~D[2021-01-01]),
+test/plausible_web/controllers/api/external_stats_controller/breakdown_test.exs-3338-        build(:imported_entry_pages, entry_page: "/test", pageviews: 1, date: ~D[2021-01-01]),
+test/plausible_web/controllers/api/external_stats_controller/breakdown_test.exs-3339-        build(:imported_exit_pages, exit_page: "/test", pageviews: 1, date: ~D[2021-01-01]),
+lib/workers/clickhouse_clean_sites.ex-20-  require Logger
+lib/workers/clickhouse_clean_sites.ex-21-
+lib/workers/clickhouse_clean_sites.ex-22-  @unpartitioned_tables [
+lib/workers/clickhouse_clean_sites.ex:23:    "imported_browsers",
+lib/workers/clickhouse_clean_sites.ex-24-    "imported_devices",
+lib/workers/clickhouse_clean_sites.ex-25-    "imported_entry_pages",
+lib/workers/clickhouse_clean_sites.ex-26-    "imported_exit_pages",
+priv/ingest_repo/structure.sql-245-ORDER BY (site_id, import_id, date, name)
+priv/ingest_repo/structure.sql-246-SETTINGS replicated_deduplication_window = 0, index_granularity = 8192;
+priv/ingest_repo/structure.sql-247-
+priv/ingest_repo/structure.sql:248:CREATE TABLE plausible_events_db.imported_browsers
+priv/ingest_repo/structure.sql-249-(
+priv/ingest_repo/structure.sql-250-    `site_id` UInt64,
+priv/ingest_repo/structure.sql-251-    `date` Date,
+lib/plausible/s3.ex-43-
+lib/plausible/s3.ex-44-  Example:
+lib/plausible/s3.ex-45-
+lib/plausible/s3.ex:46:      iex> upload = import_presign_upload(_site_id = 123, _filename = "imported_browsers.csv")
+lib/plausible/s3.ex:47:      iex> true = String.ends_with?(upload.s3_url, "/test-imports/123/imported_browsers.csv")
+lib/plausible/s3.ex:48:      iex> true = String.contains?(upload.presigned_url, "/test-imports/123/imported_browsers.csv?X-Amz-Algorithm=AWS4-HMAC-SHA256&")
+lib/plausible/s3.ex-49-
+lib/plausible/s3.ex-50-  """
+lib/plausible/s3.ex-51-  def import_presign_upload(site_id, filename) do
+priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs-126-      add(:bounces, :UInt32)
+priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs-127-    end
+priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs-128-
+priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs:129:    create_if_not_exists table(:imported_browsers,
+priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs-130-                           primary_key: false,
+priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs-131-                           engine: "MergeTree",
+priv/ingest_repo/migrations/20211112130238_create_imported_tables.exs-132-                           options: """
+lib/plausible/imported/google_analytics4.ex-294-    "(not set)" => ""
+lib/plausible/imported/google_analytics4.ex-295-  }
+lib/plausible/imported/google_analytics4.ex-296-
+lib/plausible/imported/google_analytics4.ex:297:  defp new_from_report(site_id, import_id, "imported_browsers", row) do
+lib/plausible/imported/google_analytics4.ex-298-    browser = Map.fetch!(row.dimensions, "browser")
+lib/plausible/imported/google_analytics4.ex-299-
+lib/plausible/imported/google_analytics4.ex-300-    %{
+lib/plausible/pending_stats_deletions.ex-61-  @all_stats_tables [
+lib/plausible/pending_stats_deletions.ex-62-    "events_v2",
+lib/plausible/pending_stats_deletions.ex-63-    "sessions_v2",
+lib/plausible/pending_stats_deletions.ex:64:    "imported_browsers",
+lib/plausible/pending_stats_deletions.ex-65-    "imported_devices",
+lib/plausible/pending_stats_deletions.ex-66-    "imported_entry_pages",
+lib/plausible/pending_stats_deletions.ex-67-    "imported_exit_pages",
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-2-  use Ecto.Migration
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-3-
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-4-  @add_pageviews_for [
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs:5:    "imported_browsers",
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-6-    "imported_devices",
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-7-    "imported_entry_pages",
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-8-    "imported_exit_pages",
+--
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-16-      add_column(table, "pageviews", "UInt64")
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-17-    end
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-18-
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs:19:    add_column("imported_browsers", "browser_version", "String")
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-20-    add_column("imported_exit_pages", "bounces", "UInt32")
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-21-    add_column("imported_exit_pages", "visit_duration", "UInt64")
+priv/ingest_repo/migrations/20240326134840_add_metrics_to_imported_tables.exs-22-    add_column("imported_operating_systems", "operating_system_version", "String")
+lib/plausible/imported/csv_importer.ex-169-  end
+lib/plausible/imported/csv_importer.ex-170-
+lib/plausible/imported/csv_importer.ex-171-  input_structures = %{
+lib/plausible/imported/csv_importer.ex:172:    "imported_browsers" =>
+lib/plausible/imported/csv_importer.ex-173-      "date Date, browser String, browser_version String, visitors UInt64, visits UInt64, visit_duration UInt64, bounces UInt32, pageviews UInt64",
+lib/plausible/imported/csv_importer.ex-174-    "imported_devices" =>
+lib/plausible/imported/csv_importer.ex-175-      "date Date, device String, visitors UInt64, visits UInt64, visit_duration UInt64, bounces UInt32, pageviews UInt64",
+lib/plausible/imported/browser.ex-3-  use Ecto.Schema
+lib/plausible/imported/browser.ex-4-
+lib/plausible/imported/browser.ex-5-  @primary_key false
+lib/plausible/imported/browser.ex:6:  schema "imported_browsers" do
+lib/plausible/imported/browser.ex-7-    field :site_id, Ch, type: "UInt64"
+lib/plausible/imported/browser.ex-8-    field :import_id, Ch, type: "UInt64"
+lib/plausible/imported/browser.ex-9-    field :date, :date
+priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs-2-  use Ecto.Migration
+priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs-3-
+priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs-4-  @imported_tables [
+priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs:5:    :imported_browsers,
+priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs-6-    :imported_devices,
+priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs-7-    :imported_entry_pages,
+priv/ingest_repo/migrations/20240123142959_add_import_id_to_imported_tables.exs-8-    :imported_exit_pages,
+lib/plausible/exports.ex-239-      filename.("imported_custom_events") => export_custom_events_q(site, timezone, date_range),
+lib/plausible/exports.ex-240-      filename.("imported_locations") => export_locations_q(site, timezone, date_range),
+lib/plausible/exports.ex-241-      filename.("imported_devices") => export_devices_q(site, timezone, date_range),
+lib/plausible/exports.ex:242:      filename.("imported_browsers") => export_browsers_q(site, timezone, date_range),
+lib/plausible/exports.ex-243-      filename.("imported_operating_systems") =>
+lib/plausible/exports.ex-244-        export_operating_systems_q(site, timezone, date_range),
+lib/plausible/exports.ex-245-      filename.("imported_custom_props") => export_custom_props_q(site, timezone, date_range)

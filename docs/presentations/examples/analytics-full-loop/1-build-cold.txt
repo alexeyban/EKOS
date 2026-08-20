@@ -1,0 +1,9 @@
+Build complete.
+  Files observed (new): 2045
+  Total objects in ledger: 2045
+  Connectors re-scanned: 6
+  Snapshot: .ekos/snapshots/20260820T153255Z.json.zst
+
+real	0m33,584s
+user	0m2,764s
+sys	0m2,871s

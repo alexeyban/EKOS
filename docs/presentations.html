@@ -112,6 +112,25 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
       <div class="rfc">RFC 0057 · RFC 0058</div>
     </li>
     <li>
+      <a class="deck" href="presentations/analytics-full-loop.html">Proving the Core Loop, Cold, on a Real Repo</a>
+      <p class="desc">The same repo, the whole thing this time: a genuinely cold observe → compile
+      → ledger → MCP query run over all 2,022 files, timed stage by stage, plus a real
+      <code>ekos ask</code> + MCP Q&amp;A set graded against ground truth. Surfaced three new,
+      honestly-reported gaps — a Postgres parser failure, identity over-merging real people and
+      documents (not just ClickHouse tables), and a retrieval-brittleness bug in
+      <code>ekos ask</code> itself — all fixed the same day (RFC 0059/0060/0061,
+      <code>devlog_61</code>).</p>
+      <div class="rfc">devlog_60 · devlog_61</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/token-benchmark.html">The First Benchmark Number</a>
+      <p class="desc">Every tool in this space leads with a metric; EKOS never had one published.
+      A real repo, two real questions, raw grep vs the compiled ledger, both sides counted with the
+      same standard tokenizer (<code>tiktoken</code>). 67-93% fewer tokens for the realistic case —
+      and the one case grep wins is on the page too, not edited out.</p>
+      <div class="rfc">devlog_62</div>
+    </li>
+    <li>
       <a class="deck" href="presentations/vision-and-token-utility.html">Vision &amp; Token Utility</a>
       <p class="desc">Why the EKOS token's relevance is designed to grow as a consequence of
       platform adoption, not a promise of price — the phased ecosystem roadmap from contributor

@@ -2317,7 +2317,18 @@ These items have no single phase — they must be maintained and grown throughou
     every gap the one real file that motivated it actually hits, not every possible ClickHouse
     construct); fixing the upstream `sqlparser` crate itself.
 
-- [ ] **`crates/identity`'s `DefaultResolver` over-merges real ClickHouse `imported_*` tables sharing a common base schema**
+- [x] **`crates/identity`'s `DefaultResolver` over-merges real ClickHouse `imported_*` tables sharing a common base schema — confirmed not `Table`-specific (devlog_60), fixed by RFC 0060 (devlog_61)**
+  - *Update, devlog_60:* A full cold whole-repo run against the same `analytics/` workspace shows
+    the same 0.85-threshold mechanism hits `Person` and `Document` objects too, not just `Table` —
+    a real contributor (`Niklaas Baudet von Gersdorff`, 1 real commit, confirmed via `git log
+    --author` to be a genuinely different person from `Niklas Hambüchen`) was merged away and is
+    now unfindable under his own name; separately, 27 unrelated documents (real project docs plus
+    unrelated test fixtures) merged into one identity at confidence 0.98, the worst single proposal
+    seen so far. RFC 0029's separately-coded cross-system resolver (`crates/identity/src/cross_system.rs`)
+    independently produced the same class of false positive (`sessions_v2` SameAs `imported_visitors`),
+    confirmed and rejected live via the `ekos_identity_review` MCP tool. This is now three
+    confirmations of one underlying design gap (the 0.85 default threshold, no per-kind stricter
+    override outside `Concept`), not three separate bugs. See `devlog_60.md`.
   - *What:* Found re-analyzing `analytics/` after RFC 0057/0058 fixed ClickHouse DDL parsing —
     the first time real ClickHouse `Table` objects with real `properties["columns"]` existed for
     `crates/identity` to compare. `ekos resolve` merged 6 genuinely distinct tables
@@ -2334,16 +2345,89 @@ These items have no single phase — they must be maintained and grown throughou
     columns and 1 evidence entry — the other 5 tables' distinguishing columns
     (`operating_system`/`exit_page`/`entry_page`/`device`/`browser`) and evidence are gone from
     that identity entirely.
-  - *Status:* **Not fixed.** Reported to the user rather than silently patched — unlike RFC
-    0057/0058's fix (scoped to one plugin crate), a fix here changes `crates/identity`'s scoring
-    for every same-kind comparison across the whole estate, a materially larger blast radius.
-    Candidate directions, none chosen yet: a per-kind stricter `Table` threshold (mirroring
-    `Concept`'s `0.95`); requiring near-total rather than majority column overlap for
-    high-column-count tables; or something else entirely. See `devlog_59.md` for the full
-    investigation.
-  - *Deck:* `docs/presentations/analytics-clickhouse-after.html` documents the finding with real,
-    unedited transcripts, matching the same "honest, not hidden" convention every other deck in
-    this repo follows.
+  - *Status:* **Fixed by RFC 0060** — `DEFAULT_MERGE_THRESHOLD` raised 0.85→0.90 (verified against
+    17 real pairs read from `analytics/`, not guessed) plus `name_for_similarity` stripping
+    `Table`'s schema/database qualifier before comparison (the qualifier was independently
+    inflating Jaro-Winkler for every table in the same source). Live-verified: `ekos resolve`
+    merge proposals on the real repo dropped from 19 to 8; `imported_browsers` and `Niklaas Baudet
+    von Gersdorff` are both directly queryable again under their own names. **Not a complete fix**
+    — 3 of the 17 known-wrong pairs and two `Document` over-merge clusters still incorrectly merge
+    (documented honestly in the RFC and `DEFAULT_MERGE_THRESHOLD`'s doc comment); the residual
+    cases are exactly the class of judgment call RFC 0029's cross-system review flow already
+    exists for same-source merges don't yet have. See `ekos/docs/rfcs/0060-identity-resolution-merge-threshold.md`
+    and `devlog_61.md`.
+  - *Deck:* `docs/presentations/analytics-clickhouse-after.html` documents the original finding
+    with real, unedited transcripts; `docs/presentations/analytics-full-loop.html` (devlog_60)
+    documents the Person/Document/cross-system confirmations; the fix and live re-verification are
+    in `devlog_61.md`.
+
+- [x] **Postgres dialect: `sqlparser` fails whole-file on a real `IDENTITY ... INCREMENT BY` clause — fixed by RFC 0059 (devlog_61)**
+  - *What:* Found running the full pipeline cold against `analytics/`'s actual Postgres application
+    schema (`priv/repo/structure.sql`, not the ClickHouse `priv/ingest_repo/structure.sql` RFC
+    0057/0058 already fixed) — `sql-analyzer` fails whole-file: `sql parser error: Expected: end of
+    statement, found: INCREMENT at Line: 116`. `sql-transform-analyzer` degrades to per-statement
+    fallback and maps only 1 of 1,282 statements (0.078% coverage). Unrelated to RFC 0057/0058 (a
+    different dialect crate, a different clause) and not previously known — this is the first time
+    this specific file was recovered against a rebuilt binary with a clean cache. Right now EKOS has
+    no structured knowledge of this real repo's actual Postgres schema (`sites`, `api_keys`, and
+    every other core application table).
+  - *Status:* **Fixed by RFC 0059** — three preprocessing passes added to
+    `PostgresDialectParser` (`plugins/sql-dialect-postgres`): whole-statement stripping for
+    `CREATE`/`ALTER SEQUENCE` (a real, still-open upstream `sqlparser` clause-ordering bug, not a
+    missing grammar rule; sequences were never modeled in the KIR anyway), and two
+    information-preserving keyword/clause strips (`UNLOGGED`, `NOT VALID`) found investigating the
+    same file, that keep the surrounding `CREATE TABLE`/`ALTER TABLE` statement's real content
+    intact rather than dropping it wholesale. Live-verified: `sql-analyzer` now recovers 42 real
+    `Table` objects from this file (was 0); `ekos query find "public.sites"` and `"api_keys"` now
+    return real compiled `Table` objects. See
+    `ekos/docs/rfcs/0059-postgres-sequence-and-ddl-preprocessing.md` and `devlog_61.md`.
+
+- [x] **`ekos ask` retrieval is brittle to full-sentence natural-language phrasing — fixed by RFC 0061 (devlog_61)**
+  - *What:* Found testing `ekos ask` against `analytics/`'s compiled ledger — `gather_context`
+    (`crates/runtime/src/ai.rs:131`) passes the entire question string verbatim into
+    `Runtime::find_objects()`, with no keyword extraction. Full-sentence questions ("Who are the top
+    contributors to this repository by commit count?", "Who is Niklas Hambüchen and what did they
+    contribute?", "What is Plausible Analytics and how does it track visitors without cookies?")
+    consistently retrieved zero context, even though every underlying object is trivially findable
+    via `ekos query find` or the `ekos_search` MCP tool using 2-3 keywords (MCP's own tool
+    description for `ekos_search` already says so). Reformulating as bare names/keywords
+    consistently succeeded.
+  - *Status:* **Fixed by RFC 0061** — `AiRuntime::search_for_question` extracts keywords
+    (stopword/punctuation-stripped, split on `_` matching FTS5's own tokenizer) and tries an AND
+    query for precision, falling back to OR for recall, falling back to the original raw question
+    as a last resort. Live-verified: "Who is Niklas Hambüchen and what did they contribute to this
+    repository?" now correctly retrieves and answers from real evidence (previously empty).
+    **Not fully fixed:** the related `README.md`-ambiguous-filename ranking issue found alongside
+    this (a different root cause — relevance ranking, not phrase-escaping) remains open, and
+    genuinely aggregate questions ("top contributors by commit count") still correctly retrieve
+    nothing, since no keyword search can satisfy them — that class of question needs `ekos_ekl`,
+    not `ekos_search`/`ask`. See `ekos/docs/rfcs/0061-ai-runtime-question-keyword-extraction.md`
+    and `devlog_61.md`.
+
+- [x] **Publish a first benchmark number — tokens vs. raw grep, real repo**
+  - *What:* Every comparable tool in this space (codegraph, codebase-memory-mcp, codemap,
+    CoreStory, GitNexus, Code Grapher, KiroGraph, Graphify, Aegis) leads with a published metric;
+    EKOS had none. Built a real, reproducible benchmark against `analytics/` (the same real repo
+    the full-loop case study uses): two real questions, answered from raw source (three grep
+    tiers: best-case targeted, realistic repo-wide, naive full-file-read) vs. from the compiled
+    ledger over real MCP calls (`ekos_search` + `ekos_state`, `ekos_ekl`), both sides counted with
+    `tiktoken`'s `cl100k_base` encoding — a standard reference tokenizer, not a hand-rolled
+    words/4 estimate.
+  - *Result:* 67.5-93.4% fewer tokens than the realistic/naive grep tiers across both questions.
+    **One honest exception, included rather than hidden:** the best-case tier (agent already knows
+    the exact file and line before searching) costs 9.7× *fewer* tokens than EKOS — grep wins when
+    it doesn't need to search at all, which isn't a realistic starting condition for "what does
+    this table contain?" No comparison against any named competitor's own numbers is claimed —
+    none were reproduced or available to test against.
+  - *Output:* `docs/presentations/token-benchmark.html` (new deck, same format/convention as every
+    other presentation in this repo), backed by real command transcripts, real MCP JSON-RPC
+    responses, and the exact token-counting script used, all under
+    `docs/presentations/examples/token-benchmark/`. Linked from the site hero (above the fold),
+    the "Proven, not promised" stat-grid, `docs/presentations.html`, and `README.md`'s intro.
+  - *Status:* Done for this pass. Explicitly scoped as "rough, real, and reproducible," not a
+    leaderboard claim — see the deck's own §06 for what it does and doesn't claim (single repo,
+    two questions, no latency measurement, no named-competitor comparison). More questions, more
+    repos, and a latency benchmark are natural follow-ons, not attempted here.
 
 - [ ] **`ai.rs::extract_citations` can't distinguish "cited nothing" from "nothing to cite"**
   - *What:* Found live-testing RFC 0046 against real OpenAI responses (devlog_46): when the

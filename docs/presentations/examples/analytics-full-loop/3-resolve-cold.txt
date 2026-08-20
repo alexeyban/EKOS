@@ -1,0 +1,87 @@
+Loaded 5 knowledge artifact(s) → 1575 objects, 3977 relationships
+
+Merge proposals (14):
+  1. 'test/priv/README.md' (Document) — 2 objects merged, confidence 0.89
+       • test/priv/README.md (Document)
+       • test/load/README.md (Document)
+  2. 'priv/ua_inspector/ua_inspector.readme.md' (Document) — 2 objects merged, confidence 0.91
+       • priv/ua_inspector/ua_inspector.readme.md (Document)
+       • priv/ref_inspector/ref_inspector.readme.md (Document)
+  3. 'Tracker CI' (Pipeline) — 3 objects merged, confidence 0.93
+       • Tracker CI (Pipeline)
+       • Tracker: publish NPM release (Pipeline)
+       • Tracker script update (Pipeline)
+  4. 'RobertJoonas' (Person) — 2 objects merged, confidence 0.93
+       • RobertJoonas (Person)
+       • Robert (Person)
+  5. 'tracker/test/fixtures/manual.html' (Document) — 27 objects merged, confidence 0.98
+       • tracker/test/fixtures/manual.html (Document)
+       • tracker/npm_package/CHANGELOG.md (Document)
+       • tracker/test/fixtures/engagement-pageview-props.html (Document)
+       • tracker/test/fixtures/scroll-depth-slow-window-load.html (Document)
+       • tracker/test/fixtures/cookies-quantcast.html (Document)
+       • tracker/test/fixtures/cookies-onetrust.html (Document)
+       • tracker/test/fixtures/scroll-depth-dynamic-content-load.html (Document)
+       • tracker/test/fixtures/scroll-depth-hash.html (Document)
+       • tracker/npm_package/LICENSE.md (Document)
+       • tracker/test/fixtures/engagement-hash.html (Document)
+       • tracker/ARCHITECTURE.md (Document)
+       • tracker/test/fixtures/scroll-depth.html (Document)
+       • tracker/test/fixtures/engagement-manual.html (Document)
+       • tracker/README.md (Document)
+       • tracker/test/fixtures/engagement-hash-exclusions.html (Document)
+       • tracker/test/fixtures/revenue.html (Document)
+       • tracker/test/fixtures/no-async.html (Document)
+       • tracker/test/fixtures/engagement-hash-manual.html (Document)
+       • tracker/npm_package/README.md (Document)
+       • tracker/test/fixtures/file-download-plausible-web.html (Document)
+       • tracker/test/fixtures/legacy-custom-properties.html (Document)
+       • tracker/test/fixtures/scroll-depth-content-onscroll.html (Document)
+       • tracker/test/fixtures/engagement-hash-pageview-props.html (Document)
+       • tracker/test/fixtures/cookies-iubenda.html (Document)
+       • tracker/test/fixtures/legacy-pageview-properties.html (Document)
+       • tracker/test/fixtures/cookies-cookiebot.html (Document)
+       • tracker/test/fixtures/engagement.html (Document)
+  6. 'David Janda' (Person) — 2 objects merged, confidence 0.86
+       • David Janda (Person)
+       • Davy Landman (Person)
+  7. 'Niklas Hambüchen' (Person) — 2 objects merged, confidence 0.85
+       • Niklas Hambüchen (Person)
+       • Niklaas Baudet von Gersdorff (Person)
+  8. 'Felix Haase' (Person) — 2 objects merged, confidence 0.87
+       • Felix Haase (Person)
+       • Felix Krull (Person)
+  9. 'Martin DONADIEU' (Person) — 2 objects merged, confidence 0.88
+       • Martin DONADIEU (Person)
+       • Martin Packman (Person)
+  10. 'Adam Rutkowski' (Person) — 3 objects merged, confidence 0.90
+       • Adam Rutkowski (Person)
+       • Adam (Person)
+       • Adam from Buildjet (Person)
+  11. 'plausible_events_db.imported_visitors' (Table) — 6 objects merged, confidence 0.93
+       • plausible_events_db.imported_visitors (Table)
+       • plausible_events_db.imported_operating_systems (Table)
+       • plausible_events_db.imported_exit_pages (Table)
+       • plausible_events_db.imported_entry_pages (Table)
+       • plausible_events_db.imported_devices (Table)
+       • plausible_events_db.imported_browsers (Table)
+  12. 'Build Private Images GHCR' (Pipeline) — 2 objects merged, confidence 0.93
+       • Build Private Images GHCR (Pipeline)
+       • Build Public Images GHCR (Pipeline)
+  13. 'Vini Brasil' (Person) — 2 objects merged, confidence 0.92
+       • Vini Brasil (Person)
+       • Vinicius Brasil (Person)
+  14. 'Andrea Mazzarella' (Person) — 3 objects merged, confidence 0.89
+       • Andrea Mazzarella (Person)
+       • Andrey Meshkov (Person)
+       • andreas-ementio (Person)
+
+Stats:
+  Candidates evaluated : 1575
+  Pairs compared       : 497
+  Merges proposed      : 14
+  Conflicts detected   : 0
+
+real	0m0,107s
+user	0m0,074s
+sys	0m0,028s

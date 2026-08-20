@@ -282,6 +282,11 @@ footer a:hover{ color:var(--accent-a); }
         <span class="chip">Evidence-backed ledger</span><span class="sep mono">→</span>
         <span class="chip hot">Any MCP-speaking agent</span>
       </div>
+      <div class="hero-diagram" style="margin-top:0.6rem;">
+        <span class="chip hot">67-93% fewer tokens than grep</span><span class="sep mono">→</span>
+        <span class="chip">2,022-file repo, indexed cold in 34s</span><span class="sep mono">→</span>
+        <a href="presentations/token-benchmark.html" style="color:var(--accent-a); font-size:0.82rem; align-self:center;">see the benchmark →</a>
+      </div>
       <div style="margin-top:1.4rem;">
         <a href="https://www.producthunt.com/products/ekos-2?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-ekos" target="_blank" rel="noopener noreferrer"><img alt="EKOS - Turn GitHub repos into MCP servers | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1217536&theme=light&t=1786125721893" style="display:block;"></a>
       </div>
@@ -338,6 +343,16 @@ footer a:hover{ color:var(--accent-a); }
         <div class="n">6</div>
         <div><a class="deck" href="presentations/clickhouse-connector.html">ClickHouse: Compiled Metadata + Live NL-to-SQL</a>
         <p class="desc">The RFC 0056 connector these all build on — the one explicit, audited exception to "AI never touches raw enterprise systems directly."</p></div>
+      </div>
+      <div class="announce-item">
+        <div class="n">7</div>
+        <div><a class="deck" href="presentations/analytics-full-loop.html">Proving the Core Loop, Cold, on a Real Repo</a>
+        <p class="desc">Beyond the ClickHouse slice: a cold pipeline run over the whole 2,022-file repo, timed, plus a graded <code>ekos ask</code> + MCP Q&amp;A set — three new gaps found, reported honestly, and fixed the same day (RFC 0059/0060/0061).</p></div>
+      </div>
+      <div class="announce-item">
+        <div class="n">8</div>
+        <div><a class="deck" href="presentations/token-benchmark.html">The First Benchmark Number</a>
+        <p class="desc">Every tool in this space leads with a metric; EKOS never had one. Raw grep vs the compiled ledger, same real repo, same standard tokenizer — 67-93% fewer tokens for the realistic case, with the one case grep wins included, not hidden.</p></div>
       </div>
     </div>
     <div class="source-tag">Target repo: <a href="https://github.com/plausible/analytics">github.com/plausible/analytics</a> — a real, unmodified open-source codebase, not a fixture built for EKOS.</div>
@@ -419,6 +434,8 @@ footer a:hover{ color:var(--accent-a); }
   <p class="lede">Every deck below reproduces its claims live — real terminal output, real MCP
   query/answer transcripts, and the honest gaps found along the way, never papered over.</p>
   <div class="stat-grid">
+    <div class="stat"><div class="num">67-93%</div><div class="label">fewer tokens than raw grep for the same real question — <a href="presentations/token-benchmark.html" style="color:inherit;">see the benchmark</a></div></div>
+    <div class="stat"><div class="num">34s</div><div class="label">cold ingestion, 2,022-file real repo, timed live</div></div>
     <div class="stat"><div class="num">2</div><div class="label">real ETL projects recovered cold</div></div>
     <div class="stat"><div class="num">2</div><div class="label">GitHub issues filed and closed on real gaps</div></div>
     <div class="stat"><div class="num">0</div><div class="label">fabricated facts — <code class="mono">Unmapped</code> is a citizen, not a failure</div></div>

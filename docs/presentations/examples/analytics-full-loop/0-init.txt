@@ -1,0 +1,8 @@
+ekos.toml already exists — skipping
+Initialized .ekos/ workspace at /home/legion/PycharmProjects/analytics/.ekos
+  artifacts: /home/legion/PycharmProjects/analytics/.ekos/artifacts
+  ledger:    /home/legion/PycharmProjects/analytics/.ekos/ledger
+
+real	0m0,007s
+user	0m0,000s
+sys	0m0,007s

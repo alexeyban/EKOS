@@ -1,0 +1,8 @@
+[2m2026-08-20T15:39:03.160347Z[0m [32m INFO[0m [2mekos::commands::recover[0m[2m:[0m using local Ollama provider with disk cache
+I apologize, but there is no provided context or evidence to answer this question. I'm unable to provide an answer without any information.
+
+JSON block:
+
+real	0m5,395s
+user	0m0,003s
+sys	0m0,008s

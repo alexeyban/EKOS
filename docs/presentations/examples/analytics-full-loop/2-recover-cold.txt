@@ -1,0 +1,27 @@
+[2m2026-08-20T15:33:00.359350Z[0m [32m INFO[0m [2mekos::commands::recover[0m[2m:[0m using local Ollama provider with disk cache
+[2m2026-08-20T15:33:00.726368Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-transform-analyzer:priv/ingest_repo/structure.sql
+[2m2026-08-20T15:33:00.736504Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-analyzer:priv/repo/structure.sql
+[2m2026-08-20T15:33:00.742530Z[0m [33m WARN[0m [2mekos_recovery::sql_analyzer[0m[2m:[0m sqlparser failed on priv/repo/structure.sql: sql parser error: Expected: end of statement, found: INCREMENT at Line: 116, Column: 5; falling back to empty graph
+[2m2026-08-20T15:33:00.742714Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mlocal-docs-analyzer:analytics
+[2m2026-08-20T15:33:00.750674Z[0m [32m INFO[0m [2mekos_recovery::local_docs_analyzer[0m[2m:[0m local-docs-analyzer complete [3mpass[0m[2m=[0mlocal-docs-analyzer:analytics [3mobjects[0m[2m=[0m140 [3medges[0m[2m=[0m99
+[2m2026-08-20T15:33:00.750971Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-transform-analyzer:priv/repo/structure.sql
+[2m2026-08-20T15:33:00.756361Z[0m [33m WARN[0m [2mekos_recovery::sql_transform_analyzer[0m[2m:[0m sql-transform-analyzer: sqlparser failed on priv/repo/structure.sql (postgres): sql parser error: Expected: end of statement, found: INCREMENT at Line: 116, Column: 5 — falling back to per-statement recovery
+[2m2026-08-20T15:33:00.803086Z[0m [32m INFO[0m [2mekos_recovery::sql_transform_analyzer[0m[2m:[0m sql-transform-analyzer complete [3mpass[0m[2m=[0msql-transform-analyzer:priv/repo/structure.sql [3mstatements[0m[2m=[0m1282 [3mnodes[0m[2m=[0m1282 [3mmapped[0m[2m=[0m1 [3mcoverage_pct[0m[2m=[0m0.07800312340259552
+[2m2026-08-20T15:33:00.805851Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msql-analyzer:priv/ingest_repo/structure.sql
+[2m2026-08-20T15:33:00.899120Z[0m [32m INFO[0m [2mekos_recovery::sql_analyzer[0m[2m:[0m sql-analyzer complete [3mpass[0m[2m=[0msql-analyzer:priv/ingest_repo/structure.sql [3mobjects[0m[2m=[0m15 [3mrelationships[0m[2m=[0m0
+[2m2026-08-20T15:33:00.899365Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mdependency-analyzer:analytics
+[2m2026-08-20T15:33:00.901426Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mgit-analyzer:analytics
+[2m2026-08-20T15:33:01.001835Z[0m [32m INFO[0m [2mekos_recovery::git_analyzer[0m[2m:[0m git-analyzer complete [3mpass[0m[2m=[0mgit-analyzer:analytics [3mevents[0m[2m=[0m500 [3mcontributors[0m[2m=[0m124
+[2m2026-08-20T15:33:01.014521Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0mcicd-analyzer:analytics
+[2m2026-08-20T15:33:01.019330Z[0m [32m INFO[0m [2mekos_recovery::cicd_analyzer[0m[2m:[0m cicd-analyzer complete [3mpass[0m[2m=[0mcicd-analyzer:analytics [3mpipelines[0m[2m=[0m14
+Recover complete.
+  SQL files analysed: 2
+  Git commits analysed: 500
+  Source files scanned for dependencies: 162
+  Local documents analysed: 41
+  Transformation IR nodes (SQL): 1282 total, 0% mapped (non-Unmapped)
+  Passes run: 8
+
+real	0m0,689s
+user	0m0,377s
+sys	0m0,188s

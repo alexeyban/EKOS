@@ -1,0 +1,8 @@
+[2m2026-08-20T15:38:33.686289Z[0m [32m INFO[0m [2mekos::commands::recover[0m[2m:[0m using local Ollama provider with disk cache
+Based on the provided context, I can't determine the specific columns and constraints of the "sites" table in the Postgres schema.
+
+JSON block:
+
+real	0m5,064s
+user	0m0,002s
+sys	0m0,007s

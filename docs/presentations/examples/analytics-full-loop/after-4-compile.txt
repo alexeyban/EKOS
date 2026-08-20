@@ -1,0 +1,12 @@
+[2m2026-08-20T16:54:32.005100Z[0m [32m INFO[0m [2mekos_compiler_core::pass[0m[2m:[0m running pass [3mpass[0m[2m=[0msemantic-compiler
+[2m2026-08-20T16:54:32.072939Z[0m [32m INFO[0m [2mekos_semantic[0m[2m:[0m identity resolution complete [3mproposals[0m[2m=[0m8 [3mconflicts[0m[2m=[0m0
+[2m2026-08-20T16:54:32.082543Z[0m [32m INFO[0m [2mekos_semantic[0m[2m:[0m CKM written [3mobjects[0m[2m=[0m309 [3mrelationships[0m[2m=[0m3977 [3mpath[0m[2m=[0m/home/legion/PycharmProjects/analytics/.ekos/ckm/model.json.zst
+Compile complete.
+  Objects:       309
+  Relationships: 3977
+  CKM written:   /home/legion/PycharmProjects/analytics/.ekos/ckm/model.json.zst
+  Warnings:      7256 (check logs)
+
+real	0m0,155s
+user	0m0,100s
+sys	0m0,055s

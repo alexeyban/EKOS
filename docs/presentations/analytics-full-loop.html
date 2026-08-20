@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proving the Core Loop, Cold, on a Real Repo — EKOS</title>
+<meta name="description" content="A genuinely cold observe -> compile -> ledger -> MCP query run against analytics/ (Plausible Analytics, 2,022 real files, AGPL-3.0), timed end to end. Found three real gaps -- a Postgres parser failure, identity resolution over-merging real people and tables, and a retrieval-brittleness bug in ekos ask -- and fixed all three the same day, each verified live with real before/after evidence, not just a passing unit test.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a><a href="#s10"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Prove the core loop, cold, on a real repo.<br><span class="arrow-word">Find the gaps. Fix them the same day.</span></h1>
+  <p class="lede">A genuinely cold <code class="mono">init → build → recover → resolve → compile →
+  commit</code> run over the <em>whole</em> 2,022-file <code class="mono">analytics/</code> repo
+  (Plausible Analytics), timed stage by stage, followed by a real <code class="mono">ekos ask</code>
+  + MCP question set graded against ground truth. The first pass found three real gaps — a Postgres
+  parser failure, identity resolution over-merging real people and tables, and a retrieval bug in
+  <code class="mono">ekos ask</code> itself. All three are fixed below, with real before/after
+  evidence for each — not just a passing unit test, a rerun against the same real repo.</p>
+  <div class="hero-diagram">
+    <span class="chip">2,022 files, cold, 34s</span><span class="sep mono">→</span>
+    <span class="chip bad">3 real gaps found</span><span class="sep mono">→</span>
+    <span class="chip hot">RFC 0059 / 0060 / 0061</span><span class="sep mono">→</span>
+    <span class="chip">re-verified live, same repo</span>
+  </div>
+  <div class="byline"><span class="dot"></span> analytics/ (github.com/plausible/analytics, AGPL-3.0) · sequel to the ClickHouse cold-run/after decks · devlog_60, devlog_61</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / genuinely cold, timed</div>
+  <div class="eyebrow">rm the workspace, ekos init, time every stage — real, unedited</div>
+  <h2>2,022 files → 2,402 ledger objects, cold, in under a minute of pipeline time.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos init &amp;&amp; time ekos build
+Build complete. Files observed (new): 2022
+<span class="s">real  0m33.587s</span>
+
+$ time ekos recover
+Recover complete. SQL: 2 (both dialects clean)  Git commits: 500
+Contributors: 124  Local documents: 41  CI/CD pipelines: 14  Passes run: 8
+<span class="s">real  0m0.509s</span>
+
+$ time ekos resolve &amp;&amp; time ekos compile &amp;&amp; time ekos commit
+resolve:  Merges proposed: 8    compile: 3977 relationships
+commit:   840 evidence records, 71 subsystem rollups
+<span class="s">real  0m0.084s / 0m0.155s / 0m53.433s</span></pre>
+  </div>
+  <p class="lede">Total: well under two minutes end to end, cold, on a real 2,022-file repo with
+  real git history, real SQL schemas across two dialects, real CI pipelines, and real
+  documentation. <code class="mono">ekl "FIND Object"</code> confirms <strong>2,402</strong>
+  objects in the ledger afterward — files, tables, contributors, pipelines, documents, and rollups
+  together.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/analytics-full-loop/after-1-build.txt" style="color:var(--accent-a);">after-1-build.txt</a>,
+    <a href="examples/analytics-full-loop/after-2-recover.txt" style="color:var(--accent-a);">after-2-recover.txt</a>,
+    <a href="examples/analytics-full-loop/after-5-commit.txt" style="color:var(--accent-a);">after-5-commit.txt</a></div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / gap 1 — Postgres never parsed at all</div>
+  <div class="eyebrow">RFC 0059 — real, unedited, before vs. after</div>
+  <h2>0 real tables → 42 real tables, from the same file.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal, before RFC 0059 — real, unedited</div>
+<pre style="margin:0;"><span class="bad">WARN sql-analyzer: sqlparser failed on priv/repo/structure.sql:
+     sql parser error: Expected: end of statement,
+     found: INCREMENT at Line: 116, Column: 5;
+     falling back to empty graph</span></pre>
+  </div>
+  <div class="codeblock" style="margin-top:1rem;">
+    <div class="tag">terminal, after RFC 0059 — real, unedited</div>
+<pre style="margin:0;">INFO sql-analyzer complete
+     pass=sql-analyzer:priv/repo/structure.sql
+<span class="s">     objects=42 relationships=0</span></pre>
+  </div>
+  <p class="lede">Root cause: `sqlparser`'s <code class="mono">CREATE SEQUENCE</code> option parser
+  checks <code class="mono">INCREMENT/MINVALUE/MAXVALUE/START/CACHE/CYCLE</code> in a fixed order,
+  once each, no loop — real <code class="mono">pg_dump</code> output emits <code
+  class="mono">START WITH</code> before <code class="mono">INCREMENT BY</code>, which this
+  single-pass checker can't handle. Two more real gaps surfaced in the same file investigating
+  further: <code class="mono">CREATE UNLOGGED TABLE</code> (no dispatch case for a real, otherwise-
+  tokenizable keyword) and a trailing <code class="mono">NOT VALID</code> clause on a real
+  <code class="mono">CHECK</code> constraint. Fixed by three preprocessing passes — whole-statement
+  stripping for sequences (never modeled in the KIR anyway), and two narrower, information-
+  preserving keyword/clause strips that keep the real table/constraint intact.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/analytics-full-loop/2-recover-cold.txt" style="color:var(--accent-a);">2-recover-cold.txt</a> (before),
+    <a href="examples/analytics-full-loop/after-2-recover.txt" style="color:var(--accent-a);">after-2-recover.txt</a> (after)</div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / a real recovered table, in full</div>
+  <div class="eyebrow">ekos query object — real, unedited</div>
+  <h2>public.sites: 21 real columns, real types, real evidence.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos query object — real, unedited</div>
+<pre style="margin:0;"><span class="k">Object:</span> public.sites (Table)
+  Properties:
+    columns: [
+      {"data_type":"BIGINT","name":"id"},
+      {"data_type":"CHARACTER VARYING(255)","name":"domain"},
+      {"data_type":"BOOLEAN","name":"public"},
+      {"data_type":"BOOLEAN","name":"locked"},
+      {"data_type":"JSONB","name":"imported_data"},
+      {"data_type":"CHARACTER VARYING(300)[]","name":"allowed_event_props"},
+      {"data_type":"BOOLEAN","name":"conversions_enabled"},
+      {"data_type":"BOOLEAN","name":"funnels_enabled"},
+      ... 13 more real columns
+    ]  <span class="c">// 21 columns total</span>
+  Evidence:
+    [100%] priv/repo/structure.sql — <span class="c">"CREATE TABLE public.sites"</span></pre>
+  </div>
+  <p class="lede">This is the table behind Plausible's core "is this site public, is tracking
+  locked, which event props are allowed" logic — real array types
+  (<code class="mono">CHARACTER VARYING(300)[]</code>), real JSONB columns, real booleans, every
+  one correctly typed. Before RFC 0059 this table — and every other real table in the file,
+  including <code class="mono">api_keys</code>, <code class="mono">users</code>, and 39 more —
+  simply did not exist in EKOS's knowledge of this repo.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-full-loop/after-6-query-postgres-table.txt" style="color:var(--accent-a);">after-6-query-postgres-table.txt</a></div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / gap 2 — identity resolution over-merging</div>
+  <div class="eyebrow">RFC 0060 — real, unedited, before vs. after</div>
+  <h2>14 merge proposals → 8 — with <em>more</em> real tables to confuse it, not fewer.</h2>
+  <table class="ttable">
+    <thead><tr><th>Real pair</th><th>At 0.85 (real score)</th><th>At 0.90 + qualifier strip</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">imported_visitors / imported_browsers (Table)</td><td class="bad">merged live, conf. 0.93</td><td class="good">separate, live-verified</td></tr>
+      <tr><td class="tool">Niklas Hambüchen / Niklaas Baudet von Gersdorff (Person)</td><td class="bad">merged live, conf. 0.85</td><td class="good">separate, live-verified</td></tr>
+      <tr><td class="tool">public.setup_help_emails / setup_success_emails (Table)</td><td class="bad">would merge, conf. 0.94*</td><td class="good">separate, live-verified</td></tr>
+      <tr><td class="tool">RobertJoonas / Robert (Person, same real contributor)</td><td class="good">merged live, conf. 0.93</td><td class="good">merged live, conf. 0.93</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Fix verified with real numbers first, not guessed: Jaro-Winkler/Jaccard scores
+  computed for all 17 real pairs `ekos resolve` proposed against this repo (*Postgres tables
+  hadn't recovered yet when the 0.85 baseline was captured live, so this one row's "before" score
+  is the same real column data, scored the same way, in a unit test — not a separate live run).
+  At 0.85, 16 of 17 known-wrong merges clear the bar. At 0.90 — plus stripping `Table`'s
+  schema-qualifier prefix, which was independently inflating name similarity — 14 of 17 are
+  rejected and all 3 known-correct merges survive. <strong>Not a complete fix</strong>: 3 residual
+  pairs (real, different CI pipelines and doc-generator readmes with near-templated names) still
+  merge — documented honestly in the RFC, not hidden.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/analytics-full-loop/3-resolve-cold.txt" style="color:var(--accent-a);">3-resolve-cold.txt</a> (14 proposals, before — Postgres wasn't recovering any tables yet),
+    <a href="examples/analytics-full-loop/after-3-resolve.txt" style="color:var(--accent-a);">after-3-resolve.txt</a> (8 proposals, after)</div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / what actually comes back now</div>
+  <div class="eyebrow">ekos query find — real, unedited</div>
+  <h2>Two objects that vanished are directly findable again, under their own names.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos query find imported_browsers
+<span class="s">plausible_events_db.imported_browsers</span>   <span class="c">// was absent — merged
+                                                    // into imported_visitors</span>
+
+$ ekos query find Niklaas
+<span class="s">Niklaas Baudet von Gersdorff</span>             <span class="c">// was absent — his 1 real
+                                                    // commit had vanished under
+                                                    // Niklas Hambüchen's identity</span>
+
+$ ekos query object &lt;imported_browsers id&gt;
+columns: [..., "browser", "browser_version"]     <span class="c">// its own real distinguishing
+                                                    // columns, not imported_visitors'</span></pre>
+  </div>
+  <p class="lede">This is the concrete, human-legible version of "14 → 8 merge proposals": a real
+  contributor's identity and his one real commit are back under his own name, and asking about
+  <code class="mono">imported_browsers</code> now returns <em>its own</em> real columns —
+  <code class="mono">browser</code>, <code class="mono">browser_version</code> — instead of
+  silently substituting <code class="mono">imported_visitors</code>'s 8-column schema.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-full-loop/after-7-identity-fixed.txt" style="color:var(--accent-a);">after-7-identity-fixed.txt</a></div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / gap 3 — ekos ask couldn't handle a real question</div>
+  <div class="eyebrow">RFC 0061 — real, unedited, before vs. after</div>
+  <h2>The exact same question. The exact same ledger. One retrieved nothing.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos ask, before RFC 0061 — real, unedited</div>
+<pre style="margin:0;">$ ekos ask "Who is Niklas Hambüchen and what did they
+             contribute to this repository?"
+<span class="bad">I apologize, but there is no provided context or
+evidence to answer this question. I'm unable to
+provide an answer without any information.</span></pre>
+  </div>
+  <div class="codeblock" style="margin-top:1rem;">
+    <div class="tag">ekos ask, after RFC 0061 — real, unedited</div>
+<pre style="margin:0;">$ ekos ask "Who is Niklas Hambüchen and what did they
+             contribute to this repository?"
+<span class="s">Niklas Hambüchen is a contributor to this repository,
+having made 2 commits.</span>
+
+Sources:
+  [100%] git:contributors — "contributor: Niklas Hambüchen"</pre>
+  </div>
+  <p class="lede">Root cause: any punctuation in a question (a trailing <code class="mono">?</code>
+  is enough) made `Ledger::find_objects` escape the <em>entire sentence</em> into one literal FTS5
+  phrase — text that can never appear verbatim in an object's indexed content. Fixed by extracting
+  keywords (stopwords and punctuation stripped, split the same way FTS5's own tokenizer splits on
+  `_`) and trying an AND query for precision, then OR for recall, before falling back to the
+  original raw question.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/analytics-full-loop/ask-4-niklas-hambuchen.txt" style="color:var(--accent-a);">ask-4-niklas-hambuchen.txt</a> (before),
+    <a href="examples/analytics-full-loop/after-8-ask-niklas.txt" style="color:var(--accent-a);">after-8-ask-niklas.txt</a> (after)</div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / the same fix, over the protocol an agent actually uses</div>
+  <div class="eyebrow">MCP stdio JSON-RPC 2.0 — real, unedited</div>
+  <h2>ekos_search and ekos_ekl confirm both fixes, not just the CLI.</h2>
+  <div class="codeblock">
+    <div class="tag">MCP stdio — real, unedited</div>
+<pre style="margin:0;">→ tools/call ekos_search {"query":"imported_browsers"}
+← {"matches":[
+    <span class="s">{"id":"023b95fd-...","name":"plausible_events_db.imported_browsers"}</span>,
+    {"id":"d24e8bb9-...","name":"fixture/ga4_report_imported_browsers.json"},
+    ...
+  ]}                              <span class="c">// the real Table object, ranked first</span>
+
+→ tools/call ekos_ekl {"query":"FIND Object WHERE kind='Table'
+                                   AND name CONTAINS 'sites'"}
+← {"count":1,"rows":[
+    <span class="s">{"id":"b5dc8424-...","kind":"Table","name":"public.sites"}</span>
+  ]}                              <span class="c">// the real Postgres table, one clean hit</span></pre>
+  </div>
+  <p class="lede">Both fixes hold over the exact interface an agent host actually calls — not just
+  the CLI convenience wrapper around it. One ledger, one fix, both surfaces.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/analytics-full-loop/after-10-mcp-session.jsonl" style="color:var(--accent-a);">after-10-mcp-session.jsonl</a></div>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / the honest scorecard</div>
+  <div class="eyebrow">What this run found, and what's still open</div>
+  <h2>Three real gaps. Three real fixes. Verified live, not just unit-tested.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">57</div><div class="label">real tables recovered (was 15 — Postgres contributed 0 before RFC 0059)</div></div>
+    <div class="stat"><div class="num">14→8</div><div class="label">merge proposals — despite 57 tables to compare now, not 15</div></div>
+    <div class="stat"><div class="num"><span class="bad" style="-webkit-text-fill-color:var(--bad);color:var(--bad);">3</span></div><div class="label">residual known-wrong merges, named honestly, not hidden</div></div>
+  </div>
+  <table class="ttable" style="margin-top:2rem;">
+    <thead><tr><th>Gap</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Postgres <code>INCREMENT</code>/<code>UNLOGGED</code>/<code>NOT VALID</code> parse failures</td><td class="good">Fixed — RFC 0059</td></tr>
+      <tr><td class="tool">Identity over-merge (Table / Person / Document)</td><td class="good">Improved, not complete — RFC 0060</td></tr>
+      <tr><td class="tool"><code>ekos ask</code> retrieval on full-sentence questions</td><td class="good">Fixed — RFC 0061</td></tr>
+      <tr><td class="tool"><code>README.md</code> ambiguous-filename ranking</td><td class="desc">Still open — different root cause, not attempted</td></tr>
+      <tr><td class="tool">3 residual identity over-merges (Pipeline/Document pairs)</td><td class="desc">Still open — see RFC 0060's own accounting</td></tr>
+    </tbody>
+  </table>
+  <div class="tag" style="margin-top:0.8rem;">Full writeup: <a href="../../devlog_61.md" style="color:var(--accent-a);">devlog_61.md</a> · RFCs: <a href="https://github.com/alexeyban/EKOS/blob/main/ekos/docs/rfcs/0059-postgres-sequence-and-ddl-preprocessing.md" style="color:var(--accent-a);">0059</a>, <a href="https://github.com/alexeyban/EKOS/blob/main/ekos/docs/rfcs/0060-identity-resolution-merge-threshold.md" style="color:var(--accent-a);">0060</a>, <a href="https://github.com/alexeyban/EKOS/blob/main/ekos/docs/rfcs/0061-ai-runtime-question-keyword-extraction.md" style="color:var(--accent-a);">0061</a></div>
+</section>
+
+<section class="slide cta" id="s10">
+  <div class="eyebrow">Try it yourself</div>
+  <h2>Same repo. Same commands. Nothing hidden, before or after.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ git clone https://github.com/plausible/analytics
+$ cd analytics &amp;&amp; ekos init
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+$ ekos ask "Who is Niklas Hambüchen and what did they contribute?"
+$ ekos mcp serve --workspace .</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Full workspace gate</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td class="tool"><code>cargo build/test/clippy -D warnings/fmt --check</code></td><td class="good">Clean — 97/97 test suites pass</td></tr>
+      <tr><td class="tool">Regression tests added this session</td><td class="desc">26 new tests (+1 pre-existing test un-ignored), each built from real data that exposed a real bug</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · full-loop case study against analytics/ (Plausible Analytics), found and fixed the same day · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

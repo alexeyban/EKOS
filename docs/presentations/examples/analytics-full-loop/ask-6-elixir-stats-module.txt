@@ -1,0 +1,13 @@
+[2m2026-08-20T15:41:52.801223Z[0m [32m INFO[0m [2mekos::commands::recover[0m[2m:[0m using local Ollama provider with disk cache
+The provided context is a JSON object representing a file named `lib/plausible/stats.ex`. This file contains several functions and aliases related to statistics, including `query`, `current_visitors`, `funnel`, and `filter_suggestions`.
+
+Based on the given evidence, it appears that this file is part of an Elixir project, as it uses the `use` statement to include modules from other files.
+
+Here is a JSON block summarizing my findings:
+
+Sources:
+  [100%] /home/legion/PycharmProjects/analytics/./lib/plausible/stats.ex — "file: lib/plausible/stats.ex (858 bytes)"
+
+real	0m28,727s
+user	0m0,002s
+sys	0m0,010s

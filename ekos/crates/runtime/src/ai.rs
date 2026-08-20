@@ -128,7 +128,7 @@ impl<'a> AiRuntime<'a> {
     /// and reconstruct full state (object + relationships + evidence) for
     /// every object gathered. Deduplicated by object id.
     fn gather_context(&self, question: &str) -> Result<Vec<ObjectState>, AiError> {
-        let matches = self.runtime.find_objects(question)?;
+        let matches = self.search_for_question(question)?;
         let top: Vec<KirId> = matches
             .into_iter()
             .take(self.config.max_matches as usize)
@@ -156,6 +156,79 @@ impl<'a> AiRuntime<'a> {
         }
         Ok(contexts)
     }
+
+    /// Turns a natural-language `question` into a search that `Runtime::find_objects` (backed by
+    /// SQLite FTS5) can actually match (RFC 0061), instead of passing the raw sentence straight
+    /// through as `gather_context` used to.
+    ///
+    /// `Ledger::find_objects` (`crates/ledger/src/lib.rs`) treats *any* character outside
+    /// `[alphanumeric, space, *]` — including ordinary sentence punctuation like `?`, `,`, `'` —
+    /// as a signal to escape the *entire* query into one literal FTS5 phrase. A phrase query
+    /// requires that exact text to appear contiguously in the indexed content, which a natural
+    /// question never does, so every question containing punctuation silently retrieved zero
+    /// context — confirmed live against a real compiled ledger (`analytics/`, devlog_60): "Who is
+    /// Niklas Hambüchen and what did they contribute?" retrieved nothing, while the bare name
+    /// "Niklas Hambüchen" (already alphanumeric-only, so never hit the phrase-escape path)
+    /// correctly retrieved the real `Person` object — the same object, the same ledger, only the
+    /// phrasing differed. MCP's own `ekos_search` tool description already tells callers to use
+    /// "2-3 keywords, not natural-language questions"; `ask` is the one caller that's supposed to
+    /// accept natural language and translate it, so the translation belongs here, not in
+    /// `find_objects` itself (which other callers rely on for its literal-phrase-escaping
+    /// behavior on deliberately-typed queries).
+    ///
+    /// Strategy: strip stopwords and punctuation to a keyword set, try an FTS5 **AND** query
+    /// (every keyword must appear) first for precision, fall back to an **OR** query (any
+    /// keyword) for recall if AND finds nothing, and fall back to the original raw question as a
+    /// last resort so no previously-working query (e.g. one that was already just a bare name or
+    /// a handful of keywords) can regress.
+    fn search_for_question(&self, question: &str) -> Result<Vec<(KirId, String)>, AiError> {
+        let terms = extract_search_terms(question);
+        if !terms.is_empty() {
+            let and_query = terms.join(" ");
+            let hits = self.runtime.find_objects(&and_query)?;
+            if !hits.is_empty() {
+                return Ok(hits);
+            }
+            if terms.len() > 1 {
+                let or_query = terms.join(" OR ");
+                let hits = self.runtime.find_objects(&or_query)?;
+                if !hits.is_empty() {
+                    return Ok(hits);
+                }
+            }
+        }
+        Ok(self.runtime.find_objects(question)?)
+    }
+}
+
+/// Common English function words carrying no search-discriminating value on their own — dropped
+/// before building a keyword search from a natural-language question. Deliberately conservative
+/// (short, closed-class words only) so a real content word is never mistaken for a stopword.
+const QUESTION_STOPWORDS: &[&str] = &[
+    "a", "an", "the", "is", "are", "was", "were", "am", "be", "been", "being", "do", "does", "did",
+    "doing", "what", "who", "whom", "whose", "which", "how", "why", "where", "when", "and", "or",
+    "but", "to", "of", "in", "on", "for", "with", "at", "by", "from", "about", "into", "than",
+    "then", "this", "that", "these", "those", "it", "its", "their", "they", "them", "he", "she",
+    "we", "you", "i", "my", "your", "our", "can", "could", "would", "should", "will", "shall",
+    "have", "has", "had", "not", "no", "if", "as", "there", "here", "any", "some", "did",
+];
+
+/// Lowercased, punctuation-stripped, stopword-filtered keywords from a natural-language question
+/// — the same "significant word" filtering step MCP's own `ekos_search` tool description asks
+/// callers to do by hand ("Use 2-3 keywords, not natural-language questions"). Splits on `_` too
+/// (not just non-alphanumeric punctuation) so `imported_browsers` becomes the two keywords
+/// `imported`/`browsers` — matching FTS5's own default `unicode61` tokenizer, which already
+/// treats `_` as a token separator, not part of a token. This keeps every extracted term (and the
+/// query built from them) free of any character `Ledger::find_objects`'s `is_simple_term` check
+/// would otherwise treat as needing literal-phrase escaping.
+fn extract_search_terms(question: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    question
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|w| w.to_lowercase())
+        .filter(|w| w.len() >= 2 && !QUESTION_STOPWORDS.contains(&w.as_str()))
+        .filter(|w| seen.insert(w.clone()))
+        .collect()
 }
 
 /// Parses a trailing `{"cited_evidence": [...]}` block from an LLM response.
@@ -286,5 +359,94 @@ mod tests {
         let answer = ai.ask("orders").await.unwrap();
 
         assert!(answer.evidence_refs.is_empty());
+    }
+
+    // ── RFC 0061: natural-language question retrieval ───────────────────────────────────
+
+    #[test]
+    fn extract_search_terms_strips_stopwords_and_punctuation() {
+        let terms = extract_search_terms(
+            "Who is Niklas Hambüchen and what did they contribute to this repository?",
+        );
+        assert_eq!(
+            terms,
+            vec!["niklas", "hambüchen", "contribute", "repository"]
+        );
+    }
+
+    #[test]
+    fn extract_search_terms_splits_on_underscore_like_fts5_does() {
+        let terms = extract_search_terms("What columns does imported_browsers have?");
+        assert_eq!(terms, vec!["columns", "imported", "browsers"]);
+    }
+
+    #[test]
+    fn extract_search_terms_dedupes_preserving_first_occurrence() {
+        let terms = extract_search_terms("the orders table and the orders schema");
+        assert_eq!(terms, vec!["orders", "table", "schema"]);
+    }
+
+    #[test]
+    fn extract_search_terms_on_bare_keywords_is_unchanged() {
+        // A caller that already passes 2-3 keywords (no stopwords, no punctuation) — the
+        // pre-RFC-0060 working case — must keep working identically.
+        assert_eq!(
+            extract_search_terms("Niklas Hambüchen"),
+            vec!["niklas", "hambüchen"]
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_finds_context_from_a_full_sentence_question() {
+        // Real bug (devlog_60): "orders" alone found the object; a full sentence containing
+        // "orders" plus stopwords and a trailing "?" found nothing, because the whole sentence
+        // was escaped into one unmatchable literal FTS5 phrase. Must now work identically.
+        let (ledger, _dir) = temp_ledger();
+        seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+
+        let llm = Arc::new(MockLlmProvider::new(
+            r#"Orders depends on customers. {"cited_evidence": []}"#,
+        ));
+        let ai = AiRuntime::new(&runtime, llm, AiRuntimeConfig::default());
+        let answer = ai
+            .ask("What does the orders table depend on?")
+            .await
+            .unwrap();
+
+        assert!(
+            answer.answer.contains("Orders depends on customers"),
+            "expected real context to be retrieved from a full-sentence question, got: {:?}",
+            answer.answer
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_finds_context_from_an_underscore_named_object_via_sentence() {
+        let (ledger, _dir) = temp_ledger();
+        let ev = KirEvidence::new(
+            SourceLocation::file("structure.sql"),
+            "CREATE TABLE imported_browsers",
+        );
+        ledger.append_evidence(&ev).unwrap();
+        let mut table = KirObject::new("imported_browsers", ObjectKind::Table);
+        table.evidence.push(ev.id);
+        ledger.append_object(&table).unwrap();
+        let runtime = Runtime::new(&ledger);
+
+        let llm = Arc::new(MockLlmProvider::new(
+            r#"It has a browser column. {"cited_evidence": []}"#,
+        ));
+        let ai = AiRuntime::new(&runtime, llm, AiRuntimeConfig::default());
+        let answer = ai
+            .ask("What columns does imported_browsers have?")
+            .await
+            .unwrap();
+
+        assert!(
+            answer.answer.contains("browser column"),
+            "expected the underscore-named table to be retrieved from a full-sentence question, got: {:?}",
+            answer.answer
+        );
     }
 }

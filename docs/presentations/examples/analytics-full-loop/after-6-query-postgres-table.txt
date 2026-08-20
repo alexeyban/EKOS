@@ -1,0 +1,7 @@
+$ ekos query object b5dc8424-87d4-4b52-9987-29111c12ddd8
+Object: public.sites (Table)
+  ID:   b5dc8424-87d4-4b52-9987-29111c12ddd8
+  Properties:
+    columns: [{"data_type":"BIGINT","name":"id"},{"data_type":"CHARACTER VARYING(255)","name":"domain"},{"data_type":"TIMESTAMP(0) WITHOUT TIME ZONE","name":"inserted_at"},{"data_type":"TIMESTAMP(0) WITHOUT TIME ZONE","name":"updated_at"},{"data_type":"CHARACTER VARYING(255)","name":"timezone"},{"data_type":"BOOLEAN","name":"public"},{"data_type":"BOOLEAN","name":"locked"},{"data_type":"BOOLEAN","name":"has_stats"},{"data_type":"JSONB","name":"imported_data"},{"data_type":"DATE","name":"stats_start_date"},{"data_type":"INTEGER","name":"ingest_rate_limit_scale_seconds"},{"data_type":"INTEGER","name":"ingest_rate_limit_threshold"},{"data_type":"TIMESTAMP(0) WITHOUT TIME ZONE","name":"native_stats_start_at"},{"data_type":"CHARACTER VARYING(255)","name":"domain_changed_from"},{"data_type":"TIMESTAMP(0) WITHOUT TIME ZONE","name":"domain_changed_at"},{"data_type":"CHARACTER VARYING(300)[]","name":"allowed_event_props"},{"data_type":"BOOLEAN","name":"conversions_enabled"},{"data_type":"BOOLEAN","name":"funnels_enabled"},{"data_type":"BOOLEAN","name":"props_enabled"},{"data_type":"TIMESTAMP(0) WITHOUT TIME ZONE","name":"accept_traffic_until"},{"data_type":"JSONB","name":"installation_meta"}]
+  Evidence:
+    [100%] priv/repo/structure.sql — "CREATE TABLE public.sites"
