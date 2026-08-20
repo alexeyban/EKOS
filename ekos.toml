@@ -33,5 +33,9 @@ github = "https://github.com/alexeyban/EKOS"
 hashtags = ["Rust", "AI", "MCP"]
 #
 [marketing.twitter]
-enabled = true
+# Disabled 2026-08-20 at the user's request, pausing automatic X publishing after it was just
+# wired up (both this gate and the GitHub Actions auto-trigger below were disabled together).
+# `ekos marketing publish` still drafts/previews normally — this only blocks the real API call,
+# forcing NoopPublisher regardless of --dry-run. Flip back to true to re-enable.
+enabled = false
 dry-run = false

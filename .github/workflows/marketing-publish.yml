@@ -1,16 +1,23 @@
 name: Marketing Publish
 
-# RFC 0030: on every devlog_N.md pushed to main, draft a tweet from it and publish
-# automatically (--yes, no human review — a deliberate choice for this workflow; the
-# interactive Y/N/E approval in `ekos marketing publish` is still the default for anyone
-# running the CLI by hand). `ekos marketing publish` with no devlog argument targets
-# whichever devlog_*.md is currently highest-numbered, which is exactly the one this push
-# just added.
+# RFC 0030: drafts a tweet from a devlog and publishes it automatically (--yes, no human
+# review — a deliberate choice for this workflow; the interactive Y/N/E approval in
+# `ekos marketing publish` is still the default for anyone running the CLI by hand).
+# `ekos marketing publish` with no devlog argument targets whichever devlog_*.md is
+# currently highest-numbered.
+#
+# DISABLED 2026-08-20 at the user's request, right after this was wired up: the automatic
+# `push` trigger below is commented out, leaving only manual `workflow_dispatch`. The real
+# API call is also blocked separately — `[marketing.twitter] enabled = false` in ekos.toml
+# forces NoopPublisher regardless of this workflow's state, so even a manual run won't post
+# for real right now. Re-enable both together when ready:
+#   1. uncomment the `push:` trigger below
+#   2. flip `enabled = true` back in ekos.toml's `[marketing.twitter]`
 
 on:
-  push:
-    branches: [main]
-    paths: ["devlog_*.md"]
+  # push:
+  #   branches: [main]
+  #   paths: ["devlog_*.md"]
   workflow_dispatch: {}
 
 env:
