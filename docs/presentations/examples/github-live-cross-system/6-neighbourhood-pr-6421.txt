@@ -1,0 +1,7 @@
+$ ekos query neighbourhood 49f4c202-593c-51d7-aa5e-b3e5a8ef5ccc --depth 1
+Neighbourhood of 49f4c202-593c-51d7-aa5e-b3e5a8ef5ccc (depth 1): 2 objects, 1 relationships
+
+  49f4c202-593c-51d7-aa5e-b3e5a8ef5ccc  plausible/analytics#6421: Assert how we store data imported from GA4 (PullRequest) [root]
+  7932d361-4d79-58ce-adfb-26e3a95ff50a  test/plausible/imported/google_analytics4_test.exs (File)
+
+  References  49f4c202-593c-51d7-aa5e-b3e5a8ef5ccc → 7932d361-4d79-58ce-adfb-26e3a95ff50a

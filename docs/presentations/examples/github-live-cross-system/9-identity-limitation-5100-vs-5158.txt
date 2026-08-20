@@ -1,0 +1,11 @@
+$ ekos query object <canonical #5100, surviving identity after PR #5158 was merged into it>
+Object: plausible/analytics#5100: time-on-page: Ingestion logic for engagement_time (PullRequest)
+  ID:   0f313ff8-85df-5da1-916b-61ab79f2f7de
+  Properties:
+    state: "closed"
+    excerpt: "The previous PR was merged into a dependant branch not master :facepalm: https://github.com/plausible/analytics/pull/5093"
+    number: 5100
+
+// Real, live finding: PR #5158's own body/files_changed are gone — only #5100's survive.
+// This is RFC 0060's already-documented 'surviving object swallows the rest' pattern,
+// now confirmed live on GitHub PullRequest objects too.

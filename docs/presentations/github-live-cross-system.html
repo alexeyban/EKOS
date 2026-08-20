@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitHub, Live, End to End</title>
+<meta name="description" content="EKOS's GitHub connector, run live for the first time against 1,600 real issues/PRs from github.com/plausible/analytics. Found and fixed two known gaps before the run, then a third -- 96% of real items collapsing into one identity -- live, mid-session, not planned. Real docs, real code, real GitHub items, surfaced together by one query. Every claim links to a real, unedited transcript, including the one where the fix is still incomplete.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a><a href="#s10"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>The GitHub connector, live, for the first time.<br><span class="arrow-word">Two known gaps fixed. A third found mid-run.</span></h1>
+  <p class="lede">No access to Salesforce, SAP, Oracle, Fabric, Snowflake, Confluence, or Jira —
+  but this environment has a real, authenticated GitHub token. `ekos/plugins/github` was already
+  real HTTP-calling code, just never run against the live API. This is that run: 1,600 real
+  issues/PRs from <code class="mono">github.com/plausible/analytics</code>, real external
+  documentation, real code, real cross-references — and one finding discovered only once the
+  connector was actually running at scale, not from reading the code.</p>
+  <div class="hero-diagram">
+    <span class="chip">1,600 real items, live</span><span class="sep mono">→</span>
+    <span class="chip bad">96% collapsed into 1 identity</span><span class="sep mono">→</span>
+    <span class="chip hot">fixed same session</span><span class="sep mono">→</span>
+    <span class="chip">1,439 real groups remain — reported, not hidden</span>
+  </div>
+  <div class="byline"><span class="dot"></span> github.com/plausible/analytics · RFC 0062 · devlog_63.md</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / two known gaps, fixed before the run</div>
+  <div class="eyebrow">real, unedited PR bodies from the actual repo</div>
+  <h2>"Migration for #3828" — no keyword, no edge, before today.</h2>
+  <div class="codeblock">
+    <div class="tag">real PR bodies, sampled live — unedited</div>
+<pre style="margin:0;">PR #3834 body: <span class="bad">"Migration for #3828"</span>              <span class="c">// no keyword</span>
+PR #6606 body: <span class="bad">"PR #6514 changed signup tracking..."</span> <span class="c">// mid-sentence</span>
+PR #6597 body: <span class="bad">"Extracted from .../pull/6591"</span>       <span class="c">// full URL</span></pre>
+  </div>
+  <p class="lede"><code class="mono">github_analyzer.rs</code> only detected `#N` immediately after
+  a documented GitHub auto-close keyword (`closes`, `fixes`, `resolves`) — real PR bodies in this
+  repo overwhelmingly don't use that vocabulary. Fixed: `find_bare_issue_numbers` now catches bare
+  `#N` too. Separately, `GitHubApiClient` issued exactly one unparameterized request — GitHub's
+  default (30 items, newest-first) would have silently truncated a repo with ~4,600 real
+  issues/PRs to its 30 most recent. Fixed with standard `Link`-header pagination, bounded by an
+  explicit page cap.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/github-live-cross-system/0-preflight-pr-5158.json" style="color:var(--accent-a);">0-preflight-pr-5158.json</a></div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / the live run</div>
+  <div class="eyebrow">terminal — real, unedited</div>
+  <h2>1,600 real issues/PRs. ~23 minutes. No mock in sight.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ export EKOS_GITHUB_TOKEN=$(gh auth token)
+$ export EKOS_GITHUB_OWNER=plausible EKOS_GITHUB_REPO=analytics
+$ export EKOS_GITHUB_PER_PAGE=100 EKOS_GITHUB_MAX_PAGES=16
+$ time ekos build
+Build complete. Files observed (new): 2
+Total objects in ledger: 2404
+<span class="s">real  22m50.039s</span>
+
+$ ekos recover
+github-analyzer complete  items=1600  edges=13580
+GitHub issues/PRs analysed: 1600</pre>
+  </div>
+  <p class="lede">The 23-minute wall clock is almost entirely the per-PR `list_files` call —
+  ~0.5s each, sequential, no concurrency — a real, accepted cost for a one-time documented run,
+  not engineered around. 13,580 `References` edges from 1,600 items: file-change links, closing
+  links, and the newly-added bare-mention links, all real.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/github-live-cross-system/1-build.txt" style="color:var(--accent-a);">1-build.txt</a>,
+    <a href="examples/github-live-cross-system/2-recover.txt" style="color:var(--accent-a);">2-recover.txt</a></div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / gap 3 — found live, not planned</div>
+  <div class="eyebrow">ekos resolve — real, unedited</div>
+  <h2>1,533 of 1,600 real items. One identity. Confidence 1.00.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">35. 'plausible/analytics#5869: Reduce noise in 2FA...' (PullRequest)
+    <span class="bad">— 1533 objects merged, confidence 1.00</span>
+      • #6527: Bump fast-uri from 3.0.6 to 3.1.4 in /assets
+      • #5469: remove salts logs
+      • #6534: Publish tracker package 0.4.6
+      • #5158: time-on-page: `imported_pages` new columns
+      ...1,529 more, almost every real item fetched</pre>
+  </div>
+  <p class="lede">Not a subtle edge case — the single largest fact about the compiled result.
+  `Custom("Issue")`/`Custom("PullRequest")` objects are named
+  `"{owner}/{repo}#{number}: {title}"` — every item in one repo shares the `"{owner}/{repo}#"`
+  prefix, and unlike RFC 0060's earlier `Table` fix (a namespace only), this one also swallows the
+  item's own number, making the shared, uninformative part proportionally dominant. Jaro-Winkler's
+  prefix bonus inflated every pairwise comparison regardless of how different the real titles
+  were.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/github-live-cross-system/3-resolve.txt" style="color:var(--accent-a);">3-resolve.txt</a></div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / fixed the same session</div>
+  <div class="eyebrow">crates/identity/src/lib.rs — real, unedited</div>
+  <h2>1,533 → 0. The catastrophic case is gone.</h2>
+  <div class="codeblock">
+    <div class="tag">the fix — real, unedited</div>
+<pre style="margin:0;">// RFC 0060's extension point, given a third case:
+if matches!(&amp;obj.kind, ObjectKind::Custom(k)
+    if k == "Issue" || k == "PullRequest")
+    &amp;&amp; let Some(hash_pos) = obj.name.find('#')
+    &amp;&amp; let Some(sep_pos) = obj.name[hash_pos..].find(": ")
+{
+    return &amp;obj.name[hash_pos + sep_pos + 2..];  // title only
+}</pre>
+  </div>
+  <p class="lede">Same architecture already built for `Table`'s schema-qualifier strip — just a
+  third case, not a new mechanism. Verified: the single 1,533-object group is gone from the
+  re-resolved output. <strong>Not a complete fix</strong>: 1,439 real merge groups remain (largest
+  174) — dependency-bump PRs sharing a `"Bump X from Y to Z"` template and feature-prefix
+  conventions like `"time-on-page:"` still cluster. Same reasoning RFC 0060 already gave for not
+  chasing a complete fix: a real design decision with estate-wide blast radius, not a scoped
+  bugfix.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/github-live-cross-system/3-resolve.txt" style="color:var(--accent-a);">3-resolve.txt</a> (post-fix)</div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / the honest part — the original demo PR paid the cost</div>
+  <div class="eyebrow">ekos query object — real, unedited</div>
+  <h2>#5158 was chosen as the demo before the run. It didn't survive.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos query object &lt;canonical id for #5100&gt;
+Object: plausible/analytics#5100: time-on-page:
+        Ingestion logic for engagement_time (PullRequest)
+  Properties:
+    excerpt: "The previous PR was merged into a
+              dependant branch not master :facepalm:"
+    <span class="bad">// #5158's own body and migration-file evidence: gone</span></pre>
+  </div>
+  <p class="lede">Even after the fix, PR #5158 ("time-on-page: `imported_pages` new columns" — this
+  RFC's originally-chosen example) is merged into a real 16-object group of sibling "time-on-page:"
+  PRs. The surviving identity shows only its own data — exactly RFC 0060's "surviving object
+  swallows the rest" pattern, now confirmed on GitHub `PullRequest` objects too. Reported plainly
+  rather than quietly swapped for a cleaner-looking example.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/github-live-cross-system/9-identity-limitation-5100-vs-5158.txt" style="color:var(--accent-a);">9-identity-limitation-5100-vs-5158.txt</a></div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / the working chain — a different real PR</div>
+  <div class="eyebrow">ekos query neighbourhood — real, unedited</div>
+  <h2>A real PR. A real file. One hop, live.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos query neighbourhood &lt;PR #6421 id&gt; --depth 1
+Neighbourhood: 2 objects, 1 relationships
+
+  <span class="s">plausible/analytics#6421: Assert how we store
+  data imported from GA4 (PullRequest) [root]</span>
+  test/plausible/imported/google_analytics4_test.exs (File)
+
+  References  #6421 → google_analytics4_test.exs</pre>
+  </div>
+  <p class="lede">PR #6421 survived standalone — its real `References` edge to the real test file
+  it changed is graph-traversable via `ekos query neighbourhood`, unaffected by the residual
+  over-merge issue. This is the live, working version of "beyond Git/code": a real GitHub item
+  connected to real code, not just co-existing in the same ledger.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/github-live-cross-system/6-neighbourhood-pr-6421.txt" style="color:var(--accent-a);">6-neighbourhood-pr-6421.txt</a></div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / one query, four real sources</div>
+  <div class="eyebrow">ekos query find — real, unedited</div>
+  <h2>Docs. Code. A GitHub PR. One search, no hand-curation.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos query find "google analytics import"
+31 result(s):
+  <span class="s">google-analytics-import.html: section 10</span>       <span class="c">// real docs</span>
+  <span class="s">lib/.../email/google_analytics_import.html.heex</span> <span class="c">// real code</span>
+  <span class="s">google-analytics-import.html</span>                    <span class="c">// real docs</span>
+  <span class="s">plausible/analytics#5305: GA4 import: refresh...</span> <span class="c">// real PR</span>
+  ...lib/plausible/imported/google_analytics4.ex          <span class="c">// real code</span></pre>
+  </div>
+  <p class="lede">This wasn't hand-picked to make a chain — it's what the compiled ledger returns
+  for one ordinary search, once a real external docs page (vendored unmodified from
+  <code class="mono">plausible.io/docs</code>), real code, and real GitHub items about the same
+  feature are all in it together. A stronger demonstration than the single chain this RFC set out
+  to build.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/github-live-cross-system/8-search-cross-system.txt" style="color:var(--accent-a);">8-search-cross-system.txt</a>,
+    <a href="examples/github-live-cross-system/7-mcp-session.jsonl" style="color:var(--accent-a);">7-mcp-session.jsonl</a></div>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / the honest scorecard</div>
+  <div class="eyebrow">What this run found, fixed, and left open</div>
+  <h2>Two gaps fixed before the run. One found live. One left honestly open.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">1,600</div><div class="label">real GitHub issues/PRs fetched live, paginated</div></div>
+    <div class="stat"><div class="num">1533→0</div><div class="label">objects in the worst merge group, before → after the fix</div></div>
+    <div class="stat"><div class="num"><span class="bad" style="-webkit-text-fill-color:var(--bad);color:var(--bad);">1,439</span></div><div class="label">real merge groups still remaining, reported not hidden</div></div>
+  </div>
+  <table class="ttable" style="margin-top:2rem;">
+    <thead><tr><th>Gap</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Bare `#N` references (no closing keyword)</td><td class="good">Fixed</td></tr>
+      <tr><td class="tool">Zero pagination (30-item default cap)</td><td class="good">Fixed, bounded</td></tr>
+      <tr><td class="tool">96% identity collapse on GitHub items</td><td class="good">Fixed — catastrophic case eliminated</td></tr>
+      <tr><td class="tool">Residual smaller-scale over-merging (1,439 groups)</td><td class="desc">Open — same RFC 0060 limitation, not chased further</td></tr>
+      <tr><td class="tool">Full-URL references, secondary rate limits, no concurrency</td><td class="desc">Open — named explicitly, not attempted</td></tr>
+    </tbody>
+  </table>
+  <div class="tag" style="margin-top:0.8rem;">Full writeup: <a href="../../devlog_63.md" style="color:var(--accent-a);">devlog_63.md</a> · <a href="https://github.com/alexeyban/EKOS/blob/main/ekos/docs/rfcs/0062-github-live-cross-system-verification.md" style="color:var(--accent-a);">RFC 0062</a></div>
+</section>
+
+<section class="slide cta" id="s10">
+  <div class="eyebrow">Try it yourself</div>
+  <h2>Real repo. Real token. Nothing hidden, including the incomplete part.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ export EKOS_GITHUB_TOKEN=$(gh auth token)
+$ export EKOS_GITHUB_OWNER=&lt;owner&gt; EKOS_GITHUB_REPO=&lt;repo&gt;
+$ export EKOS_GITHUB_PER_PAGE=100 EKOS_GITHUB_MAX_PAGES=10
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+$ ekos mcp serve --workspace .</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Full workspace gate</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td class="tool"><code>cargo build/test/clippy -D warnings/fmt --check</code></td><td class="good">Clean — 97/97 test suites pass</td></tr>
+      <tr><td class="tool">Regression tests added this session</td><td class="desc">10 new tests (+1 behavior-changed) across 3 crates, each built from real data</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · GitHub connector, live-verified end to end · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

@@ -5,7 +5,7 @@ use ekos_identity::{DefaultResolver, IdentityResolver};
 use ekos_kir::KirGraph;
 use std::path::Path;
 
-pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
+pub fn run(config: &EkosConfig, cwd: &Path, force: bool) -> Result<()> {
     let artifact_dir = config.artifact_dir(cwd);
     let store = PackArtifactStore::open(&artifact_dir)
         .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
@@ -97,14 +97,25 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         result.stats.conflicts_detected
     );
 
-    if !result.conflicts.is_empty() {
-        anyhow::bail!(
-            "{} identity conflict(s) detected — resolve manually before proceeding",
-            result.conflicts.len()
-        );
-    }
+    check_conflicts(result.conflicts.len(), force)
+}
 
-    Ok(())
+/// Whether to fail the pipeline on identity conflicts, or continue anyway.
+///
+/// With `force`, conflicts have already been printed above — they stay visible for the user to
+/// revisit, but no longer block `compile`/`commit` from running.
+fn check_conflicts(conflict_count: usize, force: bool) -> Result<()> {
+    if conflict_count == 0 {
+        return Ok(());
+    }
+    if force {
+        println!("\n{conflict_count} identity conflict(s) detected — continuing anyway (--force)");
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{conflict_count} identity conflict(s) detected — resolve manually before proceeding, \
+         or pass --force to continue anyway"
+    );
 }
 
 /// Append all nodes from `src` into `dst`.
@@ -120,5 +131,28 @@ fn merge_into(dst: &mut KirGraph, src: KirGraph) {
     }
     for ev in src.events {
         dst.events.push(ev);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_conflicts_always_succeeds_regardless_of_force() {
+        assert!(check_conflicts(0, false).is_ok());
+        assert!(check_conflicts(0, true).is_ok());
+    }
+
+    #[test]
+    fn conflicts_without_force_bail() {
+        let err = check_conflicts(3, false).unwrap_err();
+        assert!(err.to_string().contains("3 identity conflict"));
+        assert!(err.to_string().contains("--force"));
+    }
+
+    #[test]
+    fn conflicts_with_force_succeed() {
+        assert!(check_conflicts(230, true).is_ok());
     }
 }

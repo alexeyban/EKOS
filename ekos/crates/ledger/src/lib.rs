@@ -826,10 +826,12 @@ impl Ledger {
             format!("\"{}\"", query.replace('"', "\"\""))
         };
 
-        match self.format {
-            Format::V1 => self.find_objects_v1(&match_expr),
-            Format::V2 => self.find_objects_v2(&match_expr),
-        }
+        let mut results = match self.format {
+            Format::V1 => self.find_objects_v1(&match_expr)?,
+            Format::V2 => self.find_objects_v2(&match_expr)?,
+        };
+        promote_exact_name_matches(&mut results, query);
+        Ok(results)
     }
 
     fn find_objects_v1(&self, match_expr: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
@@ -969,6 +971,25 @@ impl Ledger {
         }
         Ok(out)
     }
+}
+
+/// Stable-partitions `results` (already bm25-ranked) so any object whose name is an exact
+/// case-insensitive match for `query` sorts ahead of every other result. Relative order within
+/// each group is preserved — this only promotes, never re-scores.
+///
+/// Found live (devlog_60): bm25's cross-document length normalization (over the `content` excerpt
+/// column, whose raw size varies by orders of magnitude between objects) can rank a small,
+/// unrelated same-basename file above the real, exact-name match it should lose to — asking
+/// `ekos ask`/`find_objects` for `"README.md"` answered from an 83-byte `test/priv/README.md`
+/// fixture instead of the real project `README.md`, which ranked 13th of 25 matches for that
+/// literal filename. Exact full-name equality is a strong, unambiguous relevance signal bm25's
+/// blended name/kind/content score doesn't privilege on its own.
+fn promote_exact_name_matches(results: &mut [(KirId, String)], query: &str) {
+    let query_lower = query.trim().to_lowercase();
+    if query_lower.is_empty() {
+        return;
+    }
+    results.sort_by_key(|(_, name)| name.to_lowercase() != query_lower);
 }
 
 fn init_schema_v2(conn: &Connection) -> SqlResult<()> {
@@ -1923,6 +1944,33 @@ mod tests {
         let results = ledger.find_objects("orders").unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].1, "orders", "name match must rank first");
+    }
+
+    /// Real regression (devlog_60): querying `"README.md"` against `analytics/`'s real ledger
+    /// ranked an 83-byte `test/priv/README.md` fixture above the real, root-level `README.md` —
+    /// bm25's content-column length normalization outweighed exact-name equality. A tiny excerpt
+    /// on the fixture and a large one on the real README reproduces the same skew here.
+    #[test]
+    fn fts_ranks_exact_name_match_above_a_same_basename_nested_file() {
+        let (ledger, _dir) = temp_ledger();
+        let fixture = KirObject::new("test/priv/README.md", ObjectKind::File).with_property(
+            "excerpt",
+            serde_json::json!("GeoLite2 test fixture, tiny file"),
+        );
+        ledger.append_object(&fixture).unwrap();
+
+        let long_excerpt =
+            "Plausible Analytics is a lightweight, open-source web analytics tool. ".repeat(50);
+        let real_readme = KirObject::new("README.md", ObjectKind::File)
+            .with_property("excerpt", serde_json::json!(long_excerpt));
+        ledger.append_object(&real_readme).unwrap();
+
+        let results = ledger.find_objects("README.md").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[0].1, "README.md",
+            "the exact-name real README must rank first, not the same-basename fixture"
+        );
     }
 
     /// RFC 0015: the FTS index must track the *latest* version — an updated

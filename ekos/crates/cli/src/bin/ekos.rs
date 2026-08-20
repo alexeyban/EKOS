@@ -32,7 +32,11 @@ enum Commands {
         parallel: bool,
     },
     /// Resolve synonymous concepts across sources into canonical identities
-    Resolve,
+    Resolve {
+        /// Print conflicts as diagnostics but don't fail the pipeline on them
+        #[arg(long)]
+        force: bool,
+    },
     /// Run the semantic compiler: KIR → Canonical Knowledge Model
     Compile,
     /// Commit the CKM to the append-only knowledge ledger
@@ -317,7 +321,7 @@ async fn main() -> Result<()> {
         Commands::Recover { parallel } => {
             ekos::commands::recover::run(&config, &cwd, parallel).await
         }
-        Commands::Resolve => ekos::commands::resolve::run(&config, &cwd),
+        Commands::Resolve { force } => ekos::commands::resolve::run(&config, &cwd, force),
         Commands::Identity { subcommand } => match subcommand {
             IdentityCommands::Scan => ekos::commands::identity::scan(&config, &cwd),
         },

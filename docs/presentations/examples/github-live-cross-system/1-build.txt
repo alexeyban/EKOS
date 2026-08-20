@@ -1,0 +1,11 @@
+Build complete.
+  Files observed (new): 2
+  Files skipped (cached): 2022
+  Total objects in ledger: 2404
+  Connectors re-scanned: 14
+  Snapshot: .ekos/snapshots/20260820T182251Z.json.zst
+
+real	22m50,039s
+user	0m3,590s
+sys	0m5,236s
+DONE

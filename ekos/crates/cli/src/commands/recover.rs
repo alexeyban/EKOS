@@ -816,7 +816,7 @@ pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn L
     if config.llm.provider.as_deref() == Some("ollama") {
         tracing::info!("using local Ollama provider with disk cache");
         return Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env(),
+            OllamaProvider::from_env_with_model(config.llm.model.as_deref()),
             cache_dir,
         ));
     }

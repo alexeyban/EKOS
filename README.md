@@ -97,7 +97,8 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `dbt-gen`, `common`, `cli`, `demo-server`, `simulation` (RFC 0047-0055's opt-in World Engine — see
 below), and `clickhouse-query` (RFC 0056's opt-in live NL-to-SQL query engine — see below).
 
-**Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs, Confluence, local documents
+**Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs (live-verified against a real
+repo, 1,600 real issues/PRs — RFC 0062), Confluence, local documents
 (PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), Pentaho Kettle (`.ktr`/`.kjb` —
 RFC 0027), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
 Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
@@ -529,6 +530,7 @@ Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presen
 - [Claude Code + EKOS](https://alexeyban.github.io/EKOS/presentations/claude-code-with-ekos.html) — how Claude Code searches and analyzes a codebase through EKOS's MCP server instead of raw grep/Read, with a measured with-vs-without comparison and real token/usage numbers.
 - [The AI-Native Enterprise Knowledge Compiler](https://alexeyban.github.io/EKOS/presentations/ai-native-knowledge-compiler-pitch.html) — the startup pitch, audited live by Claude Code using EKOS's own MCP server.
 - [ClickHouse: Compiled Metadata + Live NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html) — the one explicit, audited exception to "AI never touches raw enterprise systems directly," verified live against a real ClickHouse container, honest failures included.
+- [GitHub, Live, End to End](https://alexeyban.github.io/EKOS/presentations/github-live-cross-system.html) — the GitHub connector's first live run, 1,600 real issues/PRs from a real repo: two known gaps fixed before the run, a third (96% of items collapsing into one identity) found only at real scale and fixed the same session, and the residual limitation reported honestly, not hidden.
 - [Vision & Token Utility](https://alexeyban.github.io/EKOS/presentations/vision-and-token-utility.html) — why the EKOS token's relevance is designed to grow as a consequence of platform adoption, not a promise of price.
 
 See [alexeyban.github.io/EKOS/presentations.html](https://alexeyban.github.io/EKOS/presentations.html) for the full list.

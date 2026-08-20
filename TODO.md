@@ -2429,34 +2429,73 @@ These items have no single phase — they must be maintained and grown throughou
     two questions, no latency measurement, no named-competitor comparison). More questions, more
     repos, and a latency benchmark are natural follow-ons, not attempted here.
 
-- [ ] **`ai.rs::extract_citations` can't distinguish "cited nothing" from "nothing to cite"**
-  - *What:* Found live-testing RFC 0046 against real OpenAI responses (devlog_46): when the
-    trailing `{"cited_evidence": [...]}` block parses as valid JSON but the array is empty,
-    `extract_citations` (`crates/runtime/src/ai.rs`) returns an empty diagnostics list — identical
-    to a genuinely well-cited answer's shape minus the citations themselves. Roughly half of
-    reasonable single-keyword questions tested against `gpt-4o-mini` hit this: a real, grounded,
-    factually-correct answer with zero citations, no warning surfaced anywhere. The system prompt
-    was evidently tuned/tested primarily against Claude; not yet confirmed whether Claude exhibits
-    the same gap, since no `ANTHROPIC_API_KEY` was available to test against directly.
-  - *Output:* Not yet started. Candidate fix: treat a successfully-parsed-but-empty
-    `cited_evidence` array as its own diagnostic case (distinct from "block missing/malformed"),
-    so a caller (CLI, MCP, `demo-server`'s `/ask`) can tell the difference.
-  - *Test/Validate (remaining):* Re-run devlog_46's confirmed-bad question list (`walk`,
-    `filesystem`, `config`, `dir_entry` for `fd`; `prerender`, `bake`, `sanitize` for EKOS-self)
-    after the fix and confirm each now surfaces a distinct diagnostic instead of silence.
+- [x] **Ship the GitHub connector live, end to end — RFC 0062**
+  - *What:* Item 3 of the roadmap: ship one connector "beyond Git/code" against live, real data,
+    not a mock. No account for Salesforce/SAP/Oracle/Fabric/Snowflake/Confluence/Jira, but a real
+    authenticated `gh` CLI token was available — `ekos/plugins/github`'s `GitHubApiClient` was
+    already real HTTP code, just never run live. Fixed two real gaps before running (bare `#N`
+    issue references with no closing keyword weren't detected; `GitHubApiClient` had zero
+    pagination, silently capped at GitHub's 30-item default), then ran live against
+    `github.com/plausible/analytics` (1,600 real issues/PRs, ~23 minutes). That live run
+    immediately surfaced a third, far more severe gap — the same `crates/identity` over-merge
+    class RFC 0060 fixed for `Table`/`Person`/`Document`/`Pipeline` — collapsing **96% of the real
+    items (1,533 of 1,600) into a single identity at confidence 1.00**, because every
+    `Custom("Issue")`/`Custom("PullRequest")` object shares the long, uninformative
+    `"{owner}/{repo}#{number}: "` name prefix.
+  - *Result:* All three fixed the same session. `name_for_similarity` (RFC 0060's extension point)
+    given a third case for `Issue`/`PullRequest`; the catastrophic 1,533-object group is gone.
+    **Not a complete fix** — 1,439 real merge groups remain post-fix (largest 174), and the
+    RFC's own originally-chosen demo PR (#5158) is one of them, its real evidence lost under a
+    surviving sibling identity — reported honestly rather than quietly swapped for a
+    cleaner-looking example. The published deck's positive chain uses a different real PR (#6421)
+    that survived standalone, plus a single real search (`"google analytics import"`) that
+    surfaces real external docs, real code, and real GitHub items together without hand-curation.
+  - *Output:* `docs/presentations/github-live-cross-system.html`, backed by real transcripts under
+    `docs/presentations/examples/github-live-cross-system/`; two real `plausible.io/docs` pages
+    vendored as a second observed source (`analytics-docs/`, RFC 0044 multi-project support, no
+    new code). 10 new tests (+1 behavior-changed) across `github_analyzer.rs`, `plugins/github`,
+    and `crates/identity`.
+  - *Status:* Done for this pass. See `ekos/docs/rfcs/0062-github-live-cross-system-verification.md`
+    and `devlog_63.md` for the full accounting, including what's still open (the residual
+    over-merge, no rate-limit backoff, no request concurrency, full-URL references undetected).
 
-- [ ] **`gather_context` doesn't bound request size against broad/hub-like search terms**
-  - *What:* Found live-testing RFC 0046 (devlog_46): `AiRuntime::gather_context` (`ai.rs:130`) caps
-    seed-match count (`max_matches`) and hop depth (`neighborhood_depth`), but not the size of what
-    a single hop pulls in. Querying EKOS-self's larger (~7,500-object) ledger for broad/hub terms
-    (`artifact`, `openai`, `catalog`, `ollama`) produced real OpenAI API failures —
-    `context_length_exceeded` for one, `rate_limit_exceeded` (one request alone requesting 209,852
-    tokens against a 200,000 TPM limit) for the others. Reproduced consistently, not a fluke.
-  - *Output:* Not yet started. Candidate fix: a size/token budget check in `gather_context` that
-    trims or truncates the gathered `ObjectState`s before serializing them into the prompt, rather
-    than sending an unbounded neighborhood and letting the provider reject the request.
-  - *Test/Validate (remaining):* Re-run the same four confirmed-bad EKOS-self terms after the fix
-    and confirm a real (possibly partial) answer instead of an API error.
+- [x] **Fix real gaps found in an independent Claude+EKOS session transcript**
+  - *What:* Analyzed a separate Claude Code session's transcript running EKOS live against the same
+    `analytics/` repo. Two real, confirmed gaps: a UTF-8 char-boundary panic in
+    `statement_repair.rs`'s `starts_with_keyword()` (the other session's own uncommitted fix kept,
+    given a regression test); `ekos resolve` unconditionally hard-stopping on any identity conflict
+    with no way to proceed (added `--force`, verified against the real 230-conflict set from the
+    global multi-project workspace). A third suspected gap — Postgres `CREATE TYPE ... AS ENUM`
+    parsing — was investigated and found **not** to be real: `sqlparser` 0.53.0 already parses it
+    correctly, confirmed by running the real statement directly, not just reading source. No code
+    change for that one.
+  - *Result:* `ekos resolve --force` lets conflicts be printed without blocking `compile`/`commit`;
+    the panic fix now has real regression coverage. The dual-ledger confusion (local per-project
+    `.ekos/` vs. the global shared workspace connected MCP tools actually query, with
+    `ekos_search`/`ekos_ekl` silently returning empty results when a project isn't in the global
+    config) is real but reported, not fixed this pass — a bigger design question than the other two.
+  - *Output:* `devlog_64.md` has the full accounting, including why the ENUM "gap" turned out to be
+    a false alarm.
+  - *Status:* Done for this pass. No RFC (both fixes are small, well-scoped changes to existing
+    internal helpers/CLI flags, not new capabilities).
+
+- [x] **`ai.rs::extract_citations` can't distinguish "cited nothing" from "nothing to cite"**
+  - *What:* Found live-testing RFC 0046 against real OpenAI responses (devlog_46): a
+    successfully-parsed but empty `cited_evidence` array produced the same empty-diagnostics shape
+    as a genuinely well-cited answer.
+  - *Output:* Fixed (devlog_65): new `AI002` diagnostic, distinct from `AI001` (missing/malformed
+    block), emitted whenever zero citations survive filtering (empty array, or every id unknown).
+  - *Status:* Done — unit-tested (`crates/runtime/src/ai.rs`), full workspace gate green.
+
+- [x] **`gather_context` doesn't bound request size against broad/hub-like search terms**
+  - *What:* Found live-testing RFC 0046 (devlog_46): `AiRuntime::gather_context` capped seed-match
+    count and hop depth, but not the size of what a single hop pulls in — real
+    `context_length_exceeded`/`rate_limit_exceeded` provider failures on broad/hub search terms.
+  - *Output:* Fixed (devlog_65): `AiRuntimeConfig::max_context_chars` (default 200k, configurable
+    via `[ai].max-context-chars`), `gather_context` stops admitting objects once the budget is
+    crossed (always keeping at least one), surfaced as a new `AI003` diagnostic.
+  - *Status:* Done — unit-tested (hub-object repro, truncation + budget-respected cases), full
+    workspace gate green.
 
 - [ ] **Evidence citations show absolute filesystem paths, not repo-relative ones**
   - *What:* Found rehearsing the RFC 0045 demo end-to-end (Playwright screenshots, real `/ask`
@@ -2489,6 +2528,31 @@ These items have no single phase — they must be maintained and grown throughou
     `DefaultResolver`'s blanket kind-exclusion list (`CLAUDE.md`'s `identity` crate-map entry).
   - *Test/Validate (remaining):* Re-run the RFC 0045 bake against `ripgrep` and `bat` and confirm
     zero identity conflicts, without introducing a new over-merge in the other direction.
+  - *Note (devlog_65):* the same root-cause class had one more concrete, previously-`#[ignore]`d
+    instance — PDF/DOCX-derived `Table` objects — fixed by giving `structural_score` a second real
+    signal (`row_cell_tokens`) instead of falling back to its blanket `1.0` floor. The general
+    `ripgrep`/`bat` crate/module-name case above is a different concrete manifestation and remains
+    open.
+
+- [x] **Reread every devlog for unimplemented gaps; fix the small/well-scoped ones**
+  - *What:* User asked for a full reread of all 64 devlogs and a pass at closing whatever gaps
+    remained. Compiled a complete list, sorted into small/well-scoped code fixes (fixed below),
+    large/systemic design work needing its own RFC, and work blocked on external credentials this
+    environment doesn't have.
+  - *Fixed (devlog_65):* `OllamaProvider::from_env()` ignoring `[llm].model`; `ekos ask`'s ranking
+    picking a same-basename fixture over the real file (bm25 content-length skew —
+    `promote_exact_name_matches`); GitHub connector missing full-URL issue/PR references (only
+    bare `#N` before); `ekos_transformation_diff` false-positiving on reordered join keys across
+    Pentaho vs. SQL producers (`canonical_join_keys`) — plus the two `[ai]` fixes marked done
+    above and the PDF-table identity fix noted above.
+  - *Investigated, not a real gap:* a suspected multi-project ID-collision extension turned out to
+    need a real cross-cutting artifact-schema change (project identity was never plumbed into
+    recovery-pass artifacts at all, not just missing from a few analyzers) — re-scoped to Category
+    2 (needs its own RFC) rather than forced through; see devlog_65's "Not fixed" section.
+  - *Also found, not fixed:* `analytics/`'s local ledger has a corrupted FTS5 index (base DB passes
+    `PRAGMA integrity_check`; the virtual table doesn't) — real, physical evidence for the
+    write-barrier/concurrency gap in Priority 4 below, not touched destructively.
+  - *Status:* Done for this pass. See `devlog_65.md`.
 
 - [ ] **`examples/` — at least one runnable example per crate**
   - *What:* Each crate under `crates/` has at least one file in its `examples/` directory that

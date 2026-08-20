@@ -712,14 +712,7 @@ fn node_comparable(obj: &ekos_kir::KirObject, node_type: &str) -> String {
         "Source" | "Sink" => prop("object_name").to_string(),
         "Filter" => prop("excerpt").to_string(),
         "Calculate" => format!("{}={}", prop("output"), prop("excerpt")),
-        "Join" => format!(
-            "{}|{}",
-            prop("join_kind"),
-            obj.properties
-                .get("keys")
-                .map(|v| v.to_string())
-                .unwrap_or_default()
-        ),
+        "Join" => format!("{}|{}", prop("join_kind"), canonical_join_keys(obj)),
         "Aggregate" => format!(
             "{}|{}",
             obj.properties
@@ -733,6 +726,36 @@ fn node_comparable(obj: &ekos_kir::KirObject, node_type: &str) -> String {
         ),
         _ => String::new(),
     }
+}
+
+/// Canonicalized, order-independent rendering of a `Join` node's `properties["keys"]`
+/// (`Vec<(String, String)>`, RFC 0027) for `node_comparable`'s diff-only use — never used for
+/// `node_summary`'s human-readable display, which keeps the producer's own real key order.
+///
+/// Found live (devlog_29 Phase 7 benchmark): the same real join, recovered from two different
+/// producers, records its key pair in opposite tuple order — Pentaho's `MergeJoin` reads
+/// `<key><value1>/<value2>` as `("id", "customer_id")`; `sql_transform_analyzer.rs`'s
+/// `collect_equi_keys` reads `ON customer_id = id` left-to-right as `("customer_id", "id")`. Same
+/// columns, same join, reversed order — without canonicalizing, `ekos_transformation_diff` would
+/// report this unchanged join as both added and removed. Each pair is sorted internally, then the
+/// list of pairs itself is sorted, so producer ordering never affects the comparable string.
+fn canonical_join_keys(obj: &ekos_kir::KirObject) -> String {
+    let Some(keys) = obj.properties.get("keys").and_then(Value::as_array) else {
+        return String::new();
+    };
+    let mut pairs: Vec<[String; 2]> = keys
+        .iter()
+        .filter_map(|pair| {
+            let arr = pair.as_array()?;
+            let a = arr.first()?.as_str()?.to_string();
+            let b = arr.get(1)?.as_str()?.to_string();
+            let mut p = [a, b];
+            p.sort();
+            Some(p)
+        })
+        .collect();
+    pairs.sort();
+    serde_json::to_string(&pairs).unwrap_or_default()
 }
 
 /// Buckets two Transformation IR chains by node type and reports set
@@ -795,6 +818,55 @@ mod tests {
 
     fn parse(response: &str) -> Value {
         serde_json::from_str(response).expect("response is valid JSON")
+    }
+
+    fn join_node(keys: Value) -> ekos_kir::KirObject {
+        let mut obj = ekos_kir::KirObject::new(
+            "join-node",
+            ekos_kir::ObjectKind::Custom("TransformNode".into()),
+        );
+        obj.properties.insert("node_type".into(), json!("Join"));
+        obj.properties.insert("join_kind".into(), json!("Inner"));
+        obj.properties.insert("keys".into(), keys);
+        obj
+    }
+
+    // ── Join-key canonicalization (devlog_29 Phase 7) ────────────────────────────────────
+
+    #[test]
+    fn canonical_join_keys_ignores_within_pair_order() {
+        let a = canonical_join_keys(&join_node(json!([["id", "customer_id"]])));
+        let b = canonical_join_keys(&join_node(json!([["customer_id", "id"]])));
+        assert_eq!(
+            a, b,
+            "same join key, opposite tuple order, must compare equal"
+        );
+    }
+
+    #[test]
+    fn canonical_join_keys_ignores_pair_list_order_for_multi_key_joins() {
+        let a = canonical_join_keys(&join_node(json!([["a", "b"], ["c", "d"]])));
+        let b = canonical_join_keys(&join_node(json!([["d", "c"], ["b", "a"]])));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn canonical_join_keys_still_distinguishes_a_genuinely_different_key() {
+        let a = canonical_join_keys(&join_node(json!([["id", "customer_id"]])));
+        let b = canonical_join_keys(&join_node(json!([["id", "account_id"]])));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn diff_chains_does_not_report_a_reordered_join_key_as_changed() {
+        // Real devlog_29 Phase 7 repro: the same join, recovered by two different producers,
+        // records the same key pair in opposite tuple order.
+        let pentaho_join = join_node(json!([["id", "customer_id"]]));
+        let sql_join = join_node(json!([["customer_id", "id"]]));
+
+        let diff = diff_chains(&[pentaho_join], &[sql_join]);
+        assert_eq!(diff["joins"]["added"], json!([]));
+        assert_eq!(diff["joins"]["removed"], json!([]));
     }
 
     #[test]

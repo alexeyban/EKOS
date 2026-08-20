@@ -416,6 +416,24 @@ fn name_for_similarity(obj: &KirObject) -> &str {
     {
         return local;
     }
+    // `Custom("Issue")`/`Custom("PullRequest")` (RFC 0020) are named
+    // `"{owner}/{repo}#{number}: {title}"` (`github_analyzer.rs`) — every
+    // item in one repo shares the `"{owner}/{repo}#"` prefix, and unlike
+    // `Table`'s schema qualifier this one also swallows the number, so it's
+    // proportionally much longer relative to a typical short PR title.
+    // Confirmed live (RFC 0062, `analytics/`): comparing full names collapsed
+    // 1,533 of 1,600 real, completely unrelated GitHub items — dependency
+    // bumps, CI tweaks, unrelated features — into a single identity at
+    // confidence 1.00. Strip everything through the first `": "` after the
+    // first `#`, leaving just the title (which may itself contain `": "`
+    // later, e.g. `"time-on-page: imported_pages new columns"` — only the
+    // *first* separator, the number/title boundary, is stripped).
+    if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Issue" || k == "PullRequest")
+        && let Some(hash_pos) = obj.name.find('#')
+        && let Some(sep_pos) = obj.name[hash_pos..].find(": ")
+    {
+        return &obj.name[hash_pos + sep_pos + 2..];
+    }
     &obj.name
 }
 
@@ -440,12 +458,22 @@ fn structural_score(a: &KirObject, b: &KirObject) -> f32 {
     if a.kind != b.kind {
         return 0.0;
     }
-    match (similarity::column_names(a), similarity::column_names(b)) {
-        (Some(cols_a), Some(cols_b)) if !cols_a.is_empty() && !cols_b.is_empty() => {
-            similarity::jaccard(&cols_a, &cols_b)
-        }
-        _ => 1.0,
+    if let (Some(cols_a), Some(cols_b)) = (similarity::column_names(a), similarity::column_names(b))
+        && !cols_a.is_empty()
+        && !cols_b.is_empty()
+    {
+        return similarity::jaccard(&cols_a, &cols_b);
     }
+    // PDF/DOCX-derived `Table` objects (`local_docs_analyzer.rs`) have no `columns` property,
+    // but do carry real row content — use it the same way, before falling back to the "no
+    // structural signal" floor below.
+    if let (Some(rows_a), Some(rows_b)) = (
+        similarity::row_cell_tokens(a),
+        similarity::row_cell_tokens(b),
+    ) {
+        return similarity::jaccard(&rows_a, &rows_b);
+    }
+    1.0
 }
 
 // ── Union-Find ────────────────────────────────────────────────────────────────
@@ -757,6 +785,53 @@ mod tests {
     }
 
     #[test]
+    fn name_for_similarity_strips_owner_repo_number_prefix_for_github_items() {
+        let pr = KirObject::new(
+            "plausible/analytics#5158: time-on-page: `imported_pages` new columns",
+            ObjectKind::Custom("PullRequest".into()),
+        );
+        assert_eq!(
+            name_for_similarity(&pr),
+            "time-on-page: `imported_pages` new columns"
+        );
+        let issue = KirObject::new(
+            "plausible/analytics#3828: Shield: Country Rules",
+            ObjectKind::Custom("Issue".into()),
+        );
+        assert_eq!(name_for_similarity(&issue), "Shield: Country Rules");
+    }
+
+    #[test]
+    fn real_github_pull_requests_do_not_all_merge_into_one_identity() {
+        // Real bug (RFC 0062): comparing full `"owner/repo#number: title"` names collapsed
+        // 1,533 of 1,600 real, completely unrelated GitHub items fetched live from
+        // `plausible/analytics` into one identity at confidence 1.00 — every item shares the
+        // `"plausible/analytics#"` prefix, inflating Jaro-Winkler regardless of how different
+        // the real titles are.
+        let g = make_graph(&[
+            (
+                "plausible/analytics#5158: time-on-page: `imported_pages` new columns",
+                ObjectKind::Custom("PullRequest".into()),
+            ),
+            (
+                "plausible/analytics#6527: Bump fast-uri from 3.0.6 to 3.1.4 in /assets",
+                ObjectKind::Custom("PullRequest".into()),
+            ),
+            (
+                "plausible/analytics#5469: remove salts logs",
+                ObjectKind::Custom("PullRequest".into()),
+            ),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "three genuinely unrelated real PRs must not merge just because they share the \
+             owner/repo# prefix — got: {:?}",
+            result.proposals
+        );
+    }
+
+    #[test]
     fn different_kind_same_name_conflict() {
         let g = make_graph(&[
             ("customer", ObjectKind::Table),
@@ -838,43 +913,88 @@ mod tests {
     /// Same root cause as the test above, one kind over: PDF/DOCX-derived
     /// `Table` objects (`crates/recovery/src/local_docs_analyzer.rs`, named
     /// `"{path}: table {n}"`) share both a long literal path prefix *and*
-    /// have no `columns` property (that signal only exists for SQL-derived
-    /// tables), so they get the exact same free structural-score floor.
-    /// Live repro: 9 distinct tables from one real PDF — different content,
-    /// different rows — collapsed into a single canonical `Table` object at
-    /// confidence 0.99. This is the identical failure shape RFC 0024 already
-    /// fixed for `Custom("Section")`, just on `ObjectKind::Table`, which RFC
-    /// 0024 deliberately left untouched because SQL-derived tables need
-    /// real fuzzy name dedup across files — so the fix can't be "exclude
-    /// Table," it has to distinguish PDF-sourced tables (no `columns`) from
-    /// SQL-sourced ones some other way. Currently FAILS; documents the bug.
+    /// previously had no comparable structural signal (`column_names` only
+    /// applies to SQL-derived tables), so they got the exact same free
+    /// structural-score floor. Live repro: 9 distinct tables from one real
+    /// PDF — different content, different rows — collapsed into a single
+    /// canonical `Table` object at confidence 0.99. Fixed by giving
+    /// `structural_score` a second real signal, `similarity::row_cell_tokens`
+    /// (Jaccard over each table's actual cell text, the same real content
+    /// `local_docs_analyzer.rs` already stores under `properties["rows"]`) —
+    /// this is the identical failure shape RFC 0024 already fixed for
+    /// `Custom("Section")`, just on `ObjectKind::Table`, which RFC 0024
+    /// deliberately left untouched (SQL-derived tables still need real
+    /// fuzzy name dedup across files, so the fix couldn't be "exclude
+    /// Table" — it had to distinguish PDF-sourced tables from SQL-sourced
+    /// ones by an actual structural signal instead).
     #[test]
-    #[ignore = "known bug, tracked for a follow-up fix — see doc comment above"]
     fn distinct_pdf_tables_in_one_document_do_not_all_merge() {
-        let g = make_graph(&[
+        let mut g = KirGraph::new();
+        let tables: &[(&str, &[&[&str]])] = &[
             (
                 "docs/120 Data Science Interview Questions.pdf: table 1",
-                ObjectKind::Table,
+                &[
+                    &["Question", "Topic"],
+                    &["What is bias-variance tradeoff?", "ML theory"],
+                ],
             ),
             (
                 "docs/120 Data Science Interview Questions.pdf: table 2",
-                ObjectKind::Table,
+                &[&["Chapter", "Page"], &["Statistics", "12"]],
             ),
             (
                 "docs/120 Data Science Interview Questions.pdf: table 3",
-                ObjectKind::Table,
+                &[
+                    &["Term", "Definition"],
+                    &["Overfitting", "Memorizing noise"],
+                ],
             ),
             (
                 "docs/120 Data Science Interview Questions.pdf: table 4",
-                ObjectKind::Table,
+                &[
+                    &["Algorithm", "Use case"],
+                    &["Random Forest", "Classification"],
+                ],
             ),
-        ]);
+        ];
+        for (name, rows) in tables {
+            let row_values: Vec<Vec<&str>> = rows.iter().map(|r| r.to_vec()).collect();
+            let obj = KirObject::new(*name, ObjectKind::Table)
+                .with_property("rows", serde_json::json!(row_values));
+            g.add_object(obj);
+        }
         let result = DefaultResolver::new().resolve(&g);
         assert!(
             result.proposals.is_empty(),
-            "four distinct tables extracted from one PDF must not collapse into one canonical \
-             table just because they share a name prefix and have no `columns` property to \
-             compare — got: {:?}",
+            "four distinct tables extracted from one PDF, with real distinct row content, must \
+             not collapse into one canonical table just because they share a name prefix — got: \
+             {:?}",
+            result.proposals
+        );
+    }
+
+    /// Two `Table` objects that share the same real row content (e.g. the same PDF re-extracted,
+    /// or a genuinely duplicated table) must still be proposed for merge — the fix above must not
+    /// make every PDF table look unique regardless of content.
+    #[test]
+    fn pdf_tables_with_identical_row_content_still_merge() {
+        let rows =
+            serde_json::json!([["Question", "Topic"], ["What is overfitting?", "ML theory"]]);
+        let mut g = KirGraph::new();
+        g.add_object(
+            KirObject::new("docs/report-v1.pdf: table 1", ObjectKind::Table)
+                .with_property("rows", rows.clone()),
+        );
+        g.add_object(
+            KirObject::new("docs/report-v2.pdf: table 1", ObjectKind::Table)
+                .with_property("rows", rows),
+        );
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "two tables with identical real row content should still be proposed as one merge \
+             group — got: {:?}",
             result.proposals
         );
     }

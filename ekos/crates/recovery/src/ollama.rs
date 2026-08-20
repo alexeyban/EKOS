@@ -25,9 +25,20 @@ impl OllamaProvider {
     /// Create from environment: `OLLAMA_BASE_URL` / `OLLAMA_MODEL`, each
     /// falling back to a sane local default. Cannot fail.
     pub fn from_env() -> Self {
+        Self::from_env_with_model(None)
+    }
+
+    /// Same as [`from_env`](Self::from_env), but `model_override` (`[llm].model` in
+    /// `ekos.toml`) takes priority over `OLLAMA_MODEL`, which in turn takes priority over the
+    /// built-in default — previously `[llm].model` was silently ignored for the Ollama provider,
+    /// only ever consulted for Anthropic/OpenAI.
+    pub fn from_env_with_model(model_override: Option<&str>) -> Self {
         let base_url =
             std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
-        let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+        let model = model_override
+            .map(str::to_string)
+            .or_else(|| std::env::var("OLLAMA_MODEL").ok())
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
         Self::new(model, base_url)
     }
 
@@ -157,6 +168,29 @@ mod tests {
         let provider = OllamaProvider::from_env();
         assert_eq!(provider.model_name(), DEFAULT_MODEL);
         assert_eq!(provider.base_url, DEFAULT_BASE_URL);
+
+        // Precedence chain for `from_env_with_model`, in the same test function as the
+        // defaults check above: both mutate the same process-global `OLLAMA_MODEL` var, and
+        // Rust runs test functions in parallel by default, so this can't safely be split into
+        // separate `#[test]` functions without a race (confirmed live — it raced on the first
+        // attempt).
+        // SAFETY: test-local env mutation, no concurrent access to this var elsewhere.
+        unsafe {
+            std::env::set_var("OLLAMA_MODEL", "env-model");
+        }
+        assert_eq!(
+            OllamaProvider::from_env_with_model(None).model_name(),
+            "env-model",
+            "no override given — should fall back to OLLAMA_MODEL"
+        );
+        assert_eq!(
+            OllamaProvider::from_env_with_model(Some("configured-model")).model_name(),
+            "configured-model",
+            "explicit override should win over OLLAMA_MODEL"
+        );
+        unsafe {
+            std::env::remove_var("OLLAMA_MODEL");
+        }
     }
 
     /// RFC 0008/0021 determinism contract: temperature is always 0,

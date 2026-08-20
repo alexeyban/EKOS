@@ -35,6 +35,13 @@ const CRYPTO_EXPORT_DIR_ENV: &str = "EKOS_CRYPTO_EXPORT_DIR";
 const GITHUB_OWNER_ENV: &str = "EKOS_GITHUB_OWNER";
 const GITHUB_REPO_ENV: &str = "EKOS_GITHUB_REPO";
 const GITHUB_TOKEN_ENV: &str = "EKOS_GITHUB_TOKEN";
+/// Optional pagination knobs for the GitHub connector (RFC 0062). Both unset
+/// reproduces the pre-RFC-0062 single-page behavior exactly (see
+/// `GitHubApiClient::with_pagination`'s doc comment) — GitHub's own default
+/// page size (30 items) otherwise silently truncates any repo with more
+/// history than that.
+const GITHUB_PER_PAGE_ENV: &str = "EKOS_GITHUB_PER_PAGE";
+const GITHUB_MAX_PAGES_ENV: &str = "EKOS_GITHUB_MAX_PAGES";
 
 /// Env vars naming the Confluence site/space to observe (see RFC 0022).
 /// Both base URL and space key must be set — the observer is only added
@@ -114,11 +121,17 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     ) {
         (Ok(owner), Ok(repo)) => {
             let token = std::env::var(GITHUB_TOKEN_ENV).ok();
-            observers.push(Box::new(GitHubObserver::new(
-                Arc::new(GitHubApiClient::new(token)),
-                owner,
-                repo,
-            )));
+            let per_page = std::env::var(GITHUB_PER_PAGE_ENV)
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok());
+            let max_pages = std::env::var(GITHUB_MAX_PAGES_ENV)
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok());
+            let mut client = GitHubApiClient::new(token);
+            if per_page.is_some() || max_pages.is_some() {
+                client = client.with_pagination(per_page, max_pages.unwrap_or(1));
+            }
+            observers.push(Box::new(GitHubObserver::new(Arc::new(client), owner, repo)));
         }
         _ => {
             tracing::debug!(

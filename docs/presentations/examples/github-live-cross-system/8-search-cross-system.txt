@@ -1,0 +1,33 @@
+$ ekos query find 'google analytics import'
+31 result(s) for 'google analytics import':
+  3a0e1445-7a53-5456-8e11-069e6aa9d3a7  google-analytics-import.html: section 10
+  66fbec8c-0600-5eba-9154-c92e69871f4b  lib/plausible_web/templates/email/google_analytics_import.html.heex
+  5be472fb-c037-55b6-b9eb-0aa82aecce01  google-analytics-import.html
+  5a6e792a-e9e1-538c-98c6-c0739fb87fce  plausible/analytics#5305: GA4 import: refresh google auth along the way so token doesn't expire during >1hr imports
+  84fd9754-af4e-517f-9069-1754bb402a48  google-analytics-import.html
+  4c6c1517-ae24-5570-aba0-4a4ff4e8d52d  google-analytics-import.html: section 1
+  877e7e7e-d034-5562-896b-4494866cbfd9  google-analytics-import.html: section 8
+  99594fb5-1c2f-56ef-9902-c7650d4e097b  google-analytics-import.html: section 3
+  7f7598db-212d-5998-9fdc-0b67bfe6381d  google-analytics-import.html: section 9
+  6b34de01-9d3c-573c-af73-c10837da720c  google-analytics-import.html: section 7
+  5e768a65-6997-5e0f-865e-a629fa929c1f  google-analytics-import.html: section 2
+  1ce8da44-b656-56ab-93da-e5a64e2b64eb  lib/plausible/imported/google_analytics4.ex
+  c3c9b36a-11a8-5d84-b52f-d31433aecdeb  google-analytics-import.html: section 5
+  2d6275ad-956f-58d8-931a-955d458c95df  google-analytics-import.html: section 4
+  8449cc6a-ec5d-5e2e-8b2d-e910cfc8cde4  google-analytics-import.html: section 6
+  e8f3057d-ee30-5b17-967f-1231785f349f  test/plausible_web/controllers/google_analytics_controller_test.exs
+  c1d0aefc-e760-5d03-9a9e-d92e67131e8d  lib/plausible_web/templates/google_analytics/confirm.html.heex
+  fb459826-f6d4-5f52-98e7-9fb7ac733627  lib/plausible/google/ga4/api.ex
+  dde28acf-6e0e-59b2-b4e1-8984d3c8ff94  lib/plausible_web/controllers/google_analytics_controller.ex
+  9c67c30d-1013-5dd7-8c87-5083114aeb29  lib/plausible/google/api.ex
+  80f4bcef-3e0a-5bdf-be7c-aaa10a65b6ff  lib/plausible_web/templates/google_analytics/property_form.html.heex
+  27075a62-eaf6-58df-87bc-d61ca7852fa8  lib/plausible/imported/universal_analytics.ex
+  065ff810-0fb3-57a9-a229-ab85e3408c47  csv-import.html: section 1
+  b6b76c59-9a0f-510b-8f3a-8d85ee4db50d  lib/plausible/imported/importer.ex
+  03a32716-2989-588c-a153-dbfa4cf30281  lib/plausible/imported/noop_importer.ex
+  b2973dbc-f7fa-5cd2-9ae4-95e9996b070d  csv-import.html: section 11
+  24859b5e-ed91-5b51-9cc0-e8ae0ce36f26  CHANGELOG.md: section 10
+  faf69be1-afc2-5a91-8cf8-d619a95cd267  README.md: section 2
+  fa5d9775-1523-5142-8cff-9f3d20d453eb  test/plausible/billing/plan_benefits_test.exs
+  91c2abaf-f8b4-5790-b89b-b712ee768078  csv-import.html: section 2
+  7cbc62b9-8a72-51f3-b583-8101039ea454  lib/plausible/billing/plan_benefits.ex

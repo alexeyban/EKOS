@@ -438,6 +438,7 @@ footer a:hover{ color:var(--accent-a); }
     <div class="stat"><div class="num">34s</div><div class="label">cold ingestion, 2,022-file real repo, timed live</div></div>
     <div class="stat"><div class="num">2</div><div class="label">real ETL projects recovered cold</div></div>
     <div class="stat"><div class="num">2</div><div class="label">GitHub issues filed and closed on real gaps</div></div>
+    <div class="stat"><div class="num">1,600</div><div class="label">real GitHub issues/PRs fetched live — <a href="presentations/github-live-cross-system.html" style="color:inherit;">see the run</a></div></div>
     <div class="stat"><div class="num">0</div><div class="label">fabricated facts — <code class="mono">Unmapped</code> is a citizen, not a failure</div></div>
   </div>
 </section>
@@ -496,6 +497,14 @@ footer a:hover{ color:var(--accent-a); }
       <p class="desc">Issues, PRs, files, and their real relationships compiled into an
       append-only, evidence-backed ledger any MCP-speaking agent can query.</p>
       <div class="rfc-tag">RFC 0013 · RFC 0020</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/github-live-cross-system.html">GitHub, Live, End to End</a>
+      <p class="desc">First live run — 1,600 real issues/PRs, a real repo, not a mock. Two known
+      gaps fixed before the run; a third (96% of items collapsing into one identity) found only at
+      real scale and fixed the same session. Real docs, code, and GitHub items surfaced by one
+      query — plus the honest residual limitation, not hidden.</p>
+      <div class="rfc-tag">RFC 0020 · RFC 0062</div>
     </li>
     <li>
       <a class="deck" href="presentations/pentaho-sql-recovery-for-data-engineers.html">Pentaho + SQL Recovery, Tested Cold</a>

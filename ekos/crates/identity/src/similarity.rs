@@ -24,6 +24,37 @@ pub fn column_names(obj: &KirObject) -> Option<HashSet<String>> {
     if names.is_empty() { None } else { Some(names) }
 }
 
+/// Lowercased, deduplicated set of cell text from a `KirObject`'s `properties["rows"]`
+/// (`Vec<Vec<String>>`, as written by `local_docs_analyzer.rs` for a PDF/DOCX-extracted table) —
+/// the real structural signal PDF-derived `Table` objects carry, distinct from SQL-derived
+/// tables' `"columns"` property. `None` if absent/empty, matching `column_names`'s own convention
+/// so `structural_score` can fall through the same way.
+///
+/// Without this, `structural_score` had no way to distinguish two different tables extracted from
+/// the same PDF (same long name prefix, no `columns` property) and fell back to its blanket `1.0`
+/// "no structural signal" default — the same over-merge failure shape RFC 0024/0060 already fixed
+/// for other kinds, just never closed for PDF-sourced `Table` objects specifically (confirmed
+/// live: 9 distinct tables from one real PDF collapsed into one canonical object at confidence
+/// 0.99).
+pub fn row_cell_tokens(obj: &KirObject) -> Option<HashSet<String>> {
+    let rows = obj.properties.get("rows")?.as_array()?;
+    let mut cells = HashSet::new();
+    for row in rows {
+        let Some(row_cells) = row.as_array() else {
+            continue;
+        };
+        for cell in row_cells {
+            if let Some(s) = cell.as_str() {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    cells.insert(trimmed.to_lowercase());
+                }
+            }
+        }
+    }
+    if cells.is_empty() { None } else { Some(cells) }
+}
+
 /// Jaccard similarity (intersection over union) between two sets.
 pub fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
     let union = a.union(b).count();

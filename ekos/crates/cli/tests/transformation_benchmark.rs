@@ -161,7 +161,7 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
     ekos::commands::recover::run(&config, dir, false)
         .await
         .unwrap();
-    ekos::commands::resolve::run(&config, dir).unwrap();
+    ekos::commands::resolve::run(&config, dir, false).unwrap();
     ekos::commands::compile::run(&config, dir).await.unwrap();
     ekos::commands::commit::run(&config, dir).unwrap();
 

@@ -69,6 +69,7 @@ fn ends_with_set_op_keyword(trimmed: &str) -> bool {
 
 fn starts_with_keyword(trimmed: &str, kw: &str) -> bool {
     trimmed.len() >= kw.len()
+        && trimmed.is_char_boundary(kw.len())
         && trimmed[..kw.len()].eq_ignore_ascii_case(kw)
         && trimmed[kw.len()..]
             .chars()
@@ -116,6 +117,23 @@ SELECT * FROM t
     #[test]
     fn does_not_split_inside_open_parens() {
         let sql = "CREATE TABLE t (\n  id INT,\n  status VARCHAR(50)\n)\n\nSELECT * FROM t\n";
+        let repaired = ensure_statement_separators(sql);
+        let stmts = Parser::parse_sql(&MsSqlDialect {}, &repaired).unwrap();
+        assert_eq!(stmts.len(), 2);
+    }
+
+    #[test]
+    fn starts_with_keyword_does_not_panic_on_multibyte_char_near_boundary() {
+        // U+2014 EM DASH is 3 UTF-8 bytes; here it occupies byte offsets 3..6, so byte offset 4
+        // (the length of the keyword "WITH") falls inside it, not on a char boundary. Before the
+        // `is_char_boundary` guard, `trimmed[..kw.len()]` panicked on input shaped like this.
+        let trimmed = "-- \u{2014}note";
+        assert!(!starts_with_keyword(trimmed, "WITH"));
+    }
+
+    #[test]
+    fn does_not_panic_on_multibyte_comment_line_mid_statement() {
+        let sql = "CREATE TABLE t (id INT)\n\n-- \u{2014}note\nSELECT * FROM t\n";
         let repaired = ensure_statement_separators(sql);
         let stmts = Parser::parse_sql(&MsSqlDialect {}, &repaired).unwrap();
         assert_eq!(stmts.len(), 2);

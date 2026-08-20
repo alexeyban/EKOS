@@ -15,6 +15,12 @@ use std::sync::Arc;
 use thiserror::Error;
 
 const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
+/// Default cap on the total serialized size of gathered `ObjectState` context, in characters.
+/// ~200k chars (~50k tokens at a conservative ~4 chars/token) — comfortably under the rate/context
+/// limits that broad, hub-like search terms were observed to blow through in practice (RFC 0046,
+/// devlog_46): a single real request against EKOS-self's ~7,500-object ledger asked for 209,852
+/// tokens against a 200,000 TPM limit, with no budget check anywhere upstream to stop it.
+const DEFAULT_MAX_CONTEXT_CHARS: u32 = 200_000;
 const DEFAULT_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime assistant. Answer only using the JSON context provided.
 Every claim must be traceable to the supplied evidence. End your response with a JSON block:
 {"cited_evidence": ["<id>", ...]}
@@ -41,6 +47,11 @@ pub struct AiRuntimeConfig {
     pub neighborhood_depth: u32,
     pub max_tokens: u32,
     pub system_prompt: String,
+    /// Cap on the total serialized size (characters) of gathered `ObjectState` context sent to
+    /// the LLM. `max_matches`/`neighborhood_depth` bound seed count and hop depth, but not what a
+    /// single hop pulls in — a hub-like object with hundreds of neighbors could still blow past
+    /// any provider's context/rate limit. See [`DEFAULT_MAX_CONTEXT_CHARS`].
+    pub max_context_chars: u32,
 }
 
 impl Default for AiRuntimeConfig {
@@ -51,6 +62,7 @@ impl Default for AiRuntimeConfig {
             neighborhood_depth: 1,
             max_tokens: 1024,
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
+            max_context_chars: DEFAULT_MAX_CONTEXT_CHARS,
         }
     }
 }
@@ -96,7 +108,7 @@ impl<'a> AiRuntime<'a> {
     }
 
     pub async fn ask(&self, question: &str) -> Result<AiAnswer, AiError> {
-        let contexts = self.gather_context(question)?;
+        let (contexts, mut diagnostics) = self.gather_context(question)?;
 
         let known_evidence: HashSet<KirId> = contexts
             .iter()
@@ -114,8 +126,9 @@ impl<'a> AiRuntime<'a> {
         };
         let resp = self.llm.complete(&req).await?;
 
-        let (answer, evidence_refs, diagnostics) =
+        let (answer, evidence_refs, citation_diagnostics) =
             extract_citations(&resp.content, &known_evidence);
+        diagnostics.extend(citation_diagnostics);
 
         Ok(AiAnswer {
             answer,
@@ -124,10 +137,22 @@ impl<'a> AiRuntime<'a> {
         })
     }
 
-    /// Retrieve top-ranked object matches, expand each into its neighbourhood,
-    /// and reconstruct full state (object + relationships + evidence) for
-    /// every object gathered. Deduplicated by object id.
-    fn gather_context(&self, question: &str) -> Result<Vec<ObjectState>, AiError> {
+    /// Retrieve top-ranked object matches, expand each into its neighbourhood, and reconstruct
+    /// full state (object + relationships + evidence) for every object gathered, deduplicated by
+    /// object id, stopping once `max_context_chars` worth of serialized state has been gathered.
+    ///
+    /// Without this cap, a hub-like seed object (one with hundreds of real neighbors) could pull
+    /// its entire neighborhood into the prompt regardless of `max_matches`/`neighborhood_depth` —
+    /// those bound seed count and hop *depth*, never what a single hop actually pulls in. Found
+    /// live-testing RFC 0046 (devlog_46): broad/hub search terms against EKOS-self's ~7,500-object
+    /// ledger produced real `context_length_exceeded`/`rate_limit_exceeded` provider errors, one
+    /// request alone asking for 209,852 tokens against a 200,000 TPM limit. The first object is
+    /// always admitted regardless of its own size, so a single oversized object can never make
+    /// `ask` answer from zero context.
+    fn gather_context(
+        &self,
+        question: &str,
+    ) -> Result<(Vec<ObjectState>, Vec<Diagnostic>), AiError> {
         let matches = self.search_for_question(question)?;
         let top: Vec<KirId> = matches
             .into_iter()
@@ -148,13 +173,36 @@ impl<'a> AiRuntime<'a> {
             }
         }
 
+        let budget = self.config.max_context_chars as usize;
         let mut contexts = Vec::new();
+        let mut total_chars = 0usize;
+        let mut omitted = 0usize;
         for id in &ids {
-            if let Some(state) = self.runtime.reconstruct_state(id)? {
-                contexts.push(state);
+            let Some(state) = self.runtime.reconstruct_state(id)? else {
+                continue;
+            };
+            let size = serde_json::to_string(&state)?.len();
+            if !contexts.is_empty() && total_chars + size > budget {
+                omitted += 1;
+                continue;
             }
+            total_chars += size;
+            contexts.push(state);
         }
-        Ok(contexts)
+
+        let diagnostics = if omitted > 0 {
+            vec![Diagnostic::warning(
+                "AI003",
+                format!(
+                    "context truncated to stay under the {budget}-character budget — {omitted} \
+                     neighborhood object(s) omitted, {} included (~{total_chars} chars)",
+                    contexts.len()
+                ),
+            )]
+        } else {
+            Vec::new()
+        };
+        Ok((contexts, diagnostics))
     }
 
     /// Turns a natural-language `question` into a search that `Runtime::find_objects` (backed by
@@ -232,9 +280,18 @@ fn extract_search_terms(question: &str) -> Vec<String> {
 }
 
 /// Parses a trailing `{"cited_evidence": [...]}` block from an LLM response.
-/// Unknown or malformed ids are silently dropped; a missing/unparsable block
-/// yields the whole response as the answer with an empty citation list and a
+/// Unknown or malformed ids are dropped; a missing/unparsable block yields the
+/// whole response as the answer with an empty citation list and an `AI001`
 /// warning diagnostic — the answer is never discarded.
+///
+/// A block that parses cleanly but whose citations don't survive filtering (an empty array, or
+/// every id unknown/malformed) gets its own `AI002` diagnostic, distinct from `AI001` — found
+/// live-testing RFC 0046 against real `gpt-4o-mini` responses (devlog_46): roughly half of
+/// reasonable single-keyword questions returned a confident, correct-looking answer with a
+/// successfully-parsed but empty `cited_evidence` array, which previously produced the exact same
+/// empty-diagnostics shape as a genuinely well-cited answer — a caller (CLI/MCP/demo-server) had
+/// no way to tell "this answer is ungrounded" from "this answer is well-grounded" without
+/// separately checking `evidence_refs.is_empty()` itself.
 fn extract_citations(
     content: &str,
     known_evidence: &HashSet<KirId>,
@@ -249,7 +306,17 @@ fn extract_citations(
                 .filter_map(|s| s.parse::<KirId>().ok())
                 .filter(|id| known_evidence.contains(id))
                 .collect();
-            return (answer_part.trim().to_string(), evidence_refs, Vec::new());
+            let diagnostics = if evidence_refs.is_empty() {
+                vec![Diagnostic::warning(
+                    "AI002",
+                    "LLM response included a cited_evidence block, but no citations survived it \
+                     (empty array, or none of the ids matched evidence actually supplied in \
+                     context) — treat this answer as ungrounded even though it parsed cleanly",
+                )]
+            } else {
+                Vec::new()
+            };
+            return (answer_part.trim().to_string(), evidence_refs, diagnostics);
         }
     }
 
@@ -298,6 +365,26 @@ mod tests {
         (orders_id, ev_id)
     }
 
+    /// A "hub" object connected to `n` leaf objects — models the real broad/hub-term shape
+    /// (devlog_46) that pulled hundreds of neighbors into a single-hop expansion with no size cap.
+    fn seed_hub(ledger: &Ledger, n: usize) -> KirId {
+        let hub = KirObject::new("hub", ObjectKind::Table);
+        let hub_id = hub.id;
+        ledger.append_object(&hub).unwrap();
+        for i in 0..n {
+            let leaf = KirObject::new(format!("hub leaf {i}"), ObjectKind::Table);
+            ledger.append_object(&leaf).unwrap();
+            ledger
+                .append_relationship(&KirRelationship::new(
+                    RelationshipKind::ForeignKey,
+                    hub_id,
+                    leaf.id,
+                ))
+                .unwrap();
+        }
+        hub_id
+    }
+
     #[tokio::test]
     async fn ask_sends_object_context_in_prompt() {
         let (ledger, _dir) = temp_ledger();
@@ -311,7 +398,11 @@ mod tests {
         let answer = ai.ask("orders").await.unwrap();
 
         assert!(answer.answer.contains("Orders depends on customers"));
-        assert!(answer.diagnostics.is_empty());
+        // An empty `cited_evidence` array is a real, distinct AI002 diagnostic case (see
+        // `extract_citations`) — the answer is kept, but it's flagged as ungrounded, not silently
+        // treated the same as a genuinely well-cited answer.
+        assert_eq!(answer.diagnostics.len(), 1);
+        assert_eq!(answer.diagnostics[0].code, "AI002");
     }
 
     #[tokio::test]
@@ -359,6 +450,73 @@ mod tests {
         let answer = ai.ask("orders").await.unwrap();
 
         assert!(answer.evidence_refs.is_empty());
+        // The block parsed cleanly, but nothing in it survived the known-evidence filter — same
+        // AI002 "ungrounded despite a clean parse" case as an empty array.
+        assert_eq!(answer.diagnostics.len(), 1);
+        assert_eq!(answer.diagnostics[0].code, "AI002");
+    }
+
+    // ── Context size budget (devlog_46/devlog_64) ────────────────────────────────────────
+
+    #[test]
+    fn gather_context_admits_at_least_one_object_even_under_a_tiny_budget() {
+        let (ledger, _dir) = temp_ledger();
+        seed_hub(&ledger, 20);
+        let runtime = Runtime::new(&ledger);
+        let mut config = AiRuntimeConfig::default();
+        config.max_matches = 1;
+        config.neighborhood_depth = 1;
+        config.max_context_chars = 1; // smaller than even one serialized object
+        let ai = AiRuntime::new(&runtime, Arc::new(MockLlmProvider::new("x")), config);
+
+        let (contexts, diagnostics) = ai.gather_context("hub").unwrap();
+
+        assert!(!contexts.is_empty(), "first object must always be admitted");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "AI003");
+    }
+
+    #[test]
+    fn gather_context_stays_under_budget_and_truncates_a_large_hub_neighborhood() {
+        let (ledger, _dir) = temp_ledger();
+        seed_hub(&ledger, 20);
+        let runtime = Runtime::new(&ledger);
+        let mut config = AiRuntimeConfig::default();
+        config.max_matches = 1;
+        config.neighborhood_depth = 1;
+        config.max_context_chars = 500;
+        let ai = AiRuntime::new(&runtime, Arc::new(MockLlmProvider::new("x")), config);
+
+        let (contexts, diagnostics) = ai.gather_context("hub").unwrap();
+
+        // The hub has 21 real neighborhood objects (itself + 20 leaves); a 500-char budget
+        // must not admit all of them.
+        assert!(
+            contexts.len() < 21,
+            "expected truncation, got {} objects",
+            contexts.len()
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("omitted"));
+    }
+
+    #[tokio::test]
+    async fn ask_surfaces_context_truncation_diagnostic_alongside_citation_diagnostics() {
+        let (ledger, _dir) = temp_ledger();
+        seed_hub(&ledger, 20);
+        let runtime = Runtime::new(&ledger);
+        let mut config = AiRuntimeConfig::default();
+        config.max_matches = 1;
+        config.neighborhood_depth = 1;
+        config.max_context_chars = 500;
+        let llm = Arc::new(MockLlmProvider::new("An answer with no citation block."));
+        let ai = AiRuntime::new(&runtime, llm, config);
+
+        let answer = ai.ask("hub").await.unwrap();
+
+        let codes: Vec<&str> = answer.diagnostics.iter().map(|d| d.code.as_str()).collect();
+        assert!(codes.contains(&"AI003"), "expected AI003 in {codes:?}");
+        assert!(codes.contains(&"AI001"), "expected AI001 in {codes:?}");
     }
 
     // ── RFC 0061: natural-language question retrieval ───────────────────────────────────

@@ -96,6 +96,7 @@ pub struct AiConfig {
     pub neighborhood_depth: Option<u32>,
     pub max_tokens: Option<u32>,
     pub system_prompt: Option<String>,
+    pub max_context_chars: Option<u32>,
 }
 
 /// Gating for RFC 0026's `DocumentSemanticsAnalyzerPass`. Opt-in because the

@@ -1,0 +1,26 @@
+[
+  {
+    "sha": "b88a9432af3d1be38a6ccafb8bd9b3b1e4905f60",
+    "filename": "priv/ingest_repo/migrations/20250221124625_imported_pages_total_time_on_page.exs",
+    "status": "added",
+    "additions": 10,
+    "deletions": 0,
+    "changes": 10,
+    "blob_url": "https://github.com/plausible/analytics/blob/563bc61100137c48824ddfce1bd4b1ae4150b4ea/priv%2Fingest_repo%2Fmigrations%2F20250221124625_imported_pages_total_time_on_page.exs",
+    "raw_url": "https://github.com/plausible/analytics/raw/563bc61100137c48824ddfce1bd4b1ae4150b4ea/priv%2Fingest_repo%2Fmigrations%2F20250221124625_imported_pages_total_time_on_page.exs",
+    "contents_url": "https://api.github.com/repos/plausible/analytics/contents/priv%2Fingest_repo%2Fmigrations%2F20250221124625_imported_pages_total_time_on_page.exs?ref=563bc61100137c48824ddfce1bd4b1ae4150b4ea",
+    "patch": "@@ -0,0 +1,10 @@\n+defmodule Plausible.IngestRepo.Migrations.ImportedPagesTotalTimeOnPage do\n+  use Ecto.Migration\n+\n+  def change do\n+    alter table(:imported_pages) do\n+      add :total_time_on_page, :UInt64\n+      add :total_time_on_page_visits, :UInt64\n+    end\n+  end\n+end"
+  },
+  {
+    "sha": "548aa369931ffad464a805621d595ddf2517f5f1",
+    "filename": "priv/ingest_repo/migrations/20250304074501_populate_imported_pages_total_time_on_page.exs",
+    "status": "added",
+    "additions": 19,
+    "deletions": 0,
+    "changes": 19,
+    "blob_url": "https://github.com/plausible/analytics/blob/563bc61100137c48824ddfce1bd4b1ae4150b4ea/priv%2Fingest_repo%2Fmigrations%2F20250304074501_populate_imported_pages_total_time_on_page.exs",
+    "raw_url": "https://github.com/plausible/analytics/raw/563bc61100137c48824ddfce1bd4b1ae4150b4ea/priv%2Fingest_repo%2Fmigrations%2F20250304074501_populate_imported_pages_total_time_on_page.exs",
+    "contents_url": "https://api.github.com/repos/plausible/analytics/contents/priv%2Fingest_repo%2Fmigrations%2F20250304074501_populate_imported_pages_total_time_on_page.exs?ref=563bc61100137c48824ddfce1bd4b1ae4150b4ea",
+    "patch": "@@ -0,0 +1,19 @@\n+defmodule Plausible.IngestRepo.Migrations.PopulateImportedPagesTotalTimeOnPage do\n+  use Ecto.Migration\n+\n+  def up do\n+    # Note: This only populates the new column for old GA4 imports.\n+    # Other imports didn't populate the `time_on_page` column.\n+    execute \"\"\"\n+    ALTER TABLE imported_pages\n+    UPDATE\n+      total_time_on_page = time_on_page,\n+      total_time_on_page_visits = visits\n+    WHERE time_on_page > 0\n+    \"\"\"\n+  end\n+\n+  def down do\n+    raise \"Irreversible\"\n+  end\n+end"
+  }
+]

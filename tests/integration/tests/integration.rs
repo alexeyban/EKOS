@@ -21,7 +21,7 @@ fn fixtures_dir() -> PathBuf {
 async fn run_pipeline(config: &EkosConfig, dir: &Path) -> Result<()> {
     ekos::commands::build::run(config, dir).await?;
     ekos::commands::recover::run(config, dir, false).await?;
-    ekos::commands::resolve::run(config, dir)?;
+    ekos::commands::resolve::run(config, dir, false)?;
     ekos::commands::compile::run(config, dir).await?;
     ekos::commands::commit::run(config, dir)?;
     Ok(())
