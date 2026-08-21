@@ -55,6 +55,9 @@ extend for this.
 - Supporting every DAO governance platform. v1 targets one forum flavor (Discourse) or Snapshot,
   not both, and not e.g. Tally, Aragon, or Colony (see Open Questions).
 
+_Both the raw-RPC connector and broader DAO governance platform support are tracked as backlog:
+see `TODO.md` → "Promoted from RFC Non-Goals" → "Connector-specific gaps"._
+
 ## Design
 
 ### `TreasuryObserver` (new crate, e.g. `ekos/plugins/treasury`)

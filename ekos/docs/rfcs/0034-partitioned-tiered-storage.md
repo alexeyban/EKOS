@@ -49,6 +49,9 @@ the segment/frame format itself.
   that is kept. RFC 0033's per-channel opt-in remains the actual lever for not ingesting unwanted
   volume in the first place; any future "delete data older than N" policy is a distinct RFC given
   the ledger's append-only invariant (`CLAUDE.md`'s key invariants).
+
+_Both multi-machine distribution and retention/deletion are tracked under `TODO.md` → "Storage
+architecture: none of this is implemented yet"._
 - Changing the segment/frame format. Every existing guarantee (checksummed frames, crash recovery,
   manifest verification) is reused unchanged, once per partition.
 

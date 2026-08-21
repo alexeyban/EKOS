@@ -86,6 +86,9 @@ Two changes to `crates/identity/src/lib.rs`:
   same-source merges) than this RFC's scope; named above as the natural next step if the residual
   cases matter enough to a user to justify it.
 
+_Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Identity resolution".
+Restated in RFC 0062 for the analogous GitHub-item over-merge case — one tracked item._
+
 ## Design
 
 ```rust

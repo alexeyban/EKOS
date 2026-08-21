@@ -79,6 +79,10 @@ so this RFC builds on fact, not assumption:
   `AiRuntime::ask`'s LLM call entirely and returning raw neighborhood facts) that this RFC
   deliberately does not attempt; the guardrails below (Design, "Live-LLM-endpoint guardrails")
   exist specifically because this pass keeps the real LLM-backed path instead.
+
+_Both general self-serve ingestion and the no-LLM answer mode are tracked as backlog: see
+`TODO.md` → "Promoted from RFC Non-Goals" → "Demo server". (This RFC also reaffirms RFC 0037's
+still-open "no HTML output for curated docs" non-goal — same tracked item.)_
 - **Server-side Markdown rendering.** Curated Markdown is rendered to static HTML once, offline, as
   part of the bake step — the live server never parses Markdown on a request path.
 - **General HTML support in `docs-gen --layout curated`** (the `docs.rs:88` gap noted above) — out

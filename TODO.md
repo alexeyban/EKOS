@@ -2551,7 +2551,7 @@ These items have no single phase — they must be maintained and grown throughou
     2 (needs its own RFC) rather than forced through; see devlog_65's "Not fixed" section.
   - *Also found, not fixed:* `analytics/`'s local ledger has a corrupted FTS5 index (base DB passes
     `PRAGMA integrity_check`; the virtual table doesn't) — real, physical evidence for the
-    write-barrier/concurrency gap in Priority 4 below, not touched destructively.
+    storage write-barrier/concurrency gap below ("Storage architecture"), not touched destructively.
   - *Status:* Done for this pass. See `devlog_65.md`.
 
 - [ ] **`examples/` — at least one runnable example per crate**
@@ -2561,3 +2561,112 @@ These items have no single phase — they must be maintained and grown throughou
   - *Output:* `crates/*/examples/*.rs`; all examples pass `cargo run`.
   - *Test/Validate:* CI step: `for each crate, cargo run --example <primary-example> -p <crate>`
     exits 0. Broken examples block merge.
+
+- [ ] **Storage architecture: none of this is implemented yet**
+  - *What:* Seven real gaps, none started: a snapshot+compaction model (periodic consolidation of
+    the event chain into a final-state-plus-evidence-pointer snapshot, full history kept
+    separately, colder/more compressed); materialized views alongside EAV (RFC 0016) for
+    frequently-queried structural patterns, to avoid repeated EAV self-joins; a published v2→v3
+    deprecation timeline (when SQLite stops being the default); a write-barrier/concurrency spec
+    formalizing the single-writer model with versioned snapshots for concurrent readers; a
+    write-ahead log plus a repair tool for corrupted segments (today the only recovery option for
+    the v3 fact-segment engine is a full migration rollback); a retention/pruning policy (the
+    ledger currently has no upper bound and no archival strategy beyond compaction of existing
+    data, RFC 0034); horizontal distribution of storage across multiple machines, beyond RFC
+    0034's single-machine vertical partitioning (RFC 0034).
+  - *Why it matters now, not just eventually:* `devlog_65` found real, physical evidence this is
+    already biting — `analytics/`'s local ledger has a corrupted FTS5 virtual table (base DB
+    passes `PRAGMA integrity_check`, the FTS index doesn't) almost certainly from concurrent
+    `ekos` processes writing to the same ledger with no write-barrier.
+  - *Test/Validate:* each sub-item needs its own RFC before implementation, per the mandatory
+    workflow — this entry exists so none of the six silently stays undiscoverable backlog.
+
+- [ ] **Positioning: research paper vs. startup track sequencing**
+  - *What:* Decide whether/when to pursue an arXiv technical report (problem statement, method,
+    baseline comparison against grep/RAG/codegraph, benchmark numbers, honest limitations section)
+    alongside continued product development. Not blocking — a published report adds credibility
+    and discoverability but doesn't block shipping.
+  - *Test/Validate:* a decision, not a build — resolved once Priority-1-equivalent proof points
+    (real cold runs, a published benchmark, a live connector) exist to write about, which they now
+    do (`analytics-full-loop`, `token-benchmark`, `github-live-cross-system` decks).
+
+### Promoted from RFC Non-Goals (2026-08-21 survey)
+
+A full read-through of every RFC in `docs/rfcs/` (0001-0024) and `ekos/docs/rfcs/` (0025-0062)
+found ~40 Non-Goals items that describe genuine deferred work, not permanent scope boundaries —
+previously untracked anywhere as backlog. Each RFC's own Non-Goals section carries a one-line
+forward-pointer to its entry here; this section is the tracking home, the RFC stays the source of
+truth for *why* it was deferred. Items already fulfilled by a later RFC, or already fixed
+(RFC 0061's README ranking gap, RFC 0062's full-URL reference gap — both closed in `devlog_65`),
+are excluded — see the full exclusion list in the planning history if needed.
+
+- [ ] **Runtime/retrieval**: embedding/semantic search for retrieval (restated as open across RFC
+  0009/0014/0015/0016 — one consolidated item); streaming LLM responses (RFC 0008/0009); ledger
+  read caching (RFC 0005); multi-turn conversation history (RFC 0009); async ledger methods
+  (RFC 0005); EKL joins across Object+Relationship in one query, `COUNT`/`GROUP BY` aggregation,
+  and `AS OF <timestamp>` historical queries exposed in EKL syntax (RFC 0010 — note
+  `object_at`/`relationships_at` already exist in `Runtime`, just not surfaced in EKL grammar);
+  structurally boosting `memory/`-path search results beyond bm25 name-weighting (RFC 0014).
+
+- [ ] **MCP / connector infrastructure**: MCP HTTP/SSE transport + auth + multi-workspace routing,
+  and MCP resources/prompts capabilities beyond tools-only (RFC 0013); generic
+  `ScanContext`/`ekos.toml [connectors.X]` config plumbing — confirmed missing for every
+  connector, not just crypto (RFC 0017); dynamic/runtime plugin loading (`.so`/WASM) — RFC 0031
+  itself calls this "a known limitation, not solved here" (RFC 0006, RFC 0031).
+
+- [ ] **Connector-specific gaps**: GitHub GraphQL client upgrade (RFC 0020); GitHub secondary
+  (abuse-detection) rate-limit backoff/retry — accepted real risk from the RFC 0062 live run;
+  Confluence cross-space title resolution, LLM-based topic/concept extraction, API v1→v2
+  migration (RFC 0022); local-docs cross-document `References` edges and per-image `KirObject`s
+  (RFC 0023); ClickHouse cross-source joins in one query and LLM-based business-meaning
+  enrichment of table/column names (RFC 0056); a live Databricks Jobs API / ADF management-plane
+  connector (RFC 0038); a raw-RPC treasury connector and broader DAO governance platform support
+  beyond one (RFC 0032); real-time streaming ingestion for the chat connector (RFC 0033).
+
+- [ ] **Analyzers**: interprocedural/cross-file call-chain tracing — same underlying gap named
+  separately for Python (RFC 0040) and Rust (RFC 0041), one cross-language item; Python `.ipynb`
+  notebook support, `spark.sql(...)` argument-text parsing, full `.agg(...)` coverage (RFC 0040);
+  Rust trait-dispatch resolution (RFC 0041); deep procedural-body parsing (IF/LOOP/cursors) for
+  MySQL/Postgres SQL dialects (RFC 0031); semantic/embedding-based synonym matching in identity
+  resolution, e.g. "orders" ≈ "purchases" with no string overlap (RFC 0007 — cross-kind matching
+  itself already shipped via RFC 0029's `cross_system.rs`, don't re-add that part).
+
+- [ ] **Docs generation**: HTML output for the curated layout — punted by three separate RFCs
+  (RFC 0037, reaffirmed 0042 and 0045), one consolidated item; Docker/Kubernetes/Terraform/
+  cloud-config parsing for curated docs (RFC 0042); LLM-based chapter/heading detection for
+  document section boundaries (RFC 0024); Transformation IR semantic (business-meaning) diffing
+  via a future `TransformSemanticsAnalyzerPass` (RFC 0028).
+
+- [ ] **Multi-project / rollups**: full remediation of every analyzer-owned id scheme for
+  multi-project collision-safety (RFC 0044) — the same gap `devlog_65` already investigated and
+  found needs a real cross-cutting artifact-schema change, not a per-analyzer copy-paste fix (see
+  `devlog_65.md`'s "Not fixed" section for the full reasoning); a dedicated `ekos_summarize` MCP
+  tool, per-sub-project curated docs generation, and opt-in LLM-written rollup synthesis (RFC 0044).
+
+- [ ] **Security**: `ArtifactId` is still computed from pre-redaction bytes, and redaction isn't
+  applied at each of ~15 individual plugin `data`-construction call sites (RFC 0043) — flag as
+  security-relevant, not routine cleanup.
+
+- [ ] **Demo server**: general multi-tenant/self-serve ingestion beyond the fixed two-repo
+  catalog, and a no-LLM/ledger-only `/ask` answer mode (RFC 0045).
+
+- [ ] **World Engine — all independently confirmed still-open by the RFC survey**: a claim-review
+  MCP tool and `valid_from`/`valid_until` query surface on `KirObject` (RFC 0047); a memory-type
+  taxonomy — short-term/long-term, tracked incorrect beliefs (RFC 0049); Phase 8 parallel agent
+  execution, an LLM-backed `DecisionEngine`, per-kind action effects beyond the one worked
+  `FormAlliance` example, and Phase 14-16 (Metrics, Turning-Point Detection, Report Generation,
+  Monte Carlo, Counterfactuals, Web UI, Video Generation) (RFC 0050, reaffirmed RFC 0054);
+  per-agent decision-engine selection in scenario YAML (blocked on the `DecisionEngine` item
+  above), scenario linting beyond structural/reference errors, and a scenario ledger cleanup
+  command (RFC 0051); per-action-kind differentiated resource costs, YAML-authorable resource
+  costs, and richer domain conflict rules beyond the one worked example (RFC 0052); round-based
+  `Like`/`Follow`/`Share`/`Reply`-as-own-kind actions and a nested-thread reconstruction helper
+  (RFC 0053); an interactive replay stepping session and video/report rendering of a replay
+  (RFC 0054); a `DocumentSemanticsAnalyzerPass` for world sources, `[security]` extension patterns
+  applied to scenario ingestion, and incremental/cached re-ingestion (RFC 0055).
+
+- [ ] **Identity resolution**: extend RFC 0029's cross-system `unconfirmed`-until-reviewed flow to
+  same-source (`DefaultResolver`) merges too — RFC 0060's own stated residual (3 of 17 known-wrong
+  real pairs still clear the 0.90 threshold), restated in RFC 0062 for the GitHub over-merge case.
+  One item, two RFC citations — this is the real structural fix the recurring
+  Table/Person/Document/GitHub-item over-merge pattern actually needs.

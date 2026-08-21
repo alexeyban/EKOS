@@ -153,6 +153,7 @@ without `ocr_text`.
   large, easily-verified improvements over the status quo; a "smarter chunking" RFC — closer to how
   `book-to-skill` synthesizes chapter summaries — can follow later if page/chunk-level granularity
   proves too coarse in practice.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Docs generation"._
 - **A dedicated `Section`/`Chunk` `ObjectKind` enum variant instead of `Custom("Section")`** —
   rejected for this RFC; `Custom(String)` is the established, zero-schema-change pattern this exact
   codebase already uses for `Document`/`Page`, and nothing about sections needs enum-level

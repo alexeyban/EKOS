@@ -91,6 +91,9 @@ Checked before designing, same discipline as the prior four RFCs:
   directory a user can `rm -rf` themselves; no ledger-level tombstone exists anywhere in this
   codebase to build one on top of (RFC 0043).
 
+_Per-agent decision-engine selection, scenario linting, and a ledger cleanup command are all
+tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "World Engine"._
+
 ## Design
 
 ### Storage: scenario-scoped, not the real workspace ledger

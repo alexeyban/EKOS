@@ -84,6 +84,10 @@ one-time backfill is `rm .ekos/fingerprints.json` before the next refresh.
 - Boosting `memory/` paths structurally — bm25 name-weighting plus the
   keyword-slug convention already privileges notes; revisit with real usage.
 
+_Embedding/semantic search (restated as still-open in RFC 0015/0016 too) and structural
+`memory/`-path boosting are tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+"Runtime/retrieval"._
+
 ## Testing
 
 - File observer: text file → excerpt present and truncated; binary → absent.

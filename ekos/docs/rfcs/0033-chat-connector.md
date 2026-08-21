@@ -38,7 +38,8 @@ follows RFC 0020's shape closely rather than inventing a new connector pattern.
   arrive). Every existing `Observer::scan` is a pull-based, point-in-time scan; this connector
   follows that model — periodic re-`ekos build` picks up new messages via `since`-based
   incremental fetch, not a persistent connection. Real-time is a plausible future RFC, not this
-  one.
+  one. _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+  "Connector-specific gaps"._
 - Voice channel transcription, reactions-as-signal beyond a raw count, or any message content
   moderation/redaction beyond what a future redaction pass (referenced in `TODO.md`'s "Secrets
   management and sensitive-data policy" item) already covers project-wide.

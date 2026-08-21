@@ -100,6 +100,9 @@ observation time tracking is deferred to a future RFC.
 - Caching (the ledger's WAL mode is the performance floor in v0)
 - Write access of any kind
 
+_Streaming/pagination, async methods, and caching are tracked as backlog: see `TODO.md` →
+"Promoted from RFC Non-Goals" → "Runtime/retrieval". Write access stays a permanent invariant._
+
 ---
 
 ## Alternatives considered

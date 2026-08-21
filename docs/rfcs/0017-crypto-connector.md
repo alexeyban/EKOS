@@ -209,6 +209,8 @@ crypto data is already typed and named by the producer; there is nothing for an 
   it doesn't exist for *any* connector yet (checked: `ScanContext.with_config` is never called from
   `build.rs`), and building that generic plumbing is a separate, larger RFC. `EKOS_CRYPTO_EXPORT_DIR`
   is a narrower, honest stand-in that doesn't block on it.
+  _Tracked as backlog (generic, not crypto-specific): see `TODO.md` → "Promoted from RFC
+  Non-Goals" → "MCP / connector infrastructure"._
 - **Add the `arrow` crate for full Arrow-batch reading** — rejected; the `parquet` crate's
   `record`/`RowAccessor` API reads the same files without pulling in Arrow's compute/kernel surface,
   which this connector has no use for.

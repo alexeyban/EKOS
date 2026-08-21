@@ -73,6 +73,9 @@ Checked before designing, same discipline as the prior six RFCs:
 - **No X/Reddit (or any real platform) integration** — the source document's own instruction.
 - **No nested-thread reconstruction helper.** `reply_to` is a flat pointer to one parent message;
   walking a full reply tree is left to the caller (real, deferred work only if a scenario needs it).
+
+_Both round-based Like/Follow/Share/Reply actions and the nested-thread reconstruction helper are
+tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "World Engine"._
 - **No new `KnowledgeStore` trait methods** — `PostedIn` reuses `append_relationship`/
   `relationships_for`, already there.
 - **No moderation, rate-limiting, or spam-detection semantics** — out of scope for a deterministic

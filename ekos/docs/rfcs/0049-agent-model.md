@@ -59,6 +59,9 @@ Checked before designing, same discipline as the last two RFCs:
   Decision Engine/Simulation Engine phases (source document's Phase 5+), not agent *definition*.
   Scoping this RFC to what an agent *is* and *knows right now*, not how its knowledge changes
   through a simulation loop that doesn't exist yet.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "World Engine". (The
+  Decision/Simulation Engine phases this was deferred to now exist, RFC 0050-0055 — the taxonomy
+  itself still doesn't.)_
 - **No Decision Engine, Action System, or Simulation Engine** — unchanged from RFC 0048's
   Non-goals, still the next fork point after this one, still requiring its own scope confirmation.
 - **No `ekos agent create`/`ekos interview` CLI commands** — library capability only, same posture

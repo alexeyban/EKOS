@@ -85,6 +85,10 @@ the scope meaningfully:
   resolve yet.
 - **No Phase 8 Parallel Agent Execution** — unchanged from RFC 0050's finding; this RFC's
   confidence+seed ordering is still a single-threaded, deterministic sequence, not concurrency.
+
+_Per-action-kind resource costs, YAML-authorable costs, and richer domain conflict rules are
+tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "World Engine" (Parallel
+Agent Execution is the same tracked item as RFC 0050's)._
 - **No true randomness anywhere in decision-making itself** — the seed governs only tie-break
   ordering among already-decided actions, never what an agent decides to do. `DecisionEngine`
   implementations stay fully deterministic given their inputs, matching the source document's own

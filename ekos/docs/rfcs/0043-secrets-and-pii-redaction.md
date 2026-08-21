@@ -95,6 +95,8 @@ can only add to the baseline.
   v1; the central choke point was chosen specifically because it protects every current *and
   future* connector automatically, without relying on each plugin author remembering to call a
   helper.
+  _Tracked as backlog (security-relevant, not routine cleanup): see `TODO.md` → "Promoted from
+  RFC Non-Goals" → "Security"._
 - **PII scope is regex-shaped secrets/tokens/credentials, not free-text personal information in
   prose** (e.g. a name mentioned in a document). Structured, intentionally-modeled personal data
   that connectors already extract on purpose — git commit author name/email

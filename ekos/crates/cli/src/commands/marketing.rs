@@ -159,12 +159,16 @@ fn select_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Result<Arc<d
 }
 
 /// `DEVLOG` may be a path, a bare number ("28"), the literal "latest", or omitted (= latest).
+/// Bare numbers and "latest"/omitted resolve against `cwd/devlogs/` (devlogs moved out of the
+/// repo root); an explicit path argument is still resolved as given (absolute, or relative to
+/// `cwd`), so `ekos marketing publish devlogs/devlog_28.md` keeps working unchanged.
 fn resolve_devlog_path(cwd: &Path, devlog_arg: Option<&str>) -> Option<PathBuf> {
+    let devlogs_dir = cwd.join("devlogs");
     match devlog_arg {
-        None | Some("latest") => ekos_marketing::devlog::find_latest(cwd),
+        None | Some("latest") => ekos_marketing::devlog::find_latest(&devlogs_dir),
         Some(arg) => {
             if let Ok(n) = arg.parse::<u32>() {
-                let path = cwd.join(format!("devlog_{n}.md"));
+                let path = devlogs_dir.join(format!("devlog_{n}.md"));
                 return path.exists().then_some(path);
             }
             let path = Path::new(arg);
@@ -310,8 +314,10 @@ mod tests {
     #[test]
     fn resolve_devlog_path_none_finds_latest() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join("devlog_5.md"), "x").unwrap();
-        std::fs::write(dir.path().join("devlog_9.md"), "x").unwrap();
+        let devlogs = dir.path().join("devlogs");
+        std::fs::create_dir(&devlogs).unwrap();
+        std::fs::write(devlogs.join("devlog_5.md"), "x").unwrap();
+        std::fs::write(devlogs.join("devlog_9.md"), "x").unwrap();
         let resolved = resolve_devlog_path(dir.path(), None).unwrap();
         assert_eq!(resolved.file_name().unwrap(), "devlog_9.md");
     }
@@ -319,7 +325,9 @@ mod tests {
     #[test]
     fn resolve_devlog_path_accepts_bare_number() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join("devlog_28.md"), "x").unwrap();
+        let devlogs = dir.path().join("devlogs");
+        std::fs::create_dir(&devlogs).unwrap();
+        std::fs::write(devlogs.join("devlog_28.md"), "x").unwrap();
         let resolved = resolve_devlog_path(dir.path(), Some("28")).unwrap();
         assert_eq!(resolved.file_name().unwrap(), "devlog_28.md");
     }

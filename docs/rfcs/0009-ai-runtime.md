@@ -106,6 +106,11 @@ mirroring how `LlmConfig` already falls back to `ANTHROPIC_API_KEY` / `claude-so
   out.
 - **Streaming responses** — matches RFC 0008's existing non-goal.
 
+_Caching, smart/embedding-based keyword extraction, multi-turn conversation, and streaming are all
+tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Runtime/retrieval". (Note:
+RFC 0061 later added smarter FTS5 keyword-query construction — still not embedding-based
+retrieval, that non-goal remains open.)_
+
 ---
 
 ## Alternatives considered

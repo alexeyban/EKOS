@@ -57,6 +57,10 @@ recursive walker.
 - Macro-expanded code — `syn` parses syntax only, no macro expansion.
 - Trait-dispatch resolution — only literal same-file symbol name matches are recorded.
 
+_Cross-file/crate call resolution (same underlying gap as RFC 0040's Python interprocedural
+tracing) and trait-dispatch resolution are tracked as backlog: see `TODO.md` → "Promoted from
+RFC Non-Goals" → "Analyzers"._
+
 ## What already exists and is reused
 
 - `plugins/python/src/lib.rs` — structural template for `RustObserver`.

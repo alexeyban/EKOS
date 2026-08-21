@@ -76,6 +76,9 @@ rebuilds.
 ## Alternatives Considered
 
 - **Dynamic plugin loading (`.so` / WebAssembly)** — deferred to v1.0; adds significant complexity.
+  Still genuinely open as of RFC 0031, which independently reaffirms it's "a known limitation,
+  not solved here." _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+  "MCP / connector infrastructure"._
 - **Passing `Arc<dyn ArtifactStore>` through `ScanContext`** — rejected for v0.x; connectors write
   through the package return value, keeping them pure and testable.
 

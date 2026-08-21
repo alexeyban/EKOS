@@ -118,6 +118,10 @@ structural mapping, no LLM in the loop.
   reasonable future improvement once real credentials exist to validate
   against.
 
+_Cross-space title resolution, LLM-based topic/concept extraction, and the v1→v2 API migration
+are all tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+"Connector-specific gaps"._
+
 ## Testing
 
 - `MockConfluenceClient`-driven observer tests: one artifact per page;

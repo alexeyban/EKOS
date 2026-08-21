@@ -85,6 +85,9 @@ Two decisions were made with the user before designing further:
   itself is not ledgered, to avoid turning live analytical output into permanent ledger bloat.
 - **No LLM-based business-meaning enrichment of ClickHouse table/column names in Stage 1** (the
   `sql_analyzer.rs`-style optional second stage) — structural mapping only for v1; real, deferred.
+
+_Both cross-source joins and LLM-based table/column enrichment are tracked as backlog: see
+`TODO.md` → "Promoted from RFC Non-Goals" → "Connector-specific gaps"._
 - **No native ClickHouse driver.** ClickHouse's stock HTTP interface (`POST /?query=...FORMAT
   JSON`) is plain REST/JSON, so — unlike Oracle/SAP — there is no reason to reach for a native
   client at all; this keeps `plugins/clickhouse`'s real client on the same dependency footing as

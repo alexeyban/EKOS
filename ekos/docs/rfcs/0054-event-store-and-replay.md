@@ -72,8 +72,12 @@ almost entirely already done:
   `relationships_for`; `all_objects()` (already there) locates the singular log root.
 - **No metrics, turning-point detection, or report generation** (Phases 14-16) — real, separate,
   unscoped forks; this RFC only makes their eventual prerequisite (a durable, queryable event log)
-  exist.
+  exist. Same tracked item as RFC 0050's identical non-goal.
 - **No video/report rendering of a replay** — out of scope, downstream of this.
+
+_The interactive stepping session, Metrics/Turning-Point/Report-Generation, and video/report
+rendering are all tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+"World Engine"._
 
 ## Design
 

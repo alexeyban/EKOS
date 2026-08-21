@@ -93,6 +93,11 @@ the continuation to reach outside the graph/simulation layer into the compiler p
   established for agents/relationships/scenario-events — proportionate for the small, throwaway
   scenario ledgers this engine targets, not optimized for large source sets or repeated reloads.
 
+_The `DocumentSemanticsAnalyzerPass`, `[security]` extension patterns, and incremental/cached
+re-ingestion are all tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+"World Engine". (No SQL/Git/GitHub/Confluence observers etc. is a permanent scope boundary for
+this RFC, not deferred work — the main compiler pipeline already covers that ground.)_
+
 ## Design
 
 ### `ScenarioDefinition.world` (`crates/simulation/src/scenario.rs`)

@@ -94,6 +94,7 @@ If `api-key-env` is not set or the env var is missing:
 - **In-process cache (HashMap)** — rejected; doesn't survive process restarts. Disk cache means
   CI builds are deterministic across machines once the cache is seeded.
 - **Streaming responses** — not needed for analysis tasks; add in v1.0 if needed for UX.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Runtime/retrieval"._
 
 ---
 

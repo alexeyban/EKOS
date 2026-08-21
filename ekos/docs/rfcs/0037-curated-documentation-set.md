@@ -65,7 +65,9 @@ objects/relationships. `--layout objects` (today's per-object behavior) stays th
   analyzer for real API signatures or a real call-graph is built here.
 - Not claiming a code call-graph exists — `SequenceDiagrams.md` is explicit that it renders
   Transformation IR data-flow order, not function/service call order.
-- Not HTML output for the curated layout in this phase (Open Question, deferred).
+- Not HTML output for the curated layout in this phase (Open Question, deferred). Restated as
+  still-open in RFC 0042 and RFC 0045. _Tracked as backlog: see `TODO.md` → "Promoted from RFC
+  Non-Goals" → "Docs generation"._
 
 ## What already exists and is reused
 

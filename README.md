@@ -17,7 +17,7 @@ agents (Claude Code among them) read that ledger through a read-only Model Conte
 (`ekos mcp serve`, RFC 0013) — they never touch raw enterprise systems directly.
 
 The project follows an RFC-first workflow (`docs/rfcs/`): every capability is designed in writing
-before it's implemented, and the `devlog_*.md` files at the repo root are the running record of
+before it's implemented, and the `devlogs/devlog_*.md` files are the running record of
 what shipped, why, and what was learned building it. It is written in Rust (2024 edition) as a
 Cargo workspace, and is licensed under the [MIT License](LICENSE).
 
@@ -250,8 +250,8 @@ structs/enums/traits (from `RustSymbol`/`PythonSymbol` objects, RFC 0038/0040/00
 file, each linked to its own detail page; `SequenceDiagrams.md` covers both Transformation-IR
 data-flow sequences and real function-call sequences (RFC 0041's `Calls` graph). Per-entity pages
 nest under `entities/<kind>/<2-char shard>/` so a large codebase's page count never blows past
-GitHub's per-directory file-listing cap — this repo's own `doc/` (generated from EKOS's own
-source) is the running example. `--prose` (opt-in) layers an LLM-written overview onto each
+GitHub's per-directory file-listing cap — running `ekos docs generate --layout curated --output
+doc` against this repo's own source is a ready example to try. `--prose` (opt-in) layers an LLM-written overview onto each
 object page, reusing `ekos ask`'s exact grounding+citation pipeline, with a token-cost estimate
 shown before any call.
 
@@ -266,8 +266,8 @@ subsystem), linked to every member via the same `Contains` relationship everythi
 uses. This is exactly what closes the "huge project/many projects" context-window gap: an agent
 asking about a whole subsystem gets one condensed, evidence-linked object instead of personally
 synthesizing meaning from dozens of raw facts. Surfaced automatically in `Architecture.md`'s new
-`## Subsystems` section (see above) — this repo's own `doc/Architecture.md` shows 46 real ones,
-one per crate/plugin, generated from EKOS's own source.
+`## Subsystems` section (see above) — running the same `docs generate` command against this
+repo's own source produces one rollup per crate/plugin (46 at last count).
 
 ### Hosted demo server (RFC 0045, experimental)
 
@@ -454,48 +454,12 @@ keyword) — all reported the same honest way, not silently patched or hidden, a
 day (RFC 0059, RFC 0060, RFC 0061 — see `devlog_61.md`), each with a live re-verification against
 the same real repo, not just a passing unit test.
 
-### Demo: skills + custom subagents
+### Demo: skills + custom subagents (archived)
 
-`demo/` contains a rehearsable, twelve-act demo of EKOS's Claude Code integration, run against
-a real compiled workspace — two skills (`ekos-knowledge`, `memory`) and six custom
-subagents, each embodying one capability:
-
-| Agent | Model | Capability |
-|---|---|---|
-| `estate-scout` | haiku | existence — "what's out there?" (MCP-only, no file access) |
-| `impact-analyst` | sonnet | consequence — blast radius + cited evidence |
-| `memory-keeper` | sonnet | memory — the only agent that writes (recall, capture, async refresh) |
-| `estate-architect` | inherit | synthesis — designs from the workspace's own prior art |
-| `legacy-logic-recoverer` | sonnet | recovery — explains a Pentaho/SQL transformation chain, evidence per step (RFC 0027/0028) |
-| `identity-reviewer` | sonnet | review — batches cross-system identity hypotheses for confirm/reject (RFC 0029) |
-
-**Install the agents:**
-
-```bash
-cp demo/agents/*.md ~/.claude/agents/
-```
-
-Then in Claude Code, run `/agents` and confirm all six appear.
-
-**Run it live** — open Claude Code from the workspace root (the directory containing
-`ekos.toml`) and follow the acts in [`demo/DEMO.md`](demo/DEMO.md), which gives the exact
-prompt, expected MCP calls, and payoff line for each act.
-
-**Run it headless** (rehearsal, transcripts, or a live-demo fallback) — automates Acts 1–8
-(the skill/single-agent acts); Acts 9–12 (multi-agent chains that each need their own scratch
-workspace built first, RFC 0018/0027-0029 scenarios) are presented live only:
-
-```bash
-sh demo/headless.sh          # generate a transcript for acts 1-8
-sh demo/headless.sh 2 7      # just specific acts
-```
-
-Transcripts land in `demo/transcripts/act-N.md` — see the ones already committed there for
-real, unedited examples of what each act produces.
-
-Before presenting, work through **Act 0** in `demo/DEMO.md`: refresh the ledger, start a
-fresh MCP connection (a long-running one can go stale after a rebuild), install the agents,
-and smoke-test headlessly first.
+An earlier twelve-act scripted demo of EKOS's Claude Code integration (two skills, six custom
+subagents) is archived under `archive/demo/` for historical reference — no longer actively
+maintained against current CLI behavior, so treat it as a record of what once worked rather than
+a runnable walkthrough.
 
 ### Compact storage (RFC 0015)
 

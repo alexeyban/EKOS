@@ -49,6 +49,8 @@ code comments referencing an external, not-checked-in "implementation plan" docu
   selected by name in Rust source. Introducing genuine dynamic loading would be new,
   unprecedented infrastructure requiring a new class of `unsafe` this codebase has never had —
   out of scope here; revisit only if a concrete need for out-of-tree/no-rebuild plugins appears.
+  Same underlying non-goal as RFC 0006's. _Tracked as backlog: see `TODO.md` → "Promoted from
+  RFC Non-Goals" → "MCP / connector infrastructure"._
 - **Deep procedural-body parsing** (`IF`/`LOOP`/cursors/variable declarations) for MySQL or
   Postgres. Confirmed this session: `sqlparser` 0.53 (the version already pinned) only captures
   `CREATE FUNCTION`/`CREATE PROCEDURE` *headers* — the body is an opaque `Expr`/string for every
@@ -58,6 +60,7 @@ code comments referencing an external, not-checked-in "implementation plan" docu
   v1 for both dialects.** Control-flow bodies become an honest `Unmapped` node, exactly the
   fidelity `sql_transform_analyzer.rs:508-546` already gives MSSQL procedures today — no
   dialect is silently worse than another, and no new dependency class is introduced.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Analyzers"._
 - Re-architecting the already-working MSSQL/Databricks paths, or Informix's documented
   `GenericDialect` fallback (no dedicated `sqlparser` dialect exists for it).
 

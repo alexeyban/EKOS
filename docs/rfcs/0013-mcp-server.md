@@ -79,6 +79,10 @@ to them.
 - Write-path tools (triggering builds from the agent) — would violate the read-only runtime
   boundary; builds stay in the CLI.
 
+_HTTP/SSE transport and MCP resources/prompts are tracked as backlog: see `TODO.md` →
+"Promoted from RFC Non-Goals" → "MCP / connector infrastructure". The read-only write-path
+boundary is a permanent invariant, not deferred work._
+
 ## Testing
 
 `handle_message` is a pure function of (config, workspace, request-line) → optional

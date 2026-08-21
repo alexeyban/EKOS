@@ -112,6 +112,8 @@ Object+Relationship+Evidence mapping needs a `CompilerPass`, same as
   learn, and is sufficient to prove the pattern generalizes. A future RFC
   can upgrade to GraphQL if body-text keyword matching proves too lossy in
   practice (it will miss non-standard phrasing, e.g. "this addresses #12").
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+  "Connector-specific gaps"._
 - **Promoting inline in `build.rs`, like `FileObserver`** — rejected,
   consistent with RFC 0017's decision: `build.rs`'s inline path only
   constructs bare objects (no relationships), and this connector's entire

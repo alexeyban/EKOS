@@ -63,6 +63,8 @@ place of the direct `self.runtime.find_objects(question)` call:
 - **Not fixing the `README.md` relevance-ranking finding.** A separate root cause (ambiguous
   common filenames + a fixed `max_matches` cutoff with no relevance weighting by path
   depth/importance), not addressed here — worth its own RFC if it matters enough to a user.
+  **Fixed** — `devlog_65` (2026-08-20/21) traced the real root cause to bm25's cross-document
+  content-length normalization and added `promote_exact_name_matches` in `Ledger::find_objects`.
 - **Not answering genuinely aggregate/analytical questions** ("top contributors by commit count") —
   no keyword-search reformulation can satisfy a question with no single matching object; that
   class of question needs `ekos_ekl`'s structured query language, which an agent host aware of
@@ -73,6 +75,8 @@ place of the direct `self.runtime.find_objects(question)` call:
 - **Not adding stemming, synonym expansion, or fuzzy matching** to the keyword extraction — a
   conservative, deterministic word-splitter was sufficient to fix every real failure found; a
   fuzzier match strategy is future work if a real case demonstrates the need.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Analyzers" (the same
+  semantic-matching gap RFC 0007 names for identity resolution)._
 
 ## Design
 

@@ -180,6 +180,9 @@ Same shape as `ConfluenceAnalyzerPass`/`GitHubAnalyzerPass`: one
   pass (a different, larger mechanism, consistent with how RFC 0020
   originally deferred Confluence for the same reason). Left for future work.
 
+_Per-image `KirObject`s and cross-document `References` edges are tracked as backlog: see
+`TODO.md` → "Promoted from RFC Non-Goals" → "Connector-specific gaps"._
+
 ## Alternatives Considered
 
 - **FFI OCR bindings (`tesseract-rs`/`leptess`)** — rejected: requires

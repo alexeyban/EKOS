@@ -17,7 +17,7 @@ name: Marketing Publish
 on:
   # push:
   #   branches: [main]
-  #   paths: ["devlog_*.md"]
+  #   paths: ["devlogs/devlog_*.md"]
   workflow_dispatch: {}
 
 env:

@@ -86,13 +86,13 @@ Checked before designing, same discipline as the last three RFCs:
   matches the source document's own stated goal for Phase 8 ("avoids order-dependent behavior" by
   collecting all decisions from one shared pre-round cut before executing any of them) — true
   concurrent/parallel execution is a performance optimization over the same semantics, not a
-  behavior change, and isn't needed to prove the loop.
+  behavior change, and isn't needed to prove the loop. Still open, reaffirmed in RFC 0052.
 - **No LLM-backed `DecisionEngine`.** The trait is deliberately provider-independent (mirroring
   `LlmProvider`'s shape from RFC 0021/0046), but wiring an actual `LocalLLMAgent`/`CloudLLMAgent`
   means real prompt design (what does "reasoning_summary" look like from a live model, how is
   `available_actions` presented, how is the result parsed back into a `Decision`) — a separate,
   focused RFC once the deterministic loop itself is proven, not bundled into the RFC that proves
-  the loop.
+  the loop. Still open, reaffirmed in RFC 0051 (blocks per-agent engine selection in scenario YAML).
 - **Per-kind action effects beyond the one worked `FormAlliance` example.** Every executed action
   produces a `Custom("ActionExecuted")` event (audit trail, uniform across all 12 kinds) and fans
   out `Knows` edges per visibility — that's the real, load-bearing effect this RFC needs to prove
@@ -101,12 +101,18 @@ Checked before designing, same discipline as the last three RFCs:
   `Trusts` handling, etc. — real, named, deferred work; building bespoke effect semantics for 11
   action kinds with no concrete scenario driving their shape yet risks the same
   "designed-not-exercised" mistake RFC 0048/0049's own Alternatives Considered sections already
-  called out and avoided.
+  called out and avoided. Still open — Parallel Agent Execution, the `DecisionEngine`, and
+  per-kind action effects are all tracked as backlog: see `TODO.md` → "Promoted from RFC
+  Non-Goals" → "World Engine".
 - **No Phase 10+ work** (Scenario Definition, Virtual Social Environment, Event Store as a distinct
   concept, Replay, Metrics, Turning Point Detection, Report Generation, Monte Carlo, Counterfactuals,
   Web UI, Video Generation) — all downstream of a working simulation loop, all their own scope
-  decisions later.
+  decisions later. **Scenario/VSE/Event-Store/Replay are done** (RFC 0051/0053/0054). Metrics,
+  Turning-Point Detection, Report Generation, Monte Carlo, Counterfactuals, Web UI, and Video
+  Generation are still open, reaffirmed in RFC 0054. _Tracked as backlog: see `TODO.md` →
+  "Promoted from RFC Non-Goals" → "World Engine"._
 - **No `ekos simulate` CLI command.** Library capability only, same posture RFC 0048/0049 took.
+  **Done** — `ekos simulate` exists now.
 - **No new workspace-level `KnowledgeStore` trait methods.** Every write this RFC needs
   (`append_event`, `append_relationship`) already exists.
 

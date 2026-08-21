@@ -88,6 +88,9 @@ top-level primitive.
   temporal validity on a relationship; adding it to objects too is a natural but unrequested
   extension, deferred to keep this RFC's surface area minimal.
 
+_Both the claim-review MCP tool and `KirObject`-level `valid_from`/`valid_until` are tracked as
+backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "World Engine"._
+
 ## Design
 
 ### `valid_from`/`valid_until` (`ekos/crates/kir/src/lib.rs`)

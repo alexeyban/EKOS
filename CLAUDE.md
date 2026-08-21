@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
-Read `devlog_*.md` (root, numbered chronologically, `devlog_55.md` is latest) before starting
+Read `devlogs/devlog_*.md` (numbered chronologically, `devlog_65.md` is latest) before starting
 non-trivial work: they are the project's long-term memory and record what shipped, why, and what
 was learned. `TODO.md` tracks the phase-by-phase roadmap; RFCs are split across two locations for
 historical reasons, not a meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -134,9 +134,9 @@ JSON-RPC 2.0. Tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`, `ekos_state
 `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR, RFC 0028), and
 `ekos_identity_review` (confirm/reject a cross-system identity match, RFC 0029 — the one
 write-capable tool; every other tool is read-only, going through `Runtime` only). This repo's
-own `.claude/skills/ekos-knowledge` and `.claude/skills/memory` skills consume this server —
-`demo/` has a rehearsable scripted walkthrough (`demo/DEMO.md`, `demo/headless.sh`) if you need
-to see the whole pipeline exercised end to end.
+own `.claude/skills/ekos-knowledge` and `.claude/skills/memory` skills consume this server — an
+older scripted walkthrough of the whole pipeline is archived under `archive/demo/` for historical
+reference (no longer actively maintained against current CLI behavior).
 
 ### LLM-backed passes
 
@@ -180,11 +180,11 @@ only), no public API break, compiler diagnostics, logging, examples.
 
 ## Devlog Rule
 
-**`devlog_N.md` files are the project's long-term memory.** They are the primary source of truth for
-project history, architecture decisions, production incidents, and non-obvious knowledge. Treat them
-as the first thing to read, not the last thing to write.
+**`devlogs/devlog_N.md` files are the project's long-term memory.** They are the primary source of
+truth for project history, architecture decisions, production incidents, and non-obvious knowledge.
+Treat them as the first thing to read, not the last thing to write.
 
-**After any session with significant changes, generate a new `devlog_N.md` at the repo root.**
+**After any session with significant changes, generate a new `devlogs/devlog_N.md`.**
 
 Significant = any of: new feature shipped, bug found and fixed, architecture decision made,
 non-obvious knowledge captured, production incident, or a set of PRs merged in one session.
@@ -193,7 +193,7 @@ into the next substantive one.
 
 ### Filename
 
-Increment from the highest existing `devlog_N.md`: `devlog_43.md` → `devlog_44.md`, etc.
+Increment from the highest existing `devlogs/devlog_N.md`: `devlog_43.md` → `devlog_44.md`, etc.
 
 ### Required sections
 

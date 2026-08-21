@@ -78,6 +78,9 @@ already implicitly project-qualified in a shared-estate setup.
 ## Non-goals (this pass)
 
 - Full remediation of every analyzer-owned id scheme listed under "confirmed but deferred" above.
+  Investigated in `devlog_65` (2026-08-20/21): needs a real cross-cutting artifact-schema change
+  (project identity was never plumbed into recovery-pass artifacts at all), not a per-analyzer
+  copy-paste of this RFC's `build.rs` fix — see `devlog_65.md`'s "Not fixed" section.
 - A dedicated `ekos_summarize` MCP tool — rollups are ordinary `KirObject`s, so `ekos_search`/
   `ekos_neighborhood`/EKL already surface them for free; a tool that jumps straight to the nearest
   enclosing rollup for a given object is a natural, non-blocking follow-up.
@@ -88,6 +91,9 @@ already implicitly project-qualified in a shared-estate setup.
   RFC 0035 Phase 5) — structural rollups (counts, boundary relationships, real `Contains` links)
   ship first; prose-per-rollup is designed the same reuse-not-reinvent way but implemented as a
   follow-up once the structural layer is proven against real multi-crate/multi-project data.
+
+_The `ekos_summarize` MCP tool, per-sub-project curated docs, and opt-in LLM rollup synthesis are
+tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Multi-project / rollups"._
 
 ## Design
 

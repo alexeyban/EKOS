@@ -108,9 +108,11 @@ structured text and exits non-zero if any conflicts are detected.
 ## Limitations in Phase 7
 
 - Synonym detection across different names (`Customer` vs `Buyer`) requires semantic LLM
-  enrichment (Phase 10+).
+  enrichment (Phase 10+). Still open — confirmed no embedding/semantic matching exists anywhere
+  in the identity crate. _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+  "Analyzers"._
 - Cross-kind resolution (a `Table` object and a `Service` object for the same concept) is
-  deferred.
+  deferred. **Done** — shipped via RFC 0029's `cross_system.rs`.
 - No write-back to the artifact store in Phase 7; the resolver is a pure read + report tool.
   Phase 9 (Ledger) will own the canonical identity store.
 

@@ -88,6 +88,10 @@ and plain KIR objects/relationships.
 - Full `.agg(...)` coverage beyond the real `F.<func>(<col>).alias(<name>)` shape found in the
   test repo.
 
+_All four are tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Analyzers"
+(interprocedural chain tracing is the same underlying gap as RFC 0041's Rust equivalent — one
+consolidated cross-language item)._
+
 ## What already exists and is reused
 
 - `pentaho_analyzer.rs`'s shape (parse artifact → `TransformGraph` → `lower_to_kir` →

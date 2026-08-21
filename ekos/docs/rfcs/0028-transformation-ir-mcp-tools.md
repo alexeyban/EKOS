@@ -211,6 +211,7 @@ change a target table.
   judgment, using `ekos_transformation_explain`'s evidence-backed output as its reasoning
   material. A future `TransformSemanticsAnalyzerPass` (flagged as anticipated future work in RFC
   0027) would be the right place for LLM-assisted business-meaning labeling, not this tool.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Docs generation"._
 - **No requirement that `object_id` be a `Sink`.** Any `Custom("TransformNode")` object works —
   calling `ekos_transformation_explain` on a `Filter` node explains everything upstream of that
   filter, not the whole pipeline. Useful for narrowing an explanation to "what feeds this specific

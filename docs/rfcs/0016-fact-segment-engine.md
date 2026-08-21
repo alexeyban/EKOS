@@ -334,3 +334,7 @@ estate.
 - Query language changes — EKL and the MCP tools are unchanged consumers.
 - Compaction/retention policies (explicitly a later RFC; v1 never deletes).
 - Embedding/vector search (still deferred; tantivy adoption is orthogonal).
+
+_Compaction/retention is tracked under `TODO.md` → "Storage architecture: none of this is
+implemented yet". Embedding/vector search (restated from RFC 0014, also RFC 0015) is tracked
+under `TODO.md` → "Promoted from RFC Non-Goals" → "Runtime/retrieval"._

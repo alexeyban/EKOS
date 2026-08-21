@@ -106,10 +106,13 @@ RFC originally set out to show.
   `3828` (no word-boundary check after the digits) — documented, not engineered around. Full-URL
   references (PR #6597's shape) are also out of scope for this pass — a real, less common pattern
   than bare `#N`, left for a future RFC if it turns out to matter.
+  **Full-URL references: fixed** — `devlog_65` (2026-08-20/21) added `find_full_url_issue_numbers`
+  in `github_analyzer.rs`. The `#3828a1`-style word-boundary limitation remains open.
 - **Not sweeping the connector's full ~6,600-item history.** Bounded, newest-first pagination
   (a capped page count) reaches every real example in this RFC without an unbounded crawl.
 - **Not adding GitHub secondary (abuse-detection) rate-limit backoff/retry logic.** None exists
   today; accepted as a real risk for a one-time documented run, not engineered around.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Connector-specific gaps"._
 - **Not fully solving GitHub-item identity over-merging.** `name_for_similarity`'s prefix strip
   fixes the catastrophic case (96% collapse into one identity) but is explicitly not a complete
   fix — RFC 0060's already-stated limitation on this exact threshold/formula applies here too.
@@ -117,6 +120,8 @@ RFC originally set out to show.
   demo PR (#5158, merged into a 16-object "time-on-page:"-prefixed sibling group). Reported
   honestly, not chased further — the same design-decision-not-a-bugfix reasoning RFC 0060 already
   gave for not pursuing a complete fix in that RFC either.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Identity resolution"
+  (same underlying gap as RFC 0060's)._
 - **Not inventing a new automated/repeatable live-test framework.** No `#[ignore = "requires
   live..."]` pattern exists anywhere in this codebase. Following RFC 0056's precedent exactly:
   one real, documented live session, verified manually, recorded as checked acceptance criteria

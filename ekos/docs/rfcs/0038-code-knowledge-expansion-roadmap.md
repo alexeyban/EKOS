@@ -75,6 +75,8 @@ design each phase's interfaces/data models in full — each phase gets its own R
   history, Unity Catalog lineage) is explicitly out of scope here and would be its own future RFC
   if ever pursued, following the existing scaffolded-plugin pattern (`salesforce`/`sap`/`oracle`/
   `fabric`/`snowflake`, Phase 14/RFC 0012) for that different problem.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" →
+  "Connector-specific gaps"._
 
 ## What already exists and is reused
 

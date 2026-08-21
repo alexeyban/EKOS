@@ -62,6 +62,8 @@ links between documents. Investigated directly against current source before wri
   Dockerfile, no k8s manifests, no IaC of any kind — only GitHub Actions workflows exist as real
   deployment/CI infrastructure to model. Adding parsers for infra formats this repo doesn't use
   would be speculative, unverifiable work; deferred until a workspace that has them needs it.
+  _Tracked as backlog: see `TODO.md` → "Promoted from RFC Non-Goals" → "Docs generation"._ (This
+  RFC also reaffirms RFC 0037's still-open "no HTML output" non-goal — same tracked item.)
 - Not a call-graph analyzer — `Calls` already exists (RFC 0041); this RFC only renders it, adding
   no new extraction logic for it.
 - Not HTML output for curated (still deferred from RFC 0037's own Open Questions — unrelated to
