@@ -326,6 +326,29 @@ estate.
    path.
 6. **Migration + flip**: `migrate --v3`, acceptance gate, default switch.
 
+## Default switch (2026-08-21)
+
+Phase 6's last piece, closed. §7's own resolution deferred the default: *"Fresh workspaces keep
+the SQLite default until the engine has soaked on the live estate."* That condition is now met
+with real evidence, not a guess: `/home/legion/PycharmProjects/.ekos/` (a real, actively-used
+multi-project estate) has been running on the fact engine since **2026-07-17** — the same date as
+this RFC's own §7 acceptance measurement — with 16 sealed segments spanning roughly 350,000 real
+transactions, and its `HEAD` marker was still being touched as recently as **2026-08-20**. A full
+month of continuous, real, unassisted use with no corruption or rollback.
+
+**Change**: `crates/cli/src/commands/store.rs`'s `open_store()` — the single call site every
+command opens the knowledge store through — now opens (creates) a `FactLedger` by default for a
+**genuinely fresh** workspace (neither `facts/manifest.json` nor a SQLite `ledger.db` exists yet).
+Any **pre-existing** SQLite-backed workspace is completely unaffected: `open_store` checks for an
+existing `ledger.db` before falling through to the new default, so it keeps serving from SQLite
+forever unless explicitly migrated via `ekos ledger migrate --v3` (still the only migration path,
+unchanged, reversible — delete `facts/` to fall back to SQLite). Verified live end to end: a
+genuinely fresh scratch workspace, run through the real `build → recover → resolve → compile →
+commit` pipeline, ends up on the fact engine with zero SQLite file ever created, and real
+`ekos query find` queries against it return correct results. This repo's own `.ekos/` and the
+`analytics/` case-study workspace (both pre-existing) were confirmed unaffected — still SQLite,
+exactly as before.
+
 ## Non-goals
 
 - Multi-writer concurrency (EKOS has one writer by design; the manifest

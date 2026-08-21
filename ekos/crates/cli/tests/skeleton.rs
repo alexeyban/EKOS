@@ -55,7 +55,7 @@ async fn build_observes_files_and_writes_ledger() {
     ekos::commands::build::run(&config, dir).await.unwrap();
 
     // Ledger must exist and have entries
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let count = ledger.object_count().unwrap();
     assert!(count >= 2, "expected at least 2 file objects, got {count}");
 }
@@ -70,7 +70,7 @@ async fn query_object_returns_known_file() {
     ekos::commands::init::run(&config, dir).unwrap();
     ekos::commands::build::run(&config, dir).await.unwrap();
 
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let results = ledger.find_objects("main*").unwrap();
     assert!(!results.is_empty(), "expected to find main.rs object");
 
@@ -91,12 +91,22 @@ async fn build_is_idempotent() {
     ekos::commands::init::run(&config, dir).unwrap();
     ekos::commands::build::run(&config, dir).await.unwrap();
 
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
-    let count_after_first = ledger.object_count().unwrap();
+    // Each count is read through its own store handle, dropped before the next `build::run` —
+    // the fact engine's tantivy index takes an exclusive writer lock per open handle (real
+    // single-writer enforcement, not a bug), so holding one open across a second `build::run`
+    // call (which opens its own handle internally) would deadlock. No real CLI invocation holds
+    // a handle open across separate commands either — each process opens fresh and exits.
+    let count_after_first = {
+        let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
+        ledger.object_count().unwrap()
+    };
 
     // Second build — should not duplicate entries
     ekos::commands::build::run(&config, dir).await.unwrap();
-    let count_after_second = ledger.object_count().unwrap();
+    let count_after_second = {
+        let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
+        ledger.object_count().unwrap()
+    };
 
     assert_eq!(
         count_after_first, count_after_second,
@@ -152,7 +162,7 @@ async fn build_redacts_a_fake_secret_from_the_observed_excerpt() {
     ekos::commands::init::run(&config, dir).unwrap();
     ekos::commands::build::run(&config, dir).await.unwrap();
 
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let results = ledger.find_objects("config*").unwrap();
     assert!(!results.is_empty(), "expected to find config.rs object");
     let obj = ledger.get_object(&results[0].0).unwrap().unwrap();
@@ -187,7 +197,7 @@ async fn build_excludes_dotenv_files_entirely() {
     ekos::commands::init::run(&config, dir).unwrap();
     ekos::commands::build::run(&config, dir).await.unwrap();
 
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let results = ledger.find_objects(".env").unwrap();
     assert!(
         results.is_empty(),
@@ -231,7 +241,7 @@ async fn recover_redacts_a_fake_secret_from_a_cicd_workflow_step() {
     ekos::commands::compile::run(&config, dir).await.unwrap();
     ekos::commands::commit::run(&config, dir).unwrap();
 
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let results = ledger.find_objects("CI").unwrap();
     assert!(
         !results.is_empty(),
@@ -283,7 +293,7 @@ async fn build_keeps_same_named_files_in_different_projects_distinct() {
     ekos::commands::init::run(&config, dir).unwrap();
     ekos::commands::build::run(&config, dir).await.unwrap();
 
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let results = ledger.find_objects("main*").unwrap();
     assert_eq!(
         results.len(),
@@ -323,7 +333,7 @@ async fn build_single_project_workspace_has_no_project_property() {
     ekos::commands::init::run(&config, dir).unwrap();
     ekos::commands::build::run(&config, dir).await.unwrap();
 
-    let ledger = ekos_ledger::Ledger::open(&config.ledger_path(dir)).unwrap();
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let results = ledger.find_objects("main*").unwrap();
     assert!(!results.is_empty(), "expected to find main.rs object");
     let obj = ledger.get_object(&results[0].0).unwrap().unwrap();

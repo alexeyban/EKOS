@@ -408,7 +408,7 @@ impl IdentityResolver for DefaultResolver {
 /// database-style `schema.table` dot, and where the fix already came from the threshold change).
 /// Compares only the portion after the last `.` for `Table` objects with a qualifier; every other
 /// kind, and unqualified table names, are unaffected.
-fn name_for_similarity(obj: &KirObject) -> &str {
+pub(crate) fn name_for_similarity(obj: &KirObject) -> &str {
     if obj.kind == ObjectKind::Table
         && !obj.name.contains('/')
         && let Some((_, local)) = obj.name.rsplit_once('.')

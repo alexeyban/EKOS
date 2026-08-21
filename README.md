@@ -21,8 +21,8 @@ before it's implemented, and the `devlogs/devlog_*.md` files are the running rec
 what shipped, why, and what was learned building it. It is written in Rust (2024 edition) as a
 Cargo workspace, and is licensed under the [MIT License](LICENSE).
 
-EKOS also has a community token (`TOKENOMICS.md`) whose utility is designed to grow alongside
-the platform — see `VISION.md` for the phased ecosystem roadmap behind it.
+EKOS also has a community token — utility designed to grow as a consequence of platform adoption,
+not a promise of price. See [Token & Community](#token--community) below.
 
 ## The Problem
 
@@ -360,7 +360,8 @@ different target explicitly, including the real workspace ledger, if a caller wa
 
 This is a distinct capability from the "compiler for enterprise knowledge" positioning above, not
 a replacement for it — kept intentionally separate rather than blended into one pitch. Whether it
-grows into its own product surface is an open question, still being decided one RFC at a time.
+grows into its own product surface remains a further, explicitly **not-yet-committed** idea, not a
+decided roadmap direction — revisited RFC by RFC rather than assumed to keep expanding.
 
 ### ClickHouse connector (RFC 0056)
 
@@ -472,16 +473,18 @@ ekos ledger migrate            # ledger v1 → v2: dictionary-zstd payloads (~2.
 ekos artifact repack           # loose JSON files → packed segments (~7x smaller on disk)
 ```
 
-### Fact-segment engine (RFC 0016, experimental opt-in)
+### Fact-segment engine (RFC 0016) — the default for new workspaces
 
-`ekos ledger migrate --v3` migrates a workspace onto the fact-segment engine
-(EAV facts, immutable segments, tantivy search, mmap'd reads) — every version
-is signature-verified during migration, the SQLite source is left untouched,
-and deleting `.ekos/ledger/facts/` rolls back. Migrated workspaces are served
-by the fact engine automatically. The RFC's storage gate was amended with
-measurements in hand (≤2× of the v2 ledger at equal-or-better read latency —
-it passes at 1.66× with 19× faster search); fresh workspaces keep the SQLite
-default during the soak period (devlog 18).
+A **brand-new** workspace (`ekos init`, nothing written yet) now runs on the fact-segment engine
+(EAV facts, immutable segments, tantivy search, mmap'd reads) by default, as of 2026-08-21 — every
+version is signature-verified, and it's real, not aspirational: the RFC's storage gate was amended
+with measurements in hand (≤2× of the v2 ledger at equal-or-better read latency — it passes at
+1.66× with 19× faster search), and the default switch itself waited on a real month-long soak
+period on a live, actively-used multi-project estate before flipping (RFC 0016's own dated
+section has the evidence). Any **pre-existing** SQLite-backed workspace is completely unaffected —
+it keeps serving from SQLite forever unless explicitly migrated. `ekos ledger migrate --v3`
+migrates an existing SQLite workspace onto the fact engine — the SQLite source is left untouched,
+and deleting `.ekos/ledger/facts/` rolls back.
 
 ## Development Process
 
@@ -499,29 +502,13 @@ Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presen
 
 See [alexeyban.github.io/EKOS/presentations.html](https://alexeyban.github.io/EKOS/presentations.html) for the full list.
 
-## Official EKOS Token
+## Token & Community
 
-Network: Solana
-
-Contract (Mint) Address:
-
-CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
-
-Pump.fun:
-https://pump.fun/coin/CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
-
-See [TOKENOMICS.md](TOKENOMICS.md) for full allocation details.
-
-## Official Channels
-
-X (Twitter): [@ekosproject](https://x.com/ekosproject) — release announcements posted via
-`ekos marketing publish` (RFC 0030).
-
-## Founder Vesting Wallet
-
-u2zUCiUHRoGp9jKRsyjMGQ8x9Z3UdtERm174aiXURZo
-
-Managed through Streamflow.
+EKOS has a community token whose utility is designed to grow as the platform is adopted — a
+consequence of usage, not a promise of price. Network, contract address, and full allocation are
+the canonical facts in [TOKENOMICS.md](TOKENOMICS.md); the phased utility roadmap is in
+[VISION.md](VISION.md). Release announcements post to X: [@ekosproject](https://x.com/ekosproject)
+(via `ekos marketing publish`, RFC 0030).
 
 ## Versioning Roadmap
 

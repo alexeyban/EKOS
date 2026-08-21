@@ -13,12 +13,27 @@
 //! `crates/cli/src/commands/identity.rs` and the `ekos_identity_review` MCP
 //! tool.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ekos_kir::{KirId, KirObject, ObjectKind};
 use serde::{Deserialize, Serialize};
 
+use crate::name_for_similarity;
 use crate::similarity::{self, jaccard};
+
+/// Per-token Jaro-Winkler floor for [`fuzzy_containment_score`] — stricter than a loose match, so
+/// e.g. "sites" vs "site" (one-character difference) clears it comfortably but two unrelated short
+/// words don't.
+const FUZZY_TOKEN_THRESHOLD: f32 = 0.90;
+
+/// Shortest token worth keeping from free text — drops noise like "a"/"to"/"of" without needing a
+/// stopword list; a real concept word (`sites`, `goals`, `api`) is never this short.
+const MIN_FREE_TEXT_TOKEN_LEN: usize = 3;
+
+/// Cap on how many free-text (File/Issue/PullRequest) candidates one table-like object can
+/// produce, keeping only the strongest by confidence. See the cap's own call site for the real
+/// volume this was found to prevent (27,383 candidates from one real repo, unbounded).
+const MAX_FREE_TEXT_MATCHES_PER_TABLE: usize = 20;
 
 /// Below this, a pair is not worth surfacing at all — not a "confident
 /// match" cutoff (that's a human/agent judgment call via
@@ -151,6 +166,49 @@ fn column_overlap_score(a: &KirObject, b: &KirObject) -> Option<f32> {
     Some(jaccard(&cols_a, &cols_b))
 }
 
+/// Lowercased, deduplicated token set from a `File`'s path or an `Issue`/`PullRequest`'s title —
+/// the real-world "concept mentioned in free text" signal [`matchable_name`] can't see on its own
+/// (it only recognizes structured `Table`/`TransformNode` identifiers). `None` for every other
+/// kind. Reuses [`name_for_similarity`]'s existing `"{owner}/{repo}#{number}: "` prefix strip for
+/// GitHub items, so only the real title text is tokenized, not the repeated per-repo boilerplate.
+fn free_text_tokens(obj: &KirObject) -> Option<HashSet<String>> {
+    let text: &str = match &obj.kind {
+        ObjectKind::File => &obj.name,
+        ObjectKind::Custom(k) if k == "Issue" || k == "PullRequest" => name_for_similarity(obj),
+        _ => return None,
+    };
+    let tokens: HashSet<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|w| w.to_lowercase())
+        .filter(|w| w.len() >= MIN_FREE_TEXT_TOKEN_LEN)
+        .collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens)
+    }
+}
+
+/// Fraction of `concept_words` that have a high-similarity fuzzy match among `tokens` — the
+/// free-text analog of `normalize_cross_system` + `jaro_winkler`, applied per-token instead of to
+/// the whole string. A whole GitHub issue title or file path scores near-zero against a short
+/// table name under plain whole-string Jaro-Winkler (the concept word is a small fraction of the
+/// string); comparing word-by-word is what actually finds it.
+fn fuzzy_containment_score(concept_words: &[&str], tokens: &HashSet<String>) -> f32 {
+    if concept_words.is_empty() {
+        return 0.0;
+    }
+    let matched = concept_words
+        .iter()
+        .filter(|w| {
+            tokens
+                .iter()
+                .any(|t| similarity::jaro_winkler(w, t) >= FUZZY_TOKEN_THRESHOLD)
+        })
+        .count();
+    matched as f32 / concept_words.len() as f32
+}
+
 /// Weighted combination of whichever signals are available for this pair —
 /// signals that don't apply (e.g. no type data on either side) are excluded
 /// from the average entirely, not scored as 0, so their absence never
@@ -178,6 +236,13 @@ fn combine_signals(
 /// the *filtered* candidate set (table-like objects only, not every KIR
 /// object) — acceptable for v1 at realistic table/pipeline-endpoint counts;
 /// flagged as a follow-up if a real workspace's count makes it not.
+///
+/// Also scores every table-like object against every free-text object (`File` paths,
+/// `Issue`/`PullRequest` titles) via [`fuzzy_containment_score`] — real-world concept reuse
+/// across kinds this signal alone can see (e.g. the same `sites` concept in a real Postgres
+/// `Table`, a real Elixir `lib/plausible/site` file, and real GitHub issues about it). This pass
+/// is O(tables × free-text objects), not O(everything²) — a few hundred thousand cheap
+/// per-token comparisons for a real multi-thousand-object workspace, not a blowup.
 pub fn find_cross_system_candidates(objects: &[KirObject]) -> Vec<CrossSystemCandidate> {
     let candidates: Vec<(&KirObject, String, String)> = objects
         .iter()
@@ -226,6 +291,54 @@ pub fn find_cross_system_candidates(objects: &[KirObject]) -> Vec<CrossSystemCan
             }
         }
     }
+
+    // Second pass: table-like objects against free-text objects — a different question ("does
+    // this concept word appear in this free text") than the first pass's "are these two
+    // structured identifiers similar," so it needs its own scoring path rather than being folded
+    // into `matchable_name`'s existing candidates.
+    let free_text_objects: Vec<(&KirObject, HashSet<String>)> = objects
+        .iter()
+        .filter_map(|obj| free_text_tokens(obj).map(|tokens| (obj, tokens)))
+        .collect();
+
+    for (table_obj, _name, norm_name) in &candidates {
+        let concept_words: Vec<&str> = norm_name.split_whitespace().collect();
+        if concept_words.is_empty() {
+            continue;
+        }
+        let mut matches: Vec<CrossSystemCandidate> = free_text_objects
+            .iter()
+            .filter(|(free_obj, _)| table_obj.id != free_obj.id)
+            .filter_map(|(free_obj, tokens)| {
+                let name_pattern = fuzzy_containment_score(&concept_words, tokens);
+                let confidence = combine_signals(None, name_pattern, None);
+                (confidence >= MIN_CANDIDATE_CONFIDENCE).then_some(CrossSystemCandidate {
+                    a: table_obj.id,
+                    b: free_obj.id,
+                    confidence,
+                    signals: CrossSystemSignals {
+                        column_overlap: None,
+                        name_pattern,
+                        type_compat: None,
+                    },
+                })
+            })
+            .collect();
+
+        // A bare token-containment match has no structural corroboration (no column overlap, no
+        // type compatibility) — a single common concept word can otherwise match hundreds or
+        // thousands of incidental mentions across a real repo's full file tree and issue history.
+        // Confirmed live: an unbounded version of this pass, run against `analytics/`'s real
+        // ~3,700-object ledger, produced 27,383 candidates — far past what a human/agent review
+        // queue (`ekos_identity_review`) can realistically work through, even though every
+        // individual match was a real, correctly-scored concept-word hit. Capping to each table's
+        // own strongest matches keeps the signal (the four real pairs this was built and tested
+        // against all survive a cap this generous) without the review-queue-drowning volume.
+        matches.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
+        matches.truncate(MAX_FREE_TEXT_MATCHES_PER_TABLE);
+        results.extend(matches);
+    }
+
     results
 }
 
@@ -421,5 +534,152 @@ mod tests {
         let b = table("fact_patient_coded_value", &[("patient_id", "int")]);
         let objects = vec![a, b];
         assert!(find_cross_system_candidates(&objects).is_empty());
+    }
+
+    // ── Cross-kind free-text matching (roadmap item 4, real analytics/ data) ───────────────
+
+    fn file(path: &str) -> KirObject {
+        KirObject::new(path, ObjectKind::File)
+    }
+
+    fn github_item(owner: &str, repo: &str, number: u64, title: &str, is_pr: bool) -> KirObject {
+        let kind = ObjectKind::Custom(if is_pr { "PullRequest" } else { "Issue" }.to_string());
+        KirObject::new(format!("{owner}/{repo}#{number}: {title}"), kind)
+    }
+
+    #[test]
+    fn free_text_tokens_matches_singular_file_path_against_plural_table_concept() {
+        // Real pair (analytics/): `public.sites` (Table) vs `lib/plausible/site` (File) — the
+        // table name is plural, the directory is singular, same real concept.
+        let normalized = normalize_cross_system("public.sites");
+        let words: Vec<&str> = normalized.split_whitespace().collect();
+        let tokens = free_text_tokens(&file("lib/plausible/site")).expect("file paths tokenize");
+        assert!(
+            fuzzy_containment_score(&words, &tokens) >= 0.99,
+            "expected 'sites' to fuzzily contain-match the 'site' token from {tokens:?}"
+        );
+    }
+
+    /// Four real, concrete cross-kind pairs from `analytics/`'s live-compiled ledger (queried via
+    /// `ekos query find` while designing this fix) — a real Postgres `Table`, a real Elixir
+    /// source `File`, and a real GitHub `PullRequest`/`Issue`, all about the same real concept.
+    #[test]
+    fn real_analytics_pairs_produce_cross_kind_candidates() {
+        let cases: &[(&str, &str, &str, u64, &str, bool)] = &[
+            (
+                "public.sites",
+                "lib/plausible/site",
+                "plausible",
+                4911,
+                "Only show sites count in user CRM instead of full list of sites",
+                true,
+            ),
+            (
+                "public.api_keys",
+                "lib/plausible/auth/api_key.ex",
+                "plausible",
+                5753,
+                "Check for Sites API feature against respective team when using API key",
+                false,
+            ),
+            (
+                "public.goals",
+                "lib/plausible_web/plugins/api/schemas/goal.ex",
+                "plausible",
+                5978,
+                "Migration: Add custom props to pageview goal configuration unique index",
+                false,
+            ),
+            (
+                "public.subscriptions",
+                "lib/mix/tasks/cancel_subscription.ex",
+                "plausible",
+                5341,
+                "Don't show \"Subscription\" settings item when user role not permitted",
+                false,
+            ),
+        ];
+
+        for (table_name, file_path, owner, number, title, is_pr) in cases {
+            let table_obj = table(table_name, &[]);
+            let file_obj = file(file_path);
+            let item_obj = github_item(owner, "analytics", *number, title, *is_pr);
+            let objects = vec![table_obj.clone(), file_obj.clone(), item_obj.clone()];
+            let candidates = find_cross_system_candidates(&objects);
+
+            let table_file_match = candidates.iter().any(|c| {
+                (c.a == table_obj.id || c.b == table_obj.id)
+                    && (c.a == file_obj.id || c.b == file_obj.id)
+            });
+            assert!(
+                table_file_match,
+                "{table_name} <-> {file_path}: expected a candidate, got {candidates:?}"
+            );
+
+            let table_item_match = candidates.iter().any(|c| {
+                (c.a == table_obj.id || c.b == table_obj.id)
+                    && (c.a == item_obj.id || c.b == item_obj.id)
+            });
+            assert!(
+                table_item_match,
+                "{table_name} <-> #{number}: expected a candidate, got {candidates:?}"
+            );
+        }
+    }
+
+    /// Negative case (matches this session's established discipline of testing filters against a
+    /// real negative, not just positives): two real, genuinely unrelated pairs from the same real
+    /// `analytics/` data above must not cross-match.
+    #[test]
+    fn unrelated_real_table_and_file_do_not_cross_match() {
+        let goals_table = table("public.goals", &[]);
+        let api_key_file = file("lib/plausible/auth/api_key.ex");
+        let objects = vec![goals_table, api_key_file];
+        assert!(
+            find_cross_system_candidates(&objects).is_empty(),
+            "public.goals must not spuriously match an unrelated api_key.ex file"
+        );
+    }
+
+    #[test]
+    fn unrelated_real_table_and_issue_do_not_cross_match() {
+        let subscriptions_table = table("public.subscriptions", &[]);
+        let sites_issue = github_item(
+            "plausible",
+            "analytics",
+            4911,
+            "Only show sites count in user CRM instead of full list of sites",
+            true,
+        );
+        let objects = vec![subscriptions_table, sites_issue];
+        assert!(
+            find_cross_system_candidates(&objects).is_empty(),
+            "public.subscriptions must not spuriously match an unrelated sites issue"
+        );
+    }
+
+    /// Real finding, not hypothetical: an uncapped version of the free-text pass, run against
+    /// `analytics/`'s real ~3,700-object ledger, produced 27,383 candidates. Reproduces the same
+    /// shape here — one table concept word matching far more free-text objects than a review
+    /// queue can handle — and confirms the cap keeps only the strongest matches.
+    #[test]
+    fn free_text_matches_per_table_are_capped_to_the_strongest() {
+        let sites_table = table("public.sites", &[]);
+        let mut objects = vec![sites_table.clone()];
+        // 30 real-shaped file paths that would all genuinely contain-match "sites".
+        for i in 0..30 {
+            objects.push(file(&format!("lib/plausible_web/controllers/sites_{i}.ex")));
+        }
+        let candidates = find_cross_system_candidates(&objects);
+        let sites_matches: Vec<_> = candidates
+            .iter()
+            .filter(|c| c.a == sites_table.id || c.b == sites_table.id)
+            .collect();
+        assert_eq!(
+            sites_matches.len(),
+            MAX_FREE_TEXT_MATCHES_PER_TABLE,
+            "expected exactly the cap's worth of matches out of 30 real candidates, got {}",
+            sites_matches.len()
+        );
     }
 }

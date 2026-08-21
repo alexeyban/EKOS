@@ -10,7 +10,6 @@
 
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
-use ekos_ledger::Ledger;
 use ekos_runtime::Runtime;
 use std::path::{Path, PathBuf};
 
@@ -43,8 +42,8 @@ async fn ecommerce_pipeline_end_to_end() -> Result<()> {
     let config = EkosConfig::default();
     run_pipeline(&config, dir.path()).await?;
 
-    let ledger = Ledger::open(&config.ledger_path(dir.path()))?;
-    let runtime = Runtime::new(&ledger);
+    let store = ekos::commands::store::open_store(&config, dir.path())?;
+    let runtime = Runtime::over(&*store);
 
     assert_eq!(table_count(&runtime)?, 6, "ecommerce schema has exactly 6 tables");
 
@@ -73,8 +72,8 @@ async fn northwind_pipeline_end_to_end() -> Result<()> {
     let config = EkosConfig::default();
     run_pipeline(&config, dir.path()).await?;
 
-    let ledger = Ledger::open(&config.ledger_path(dir.path()))?;
-    let runtime = Runtime::new(&ledger);
+    let store = ekos::commands::store::open_store(&config, dir.path())?;
+    let runtime = Runtime::over(&*store);
 
     // Northwind is externally sourced — assert a realistic floor, not an exact count
     // pinned to this fixture's incidental details.
@@ -114,16 +113,16 @@ async fn odoo_git_fixture_pipeline_end_to_end() -> Result<()> {
     ekos::commands::compile::run(&config, dir.path()).await?;
     ekos::commands::commit::run(&config, dir.path())?;
 
-    let ledger = Ledger::open(&config.ledger_path(dir.path()))?;
+    let store = ekos::commands::store::open_store(&config, dir.path())?;
     // The real Odoo `utm` module's initial commit alone touches 28 files together —
     // real coupling, not synthetic. Assert some relationship emerged from real history
     // rather than pinning an exact count (real commit history isn't a fixed number we
     // control).
     assert!(
-        ledger.relationship_count()? > 0,
+        store.relationship_count()? > 0,
         "GitAnalyzerPass should find at least one CoupledWith relationship in real Odoo history"
     );
-    assert!(ledger.object_count()? > 0, "at least the observed files/commits should be objects");
+    assert!(store.object_count()? > 0, "at least the observed files/commits should be objects");
 
     Ok(())
 }

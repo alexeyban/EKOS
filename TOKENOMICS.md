@@ -35,6 +35,7 @@ curve and open market.
 
 14,000,000 EKOS of the founder allocation is locked under a Streamflow vesting contract:
 
+- Wallet: `u2zUCiUHRoGp9jKRsyjMGQ8x9Z3UdtERm174aiXURZo`
 - Total: 14,000,000 EKOS
 - Unlock schedule: linear, monthly
 - Unlock per month: 1,166,600 EKOS (14,000,000 ÷ 12)
