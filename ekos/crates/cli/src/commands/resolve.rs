@@ -55,18 +55,38 @@ pub fn run(config: &EkosConfig, cwd: &Path, force: bool) -> Result<()> {
     let result = resolver.resolve(&combined);
 
     // ── Print proposals ───────────────────────────────────────────────────
+    // RFC 0063: only exact-normalized-name groups are actually auto-merged by `ekos compile` —
+    // fuzzy groups become unconfirmed SameAs relationships for `ekos_identity_review` instead, so
+    // this preview must label each proposal with how it will really be handled.
     if result.proposals.is_empty() {
         println!("\nNo merge proposals (all objects appear to be unique).");
     } else {
-        println!("\nMerge proposals ({}):", result.proposals.len());
+        let auto_merge_count = result
+            .proposals
+            .iter()
+            .filter(|p| p.exact_name_match)
+            .count();
+        let review_count = result.proposals.len() - auto_merge_count;
+        println!(
+            "\nMerge proposals ({}) — {} will auto-merge, {} will be sent to review:",
+            result.proposals.len(),
+            auto_merge_count,
+            review_count,
+        );
         for (i, p) in result.proposals.iter().enumerate() {
+            let disposition = if p.exact_name_match {
+                "auto-merge"
+            } else {
+                "sent to review (fuzzy match, RFC 0063)"
+            };
             println!(
-                "  {}. '{}' ({}) — {} objects merged, confidence {:.2}",
+                "  {}. '{}' ({}) — {} objects, confidence {:.2} — {}",
                 i + 1,
                 p.canonical_name,
                 p.canonical_kind,
                 p.source_ids.len(),
                 p.confidence,
+                disposition,
             );
             for id in &p.source_ids {
                 if let Some(obj) = combined.get_object(id) {

@@ -204,7 +204,12 @@ The same real-world entity observed under different names across systems (Inform
 Postgres `customers`, Databricks `gold.dim_customer`) can be linked too: `ekos identity scan`
 scores candidate cross-system matches (column overlap, naming-pattern similarity, type
 compatibility) and writes them as `unconfirmed` relationships — never a silent auto-merge — for
-review via the `ekos_identity_review` MCP tool.
+review via the `ekos_identity_review` MCP tool. Same-source duplicates (`ekos resolve`/`ekos
+compile`, e.g. two `Table` objects both literally named `customers`) auto-merge only when the
+match is an exact normalized name; anything fuzzy goes through that same `unconfirmed`/review
+flow instead of an irreversible merge (RFC 0063) — no confidence threshold on the underlying
+scoring formula reliably separates real correct fuzzy merges from real incorrect ones, so an
+irreversible auto-merge isn't a safe default for that case.
 
 ### Document semantic memory (RFC 0025/0026)
 

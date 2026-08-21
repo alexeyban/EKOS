@@ -2699,11 +2699,15 @@ are excluded — see the full exclusion list in the planning history if needed.
   (RFC 0054); a `DocumentSemanticsAnalyzerPass` for world sources, `[security]` extension patterns
   applied to scenario ingestion, and incremental/cached re-ingestion (RFC 0055).
 
-- [ ] **Identity resolution**: extend RFC 0029's cross-system `unconfirmed`-until-reviewed flow to
+- [x] **Identity resolution**: extend RFC 0029's cross-system `unconfirmed`-until-reviewed flow to
   same-source (`DefaultResolver`) merges too — RFC 0060's own stated residual (3 of 17 known-wrong
   real pairs still clear the 0.90 threshold), restated in RFC 0062 for the GitHub over-merge case.
-  One item, two RFC citations — this is the real structural fix the recurring
-  Table/Person/Document/GitHub-item over-merge pattern actually needs.
+  Done (RFC 0063 / `devlog_69`): split on exact-vs-fuzzy normalized name (RFC 0060 showed no
+  confidence threshold alone separates known-good from known-wrong pairs), not a second threshold.
+  Exact matches keep auto-merging; fuzzy matches become `unconfirmed` `SameAs` relationships,
+  reviewable via the existing `ekos_identity_review` with zero changes to that tool. Verified live
+  against a disposable copy of `analytics/`: all 3 named residual pairs now route to review instead
+  of silently merging.
   - *Related, done (`devlog_66`):* roadmap item 4 ("attack identity resolution directly, with a
     narrow test case") picked 4 concrete cross-source pairs in `analytics/`'s real ledger
     (`sites`, `api_keys`, `goals`, `subscriptions` — each a real `Table` + real `File` + real

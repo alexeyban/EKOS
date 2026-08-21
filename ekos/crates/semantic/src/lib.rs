@@ -11,7 +11,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_identity::{DefaultResolver, IdentityResolver, MergeProposal};
-use ekos_kir::{KirGraph, KirId, KirRelationship, ObjectKind, RelationshipKind};
+use ekos_kir::{
+    KirEvidence, KirGraph, KirId, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -155,6 +157,58 @@ pub fn apply_merges(mut graph: KirGraph, proposals: &[MergeProposal]) -> KirGrap
     graph.relationships = dedup_relationships(graph.relationships);
 
     graph
+}
+
+/// Split identity-resolution proposals into the two tiers RFC 0063 defines: proposals whose
+/// group members share the exact same normalized name (`exact_name_match`) are safe to auto-apply
+/// via `apply_merges` unchanged; everything else is a fuzzy, judgment-call match that must go
+/// through human/agent review (`ekos_identity_review`) instead of being irreversibly merged into
+/// the append-only ledger. See `MergeProposal::exact_name_match`'s doc comment for why a
+/// confidence threshold alone can't make this split safely.
+fn partition_proposals(proposals: Vec<MergeProposal>) -> (Vec<MergeProposal>, Vec<MergeProposal>) {
+    proposals.into_iter().partition(|p| p.exact_name_match)
+}
+
+/// Build one `unconfirmed` `Custom("SameAs")` relationship + evidence pair per non-canonical
+/// member of each fuzzy-match proposal (RFC 0063), in the same property shape
+/// `crates/cli/src/commands/identity.rs::scan` already writes for cross-system candidates — so
+/// `ekos_identity_review` handles these with no changes there. Star topology, canonical → member,
+/// matching the group's existing canonical-centric shape.
+fn review_candidates_for(proposals: &[MergeProposal]) -> (Vec<KirEvidence>, Vec<KirRelationship>) {
+    let mut evidence = Vec::new();
+    let mut relationships = Vec::new();
+
+    for p in proposals {
+        for &member_id in &p.source_ids {
+            if member_id == p.canonical_id {
+                continue;
+            }
+            let ev = KirEvidence::new(
+                SourceLocation::file("ekos compile (identity resolution)"),
+                format!(
+                    "same-source merge candidate for '{}' ({}), confidence={:.2}",
+                    p.canonical_name, p.canonical_kind, p.confidence
+                ),
+            )
+            .with_confidence(p.confidence);
+            let ev_id = ev.id;
+            evidence.push(ev);
+
+            let mut rel = KirRelationship::new(
+                RelationshipKind::Custom("SameAs".to_string()),
+                p.canonical_id,
+                member_id,
+            );
+            rel.properties
+                .insert("status".into(), serde_json::json!("unconfirmed"));
+            rel.properties
+                .insert("confidence".into(), serde_json::json!(p.confidence));
+            rel.evidence.push(ev_id);
+            relationships.push(rel);
+        }
+    }
+
+    (evidence, relationships)
 }
 
 /// Deduplicate relationships by `(from, to, kind)`, merging evidence lists.
@@ -337,14 +391,39 @@ impl CompilerPass for SemanticCompilerPass {
                 .warning("SEM001", conflict.description.clone());
         }
 
+        // RFC 0063: only exact-normalized-name groups are safe to auto-merge (irreversibly, into
+        // an append-only ledger with no object-level delete/tombstone). Fuzzy groups — which RFC
+        // 0060 showed cannot be safely separated from exact ones by confidence alone — become
+        // `unconfirmed` `Custom("SameAs")` relationships instead, reviewable via
+        // `ekos_identity_review`, same as RFC 0029's cross-system candidates.
+        let (auto_merge, review) = partition_proposals(resolution.proposals);
+
         tracing::info!(
             proposals = resolution.stats.merges_proposed,
+            auto_merged = auto_merge.len(),
+            sent_to_review = review.len(),
             conflicts = resolution.stats.conflicts_detected,
             "identity resolution complete"
         );
+        if !review.is_empty() {
+            ctx.diagnostics.lock().unwrap().warning(
+                "SEM003",
+                format!(
+                    "{} same-source merge candidate(s) were fuzzy name matches — sent to review \
+                     as unconfirmed SameAs relationships instead of auto-merging (RFC 0063); use \
+                     ekos_identity_review to confirm or reject",
+                    review.len()
+                ),
+            );
+        }
 
         // ── Apply merges ──────────────────────────────────────────────────────
-        let resolved = apply_merges(combined, &resolution.proposals);
+        let mut resolved = apply_merges(combined, &auto_merge);
+
+        // ── Review candidates ───────────────────────────────────────────────────
+        let (review_evidence, review_relationships) = review_candidates_for(&review);
+        resolved.evidence.extend(review_evidence);
+        resolved.relationships.extend(review_relationships);
 
         // Hierarchical rollups (RFC 0044) intentionally do NOT run here: `File` objects — the
         // only kind rollups group by directly — are written straight to the ledger by `ekos
@@ -523,6 +602,7 @@ mod tests {
             canonical_kind: ObjectKind::Table,
             source_ids: vec![canonical, old],
             confidence: 1.0,
+            exact_name_match: true,
         };
 
         let resolved = apply_merges(g, &[proposal]);
@@ -550,6 +630,7 @@ mod tests {
             canonical_kind: ObjectKind::Table,
             source_ids: vec![b_new, b_old],
             confidence: 0.97,
+            exact_name_match: true,
         };
 
         let resolved = apply_merges(g, &[proposal]);
@@ -558,6 +639,106 @@ mod tests {
             1,
             "rels must deduplicate after remap"
         );
+    }
+
+    #[test]
+    fn partition_proposals_splits_exact_from_fuzzy() {
+        let exact = MergeProposal {
+            canonical_id: KirId::new(),
+            canonical_name: "Customer".into(),
+            canonical_kind: ObjectKind::Table,
+            source_ids: vec![KirId::new(), KirId::new()],
+            confidence: 1.0,
+            exact_name_match: true,
+        };
+        let fuzzy = MergeProposal {
+            canonical_id: KirId::new(),
+            canonical_name: "RobertJoonas".into(),
+            canonical_kind: ObjectKind::Person,
+            source_ids: vec![KirId::new(), KirId::new()],
+            confidence: 0.93,
+            exact_name_match: false,
+        };
+
+        let (auto, review) = partition_proposals(vec![exact.clone(), fuzzy.clone()]);
+        assert_eq!(auto.len(), 1);
+        assert_eq!(auto[0].canonical_name, "Customer");
+        assert_eq!(review.len(), 1);
+        assert_eq!(review[0].canonical_name, "RobertJoonas");
+    }
+
+    #[test]
+    fn review_candidates_for_produces_unconfirmed_same_as_relationships() {
+        let canonical = KirId::new();
+        let member = KirId::new();
+        let proposal = MergeProposal {
+            canonical_id: canonical,
+            canonical_name: "RobertJoonas".into(),
+            canonical_kind: ObjectKind::Person,
+            source_ids: vec![canonical, member],
+            confidence: 0.93,
+            exact_name_match: false,
+        };
+
+        let (evidence, relationships) = review_candidates_for(&[proposal]);
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(relationships.len(), 1);
+
+        let rel = &relationships[0];
+        assert!(matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs"));
+        assert_eq!(rel.from, canonical);
+        assert_eq!(rel.to, member);
+        assert_eq!(rel.properties["status"], "unconfirmed");
+        assert_eq!(rel.properties["confidence"].as_f64().unwrap() as f32, 0.93);
+        assert_eq!(rel.evidence, vec![evidence[0].id]);
+    }
+
+    #[test]
+    fn fuzzy_proposals_do_not_delete_objects_but_do_add_a_review_relationship() {
+        // End-to-end shape of the RFC 0063 fix: a fuzzy proposal must leave both objects in the
+        // resolved graph (never irreversibly merged into an append-only ledger) while still
+        // producing a reviewable SameAs relationship.
+        let mut g = KirGraph::new();
+        let canonical = g.add_object(KirObject::new("RobertJoonas", ObjectKind::Person));
+        let member = g.add_object(KirObject::new("Robert", ObjectKind::Person));
+
+        let proposal = MergeProposal {
+            canonical_id: canonical,
+            canonical_name: "RobertJoonas".into(),
+            canonical_kind: ObjectKind::Person,
+            source_ids: vec![canonical, member],
+            confidence: 0.93,
+            exact_name_match: false,
+        };
+
+        let (auto, review) = partition_proposals(vec![proposal]);
+        assert!(auto.is_empty());
+
+        let mut resolved = apply_merges(g, &auto);
+        let (review_evidence, review_relationships) = review_candidates_for(&review);
+        resolved.evidence.extend(review_evidence);
+        resolved.relationships.extend(review_relationships);
+
+        assert_eq!(
+            resolved.objects.len(),
+            2,
+            "both objects must survive, unmerged"
+        );
+        assert_eq!(resolved.relationships.len(), 1);
+        assert!(matches!(
+            &resolved.relationships[0].kind,
+            RelationshipKind::Custom(k) if k == "SameAs"
+        ));
+        assert_eq!(
+            resolved.relationships[0].properties["status"],
+            "unconfirmed"
+        );
+
+        // And the review relationship survives straight through build_ckm.
+        let model = build_ckm(&resolved);
+        assert_eq!(model.objects.len(), 2);
+        assert_eq!(model.relationships.len(), 1);
+        assert_eq!(model.relationships[0].properties["status"], "unconfirmed");
     }
 
     #[test]

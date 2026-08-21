@@ -43,6 +43,21 @@ pub struct MergeProposal {
     pub source_ids: Vec<KirId>,
     /// Highest pairwise similarity score within this group.
     pub confidence: f32,
+    /// `true` only if every member of this group shares the exact same
+    /// `name_for_similarity` after normalization (RFC 0063).
+    ///
+    /// RFC 0060 found that no single confidence threshold on the current scoring formula
+    /// separates every real known-good merge from every real known-wrong one — they interleave
+    /// (e.g. two distinct real pipelines, `Build Private Images GHCR`/`Build Public Images GHCR`,
+    /// score 0.9277, higher than the known-correct `Adam Rutkowski`/`Adam` merge at 0.9000).
+    /// Every one of RFC 0060's residual known-wrong pairs is a *fuzzy* name match, but so is
+    /// every one of its known-*correct* merges — fuzzy matching itself is the judgment call, not
+    /// a threshold band. Exact-vs-fuzzy is the dividing line that is actually safe to automate on:
+    /// two objects with the literal same normalized name carry none of that ambiguity. A group is
+    /// "exact" only if **every** member matches the canonical exactly — a group that rode in on
+    /// one exact and one fuzzy pairwise link (via Union-Find transitivity) is conservatively
+    /// treated as fuzzy, since transitivity can chain a safe pair to an unsafe one.
+    pub exact_name_match: bool,
 }
 
 /// Type of identity conflict.
@@ -373,12 +388,17 @@ impl IdentityResolver for DefaultResolver {
                 .iter()
                 .map(|&i| max_score_per_idx[i])
                 .fold(0.0f32, f32::max);
+            let canonical_norm = similarity::normalize(name_for_similarity(canonical));
+            let exact_name_match = members.iter().all(|&i| {
+                similarity::normalize(name_for_similarity(&objects[i])) == canonical_norm
+            });
             proposals.push(MergeProposal {
                 canonical_id: canonical.id,
                 canonical_name: canonical.name.clone(),
                 canonical_kind: canonical.kind.clone(),
                 source_ids: members.iter().map(|&i| objects[i].id).collect(),
                 confidence,
+                exact_name_match,
             });
             stats.merges_proposed += 1;
         }
@@ -753,6 +773,106 @@ mod tests {
             result.proposals.len(),
             1,
             "RobertJoonas and Robert are the same real contributor and should still merge"
+        );
+    }
+
+    #[test]
+    fn exact_name_match_true_for_identical_normalized_names() {
+        // Same literal name (case/whitespace variants only) — unambiguous, safe to auto-merge.
+        let g = make_graph(&[
+            ("Customer", ObjectKind::Table),
+            ("customer", ObjectKind::Table),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.proposals.len(), 1);
+        assert!(
+            result.proposals[0].exact_name_match,
+            "identical-after-normalization names must be flagged exact"
+        );
+    }
+
+    #[test]
+    fn exact_name_match_false_for_the_rfc_0060_known_good_fuzzy_merges() {
+        // RFC 0060's own known-correct merges (RobertJoonas/Robert, and the same shape for
+        // Adam Rutkowski/Adam, Vini Brasil/Vinicius Brasil) are all real, legitimate merges — but
+        // none of them share a literal identical normalized name. They must still be *proposed*
+        // (this RFC does not change scoring/threshold behavior), just flagged fuzzy rather than
+        // exact, so `ekos compile` sends them to review instead of silently auto-merging them.
+        let g = make_graph(&[
+            ("RobertJoonas", ObjectKind::Person),
+            ("Robert", ObjectKind::Person),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.proposals.len(), 1);
+        assert!(
+            !result.proposals[0].exact_name_match,
+            "a real nickname/variant merge is not a literal name match and must be flagged fuzzy"
+        );
+    }
+
+    #[test]
+    fn exact_name_match_false_for_rfc_0060_residual_known_wrong_pairs() {
+        // RFC 0060's own documented residual: these 3 real pairs still incorrectly clear the 0.90
+        // threshold (no confidence cutoff separates them from the known-good fuzzy merges above —
+        // that's RFC 0060's core finding). RFC 0063's fix is not to reject these at scoring time
+        // (out of scope, unchanged) but to ensure none of them are exact matches, so they get
+        // routed to review instead of silently, irreversibly merged.
+        for (name_a, name_b, kind) in [
+            (
+                "Build Private Images GHCR",
+                "Build Public Images GHCR",
+                ObjectKind::Custom("Pipeline".into()),
+            ),
+            (
+                "Tracker CI",
+                "Tracker script update",
+                ObjectKind::Custom("Pipeline".into()),
+            ),
+            (
+                // A shared directory prefix (as the real RFC 0060 pair had) is required for
+                // both to land in the same `(kind, first-3-normalized-chars)` block — the
+                // differing part is only in the basename.
+                "docs/localization/ua_inspector.readme.md",
+                "docs/localization/ref_inspector.readme.md",
+                ObjectKind::Custom("Document".into()),
+            ),
+        ] {
+            let g = make_graph(&[(name_a, kind.clone()), (name_b, kind.clone())]);
+            let result = DefaultResolver::new().resolve(&g);
+            assert_eq!(
+                result.proposals.len(),
+                1,
+                "'{name_a}'/'{name_b}' expected to still be proposed (RFC 0060's documented \
+                 residual, unchanged by this fix)"
+            );
+            assert!(
+                !result.proposals[0].exact_name_match,
+                "'{name_a}'/'{name_b}' must not be flagged as an exact match"
+            );
+        }
+    }
+
+    #[test]
+    fn exact_name_match_false_for_a_transitively_chained_mixed_group() {
+        // Union-Find is transitive: if A-B is exact and B-C is fuzzy, A/B/C can land in one group
+        // even though A-C alone might not score above threshold. Such a group must be
+        // conservatively treated as fuzzy as a whole — auto-merging it would silently include the
+        // unsafe fuzzy link.
+        let g = make_graph(&[
+            ("Robert", ObjectKind::Person),
+            ("robert", ObjectKind::Person), // exact match to "Robert" after normalization
+            ("RobertJoonas", ObjectKind::Person), // fuzzy match, chains the group together
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(
+            result.proposals.len(),
+            1,
+            "all three should union into one group"
+        );
+        assert_eq!(result.proposals[0].source_ids.len(), 3);
+        assert!(
+            !result.proposals[0].exact_name_match,
+            "a group containing any fuzzy pairwise link must not be flagged exact"
         );
     }
 
