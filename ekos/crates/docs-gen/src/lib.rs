@@ -984,6 +984,11 @@ pub fn render_architecture(
     }
 
     out.push_str("## Crate & Workspace Topology\n\n");
+    out.push_str(
+        "_C4 mapping (RFC 0065 §23): each crate below is a C4 **Container** — the natural \
+         deployable/buildable unit in a Rust workspace — and each entry under Technologies is a \
+         C4 **External System** the workspace depends on but doesn't own._\n\n",
+    );
     let crates: Vec<&KirObject> = objects
         .iter()
         .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
@@ -1036,6 +1041,40 @@ pub fn render_architecture(
                 dependents.join(", ")
             };
             out.push_str(&format!("- **{}** — used by: {used_by}\n", tech.name));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("## Open Questions\n\n");
+    out.push_str(
+        "_Explicit knowledge gaps (RFC 0065 §17) — not errors, and not silently dropped: each \
+         entry below is something a deterministic pass found it could not resolve, evidence-backed \
+         like everything else on this page. Unless resolved, they stay here rather than being \
+         guessed at._\n\n",
+    );
+    let gaps: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ArchitectureGap"))
+        .collect();
+    if gaps.is_empty() {
+        out.push_str("_No open architecture questions compiled._\n\n");
+    } else {
+        for gap in &gaps {
+            let question = gap
+                .properties
+                .get("question")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&gap.name);
+            let affected = gap
+                .properties
+                .get("affected_crate")
+                .and_then(|v| v.as_str());
+            match affected {
+                Some(crate_name) => {
+                    out.push_str(&format!("- {question} (affects `{crate_name}`)\n"))
+                }
+                None => out.push_str(&format!("- {question}\n")),
+            }
         }
         out.push('\n');
     }
@@ -2111,6 +2150,10 @@ mod tests {
                 .contains("No CI/CD pipeline definitions compiled.")
         );
         assert!(page.content.contains("No subsystem rollups compiled."));
+        assert!(
+            page.content
+                .contains("No open architecture questions compiled.")
+        );
     }
 
     #[test]
@@ -2142,6 +2185,28 @@ mod tests {
         assert!(
             page.content
                 .contains("**RustSymbol**: 1 — see [API.md](API.md)")
+        );
+        assert!(page.content.contains("C4 mapping (RFC 0065 §23)"));
+        assert!(page.content.contains("C4 **Container**"));
+    }
+
+    #[test]
+    fn architecture_renders_open_questions_from_architecture_gaps() {
+        let gap = KirObject::new(
+            "unresolved dependency 'foo' for ekos-orphan",
+            ObjectKind::Custom("ArchitectureGap".to_string()),
+        )
+        .with_property(
+            "question",
+            serde_json::json!("What does 'foo' resolve to for ekos-orphan?"),
+        )
+        .with_property("affected_crate", serde_json::json!("ekos-orphan"));
+
+        let page = render_architecture(&[gap], &[]);
+        assert!(page.content.contains("## Open Questions"));
+        assert!(
+            page.content
+                .contains("What does 'foo' resolve to for ekos-orphan? (affects `ekos-orphan`)")
         );
     }
 

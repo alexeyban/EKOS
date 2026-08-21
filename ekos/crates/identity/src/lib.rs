@@ -330,7 +330,18 @@ impl IdentityResolver for DefaultResolver {
             // topology into one canonical object. Each `Crate` is already deterministically
             // identified by its manifest directory — no two distinct crates can legitimately be
             // the same real-world entity.
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate")
+            //
+            // `Custom("Claim")` and `Custom("ArchitectureGap")` (RFC 0065 Phase 1) are added
+            // proactively, before any real over-merge was observed, specifically to avoid
+            // rediscovering this exact failure shape a sixth time. Both are self-identified by a
+            // structural key: a `Claim` by the (subject, predicate, object) triple of the
+            // `DependsOn` relationship it was synthesized from, an `ArchitectureGap` by (crate,
+            // unresolved dependency name) — many claims/gaps from the same source crate share a
+            // long name/statement prefix exactly like `Crate`'s shared `ekos-*` prefix, and every
+            // instance of each kind has the same property shape (no `columns`), so the same
+            // same-kind 1.0 structural fallback would apply here too. No two distinct claims or
+            // gaps can legitimately be the same real-world entity.
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate" || k == "Claim" || k == "ArchitectureGap")
             {
                 continue;
             }
@@ -1254,6 +1265,41 @@ mod tests {
         assert!(
             result.proposals.is_empty(),
             "Crate objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    #[test]
+    fn claim_objects_are_never_merged_even_with_shared_statement_prefix() {
+        // RFC 0065 Phase 1: claims derived from the same source crate share a long
+        // "{crate} depends_on ..." prefix — the same failure shape as Crate's shared `ekos-*`
+        // prefix — added to the exclusion list proactively, before any real over-merge occurred.
+        let claim_kind = ObjectKind::Custom("Claim".to_string());
+        let g = make_graph(&[
+            ("ekos-cli depends_on ekos-common", claim_kind.clone()),
+            ("ekos-cli depends_on ekos-kir", claim_kind.clone()),
+            ("ekos-cli depends_on serde", claim_kind),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "Claim objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    #[test]
+    fn architecture_gap_objects_are_never_merged_even_with_shared_question_prefix() {
+        let gap_kind = ObjectKind::Custom("ArchitectureGap".to_string());
+        let g = make_graph(&[
+            ("unresolved dependency foo for ekos-cli", gap_kind.clone()),
+            ("unresolved dependency bar for ekos-cli", gap_kind.clone()),
+            ("unresolved dependency foo for ekos-kir", gap_kind),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "ArchitectureGap objects must never be merge candidates, got {:?}",
             result.proposals
         );
     }

@@ -44,6 +44,57 @@ fn technology_kir_id(name: &str) -> KirId {
     ))
 }
 
+/// Deterministic id for a `Custom("Claim")` object (RFC 0065 Phase 1), keyed by the
+/// (subject crate dir, object id) pair the claim was synthesized from — the same claim
+/// re-derived on a re-run must resolve to the same object, not a duplicate.
+fn claim_kir_id(subject_dir: &str, object_id: KirId) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("claim:{subject_dir}:{object_id}").as_bytes(),
+    ))
+}
+
+/// Deterministic id for a `Custom("ArchitectureGap")` object (RFC 0065 Phase 1), keyed by
+/// (crate manifest dir, unresolved dependency name).
+fn architecture_gap_kir_id(crate_dir: &str, dep_name: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("architecture-gap:{crate_dir}:{dep_name}").as_bytes(),
+    ))
+}
+
+/// Adds one Fact-type `Custom("Claim")` object for a `DependsOn` relationship already added to
+/// `graph` (RFC 0065 §12-13 — "Facts should preferably come from deterministic extraction").
+/// Reuses the relationship's own evidence rather than duplicating it. `Inference`/`Assumption`/
+/// `Recommendation`-type claims require the reasoning layer and are out of scope for this phase —
+/// see RFC 0065's own Phase 1 status note.
+///
+/// Takes `subject_name`/`object_name` directly rather than looking them up in `graph.objects`:
+/// crates are added to the graph progressively as `crates` is iterated, so a target crate that
+/// appears later in that list wouldn't be findable there yet when its dependent is processed.
+#[allow(clippy::too_many_arguments)]
+fn add_depends_on_claim(
+    graph: &mut KirGraph,
+    subject_dir: &str,
+    subject_id: KirId,
+    subject_name: &str,
+    object_id: KirId,
+    object_name: &str,
+    evidence_id: KirId,
+) {
+    let mut claim = KirObject::new(
+        format!("{subject_name} depends_on {object_name}"),
+        ObjectKind::Custom("Claim".to_string()),
+    )
+    .with_property("subject_id", serde_json::json!(subject_id.to_string()))
+    .with_property("predicate", serde_json::json!("depends_on"))
+    .with_property("object_id", serde_json::json!(object_id.to_string()))
+    .with_property("claim_type", serde_json::json!("fact"))
+    .with_evidence(evidence_id);
+    claim.id = claim_kir_id(subject_dir, object_id);
+    graph.add_object(claim);
+}
+
 /// Lexically joins `base` and `rel` and collapses `.`/`..` components — no filesystem access, no
 /// symlink resolution, just enough to turn `crates/cli/../recovery` into `crates/recovery` so it
 /// matches another manifest's own directory path.
@@ -231,6 +282,14 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
             .map(|c| (c.dir.clone(), crate_kir_id(&c.dir)))
             .collect();
 
+        // Built upfront (independent of `graph.objects`' progressive insertion order) so
+        // `add_depends_on_claim` can always name a claim's subject/object crate even when the
+        // target crate appears later in `crates` and hasn't been added to `graph` yet.
+        let crate_name_by_id: HashMap<KirId, String> = crates
+            .iter()
+            .map(|c| (dir_to_id[&c.dir], c.name.clone()))
+            .collect();
+
         let mut technology_ids: HashMap<String, KirId> = HashMap::new();
 
         for c in &crates {
@@ -258,11 +317,52 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                     DepResolution::Path(raw) => {
                         DepResolution::Path(normalize_rel_path(manifest_dir, &raw))
                     }
-                    DepResolution::Unresolved => match workspace_deps.get(dep_name) {
-                        Some(WorkspaceDep::Path(p)) => DepResolution::Path(p.clone()),
-                        Some(WorkspaceDep::Version(v)) => DepResolution::Version(v.clone()),
-                        None => continue,
-                    },
+                    DepResolution::Unresolved => {
+                        match workspace_deps.get(dep_name) {
+                            Some(WorkspaceDep::Path(p)) => DepResolution::Path(p.clone()),
+                            Some(WorkspaceDep::Version(v)) => DepResolution::Version(v.clone()),
+                            // RFC 0065 Phase 1: previously a silent `continue` — a `{ workspace = true
+                            // }` entry with no matching root `[workspace.dependencies]` key, or a
+                            // git/registry-index dependency shape not modeled in v1 (see
+                            // `DepResolution::Unresolved`'s doc comment), is a real knowledge gap, not
+                            // a non-event. Recorded as an evidence-backed `ArchitectureGap` instead of
+                            // dropped, matching this project's own "Unmapped is deliberate, not a gap
+                            // swept under the rug" philosophy (Transformation IR, RFC 0027).
+                            None => {
+                                let gap_id = architecture_gap_kir_id(&c.dir, dep_name);
+                                let ev = KirEvidence::new(
+                                    SourceLocation::file(&manifest_path),
+                                    format!(
+                                        "{} declares a dependency on '{dep_name}' that could not be \
+                                     resolved (workspace = true with no matching \
+                                     [workspace.dependencies] entry, or a git/registry-index \
+                                     dependency shape not modeled in v1)",
+                                        c.name
+                                    ),
+                                );
+                                let ev_id = graph.add_evidence(ev);
+                                let mut gap = KirObject::new(
+                                format!("unresolved dependency '{dep_name}' for {}", c.name),
+                                ObjectKind::Custom("ArchitectureGap".to_string()),
+                            )
+                            .with_property("question", serde_json::json!(format!(
+                                "What does '{dep_name}' resolve to for {}?", c.name
+                            )))
+                            .with_property("affected_crate", serde_json::json!(c.name))
+                            .with_property(
+                                "reason",
+                                serde_json::json!(
+                                    "workspace = true with no matching [workspace.dependencies] \
+                                     entry, or a dependency shape not modeled in v1"
+                                ),
+                            )
+                            .with_evidence(ev_id);
+                                gap.id = gap_id;
+                                graph.add_object(gap);
+                                continue;
+                            }
+                        }
+                    }
                     other => other,
                 };
 
@@ -283,6 +383,22 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                             KirRelationship::new(RelationshipKind::DependsOn, crate_id, target_id);
                         rel.evidence.push(ev_id);
                         graph.add_relationship(rel);
+
+                        // RFC 0065 Phase 1: "X depends_on Y" is a deterministic Fact-type Claim —
+                        // reuses the same evidence the relationship above already carries.
+                        let target_name = crate_name_by_id
+                            .get(&target_id)
+                            .map(String::as_str)
+                            .unwrap_or(dep_name);
+                        add_depends_on_claim(
+                            &mut graph,
+                            &c.dir,
+                            crate_id,
+                            &c.name,
+                            target_id,
+                            target_name,
+                            ev_id,
+                        );
                     }
                     DepResolution::Version(version) => {
                         let tech_id = *technology_ids
@@ -306,7 +422,16 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                             KirRelationship::new(RelationshipKind::DependsOn, crate_id, tech_id);
                         rel.evidence.push(ev_id);
                         graph.add_relationship(rel);
+
+                        add_depends_on_claim(
+                            &mut graph, &c.dir, crate_id, &c.name, tech_id, dep_name, ev_id,
+                        );
                     }
+                    // Unreachable: `resolution` is bound above only via `DepResolution::Path(_)`
+                    // (first match arm), the `Unresolved` arm (which converts to `Path`/`Version`
+                    // or `continue`s before reaching this second match), or `other => other`
+                    // (which `resolve_dep_entry`'s own return type limits to `Version(_)`) — kept
+                    // only because the match must stay exhaustive over `DepResolution`.
                     DepResolution::Unresolved => {}
                 }
             }
@@ -527,6 +652,105 @@ tokio = "1"
         assert!(
             c.artifact_store.list().unwrap().is_empty(),
             "no KnowledgeArtifact should be written when no [package] manifest exists"
+        );
+    }
+
+    // ── RFC 0065 Phase 1: Claim / ArchitectureGap ──────────────────────────────
+
+    #[tokio::test]
+    async fn internal_depends_on_edge_emits_a_matching_fact_claim() {
+        let graph = run_pass(vec![
+            ("Cargo.toml", ROOT),
+            ("crates/kir/Cargo.toml", KIR),
+            ("crates/consumer/Cargo.toml", CONSUMER),
+        ])
+        .await;
+
+        let consumer = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "ekos-consumer")
+            .unwrap();
+        let kir = graph.objects.iter().find(|o| o.name == "ekos-kir").unwrap();
+
+        let claim = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "ekos-consumer depends_on ekos-kir")
+            .expect("a Claim for the consumer -> kir DependsOn edge");
+        assert_eq!(claim.kind, ObjectKind::Custom("Claim".to_string()));
+        assert_eq!(claim.properties["claim_type"], serde_json::json!("fact"));
+        assert_eq!(
+            claim.properties["predicate"],
+            serde_json::json!("depends_on")
+        );
+        assert_eq!(
+            claim.properties["subject_id"],
+            serde_json::json!(consumer.id.to_string())
+        );
+        assert_eq!(
+            claim.properties["object_id"],
+            serde_json::json!(kir.id.to_string())
+        );
+        assert!(!claim.evidence.is_empty(), "claim must carry evidence");
+    }
+
+    #[tokio::test]
+    async fn external_dependency_edge_emits_a_matching_fact_claim() {
+        let graph = run_pass(vec![
+            ("Cargo.toml", ROOT),
+            ("crates/consumer/Cargo.toml", CONSUMER),
+        ])
+        .await;
+
+        let claim = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "ekos-consumer depends_on tokio")
+            .expect("a Claim for the consumer -> tokio DependsOn edge");
+        assert_eq!(claim.kind, ObjectKind::Custom("Claim".to_string()));
+        assert_eq!(claim.properties["claim_type"], serde_json::json!("fact"));
+    }
+
+    #[tokio::test]
+    async fn unresolvable_workspace_dependency_emits_an_architecture_gap_instead_of_being_dropped()
+    {
+        // `orphan.workspace = true` with no matching `[workspace.dependencies]` entry in ROOT —
+        // previously a silent `continue`, now a real, evidence-backed knowledge gap (RFC 0065 §17).
+        const ORPHAN_DEP: &str = r#"
+[package]
+name = "ekos-orphan-dep"
+version = "0.1.0"
+
+[dependencies]
+orphan.workspace = true
+"#;
+        let graph = run_pass(vec![
+            ("Cargo.toml", ROOT),
+            ("crates/orphan/Cargo.toml", ORPHAN_DEP),
+        ])
+        .await;
+
+        let gap = graph
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Custom("ArchitectureGap".to_string()))
+            .expect("an ArchitectureGap for the unresolvable 'orphan' dependency");
+        assert!(gap.name.contains("orphan"));
+        assert!(gap.name.contains("ekos-orphan-dep"));
+        assert_eq!(
+            gap.properties["affected_crate"],
+            serde_json::json!("ekos-orphan-dep")
+        );
+        assert!(!gap.evidence.is_empty(), "gap must carry evidence");
+
+        // And, crucially, no DependsOn edge or Claim was fabricated for it.
+        assert!(
+            !graph
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::DependsOn),
+            "an unresolved dependency must not produce a fabricated DependsOn edge"
         );
     }
 }

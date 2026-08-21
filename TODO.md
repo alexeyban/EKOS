@@ -2737,3 +2737,14 @@ are excluded — see the full exclusion list in the planning history if needed.
     `.ekos/ledger/`, `recover → resolve → compile → commit`, confirm `File` objects are missing),
     then trace whether `build.rs`'s file-KirObject construction needs its own cacheable artifact
     type the way analyzer passes already have.
+
+- [ ] **Architecture Knowledge Model — reasoning layer, evaluator, agent state machine (RFC
+  0065/0066)**: RFC 0065 Phase 1 (`devlog_70`) shipped a narrow, integrated slice — `Claim`/
+  `ArchitectureGap` KIR kinds, `CrateTopologyAnalyzerPass` deterministically populating them, a C4
+  mapping note + Open Questions section in `render_architecture`. Real follow-on work, not started:
+  RFC 0065 §14-15's LLM reasoning layer (would produce `Inference`/`Assumption`/`Recommendation`-
+  type `Claim`s, which Phase 1 deliberately left unpopulated since they require interpretive
+  judgment); §32-39's evaluator + feedback/re-collection loop; RFC 0066's agent state machine in
+  full (depends on the reasoning layer existing first); Phase 2 extractors (Terraform/Kubernetes/
+  OpenAPI/SQL, §68). Each is real RFC-sized work in its own right, per this project's
+  just-in-time RFC discipline — not to be started speculatively ahead of an actual need.
