@@ -17,6 +17,8 @@ pub struct EkosConfig {
     #[serde(default)]
     pub architecture_reasoning: ArchitectureReasoningConfig,
     #[serde(default)]
+    pub llm_description: LlmDescriptionConfig,
+    #[serde(default)]
     pub marketing: MarketingConfig,
     #[serde(default)]
     pub recover: RecoverConfig,
@@ -123,6 +125,33 @@ pub struct DocumentSemanticsConfig {
 pub struct ArchitectureReasoningConfig {
     #[serde(default)]
     pub enabled: bool,
+}
+
+/// Gating for RFC 0088's `describe_objects` post-`commit` step. Opt-in, same reasoning as
+/// `ArchitectureReasoningConfig`: a real, potentially large LLM spend (~900 calls at the default
+/// `scope = "modules"` against a real mid-size codebase, ~5x that at `scope = "all"`) a workspace
+/// shouldn't pay for unless it asked to. `scope` defaults to the cheaper tier specifically so
+/// enabling this once doesn't silently commit a user to the larger `"all"` spend without a second,
+/// explicit choice.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LlmDescriptionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub scope: DescriptionScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DescriptionScope {
+    /// `Module`/`Rollup`/`Crate` objects only — the cheaper, default tier.
+    #[default]
+    Modules,
+    /// `Symbol` objects only (function/method-level) — no module-level overviews.
+    Symbols,
+    /// Both modules and symbols — the full, most expensive tier.
+    All,
 }
 
 /// RFC 0027: marketing-agent config. `[marketing]` in `ekos.toml`, replacing the source
@@ -290,6 +319,7 @@ impl Default for EkosConfig {
             ai: AiConfig::default(),
             document_semantics: DocumentSemanticsConfig::default(),
             architecture_reasoning: ArchitectureReasoningConfig::default(),
+            llm_description: LlmDescriptionConfig::default(),
             marketing: MarketingConfig::default(),
             recover: RecoverConfig::default(),
             security: SecurityConfig::default(),
@@ -406,6 +436,32 @@ max-sections = 500
         let cfg: EkosConfig = toml::from_str(toml).unwrap();
         assert!(cfg.document_semantics.enabled);
         assert_eq!(cfg.document_semantics.max_sections, Some(500));
+    }
+
+    /// RFC 0088: LLM-backed compile-time descriptions are opt-in, and default to the cheaper
+    /// `"modules"` scope rather than `"all"` even once enabled — the whole point being that
+    /// turning this on once must never silently commit a workspace to the ~5x larger per-symbol
+    /// spend without a second, explicit `scope = "all"` choice.
+    #[test]
+    fn llm_description_defaults_to_disabled_at_modules_scope() {
+        let cfg = EkosConfig::default();
+        assert!(!cfg.llm_description.enabled);
+        assert_eq!(cfg.llm_description.scope, DescriptionScope::Modules);
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert!(!cfg.llm_description.enabled);
+        assert_eq!(cfg.llm_description.scope, DescriptionScope::Modules);
+    }
+
+    #[test]
+    fn llm_description_parses_from_kebab_case_table() {
+        let toml = r#"
+[llm-description]
+enabled = true
+scope = "all"
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.llm_description.enabled);
+        assert_eq!(cfg.llm_description.scope, DescriptionScope::All);
     }
 
     /// RFC 0027: publishing is off unless a config explicitly opts in, even if the

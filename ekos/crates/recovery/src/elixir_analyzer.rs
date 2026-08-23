@@ -23,8 +23,15 @@
 //!   named target module — using the *same* deterministic id scheme for both a module's own
 //!   `defmodule` declaration and any reference to it, so a real internal dependency (module A
 //!   depends on module B, both defined in this codebase) resolves onto the *same* real object,
-//!   not two disconnected ones. Multi-alias forms (`alias Plausible.{Auth, Teams}`) capture the
-//!   real shared prefix as one honest dependency signal rather than attempting full expansion.
+//!   not two disconnected ones. Multi-alias forms (`alias Plausible.{Auth, Teams}`) expand to one
+//!   real `DependsOn` edge per named leaf (`Plausible.Auth`, `Plausible.Teams`) — pre-scanned
+//!   separately (`prescan_multi_alias_targets`), the same lookahead the doc-comment pre-scan
+//!   already needs, since Elixir's own formatter commonly wraps each leaf onto its own line and
+//!   the main per-line loop has no lookahead. Fixed 2026-08-23: this used to create one honest but
+//!   misleading `DependsOn` edge to the bare shared prefix instead (`Plausible` itself, never
+//!   `defmodule`'d anywhere) — a real phantom object with no file, no properties, and no real
+//!   relationships of its own, indistinguishable on its generated entity page from an actually
+//!   undocumented real module.
 //! - Block nesting (`do`/`end`/`fn`, including `if`/`case`/`cond`/`with`/try`/`receive`/`for`) is
 //!   tracked generically via a simple depth stack so a real guard clause spanning to a `do` on a
 //!   *later* line, or an inline `fn ... end`, doesn't desynchronize which module a later
@@ -218,16 +225,19 @@ struct ElixirFileResult {
 
 /// One open block on the depth stack. `Module` carries the id so `def`/`alias` lines can find
 /// "the innermost module currently open" regardless of how much unrelated nesting (`if`/`case`/
-/// `fn`) sits in between.
+/// `fn`) sits in between. `Symbol` (RFC 0088's `source_span`) marks the block opened by a real
+/// `def`/`defp`'s own body — carrying the id back out on `end` so the matching close line can be
+/// recorded, the same "carry what a later line needs to find" shape `Module` already established.
 enum Block {
     Module(KirId),
+    Symbol(KirId),
     Other,
 }
 
 fn current_module(stack: &[Block]) -> Option<KirId> {
     stack.iter().rev().find_map(|b| match b {
         Block::Module(id) => Some(*id),
-        Block::Other => None,
+        Block::Symbol(_) | Block::Other => None,
     })
 }
 
@@ -326,6 +336,9 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
     let mut ecto_repo_modules: HashSet<KirId> = HashSet::new();
     // Phase 1 ("Real Descriptions, Purpose, and Links"): real `@moduledoc`/`@doc` text.
     let doc_comments = extract_doc_comments(source);
+    // Real per-leaf expansion of multi-target `alias/import/require/use X.{A, B}` forms — see
+    // `prescan_multi_alias_targets`'s own doc comment for why this needs a separate pre-scan.
+    let multi_alias_targets = prescan_multi_alias_targets(source);
     // Index into `result.objects` for a module created *in this file* — `@moduledoc` mutates the
     // already-created object in place once it's encountered a few lines later (real Elixir puts
     // `@moduledoc` *inside* the module, after `defmodule X do`, not on the same line). Only
@@ -334,6 +347,16 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
     // cross-file index this per-file pass doesn't have, the same accepted scope this file's
     // module-level doc comment already states for cross-file dedup ordering.
     let mut module_obj_index: HashMap<KirId, usize> = HashMap::new();
+    // RFC 0088: real `source_span` (1-indexed start/end line) per symbol, keyed by the symbol's
+    // own id, filled in as `adjust_depth` finds the matching `do`/`end` pair for a real `def`/
+    // `defp`'s own body. `pending_symbol` is armed right after a *first-occurrence* def/defp line
+    // is parsed and consumed by the very next `do`/`fn` token `adjust_depth` sees (which may be
+    // on a later real line — a guard clause can span several, already handled generically below)
+    // — arming unconditionally overwrites any earlier unconsumed value, so a one-line `, do:
+    // expr` form (no block ever opens, `source_span` simply isn't recorded for it) can never
+    // wrongly attach to a later, unrelated block.
+    let mut pending_symbol: Option<(KirId, usize)> = None;
+    let mut symbol_spans: HashMap<KirId, (usize, usize)> = HashMap::new();
 
     for (line_idx, raw_line) in source.lines().enumerate() {
         let line = strip_comment(raw_line);
@@ -403,6 +426,13 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
         }
 
         if let Some(kind) = def_kind(trimmed) {
+            // RFC 0088: any earlier-armed `pending_symbol` this def/defp line hasn't reached yet
+            // (e.g. a prior one-line `, do:` clause of the *same* multi-clause function, which
+            // never opens a real block to consume it) must never survive into *this* line's own
+            // block — otherwise a later real `do` could wrongly stitch together a start line from
+            // one clause and an end line from another. Cleared unconditionally, re-armed below
+            // only on a genuine first occurrence.
+            pending_symbol = None;
             if let Some((name, arity)) = parse_def_line(trimmed, kind) {
                 let owner = current_module(&stack).unwrap_or(file_id);
                 let qualified = ekos_common::project::project_qualify(&name, project);
@@ -436,6 +466,10 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                     }
                     result.objects.push(obj);
                     result.symbol_count += 1;
+                    // RFC 0088: arm the source-span tracker on this, the first (and only
+                    // span-carrying) clause — the matching `do`/`end` pair is found generically
+                    // below, possibly several real lines later (guard clause).
+                    pending_symbol = Some((sym_id, line_idx + 1));
                 }
                 result.relationships.push(KirRelationship::new(
                     RelationshipKind::Contains,
@@ -448,24 +482,56 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
             // one-line `, do:` form) is handled uniformly below, same as any other line.
         } else if let Some(target) = extract_dependency_target(trimmed) {
             let owner = current_module(&stack).unwrap_or(file_id);
-            let qualified = ekos_common::project::project_qualify(&target, project);
-            let target_id = elixir_module_kir_id(&qualified);
-            if target_id != owner {
-                if seen.insert(target_id) {
-                    let mut obj =
-                        KirObject::new(target, ObjectKind::Custom("ElixirModule".to_string()));
-                    obj.id = target_id;
-                    result.objects.push(obj);
+            // A multi-target `X.{A, B}` form (possibly wrapped across several following real
+            // lines) resolves to its real per-leaf expansion when the pre-scan found one at this
+            // exact starting line; otherwise `target` (a plain single-name `alias`/`import`/
+            // `require`/`use`, or the shared-prefix fallback for a brace form the pre-scan
+            // couldn't close) is the one real target, unchanged from before this fix.
+            let targets = multi_alias_targets
+                .get(&line_idx)
+                .cloned()
+                .unwrap_or_else(|| vec![target]);
+            for raw_target in targets {
+                let qualified = ekos_common::project::project_qualify(&raw_target, project);
+                let target_id = elixir_module_kir_id(&qualified);
+                if target_id != owner {
+                    if seen.insert(target_id) {
+                        let mut obj = KirObject::new(
+                            raw_target,
+                            ObjectKind::Custom("ElixirModule".to_string()),
+                        );
+                        obj.id = target_id;
+                        result.objects.push(obj);
+                    }
+                    result.relationships.push(KirRelationship::new(
+                        RelationshipKind::DependsOn,
+                        owner,
+                        target_id,
+                    ));
                 }
-                result.relationships.push(KirRelationship::new(
-                    RelationshipKind::DependsOn,
-                    owner,
-                    target_id,
-                ));
             }
         }
 
-        adjust_depth(&mut stack, trimmed);
+        adjust_depth(
+            &mut stack,
+            trimmed,
+            line_idx,
+            &mut pending_symbol,
+            &mut symbol_spans,
+        );
+    }
+
+    // RFC 0088: apply the real, now-fully-resolved source spans onto their matching symbol
+    // objects — deferred to the end (rather than written at push time) because a span's own end
+    // line isn't known until its closing `end` is reached, which can be many lines after the
+    // object itself was created.
+    for obj in &mut result.objects {
+        if let Some(&(start, end)) = symbol_spans.get(&obj.id) {
+            obj.properties.insert(
+                "source_span".into(),
+                serde_json::json!({"start_line": start, "end_line": end}),
+            );
+        }
     }
 
     result
@@ -565,6 +631,79 @@ fn count_arity(s: &str) -> usize {
     if has_content { commas + 1 } else { 0 }
 }
 
+/// Pre-scans real multi-target `alias/import/require/use X.{A, B, C}` forms into their full
+/// per-leaf expansion (`X.A`, `X.B`, `X.C`) — separate from the main per-line loop for the same
+/// reason `extract_doc_comments` is: a real brace list commonly wraps one leaf per line (`mix
+/// format`'s own convention once a line gets long), so resolving it needs lookahead the main loop
+/// doesn't have. A single-line form (`alias X.{A, B}`) is handled by the same code path (the
+/// closing `}` is just found on the starting line instead of a later one) so the main loop has
+/// exactly one lookup regardless of how the source wraps.
+///
+/// Returns a map from the *starting* line index (the line containing `X.{`) to the real qualified
+/// leaf names. A brace list this scan never finds a closing `}` for (truncated file, or a form
+/// this scanner's own documented limitations miss) simply has no entry — the caller falls back to
+/// `extract_dependency_target`'s single shared-prefix target for that line, the same honest
+/// degraded behavior this whole file already accepts elsewhere.
+fn prescan_multi_alias_targets(source: &str) -> HashMap<usize, Vec<String>> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut result = HashMap::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = strip_comment(lines[i]).trim();
+        let Some(rest) = ["alias ", "import ", "require ", "use "]
+            .iter()
+            .find_map(|p| trimmed.strip_prefix(p))
+        else {
+            i += 1;
+            continue;
+        };
+        let Some(brace_pos) = rest.find(".{") else {
+            i += 1;
+            continue;
+        };
+        let target_prefix = &rest[..brace_pos];
+        if !target_prefix
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_uppercase())
+        {
+            i += 1;
+            continue;
+        }
+        let start_line = i;
+        let after_brace = &rest[brace_pos + 2..];
+        let mut body = String::new();
+        if let Some(close) = after_brace.find('}') {
+            body.push_str(&after_brace[..close]);
+            i += 1;
+        } else {
+            body.push_str(after_brace);
+            i += 1;
+            while i < lines.len() {
+                let line = strip_comment(lines[i]).trim();
+                body.push(' ');
+                if let Some(close) = line.find('}') {
+                    body.push_str(&line[..close]);
+                    i += 1;
+                    break;
+                }
+                body.push_str(line);
+                i += 1;
+            }
+        }
+        let leaves: Vec<String> = body
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("{target_prefix}.{s}"))
+            .collect();
+        if !leaves.is_empty() {
+            result.insert(start_line, leaves);
+        }
+    }
+    result
+}
+
 /// Real dependency directives only — `plug`/other macro invocations that happen to name a
 /// module are deliberately not recognized here (this analyzer reads declared dependencies, not
 /// every macro call site, the same "read what's declared" scope as `crate_topology_analyzer.rs`).
@@ -623,14 +762,35 @@ fn normalize_ecto_adapter(raw: &str) -> String {
 /// `receive`/`for`/`defmodule`/`def`/`defp` themselves never push directly — only the `do` token
 /// that (eventually, possibly on a later line for a guard clause) follows them does, which this
 /// function alone is responsible for, regardless of which line matched a declaration above.
-fn adjust_depth(stack: &mut Vec<Block>, line: &str) {
+/// `line_idx` (0-indexed, the same convention every other per-line lookup in this file uses) is
+/// only consulted for `source_span`'s own 1-indexed end line; `pending_symbol`/`spans` implement
+/// RFC 0088's real per-symbol source-span capture — see `pending_symbol`'s own doc comment above
+/// its declaration in `parse_elixir_file` for why arming is unconditional-overwrite, not queued.
+fn adjust_depth(
+    stack: &mut Vec<Block>,
+    line: &str,
+    line_idx: usize,
+    pending_symbol: &mut Option<(KirId, usize)>,
+    spans: &mut HashMap<KirId, (usize, usize)>,
+) {
     for word in line.split_whitespace() {
         let w = word.trim_end_matches([')', ',', ';', ']', '}']);
         match w {
             "end" => {
-                stack.pop();
+                if let Some(Block::Symbol(sym_id)) = stack.pop()
+                    && let Some(entry) = spans.get_mut(&sym_id)
+                {
+                    entry.1 = line_idx + 1;
+                }
             }
-            "do" | "fn" => stack.push(Block::Other),
+            "do" | "fn" => {
+                if let Some((sym_id, start_line)) = pending_symbol.take() {
+                    stack.push(Block::Symbol(sym_id));
+                    spans.insert(sym_id, (start_line, start_line));
+                } else {
+                    stack.push(Block::Other);
+                }
+            }
             _ => {}
         }
     }
@@ -728,6 +888,68 @@ mod tests {
                 .filter(|r| r.kind == RelationshipKind::DependsOn && r.from == module.id)
                 .count(),
             4
+        );
+    }
+
+    #[test]
+    fn a_single_line_multi_alias_expands_to_one_edge_per_real_leaf() {
+        let result =
+            parse("defmodule Plausible.Auth do\n  alias Plausible.{Teams, Billing}\nend\n");
+        let module = result
+            .objects
+            .iter()
+            .find(|o| o.name == "Plausible.Auth")
+            .unwrap();
+        let targets: Vec<&str> = result
+            .objects
+            .iter()
+            .filter(|o| {
+                o.kind == ObjectKind::Custom("ElixirModule".to_string()) && o.id != module.id
+            })
+            .map(|o| o.name.as_str())
+            .collect();
+        assert!(targets.contains(&"Plausible.Teams"));
+        assert!(targets.contains(&"Plausible.Billing"));
+        assert!(
+            !targets.contains(&"Plausible"),
+            "the bare shared prefix must never become its own phantom object: {targets:?}"
+        );
+    }
+
+    #[test]
+    fn a_multi_line_wrapped_multi_alias_expands_to_one_edge_per_real_leaf() {
+        // The real, common `mix format` shape for a long multi-alias list — one leaf per line,
+        // the main per-line loop has no lookahead to see past the opening `{` on its own.
+        let result = parse(
+            "defmodule PlausibleWeb.Live.CustomerSupport.Team do\n  alias PlausibleWeb.CustomerSupport.Team.Components.{\n    Overview,\n    Billing,\n    SSO\n  }\nend\n",
+        );
+        let module = result
+            .objects
+            .iter()
+            .find(|o| o.name == "PlausibleWeb.Live.CustomerSupport.Team")
+            .unwrap();
+        let targets: Vec<&str> = result
+            .objects
+            .iter()
+            .filter(|o| {
+                o.kind == ObjectKind::Custom("ElixirModule".to_string()) && o.id != module.id
+            })
+            .map(|o| o.name.as_str())
+            .collect();
+        assert!(targets.contains(&"PlausibleWeb.CustomerSupport.Team.Components.Overview"));
+        assert!(targets.contains(&"PlausibleWeb.CustomerSupport.Team.Components.Billing"));
+        assert!(targets.contains(&"PlausibleWeb.CustomerSupport.Team.Components.SSO"));
+        assert!(
+            !targets.contains(&"PlausibleWeb.CustomerSupport.Team.Components"),
+            "the bare shared prefix must never become its own phantom object: {targets:?}"
+        );
+        assert_eq!(
+            result
+                .relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::DependsOn && r.from == module.id)
+                .count(),
+            3
         );
     }
 
@@ -961,5 +1183,85 @@ mod tests {
         let result = parse("defmodule M do\n  def f do\n    :ok\n  end\nend\n");
         let f = result.objects.iter().find(|o| o.name == "f").unwrap();
         assert!(!f.properties.contains_key("description"));
+    }
+
+    // ── RFC 0088 — real source_span capture ─────────────────────────────────
+
+    #[test]
+    fn a_single_line_function_gets_a_real_source_span() {
+        // Lines: 1 defmodule, 2 def, 3 body, 4 end, 5 end.
+        let result = parse("defmodule M do\n  def f do\n    :ok\n  end\nend\n");
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert_eq!(
+            f.properties["source_span"],
+            serde_json::json!({"start_line": 2, "end_line": 4})
+        );
+    }
+
+    #[test]
+    fn a_multi_line_function_body_gets_a_real_source_span() {
+        let result =
+            parse("defmodule M do\n  def f do\n    x = 1\n    y = 2\n    x + y\n  end\nend\n");
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert_eq!(
+            f.properties["source_span"],
+            serde_json::json!({"start_line": 2, "end_line": 6})
+        );
+    }
+
+    #[test]
+    fn a_guard_clause_spanning_lines_still_gets_a_real_source_span_from_its_own_do() {
+        // The real, live case this project's own multi-line `when` guard already covers for
+        // depth tracking — the span's start is the real `def` line, not the later `do` line.
+        let result =
+            parse("defmodule M do\n  def foo(x)\n      when is_binary(x) do\n    x\n  end\nend\n");
+        let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
+        assert_eq!(
+            foo.properties["source_span"],
+            serde_json::json!({"start_line": 2, "end_line": 5})
+        );
+    }
+
+    #[test]
+    fn multiple_clauses_the_first_clauses_real_block_wins_the_source_span() {
+        // RFC 0081's own multi-clause collapse-to-one-symbol rule — the span must come from the
+        // first clause only, never overwritten by a later one (matching the same convention
+        // already established for `@doc` attachment).
+        let result = parse(
+            "defmodule M do\n  def f(0) do\n    :zero\n  end\n\n  def f(x) do\n    x\n  end\nend\n",
+        );
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert_eq!(
+            f.properties["source_span"],
+            serde_json::json!({"start_line": 2, "end_line": 4})
+        );
+    }
+
+    #[test]
+    fn a_one_line_first_clause_leaves_no_span_even_when_a_later_clause_has_a_real_block() {
+        // The honest, safer choice over guessing: when the *first* clause never opens a real
+        // block (a one-line `, do:` form), the symbol gets no `source_span` at all, rather than
+        // stitching a start line from clause 1 onto an end line from clause 2 — a real
+        // mismatched-span bug this exact test caught live during implementation.
+        let result =
+            parse("defmodule M do\n  def f(0), do: :zero\n\n  def f(x) do\n    x\n  end\nend\n");
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert!(!f.properties.contains_key("source_span"));
+    }
+
+    #[test]
+    fn a_one_line_do_colon_function_never_desyncs_a_later_functions_real_span() {
+        // The real risk this design has to guard against: `f`'s one-line `, do:` form never
+        // opens a real block at all, so its own `pending_symbol` must not wrongly attach to
+        // `g`'s real block below it.
+        let result =
+            parse("defmodule M do\n  def f(x), do: x\n\n  def g do\n    :ok\n  end\nend\n");
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert!(!f.properties.contains_key("source_span"));
+        let g = result.objects.iter().find(|o| o.name == "g").unwrap();
+        assert_eq!(
+            g.properties["source_span"],
+            serde_json::json!({"start_line": 4, "end_line": 6})
+        );
     }
 }

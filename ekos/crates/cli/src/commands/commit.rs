@@ -4,9 +4,10 @@ use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirGraph, KirObject, KirRelationship, SourceLocation};
 use ekos_ledger::KnowledgeStore;
 use ekos_semantic::{CkModel, CkmRelationship, EvidenceRecord, data_lineage, rollup};
+use std::io::{BufRead, Write};
 use std::path::Path;
 
-pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
+pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     let model_path = config.ekos_dir(cwd).join("ckm").join("model.json");
 
     if ekos_common::compress::resolve_auto(&model_path).is_none() {
@@ -64,6 +65,16 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     // just committed above) coexists in one ledger read.
     let lineage_links_added = commit_data_lineage(&*ledger)?;
 
+    // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
+    // in-scope `Module`/`Rollup`/`Symbol` — opt-in (`[llm-description].enabled`), same reasoning
+    // as `[architecture-reasoning]`. Runs last: needs the fully-committed graph above (real
+    // cross-file `DependsOn` neighbors, real `Rollup`s), not the in-memory CKM `compile` builds.
+    let description_stats = if config.llm_description.enabled {
+        Some(run_llm_description(config, cwd, &*ledger, yes).await?)
+    } else {
+        None
+    };
+
     println!("Commit complete.");
     println!("  Objects written:       {objects_written}");
     println!("  Objects skipped:       {objects_skipped} (already in ledger)");
@@ -71,6 +82,16 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  Evidence records:      {evidence_written}");
     if rollups_added > 0 {
         println!("  Subsystem rollups:     {rollups_added}");
+    }
+    if let Some(stats) = &description_stats {
+        println!(
+            "  AI descriptions:       {} module(s), {} symbol(s) described ({} cached, {} skipped without a source span, {} errors)",
+            stats.modules_described,
+            stats.symbols_described,
+            stats.skipped_cached,
+            stats.symbols_without_span,
+            stats.llm_errors
+        );
     }
     if lineage_links_added > 0 {
         println!("  Data lineage links:    {lineage_links_added}");
@@ -144,6 +165,114 @@ fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
     }
 
     Ok(written)
+}
+
+/// RFC 0088: shows a real cost estimate (an upper bound — a real run may skip some via caching
+/// or a missing `source_span`), asks for confirmation unless `yes`, then runs
+/// `ekos_recovery::describe_objects` against the real committed ledger.
+async fn run_llm_description(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    yes: bool,
+) -> Result<ekos_recovery::DescriptionStats> {
+    let scope = match config.llm_description.scope {
+        ekos_compiler_core::config::DescriptionScope::Modules => {
+            ekos_recovery::DescriptionScope::Modules
+        }
+        ekos_compiler_core::config::DescriptionScope::Symbols => {
+            ekos_recovery::DescriptionScope::Symbols
+        }
+        ekos_compiler_core::config::DescriptionScope::All => ekos_recovery::DescriptionScope::All,
+    };
+
+    let objects = ledger.all_objects()?;
+    let (modules, symbols) = ekos_recovery::estimate_call_counts(&objects, scope);
+    // +1: the real project-level Purpose/Architecture-style call `describe_project` always
+    // attempts once, regardless of scope — real, but a single flat call, not scaled by workspace
+    // size the way the per-object counts are.
+    let total = modules + symbols + 1;
+    if modules + symbols == 0 {
+        return Ok(ekos_recovery::DescriptionStats::default());
+    }
+
+    println!(
+        "LLM description requested for up to {total} real call(s) ({modules} module(s)/subsystem(s), \
+         {symbols} symbol(s), 1 project-level summary) — real cost, some may be skipped via caching."
+    );
+    if !confirm_description_spend(yes)? {
+        println!("Skipped (not confirmed).");
+        return Ok(ekos_recovery::DescriptionStats::default());
+    }
+
+    let llm = select_llm_provider_for_description(config, &config.artifact_dir(cwd))?;
+    let redaction = config.redaction_config();
+    let stats = ekos_recovery::describe_objects(ledger, &*llm, scope, cwd, &redaction)
+        .await
+        .map_err(|e| anyhow::anyhow!("LLM description failed: {e}"))?;
+
+    // Best-effort: a failed project-level summary shouldn't fail the whole `commit` run when the
+    // real per-object work above already succeeded.
+    if let Err(e) = ekos_recovery::describe_project(ledger, &*llm).await {
+        eprintln!("warning: project-level LLM summary failed (skipped): {e}");
+    }
+
+    Ok(stats)
+}
+
+/// Same shape as `docs.rs::confirm_prose_spend`.
+fn confirm_description_spend(auto: bool) -> Result<bool> {
+    if auto {
+        return Ok(true);
+    }
+    print!("Proceed with these LLM call(s)? [y/N]: ");
+    std::io::stdout().flush().ok();
+    let mut line = String::new();
+    if std::io::stdin().lock().read_line(&mut line)? == 0 {
+        return Ok(false);
+    }
+    Ok(matches!(line.trim().to_lowercase().as_str(), "y" | "yes"))
+}
+
+/// Same shape as `docs.rs::select_llm_provider_for_prose` — no degraded mode: an opt-in LLM step
+/// with no real API access should fail clearly, not silently produce nonsense output.
+fn select_llm_provider_for_description(
+    config: &EkosConfig,
+    artifact_dir: &Path,
+) -> Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
+    use ekos_recovery::{AnthropicProvider, CachedLlmProvider, OllamaProvider};
+
+    let cache_dir = artifact_dir
+        .parent()
+        .unwrap_or(artifact_dir)
+        .join("llm-cache");
+    std::fs::create_dir_all(&cache_dir).ok();
+
+    if config.llm.provider.as_deref() == Some("ollama") {
+        // `from_env_with_model`, not `from_env` — found live (this session's own local-Ollama
+        // verification run): `from_env` silently ignores `[llm].model` and always uses the
+        // built-in `llama3.1:8b` default, the same real, pre-existing gap `recover.rs` already
+        // fixed for its own Ollama call site but `docs.rs`/`marketing.rs` still have.
+        return Ok(std::sync::Arc::new(CachedLlmProvider::new(
+            OllamaProvider::from_env_with_model(config.llm.model.as_deref()),
+            cache_dir,
+        )));
+    }
+
+    let key_env = config
+        .llm
+        .api_key_env
+        .as_deref()
+        .unwrap_or("ANTHROPIC_API_KEY");
+    let provider = AnthropicProvider::from_env_var(key_env).map_err(|_| {
+        anyhow::anyhow!(
+            "{key_env} not set and no [llm] provider = \"ollama\" configured in ekos.toml — \
+             an LLM is required for [llm-description]"
+        )
+    })?;
+    Ok(std::sync::Arc::new(CachedLlmProvider::new(
+        provider, cache_dir,
+    )))
 }
 
 fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {

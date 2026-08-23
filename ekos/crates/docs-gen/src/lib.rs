@@ -101,6 +101,19 @@ pub struct ObjectPageModel {
     /// deterministic layer (`prose`, below, is where an opt-in LLM may add real heuristic
     /// enrichment on top). Promoted out of `properties` below so it isn't shown twice.
     pub definition: Option<String>,
+    /// RFC 0088: a real, evidence-grounded LLM overview from the compile-time `describe_objects`
+    /// step — `None` when that step hasn't run (disabled by default) or hasn't reached this
+    /// object yet. Rendered in its own "## AI-Assisted Overview" subsection, kept visually
+    /// distinct from `definition` above (real, analyzer-extracted text) so a reader can always
+    /// tell compiled-real-evidence text from LLM-synthesized text at a glance — the same
+    /// boundary RFC 0087's `description` vs. `--prose`'s `ProseSection` already established.
+    pub ai_overview: Option<String>,
+    pub ai_usage: Option<String>,
+    /// `Some("stale"|"incomplete")` renders a visible callout right on the Definition section —
+    /// the moment a reader is about to trust a comment that might be wrong. `Some("consistent")`
+    /// and `None` both render nothing extra there (a `None` never happened because RFC 0088 only
+    /// ever writes this property when a real existing comment was actually shown to the LLM).
+    pub ai_comment_check: Option<String>,
     pub properties: Vec<(String, String)>,
     /// Real relationships already compiled, regrouped by real structural meaning rather than raw
     /// relationship kind (Phase 2): `"Based on"` (the real `Contains` *parent* — where this is
@@ -141,10 +154,32 @@ pub fn build_object_page_model(
         .get("description")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    // RFC 0088: same promote-out-of-the-generic-table treatment `description` already gets —
+    // `ai_evidence_hash` additionally excluded outright (an internal cache key, never meant for
+    // a human reader) regardless of whether the other two are present.
+    let ai_overview = object
+        .properties
+        .get("ai_overview")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let ai_usage = object
+        .properties
+        .get("ai_usage")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let ai_comment_check = object
+        .properties
+        .get("ai_comment_check")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let mut properties: Vec<(String, String)> = object
         .properties
         .iter()
-        .filter(|(k, _)| definition.is_none() || k.as_str() != "description")
+        .filter(|(k, _)| match k.as_str() {
+            "description" => definition.is_none(),
+            "ai_overview" | "ai_usage" | "ai_comment_check" | "ai_evidence_hash" => false,
+            _ => true,
+        })
         .map(|(k, v)| (k.clone(), format_value(v)))
         .collect();
     properties.sort_by(|a, b| a.0.cmp(&b.0));
@@ -218,6 +253,9 @@ pub fn build_object_page_model(
         kind: object.kind.clone(),
         name: object.name.clone(),
         definition,
+        ai_overview,
+        ai_usage,
+        ai_comment_check,
         properties,
         relationship_groups,
         diagram_markdown,
@@ -261,6 +299,20 @@ pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
         Some(text) => out.push_str(&format!("{}\n\n", text.trim())),
         None => out.push_str("_Not documented in source._\n\n"),
     }
+    // RFC 0088: right at the moment a reader is about to trust this comment — a visible flag
+    // when the LLM-assisted check found a real discrepancy, never for "consistent" (nothing to
+    // warn about) or absent (the check never ran).
+    match model.ai_comment_check.as_deref() {
+        Some("stale") => out.push_str(
+            "⚠ **Possibly stale** — an LLM-assisted check found this description may not match \
+             the real current code. See `## AI-Assisted Overview` below.\n\n",
+        ),
+        Some("incomplete") => out.push_str(
+            "⚠ **Possibly incomplete** — an LLM-assisted check found this description may omit \
+             real behavior the code has. See `## AI-Assisted Overview` below.\n\n",
+        ),
+        _ => {}
+    }
 
     if let Some(prose) = &model.prose {
         out.push_str("## Overview\n\n");
@@ -285,6 +337,27 @@ pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
             out.push_str(&format!("| `{key}` | {value} |\n"));
         }
         out.push('\n');
+    }
+
+    // RFC 0088: only rendered when the compile-time `describe_objects` step actually reached
+    // this object — omitted entirely otherwise, not shown empty, matching this whole codebase's
+    // "absence over a fabricated placeholder" convention for every opt-in LLM section.
+    if model.ai_overview.is_some() || model.ai_usage.is_some() {
+        out.push_str("## AI-Assisted Overview\n\n");
+        out.push_str(
+            "_LLM-generated, evidence-grounded (RFC 0088) — describes what the compiled \
+             structure/real source shows, not a human-written claim. Never a substitute for \
+             `## Definition` above; read alongside it, not instead of it._\n\n",
+        );
+        if let Some(overview) = &model.ai_overview {
+            out.push_str(overview.trim());
+            out.push_str("\n\n");
+        }
+        if let Some(usage) = &model.ai_usage {
+            out.push_str("**Usage:** ");
+            out.push_str(usage.trim());
+            out.push_str("\n\n");
+        }
     }
 
     out.push_str("## Relationships\n\n");
@@ -364,6 +437,19 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
         Some(text) => body.push_str(&format!("<p>{}</p>\n", html_escape(text.trim()))),
         None => body.push_str("<p class=\"empty\">Not documented in source.</p>\n"),
     }
+    match model.ai_comment_check.as_deref() {
+        Some("stale") => body.push_str(
+            "<p class=\"warning\">&#9888; <strong>Possibly stale</strong> &mdash; an LLM-assisted \
+             check found this description may not match the real current code. See <em>AI-Assisted \
+             Overview</em> below.</p>\n",
+        ),
+        Some("incomplete") => body.push_str(
+            "<p class=\"warning\">&#9888; <strong>Possibly incomplete</strong> &mdash; an \
+             LLM-assisted check found this description may omit real behavior the code has. See \
+             <em>AI-Assisted Overview</em> below.</p>\n",
+        ),
+        _ => {}
+    }
 
     if let Some(prose) = &model.prose {
         body.push_str("<h2>Overview</h2>\n");
@@ -394,6 +480,24 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
             ));
         }
         body.push_str("</tbody>\n</table>\n");
+    }
+
+    if model.ai_overview.is_some() || model.ai_usage.is_some() {
+        body.push_str("<h2>AI-Assisted Overview</h2>\n");
+        body.push_str(
+            "<p class=\"empty\">LLM-generated, evidence-grounded (RFC 0088) &mdash; describes \
+             what the compiled structure/real source shows, not a human-written claim. Never a \
+             substitute for Definition above; read alongside it, not instead of it.</p>\n",
+        );
+        if let Some(overview) = &model.ai_overview {
+            body.push_str(&format!("<p>{}</p>\n", html_escape(overview.trim())));
+        }
+        if let Some(usage) = &model.ai_usage {
+            body.push_str(&format!(
+                "<p><strong>Usage:</strong> {}</p>\n",
+                html_escape(usage.trim())
+            ));
+        }
     }
 
     body.push_str("<h2>Relationships</h2>\n");
@@ -722,11 +826,40 @@ fn render_architecture_summary(objects: &[KirObject], relationships: &[KirRelati
         .count();
     out.push_str(&format!("**Open questions:** {open_questions}\n\n"));
 
+    // RFC 0088: real, evidence-grounded Purpose/Architecture-style from the one synthetic
+    // `ProjectSummary` object `describe_project` writes — read here rather than duplicating the
+    // per-object promotion pattern, since this is the only place either property is ever shown.
+    let summary = objects
+        .iter()
+        .find(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ProjectSummary"));
+    let purpose = summary
+        .and_then(|o| o.properties.get("purpose"))
+        .and_then(|v| v.as_str());
+    let architecture_style = summary
+        .and_then(|o| o.properties.get("architecture_style"))
+        .and_then(|v| v.as_str());
+
+    match purpose {
+        Some(text) => out.push_str(&format!(
+            "**Purpose:** {text} _(LLM-assisted, RFC 0088 — see the object's own evidence)_\n\n"
+        )),
+        None => out.push_str(
+            "**Purpose:** _not yet computed — no real EKOS source for a project's stated purpose \
+             today (RFC 0068 §14)_\n\n",
+        ),
+    }
+    match architecture_style {
+        Some(text) => out.push_str(&format!(
+            "**Architecture style:** {text} _(LLM-assisted, RFC 0088 — see the object's own \
+             evidence)_\n\n"
+        )),
+        None => out.push_str(
+            "**Architecture style:** _not yet computed — requires reasoning EKOS doesn't perform \
+             yet_\n\n",
+        ),
+    }
     out.push_str(
-        "**Purpose:** _not yet computed — no real EKOS source for a project's stated purpose \
-         today (RFC 0068 §14)_\n\n\
-         **Architecture style:** _not yet computed — requires reasoning EKOS doesn't perform yet_\n\n\
-         **Major risks:** _not yet computed — no `Risk` KIR kind exists yet (RFC 0068 §29/§62)_\n\n\
+        "**Major risks:** _not yet computed — no `Risk` KIR kind exists yet (RFC 0068 §29/§62)_\n\n\
          **Architecture confidence:** _not yet computed here — see `ekos architecture investigate`'s \
          own evaluation report (RFC 0065 Phase 3) for a real completeness/evidence-coverage score_\n\n",
     );
@@ -1024,6 +1157,76 @@ fn render_system_decomposition(
     out
 }
 
+/// Real per-`Rollup` breakdown within each Backend/Frontend/Database layer — a "detailed view"
+/// requested live 2026-08-23: the summary diagram above says *how many* files are in each layer,
+/// never *which real subsystem* they come from. Reuses `Rollup`'s own real `Contains` edges (RFC
+/// 0044) cross-referenced against each member's already-computed layer, rather than any new
+/// extraction. A rollup with members in more than one real layer (mixed content — e.g. this
+/// project's own real `priv/tracker/js/p.js`, a compiled frontend asset living inside an
+/// otherwise-backend `priv/` directory) is honestly listed under every layer it actually has
+/// members in, never forced into just one.
+fn render_system_decomposition_detail(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+    overrides: &[LayerOverride],
+    page_names: &HashMap<KirId, String>,
+) -> String {
+    let membership = layer_membership(objects, overrides);
+    if membership.is_empty() {
+        return String::new();
+    }
+    let rollup_ids: HashMap<KirId, &str> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Rollup"))
+        .map(|o| (o.id, o.name.as_str()))
+        .collect();
+    if rollup_ids.is_empty() {
+        return String::new();
+    }
+
+    // (layer, rollup_id) -> real member count, only counting members whose own layer is known.
+    let mut counts: HashMap<(Layer, KirId), usize> = HashMap::new();
+    for rel in relationships {
+        if rel.kind != RelationshipKind::Contains || !rollup_ids.contains_key(&rel.from) {
+            continue;
+        }
+        if let Some(&layer) = membership.get(&rel.to) {
+            *counts.entry((layer, rel.from)).or_insert(0) += 1;
+        }
+    }
+    if counts.is_empty() {
+        return String::new();
+    }
+
+    let mut by_layer: HashMap<Layer, Vec<(KirId, usize)>> = HashMap::new();
+    for ((layer, rollup_id), count) in counts {
+        by_layer.entry(layer).or_default().push((rollup_id, count));
+    }
+
+    let mut out = String::from("### Layer Breakdown\n\n");
+    for layer in [Layer::Backend, Layer::Frontend, Layer::Database] {
+        let Some(mut entries) = by_layer.remove(&layer) else {
+            continue;
+        };
+        entries.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| rollup_ids[&a.0].cmp(rollup_ids[&b.0]))
+        });
+        out.push_str(&format!("**{}:**\n", layer.label()));
+        for (rollup_id, count) in entries {
+            let name = rollup_ids[&rollup_id];
+            let plural = if count == 1 { "" } else { "s" };
+            let label = match page_names.get(&rollup_id) {
+                Some(f) => format!("[{name}]({f})"),
+                None => name.to_string(),
+            };
+            out.push_str(&format!("- {label} — {count} file{plural}\n"));
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// Render `## System Decomposition` (see [`render_system_decomposition`]) as a standalone SVG
 /// file, same reasoning as [`render_system_context_svg`].
 pub fn render_system_decomposition_svg(
@@ -1302,6 +1505,44 @@ fn render_component_view(
         .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Rollup"))
         .map(|o| (o.name.as_str(), o))
         .collect();
+
+    // Real gap found live 2026-08-23 against the real analytics project (Elixir/Phoenix, zero
+    // `Cargo.toml`, zero `Crate` objects ever compiled): the crate-matching logic below can never
+    // produce anything for a non-Rust workspace, so this whole C4 Component slot always rendered
+    // the same honest-but-useless "no crate directory matched" line regardless of how much real
+    // subsystem structure *was* compiled. `Rollup` (RFC 0044) is this project's own
+    // language-agnostic real grouping — every non-Rust workspace already has it, it's exactly
+    // this section's own target granularity ("one level inside a Container"), and `## Subsystems`
+    // already proves each one carries a real member-file count. Falling back to it here — clearly
+    // labeled as a fallback, never presented as if it were a real `Crate` — replaces a dead-end
+    // message with the same real decomposition RFC 0068 §18 asks for, for every language this
+    // project's analyzers actually cover today (Elixir/Python/JS-TS), not just Rust.
+    if crates.is_empty() {
+        let mut rollups: Vec<&KirObject> = rollups_by_name.values().copied().collect();
+        if rollups.is_empty() {
+            return "_No crate/workspace manifests or subsystem rollups compiled._\n\n".to_string();
+        }
+        rollups.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut out = String::from(
+            "_No Cargo-based crate manifests compiled for this workspace — showing each real \
+             compiled `Rollup` (RFC 0044) as this project's Container-level decomposition \
+             instead, since \"crate\" doesn't apply outside a Rust workspace._\n\n",
+        );
+        for rollup in rollups {
+            let member_count = rollup
+                .properties
+                .get("member_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let label = match page_names.get(&rollup.id) {
+                Some(f) => format!("[{}]({f})", rollup.name),
+                None => rollup.name.clone(),
+            };
+            out.push_str(&format!("- **{label}** — {member_count} member file(s)\n"));
+        }
+        out.push('\n');
+        return out;
+    }
 
     let mut sorted_crates: Vec<&&KirObject> = crates.iter().collect();
     sorted_crates.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1925,6 +2166,12 @@ pub fn render_architecture(
     } else {
         out.push('\n');
     }
+    out.push_str(&render_system_decomposition_detail(
+        objects,
+        relationships,
+        layer_overrides,
+        &page_names,
+    ));
 
     out.push_str("## Components\n\n");
     let counts = count_by_kind(objects, is_significant);
@@ -2694,6 +2941,64 @@ mod tests {
         assert!(!page.content.contains("`description`"));
     }
 
+    // ── RFC 0088 — AI-Assisted Overview ─────────────────────────────────────
+
+    #[test]
+    fn an_ai_overview_property_renders_its_own_section_not_the_generic_table() {
+        let module = KirObject::new("Plausible.Repo", ObjectKind::Custom("ElixirModule".into()))
+            .with_property("ai_overview", serde_json::json!("An Ecto repo module."))
+            .with_property("ai_usage", serde_json::json!("Used by controllers."))
+            .with_property("ai_evidence_hash", serde_json::json!("deadbeef"));
+        let page = render_object_page(&module, &[], &[], &HashMap::new());
+        assert!(page.content.contains("## AI-Assisted Overview"));
+        assert!(page.content.contains("An Ecto repo module."));
+        assert!(page.content.contains("**Usage:** Used by controllers."));
+        // Neither promoted property, nor the internal cache key, leaks into the generic table.
+        assert!(!page.content.contains("`ai_overview`"));
+        assert!(!page.content.contains("`ai_usage`"));
+        assert!(!page.content.contains("`ai_evidence_hash`"));
+        assert!(!page.content.contains("deadbeef"));
+    }
+
+    #[test]
+    fn no_ai_overview_property_omits_the_section_entirely() {
+        let module = KirObject::new("Plausible.Repo", ObjectKind::Custom("ElixirModule".into()));
+        let page = render_object_page(&module, &[], &[], &HashMap::new());
+        assert!(!page.content.contains("## AI-Assisted Overview"));
+    }
+
+    #[test]
+    fn a_stale_comment_check_renders_a_visible_callout_on_definition() {
+        let module = KirObject::new("Plausible.Repo", ObjectKind::Custom("ElixirModule".into()))
+            .with_property("description", serde_json::json!("An old comment."))
+            .with_property("ai_overview", serde_json::json!("Real current behavior."))
+            .with_property("ai_comment_check", serde_json::json!("stale"));
+        let page = render_object_page(&module, &[], &[], &HashMap::new());
+        assert!(page.content.contains("Possibly stale"));
+        assert!(!page.content.contains("`ai_comment_check`"));
+    }
+
+    #[test]
+    fn a_consistent_comment_check_renders_no_callout() {
+        let module = KirObject::new("Plausible.Repo", ObjectKind::Custom("ElixirModule".into()))
+            .with_property("description", serde_json::json!("An accurate comment."))
+            .with_property("ai_overview", serde_json::json!("Matches."))
+            .with_property("ai_comment_check", serde_json::json!("consistent"));
+        let page = render_object_page(&module, &[], &[], &HashMap::new());
+        assert!(!page.content.contains("Possibly stale"));
+        assert!(!page.content.contains("Possibly incomplete"));
+    }
+
+    #[test]
+    fn html_page_also_renders_the_ai_assisted_overview_section() {
+        let module = KirObject::new("Plausible.Repo", ObjectKind::Custom("ElixirModule".into()))
+            .with_property("ai_overview", serde_json::json!("An Ecto repo module."));
+        let model = build_object_page_model(&module, &[], &[], &HashMap::new());
+        let page = render_html_object_page(&model);
+        assert!(page.content.contains("<h2>AI-Assisted Overview</h2>"));
+        assert!(page.content.contains("An Ecto repo module."));
+    }
+
     #[test]
     fn no_real_description_property_renders_an_honest_not_documented_placeholder() {
         let table = sample_table();
@@ -3280,7 +3585,7 @@ mod tests {
         );
         assert!(
             page.content
-                .contains("No crate directory matched a compiled subsystem rollup.")
+                .contains("No crate/workspace manifests or subsystem rollups compiled.")
         );
         assert!(
             page.content
@@ -3358,6 +3663,30 @@ mod tests {
             page.content
                 .contains("**Architecture confidence:** _not yet computed")
         );
+    }
+
+    #[test]
+    fn architecture_summary_reads_real_purpose_and_style_from_project_summary() {
+        let summary = KirObject::new(
+            "Project Summary",
+            ObjectKind::Custom("ProjectSummary".into()),
+        )
+        .with_property(
+            "purpose",
+            serde_json::json!("A privacy-friendly web analytics platform."),
+        )
+        .with_property("architecture_style", serde_json::json!("modular monolith"));
+        let page = render_architecture(&[summary], &[], &[]);
+        assert!(
+            page.content
+                .contains("**Purpose:** A privacy-friendly web analytics platform.")
+        );
+        assert!(
+            page.content
+                .contains("**Architecture style:** modular monolith")
+        );
+        assert!(page.content.contains("LLM-assisted, RFC 0088"));
+        assert!(!page.content.contains("**Purpose:** _not yet computed"));
     }
 
     #[test]
@@ -3762,8 +4091,27 @@ mod tests {
         let page = render_architecture(&[], &[], &[]);
         assert!(
             page.content
-                .contains("_No crate directory matched a compiled subsystem rollup._")
+                .contains("_No crate/workspace manifests or subsystem rollups compiled._")
         );
+    }
+
+    #[test]
+    fn architecture_component_view_falls_back_to_rollups_for_a_non_rust_workspace() {
+        // Real gap found live against the real analytics project (Elixir/Phoenix, zero
+        // `Cargo.toml`, zero `Crate` objects ever compiled): with no crates at all, this section
+        // must show the real compiled `Rollup`s instead of a dead-end message, since a non-Rust
+        // workspace can never have crates but still has real Container-level structure.
+        let rollup = KirObject::new("lib", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(606));
+
+        let page = render_architecture(&[rollup], &[], &[]);
+        assert!(page.content.contains("## Component View"));
+        assert!(
+            page.content
+                .contains("No Cargo-based crate manifests compiled for this workspace")
+        );
+        assert!(page.content.contains("lib](entities/rollup/"));
+        assert!(page.content.contains("606 member file(s)"));
     }
 
     #[test]
@@ -4123,5 +4471,59 @@ mod tests {
             .unwrap()
             .1;
         assert_eq!(backend_label, "Backend (1 file)");
+    }
+
+    #[test]
+    fn system_decomposition_detail_lists_real_rollup_membership_per_layer() {
+        let backend_file = KirObject::new("lib/plausible/repo.ex", ObjectKind::File);
+        let rollup = KirObject::new("lib", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(1));
+        let contains = KirRelationship::new(RelationshipKind::Contains, rollup.id, backend_file.id);
+
+        let page = render_architecture(
+            &[backend_file, rollup],
+            std::slice::from_ref(&contains),
+            &[],
+        );
+        assert!(page.content.contains("### Layer Breakdown"));
+        assert!(page.content.contains("**Backend:**"));
+        assert!(page.content.contains("lib](entities/rollup/"));
+        assert!(page.content.contains("— 1 file\n"));
+    }
+
+    #[test]
+    fn system_decomposition_detail_lists_a_mixed_rollup_under_every_real_layer_it_touches() {
+        // The real, live case: `priv/tracker/js/p.js` is a real compiled frontend asset living
+        // inside an otherwise-backend `priv` directory — the rollup must appear under both
+        // Backend and Frontend, not be forced into just one.
+        let backend_file = KirObject::new("priv/repo/data_migration.ex", ObjectKind::File);
+        let frontend_file = KirObject::new("priv/tracker/js/p.js", ObjectKind::File);
+        let rollup = KirObject::new("priv", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(2));
+        let contains_backend =
+            KirRelationship::new(RelationshipKind::Contains, rollup.id, backend_file.id);
+        let contains_frontend =
+            KirRelationship::new(RelationshipKind::Contains, rollup.id, frontend_file.id);
+
+        let page = render_architecture(
+            &[backend_file, frontend_file, rollup],
+            &[contains_backend, contains_frontend],
+            &[],
+        );
+        assert!(page.content.contains("**Backend:**"));
+        assert!(page.content.contains("**Frontend:**"));
+        let backend_idx = page.content.find("**Backend:**").unwrap();
+        let frontend_idx = page.content.find("**Frontend:**").unwrap();
+        let backend_block = &page.content[backend_idx..frontend_idx];
+        assert!(backend_block.contains("priv]"));
+        let frontend_block = &page.content[frontend_idx..];
+        assert!(frontend_block.contains("priv]"));
+    }
+
+    #[test]
+    fn system_decomposition_detail_is_empty_when_no_rollups_are_compiled() {
+        let file = KirObject::new("lib/plausible/repo.ex", ObjectKind::File);
+        let page = render_architecture(&[file], &[], &[]);
+        assert!(!page.content.contains("### Layer Breakdown"));
     }
 }

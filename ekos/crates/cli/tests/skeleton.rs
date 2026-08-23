@@ -239,7 +239,9 @@ async fn recover_redacts_a_fake_secret_from_a_cicd_workflow_step() {
         .await
         .unwrap();
     ekos::commands::compile::run(&config, dir).await.unwrap();
-    ekos::commands::commit::run(&config, dir).unwrap();
+    ekos::commands::commit::run(&config, dir, true)
+        .await
+        .unwrap();
 
     let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
     let results = ledger.find_objects("CI").unwrap();

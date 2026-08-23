@@ -287,6 +287,35 @@ no separate `--llm` flag. See RFC 0067 for what's deliberately out of scope for 
 (persistent checkpointing/resume, concurrency-safety infrastructure, CI/CD exit codes, multi-format
 output).
 
+### LLM-backed compile-time descriptions (RFC 0088, opt-in)
+
+Unlike `--prose` above (render-time, re-spent on every `docs generate` call), `[llm-description]`
+in `ekos.toml` runs at `commit` time and persists real, evidence-grounded `ai_overview`/`ai_usage`
+properties straight into the ledger — queryable through `ekos ekl`/`ekos ask`/MCP the same as any
+other compiled knowledge, not just rendered once. Covers every `Module`/`Rollup`/`Crate`, and every
+`Symbol` with a compiled `source_span` (Rust and Elixir today), regardless of whether RFC 0087
+already found a real doc comment — a doc comment is real input to the prompt, not a skip condition.
+When one exists, a new `ai_comment_check` property (`consistent`/`stale`/`incomplete`) flags a real
+discrepancy between what the comment claims and what the code actually does, rendered as a visible
+callout right on the entity page's Definition section — never silently trusted, never overwritten.
+A single project-level call also fills `Architecture.md`'s `Purpose`/`Architecture style` fields
+when real signal (a README, compiled subsystems, compiled technologies) exists to ground them.
+
+```toml
+[llm-description]
+enabled = true
+scope = "modules"   # "modules" (default, cheapest) | "symbols" | "all"
+```
+
+```bash
+ekos commit          # shows a real call-count estimate, asks to confirm before any spend
+ekos commit --yes    # skip the confirmation prompt
+```
+
+Opt-in and cost-gated like `[architecture-reasoning]` — a real, potentially large spend (~900 real
+LLM calls at the default `scope = "modules"` against a real mid-size codebase, ~5x that at
+`scope = "all"`), never defaulting to the more expensive tier just because it was turned on.
+
 ### Hierarchical rollups (RFC 0044)
 
 Every other context-saving mechanism in EKOS (capped search results, hop-bounded graph walks) is

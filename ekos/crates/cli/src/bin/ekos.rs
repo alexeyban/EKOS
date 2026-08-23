@@ -40,7 +40,12 @@ enum Commands {
     /// Run the semantic compiler: KIR → Canonical Knowledge Model
     Compile,
     /// Commit the CKM to the append-only knowledge ledger
-    Commit,
+    Commit {
+        /// Skip the LLM-spend confirmation prompt (RFC 0088's `[llm-description]`, only relevant
+        /// when that's enabled in `ekos.toml`) and proceed automatically.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Ledger management subcommands
     Ledger {
         #[command(subcommand)]
@@ -350,7 +355,7 @@ async fn main() -> Result<()> {
             IdentityCommands::Scan => ekos::commands::identity::scan(&config, &cwd),
         },
         Commands::Compile => ekos::commands::compile::run(&config, &cwd).await,
-        Commands::Commit => ekos::commands::commit::run(&config, &cwd),
+        Commands::Commit { yes } => ekos::commands::commit::run(&config, &cwd, yes).await,
         Commands::Ledger { subcommand } => match subcommand {
             LedgerCommands::Status { storage } => {
                 ekos::commands::ledger::status(&config, &cwd, storage)

@@ -163,7 +163,9 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
         .unwrap();
     ekos::commands::resolve::run(&config, dir, false).unwrap();
     ekos::commands::compile::run(&config, dir).await.unwrap();
-    ekos::commands::commit::run(&config, dir).unwrap();
+    ekos::commands::commit::run(&config, dir, true)
+        .await
+        .unwrap();
 
     // ── Step 1: locate each pipeline's Sink purely via ekos_ekl + ekos_state ──
     // ("developer" doesn't know ids or node ordering yet, only that the job

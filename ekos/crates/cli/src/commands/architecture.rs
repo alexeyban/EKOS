@@ -52,7 +52,10 @@ pub async fn investigate(config: &EkosConfig, cwd: &Path, opts: InvestigateOptio
     build::run(&config, cwd).await?;
     recover::run(&config, cwd, false).await?;
     compile::run(&config, cwd).await?;
-    commit::run(&config, cwd)?;
+    // `yes: true` — an automated, unattended investigation loop must never block on stdin for
+    // RFC 0088's LLM-description cost confirmation; only relevant at all if the user's own
+    // `ekos.toml` already opted into `[llm-description]` separately from this command.
+    commit::run(&config, cwd, true).await?;
 
     let mut iteration = 1u32;
     let mut report = evaluate_current(&config, cwd)?;
@@ -88,7 +91,7 @@ pub async fn investigate(config: &EkosConfig, cwd: &Path, opts: InvestigateOptio
 
         run_targeted_reasoning(&config, cwd, dirs, context).await?;
         compile::run(&config, cwd).await?;
-        commit::run(&config, cwd)?;
+        commit::run(&config, cwd, true).await?;
 
         report = evaluate_current(&config, cwd)?;
         print_iteration_summary(iteration, &report);

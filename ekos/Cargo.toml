@@ -139,6 +139,10 @@ rustpython-ast = "0.4"
 
 # Rust source parsing (RFC 0041) — pure Rust, no C-dependency
 syn = { version = "3.0", features = ["full", "visit"] }
+# RFC 0088: `span-locations` is required for `Span::start()`/`.end()` to return real line numbers
+# outside an actual proc-macro context (`syn::parse_file` on a plain string, this project's own
+# use) — without it, every span silently reports line 0 regardless of real source position.
+proc-macro2 = { version = "1", features = ["span-locations"] }
 
 # JavaScript/TypeScript source parsing (RFC 0085) — MIT-licensed, native TS/JSX/TSX support in
 # one crate with no separate syntax-config setup (unlike swc's split Syntax::Es/Syntax::Typescript

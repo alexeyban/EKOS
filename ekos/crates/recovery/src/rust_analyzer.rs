@@ -215,7 +215,15 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
             Item::Fn(f) => {
                 let name = f.sig.ident.to_string();
                 let doc = extract_doc_comment(&f.attrs);
-                let id = add_symbol(&name, "function", path, file_id, &mut result, doc);
+                let id = add_symbol(
+                    &name,
+                    "function",
+                    path,
+                    file_id,
+                    &mut result,
+                    doc,
+                    item_span(f),
+                );
                 result.symbol_count += 1;
                 functions.insert(name, id);
                 bodies.push((id, f.block.as_ref(), None));
@@ -229,6 +237,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     file_id,
                     &mut result,
                     doc,
+                    item_span(s),
                 );
                 result.symbol_count += 1;
             }
@@ -241,6 +250,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     file_id,
                     &mut result,
                     doc,
+                    item_span(e),
                 );
                 result.symbol_count += 1;
             }
@@ -253,6 +263,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     file_id,
                     &mut result,
                     doc,
+                    item_span(t),
                 );
                 result.symbol_count += 1;
             }
@@ -265,7 +276,15 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                         let method_name = m.sig.ident.to_string();
                         let qualified = format!("{type_name}::{method_name}");
                         let doc = extract_doc_comment(&m.attrs);
-                        let id = add_symbol(&qualified, "method", path, file_id, &mut result, doc);
+                        let id = add_symbol(
+                            &qualified,
+                            "method",
+                            path,
+                            file_id,
+                            &mut result,
+                            doc,
+                            item_span(m),
+                        );
                         result.symbol_count += 1;
                         methods_by_name
                             .entry(method_name.clone())
@@ -366,6 +385,14 @@ fn add_import(module: &str, file_id: KirId, result: &mut RustFileResult) {
     ));
 }
 
+/// RFC 0088: real 1-indexed `(start_line, end_line)` from `syn`'s own joined span — `(0, 0)`
+/// (never a valid real line number) when `proc-macro2`'s fallback span resolution couldn't
+/// locate it, so the caller can tell "genuinely unresolved" apart from a real one-line item.
+fn item_span<T: syn::spanned::Spanned>(item: &T) -> (u32, u32) {
+    let span = item.span();
+    (span.start().line as u32, span.end().line as u32)
+}
+
 fn add_symbol(
     name: &str,
     kind: &str,
@@ -373,6 +400,7 @@ fn add_symbol(
     file_id: KirId,
     result: &mut RustFileResult,
     doc: Option<String>,
+    span: (u32, u32),
 ) -> KirId {
     let target_id = KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
@@ -385,6 +413,16 @@ fn add_symbol(
     if let Some(doc) = doc {
         obj.properties
             .insert("description".into(), serde_json::json!(doc));
+    }
+    // RFC 0088: real source span from `syn`'s own joined item span (`proc-macro2`'s
+    // `span-locations` feature — without it every span silently reports line 0). `(0, 0)` (real
+    // line numbers are always >= 1) means the span couldn't be resolved; skip rather than write
+    // a fabricated `{0, 0}` a downstream reader could mistake for a real one-line item.
+    if span != (0, 0) {
+        obj.properties.insert(
+            "source_span".into(),
+            serde_json::json!({"start_line": span.0, "end_line": span.1}),
+        );
     }
     result.objects.push(obj);
     result.relationships.push(KirRelationship::new(
@@ -517,6 +555,41 @@ mod tests {
         assert!(names.contains(&"Qux"));
         let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
         assert_eq!(foo.properties["kind"], "function");
+    }
+
+    #[test]
+    fn a_multi_line_function_gets_a_real_source_span() {
+        let result = parse("fn foo() {\n    let x = 1;\n    x + 1\n}\n");
+        let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
+        assert_eq!(
+            foo.properties["source_span"],
+            serde_json::json!({"start_line": 1, "end_line": 4})
+        );
+    }
+
+    #[test]
+    fn a_real_doc_comment_is_included_in_the_symbols_own_source_span() {
+        // Confirmed live rather than assumed: `syn`'s own joined span for `ItemFn` covers every
+        // real token belonging to the item, including its leading `#[doc = "..."]` attributes
+        // (what `///` desugars to) — the span starts at the comment, not the `fn` keyword. Kept
+        // rather than trimmed: RFC 0088's `ai_comment_check` step wants the LLM to see a real
+        // existing comment right alongside the real code it documents, not stripped away.
+        let result = parse("/// Hashes a password.\nfn hash(pw: &str) {\n    pw.to_string()\n}\n");
+        let hash_fn = result.objects.iter().find(|o| o.name == "hash").unwrap();
+        assert_eq!(
+            hash_fn.properties["source_span"],
+            serde_json::json!({"start_line": 1, "end_line": 4})
+        );
+    }
+
+    #[test]
+    fn an_impl_method_gets_a_real_source_span() {
+        let result = parse("struct S;\nimpl S {\n    fn m(&self) {\n        1\n    }\n}\n");
+        let m = result.objects.iter().find(|o| o.name == "S::m").unwrap();
+        assert_eq!(
+            m.properties["source_span"],
+            serde_json::json!({"start_line": 3, "end_line": 5})
+        );
     }
 
     #[test]

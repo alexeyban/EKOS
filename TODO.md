@@ -3193,3 +3193,61 @@ are excluded — see the full exclusion list in the planning history if needed.
     existing relationship list (e.g. inline references from prose/description text to other entity
     pages). Deferred until real usage against a live project shows what's actually missing, per
     this project's own just-in-time RFC convention.
+  - [x] **Phase 4 — LLM-backed compile-time descriptions (modules, subsystems, symbols, and
+    project-level Purpose/Architecture-style)** — RFC 0088, filed + implemented 2026-08-23
+    (`devlog_93`). Real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` properties,
+    persisted at `commit` time (not regenerated at every `docs generate` the way `--prose` is),
+    for every `Module`/`Rollup`/`Crate` **and every `Symbol`** with a real compiled `source_span`
+    (Rust/Elixir so far — Python/JS deferred, a real, honest, tracked gap, not silently smoothed
+    over) — per-symbol scope folded into this RFC's own implementation at the user's explicit
+    request. New `ai_comment_check` (`"consistent"`/`"stale"`/`"incomplete"`) is the concrete
+    answer to the user's own framing (kept verbatim in the RFC) that a comment being present isn't
+    a reason to skip it; RFC 0087's real `description` property is never overwritten, only
+    supplemented. Design correction found *before* writing code (reading `semantic`/`ledger`
+    source directly, not assumed): this runs as a post-`commit` step against `&dyn KnowledgeStore`
+    (`commit_rollups`/`commit_data_lineage`'s own architectural slot), not a `CompilerPass` — this
+    pipeline's ledger versions whole objects, not patches, so a bare partial-object write could
+    have silently regressed real structural properties another pass wrote. Opt-in
+    (`[llm-description]`, `scope` defaults to the cheaper `"modules"`), cost-gated (`ekos commit
+    --yes` to skip the confirm prompt), same UX `--prose` already established. Live-verified real,
+    zero-API-cost end-to-end against a real local Ollama model (`llama3:latest`): real grounded
+    overviews on documented and undocumented symbols alike, real `Architecture style` populated,
+    `Purpose` honestly left uncomputed when no real README existed to ground it. Two real bugs
+    found and fixed by that live run (neither caught by 17 passing unit tests): a `File`-path
+    resolution gap in multi-`[observe] paths` workspaces (the real analytics project's own shape),
+    and a pre-existing Ollama model-selection bug (`from_env` vs. `from_env_with_model`) this
+    session's own new code had copied from `docs.rs`/`marketing.rs` — both still have it,
+    flagged but not fixed (out of this session's scope). Still deferred: the `Risk` KIR kind +
+    `## Major risks`, `## Architecture confidence` from a real LLM judgment, Python/JS
+    `source_span` capture.
+
+- **Real gaps found live 2026-08-23 analyzing the analytics project's backend, fixed same session**
+  (`devlog_92`):
+  - [x] `elixir_analyzer.rs`: a multi-target `alias X.{A, B}` form (single-line or wrapped across
+    several real lines, `mix format`'s own common shape) was creating one phantom `DependsOn` edge
+    to the bare shared prefix (never `defmodule`'d anywhere — a real contentless entity page)
+    instead of real edges to each real leaf module. Fixed via a new pre-scan
+    (`prescan_multi_alias_targets`), 2 new tests, live-verified against the real analytics backend.
+  - [x] `docs-gen`'s `## Component View` always said "no crate directory matched" for any non-Rust
+    workspace (zero `Crate` objects ever compile without a `Cargo.toml`) — now falls back to
+    listing real compiled `Rollup`s directly when no `Crate`s exist, clearly labeled as a fallback.
+  - [x] `## System Decomposition` was summary-only (aggregate file counts per layer, no drill-down)
+    — new `### Layer Breakdown` subsection lists which real `Rollup` contributes how many files to
+    each layer; a rollup with real members in more than one layer (live-confirmed real case:
+    `priv/tracker/js/p.js`, a compiled frontend asset inside an otherwise-backend `priv/`) is
+    listed honestly under every layer it actually touches.
+
+- **Real gaps found live 2026-08-23 implementing RFC 0088, fixed only where in scope**
+  (`devlog_93`):
+  - [x] `llm_description.rs`: `File.name` is relative to its own `[observe] paths` entry, not the
+    workspace root, in any multi-path workspace — reading a real source file needs the real
+    `"project"` property (RFC 0079) joined back on first. Fixed (`real_file_path`); found by a
+    real live run reporting 0 described objects despite real `source_span` data being present.
+  - [x] `commit.rs`'s own new Ollama provider selection fixed to use `from_env_with_model`
+    (`config.llm.model` was being silently ignored, always falling back to the hard-coded
+    `llama3.1:8b` default).
+  - [ ] **Not fixed, flagged only** — `docs.rs::select_llm_provider_for_prose` and
+    `marketing.rs`'s equivalent have the exact same `from_env` (not `from_env_with_model`) bug;
+    `recover.rs` already has the correct fix. `--prose` and `ekos marketing publish` against a
+    configured non-default Ollama model silently use the wrong model today. Out of RFC 0088's own
+    scope to fix; tracked here so it isn't rediscovered from scratch.

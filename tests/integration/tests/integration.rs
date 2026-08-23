@@ -22,7 +22,7 @@ async fn run_pipeline(config: &EkosConfig, dir: &Path) -> Result<()> {
     ekos::commands::recover::run(config, dir, false).await?;
     ekos::commands::resolve::run(config, dir, false)?;
     ekos::commands::compile::run(config, dir).await?;
-    ekos::commands::commit::run(config, dir)?;
+    ekos::commands::commit::run(config, dir, true).await?;
     Ok(())
 }
 
@@ -111,7 +111,7 @@ async fn odoo_git_fixture_pipeline_end_to_end() -> Result<()> {
     ekos::commands::build::run(&config, dir.path()).await?;
     ekos::commands::recover::run(&config, dir.path(), false).await?;
     ekos::commands::compile::run(&config, dir.path()).await?;
-    ekos::commands::commit::run(&config, dir.path())?;
+    ekos::commands::commit::run(&config, dir.path(), true).await?;
 
     let store = ekos::commands::store::open_store(&config, dir.path())?;
     // The real Odoo `utm` module's initial commit alone touches 28 files together —

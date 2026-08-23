@@ -86,7 +86,9 @@ async fn claude_code_session_over_mcp() {
         .await
         .unwrap();
     ekos::commands::compile::run(&config, dir).await.unwrap();
-    ekos::commands::commit::run(&config, dir).unwrap();
+    ekos::commands::commit::run(&config, dir, true)
+        .await
+        .unwrap();
 
     // ── Turn 0: MCP handshake (what `claude mcp list` verifies) ─────────────
     let init = ekos::commands::mcp::handle_message(
