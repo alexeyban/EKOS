@@ -36,6 +36,8 @@ members = [
     "plugins/pentaho",
     "plugins/python",
     "plugins/rust",
+    "plugins/elixir",
+    "plugins/javascript",
     "plugins/sql-dialect-mysql",
     "plugins/sql-dialect-postgres",
     "plugins/sql-dialect-snowflake",
@@ -137,6 +139,17 @@ rustpython-ast = "0.4"
 
 # Rust source parsing (RFC 0041) — pure Rust, no C-dependency
 syn = { version = "3.0", features = ["full", "visit"] }
+
+# JavaScript/TypeScript source parsing (RFC 0085) — MIT-licensed, native TS/JSX/TSX support in
+# one crate with no separate syntax-config setup (unlike swc's split Syntax::Es/Syntax::Typescript
+# + SourceMap/Lexer boilerplate), the deciding factor over `swc_ecma_parser` for a bounded,
+# "read what's declared" analyzer matching rust_analyzer.rs's/python_analyzer.rs's own scope.
+# Pinned to 0.133 — 0.146 (latest at evaluation time) requires rustc 1.95, newer than this
+# workspace's 1.93 toolchain; confirmed via `cargo add --dry-run` before committing, not assumed.
+oxc_parser    = "=0.133.0"
+oxc_allocator = "=0.133.0"
+oxc_span      = "=0.133.0"
+oxc_ast       = "=0.133.0"
 
 # HTTP client (LLM API calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

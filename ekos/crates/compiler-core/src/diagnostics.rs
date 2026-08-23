@@ -63,8 +63,19 @@ pub struct DiagnosticSink {
 }
 
 impl DiagnosticSink {
+    /// RFC 0076: every diagnostic used to log at `debug` regardless of its own severity — a real,
+    /// confirmed gap found live: `ekos compile` reported "Warnings: 28434 (check logs)" against a
+    /// real project, but every one of those 28,434 warnings was invisible at this project's own
+    /// default `log-level = "info"` (`ekos.toml`), since `info`-level filtering excludes `debug`.
+    /// "Check logs" was only true with `RUST_LOG=debug` explicitly set, which nothing told the
+    /// user to do. Now each diagnostic logs at the tracing level matching its own `Severity`, so a
+    /// warning is actually visible at the log level a warning should be visible at.
     pub fn emit(&mut self, d: Diagnostic) {
-        tracing::debug!(severity = ?d.severity, code = %d.code, "{}", d.message);
+        match d.severity {
+            Severity::Error => tracing::error!(code = %d.code, "{}", d.message),
+            Severity::Warning => tracing::warn!(code = %d.code, "{}", d.message),
+            Severity::Info => tracing::info!(code = %d.code, "{}", d.message),
+        }
         self.diagnostics.push(d);
     }
 

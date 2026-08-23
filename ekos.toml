@@ -19,6 +19,11 @@ ignore-patterns = [
     # tested against.
     "fixtures",
     "examples",
+    # Found live 2026-08-23 (devlog_90 found the same gap in a downstream project first): `doc/`
+    # is this repo's own self-dogfooded `docs generate --output doc` output. Left unexcluded, a
+    # real `ekos build` would re-ingest EKOS's own generated documentation as if it were fresh
+    # project source — the same self-referential contamination loop devlog_90 fixed elsewhere.
+    "doc",
 ]
 
 [llm]

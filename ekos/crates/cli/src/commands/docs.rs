@@ -367,13 +367,48 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
     std::fs::create_dir_all(output)
         .with_context(|| format!("cannot create output dir {}", output.display()))?;
 
+    // RFC 0083: real per-workspace escape hatch for `## System Decomposition`'s convention-based
+    // Backend/Frontend/Database classification — same `ekos.toml` → analyzer-input translation
+    // shape `redaction_config`/`[recover.sql.dialect-rules]` already establish elsewhere in this
+    // file's sibling commands.
+    let layer_overrides: Vec<ekos_docs_gen::LayerOverride> = config
+        .architecture
+        .system_decomposition
+        .overrides
+        .iter()
+        .map(|o| ekos_docs_gen::LayerOverride {
+            path_glob: o.path_glob.clone(),
+            layer: o.layer.clone(),
+        })
+        .collect();
+
     let readme = ekos_docs_gen::render_readme(&objects);
-    let architecture = ekos_docs_gen::render_architecture(&objects, &relationships);
+    let architecture =
+        ekos_docs_gen::render_architecture(&objects, &relationships, &layer_overrides);
     let api = ekos_docs_gen::render_api(&objects, &relationships);
     let sequence_diagrams = ekos_docs_gen::render_sequence_diagrams(&objects, &relationships);
 
     for page in [&readme, &architecture, &api, &sequence_diagrams] {
         write_page(output, page)?;
+    }
+
+    // RFC 0073: the one remaining RFC 0068 §61 MVP item — a standalone SVG artifact alongside the
+    // Mermaid-in-Markdown diagram, not just a fenced code block. Only written when there's real
+    // data behind it (`None` on an empty/no-dependency workspace), matching every other
+    // conditional file this function already writes (entity pages below, ER diagram elsewhere).
+    if let Some(svg_page) = ekos_docs_gen::render_system_context_svg(&objects, &relationships) {
+        write_page(output, &svg_page)?;
+    }
+    // RFC 0083: same reasoning, for the new `## System Decomposition` section.
+    if let Some(svg_page) =
+        ekos_docs_gen::render_system_decomposition_svg(&objects, &relationships, &layer_overrides)
+    {
+        write_page(output, &svg_page)?;
+    }
+    // RFC 0083 Phase 4: same reasoning, for `## Crate & Workspace Topology` — one of the sections
+    // RFC 0073 itself deferred ("current output is Mermaid-in-Markdown only").
+    if let Some(svg_page) = ekos_docs_gen::render_crate_topology_svg(&objects, &relationships) {
+        write_page(output, &svg_page)?;
     }
 
     // RFC 0042: per-entity detail pages for the crate/program-entity/technology/pipeline kinds
@@ -485,7 +520,9 @@ mod tests {
         assert!(output.join("table-customers.md").exists());
         assert!(output.join("table-orders.md").exists());
         let orders_content = std::fs::read_to_string(output.join("table-orders.md")).unwrap();
-        assert!(orders_content.contains("### ForeignKey"));
+        // Real relationships group by real structural meaning now (RFC 0088 Phase 2), not raw
+        // kind — a real outgoing, non-`Contains` edge like this one is real "Dependent on" data.
+        assert!(orders_content.contains("### Dependent on"));
         assert!(orders_content.contains("FOREIGN KEY (customer_id)"));
         assert!(
             orders_content.contains("```mermaid"),
@@ -862,6 +899,10 @@ mod tests {
                 "Architecture.md".to_string(),
                 "README.md".to_string(),
                 "SequenceDiagrams.md".to_string(),
+                // RFC 0083: the one real `Table` object is real, honest `Database` layer data —
+                // `## System Decomposition` writes its SVG the same conditional way `## System
+                // Context` already does (see the sibling `*_writes_system_context_svg_*` test).
+                "system-decomposition.svg".to_string(),
             ]
         );
 
@@ -918,6 +959,150 @@ mod tests {
                 "API.md links to {file_name}, which was never written"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn generate_curated_writes_system_context_svg_and_links_it_from_architecture_md() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
+        ledger.append_object(&krate).unwrap();
+        ledger.append_object(&tech).unwrap();
+        let dep = KirRelationship::new(RelationshipKind::DependsOn, krate.id, tech.id);
+        ledger.append_relationship(&dep).unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let svg_path = output.join("system-context.svg");
+        assert!(
+            svg_path.exists(),
+            "system-context.svg must be written when real Crate/Technology dependency data exists"
+        );
+        let svg = std::fs::read_to_string(&svg_path).unwrap();
+        assert!(svg.starts_with("<svg "));
+        assert!(svg.contains(">clap<"));
+
+        let architecture = std::fs::read_to_string(output.join("Architecture.md")).unwrap();
+        assert!(architecture.contains("[System Context diagram (SVG)](system-context.svg)"));
+    }
+
+    #[tokio::test]
+    async fn generate_curated_omits_system_context_svg_when_no_real_dependency_data_exists() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+        ledger
+            .append_object(&KirObject::new("customers", ObjectKind::Table))
+            .unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(!output.join("system-context.svg").exists());
+    }
+
+    /// RFC 0083: real Backend (`.ex` `File`) + real Database (`Table`) layer data must produce a
+    /// real `## System Decomposition` SVG, linked from `Architecture.md`, same conditional-write
+    /// discipline the System Context SVG already has.
+    #[tokio::test]
+    async fn generate_curated_writes_system_decomposition_svg_and_links_it_from_architecture_md() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+        ledger
+            .append_object(&KirObject::new("lib/plausible/auth.ex", ObjectKind::File))
+            .unwrap();
+        ledger
+            .append_object(&KirObject::new("events", ObjectKind::Table))
+            .unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let svg_path = output.join("system-decomposition.svg");
+        assert!(svg_path.exists());
+        let svg = std::fs::read_to_string(&svg_path).unwrap();
+        assert!(svg.starts_with("<svg "));
+        assert!(svg.contains("Backend"));
+        assert!(svg.contains("SQL Database"));
+
+        let architecture = std::fs::read_to_string(output.join("Architecture.md")).unwrap();
+        assert!(
+            architecture.contains("[System Decomposition diagram (SVG)](system-decomposition.svg)")
+        );
+    }
+
+    /// RFC 0083: an `[[architecture.system-decomposition.overrides]]` entry must win over the
+    /// built-in extension convention, all the way through the real CLI config → render pipeline
+    /// (not just the unit-level `classify_path` test in `docs-gen`).
+    #[tokio::test]
+    async fn generate_curated_respects_a_system_decomposition_override() {
+        let dir = tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.architecture.system_decomposition.overrides.push(
+            ekos_compiler_core::config::LayerOverrideConfig {
+                path_glob: "vendor/**/*.rs".to_string(),
+                layer: "frontend".to_string(),
+            },
+        );
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+        ledger
+            .append_object(&KirObject::new("vendor/widget.rs", ObjectKind::File))
+            .unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let svg = std::fs::read_to_string(output.join("system-decomposition.svg")).unwrap();
+        assert!(
+            svg.contains("Frontend"),
+            "override must route the .rs file to Frontend, not the default Backend"
+        );
+        assert!(!svg.contains(">Backend"));
     }
 
     #[tokio::test]

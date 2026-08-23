@@ -55,6 +55,21 @@ Terraform/Kubernetes/OpenAPI/SQL extractors (§68).
 See `devlogs/devlog_70.md` for the full writeup, including why the originally-planned standalone
 C4 diagram function was dropped mid-implementation in favor of annotating what already existed.
 
+## Phase 2/3 implemented (2026-08-22) — reasoning + evaluation, RFC 0067
+
+Closes two of Phase 1's deferred items: the reasoning layer (§14-15, §41-49) and the evaluator +
+targeted re-collection (§32-39), scoped to the real MVP both this RFC (§67) and RFC 0066 (§64-65)
+already define, not their full combined 146-section scope. Full design rationale in RFC 0067; the
+short version: `ArchitectureReasoningPass` is modeled directly on the existing
+`DocumentSemanticsAnalyzerPass` (RFC 0026) — real LLM classification of each `Crate`'s
+architectural role, written as `inference`-type `Claim`s; `evaluate_architecture` is a plain
+deterministic function scoring only the two dimensions this phase has real signal for
+(`completeness`, `evidence_coverage`); targeted re-collection reads a crate's own leading `//!` doc
+comment for any crate the evaluator flagged unclassified. RFC 0066's MVP investigation loop
+(`ekos architecture investigate`) orchestrates all of it. Still deferred: `Assumption`/
+`Contradiction`-type claims, Phase 2/3 extractors, everything RFC 0066 itself scopes past its own
+MVP (checkpointing, concurrency, CI/CD mode). See `devlogs/devlog_71.md`.
+
 ---
 
 # 1. Summary

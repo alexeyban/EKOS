@@ -1,0 +1,7 @@
+$ find /home/legion/PycharmProjects/analytics/extra -ipath "*exploration*" -o -ipath "*journey*"
+/home/legion/PycharmProjects/analytics/extra/lib/plausible/stats/journey
+/home/legion/PycharmProjects/analytics/extra/lib/plausible/stats/exploration.ex
+/home/legion/PycharmProjects/analytics/extra/lib/plausible/stats/journey/step.ex
+
+# Scoped to extra/ (the EE Elixir backend dir) only -- never looked under assets/js/.
+# The entire frontend exploration UI (6 files, see pass2) was never discovered this way.

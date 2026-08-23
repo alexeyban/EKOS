@@ -1817,13 +1817,20 @@ These items have no single phase — they must be maintained and grown throughou
     ledger despite passing every unit test). Deterministic, zero-LLM: real member counts +
     boundary-relationship counts + `Contains` links to every member. Surfaced in
     `Architecture.md`'s new `## Subsystems` section (RFC 0042's curated docs).
-  - [ ] *Analyzer-owned id-collision risk beyond `File`* — not yet done. `github_analyzer.rs`,
-    `local_docs_analyzer.rs`, `rust_analyzer.rs`/`python_analyzer.rs` (via an embedded `data.path`
-    field), and git's `CoupledWith` file-pair ids all derive from the same
-    `ScanContext.workspace_root`-relative path convention `plugins/file/src/lib.rs` uses, and share
-    the identical multi-project collision risk `build.rs` had. Two viable fixes not yet built:
-    qualify `ObservationArtifact.content.target` centrally at RFC 0043's redaction choke point in
-    `build.rs`, or fix each analyzer's id derivation individually.
+  - [x] *Analyzer-owned id-collision risk beyond `File`* — closed for four of five, RFC 0079 /
+    `devlog_82`. `build.rs` writes a `"project"` field onto every artifact's `data` object at the
+    RFC 0043 redaction choke point (absent for the single-path case); a new shared
+    `ekos_common::project::project_qualify` helper qualifies id-hash inputs only, never displayed
+    names. Wired into `local_docs_analyzer.rs`, `rust_analyzer.rs`, `python_analyzer.rs`,
+    `git_analyzer.rs`'s `CoupledWith`. Live-verified: a real two-project fixture with an
+    identically-named/shaped Rust file in each produced two distinct `RustSymbol` ids (caught and
+    fixed a real bug in the first attempt — see devlog for the live-test failure that found it).
+    - *Still open, honestly scoped*: `github_analyzer.rs`'s `file_kir_id` (for `References` edges
+      to files mentioned in PR/issue text) is a structurally different problem — a path parsed
+      from free text has no single `[observe] paths` entry it naturally belongs to. Investigation
+      found it's now *silently wrong*, not just collision-risky, in a multi-project workspace: it
+      still computes the bare-path id, which no longer matches `build.rs`'s own project-qualified
+      `File` object, so the `References` edge dangles rather than colliding.
   - [ ] *Per-sub-project curated docs* — not yet done. `ekos docs generate` (any layout) reads the
     whole ledger; there's no way to scope curated output to one project within a shared estate
     ledger. Today this requires N separate `ekos.toml`/`.ekos` setups (confirmed this session for
@@ -2515,19 +2522,29 @@ These items have no single phase — they must be maintained and grown throughou
     call site), fix it there, and confirm citations render repo-relative for a workspace at an
     arbitrary (not repo-root) path — `fd`'s baked ledger is a ready-made repro case.
 
-- [ ] **Identity-resolution over-merge — real hits found against `ripgrep`/`bat`, still unfixed**
-  - *What:* The repo-selection spike for RFC 0045 (devlog_45) baked `BurntSushi/ripgrep` and
-    `sharkdp/bat` end-to-end and both hit the same identity-over-merge failure class CLAUDE.md
-    already documents for `Section`/`TransformNode`/`RustSymbol`/`RustModule`/`Crate`: common-word
-    crate/module names (`ignore`, `pcre2`, `bat` itself) flagged as multiple kinds via
-    name-prefix similarity plus the same-kind structural-score fallback of 1.0. `fd` was chosen for
-    the demo specifically because it was the one candidate that baked clean — this is a genuine,
-    still-open product gap, not a demo-prep footnote.
-  - *Output:* Not yet started. A structural fix to `identity`'s resolver (the recurring root cause),
-    not another one-off exclusion-list entry — see `identity/src/cross_system.rs` and
-    `DefaultResolver`'s blanket kind-exclusion list (`CLAUDE.md`'s `identity` crate-map entry).
-  - *Test/Validate (remaining):* Re-run the RFC 0045 bake against `ripgrep` and `bat` and confirm
-    zero identity conflicts, without introducing a new over-merge in the other direction.
+- [x] **Identity-resolution over-merge — real hits found against `ripgrep`/`bat`** — the
+  `Technology`/`Crate` half fixed at its real source, RFC 0078 / `devlog_81`; the `RustSymbol`/
+  `Crate` half honestly re-scoped, still open.
+  - *What was actually wrong:* not `identity`'s resolver — `crate_topology_analyzer.rs` fabricated
+    a duplicate `Custom("Technology")` object whenever a real internal crate (`ignore`, `pcre2`,
+    `bat` itself) was also depended on elsewhere in the same workspace by a bare version string
+    instead of `path`/`workspace = true`. The resolver's `SameNameDifferentKind` conflict report
+    was a correct read of bad upstream data, not a resolver bug.
+  - *Fix:* check the dependency name against every already-known internal crate name
+    (`name_to_crate_id`) before fabricating a `Technology` — a real internal `DependsOn` edge
+    instead. Verified with a fixture reproducing the exact real `ripgrep`/`bat` shape (an internal
+    crate also version-depended-on elsewhere).
+  - *Still open, honestly scoped, not guessed at:* the `RustSymbol`/`Crate` half of the same
+    finding (a module/type inside a crate's own source sharing that crate's name — normal Rust
+    convention, e.g. `pcre2`'s own `mod pcre2` — not a bug) has no existing relationship connecting
+    a `Crate` to its own source `File`/`RustModule`/`RustSymbol` objects to structurally
+    distinguish legitimate self-naming from a real coincidental collision (Component View, RFC
+    0070, only matches `Crate`↔`Rollup` by path-string equality, not a graph relationship).
+    Building that missing link is real, separate work.
+  - *Test/Validate (remaining):* re-run the RFC 0045 bake against `ripgrep`/`bat` for real
+    end-to-end confirmation (not done this session — no live GitHub bake performed, only the
+    targeted unit reproduction); expect the `Technology`/`Crate` conflicts gone, the `RustSymbol`
+    ones still present until the follow-on above is built.
   - *Note (devlog_65):* the same root-cause class had one more concrete, previously-`#[ignore]`d
     instance — PDF/DOCX-derived `Table` objects — fixed by giving `structural_score` a second real
     signal (`row_cell_tokens`) instead of falling back to its blanket `1.0` floor. The general
@@ -2576,25 +2593,35 @@ These items have no single phase — they must be maintained and grown throughou
     caught and fixed in two of them (hardcoded `Ledger::open` call sites bypassing the new
     auto-detection), see the devlog's own account.
 
-- [ ] **Storage architecture: six real gaps, none started**
-  - *What:* A snapshot+compaction model (periodic consolidation of
-    the event chain into a final-state-plus-evidence-pointer snapshot, full history kept
-    separately, colder/more compressed); materialized views alongside EAV (RFC 0016) for
-    frequently-queried structural patterns, to avoid repeated EAV self-joins; a write-barrier/
-    concurrency spec formalizing the single-writer model with versioned snapshots for concurrent
-    readers (note: the fact engine's tantivy lockfile already enforces real single-writer
-    exclusion at the OS level, found live in `devlog_67` — the spec/design work for versioned
-    concurrent *reads* is still the open part); a write-ahead log plus a repair tool for corrupted
-    segments (today the only recovery option for the v3 fact-segment engine is a full migration
-    rollback); a retention/pruning policy (the ledger currently has no upper bound and no archival
-    strategy beyond compaction of existing data, RFC 0034); horizontal distribution of storage
-    across multiple machines, beyond RFC 0034's single-machine vertical partitioning (RFC 0034).
+- [ ] **Storage architecture: six real gaps — plan saved, RFC 0080, none implemented yet**
+  - *What:* A real, technically-grounded plan now exists (RFC 0080) — each of the six sub-gaps
+    checked against the actual current implementation (not just this summary) and correctly
+    attributed to the backend it affects, sequenced by real urgency/dependency:
+    - *Phase 1 (highest priority, real live evidence):* concurrency — two distinct real gaps, one
+      per backend. SQLite `Ledger`'s `append_object` does 3-4 unwrapped statements with **no
+      transaction**, the likely real mechanism behind the corrupted FTS5 table `devlog_65` found
+      live in `analytics/`'s ledger. `FactLedger` v3's actual single-writer enforcement is
+      tantivy's own `IndexWriter` lock (an incidental side effect, not a designed mechanism) —
+      RFC 0016's own text incorrectly attributes this to "the manifest lock," which doesn't exist
+      in the code; needs correcting alongside a real designed cross-process lock and a written
+      concurrent-read visibility spec.
+    - *Phase 2:* a WAL + repair tool — `FactLedger` already has strong crash-recovery primitives
+      (checksummed frames, atomic manifest writes) with no tool surfacing them yet.
+    - *Phase 3:* snapshot+compaction of the version chain — genuinely greenfield; must preserve
+      RFC 0047's `object_history`/`object_at` semantics for the retained window.
+    - *Phase 4:* retention/pruning policy — needs Phase 3's compaction model first, or pruning
+      means real data loss, not archival.
+    - *Phase 5:* materialized views alongside the EAV fact engine — least-scoped so far, needs a
+      pass over real EKL/MCP query logs to find what's actually worth materializing.
+    - *Phase 6:* horizontal distribution — blocked on RFC 0034 (Draft, **not yet implemented**)
+      shipping first; TODO's own earlier phrasing ("beyond RFC 0034") was misleading since RFC
+      0034 itself has no completed foundation to build beyond yet.
   - *Why it matters now, not just eventually:* `devlog_65` found real, physical evidence this is
     already biting — `analytics/`'s local ledger has a corrupted FTS5 virtual table (base DB
-    passes `PRAGMA integrity_check`, the FTS index doesn't) almost certainly from concurrent
-    `ekos` processes writing to the same ledger with no write-barrier.
-  - *Test/Validate:* each sub-item needs its own RFC before implementation, per the mandatory
-    workflow — this entry exists so none of the six silently stays undiscoverable backlog.
+    passes `PRAGMA integrity_check`, the FTS index doesn't), now traced to a specific, real,
+    plausible mechanism (Phase 1, above) rather than just "concurrency, generally."
+  - *Test/Validate:* each phase still needs its own dated implementation RFC before any code, per
+    the mandatory workflow — RFC 0080 is the saved plan, not the implementation.
 
 - [x] **Positioning: separate the technical pitch from token materials — README (devlog_68)**
   - *What:* Real risk: README ran three token/crypto headers (raw contract address, pump.fun
@@ -2720,31 +2747,449 @@ are excluded — see the full exclusion list in the planning history if needed.
     account, including a verification gap (the rebuild used to re-check live was missing `File`
     objects for an unrelated reason, see the new item directly below).
 
-- [ ] **`ekos build`'s fingerprint cache can silently drop `File` objects on a ledger rebuild**
-  - *What:* Found live while re-verifying the identity-resolution fix above (`devlog_66`):
-    clearing a ledger and re-running `recover → resolve → compile → commit` from already-cached
-    observation artifacts does **not** reproduce `File`-kind `KirObject`s, even though the same
-    real file paths were searchable before the ledger was cleared. Root cause, not yet fully
-    traced: `ekos build`'s fingerprint cache decided nothing on disk had changed (`Files observed
-    (new): 0`) and skipped re-observing; unlike `recover`-stage analyzer output (which is cached as
-    a replayable artifact `compile`/`commit` can re-consume any time), `build`'s own inline
-    `File`-object construction apparently isn't independently replayable from that cache — it only
-    flows into the ledger at the moment `build` actually processes a file.
-  - *Output:* Not yet started. A real, previously-undiscovered pipeline/caching gap, unrelated to
-    identity resolution — surfaces specifically for anyone clearing a ledger while keeping cached
-    artifacts (an uncommon but real operation, done twice this session for exactly that reason).
-  - *Test/Validate (remaining):* Reproduce minimally (a small workspace, `build`, clear just
-    `.ekos/ledger/`, `recover → resolve → compile → commit`, confirm `File` objects are missing),
-    then trace whether `build.rs`'s file-KirObject construction needs its own cacheable artifact
-    type the way analyzer passes already have.
+- [x] **`ekos build`'s fingerprint cache can silently drop `File` objects on a ledger rebuild** —
+  root-caused and fixed, RFC 0077 / `devlog_80`. Root cause: the fingerprint gates both
+  re-scanning the filesystem AND constructing/writing `File` `KirObject`s behind one check —
+  correct for "did the source change," silent about "does the ledger still have the result."
+  Fixed: `ledger.object_count() == 0` distrusts the fingerprint cache entirely for one run when the
+  ledger looks freshly cleared, forcing a real rescan; every subsequent run resumes trusting the
+  cache normally. Live-verified with a real reproduction test (clear `.ekos/ledger/`, rebuild,
+  confirm `File` objects return) and a regression guard the other direction (intact ledger +
+  unchanged content still hits the cache, doesn't duplicate). Deliberately doesn't cover a
+  hypothetical *partial* File-object loss with everything else intact — not what was found live.
 
-- [ ] **Architecture Knowledge Model — reasoning layer, evaluator, agent state machine (RFC
-  0065/0066)**: RFC 0065 Phase 1 (`devlog_70`) shipped a narrow, integrated slice — `Claim`/
-  `ArchitectureGap` KIR kinds, `CrateTopologyAnalyzerPass` deterministically populating them, a C4
-  mapping note + Open Questions section in `render_architecture`. Real follow-on work, not started:
-  RFC 0065 §14-15's LLM reasoning layer (would produce `Inference`/`Assumption`/`Recommendation`-
-  type `Claim`s, which Phase 1 deliberately left unpopulated since they require interpretive
-  judgment); §32-39's evaluator + feedback/re-collection loop; RFC 0066's agent state machine in
-  full (depends on the reasoning layer existing first); Phase 2 extractors (Terraform/Kubernetes/
-  OpenAPI/SQL, §68). Each is real RFC-sized work in its own right, per this project's
-  just-in-time RFC discipline — not to be started speculatively ahead of an actual need.
+- [x] **Architecture Knowledge Model — reasoning layer, evaluator, MVP agent (RFC 0065/0066/0067)**:
+  RFC 0065 Phase 1 (`devlog_70`) shipped the static knowledge model — `Claim`/`ArchitectureGap`
+  KIR kinds, `CrateTopologyAnalyzerPass` deterministically populating them, a C4 mapping note + Open
+  Questions in `render_architecture`. RFC 0065 Phase 2/3 + RFC 0066's MVP agent (`devlog_71`, RFC
+  0067) closed the rest of the real MVP scope both RFCs define: `ArchitectureReasoningPass` (LLM
+  role classification, `inference`-type `Claim`s), `evaluate_architecture` (deterministic
+  completeness/evidence-coverage scoring), targeted re-collection (a crate's own doc comment), and
+  `ekos architecture investigate` orchestrating all of it in RFC 0066 §65's 12-step loop. Live
+  end-to-end with a real local Ollama model against this repo's own workspace.
+
+  **Known gaps left untouched — for the next run on this feature:**
+  - *Full 3-iteration loop never re-verified end to end with the chunking fix in place.* The
+    context-window bug (`MAX_CRATES_PER_CALL`) was fixed and reverified live, but only via a fast
+    `ekos recover`-only check (39/44 crates classified in one broad pass) — not a full
+    `ekos architecture investigate` run, which would also exercise targeted re-collection against
+    the *remaining* ~5 unclassified crates with the fix in place. The two full runs that did
+    complete both predate the fix. Cost: ~30-45 min against this repo's real ~35k+-object ledger.
+  - *5/44 crates still unclassified even post-fix* (39/44, not 44/44) — real residual quality gap,
+    not yet root-caused. Worth checking whether it's model-capability (the LLM skipping a few names
+    even within a correctly-sized chunk) or a second, smaller instance of the same class of bug.
+  - *`document_semantics_analyzer.rs::collect_sections` has the same latent duplicate-artifact bug*
+    `architecture_reasoning.rs::collect_crates` was found to have and fixed (RFC 0015's
+    content-addressed, additive artifact store means "read every artifact matching this pass name"
+    silently double-/triple-counts after more than one uncached `recover` run in a workspace's
+    history). Not fixed here — noted live in `devlog_71`, still real and unaddressed.
+  - *Role classifications aren't surfaced in generated docs.* `Claim` objects with `has_role` are
+    real, evidence-backed, and queryable via `ekos ekl`/`ekos_search`, but `render_architecture`
+    only gained the C4 note + Open Questions (RFC 0065 Phase 1) — no "Role Classifications" section
+    reads Phase 2's `has_role` claims back out. A human reading `Architecture.md` currently can't
+    see what the LLM concluded about each crate without querying the ledger directly.
+  - *`evaluate_architecture` computes 2 of RFC 0065 §34's listed dimensions* (`completeness`,
+    `evidence_coverage`) *only* — `consistency`, `cross_view_consistency`, `traceability`, and the
+    rest have no real signal to compute yet and were deliberately left unscored rather than faked.
+  - *RFC 0066's own Phase 2/3 sections, and RFC 0065's Phase 2 extractors — deliberately not
+    started*: persistent checkpointing/resume, concurrency-safety infrastructure, CI/CD exit-code
+    matrix + PR-comment workflow, human-review UI, MCP additions, `Assumption`/`Contradiction`-type
+    claims (need the reasoning layer to detect a real contradiction first, which hasn't happened on
+    real data yet), Terraform/Kubernetes/OpenAPI/SQL extractors. Each is real RFC-sized work in its
+    own right — not to be started speculatively ahead of an actual need.
+
+- [ ] **Architecture Documentation Standard — full build-out (RFC 0068)**: filed 2026-08-22 from an
+  externally-authored 67-section spec unifying ISO/IEC/IEEE 42010, arc42, C4, and ISO/IEC 25010
+  into one target documentation package — the fuller standard RFC 0065 Phase 1-3/RFC 0066's MVP
+  agent/RFC 0067 were the first real slice of. **Explicit instruction: build the full feature set
+  below, not another trimmed MVP — nothing here is to be cut, only sequenced.** Grouped below by
+  RFC 0068's *own* MVP/Phase 2/Phase 3 structure (§61-63) — that sequencing is the source
+  document's own, not an invented scope reduction; every item is real, planned build-out, not a
+  deferred-indefinitely non-goal the way earlier RFC 0065/0066 items were framed.
+
+  - **Already shipped, real subset** (RFC 0065 Phase 1-3, RFC 0066 MVP agent, RFC 0067 —
+    `devlog_70`/`devlog_71`): deterministic crate-topology extraction, one C4-ish container-level
+    view (`## Crate & Workspace Topology` + C4 mapping note in `Architecture.md`), LLM-backed role
+    classification (`Claim`/`inference`), a deterministic evaluator (`completeness`/
+    `evidence_coverage` only), targeted re-collection (crate doc comments), the `ekos architecture
+    investigate` orchestrating loop, local Ollama support, Markdown generation. `ekos diff`
+    (existing command, RFC 0018-era) already gives ledger-level point-in-time comparison — the real
+    primitive RFC 0068 §31-32's "Documentation Drift" needs, not yet wired to an architecture-claim
+    comparison though.
+
+  - **RFC 0068 §61 MVP — remaining pieces**:
+    - [x] **System Context** (§15) and **basic documentation drift** (§31-32) — done, RFC 0069 /
+      `devlog_72`. Drift ended up needing no `ekos diff` extension at all: the real primitive was
+      already `KnowledgeStore::object_history` (RFC 0047) plus `append_object`'s existing
+      `(id, content_signature)` versioning (RFC 0015) — a role `Claim`'s own version history *is*
+      the "documented vs. observed" comparison, not a separately modeled concept. Live-verified
+      against this repo's own real ledger: 7 genuine findings from earlier real
+      `architecture-reasoning` runs this session, with zero new pipeline run needed to prove it.
+    - [x] **Basic Component View** (§18) and **Technology Inventory** — done, RFC 0070 /
+      `devlog_73`. The Crate↔File design question resolved with zero new extraction: RFC 0044's
+      existing `Rollup` grouping already covers it (`Rollup.name` and `Crate.path` use the same
+      directory convention — confirmed against this repo's own real compiled data, not assumed).
+      Live-verified: real Component View + Technology Inventory rendered against this repo's own
+      already-committed ledger, no new pipeline run needed.
+    - [x] **Basic Runtime View** (§20) and **Architecture Summary** (§14) — done, RFC 0071 /
+      `devlog_74`. Runtime View links to the already-generated `SequenceDiagrams.md` rather than
+      duplicating it (naming *which* sequences are important business scenarios needs LLM
+      reasoning or human curation, neither available here — stated explicitly, not invented).
+      Architecture Summary populates only real-evidenced fields (component/crate counts, top
+      technologies, open-questions count); `Purpose`/`Architecture style`/`Major risks`/
+      `Architecture confidence` each say explicitly why they're not computed yet rather than being
+      guessed at. Hit the same relationship-duplication bug from RFC 0070 in a new location (raw
+      dependent counts) — fixed the same way (dedupe by `(from, to)` before counting), with its own
+      regression test — this is now the *second* per-view mitigation for the same untouched root
+      cause tracked below.
+    - [x] **SVG/diagram generation** — done for System Context, RFC 0073 / `devlog_76`. New generic,
+      dependency-free, deterministic `render_graph_svg`/`layer_nodes` primitive (Kahn's-algorithm
+      layering, tie-broken by node id for reproducibility; a cycle-fallback layer so no node is ever
+      silently dropped) produces a real standalone `system-context.svg` alongside the existing
+      Mermaid-in-Markdown block, written by `generate_curated` only when there's real dependency
+      data. **All six RFC 0068 §61 MVP view items are now done.** Deliberately scoped to one
+      diagram, not all four `graph TD` producers `docs-gen` has (per-object neighborhood via
+      `render_mermaid_graph`, Crate & Workspace Topology / per-kind Dependency Graph via
+      `render_relationship_kind_graph`) — the primitive is generic and ready for those as real,
+      concretely scoped follow-on work, tracked here, not silently narrowed:
+      - [ ] Wire `render_graph_svg` into `render_mermaid_graph` (per-object neighborhood diagrams,
+        `--layout objects`) — one SVG per significant object's page.
+      - [ ] Wire `render_graph_svg` into `render_relationship_kind_graph`'s two `render_architecture`
+        call sites (`## Crate & Workspace Topology`, and any per-relationship-kind Dependency Graph
+        subsection) — needs a real decision on file naming per relationship kind first, not attempted
+        yet.
+      - [ ] `erDiagram`/`sequenceDiagram` families (`render_er_diagram`, `render_sequence_diagrams`)
+        use different Mermaid syntax entirely — would need their own (still generic, still
+        Mermaid-independent) node/edge extraction, not a reuse of `system_context_graph`'s shape.
+      - [ ] Known real limitation, not yet fixed: `layer_nodes` doesn't wrap wide layers — this
+        repo's own real System Context diagram (45 technologies) renders as one very wide row
+        (8296×190px), correct but impractical to view as an image. A max-nodes-per-row wrap rule
+        would fix this; explicitly deferred, not silently ignored (RFC 0073).
+
+  - **RFC 0068 §62 Phase 2 — remaining pieces**:
+    - [x] **Data Architecture** (§22) — done, RFC 0074 / `devlog_77`. Real Data Stores (every
+      compiled `Table`/`Dataset`, with real foreign-key edge counts) and real Transformations/
+      Lineage (link-through to `SequenceDiagrams.md`'s Data-Flow Sequences, RFC 0027). Found a
+      real, concrete integration gap while building this: `TransformNode` source/sink nodes
+      carried table names as *properties*, not a relationship edge to the actual compiled `Table`
+      object. Closed in Increment 7, below.
+    - [x] **Data Architecture cross-referencing (RFC 0075 / `devlog_78`)** — closes the four
+      follow-ons the item above surfaced:
+      - [x] `TransformNode` Source/Sink nodes now link to the real `Table`/`Dataset` object they
+        name (`ekos_semantic::data_lineage::link_transform_nodes_to_tables`, run from `commit.rs`)
+        — unambiguous exact-name match only (case-insensitive), deterministic ids from the start
+        (matching RFC 0072's pattern, not repeating its bug). `docs-gen`'s Data Stores section now
+        shows real read/write-by-transformation counts per store. Live-verified end to end
+        against a disposable fixture, idempotent across a re-commit.
+      - [x] Data Domains — real, reusing structure already in the compiled name (schema-qualifier
+        prefix, e.g. `sales.orders` → domain `sales`), zero new extraction. Honestly empty for
+        both this repo's own committed fixtures (`ecommerce.sql`, `northwind.sql` both use
+        unqualified table names) — the grouping logic itself is unit-tested against synthetic
+        qualified names, and will activate for real on any workspace whose DDL qualifies table
+        names.
+      - [x] **Correction, not implementation**: RFC 0074's own Ownership text (repeated in this
+        file, just above, before this edit) was factually wrong — `git_analyzer.rs`'s only
+        `OwnedBy` edge connects a **commit event** to its **author**, never a `File` object (which
+        `git_analyzer.rs` doesn't even emit); RFC 0074 had claimed it landed "onto observed `File`
+        objects." Corrected in the rendered Data Architecture text and here. Real, still-open,
+        now-correctly-scoped blocker for Ownership: (1) `git_analyzer.rs` needs a new per-file
+        top-contributor derivation (it only has commit-event-level `OwnedBy` today, not file-level
+        — a real, buildable extension of the same pass's existing per-file `CoupledWith` coupling
+        logic, not a redesign); (2) a `Table`/`Dataset` needs the same kind of name/evidence-path
+        linkage RFC 0075 just built for `TransformNode`s, but against `File` objects instead of
+        `Table` objects. Neither built yet — both concretely scoped now, not vague.
+      - [x] Lifecycle — same root blocker as Ownership's item (2) above (no `Table`→`File` link);
+        not a separate investigation, confirmed to share the identical missing primitive.
+      - [x] Data Quality — checked for a hidden signal (DDL `NOT NULL`/constraint metadata) and
+        deliberately didn't use it: a structural constraint is a stated rule, not a measurement of
+        actual data, the same requirement-vs-observation distinction RFC 0068 §26 itself draws.
+        Confirmed genuinely blocked on RFC 0068 §63 Phase 3 runtime telemetry (row counts, null
+        rates, constraint violations against real data) — checked, not assumed.
+    - [ ] Terraform/Kubernetes/OpenAPI extractors (same items RFC 0065/0066 already named) —
+      genuinely new extraction, no existing analyzer to extend; investigated and explicitly not
+      started this increment in favor of Data Architecture (RFC 0074's own investigation section).
+    - [ ] **Deployment Architecture** (§21), **Security Architecture** (§24), **Quality
+      Architecture** (§26-27) views — each a real named section in the target package, none built
+      yet; Deployment Architecture specifically depends on the Terraform/Kubernetes/OpenAPI
+      extractors above (no compiled infrastructure data exists to render a real view from yet).
+    - [ ] **Architecture Diff** (§55, a real architecture-level diff — not the same as raw `ekos
+      diff`, needs to diff at the Claim/entity level).
+    - [ ] **Architecture Drift** (§56, continuous version of the MVP's one-shot drift check, RFC
+      0069).
+    - [ ] **Human Review** workflow (§ referenced throughout — RFC 0029's `ekos_identity_review`
+      pattern is the closest existing precedent to extend, not build from scratch; investigated as
+      a candidate for this increment, not chosen — Data Architecture had more real compiled data
+      already behind it).
+    - [ ] **ADR generation** (§28, Architecture Decision Records — `BusinessRule`/`Custom("Claim")`
+      kinds are the closest existing KIR shapes to extend).
+    - [ ] **MCP** exposure of architecture query/investigation tools (existing MCP server,
+      `crates/cli/src/commands/mcp.rs`, is the extension point).
+
+  - **RFC 0068 §63 Phase 3 — remaining pieces**: runtime telemetry/logs/metrics/traces ingestion;
+    continuous drift detection (running the MVP drift check on a schedule/trigger, not just
+    on-demand); **Architecture Q&A** (§57 — likely extends `ekos ask`'s existing grounding+citation
+    pipeline rather than a new one); Target Architecture / Migration Architecture (a *desired*
+    future-state AKM compared against the *current* reconstructed one — genuinely new concept, no
+    existing EKOS primitive for a non-observed, aspirational knowledge state); architecture fitness
+    checks; architecture governance; architecture evolution analysis (trend over multiple
+    baselines, not just two-point diff).
+
+  - **Structural/standards-mapping work spanning all phases, not phase-specific** (§6-13, §41-44):
+    ISO 42010's Stakeholders/Concerns/Viewpoints/Views/Model-Kinds framework — no existing EKOS
+    concept models "stakeholder concern" or "viewpoint" as first-class filters over the AKM today;
+    Cross-View Consistency checking (§41, "does C4 Context agree with C4 Container" — needs at
+    least two real views to exist first before this is checkable); Architecture Correspondence
+    (§42); Quality-to-Architecture and Architecture-to-Evidence traceability (§43-44, extends the
+    existing evidence-linking already on every `Claim`/object, but as an explicit cross-cutting
+    report, not implicit); a Glossary section (§39) and Appendices (§40) in generated docs;
+    Documentation Quality Gate (§48, a pass/fail gate wired into the investigation loop's DECISION
+    step, extending RFC 0066's existing quality-threshold check); Machine-Readable Companion (§53 —
+    likely the CKM/ledger JSON already *is* this, needs packaging/documenting as a deliverable
+    rather than new data); Architecture Baseline (§54, a named, retrievable ledger snapshot —
+    `ekos build`'s existing `.ekos/snapshots/*.json.zst` may already be most of this).
+
+  - *Next step*: **Increment 8** — with Data Architecture (§22) and all four of its follow-ons
+    closed (Increment 7, RFC 0075 — two shipped as real code, two turned from vague gaps into
+    precisely-scoped, correctly-diagnosed blockers with a real factual correction along the way),
+    the next real choice is among the untouched §62 Phase 2 items above. **Human Review** workflow
+    remains the most-reusable (RFC 0029's `ekos_identity_review` MCP-tool pattern is a real, close
+    precedent, not a from-scratch design) — the two newly-scoped Ownership/Lifecycle follow-ons
+    (a `git_analyzer.rs` per-file ownership derivation; a `Table`/`Dataset`→`File` link) are real
+    candidates too, now that they're concretely designed rather than vague. Its own dated RFC
+    (0076) the way RFC 0069-0075 were, continuing automatically down the roadmap per the standing
+    instruction not to cut anything here.
+
+- [x] **`KirRelationship`'s non-deterministic ids let logically-identical relationships
+  accumulate as real duplicates across repeated commits** — the concretely observed instance fixed
+  at its source, RFC 0072 / `devlog_75`. Found live verifying RFC 0070's Technology Inventory view
+  (devlog_73), found *again* independently in RFC 0071's Architecture Summary (devlog_74) — two
+  render-time mitigations for the same root cause, both still in place. `crate_topology_analyzer.rs`'s
+  `DependsOn` edges (the actual pass responsible for every duplicate seen in either view) now get a
+  deterministic id, matching how `Crate`/`Technology`/`Claim`/`ArchitectureGap` already do —
+  live-verified end to end (not just unit-level): three independent `build`/`recover`/`compile`/
+  `commit` cycles against a real disposable workspace on the real default v3 `FactLedger` backend
+  produced the same 2 real relationship ids each time, not a growing count.
+  - *Deliberately not a blanket fix* — investigated first, not assumed safe: `grep` found 136
+    `KirRelationship::new()` call sites across 32 files, and `sql_analyzer.rs`'s `ForeignKey` edges
+    are a real, already-shipped counter-example (two distinct real foreign keys between the same
+    two tables via different columns share the same `(from, to, kind)` tuple — a blanket
+    `(from,to,kind)`-based id would have silently collapsed them, losing a real fact). Each
+    relationship kind needs its own real judgment call about what distinguishes two instances, not
+    a mechanical global change.
+  - *Still open, real, separate work* — not folded into RFC 0072: the other 134 call sites remain
+    exposed to varying degrees (Crate topology Mermaid diagram, MCP tools, EKL queries, and any
+    other relationship-reading code); each needs the same kind of case-by-case investigation RFC
+    0072 did for `DependsOn`, not a batch fix. Also: this fix does not and cannot retroactively
+    clean up duplicate rows already committed to this repo's own real ledger before it shipped (no
+    delete/tombstone mechanism exists anywhere in the codebase) — RFC 0070/0071's render-time dedup
+    stays in place for exactly that reason and keeps working regardless.
+  - **RFC 0072 named `sql_analyzer.rs`'s `ForeignKey` edges as the counter-example proving a
+    blanket fix would be wrong — but never checked whether `sql_analyzer.rs`'s own `Table`/
+    `ForeignKey` objects had a deterministic id at all.** They didn't. Found live testing a real
+    external project (RFC 0076, below) — one of the 134 still-open call sites this note already
+    flagged, now closed for real, live-verified data corruption, not just a theoretical gap.
+
+- [x] **Real-project testing (RFC 0076 / `devlog_79`)** — compiled the current build and generated
+  documentation for a real, external, non-Rust project (`/home/legion/PycharmProjects/analytics`,
+  Plausible Analytics, Elixir, 804MB, 495 files, a real multi-month-old EKOS case-study workspace).
+  First time this session tested against pre-existing real ledger state rather than a fresh
+  disposable fixture. Six findings, four fixed:
+  - [x] `sql_analyzer.rs`'s `Table`/`ForeignKey` objects had no deterministic id — every table in
+    the real workspace existed twice (114 rows for 57 real tables, confirmed live via `ekl`). Same
+    failure class as the `DependsOn` bug above, one layer deeper. Fixed: `table_kir_id`/
+    `foreign_key_kir_id`, live-verified via a completely fresh rebuild of the real workspace, twice
+    — 57 tables both times.
+  - [x] Elixir's `defp`/`defmodule` (and `defmacro`/`defmacrop`/`defdelegate`) were invisible to
+    `plugins/file/src/lib.rs`'s declaration-prefix symbol fallback — checked a real large Elixir
+    codebase directly: 1917 `defp` vs. 2509 `def`, 522 `defmodule`, all silently missing. Fixed by
+    extending `DECL_PREFIXES`; zero cost for every other already-covered language.
+  - [x] `ekos doctor` false-negatived on a correctly-running local Ollama (hardcoded
+    `ANTHROPIC_API_KEY` check regardless of configured provider). Fixed: `llm_provider_check`
+    extracted and testable, Ollama special-cased (no API key exists for a local server).
+  - [x] `ekos compile`'s "Warnings: N (check logs)" pointed nowhere real — every diagnostic only
+    ever logged at `tracing::debug!` (invisible at this project's own default `log-level = "info"`)
+    and was never persisted; `ekos recover` was worse, not even printing a count. Fixed:
+    `DiagnosticSink::emit` now logs at each diagnostic's real severity, and a new
+    `write_diagnostics_log` helper persists the full list to `.ekos/diagnostics/<command>.log`,
+    wired into both commands. Live-verified: surfaced a real, previously-invisible, actionable
+    finding on the first try (`SQL003: ... model 'llama3.1:8b' not found`).
+  - [ ] **Not fixed, investigated, not a bug**: low SQL transform coverage (20% mapped) turned out
+    to be a real Postgres trigger function's control flow (`IF`/`RAISE`/`RETURN`), genuinely out of
+    the Transformation IR's dataflow-only scope (RFC 0027), correctly and honestly reported
+    `Unmapped` rather than fabricated. Modeling procedural control flow (`Branch`/`Loop`/
+    `Exception` IR node types) would be a real, separate, substantial feature — not attempted, not
+    needed to call this "not broken."
+  - [ ] **Not fixed, investigated, real fix deferred**: `ekos resolve` took ~5 min against the real
+    pre-existing workspace (29.5M pairwise comparisons over 10,178 candidates).
+    `DefaultResolver::resolve` already blocks by `(kind, name-prefix)` — not a naive unblocked scan.
+    A completely fresh rebuild of the same real workspace produced 5,241 pairs for a structurally
+    identical run (≈5,600× fewer) — strong evidence the real driver is candidate-set inflation
+    specific to a long-lived, repeatedly-`recover`'d workspace (most likely accumulated
+    `KnowledgeArtifact`s from many historical runs all still read as current input by `compile`'s
+    `knowledge_artifact_ids`), not the resolver's blocking algorithm. Not fixed: the real fix is
+    either an artifact-store lifecycle change (prune/supersede old `KnowledgeArtifact`s per pass) or
+    a blocking-key improvement — both real, larger changes with genuine risk of dropping evidence a
+    case this session didn't test still needs. A guessed fix here risked a worse regression than the
+    performance cost it addresses.
+  - *Recurred, confirming the diagnosis*: hit live again during RFC 0081's own verification —
+    re-running `recover`/`compile` against the same real analytics workspace after invalidating
+    `pass-manifests` (needed to pick up an analyzer code change) produced a real, temporary spike
+    to 15,866 CKM-stage objects (nearly double), before `commit`'s content-addressed dedup brought
+    the final ledger back to the correct real count. Same root cause, same real workaround
+    (`ekos ledger` doesn't yet have a real prune tool — this is exactly Storage Architecture Phase 2
+    from RFC 0080, above), not a new bug. Recurred a third time during Phase 2's live verification
+    (`SEM002 unknown from-id` warning count: 3379 → 3879 → 6331 across three consecutive cycles) —
+    confirmed via direct `ekl` lookup that the specific flagged objects/edges resolve correctly
+    post-`commit` each time; still not fixed, still correctly deferred to Storage Architecture
+    Phase 2.
+
+- [ ] **`GitObserver::is_git_repo()` false-positive on an unrelated ancestor `.git`** — found live
+  while cleaning the analytics project's ledger (before the docs-decomposition plan started), not
+  yet fixed. `plugins/git/src/lib.rs` uses `git rev-parse --git-dir`, which walks up to *any*
+  ancestor `.git` — so a second `[[observe]] paths` entry with no `.git` of its own (e.g.
+  `../analytics-docs`) gets wrongly detected as a git repo if it happens to sit inside a parent
+  directory that does have one (`/home/legion/PycharmProjects/.git`). Compounded by
+  `recover.rs`'s `collect_git_artifact_ids`, which scans the *whole* artifact store for
+  `connector_name == "git"` artifacts with no per-project scoping and unconditionally overwrites
+  (`repo_id = Some(id)`, last-one-wins) which "repo" metadata is treated as authoritative — this
+  can nondeterministically surface the wrong (tiny, ~1-contributor) commit history instead of the
+  real one (~124 contributors), depending on artifact store iteration order. Real fix needs two
+  parts: `is_git_repo()` should check for a `.git` directly inside the given path, not walk
+  ancestors (or explicitly opt into ancestor discovery only when desired); `collect_git_artifact_ids`
+  needs the same per-project scoping RFC 0079 already gave the other multi-project analyzers.
+
+- [x] **Identity resolver: `ElixirModule`/`ElixirSymbol`/`JsModule`/`JsSymbol` missing from
+  `DefaultResolver`'s blanket kind-exclusion list** — `devlog_90`. Found live reading a real
+  generated entity page (`Plausible.Auth.Password`), not by testing: a real password-hashing
+  module had 1,236 real `SameAs` edges to unrelated real modules at confidence=1.00, the exact same
+  same-kind-structural-fallback failure `Section`/`TransformNode`/`RustSymbol`/`RustModule`/
+  `PythonSymbol`/`PythonModule`/`Crate`/`Claim`/`ArchitectureGap` already hit — RFC 0081/0085 both
+  missed adding their new kinds to this list. Fixed (`crates/identity/src/lib.rs`), 3 new tests
+  using the exact real names. Verified via a full clean ledger rebuild: 0 bad edges (was 1,236).
+- [x] **`docs-generated/` self-referential contamination** — `devlog_90`. Found while chasing why
+  the identity fix above didn't seem to take effect: the analytics project's `ekos.toml` never
+  excluded its own `docs-generated/` output directory from `[observe] paths`, so every `ekos build`
+  after every `ekos docs generate` re-ingested EKOS's own previously generated markdown as real
+  project documentation — inflating "Local documents analysed" from 237 to 6,364 and the ledger
+  object count to 127,676 at its worst, independent of and compounding RFC 0076 Finding 6. Fixed
+  with one `ignore-patterns` line; verified via full clean rebuild: 2,414 real files (not 6,128),
+  139 real local documents (not 6,364), 8,787 real CKM objects (not 127,676).
+
+- [x] **Deep Source Decomposition + Production-Grade Architecture Diagrams** — all 6 phases
+  shipped and live-verified. Full plan: `/home/legion/.claude/plans/1-prove-the-core-memoized-wren.md`.
+  Real motivation: generated `Architecture.md` for the real analytics project and found it
+  unprofessional — no backend/frontend/database decomposition, mostly flat lists, the one real
+  diagram (System Context) an unreadable 8296×190px single row.
+  - [x] **Phase 1 — real Elixir decomposition** — RFC 0081 / `devlog_84`. New
+    `ekos-plugin-elixir` observer + `ElixirAnalyzerPass`: real `Custom("ElixirModule")`/
+    `Custom("ElixirSymbol")` objects, real `Contains`/`DependsOn` edges (including real
+    module-to-module dependencies when both ends are locally defined — the actual "restore links
+    and relationships" deliverable). Live-verified against the real analytics project: 1231 files,
+    ~1260 modules, ~4800 functions, spot-checked against two real files' actual content. Found and
+    fixed a real `API.md` integration gap along the way (two-level `File→Module→Symbol` containment
+    wasn't resolved by the existing Rust/Python-shaped grouping logic).
+    - *Deferred, not cut*: Phoenix-convention role tagging (controller/LiveView/context) — designed,
+      then cut after finding a real dedup-ordering risk in the natural implementation; left for
+      Phase 3 as a render-time derivation instead (matching RFC 0075's Data Domains pattern).
+  - [x] **Phase 2 — `package.json` dependency extraction** — RFC 0082 / `devlog_85`. New
+    `PackageJsonAnalyzerPass`: real `Custom("Technology")` objects + `DependsOn` edges from
+    `dependencies`/`devDependencies`, pure JSON parse, no new parser crate. Live-verified against
+    the real analytics project: 4 real manifests, 76 real `Technology` objects, 92 real
+    `DependsOn` edges; spot-checked `react` directly via `ekl` (real object + real edge from
+    `assets/package.json`'s real `File` object, both confirmed in the final committed ledger).
+    `Architecture.md`'s `## Technology Inventory` now lists all 76 real packages with real
+    per-manifest attribution.
+    - *Real anomaly investigated, not a Phase 2 bug*: `compile` logged a growing count of
+      transient `SEM002 unknown from-id` warnings (3379 → 3879 → 6331 across three consecutive
+      cycles against this same long-lived workspace) — confirmed as a further live recurrence of
+      RFC 0076 Finding 6 (already tracked above), not something this phase introduced; the
+      specific flagged object/edge both resolve correctly post-`commit`.
+  - [x] **Phase 3 — real System Decomposition view (Backend/Frontend/Database layers)** — RFC
+    0083 / `devlog_86`. New `layer_classification.rs`: convention-based `classify_path` (backend/
+    frontend language extensions, `package.json` as an always-frontend signal), with a real
+    `[[architecture.system-decomposition.overrides]]` escape hatch in `ekos.toml` (same
+    first-glob-match-wins shape RFC 0031's `[recover.sql.dialect-rules]` already established). New
+    `## System Decomposition` section in `render_architecture`, right after `## System Context`,
+    reusing `render_graph_svg` (RFC 0073) completely unmodified. Cross-tier edges only drawn when a
+    real `DependsOn`/`ReadsFrom`/`WritesTo` relationship justifies one; honestly absent otherwise
+    (true for this project today — Phase 6's job). Live-verified against the real analytics
+    project: Backend (1232 files), Frontend (324 files), SQL Database (57 tables), rendered as a
+    genuinely readable 568×80px SVG — the direct fix for the complaint that started this whole
+    plan.
+  - [x] **Phase 4 — diagram-quality fixes** — RFC 0084 / `devlog_87`. `layer_nodes`'s topological
+    DAG layering left unchanged; new visual-only row-wrapping (`wrap_layer_into_rows`, 8
+    nodes/row) so a wide layer becomes multiple rows instead of one unreadable wide row. New
+    standalone `crate-topology.svg` (reusing `render_graph_svg` unmodified, same shape as System
+    Context's own SVG). Component View's crate-with-no-matching-rollup case now named and counted,
+    not silently dropped. Live-verified against EKOS's own self-dogfooded ledger (the analytics
+    project has zero `Crate` objects at all — Elixir/Phoenix, no `Cargo.toml` — so these three
+    fixes needed a real Rust workspace to exercise): System Context's real 46-node diagram now
+    renders as a multi-row 1488×470px SVG instead of the previously-reported unreadable single-row
+    8296×190px; `crate-topology.svg` is new and real (44 crates); Component View now names
+    `ekos-benchmark, ekos-integration-tests` explicitly instead of silently omitting them.
+    - *Deferred, not cut*: standalone SVGs for per-object neighborhood diagrams and `render_api`'s
+      per-relationship-kind graphs — a different shape of work (many small per-object/per-kind
+      SVGs vs. one whole-workspace SVG per section) with much lower marginal readability payoff
+      than the three items shipped; left for a future increment if real usage shows it's needed.
+  - [x] **Phase 5 — real JS/TS decomposition** (`javascript_analyzer.rs`) — RFC 0085 / `devlog_88`.
+    `oxc_parser` chosen over `swc_ecma_parser` after a real live comparison (crates.io/docs.rs
+    metadata fetched, not assumed) — MIT license, single-call API, native TS/JSX/TSX, pinned to
+    `=0.133.0` (latest 0.146 needs rustc 1.95, newer than this workspace's 1.93). Real
+    `Custom("JsModule")`/`Custom("JsSymbol")` objects, real `Contains`/`DependsOn` edges, flat
+    `File → Symbol` containment (no Elixir-style two-level fix needed). Found and fixed a real bug
+    live: 18/291 real files failed to parse — all real `.js` files containing real JSX (`.js`
+    doesn't get JSX enabled by extension alone); fixed by forcing JSX on for JavaScript source
+    types while deliberately leaving TypeScript's `.ts` non-JSX (real `<T>expr` generic-assertion
+    ambiguity). Live-verified: 291 real files, 434 real `JsModule`s, 851 real `JsSymbol`s, 99.3%
+    parse success after the fix (2 real remaining failures are a real, uninvestigated gap in the
+    pinned older `oxc_parser` version's own TS grammar coverage, not an EKOS bug).
+  - [x] **Phase 6 — real cross-tier edges (stretch)** — RFC 0086 / `devlog_89`. Backend→Database
+    shipped: extended `elixir_analyzer.rs` (not a new pass) to detect real `use Ecto.Repo,
+    adapter: Ecto.Adapters.X` declarations, emitting a real `Custom("Technology")` object +
+    `DependsOn` edge, reusing `dependency_analyzer.rs`'s own "PostgreSQL" naming convention for
+    cross-analyzer identity. `docs-gen` extended with real `Contains`-based one-hop layer
+    inheritance (edge resolution only, never inflating displayed file/table counts) and a
+    database-adapter-Technology bucket that routes into the same real `layer_sql`/
+    `layer_clickhouse` node a matching `Table` would use — honest `"(config only, no tables
+    compiled)"` label when a real adapter exists with zero real compiled tables behind it (true
+    for this project's ClickHouse side today). Found and fixed a real duplication bug before
+    shipping: the real analytics project's 5 separate ClickHouse-adapter Repo modules would have
+    each re-pushed a duplicate "ClickHouse" object without extending the existing cross-file dedup
+    condition. Live-verified: 6 real ClickHouse-adapter modules and 3 real Postgres-adapter
+    modules all resolve to one real object per database (confirmed via `ekl`, no duplication);
+    `Architecture.md`'s `## System Decomposition` now draws real `Backend → SQL Database`/
+    `Backend → ClickHouse Database` arrows — the plan's first real cross-tier relationship line.
+    Frontend→Backend (route/fetch-call matching) stays deliberately unattempted, per the plan's
+    own original lower-confidence scoping — not cut, never in this phase's real scope.
+
+  **Plan complete.** All 6 phases (RFC 0081-0086, devlogs 84-89) shipped, tested, and live-verified
+  against the real analytics project and/or EKOS's own self-dogfooded ledger. Real backend
+  (Elixir) and frontend (JS/TS) decomposition, real npm/database dependency data, a real System
+  Decomposition view with real cross-tier edges, and the diagram-readability bugs that made the
+  original complaint's System Context view unreadable are all fixed.
+
+- **"Real Descriptions, Purpose, and Links Throughout Generated Documentation" plan**
+  - [x] **Phase 1 — real doc-comment extraction (Rust/Python/Elixir/JS-TS)** — RFC 0087 /
+    `devlog_91`. All four real decomposition analyzers now extract a real `"description"` property
+    from human-written source documentation (`///` doc comments via `syn`'s `#[doc]` attributes,
+    PEP 257 docstrings, `@moduledoc`/`@doc`, JSDoc via `oxc_parser`'s comment classification) —
+    never fabricated, property absent entirely when the source has none. 18 new tests across the
+    four analyzers, all passing.
+  - [x] **Phase 2 — entity-page rendering** — RFC 0087 / `devlog_91`. `docs-gen` promotes the real
+    `"description"` property into the entity page's Definition section (Markdown + HTML), with an
+    honest "Not documented in source" fallback when absent; relationships also regrouped by real
+    structural meaning (`"Based on"` for the `Contains` parent, direction-grouped otherwise) rather
+    than raw kind. New `docs-gen` render tests, all passing.
+    - Full workspace gate (`build`/`test`/`clippy -D warnings`/`fmt --check`) clean. Live-verified
+      against the real analytics project with a full clean rebuild: `Plausible.SentryFilter`'s real
+      `@moduledoc` text renders correctly on its entity page; `Plausible.Auth.Password` (genuinely
+      undocumented in source) renders the honest fallback. Also reconfirmed devlog_90's two bug
+      fixes (identity over-merge, `docs-generated/` contamination) still hold on a fresh rebuild.
+    - *Process note*: live-verification itself nearly reintroduced devlog_90's contamination bug
+      under a new name (`docs generate --output doc` instead of the already-ignored
+      `docs-generated`) — caught before any real build re-ran; see `devlog_91`'s Knowledge
+      Captured for the generalizable lesson.
+  - [ ] **Phase 3+ ("Links")** — not yet scoped: cross-linking between related entities beyond the
+    existing relationship list (e.g. inline references from prose/description text to other entity
+    pages). Deferred until real usage against a live project shows what's actually missing, per
+    this project's own just-in-time RFC convention.

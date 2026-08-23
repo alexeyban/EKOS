@@ -63,6 +63,25 @@ fn architecture_gap_kir_id(crate_dir: &str, dep_name: &str) -> KirId {
     ))
 }
 
+/// Deterministic id for one crate's `DependsOn` edge (RFC 0072), keyed by `(from, to)` — a
+/// dependency is a boolean fact per (dependent, dependency) pair, no legitimate real duplicate
+/// shape the way e.g. `sql_analyzer.rs`'s `ForeignKey` edges can legitimately repeat between the
+/// same two tables via different columns (confirmed by reading `add_fk_relationship` before
+/// picking this scope — a blanket "give every relationship a deterministic id" fix would have
+/// silently collapsed that real case; this fix is deliberately narrow to the one relationship
+/// shape actually proven safe). Without this, `KirRelationship::new`'s random default id meant
+/// `append_relationship`'s `(id, content_signature)` versioning (RFC 0015 — the same mechanism
+/// that already correctly dedupes identical `KirObject` re-writes) never recognized a
+/// logically-identical edge re-derived by a later `recover`/`commit` as "the same one" — real,
+/// unbounded duplicates accumulated in the ledger every time this pass ran again (found live,
+/// RFC 0070/0071, `devlog_73`/`devlog_74`).
+fn depends_on_kir_id(from: KirId, to: KirId) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("depends-on:{from}:{to}").as_bytes(),
+    ))
+}
+
 /// Adds one Fact-type `Custom("Claim")` object for a `DependsOn` relationship already added to
 /// `graph` (RFC 0065 §12-13 — "Facts should preferably come from deterministic extraction").
 /// Reuses the relationship's own evidence rather than duplicating it. `Inference`/`Assumption`/
@@ -282,6 +301,22 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
             .map(|c| (c.dir.clone(), crate_kir_id(&c.dir)))
             .collect();
 
+        // RFC 0078: a version-pinned dependency (`ignore = "0.4"`, not `{ path = "../ignore" }`)
+        // whose name exactly matches an internal workspace crate's own name is that crate, not a
+        // real external technology — a real, live-observed pattern (`BurntSushi/ripgrep`'s
+        // `ignore`/`pcre2`, `sharkdp/bat`'s `bat` itself: each is both a real workspace member
+        // *and* depended on by version elsewhere in the same workspace, e.g. because that other
+        // crate's manifest doesn't use a `path`/`workspace = true` dependency shape for it).
+        // Without this, `resolve_dep_entry`'s purely-syntactic Path/Version classification
+        // manufactured a spurious duplicate `Custom("Technology")` object sharing the real
+        // `Custom("Crate")`'s exact name — surfaced downstream as a `SameNameDifferentKind`
+        // identity-resolution conflict for a name that was never actually ambiguous, just
+        // observed twice under two different KIR shapes.
+        let name_to_crate_id: HashMap<&str, KirId> = crates
+            .iter()
+            .map(|c| (c.name.as_str(), dir_to_id[&c.dir]))
+            .collect();
+
         // Built upfront (independent of `graph.objects`' progressive insertion order) so
         // `add_depends_on_claim` can always name a claim's subject/object crate even when the
         // target crate appears later in `crates` and hasn't been added to `graph` yet.
@@ -381,6 +416,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                         let ev_id = graph.add_evidence(ev);
                         let mut rel =
                             KirRelationship::new(RelationshipKind::DependsOn, crate_id, target_id);
+                        rel.id = depends_on_kir_id(crate_id, target_id);
                         rel.evidence.push(ev_id);
                         graph.add_relationship(rel);
 
@@ -401,6 +437,51 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                         );
                     }
                     DepResolution::Version(version) => {
+                        // RFC 0078: check for a real internal crate of this exact name first —
+                        // see `name_to_crate_id`'s doc comment above.
+                        if let Some(&target_id) = name_to_crate_id.get(dep_name.as_str())
+                            && target_id != crate_id
+                        {
+                            let fragment = match &version {
+                                Some(v) => format!(
+                                    "{} depends on {dep_name} {v} (version-pinned dependency \
+                                     resolved to workspace-internal crate {dep_name})",
+                                    c.name
+                                ),
+                                None => format!(
+                                    "{} depends on {dep_name} (version-pinned dependency \
+                                     resolved to workspace-internal crate {dep_name})",
+                                    c.name
+                                ),
+                            };
+                            let ev =
+                                KirEvidence::new(SourceLocation::file(&manifest_path), fragment);
+                            let ev_id = graph.add_evidence(ev);
+                            let mut rel = KirRelationship::new(
+                                RelationshipKind::DependsOn,
+                                crate_id,
+                                target_id,
+                            );
+                            rel.id = depends_on_kir_id(crate_id, target_id);
+                            rel.evidence.push(ev_id);
+                            graph.add_relationship(rel);
+
+                            let target_name = crate_name_by_id
+                                .get(&target_id)
+                                .map(String::as_str)
+                                .unwrap_or(dep_name);
+                            add_depends_on_claim(
+                                &mut graph,
+                                &c.dir,
+                                crate_id,
+                                &c.name,
+                                target_id,
+                                target_name,
+                                ev_id,
+                            );
+                            continue;
+                        }
+
                         let tech_id = *technology_ids
                             .entry(dep_name.clone())
                             .or_insert_with(|| technology_kir_id(dep_name));
@@ -420,6 +501,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                         let ev_id = graph.add_evidence(ev);
                         let mut rel =
                             KirRelationship::new(RelationshipKind::DependsOn, crate_id, tech_id);
+                        rel.id = depends_on_kir_id(crate_id, tech_id);
                         rel.evidence.push(ev_id);
                         graph.add_relationship(rel);
 
@@ -602,6 +684,71 @@ tokio = "1"
     }
 
     #[tokio::test]
+    async fn version_pinned_dependency_matching_an_internal_crate_name_is_not_a_technology() {
+        // RFC 0078: the real `BurntSushi/ripgrep`/`sharkdp/bat` pattern — an internal workspace
+        // crate ("ignore") also depended on elsewhere by a bare version string rather than
+        // `path`/`workspace = true`. Before this fix, this produced a spurious duplicate
+        // `Technology` object sharing the real `Crate`'s exact name.
+        const ROOT_WITH_IGNORE: &str = r#"
+[workspace]
+members = ["crates/ignore", "crates/consumer"]
+"#;
+        const IGNORE_CRATE: &str = r#"
+[package]
+name = "ignore"
+version = "0.4.0"
+description = "gitignore-aware directory walker"
+"#;
+        const CONSUMER_VERSION_PINNED: &str = r#"
+[package]
+name = "ekos-consumer"
+version = "0.1.0"
+
+[dependencies]
+ignore = "0.4"
+"#;
+
+        let graph = run_pass(vec![
+            ("Cargo.toml", ROOT_WITH_IGNORE),
+            ("crates/ignore/Cargo.toml", IGNORE_CRATE),
+            ("crates/consumer/Cargo.toml", CONSUMER_VERSION_PINNED),
+        ])
+        .await;
+
+        let ignore_objects: Vec<_> = graph
+            .objects
+            .iter()
+            .filter(|o| o.name == "ignore")
+            .collect();
+        assert_eq!(
+            ignore_objects.len(),
+            1,
+            "exactly one 'ignore' object must exist — no spurious duplicate Technology object"
+        );
+        assert_eq!(
+            ignore_objects[0].kind,
+            ObjectKind::Custom("Crate".to_string()),
+            "the real internal crate must win, not a manufactured Technology object"
+        );
+
+        let consumer = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "ekos-consumer")
+            .unwrap();
+        assert!(
+            graph
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::DependsOn
+                    && r.from == consumer.id
+                    && r.to == ignore_objects[0].id),
+            "the version-pinned dependency must still resolve to a real DependsOn edge, just to \
+             the internal Crate instead of a fabricated Technology"
+        );
+    }
+
+    #[tokio::test]
     async fn workspace_true_external_dependency_resolves_via_root_manifest() {
         let graph = run_pass(vec![("Cargo.toml", ROOT), ("crates/kir/Cargo.toml", KIR)]).await;
 
@@ -638,6 +785,39 @@ tokio = "1"
             tokio_objects.len(),
             1,
             "tokio Technology object must be shared"
+        );
+    }
+
+    #[tokio::test]
+    async fn depends_on_relationship_id_is_deterministic_across_separate_recover_runs() {
+        // RFC 0072 (`devlog_75`): real bug, found live — `KirRelationship::new`'s default random
+        // id meant `append_relationship`'s ledger-level `(id, content_signature)` versioning never
+        // recognized a logically-identical DependsOn edge re-derived by a later recover/commit as
+        // "the same one," so real duplicates accumulated in the ledger forever. Two genuinely
+        // separate pass runs (simulating two separate `recover` invocations, not two artifacts
+        // from one run) must produce the *same* relationship id for the same (from, to) edge.
+        let manifests = vec![
+            ("Cargo.toml", ROOT),
+            ("crates/kir/Cargo.toml", KIR),
+            ("crates/consumer/Cargo.toml", CONSUMER),
+        ];
+        let graph_a = run_pass(manifests.clone()).await;
+        let graph_b = run_pass(manifests).await;
+
+        let depends_on_ids = |g: &KirGraph| -> Vec<String> {
+            let mut ids: Vec<String> = g
+                .relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::DependsOn)
+                .map(|r| r.id.to_string())
+                .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(
+            depends_on_ids(&graph_a),
+            depends_on_ids(&graph_b),
+            "the same real DependsOn edge must get the same id on every independent recover run"
         );
     }
 

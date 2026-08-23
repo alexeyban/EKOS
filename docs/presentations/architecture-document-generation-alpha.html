@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture Document Generation, Alpha — EKOS</title>
+<meta name="description" content="Real source decomposition, real diagrams, real evidence — a from-scratch pass on EKOS's generated Architecture.md, live-verified against a real 2,000+ file Elixir/Phoenix + React codebase. Real backend and frontend AST decomposition, a real System Decomposition view, readable diagrams, and real Backend-to-Database edges. Alpha: shipped, honest about what's still deferred, more coming.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a><a href="#s10"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Architecture document generation.<br><span class="arrow-word">Alpha — real decomposition, real diagrams, real evidence.</span></h1>
+  <p class="lede">Generated <code class="mono">Architecture.md</code> for a real, 2,000+ file
+  Elixir/Phoenix + React codebase and it read as unprofessional: flat bullet lists, no backend,
+  frontend, or database decomposition, and the one real diagram an unreadable single row of boxes.
+  Six increments later, the same command produces real per-language AST decomposition, a real
+  System Decomposition view, readable diagrams, and real cross-tier edges — all live-verified
+  against the same real project, nothing mocked. This is the Alpha: shipped and working, honest
+  about what's still deferred.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">flat lists, unreadable diagram</span><span class="sep mono">→</span>
+    <span class="chip">6 increments, live-verified each time</span><span class="sep mono">→</span>
+    <span class="chip hot">RFC 0081-0086</span><span class="sep mono">→</span>
+    <span class="chip">real Backend/Frontend/Database decomposition</span>
+  </div>
+  <div class="byline"><span class="dot"></span> analytics/ (github.com/plausible/analytics, AGPL-3.0) — Elixir/Phoenix backend, React frontend, Postgres + ClickHouse · devlogs 84-90</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the real problem</div>
+  <div class="eyebrow">what "ekos docs generate --layout curated" produced, before</div>
+  <h2>No source decomposition. No links. A diagram that couldn't be read.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">EKOS's only two <em>real</em> AST-based decomposition
+      analyzers were for Rust and Python. Elixir — 100% of this project's backend — and JS/TS — its
+      entire frontend — got nothing but a crude declaration-prefix scan: bare symbol name strings,
+      no relationships, no module hierarchy, no KIR objects at all. The one real diagram that did
+      exist (System Context, RFC 0073) had a real, separately-tracked bug: a wide layer rendered as
+      one unreadably long row rather than wrapping.</p>
+    </div>
+    <div class="codeblock">
+      <div class="tag">before — real gap, not exaggerated</div>
+<pre style="margin:0;"><span class="bad">## Components
+- File: 1847
+- Person: 124
+- Table: 15</span>          <span class="c">// flat counts, no
+                        // backend/frontend split
+                        // at all</span>
+
+<span class="bad">## System Context</span>
+  <span class="c">[46 boxes, one row, 8296px wide]</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / real backend decomposition</div>
+  <div class="eyebrow">RFC 0081 — new ekos-plugin-elixir + ElixirAnalyzerPass</div>
+  <h2>1231 real Elixir files → 1355 real modules, 4810 real functions.</h2>
+  <div class="codeblock">
+    <div class="tag">ekos recover — real, unedited</div>
+<pre style="margin:0;">INFO elixir-analyzer complete pass=elixir-analyzer:analytics
+<span class="s">     files=1231 modules=1355 symbols=4810</span></pre>
+  </div>
+  <p class="lede">No mature Elixir-grammar Rust crate exists — a real, bounded, hand-written
+  structural scanner instead. <code class="mono">defmodule</code> → real
+  <code class="mono">Custom("ElixirModule")</code> objects; <code class="mono">def</code>/<code
+  class="mono">defp</code> → real <code class="mono">Custom("ElixirSymbol")</code> objects, tagged
+  <code class="mono">public</code>/<code class="mono">private</code> from the real keyword, not
+  guessed; <code class="mono">alias</code>/<code class="mono">import</code>/<code
+  class="mono">use</code>/<code class="mono">require</code> → real internal module-to-module
+  <code class="mono">DependsOn</code> edges — the actual "restore links and relationships"
+  deliverable. Spot-checked two known real files directly against the compiled ledger: exact
+  function lists, exact dependency edges, matching the real source read directly.</p>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / real frontend decomposition</div>
+  <div class="eyebrow">RFC 0082 (package.json) + RFC 0085 (oxc_parser) — a real bug found and fixed live</div>
+  <h2>291 real JS/TS files, 78 real npm packages — and a real JSX-in-.js parser bug, caught before shipping.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">78</div><div class="label">real Technology objects from 4 real package.json manifests</div></div>
+    <div class="stat"><div class="num">444</div><div class="label">real JsModule objects (real import specifiers)</div></div>
+    <div class="stat"><div class="num">862</div><div class="label">real JsSymbol objects (functions, classes, components)</div></div>
+  </div>
+  <p class="lede">Picked <code class="mono">oxc_parser</code> over <code
+  class="mono">swc_ecma_parser</code> after a real live comparison of both crates' license,
+  API shape, and maturity — not a coin flip. First live run against the real project found 18 of
+  291 real files failing to parse: every one a real <code class="mono">.js</code> file containing
+  real JSX (<code class="mono">lazy-loader.js</code>'s own <code
+  class="mono">&lt;div ref={ref}&gt;</code>), which a bare-extension guess doesn't enable JSX for.
+  Fixed by forcing JSX on for JavaScript, deliberately left off for <code class="mono">.ts</code>
+  (real generic-assertion ambiguity) — parse success went from 93.8% to <strong>99.3%</strong>,
+  re-verified against the same real files, not assumed fixed.</p>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / the actual deliverable</div>
+  <div class="eyebrow">RFC 0083 — new "## System Decomposition" section, right after System Context</div>
+  <h2>Backend, Frontend, Database — one real diagram, real counts, real edges.</h2>
+  <div style="background:#fff; border:1px solid var(--rule); border-radius:10px; padding:1.3rem 1.5rem; box-shadow:0 8px 30px -12px rgba(0,0,0,0.5); max-width:26rem;">
+    <div class="tag" style="color:var(--code-dim);">system-decomposition.svg — real, unedited, this project</div>
+    <svg xmlns="http://www.w3.org/2000/svg" width="384.0" height="190.0" viewBox="0 0 384.0 190.0" style="width:100%; height:auto;">
+      <defs><marker id="arrow-s5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#555555"/></marker></defs>
+      <line x1="100.0" y1="60.0" x2="100.0" y2="130.0" stroke="#555555" stroke-width="1.5" marker-end="url(#arrow-s5)"/>
+      <line x1="100.0" y1="60.0" x2="284.0" y2="130.0" stroke="#555555" stroke-width="1.5" marker-end="url(#arrow-s5)"/>
+      <rect x="20.0" y="20.0" width="160.0" height="40.0" rx="6" fill="#eef2ff" stroke="#3355bb"/>
+      <text x="100.0" y="40.0" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12">Backend (1232 files)</text>
+      <rect x="204.0" y="20.0" width="160.0" height="40.0" rx="6" fill="#eef2ff" stroke="#3355bb"/>
+      <text x="284.0" y="40.0" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12">Frontend (324 files)</text>
+      <rect x="20.0" y="130.0" width="160.0" height="40.0" rx="6" fill="#eef2ff" stroke="#3355bb"/>
+      <text x="100.0" y="150.0" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="11">ClickHouse Database (config only,</text>
+      <text x="100.0" y="162.0" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="11">no tables compiled)</text>
+      <rect x="204.0" y="130.0" width="160.0" height="40.0" rx="6" fill="#eef2ff" stroke="#3355bb"/>
+      <text x="284.0" y="150.0" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12">SQL Database (57 tables)</text>
+    </svg>
+  </div>
+  <p class="lede">Convention-based classification (<code class="mono">.ex</code>/<code class="mono">.rs</code>/<code class="mono">.py</code> → Backend, <code class="mono">.js</code>/<code class="mono">.ts</code>/<code class="mono">.css</code> →
+  Frontend, real <code class="mono">Table</code>/<code class="mono">source_system</code> data →
+  Database), with a real <code class="mono">ekos.toml</code> override escape hatch for when the
+  convention gets a project's layout wrong — never a silent misclassification with no way out.
+  This is the direct answer to "which components does it have and how do they relate," the most
+  directly requested deliverable of the whole effort — this is the literal SVG file the pipeline
+  writes to disk, embedded here unmodified.</p>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / the diagrams themselves, fixed</div>
+  <div class="eyebrow">RFC 0084 — row-wrapping, a new Crate Topology SVG, an honest Component View</div>
+  <h2>8296×190px, one unreadable row → 1488×470px, readable.</h2>
+  <table class="ttable">
+    <thead><tr><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td class="bad">46-node layer, one row, 8296px wide</td><td class="good">wraps at 8 nodes/row, 1488×470px</td></tr>
+      <tr><td class="bad">no standalone Crate Topology diagram</td><td class="good">new crate-topology.svg — 44 real crates, reusing the same SVG renderer unmodified</td></tr>
+      <tr><td class="bad">crate w/ no matching rollup: silently vanished</td><td class="good">"2 crate(s) have no matching subsystem rollup ... ekos-benchmark, ekos-integration-tests"</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">The topological DAG layering itself was already correct — the bug was treating
+  "one DAG layer" and "one visual row" as always the same thing. A purely visual wrap fixed it,
+  verified live against EKOS's own self-dogfooded architecture docs (the real Rust workspace
+  needed to actually exercise a 46-node layer).</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / real cross-tier edges</div>
+  <div class="eyebrow">RFC 0086 — the plan's own "stretch" phase, shipped</div>
+  <h2>A real Ecto adapter declaration becomes a real Backend → Database arrow.</h2>
+  <div class="codeblock">
+    <div class="tag">lib/plausible/clickhouse_repo.ex — real source</div>
+<pre style="margin:0;"><span class="k">use</span> Ecto.Repo,
+  otp_app: :plausible,
+  <span class="s">adapter: Ecto.Adapters.ClickHouse</span>,
+  read_only: true</pre>
+  </div>
+  <p class="lede">No new pass — extended <code class="mono">elixir_analyzer.rs</code> to read a
+  real, in-source signal already there. Found a real duplication bug before shipping: this project
+  declares <strong>5 separate</strong> ClickHouse-adapter Repo modules, which would have each
+  re-pushed a duplicate "ClickHouse" object without extending the existing cross-file dedup — fixed
+  before it ever reached the ledger. Verified via <code class="mono">ekl</code>: all 6 real
+  ClickHouse-adapter modules and all 3 real Postgres-adapter modules resolve to one real object per
+  database, no duplicates.</p>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / found while building this very deck</div>
+  <div class="eyebrow">devlog_90 — two real bugs, found by reading real output, not by testing</div>
+  <h2>1,236 unrelated real modules, falsely merged at confidence 1.00.</h2>
+  <div class="codeblock">
+    <div class="tag">a real generated page, before this fix — real, unedited</div>
+<pre style="margin:0;"><span class="k">## Plausible.Auth.Password (ElixirModule)</span>
+
+### SameAs
+<span class="bad">- ← PlausibleWeb.Plugins.API.Schemas.Funnel.CreateRequest
+  — confidence=1.00</span>  <span class="c">// a password-hashing module and an
+                             // API schema, "the same real thing"?</span></pre>
+  </div>
+  <p class="lede">Picking this exact real module as a deck example surfaced it: `ElixirModule`/
+  `ElixirSymbol`/`JsModule`/`JsSymbol` (RFC 0081/0085) were never added to the identity resolver's
+  own documented exclusion list — the identical failure six other object kinds had already hit and
+  been fixed for. Direct CKM inspection found the real scale: <strong>one</strong> canonical module
+  had 1,236 real false `SameAs` edges. Chasing why a first fix attempt didn't change anything
+  surfaced a second, bigger bug: <code class="mono">docs-generated/</code> was never excluded from
+  this project's own `[observe] paths` — every build was re-ingesting EKOS's own past output as
+  real source, feeding old errors back into the pipeline. Fixed both; a full clean rebuild dropped
+  the ledger from 127,676 contaminated objects to 8,787 real ones, and this exact module's page to
+  its real 3 relationships, nothing else.</p>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / the honest scorecard</div>
+  <div class="eyebrow">Alpha means shipped and real — not means finished</div>
+  <h2>What's real now. What's deliberately still open.</h2>
+  <table class="ttable">
+    <thead><tr><th>Real, shipped</th><th>Deliberately deferred</th></tr></thead>
+    <tbody>
+      <tr><td class="good">Elixir backend: modules, functions, real deps</td><td class="desc">Phoenix role tagging (controller/LiveView/context) — designed, cut over a real dedup-ordering risk</td></tr>
+      <tr><td class="good">JS/TS frontend: modules, symbols, 99.3% parse rate</td><td class="desc">Relative import resolution (<code>./Dashboard</code> → its real file)</td></tr>
+      <tr><td class="good">Real Backend/Frontend/Database decomposition view</td><td class="desc">Per-table precision on cross-tier edges (adapter-level today, not per-table)</td></tr>
+      <tr><td class="good">Readable diagrams, real Crate Topology SVG</td><td class="desc">Frontend → Backend edges — explicitly lower-confidence, never attempted</td></tr>
+      <tr><td class="good">Real Backend → Database edges (Ecto adapters)</td><td class="desc">2/291 real TS files still fail under the pinned oxc_parser 0.133.0</td></tr>
+      <tr><td class="good">Identity resolver exclusion list, self-referential docs ingestion — both fixed</td><td class="desc">Residual fuzzy `SameAs` candidates (Document/Technology/Pipeline) — RFC 0060's own already-tracked territory</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Nothing in the right column is a bug hidden from this deck — every one is named,
+  scoped, and reasoned about in its own RFC or devlog. That's the actual meaning of "Alpha" here:
+  real, live-verified, evidence-backed work, with a real, honest map of what comes next.</p>
+</section>
+
+<section class="slide cta" id="s10">
+  <div class="eyebrow">Try it yourself — nothing hidden, before or after</div>
+  <h2>Same repo. Same command. Real output.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ git clone https://github.com/plausible/analytics
+$ cd analytics &amp;&amp; ekos init
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+$ ekos docs generate --layout curated
+$ open docs-generated/Architecture.md</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Full workspace gate</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td class="tool"><code>cargo build/test/clippy -D warnings/fmt --check</code></td><td class="good">Clean, every increment</td></tr>
+      <tr><td class="tool">New tests this effort</td><td class="desc">60+ new tests across 6 RFCs, each built from real fixtures or a real bug found live</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · Architecture Document Generation, Alpha — RFC 0081-0086, devlogs 84-90 · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

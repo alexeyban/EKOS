@@ -1,0 +1,17 @@
+$ ekos_ekl(query: "FIND Object WHERE kind = 'File' AND name CONTAINS 'exploration' LIMIT 10")
+
+{
+  "count": 10,
+  "rows": [
+    { "id": "6e6bb33c-79c2-5586-8fa8-69fbefe02906", "kind": "File", "name": "assets/js/dashboard/extra/exploration/index.tsx" },
+    { "id": "92721d24-fe30-5efa-bea9-67a88cd46dfa", "kind": "File", "name": "assets/js/dashboard/extra/exploration/journey.ts" },
+    { "id": "0a0bc747-9615-5634-929e-3832f2eb9feb", "kind": "File", "name": "e2e/tests/dashboard/exploration.spec.ts" },
+    { "id": "41019f57-4366-58ae-ba53-688b6d3733a0", "kind": "File", "name": "assets/js/dashboard/extra/exploration/exploration-state.ts" },
+    { "id": "5f3cb5de-1a6a-5fe9-8662-df4741ced068", "kind": "File", "name": "assets/js/dashboard/extra/exploration/exploration-column.tsx" },
+    { "id": "13b22516-9d08-5220-811b-cf87caacb98b", "kind": "File", "name": "assets/js/dashboard/extra/exploration/constants.ts" },
+    { "id": "112477bd-8915-53c6-82b5-1c78f15f3801", "kind": "File", "name": "test/plausible/stats/exploration_test.exs" },
+    { "id": "92f605f2-d850-542f-ae28-ed7d71815ca4", "kind": "File", "name": "assets/js/dashboard/extra/exploration/path-connectors.tsx" },
+    { "id": "f9aae189-01ea-5f2b-a7d7-ef0b65ae18ba", "kind": "File", "name": "test/plausible_web/controllers/api/stats_controller/exploration_test.exs" },
+    { "id": "deada174-77a5-5dec-a7eb-898c590a5ee0", "kind": "File", "name": "extra/lib/plausible/stats/exploration.ex" }
+  ]
+}

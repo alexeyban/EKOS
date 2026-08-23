@@ -6,13 +6,15 @@ use ekos_compiler_core::{
     scheduler::FailureMode,
 };
 use ekos_recovery::{
-    CicdAnalyzerPass, ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass,
-    CryptoAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
-    DocumentSemanticsStats, GitAnalyzerPass, GitHubAnalyzerPass, LocalDocAnalyzerPass,
-    MockLlmProvider, OllamaProvider, OpenAiProvider, PentahoAnalyzerPass, PentahoStats,
-    PythonAnalyzerPass, PythonStats, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
-    SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
-    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
+    ArchitectureReasoningPass, ArchitectureReasoningStats, CicdAnalyzerPass,
+    ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
+    DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass, DocumentSemanticsStats,
+    ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass, JavaScriptAnalyzerPass,
+    JavaScriptStats, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, OpenAiProvider,
+    PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass, PythonStats,
+    RustAnalyzerPass, RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
+    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
+    llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -362,6 +364,38 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(rust_pass));
     }
 
+    // ── Elixir .ex/.exs artifacts (RFC 0081) ────────────────────────────────
+    let elixir_artifact_ids = collect_elixir_artifact_ids(&*artifact_store);
+    let elixir_count = elixir_artifact_ids.len();
+    let mut elixir_stats: Option<Arc<std::sync::Mutex<ElixirStats>>> = None;
+    if !elixir_artifact_ids.is_empty() {
+        let elixir_pass = ElixirAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            elixir_artifact_ids,
+        );
+        elixir_stats = Some(elixir_pass.stats_handle());
+        pass_manager.register(Box::new(elixir_pass));
+    }
+
+    // ── JavaScript/TypeScript artifacts (RFC 0085) ──────────────────────────
+    let javascript_artifact_ids = collect_javascript_artifact_ids(&*artifact_store);
+    let javascript_count = javascript_artifact_ids.len();
+    let mut javascript_stats: Option<Arc<std::sync::Mutex<JavaScriptStats>>> = None;
+    if !javascript_artifact_ids.is_empty() {
+        let javascript_pass = JavaScriptAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            javascript_artifact_ids,
+        );
+        javascript_stats = Some(javascript_pass.stats_handle());
+        pass_manager.register(Box::new(javascript_pass));
+    }
+
     // ── Cargo.toml crate/workspace topology (RFC 0042) ────────────────────
     let mut cargo_manifests: Vec<(String, String)> = Vec::new();
     for base in &observe_paths {
@@ -397,7 +431,77 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             cargo_manifests.push((rel.to_string_lossy().replace('\\', "/"), content));
         }
     }
+
+    // ── package.json dependency extraction (RFC 0082) ──────────────────────
+    // RFC 0079's own qualification convention, computed fresh here — this collection loop reads
+    // files directly (the same second raw-content entry point `crate_topology_analyzer.rs`'s own
+    // collection above uses), so it has no `build.rs`-populated `data.project` field to read back.
+    let mut package_json_manifests: Vec<(String, String, Option<String>)> = Vec::new();
+    for base in &observe_paths {
+        let project_key = if observe_paths.len() > 1 {
+            Some(
+                base.strip_prefix(cwd)
+                    .unwrap_or(base)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            )
+        } else {
+            None
+        };
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_str().unwrap_or("");
+                    return !ignore.iter().any(|p| name == p.as_str());
+                }
+                true
+            })
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "package.json" {
+                continue;
+            }
+            let path = entry.path();
+            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
+            let content = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let content = ekos_common::redaction::redact(&content, &redaction_config);
+            package_json_manifests.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
+        }
+    }
+    let package_json_count = package_json_manifests.len();
+    if !package_json_manifests.is_empty() {
+        let package_json_pass = PackageJsonAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            package_json_manifests,
+        );
+        pass_manager.register(Box::new(package_json_pass));
+    }
+
+    let mut archreasoning_stats: Option<Arc<std::sync::Mutex<ArchitectureReasoningStats>>> = None;
     if !cargo_manifests.is_empty() {
+        let crate_count = cargo_manifests
+            .iter()
+            .filter(|(_, content)| content.contains("[package]"))
+            .count();
         let crate_topology_pass = CrateTopologyAnalyzerPass::new(
             cwd.file_name()
                 .unwrap_or_default()
@@ -405,6 +509,17 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 .as_ref(),
             cargo_manifests,
         );
+
+        // ── LLM architecture reasoning (RFC 0065 Phase 2) ─────────────────
+        // Opt-in: one batched LLM call per `recover` run, so it stays off unless asked for.
+        // Reuses the provider already selected above.
+        if should_register_architecture_reasoning(config, crate_count) {
+            let archreasoning_pass =
+                ArchitectureReasoningPass::new(crate_topology_pass.name(), llm.clone());
+            archreasoning_stats = Some(archreasoning_pass.stats_handle());
+            pass_manager.register(Box::new(archreasoning_pass));
+        }
+
         pass_manager.register(Box::new(crate_topology_pass));
     }
 
@@ -552,6 +667,36 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             s.symbols_total, s.calls_total
         );
     }
+    if elixir_count > 0 {
+        println!("  Elixir files analysed: {elixir_count}");
+    }
+    if let Some(stats) = &elixir_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Elixir modules/symbols recovered: {} modules, {} symbols",
+            s.modules_total, s.symbols_total
+        );
+    }
+    if javascript_count > 0 {
+        println!("  JavaScript/TypeScript files analysed: {javascript_count}");
+    }
+    if let Some(stats) = &javascript_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  JS/TS modules/symbols recovered: {} modules, {} symbols ({} failed to parse)",
+            s.modules_total, s.symbols_total, s.files_failed_to_parse
+        );
+    }
+    if package_json_count > 0 {
+        println!("  package.json manifests analysed: {package_json_count}");
+    }
+    if let Some(stats) = &archreasoning_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Architecture reasoning: {} crates considered, {} role(s) assigned, {} rejected",
+            s.crates_considered, s.roles_assigned, s.rejected_unknown_crate
+        );
+    }
     if !sql_transform_stats_handles.is_empty() {
         let mut nodes_total = 0usize;
         let mut nodes_mapped = 0usize;
@@ -582,6 +727,22 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             if let Err(e) = &o.result {
                 println!("    {}: {e}", o.pass_name);
             }
+        }
+    }
+    // RFC 0076: `recover` used to collect real per-pass warnings (SQL001-003, and others) into
+    // `ctx.diagnostics` without ever summarising or persisting them anywhere — worse than
+    // `compile`'s at-least-a-count-with-a-broken-pointer, this was pure silent loss. Same fix,
+    // same shared helper: a real, `.ekos/diagnostics/recover.log` file when there's anything to
+    // say, nothing left behind otherwise.
+    if ctx.diagnostics.lock().unwrap().has_warnings() {
+        let warning_count = ctx.diagnostics.lock().unwrap().warning_count();
+        match super::diagnostics_log::write_diagnostics_log(&config.ekos_dir(cwd), "recover", &ctx)
+        {
+            Ok(Some(path)) => {
+                println!("  Warnings: {warning_count} (see {})", path.display())
+            }
+            Ok(None) => println!("  Warnings: {warning_count}"),
+            Err(e) => println!("  Warnings: {warning_count} (could not write log: {e})"),
         }
     }
     if ctx.diagnostics.lock().unwrap().has_errors() {
@@ -789,11 +950,59 @@ fn collect_rust_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
     ids
 }
 
+fn collect_elixir_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("elixir"))
+        })
+        .collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
+/// Collect ArtifactIds for every JavaScript/TypeScript artifact currently in the store (RFC 0085).
+fn collect_javascript_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    let all_ids = match store.list() {
+        Ok(ids) => ids,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut ids: Vec<ArtifactId> = all_ids
+        .into_iter()
+        .filter(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["connector_name"].as_str() == Some("javascript"))
+        })
+        .collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
+
 /// RFC 0026's opt-in gate: the document-semantics pass costs one LLM call per
 /// document section, so it registers only when explicitly enabled *and* there is
 /// local-document output for it to read.
 fn should_register_document_semantics(config: &EkosConfig, localdocs_count: usize) -> bool {
     config.document_semantics.enabled && localdocs_count > 0
+}
+
+/// RFC 0065 Phase 2's opt-in gate: the architecture-reasoning pass costs one (batched) LLM call
+/// per `recover` run, so — same shape as `should_register_document_semantics` — it registers only
+/// when explicitly enabled *and* there is crate-topology output for it to read.
+fn should_register_architecture_reasoning(config: &EkosConfig, crate_count: usize) -> bool {
+    config.architecture_reasoning.enabled && crate_count > 0
 }
 
 /// Choose LLM provider (RFC 0021, RFC 0046): `[llm] provider = "ollama"` in
@@ -903,6 +1112,29 @@ mod tests {
         let mut config = EkosConfig::default();
         config.document_semantics.enabled = true;
         assert!(should_register_document_semantics(&config, 1));
+    }
+
+    /// RFC 0065 Phase 2, same acceptance shape as document-semantics above: zero LLM calls
+    /// unless the user opted in, and no registration with nothing to read.
+    #[test]
+    fn architecture_reasoning_pass_not_registered_when_config_absent() {
+        let config = EkosConfig::default();
+        assert!(!config.architecture_reasoning.enabled);
+        assert!(!should_register_architecture_reasoning(&config, 44));
+    }
+
+    #[test]
+    fn architecture_reasoning_pass_not_registered_without_crates() {
+        let mut config = EkosConfig::default();
+        config.architecture_reasoning.enabled = true;
+        assert!(!should_register_architecture_reasoning(&config, 0));
+    }
+
+    #[test]
+    fn architecture_reasoning_pass_registered_when_enabled_with_crates() {
+        let mut config = EkosConfig::default();
+        config.architecture_reasoning.enabled = true;
+        assert!(should_register_architecture_reasoning(&config, 44));
     }
 
     /// RFC 0021: `provider = "ollama"` must route here without ever

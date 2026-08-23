@@ -2,6 +2,7 @@
 /benchmark/target/
 /tests/integration/target/
 .ekos/
+/doc/
 *.db
 *.db-shm
 *.db-wal

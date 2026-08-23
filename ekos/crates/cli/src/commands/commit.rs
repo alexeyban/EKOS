@@ -3,7 +3,7 @@ use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirGraph, KirObject, KirRelationship, SourceLocation};
 use ekos_ledger::KnowledgeStore;
-use ekos_semantic::{CkModel, CkmRelationship, EvidenceRecord, rollup};
+use ekos_semantic::{CkModel, CkmRelationship, EvidenceRecord, data_lineage, rollup};
 use std::path::Path;
 
 pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
@@ -57,6 +57,13 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     // objects (just committed above) coexist in one place.
     let rollups_added = commit_rollups(&*ledger)?;
 
+    // RFC 0075: links `TransformNode` Source/Sink nodes to the real `Table`/`Dataset` object they
+    // read/write, closing the Data Architecture cross-reference gap RFC 0074 found. Run after
+    // rollups for the same reason rollups run here at all — this is the first point in the
+    // pipeline where every kind of object involved (CKM-derived `TransformNode`s and `Table`s,
+    // just committed above) coexists in one ledger read.
+    let lineage_links_added = commit_data_lineage(&*ledger)?;
+
     println!("Commit complete.");
     println!("  Objects written:       {objects_written}");
     println!("  Objects skipped:       {objects_skipped} (already in ledger)");
@@ -64,6 +71,9 @@ pub fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  Evidence records:      {evidence_written}");
     if rollups_added > 0 {
         println!("  Subsystem rollups:     {rollups_added}");
+    }
+    if lineage_links_added > 0 {
+        println!("  Data lineage links:    {lineage_links_added}");
     }
     println!("  Ledger:                {}", store_display(config, cwd));
 
@@ -104,6 +114,33 @@ fn commit_rollups(ledger: &dyn KnowledgeStore) -> Result<usize> {
     }
     for rel in new_relationships {
         ledger.append_relationship(rel)?;
+    }
+
+    Ok(written)
+}
+
+/// Reads the ledger's full current object/relationship set, links `TransformNode` Source/Sink
+/// nodes to the real `Table`/`Dataset` object they name (RFC 0075), and appends only the newly
+/// produced relationships. Deterministic ids (`data_lineage::link_transform_nodes_to_tables`) mean
+/// this is a no-op on a re-run against unchanged input, the same as `commit_rollups` above.
+fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
+    let objects = ledger.all_objects()?;
+    let relationships = ledger.all_relationships()?;
+    let original_relationship_count = relationships.len();
+
+    let mut graph = KirGraph {
+        objects,
+        relationships,
+        events: Vec::new(),
+        evidence: Vec::new(),
+    };
+    data_lineage::link_transform_nodes_to_tables(&mut graph);
+
+    let mut written = 0usize;
+    for rel in &graph.relationships[original_relationship_count..] {
+        if ledger.append_relationship(rel)? {
+            written += 1;
+        }
     }
 
     Ok(written)

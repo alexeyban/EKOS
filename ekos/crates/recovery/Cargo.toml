@@ -27,6 +27,10 @@ roxmltree = { workspace = true }
 rustpython-parser = { workspace = true }
 rustpython-ast = { workspace = true }
 syn = { workspace = true }
+oxc_parser = { workspace = true }
+oxc_allocator = { workspace = true }
+oxc_span = { workspace = true }
+oxc_ast = { workspace = true }
 ekos-sql-dialect-sdk.workspace = true
 ekos-plugin-sql-dialect-mysql.workspace = true
 ekos-plugin-sql-dialect-postgres.workspace = true

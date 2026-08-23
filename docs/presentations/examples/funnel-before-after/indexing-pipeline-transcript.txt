@@ -1,0 +1,108 @@
+Real, unedited excerpts from this session's terminal output, in chronological order.
+Timestamps and durations below are exactly as logged/self-reported by the tools; nothing
+estimated. Where a number is not instrumented (recover/resolve wall-clock), that is stated,
+not filled in with a guess.
+
+--- 1. analytics/ repo-local indexing (already-scaffolded workspace, root=".") ---
+
+$ ekos recover
+Recover complete.
+  SQL files analysed: 2
+  Git commits analysed: 500
+  Source files scanned for dependencies: 162
+  Local documents analysed: 41
+  Passes run: 7
+
+$ ekos resolve
+Stats:
+  Candidates evaluated : 604
+  Pairs compared       : 2687
+  Merges proposed      : 135
+  Conflicts detected   : 0
+
+$ ekos compile
+Compile complete.
+  Objects:       511
+  Relationships: 3977
+  Warnings:      7482 (check logs)
+
+$ ekos commit
+Commit complete.
+  Objects written:       226
+  Objects skipped:       285 (already in ledger)
+  Relationships written: 3977
+  Evidence records:      1604
+
+$ ekos ledger status
+Ledger: /home/legion/PycharmProjects/analytics/.ekos/ledger/ledger.db
+  Total entries : 17410
+  Objects       : 2402
+
+--- 2. merging analytics/ into the shared cross-project ledger (~50 projects) ---
+(this is the ledger the connected mcp__ekos__* tools actually query)
+
+$ time ekos build --config ekos.toml     # from /home/legion/PycharmProjects, "analytics" just added to paths
+Build complete.
+  Files observed (new): 5107
+  Files skipped (cached): 55
+  Total objects in ledger: 79498
+real    2m40.478s      <- exact, via `time`
+user    0m41.478s
+sys     0m7.454s
+
+$ ekos recover --config ekos.toml        # ATTEMPT 1 -- crashed
+...
+running pass pass=sql-analyzer:ai-data-platform-engineer/postgres-sample-dbs/chinook.sql
+
+thread 'main' (1292134) panicked at crates/recovery/src/statement_repair.rs:72:19:
+byte index 6 is not a char boundary; it is inside '<26>' (bytes 5..8) of `26<TAB>Ac<26>stico MTV [Live]<TAB>19`
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[recover never printed "Recover complete." -- no artifacts committed from this run]
+
+# Root cause: crates/recovery/src/statement_repair.rs, starts_with_keyword() sliced a &str by
+# raw byte offset (trimmed[..kw.len()]) without checking it landed on a UTF-8 char boundary.
+# A sample-DB fixture line containing "Acústico" (non-ASCII) tripped it. Unrelated to analytics/
+# -- this is a pre-existing bug in EKOS itself, just never hit until a repo whose recover pass
+# walked past that fixture ran. See bug-fix.diff for the one-line fix.
+
+$ cargo install --path crates/cli --force
+    Finished `release` profile [optimized] target(s) in 2m 09s     <- exact, self-reported by cargo
+    Replacing /home/legion/.cargo/bin/ekos
+
+$ ekos recover --config ekos.toml        # ATTEMPT 2 -- after the fix, same full workspace
+Recover complete.
+  SQL files analysed: 609
+  Git commits analysed: 4222
+  Crypto batches analysed: 1
+  Source files scanned for dependencies: 12370
+  Local documents analysed: 4632
+  Python files analysed: 2807
+  Rust files analysed: 159
+  Rust symbols recovered: 1496 total, 842 Calls edges
+  Transformation IR nodes (SQL): 6922 total, 1% mapped (non-Unmapped)
+  Passes run: 1226
+[no panic this time]
+
+$ ekos resolve --config ekos.toml        # blocked -- unrelated to analytics/
+Stats:
+  Candidates evaluated : 118193
+  Pairs compared       : 22062278
+  Merges proposed      : 6227
+  Conflicts detected   : 230
+Error: 230 identity conflict(s) detected -- resolve manually before proceeding
+
+# Sample conflicts (all cross-project name collisions, none touching analytics/):
+#   [CONFLICT] 'validate' appears as multiple kinds: PythonSymbol x13, Pipeline x2
+#   [CONFLICT] 'extension' appears as multiple kinds: PythonModule x4, PythonSymbol x4
+#   [CONFLICT] 'connectionpool' appears as multiple kinds: PythonModule, PythonSymbol, ...
+# ekos compile/commit never ran for this pass -- the shared ledger's derived layer (git
+# contributors, dependency graph, SQL-recovered tables) for analytics/ was never written.
+# What the § "with EKOS" pass actually queried below came only from the `build` layer
+# (File objects + excerpts + symbol names), which IS already committed and shared --
+# ekos build writes straight to the ledger, independent of resolve/compile/commit.
+
+$ ekos_status (MCP, after all of the above)
+{ "entries": 436730, "ledger_path": "/home/legion/PycharmProjects/.ekos/ledger/facts",
+  "objects": 79498, "relationships": 152764 }
+  <- objects count matches the `build` step exactly (79498) -- confirms resolve/compile/commit
+     contributed nothing further to the shared ledger; everything queried below is build-layer.

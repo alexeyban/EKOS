@@ -7,9 +7,11 @@ use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
 use ekos_plugin_clickhouse::{ClickHouseHttpClient, ClickHouseObserver};
 use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
+use ekos_plugin_elixir::ElixirObserver;
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
+use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
 use ekos_plugin_pentaho::PentahoObserver;
 use ekos_plugin_python::PythonObserver;
@@ -106,6 +108,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         // RFC 0041: local .rs files, no credential to gate on — runs
         // unconditionally, same as PythonObserver.
         Box::new(RustObserver::new()),
+        // RFC 0081: local .ex/.exs files, no credential to gate on — runs
+        // unconditionally, same as RustObserver.
+        Box::new(ElixirObserver::new()),
+        // RFC 0085: local .js/.jsx/.ts/.tsx/.mjs/.cjs files, no credential to gate on — runs
+        // unconditionally, same as ElixirObserver.
+        Box::new(JavaScriptObserver::new()),
     ];
     if let Ok(export_dir) = std::env::var(CRYPTO_EXPORT_DIR_ENV) {
         observers.push(Box::new(CryptoObserver::new(
@@ -177,6 +185,22 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let fingerprint_path = config.ekos_dir(cwd).join("fingerprints.json");
     let mut fingerprints = load_fingerprints(&fingerprint_path);
 
+    // RFC 0077: `File`-kind `KirObject`s are constructed and written to the ledger inline, right
+    // here, only when a `file` observer's package is freshly produced this run — unlike
+    // `recover`-stage analyzer output (re-derived from `artifact_store` fresh on every invocation,
+    // independent of any fingerprint), this inline construction is never independently replayable
+    // from the artifact cache. Found live: clearing just `.ekos/ledger/` while keeping
+    // `.ekos/artifacts/` and `fingerprints.json` reproduced zero `File` objects, because the
+    // fingerprint-cache-hit branch below skipped this whole per-path block unconditionally,
+    // regardless of whether the ledger it's supposed to be populating still had anything in it.
+    // `ledger.object_count() == 0` is a cheap, always-correct signal that the ledger was just
+    // cleared (or never populated) — when true, no fingerprint is trusted this run, forcing a real
+    // rescan that repopulates it; every subsequent run (ledger no longer empty) resumes trusting
+    // the cache normally. Doesn't cover the far rarer case of *other* kinds surviving while only
+    // `File` objects were somehow selectively lost — that's not what was found live, and this
+    // fix's scope is deliberately the reported scenario, not every hypothetical partial-loss case.
+    let ledger_is_empty = ledger.object_count()? == 0;
+
     let mut total_observed = 0usize;
     let mut total_skipped = 0usize;
     let mut connectors_rescanned = 0usize;
@@ -206,7 +230,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
 
         let fp = source_fingerprint(&ctx);
         let fp_key = base.display().to_string();
-        if fingerprints.get(&fp_key) == Some(&fp.0) {
+        if !ledger_is_empty && fingerprints.get(&fp_key) == Some(&fp.0) {
             connectors_skipped_cached += observers.len();
             continue;
         }
@@ -232,6 +256,28 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
             });
             for artifact in &mut package.artifacts {
                 ekos_common::redaction::redact_json(&mut artifact.content.data, &redaction_config);
+                // RFC 0079: the same central choke point, for the same reason — every path-keyed
+                // recovery pass that derives a `KirId` from a raw path string embedded in this
+                // artifact's own `data` (not `content.target`, which these passes never read:
+                // `local_docs_analyzer.rs`/`rust_analyzer.rs`/`python_analyzer.rs`'s `data.path`,
+                // `git_analyzer.rs`'s per-commit `data.files_changed`) has no project context of
+                // its own — `project_key` only ever existed as this loop's own transient local
+                // (RFC 0044, `devlog_65`'s investigation confirmed this is a real, not
+                // per-file-tweakable gap). Riding a `"project"` field on `data` here, once, for
+                // every connector's artifacts, means those passes can read it straight back
+                // without this crate needing to know anything about their individual `data`
+                // shapes — see each pass's own `project_qualified_id` usage for the consuming
+                // half of this fix. Absent entirely (not an empty string) for the single-path
+                // case, matching the same "existing single-project ledgers keep byte-identical
+                // ids" principle `build.rs`'s own `File`-object fix already established.
+                if !project_key.is_empty()
+                    && let Some(obj) = artifact.content.data.as_object_mut()
+                {
+                    obj.insert(
+                        "project".to_string(),
+                        serde_json::Value::String(project_key.clone()),
+                    );
+                }
             }
 
             for artifact in &package.artifacts {
@@ -369,5 +415,79 @@ fn prune_snapshots(snapshot_dir: &Path, keep: usize) {
     let excess = names.len().saturating_sub(keep);
     for path in names.into_iter().take(excess) {
         std::fs::remove_file(&path).ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ekos_kir::ObjectKind;
+    use tempfile::tempdir;
+
+    fn file_object_count(config: &EkosConfig, cwd: &Path) -> usize {
+        open_store(config, cwd)
+            .unwrap()
+            .all_objects()
+            .unwrap()
+            .iter()
+            .filter(|o| o.kind == ObjectKind::File)
+            .count()
+    }
+
+    #[tokio::test]
+    async fn rebuilding_after_a_ledger_clear_reproduces_file_objects_despite_a_fingerprint_hit() {
+        // RFC 0077: found live — clearing just `.ekos/ledger/` while keeping the artifact cache
+        // and `fingerprints.json` used to reproduce zero `File` objects, because an unchanged
+        // fingerprint skipped the whole per-path scan (and the `File`-KirObject construction
+        // inlined inside it) unconditionally, regardless of what the ledger actually still held.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("hello.txt"), b"hello world").unwrap();
+        let config = EkosConfig::default();
+
+        run(&config, dir.path()).await.unwrap();
+        assert!(
+            file_object_count(&config, dir.path()) > 0,
+            "first build must produce File objects"
+        );
+
+        // Real scenario: only the ledger is cleared. The artifact cache and fingerprints.json
+        // survive untouched.
+        std::fs::remove_dir_all(config.ekos_dir(dir.path()).join("ledger")).unwrap();
+
+        // Source content is unchanged, so the fingerprint would normally match and skip
+        // everything — but the ledger is now empty, so this must force a real rescan instead.
+        run(&config, dir.path()).await.unwrap();
+        assert!(
+            file_object_count(&config, dir.path()) > 0,
+            "File objects must be reproduced after a ledger clear, even though the fingerprint \
+             cache matches the unchanged source content"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_fingerprint_still_skips_the_rescan_when_the_ledger_is_not_empty() {
+        // The fix must not defeat the cache entirely — only bypass it when the ledger looks
+        // freshly cleared. A second build with an intact ledger and unchanged content should
+        // report the connector(s) as cache-skipped, not re-scanned.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("hello.txt"), b"hello world").unwrap();
+        let config = EkosConfig::default();
+
+        run(&config, dir.path()).await.unwrap();
+        let first_count = open_store(&config, dir.path())
+            .unwrap()
+            .object_count()
+            .unwrap();
+        assert!(first_count > 0);
+
+        run(&config, dir.path()).await.unwrap();
+        let second_count = open_store(&config, dir.path())
+            .unwrap()
+            .object_count()
+            .unwrap();
+        assert_eq!(
+            first_count, second_count,
+            "a cache-hit re-run against an intact ledger must not duplicate or lose objects"
+        );
     }
 }

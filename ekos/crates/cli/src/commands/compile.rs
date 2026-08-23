@@ -67,10 +67,18 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  Relationships: {rel_count}");
     println!("  CKM written:   {}", written_path.display());
     if ctx.diagnostics.lock().unwrap().has_warnings() {
-        println!(
-            "  Warnings:      {} (check logs)",
-            ctx.diagnostics.lock().unwrap().warning_count()
-        );
+        let warning_count = ctx.diagnostics.lock().unwrap().warning_count();
+        // RFC 0076: "(check logs)" used to point nowhere real — diagnostics only ever logged at
+        // `tracing::debug!`, invisible at this project's own default `log-level = "info"`. Now a
+        // real file, and the message says so.
+        match super::diagnostics_log::write_diagnostics_log(&config.ekos_dir(cwd), "compile", &ctx)
+        {
+            Ok(Some(path)) => {
+                println!("  Warnings:      {warning_count} (see {})", path.display())
+            }
+            Ok(None) => println!("  Warnings:      {warning_count}"),
+            Err(e) => println!("  Warnings:      {warning_count} (could not write log: {e})"),
+        }
     }
 
     Ok(())

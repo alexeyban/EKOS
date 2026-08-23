@@ -15,6 +15,8 @@ pub struct EkosConfig {
     #[serde(default)]
     pub document_semantics: DocumentSemanticsConfig,
     #[serde(default)]
+    pub architecture_reasoning: ArchitectureReasoningConfig,
+    #[serde(default)]
     pub marketing: MarketingConfig,
     #[serde(default)]
     pub recover: RecoverConfig,
@@ -22,6 +24,8 @@ pub struct EkosConfig {
     pub security: SecurityConfig,
     #[serde(default)]
     pub clickhouse: ClickHouseConfig,
+    #[serde(default)]
+    pub architecture: ArchitectureConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +112,17 @@ pub struct DocumentSemanticsConfig {
     pub enabled: bool,
     /// Safety valve for "opted in, then ran against a huge corpus by accident".
     pub max_sections: Option<u32>,
+}
+
+/// Gating for RFC 0065 Phase 2's `ArchitectureReasoningPass`. Opt-in, same reasoning as
+/// `DocumentSemanticsConfig`: one batched LLM call per `recover` run (all crates in one prompt,
+/// not one call per crate — RFC 0065 §42's cost discipline), but still a real network call a
+/// workspace shouldn't pay for unless it asked to.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ArchitectureReasoningConfig {
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// RFC 0027: marketing-agent config. `[marketing]` in `ekos.toml`, replacing the source
@@ -237,6 +252,34 @@ pub struct ClickHouseConfig {
     pub enable_mcp_query: bool,
 }
 
+/// RFC 0083 (System Decomposition, Phase 3): `[architecture.system-decomposition]` in
+/// `ekos.toml`. A convention-based path→layer classifier ([`ekos_docs_gen::classify_path`]) needs
+/// a real escape hatch for the workspaces it guesses wrong on — same shape and same
+/// first-match-wins precedence `[recover.sql.dialect-rules]` already established for the
+/// equivalent SQL-dialect problem (`SqlRecoverConfig`/`SqlDialectRuleConfig` above).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ArchitectureConfig {
+    #[serde(default)]
+    pub system_decomposition: SystemDecompositionConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SystemDecompositionConfig {
+    /// Checked in order; the first `path-glob` match wins over the built-in extension
+    /// convention. `layer` is one of `backend`/`frontend`/`database` (case-insensitive).
+    #[serde(default)]
+    pub overrides: Vec<LayerOverrideConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LayerOverrideConfig {
+    pub path_glob: String,
+    pub layer: String,
+}
+
 #[allow(clippy::derivable_impls)]
 impl Default for EkosConfig {
     fn default() -> Self {
@@ -246,10 +289,12 @@ impl Default for EkosConfig {
             llm: LlmConfig::default(),
             ai: AiConfig::default(),
             document_semantics: DocumentSemanticsConfig::default(),
+            architecture_reasoning: ArchitectureReasoningConfig::default(),
             marketing: MarketingConfig::default(),
             recover: RecoverConfig::default(),
             security: SecurityConfig::default(),
             clickhouse: ClickHouseConfig::default(),
+            architecture: ArchitectureConfig::default(),
         }
     }
 }
@@ -428,6 +473,36 @@ dialect = "postgres"
     fn clickhouse_mcp_query_parses_from_kebab_case_table() {
         let cfg: EkosConfig = toml::from_str("[clickhouse]\nenable-mcp-query = true\n").unwrap();
         assert!(cfg.clickhouse.enable_mcp_query);
+    }
+
+    /// RFC 0083: omitting `[architecture.system-decomposition]` entirely must preserve the pure
+    /// convention-based behavior — no overrides, matching every other opt-in-table pattern above.
+    #[test]
+    fn system_decomposition_defaults_to_no_overrides() {
+        let cfg = EkosConfig::default();
+        assert!(cfg.architecture.system_decomposition.overrides.is_empty());
+
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert!(cfg.architecture.system_decomposition.overrides.is_empty());
+    }
+
+    #[test]
+    fn system_decomposition_parses_overrides_from_kebab_case_table() {
+        let toml = r#"
+[[architecture.system-decomposition.overrides]]
+path-glob = "vendor/**/*.rs"
+layer = "frontend"
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.architecture.system_decomposition.overrides.len(), 1);
+        assert_eq!(
+            cfg.architecture.system_decomposition.overrides[0].path_glob,
+            "vendor/**/*.rs"
+        );
+        assert_eq!(
+            cfg.architecture.system_decomposition.overrides[0].layer,
+            "frontend"
+        );
     }
 
     #[test]

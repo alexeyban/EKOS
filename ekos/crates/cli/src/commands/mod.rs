@@ -1,3 +1,4 @@
+pub mod architecture;
 pub mod artifact;
 pub mod ask;
 pub mod branch;
@@ -7,6 +8,7 @@ pub mod clickhouse;
 pub mod commit;
 pub mod compile;
 pub mod dbt;
+pub mod diagnostics_log;
 pub mod diff;
 pub mod docs;
 pub mod doctor;

@@ -1,0 +1,47 @@
+$ ekos_state(id: "41019f57-4366-58ae-ba53-688b6d3733a0")   # exploration-state.ts
+
+{
+  "evidence": [{
+    "confidence": 1.0,
+    "created_at": "2026-08-20T17:58:46.233820932Z",
+    "fragment": "file: assets/js/dashboard/extra/exploration/exploration-state.ts (8278 bytes)",
+    "id": "c2687c63-4435-511e-a77e-fe78eabdb495",
+    "location": { "column": null, "line": null, "path": "/home/legion/PycharmProjects/analytics/assets/js/dashboard/extra/exploration/exploration-state.ts" }
+  }],
+  "object": {
+    "id": "41019f57-4366-58ae-ba53-688b6d3733a0",
+    "kind": "File",
+    "name": "assets/js/dashboard/extra/exploration/exploration-state.ts",
+    "properties": {
+      "artifact_id": "ea97d23e411c512d9448d6038b005ccbc30b99ba627faf9cfbd3ea51a1e27036",
+      "excerpt": "import { useState, useEffect, useRef, useCallback } from 'react'\nimport { ApiError } from '../../api'\nimport * as api from '../../api'\nimport * as url from '../../util/url'\nimport { useSiteContext, PlausibleSite } from '../../site-context'\nimport { DashboardState } from '../../dashboard-state'\nimport {\n  emptyJourney,\n  toggleJourneyStep,\n  setJourneyActiveFilter,\n  clearJourneyFrozen,\n  clearJourneyFunnel,\n  clearJourneyRateLimit,\n  updateJourneyOnSuccess,\n  updateJourneyOnError,\n  updateJourneyOnRateLimitError,\n  JourneyStep,\n  Journey,\n  JourneySuggestion,\n  FunnelStep\n} from './journey'\nim",
+      "path": "assets/js/dashboard/extra/exploration/exploration-state.ts",
+      "size_bytes": 8278
+    }
+  },
+  "relationships": []
+}
+
+$ ekos_state(id: "92721d24-fe30-5efa-bea9-67a88cd46dfa")   # journey.ts
+
+{
+  "evidence": [{
+    "confidence": 1.0,
+    "created_at": "2026-08-20T17:58:46.254553230Z",
+    "fragment": "file: assets/js/dashboard/extra/exploration/journey.ts (8699 bytes)",
+    "id": "7028b206-d72f-5276-ae96-8160fb959b84",
+    "location": { "column": null, "line": null, "path": "/home/legion/PycharmProjects/analytics/assets/js/dashboard/extra/exploration/journey.ts" }
+  }],
+  "object": {
+    "id": "92721d24-fe30-5efa-bea9-67a88cd46dfa",
+    "kind": "File",
+    "name": "assets/js/dashboard/extra/exploration/journey.ts",
+    "properties": {
+      "artifact_id": "6a0b869f9e6588303703f3e58100ee31f38fb7b68c8556f2adf6f5e3a32377db",
+      "excerpt": "import { roundedNumberFormatter } from '../../util/number-formatter'\n\nexport type JourneyStep = {\n  label: string\n  name: string\n  pathname: string\n  includes_subpaths: boolean\n  subpaths_count: number\n  is_goal: boolean\n}\n\nexport type JourneySuggestion = {\n  step: JourneyStep\n  visitors: number\n}\n\nexport type SelectedSuggestion = {\n  step: JourneyStep\n  visitors: number | null\n  conversion_rate: string | null\n}\n\nexport type FunnelStep = {\n  step: JourneyStep\n  visitors: number\n  dropoff: number\n  dropoff_percentage: number\n  conversion_rate: string\n  conversion_rate_step: string\n}\n\ntype Provi",
+      "path": "assets/js/dashboard/extra/exploration/journey.ts",
+      "size_bytes": 8699
+    }
+  },
+  "relationships": []
+}

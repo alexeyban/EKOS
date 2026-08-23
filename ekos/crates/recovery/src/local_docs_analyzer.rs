@@ -47,6 +47,11 @@ struct SectionData {
 #[derive(Debug, Deserialize)]
 struct DocumentData {
     path: String,
+    /// RFC 0079: present only in a multi-`[observe] paths` workspace — `build.rs`'s own choke
+    /// point, not this analyzer's connector. Qualifies id hashing only; `path` above stays the
+    /// bare, human-readable path everywhere it's displayed (object name, evidence text).
+    #[serde(default)]
+    project: Option<String>,
     doc_format: String,
     #[serde(default)]
     page_count: Option<u32>,
@@ -145,7 +150,11 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 }
             };
 
-            let doc_id = document_kir_id(&data.path);
+            // RFC 0079: id hashing only — `data.path` (display name, evidence text, properties)
+            // stays the bare, human-readable path everywhere below.
+            let id_path =
+                ekos_common::project::project_qualify(&data.path, data.project.as_deref());
+            let doc_id = document_kir_id(&id_path);
             let mut obj = KirObject::new(
                 data.path.clone(),
                 ObjectKind::Custom("Document".to_string()),
@@ -179,7 +188,7 @@ impl CompilerPass for LocalDocAnalyzerPass {
             graph.objects.push(obj);
 
             for (index, table) in data.tables.iter().enumerate() {
-                let tbl_id = table_kir_id(&data.path, index);
+                let tbl_id = table_kir_id(&id_path, index);
                 let mut tbl_obj = KirObject::new(
                     format!("{}: table {}", data.path, index + 1),
                     ObjectKind::Table,
@@ -214,7 +223,7 @@ impl CompilerPass for LocalDocAnalyzerPass {
             }
 
             for section in &data.sections {
-                let sec_id = section_kir_id(&data.path, section.index);
+                let sec_id = section_kir_id(&id_path, section.index);
                 let name = match section.page {
                     Some(p) => format!("{}: page {p}", data.path),
                     None => format!("{}: section {}", data.path, section.index + 1),
@@ -415,6 +424,45 @@ mod tests {
         let graph2 = run_pass(vec![id2], c2).await;
 
         assert_eq!(graph1.objects[0].id, graph2.objects[0].id);
+    }
+
+    #[tokio::test]
+    async fn a_project_field_qualifies_the_document_id_but_not_its_displayed_path() {
+        // RFC 0079: real multi-project-workspace shape — `build.rs` writes `data.project` when
+        // `[observe] paths` has more than one entry; this analyzer must fold it into the id hash
+        // while leaving the human-readable path (name, properties) untouched.
+        let (c, _dir) = ctx();
+        let data = serde_json::json!({
+            "path": "notes.md",
+            "project": "service-a",
+            "doc_format": "md",
+            "page_count": null,
+            "excerpt": "hello",
+            "tables": [],
+            "sections": [],
+            "ocr_text": null,
+        });
+        let artifact = ekos_artifact::ObservationArtifact::new("localdocs", "notes.md", data);
+        let id = artifact.id.clone();
+        let json = serde_json::to_value(&artifact).unwrap();
+        c.artifact_store.write(&artifact.id, &json).unwrap();
+
+        let graph = run_pass(vec![id], c).await;
+        assert_eq!(graph.objects.len(), 1);
+        assert_eq!(
+            graph.objects[0].id,
+            document_kir_id("service-a:notes.md"),
+            "id must be qualified by the project field"
+        );
+        assert_eq!(
+            graph.objects[0].name, "notes.md",
+            "the displayed path must stay bare, unqualified"
+        );
+        assert_ne!(
+            graph.objects[0].id,
+            document_kir_id("notes.md"),
+            "must not collide with the same path from an unqualified/different project"
+        );
     }
 
     /// Real table content extracted by `PdfParser` from a public MLOps

@@ -26,6 +26,43 @@ impl Check {
     }
 }
 
+/// RFC 0076: this used to default the checked env var to `ANTHROPIC_API_KEY` regardless of which
+/// provider was actually configured — a real, confirmed false-negative found live against a real
+/// workspace with `provider = "ollama"` and Ollama running correctly locally: this check reported
+/// `[FAIL] ... ollama configured but $ANTHROPIC_API_KEY is not set`, true but irrelevant
+/// (`ekos_recovery::ollama::OllamaProvider::from_env` reads `OLLAMA_BASE_URL`/`OLLAMA_MODEL`, both
+/// optional with sensible defaults — no API key exists for a local Ollama server at all). Ollama
+/// is the one built-in provider with no key requirement; every other provider (today: Anthropic)
+/// keeps the original check. `key_is_set` is injected (rather than calling `std::env::var`
+/// directly) so this is testable without mutating real process environment variables, which would
+/// race across parallel test threads.
+fn llm_provider_check(
+    provider: Option<&str>,
+    api_key_env: Option<&str>,
+    key_is_set: impl Fn(&str) -> bool,
+) -> Check {
+    let Some(provider) = provider else {
+        return Check::ok("LLM provider", "not configured (required for Phase 6+)");
+    };
+
+    if provider == "ollama" {
+        return Check::ok(
+            "LLM provider",
+            format!("{provider} (local provider, no API key required)"),
+        );
+    }
+
+    let key_var = api_key_env.unwrap_or("ANTHROPIC_API_KEY");
+    if key_is_set(key_var) {
+        Check::ok("LLM provider", format!("{provider} (key: ${key_var} ✓)"))
+    } else {
+        Check::fail(
+            "LLM provider",
+            format!("{provider} configured but ${key_var} is not set"),
+        )
+    }
+}
+
 pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
     let mut checks = Vec::new();
 
@@ -88,29 +125,11 @@ pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
     }
 
     // LLM config
-    if let Some(ref provider) = config.llm.provider {
-        let key_var = config
-            .llm
-            .api_key_env
-            .as_deref()
-            .unwrap_or("ANTHROPIC_API_KEY");
-        if std::env::var(key_var).is_ok() {
-            checks.push(Check::ok(
-                "LLM provider",
-                format!("{provider} (key: ${key_var} ✓)"),
-            ));
-        } else {
-            checks.push(Check::fail(
-                "LLM provider",
-                format!("{provider} configured but ${key_var} is not set"),
-            ));
-        }
-    } else {
-        checks.push(Check::ok(
-            "LLM provider",
-            "not configured (required for Phase 6+)",
-        ));
-    }
+    checks.push(llm_provider_check(
+        config.llm.provider.as_deref(),
+        config.llm.api_key_env.as_deref(),
+        |key_var| std::env::var(key_var).is_ok(),
+    ));
 
     println!("EKOS Doctor");
     println!("{}", "─".repeat(40));
@@ -129,5 +148,43 @@ pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
         Ok(())
     } else {
         anyhow::bail!("Some checks failed — see above.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ollama_passes_regardless_of_any_api_key_env_var() {
+        let check = llm_provider_check(Some("ollama"), None, |_| false);
+        assert!(check.ok, "ollama needs no API key at all");
+        assert!(check.detail.contains("no API key required"));
+    }
+
+    #[test]
+    fn anthropic_fails_when_its_key_env_var_is_unset() {
+        let check = llm_provider_check(Some("anthropic"), None, |_| false);
+        assert!(!check.ok);
+        assert!(check.detail.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn anthropic_passes_when_its_key_env_var_is_set() {
+        let check = llm_provider_check(Some("anthropic"), None, |_| true);
+        assert!(check.ok);
+    }
+
+    #[test]
+    fn a_custom_api_key_env_name_is_respected() {
+        let check = llm_provider_check(Some("anthropic"), Some("MY_KEY"), |var| var == "MY_KEY");
+        assert!(check.ok);
+        assert!(check.detail.contains("MY_KEY"));
+    }
+
+    #[test]
+    fn no_provider_configured_is_ok_not_a_failure() {
+        let check = llm_provider_check(None, None, |_| false);
+        assert!(check.ok, "no LLM configured is a valid, non-failing state");
     }
 }

@@ -249,16 +249,43 @@ ekos docs generate --layout curated --output doc # README.md/Architecture.md/API
 ```
 
 `--layout curated`'s `Architecture.md` includes a real crate/workspace dependency graph (parsed
-`Cargo.toml`, not guessed), external technology dependencies, CI/CD pipelines (parsed
-`.github/workflows/*.yml`), and an entity-relationship diagram; `API.md` lists real functions/
+`Cargo.toml`, not guessed, annotated with a C4 mapping — crate → Container, external dependency →
+External System, RFC 0065), external technology dependencies, an `## Open Questions` section
+listing real knowledge gaps a deterministic pass couldn't resolve (e.g. an unresolvable workspace
+dependency) rather than dropping them silently, CI/CD pipelines (parsed `.github/workflows/*.yml`),
+and an entity-relationship diagram; `API.md` lists real functions/
 structs/enums/traits (from `RustSymbol`/`PythonSymbol` objects, RFC 0038/0040/0041) grouped by
 file, each linked to its own detail page; `SequenceDiagrams.md` covers both Transformation-IR
 data-flow sequences and real function-call sequences (RFC 0041's `Calls` graph). Per-entity pages
 nest under `entities/<kind>/<2-char shard>/` so a large codebase's page count never blows past
 GitHub's per-directory file-listing cap — running `ekos docs generate --layout curated --output
-doc` against this repo's own source is a ready example to try. `--prose` (opt-in) layers an LLM-written overview onto each
+doc` against this repo's own source is a ready example to try. Each entity page's Definition
+section now shows the real human-written documentation from source when the analyzer found any
+(`///` doc comments, Python docstrings, `@moduledoc`/`@doc`, JSDoc — RFC 0087), honestly stating
+"Not documented in source" rather than fabricating one when it didn't. `--prose` (opt-in) layers an LLM-written overview onto each
 object page, reusing `ekos ask`'s exact grounding+citation pipeline, with a token-cost estimate
 shown before any call.
+
+### Architecture reasoning + investigation loop (RFC 0065/0066/0067, opt-in)
+
+Beyond deterministic extraction, `ekos architecture investigate` runs the RFC 0066 MVP agentic
+loop: broad collection, deterministic crate-topology extraction, one batched LLM call classifying
+each crate's architectural role (`ArchitectureReasoningPass`, RFC 0065 Phase 2), a deterministic
+evaluator scoring completeness and evidence coverage (no LLM — RFC 0065 Phase 3), and — for any
+crate the evaluator flags unclassified — a targeted second pass that reads that crate's own leading
+doc comment for more context before trying again. Stops early once the quality threshold is met, or
+after `--max-iterations`, always ending with a curated-docs `docs generate` run:
+
+```bash
+ekos architecture investigate                                 # RFC 0066 MVP defaults: 3 iterations,
+                                                                # 0.90 quality threshold, --output doc
+ekos architecture investigate --max-iterations 5 --quality-threshold 0.95 --output doc
+```
+
+Reuses the `[llm]` provider already configured in `ekos.toml` (local Ollama or a cloud provider) —
+no separate `--llm` flag. See RFC 0067 for what's deliberately out of scope for this MVP
+(persistent checkpointing/resume, concurrency-safety infrastructure, CI/CD exit codes, multi-format
+output).
 
 ### Hierarchical rollups (RFC 0044)
 

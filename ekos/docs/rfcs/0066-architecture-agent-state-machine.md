@@ -12,6 +12,21 @@ sequence — kept below for provenance)
 
 ---
 
+## MVP Agent implemented (2026-08-22) — RFC 0067
+
+`Status` above stays `Proposed` — the full state machine (persistent checkpointing §51,
+concurrency-safety infrastructure §53-54, CI/CD exit-code matrix + PR-comment workflow §49-50,
+human review, MCP additions) is not built. What shipped is exactly this RFC's own §64-65 "MVP
+Agent"/"MVP Investigation Loop": `ekos architecture investigate`
+(`crates/cli/src/commands/architecture.rs`) — one orchestrating async function, not a generic
+state-machine framework (this MVP runs one investigation at a time, nothing to checkpoint or
+coordinate concurrently), composing the existing pipeline stages (`build`/`recover`/`compile`/
+`commit`/`docs generate`) plus RFC 0065 Phase 2/3's reasoning pass and evaluator around the
+12-step, max-3-iteration MVP loop §65 itself defines. Full design rationale in RFC 0067; live
+verification (real local Ollama model, this repo's own workspace) in `devlogs/devlog_71.md`.
+
+---
+
 # 1. Summary
 
 This RFC defines the runtime behavior of the **EKOS Architecture Agent**.

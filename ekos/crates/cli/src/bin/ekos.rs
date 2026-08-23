@@ -115,6 +115,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: DbtCommands,
     },
+    /// Architecture Knowledge Model reasoning + investigation loop (RFC 0065/0066)
+    Architecture {
+        #[command(subcommand)]
+        subcommand: ArchitectureCommands,
+    },
     /// Load and run a World Engine scenario (RFC 0051)
     Simulate {
         /// Path to the scenario YAML file
@@ -158,6 +163,25 @@ enum DbtCommands {
     /// transpiled.
     Generate {
         /// Output directory (default: <workspace>/dbt-generated)
+        #[arg(long, value_name = "DIR")]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ArchitectureCommands {
+    /// Run the RFC 0066 MVP investigation loop: broad collection, deterministic crate-topology
+    /// extraction, LLM-backed role classification, evaluation, and targeted re-investigation of
+    /// any crate the evaluator flagged unclassified — up to --max-iterations, or until
+    /// --quality-threshold is reached. Always ends by generating curated docs (RFC 0035/0037).
+    Investigate {
+        /// Stop after this many iterations even if the quality threshold wasn't reached.
+        #[arg(long, default_value_t = 3)]
+        max_iterations: u32,
+        /// Evaluation score (0.0-1.0) at which the investigation stops early.
+        #[arg(long, default_value_t = 0.90)]
+        quality_threshold: f32,
+        /// Output directory for the generated curated docs (default: <workspace>/doc)
         #[arg(long, value_name = "DIR")]
         output: Option<PathBuf>,
     },
@@ -395,6 +419,21 @@ async fn main() -> Result<()> {
             DbtCommands::Generate { output } => {
                 let output = ekos::commands::dbt::resolve_output_dir(&cwd, output);
                 ekos::commands::dbt::generate(&cwd, &output, &config).await
+            }
+        },
+        Commands::Architecture { subcommand } => match subcommand {
+            ArchitectureCommands::Investigate {
+                max_iterations,
+                quality_threshold,
+                output,
+            } => {
+                let output = ekos::commands::architecture::resolve_output_dir(&cwd, output);
+                let opts = ekos::commands::architecture::InvestigateOptions {
+                    max_iterations,
+                    quality_threshold,
+                    output,
+                };
+                ekos::commands::architecture::investigate(&config, &cwd, opts).await
             }
         },
         Commands::Simulate {

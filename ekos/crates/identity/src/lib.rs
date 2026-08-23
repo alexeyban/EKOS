@@ -341,7 +341,19 @@ impl IdentityResolver for DefaultResolver {
             // instance of each kind has the same property shape (no `columns`), so the same
             // same-kind 1.0 structural fallback would apply here too. No two distinct claims or
             // gaps can legitimately be the same real-world entity.
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate" || k == "Claim" || k == "ArchitectureGap")
+            //
+            // `Custom("ElixirModule")`/`Custom("ElixirSymbol")` (RFC 0081) and
+            // `Custom("JsModule")`/`Custom("JsSymbol")` (RFC 0085) hit this exact failure shape a
+            // seventh and eighth time — found live, not proactively, by reading a real generated
+            // entity page (`Plausible.Auth.Password`, a real password-hashing module) and finding
+            // an 18-times-duplicated `SameAs` relationship at confidence=1.00 to
+            // `PlausibleWeb.Plugins.API.Schemas.Funnel.CreateRequest`, a completely unrelated real
+            // module — CLAUDE.md's own crate-map already names this exact obligation ("New
+            // `ObjectKind::Custom(_)` variants... must be added to `DefaultResolver`'s blanket
+            // kind-exclusion list") and both RFCs missed it. Each is self-identified by a
+            // structural key (module: qualified name; symbol: owning module id + qualified name)
+            // — no two distinct instances can legitimately be the same real-world entity.
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate" || k == "Claim" || k == "ArchitectureGap" || k == "ElixirModule" || k == "ElixirSymbol" || k == "JsModule" || k == "JsSymbol")
             {
                 continue;
             }
@@ -1267,6 +1279,49 @@ mod tests {
             "Crate objects must never be merge candidates, got {:?}",
             result.proposals
         );
+    }
+
+    /// Regression test for a real bug found live while reading a real generated entity page for
+    /// the analytics project (RFC 0081/RFC 0086's own docs quality effort): `Custom("ElixirModule")`
+    /// was missing from the same blanket kind-exclusion list `RustSymbol`/`Crate` already needed —
+    /// `Plausible.Auth.Password` (a real password-hashing module) scored a `SameAs` merge candidate
+    /// against `PlausibleWeb.Plugins.API.Schemas.Funnel.CreateRequest` (a completely unrelated real
+    /// module) at confidence 1.00, purely from `structural_score`'s same-kind fallback. Two module
+    /// names sharing no real relationship must never merge just because both are `ElixirModule`.
+    #[test]
+    fn elixir_module_objects_are_never_merged_even_with_unrelated_names() {
+        let elixir_module = ObjectKind::Custom("ElixirModule".to_string());
+        let g = make_graph(&[
+            ("Plausible.Auth.Password", elixir_module.clone()),
+            (
+                "PlausibleWeb.Plugins.API.Schemas.Funnel.CreateRequest",
+                elixir_module,
+            ),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "ElixirModule objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
+    /// Same failure shape, `Custom("ElixirSymbol")`/`Custom("JsModule")`/`Custom("JsSymbol")` (RFC
+    /// 0081/RFC 0085) — added to the same exclusion list in the same fix, verified here together
+    /// since none had a real observed over-merge yet (matching how `Claim`/`ArchitectureGap` were
+    /// added proactively rather than waiting for a seventh real incident).
+    #[test]
+    fn elixir_symbol_and_js_module_and_js_symbol_objects_are_never_merged() {
+        for kind_name in ["ElixirSymbol", "JsModule", "JsSymbol"] {
+            let kind = ObjectKind::Custom(kind_name.to_string());
+            let g = make_graph(&[("handle_event", kind.clone()), ("handle_event_2", kind)]);
+            let result = DefaultResolver::new().resolve(&g);
+            assert!(
+                result.proposals.is_empty(),
+                "{kind_name} objects must never be merge candidates, got {:?}",
+                result.proposals
+            );
+        }
     }
 
     #[test]

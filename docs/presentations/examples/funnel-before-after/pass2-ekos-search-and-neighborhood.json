@@ -1,0 +1,36 @@
+$ ekos_search(query: "journey_funnel")
+
+{
+  "matches": [
+    { "id": "148ec1c1-faa6-5b75-bdf3-7e3807a8df87", "name": "extra/lib/plausible/funnel.ex" },
+    { "id": "deada174-77a5-5dec-a7eb-898c590a5ee0", "name": "extra/lib/plausible/stats/exploration.ex" }
+  ]
+}
+
+$ ekos_search(query: "windowFunnel")
+
+{ "matches": [] }
+
+$ ekos_neighborhood(id: "deada174-77a5-5dec-a7eb-898c590a5ee0", depth: 2)
+
+{
+  "events": [],
+  "evidence": [],
+  "objects": [
+    {
+      "created_at": "2026-08-20T17:58:37.741051635Z",
+      "evidence": ["2b669998-bd18-51c7-840d-4b7758a1ac3b"],
+      "id": "deada174-77a5-5dec-a7eb-898c590a5ee0",
+      "kind": "File",
+      "name": "extra/lib/plausible/stats/exploration.ex",
+      "properties": {
+        "artifact_id": "b63f87f055964185be4778e8b65accec1bfab227cf7e15145cc511b75762e898",
+        "excerpt": "defmodule Plausible.Stats.Exploration do\n  @moduledoc \"\"\"\n  Query logic for user journey exploration.\n  \"\"\"\n\n  import Ecto.Query\n  import Plausible.Stats.SQL.Fragments\n  import Plausible.Stats.Util, only: [percentage: 2]\n\n  alias Plausible.ClickhouseRepo\n  alias Plausible.Stats.Base\n  alias Plausible.Stats.Exploration.Journey\n  alias Plausible.Stats.Filters\n  alias Plausible.Stats.Query\n\n  @type journey() :: [Journey.Step.t()]\n  @type direction() :: :forward | :backward\n\n  defguard is_direction(value) when value in [:forward, :backward]\n\n  @type next_step() :: %{\n          step: Journey.Step.t",
+        "path": "extra/lib/plausible/stats/exploration.ex",
+        "size_bytes": 18787,
+        "symbols": ["max_steps", "next_steps", "next_steps", "next_steps", "journey_funnel", "journey_funnel", "journey_funnel", "journey_funnel"]
+      }
+    }
+  ],
+  "relationships": []
+}

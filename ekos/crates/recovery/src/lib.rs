@@ -3,6 +3,9 @@
 //! Phase 6. Requires RFC 0003 (KIR) and RFC 0008 (LLM policy).
 
 pub mod anthropic;
+pub mod architecture_drift;
+pub mod architecture_evaluator;
+pub mod architecture_reasoning;
 pub mod cache;
 pub mod cicd_analyzer;
 pub mod clickhouse_analyzer;
@@ -11,13 +14,16 @@ pub mod crate_topology_analyzer;
 pub mod crypto_analyzer;
 pub mod dependency_analyzer;
 pub mod document_semantics_analyzer;
+pub mod elixir_analyzer;
 pub mod git_analyzer;
 pub mod github_analyzer;
+pub mod javascript_analyzer;
 pub mod llm;
 pub mod llm_json;
 pub mod local_docs_analyzer;
 pub mod ollama;
 pub mod openai;
+pub mod package_json_analyzer;
 pub mod pentaho_analyzer;
 pub mod python_analyzer;
 pub mod rust_analyzer;
@@ -27,6 +33,15 @@ pub mod sql_transform_analyzer;
 mod statement_repair;
 
 pub use anthropic::AnthropicProvider;
+pub use architecture_drift::{DriftFinding, drift_from_history};
+pub use architecture_evaluator::{
+    EvaluationIssue, EvaluationIssueType, EvaluationReport, IssueSeverity,
+    crates_missing_classification, evaluate_architecture,
+};
+pub use architecture_reasoning::{
+    ArchitectureReasoningPass, ArchitectureReasoningStats, read_crate_doc_comment,
+    role_claim_kir_id,
+};
 pub use cache::CachedLlmProvider;
 pub use cicd_analyzer::CicdAnalyzerPass;
 pub use clickhouse_analyzer::ClickHouseAnalyzerPass;
@@ -35,13 +50,16 @@ pub use crate_topology_analyzer::CrateTopologyAnalyzerPass;
 pub use crypto_analyzer::CryptoAnalyzerPass;
 pub use dependency_analyzer::DependencyAnalyzerPass;
 pub use document_semantics_analyzer::{DocumentSemanticsAnalyzerPass, DocumentSemanticsStats};
+pub use elixir_analyzer::{ElixirAnalyzerPass, ElixirStats};
 pub use git_analyzer::GitAnalyzerPass;
 pub use github_analyzer::GitHubAnalyzerPass;
+pub use javascript_analyzer::{JavaScriptAnalyzerPass, JavaScriptStats};
 pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MockLlmProvider};
 pub use llm_json::strip_json_fences;
 pub use local_docs_analyzer::LocalDocAnalyzerPass;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
+pub use package_json_analyzer::PackageJsonAnalyzerPass;
 pub use pentaho_analyzer::{PentahoAnalyzerPass, PentahoStats};
 pub use python_analyzer::{PythonAnalyzerPass, PythonStats};
 pub use rust_analyzer::{RustAnalyzerPass, RustStats};

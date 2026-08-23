@@ -16,6 +16,9 @@
 use ekos_kir::{KirEvidence, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+mod layer_classification;
+pub use layer_classification::{Layer, LayerOverride, classify_path};
+
 /// One generated documentation page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderedPage {
@@ -91,7 +94,20 @@ pub struct ProseSection {
 pub struct ObjectPageModel {
     pub kind: ObjectKind,
     pub name: String,
+    /// Real, already-written documentation (Phase 1 of the "Real Descriptions, Purpose, and
+    /// Links" plan — a real `///`/docstring/`@doc`/JSDoc comment the analyzer captured into the
+    /// object's own `"description"` property). `None` when the source has no real doc comment —
+    /// rendered as an honest "not documented in source" placeholder, never fabricated at this
+    /// deterministic layer (`prose`, below, is where an opt-in LLM may add real heuristic
+    /// enrichment on top). Promoted out of `properties` below so it isn't shown twice.
+    pub definition: Option<String>,
     pub properties: Vec<(String, String)>,
+    /// Real relationships already compiled, regrouped by real structural meaning rather than raw
+    /// relationship kind (Phase 2): `"Based on"` (the real `Contains` *parent* — where this is
+    /// declared), `"Contains"` (real `Contains` children, unchanged from the prior grouping),
+    /// `"Used in"` (every other real incoming edge — who calls/depends on/references this),
+    /// `"Dependent on"` (every other real outgoing edge — what this itself relies on). A group
+    /// with zero real rows is omitted entirely rather than shown empty.
     pub relationship_groups: Vec<(String, Vec<RelationshipRow>)>,
     /// `Some(fenced-Markdown Mermaid block)` from [`render_mermaid_graph`] when there's at least
     /// one relationship to diagram, `None` otherwise. Kept as the exact Markdown-fenced string
@@ -115,14 +131,30 @@ pub fn build_object_page_model(
 ) -> ObjectPageModel {
     let evidence_by_id: HashMap<KirId, &KirEvidence> = evidence.iter().map(|e| (e.id, e)).collect();
 
+    // Phase 1/2 ("Real Descriptions, Purpose, and Links"): promote a real "description" property
+    // (a real doc comment an analyzer captured) out of the generic table into its own `definition`
+    // field — real analyzers write plain strings here, so `as_str` covers every real case; a
+    // non-string value (never written by any real analyzer today) is left in the generic
+    // properties table rather than silently dropped.
+    let definition = object
+        .properties
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let mut properties: Vec<(String, String)> = object
         .properties
         .iter()
+        .filter(|(k, _)| definition.is_none() || k.as_str() != "description")
         .map(|(k, v)| (k.clone(), format_value(v)))
         .collect();
     properties.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let mut by_kind: HashMap<String, Vec<RelationshipRow>> = HashMap::new();
+    // Phase 2: real relationships regrouped by real structural meaning rather than raw kind — see
+    // `ObjectPageModel::relationship_groups`'s own doc comment for the four real buckets.
+    let mut based_on: Vec<RelationshipRow> = Vec::new();
+    let mut contains: Vec<RelationshipRow> = Vec::new();
+    let mut used_in: Vec<RelationshipRow> = Vec::new();
+    let mut dependent_on: Vec<RelationshipRow> = Vec::new();
     for rel in relationships {
         let outgoing = rel.from == object.id;
         let other_id = if outgoing { rel.to } else { rel.from };
@@ -133,19 +165,31 @@ pub fn build_object_page_model(
                 None => RowEvidence::Unavailable,
             },
         };
-        by_kind
-            .entry(rel.kind.to_string())
-            .or_default()
-            .push(RelationshipRow {
-                outgoing,
-                other_id,
-                other_name: object_names.get(&other_id).cloned(),
-                evidence: row_evidence,
-            });
+        let row = RelationshipRow {
+            outgoing,
+            other_id,
+            other_name: object_names.get(&other_id).cloned(),
+            evidence: row_evidence,
+        };
+        let is_contains = rel.kind == RelationshipKind::Contains;
+        match (is_contains, outgoing) {
+            (true, false) => based_on.push(row),
+            (true, true) => contains.push(row),
+            (false, false) => used_in.push(row),
+            (false, true) => dependent_on.push(row),
+        }
     }
-    let mut relationship_groups: Vec<(String, Vec<RelationshipRow>)> =
-        by_kind.into_iter().collect();
-    relationship_groups.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut relationship_groups: Vec<(String, Vec<RelationshipRow>)> = Vec::new();
+    for (label, rows) in [
+        ("Based on", based_on),
+        ("Contains", contains),
+        ("Used in", used_in),
+        ("Dependent on", dependent_on),
+    ] {
+        if !rows.is_empty() {
+            relationship_groups.push((label.to_string(), rows));
+        }
+    }
 
     let diagram_markdown = if relationships.is_empty() {
         None
@@ -173,6 +217,7 @@ pub fn build_object_page_model(
     ObjectPageModel {
         kind: object.kind.clone(),
         name: object.name.clone(),
+        definition,
         properties,
         relationship_groups,
         diagram_markdown,
@@ -210,6 +255,12 @@ pub fn render_object_page(
 pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
     let mut out = String::new();
     out.push_str(&format!("# {} ({})\n\n", model.name, model.kind));
+
+    out.push_str("## Definition\n\n");
+    match &model.definition {
+        Some(text) => out.push_str(&format!("{}\n\n", text.trim())),
+        None => out.push_str("_Not documented in source._\n\n"),
+    }
 
     if let Some(prose) = &model.prose {
         out.push_str("## Overview\n\n");
@@ -307,6 +358,12 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
         html_escape(&model.name),
         html_escape(&model.kind.to_string())
     ));
+
+    body.push_str("<h2>Definition</h2>\n");
+    match &model.definition {
+        Some(text) => body.push_str(&format!("<p>{}</p>\n", html_escape(text.trim()))),
+        None => body.push_str("<p class=\"empty\">Not documented in source.</p>\n"),
+    }
 
     if let Some(prose) = &model.prose {
         body.push_str("<h2>Overview</h2>\n");
@@ -428,6 +485,10 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     | "RustSymbol"
                     | "PythonModule"
                     | "PythonSymbol"
+                    | "ElixirModule"
+                    | "ElixirSymbol"
+                    | "JsModule"
+                    | "JsSymbol"
                     | "Technology"
                     | "Rollup"
             )
@@ -593,6 +654,709 @@ pub fn render_er_diagram(tables: &[KirObject], relationships: &[KirRelationship]
         out.push_str("    %% no ForeignKey relationships among the given tables\n");
     }
     out.push_str("```\n");
+    out
+}
+
+/// Render the Executive Overview (RFC 0068 §14). Only the fields this project has real compiled
+/// signal for are populated with data: component/crate counts (`count_by_kind`, already this
+/// file's own established pattern), the technologies with the most real compiled dependents, and
+/// the Open Questions count (RFC 0065 §17). `Purpose`, `Architecture style`, `Major risks`, and
+/// `Architecture confidence` are named by RFC 0068's own template but have no real EKOS source yet
+/// — `Major risks` needs a `Risk` KIR kind this project doesn't have (RFC 0068 §62 Phase 2);
+/// `Architecture confidence` needs `evaluate_architecture` wired through from `cli` the same way
+/// RFC 0069 wired drift through, not yet done for the plain `docs generate` path (only
+/// `ekos architecture investigate` computes it today); `Purpose`/`Architecture style` need either
+/// an LLM read of real project documentation or human input, neither available to a zero-LLM
+/// deterministic renderer. Each says so explicitly rather than being silently dropped or guessed.
+fn render_architecture_summary(objects: &[KirObject], relationships: &[KirRelationship]) -> String {
+    let mut out = String::new();
+
+    let counts = count_by_kind(objects, is_significant);
+    let component_total: usize = counts.iter().map(|(_, n)| n).sum();
+    out.push_str(&format!(
+        "**Components:** {component_total} compiled object(s) across {} kind(s)\n\n",
+        counts.len()
+    ));
+
+    let crate_count = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .count();
+    out.push_str(&format!("**Containers (crates):** {crate_count}\n\n"));
+
+    // Deduplicated by (from, to) pair before counting — the same non-deterministic relationship
+    // id gap RFC 0070 found and fixed for the Technology Inventory view applies here too (found
+    // live, verifying this exact section against this repo's own real, repeatedly-recommitted
+    // ledger: raw counts read 132 "dependents" for a technology only ~33 real crates use).
+    let unique_edges: HashSet<(KirId, KirId)> = relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::DependsOn)
+        .map(|r| (r.from, r.to))
+        .collect();
+    let mut dependent_counts: HashMap<KirId, usize> = HashMap::new();
+    for (_, to) in &unique_edges {
+        *dependent_counts.entry(*to).or_insert(0) += 1;
+    }
+    let mut technologies: Vec<(&KirObject, usize)> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Technology"))
+        .map(|o| (o, dependent_counts.get(&o.id).copied().unwrap_or(0)))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    technologies.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name)));
+    const TOP_N_TECHNOLOGIES: usize = 5;
+    if technologies.is_empty() {
+        out.push_str("**Primary technologies:** _none compiled_\n\n");
+    } else {
+        let top: Vec<String> = technologies
+            .iter()
+            .take(TOP_N_TECHNOLOGIES)
+            .map(|(t, n)| format!("{} ({n} dependent(s))", t.name))
+            .collect();
+        out.push_str(&format!("**Primary technologies:** {}\n\n", top.join(", ")));
+    }
+
+    let open_questions = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ArchitectureGap"))
+        .count();
+    out.push_str(&format!("**Open questions:** {open_questions}\n\n"));
+
+    out.push_str(
+        "**Purpose:** _not yet computed — no real EKOS source for a project's stated purpose \
+         today (RFC 0068 §14)_\n\n\
+         **Architecture style:** _not yet computed — requires reasoning EKOS doesn't perform yet_\n\n\
+         **Major risks:** _not yet computed — no `Risk` KIR kind exists yet (RFC 0068 §29/§62)_\n\n\
+         **Architecture confidence:** _not yet computed here — see `ekos architecture investigate`'s \
+         own evaluation report (RFC 0065 Phase 3) for a real completeness/evidence-coverage score_\n\n",
+    );
+
+    out
+}
+
+/// `(id, label)` nodes and `(from_id, to_id)` edges — the interchange shape both
+/// [`system_context_graph`] and [`render_graph_svg`] share.
+type IdGraph = (Vec<(String, String)>, Vec<(String, String)>);
+
+/// Shared node/edge extraction behind both [`render_system_context`] (Mermaid text) and
+/// [`render_system_context_svg`] (standalone SVG, RFC 0073) — computed once so the two renderers
+/// can never drift apart on which technologies actually qualify. `None` when there's no real data
+/// to show (no crates, no technologies, or no crate has a real `DependsOn` edge to one) — the
+/// same honest-empty-state condition both callers already had before this was factored out.
+fn system_context_graph(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+) -> Option<IdGraph> {
+    let crate_ids: HashSet<KirId> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .map(|o| o.id)
+        .collect();
+    let technologies: HashMap<KirId, &str> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Technology"))
+        .map(|o| (o.id, o.name.as_str()))
+        .collect();
+
+    if crate_ids.is_empty() || technologies.is_empty() {
+        return None;
+    }
+
+    let mut used: HashSet<KirId> = HashSet::new();
+    for rel in relationships {
+        if rel.kind == RelationshipKind::DependsOn
+            && crate_ids.contains(&rel.from)
+            && technologies.contains_key(&rel.to)
+        {
+            used.insert(rel.to);
+        }
+    }
+
+    if used.is_empty() {
+        return None;
+    }
+
+    let system_node = "system_context_root".to_string();
+    let mut nodes = vec![(system_node.clone(), "System".to_string())];
+    let mut edges = Vec::new();
+    let mut sorted: Vec<KirId> = used.into_iter().collect();
+    sorted.sort_by_key(|id| technologies[id]);
+    for tech_id in sorted {
+        let node_id = mermaid_node_id(&tech_id);
+        nodes.push((node_id.clone(), technologies[&tech_id].to_string()));
+        edges.push((system_node.clone(), node_id));
+    }
+    Some((nodes, edges))
+}
+
+/// Render a C4 System Context diagram (RFC 0068 §15): the whole compiled workspace collapsed to
+/// one "System" node, with an edge to every `Custom("Technology")` object that at least one
+/// `Custom("Crate")` actually has a real `DependsOn` edge to — not every `Technology` object that
+/// happens to exist, only ones a real compiled dependency connects to the system. One C4 level
+/// broader than the Container-level `## Crate & Workspace Topology` view; deliberately has no new
+/// extraction behind it, reusing exactly the Crate/Technology/DependsOn data that view already
+/// has (RFC 0042).
+fn render_system_context(objects: &[KirObject], relationships: &[KirRelationship]) -> String {
+    let Some((nodes, edges)) = system_context_graph(objects, relationships) else {
+        return "_No external technology dependencies compiled._\n\n".to_string();
+    };
+
+    let mut out = String::from("```mermaid\ngraph TD\n");
+    for (id, label) in &nodes {
+        out.push_str(&format!("    {id}[\"{}\"]\n", mermaid_escape_label(label)));
+    }
+    for (from, to) in &edges {
+        out.push_str(&format!("    {from} -->|DependsOn| {to}\n"));
+    }
+    out.push_str("```\n");
+    out
+}
+
+/// Render the System Context diagram (see [`render_system_context`]) as a standalone SVG file
+/// (RFC 0068's remaining §61 MVP item: "current output is Mermaid-in-Markdown only ... isn't a
+/// standalone SVG artifact"). `None` under the exact same honest-empty condition
+/// [`render_system_context`] falls back to text for — no SVG file is worth writing to disk for a
+/// diagram that has nothing real to show. Uses the same node/edge data as the Mermaid rendering
+/// ([`system_context_graph`]), laid out and drawn by the generic [`render_graph_svg`] primitive.
+pub fn render_system_context_svg(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+) -> Option<RenderedPage> {
+    let (nodes, edges) = system_context_graph(objects, relationships)?;
+    Some(RenderedPage {
+        file_name: "system-context.svg".to_string(),
+        content: render_graph_svg(&nodes, &edges),
+    })
+}
+
+/// Real per-object layer membership feeding `## System Decomposition`: every compiled `File`
+/// object classified via [`classify_path`], plus every real `ObjectKind::Table` — already
+/// unambiguously `Layer::Database` by its own kind, no path heuristic needed (`classify_path`
+/// itself never assigns `Layer::Database`).
+fn layer_membership(objects: &[KirObject], overrides: &[LayerOverride]) -> HashMap<KirId, Layer> {
+    let mut membership = HashMap::new();
+    for obj in objects {
+        match &obj.kind {
+            ObjectKind::File => {
+                if let Some(layer) = classify_path(&obj.name, overrides) {
+                    membership.insert(obj.id, layer);
+                }
+            }
+            ObjectKind::Table => {
+                membership.insert(obj.id, Layer::Database);
+            }
+            _ => {}
+        }
+    }
+    membership
+}
+
+/// Extends `membership`'s File/Table layer assignments with real `Contains`-based inheritance —
+/// e.g. a real Ecto Repo `Custom("ElixirModule")` (RFC 0086 Phase 6) inherits its owning `File`'s
+/// `Layer::Backend` so a `DependsOn` edge *from that module* can resolve to a real layer. Used
+/// only for resolving a cross-tier edge's endpoints — never for the per-layer node *counts* in
+/// [`system_decomposition_graph`], which stay exactly the real File/Table counts, not inflated by
+/// every object that merely lives inside one.
+fn layer_membership_for_edges(
+    membership: &HashMap<KirId, Layer>,
+    relationships: &[KirRelationship],
+) -> HashMap<KirId, Layer> {
+    let mut extended = membership.clone();
+    for rel in relationships {
+        if rel.kind == RelationshipKind::Contains
+            && let Some(&layer) = membership.get(&rel.from)
+            && !extended.contains_key(&rel.to)
+        {
+            extended.insert(rel.to, layer);
+        }
+    }
+    extended
+}
+
+/// Builds the `## System Decomposition` graph (RFC 0068's C4 Container-level intent for a
+/// non-Rust project, RFC 0083 Phase 3): one node per real, non-empty layer — Backend, Frontend,
+/// SQL Database, ClickHouse Database (the two real `Table` `source_system` (RFC 0056) values kept
+/// as distinct nodes rather than merged into one "Database" box, since a real project can and
+/// does use both at once) — and one edge per pair of layers a real compiled `DependsOn`/
+/// `ReadsFrom`/`WritesTo` relationship actually connects. Never a guessed line: matches RFC 0068
+/// §22's own "don't fabricate" principle, already this crate's practice for Data Architecture's
+/// Ownership/Lifecycle/Data Quality fields.
+fn system_decomposition_graph(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+    overrides: &[LayerOverride],
+) -> Option<IdGraph> {
+    let membership = layer_membership(objects, overrides);
+    if membership.is_empty() {
+        return None;
+    }
+
+    let clickhouse_ids: HashSet<KirId> = objects
+        .iter()
+        .filter(|o| {
+            o.kind == ObjectKind::Table
+                && o.properties.get("source_system").and_then(|v| v.as_str()) == Some("clickhouse")
+        })
+        .map(|o| o.id)
+        .collect();
+
+    // RFC 0086 (Phase 6): a real database-adapter `Custom("Technology")` object (e.g. from a real
+    // Ecto Repo's `adapter: Ecto.Adapters.Postgres`/`ClickHouse` declaration) routes into the same
+    // real SQL/ClickHouse bucket a `Table` object with matching `source_system` would — the reader
+    // sees "Backend depends on ClickHouse Database" either way, regardless of which real analyzer
+    // produced the evidence.
+    let db_technology_bucket: HashMap<KirId, &'static str> = objects
+        .iter()
+        .filter(|o| {
+            matches!(&o.kind, ObjectKind::Custom(s) if s == "Technology")
+                && o.properties.get("ecosystem").and_then(|v| v.as_str()) == Some("database")
+        })
+        .map(|o| {
+            let bucket = if o.name == "ClickHouse" {
+                "layer_clickhouse"
+            } else {
+                "layer_sql"
+            };
+            (o.id, bucket)
+        })
+        .collect();
+
+    let edge_membership = layer_membership_for_edges(&membership, relationships);
+    let node_key = |id: &KirId| -> Option<&'static str> {
+        if clickhouse_ids.contains(id) {
+            return Some("layer_clickhouse");
+        }
+        if let Some(&bucket) = db_technology_bucket.get(id) {
+            return Some(bucket);
+        }
+        edge_membership.get(id).map(|l| match l {
+            Layer::Backend => "layer_backend",
+            Layer::Frontend => "layer_frontend",
+            Layer::Database => "layer_sql",
+        })
+    };
+
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for id in membership.keys() {
+        if let Some(key) = node_key(id) {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    if counts.is_empty() {
+        return None;
+    }
+
+    let labels: [(&str, &str, &str); 4] = [
+        ("layer_backend", "Backend", "file"),
+        ("layer_frontend", "Frontend", "file"),
+        ("layer_sql", "SQL Database", "table"),
+        ("layer_clickhouse", "ClickHouse Database", "table"),
+    ];
+    // RFC 0086 (Phase 6): a real database-adapter Technology can name a real SQL/ClickHouse
+    // dependency with zero real compiled `Table` rows behind it (e.g. Ecto configured, no schema
+    // recovered yet) — the node must still exist so the edge to it isn't silently dropped
+    // (`render_graph_svg` skips edges referencing an id absent from `nodes`), with an honest label
+    // rather than a fabricated table count.
+    let db_config_only_buckets: HashSet<&str> = db_technology_bucket.values().copied().collect();
+    let mut nodes = Vec::new();
+    for (key, label, unit) in labels {
+        if let Some(&count) = counts.get(key) {
+            let plural = if count == 1 { "" } else { "s" };
+            nodes.push((key.to_string(), format!("{label} ({count} {unit}{plural})")));
+        } else if db_config_only_buckets.contains(key) {
+            nodes.push((
+                key.to_string(),
+                format!("{label} (config only, no {unit}s compiled)"),
+            ));
+        }
+    }
+
+    let mut edge_pairs: HashSet<(&str, &str)> = HashSet::new();
+    for rel in relationships {
+        let is_real_cross_tier_edge = matches!(rel.kind, RelationshipKind::DependsOn)
+            || is_reads_from(&rel.kind)
+            || is_writes_to(&rel.kind);
+        if !is_real_cross_tier_edge {
+            continue;
+        }
+        if let (Some(from_key), Some(to_key)) = (node_key(&rel.from), node_key(&rel.to))
+            && from_key != to_key
+        {
+            edge_pairs.insert((from_key, to_key));
+        }
+    }
+    let mut edges: Vec<(String, String)> = edge_pairs
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+    edges.sort();
+
+    Some((nodes, edges))
+}
+
+/// Render `## System Decomposition` (RFC 0068's C4 Container-level intent, RFC 0083 Phase 3):
+/// real, evidence-backed Backend/Frontend/Database boxes — the "which components does it have and
+/// how do they relate" answer for a non-Rust project where `Crate` doesn't exist. One level more
+/// detailed than `## System Context` above, positioned right after it (same C4-adjacent spot).
+fn render_system_decomposition(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+    overrides: &[LayerOverride],
+) -> String {
+    let Some((nodes, edges)) = system_decomposition_graph(objects, relationships, overrides) else {
+        return "_No Backend, Frontend, or Database layer data compiled yet._\n\n".to_string();
+    };
+
+    let mut out = String::from("```mermaid\ngraph TD\n");
+    for (id, label) in &nodes {
+        out.push_str(&format!("    {id}[\"{}\"]\n", mermaid_escape_label(label)));
+    }
+    if edges.is_empty() {
+        out.push_str(
+            "    %% No real compiled relationship yet connects these layers to each other.\n",
+        );
+    } else {
+        for (from, to) in &edges {
+            out.push_str(&format!("    {from} --> {to}\n"));
+        }
+    }
+    out.push_str("```\n");
+    out
+}
+
+/// Render `## System Decomposition` (see [`render_system_decomposition`]) as a standalone SVG
+/// file, same reasoning as [`render_system_context_svg`].
+pub fn render_system_decomposition_svg(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+    overrides: &[LayerOverride],
+) -> Option<RenderedPage> {
+    let (nodes, edges) = system_decomposition_graph(objects, relationships, overrides)?;
+    Some(RenderedPage {
+        file_name: "system-decomposition.svg".to_string(),
+        content: render_graph_svg(&nodes, &edges),
+    })
+}
+
+/// Builds the `## Crate & Workspace Topology` graph (RFC 0065 §23's Container-level internal
+/// dependency graph) as node/edge data for [`render_graph_svg`] — the RFC 0083 Phase 4 standalone
+/// SVG counterpart to [`render_relationship_kind_graph`]'s existing Mermaid-in-Markdown rendering
+/// of the same real `Crate`→`Crate` `DependsOn` edges. `None` under the same honest-empty
+/// condition (`crates.is_empty()` or no internal path dependencies compiled) `render_architecture`
+/// itself already checks before calling this.
+fn crate_topology_graph(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+) -> Option<IdGraph> {
+    let crates: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .collect();
+    let crate_ids: HashSet<KirId> = crates.iter().map(|c| c.id).collect();
+    let crate_edges: Vec<&KirRelationship> = relationships
+        .iter()
+        .filter(|r| {
+            matches!(r.kind, RelationshipKind::DependsOn)
+                && crate_ids.contains(&r.from)
+                && crate_ids.contains(&r.to)
+        })
+        .collect();
+    if crate_edges.is_empty() {
+        return None;
+    }
+
+    let name_by_id: HashMap<KirId, &str> = crates.iter().map(|c| (c.id, c.name.as_str())).collect();
+    let mut seen: HashSet<KirId> = HashSet::new();
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for rel in &crate_edges {
+        for id in [rel.from, rel.to] {
+            if seen.insert(id) {
+                let label = name_by_id.get(&id).copied().unwrap_or("unknown");
+                nodes.push((mermaid_node_id(&id), label.to_string()));
+            }
+        }
+        edges.push((mermaid_node_id(&rel.from), mermaid_node_id(&rel.to)));
+    }
+    Some((nodes, edges))
+}
+
+/// Render `## Crate & Workspace Topology` (see [`crate_topology_graph`]) as a standalone SVG
+/// file, same reasoning and same conditional-write contract as [`render_system_context_svg`].
+pub fn render_crate_topology_svg(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+) -> Option<RenderedPage> {
+    let (nodes, edges) = crate_topology_graph(objects, relationships)?;
+    Some(RenderedPage {
+        file_name: "crate-topology.svg".to_string(),
+        content: render_graph_svg(&nodes, &edges),
+    })
+}
+
+const SVG_NODE_WIDTH: f64 = 160.0;
+const SVG_NODE_HEIGHT: f64 = 40.0;
+const SVG_LAYER_GAP: f64 = 70.0;
+const SVG_NODE_GAP: f64 = 24.0;
+const SVG_MARGIN: f64 = 20.0;
+/// Vertical gap between two *wrapped* rows of the same topological layer — deliberately smaller
+/// than [`SVG_LAYER_GAP`] so a wrap reads as "more of the same row" rather than a new DAG layer.
+const SVG_ROW_GAP: f64 = 16.0;
+/// Maximum nodes drawn in one horizontal row before wrapping into a new row within the same
+/// topological layer (RFC 0068 §61/RFC 0083 Phase 4's own tracked finding: a real System Context
+/// diagram with 46 nodes in one layer rendered as one unreadable 8296px-wide row). Chosen to keep
+/// a full row's width at this renderer's fixed `SVG_NODE_WIDTH` in the same rough range as a
+/// typical rendered page width.
+const MAX_NODES_PER_ROW: usize = 8;
+
+/// Escape text for use inside SVG element content/attributes — the same five XML entities every
+/// SVG (and HTML) text node needs; distinct from [`mermaid_escape_label`], which only needs to
+/// avoid breaking Mermaid's `id["label"]` syntax, not full XML.
+fn svg_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+/// Assign each node to a layer via Kahn's algorithm (BFS topological levels): layer 0 is every
+/// node with no incoming edge among `edges`, layer 1 is every node whose predecessors are all
+/// already placed, and so on. Ties within a layer are broken by node id (lexicographic) so the
+/// same graph always lays out identically — required for [`render_graph_svg`] to be a
+/// deterministic, reproducible-build-compatible renderer (no LLM, no interpretation, matching
+/// this whole crate's existing convention). A node that's part of a cycle never becomes "ready"
+/// through the main loop; any such nodes are appended as one final sorted layer instead of being
+/// dropped, so every node in `nodes` always appears exactly once in the result.
+fn layer_nodes(nodes: &[(String, String)], edges: &[(String, String)]) -> Vec<Vec<usize>> {
+    let id_to_idx: HashMap<&str, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _))| (id.as_str(), i))
+        .collect();
+    let n = nodes.len();
+    let mut indegree = vec![0usize; n];
+    let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (from, to) in edges {
+        if let (Some(&from_idx), Some(&to_idx)) =
+            (id_to_idx.get(from.as_str()), id_to_idx.get(to.as_str()))
+        {
+            adjacency[from_idx].push(to_idx);
+            indegree[to_idx] += 1;
+        }
+    }
+
+    let mut placed = vec![false; n];
+    let mut layers: Vec<Vec<usize>> = Vec::new();
+    loop {
+        let mut ready: Vec<usize> = (0..n).filter(|&i| !placed[i] && indegree[i] == 0).collect();
+        if ready.is_empty() {
+            break;
+        }
+        ready.sort_by(|&a, &b| nodes[a].0.cmp(&nodes[b].0));
+        for &i in &ready {
+            placed[i] = true;
+        }
+        for &i in &ready {
+            for &j in &adjacency[i] {
+                if !placed[j] {
+                    indegree[j] = indegree[j].saturating_sub(1);
+                }
+            }
+        }
+        layers.push(ready);
+    }
+
+    let mut remaining: Vec<usize> = (0..n).filter(|&i| !placed[i]).collect();
+    if !remaining.is_empty() {
+        remaining.sort_by(|&a, &b| nodes[a].0.cmp(&nodes[b].0));
+        layers.push(remaining);
+    }
+    layers
+}
+
+/// Splits one topological layer's node indices into one or more visual rows of at most
+/// [`MAX_NODES_PER_ROW`], preserving [`layer_nodes`]'s existing deterministic order (chunking,
+/// never re-sorting). Each returned row is paired with whether it's the layer's *first* row —
+/// [`render_graph_svg`] uses that to pick [`SVG_LAYER_GAP`] (a new DAG layer) vs.
+/// [`SVG_ROW_GAP`] (a continuation row of the same layer) above it.
+fn wrap_layer_into_rows(layer: &[usize]) -> Vec<(Vec<usize>, bool)> {
+    layer
+        .chunks(MAX_NODES_PER_ROW.max(1))
+        .enumerate()
+        .map(|(i, chunk)| (chunk.to_vec(), i == 0))
+        .collect()
+}
+
+/// Generic deterministic `(nodes, edges) -> SVG` renderer — no Mermaid parsing, no headless
+/// browser, no Node.js dependency (all ruled out: this project's own reproducible-build and
+/// zero-`unsafe`/pure-function conventions rule out shelling out to `mmdc`/puppeteer, and no
+/// mature pure-Rust Mermaid renderer exists to depend on). Lays nodes out in layers via
+/// [`layer_nodes`], wraps any layer over [`MAX_NODES_PER_ROW`] into multiple visual rows via
+/// [`wrap_layer_into_rows`] (RFC 0083 Phase 4 — a real 46-node System Context layer used to
+/// render as one unreadably wide row), centers each row horizontally, and draws a straight arrow
+/// from the bottom of each source box to the top of each target box. `nodes` is `(id, label)`;
+/// `edges` is `(from_id, to_id)` referencing those same ids — an edge referencing an id not in
+/// `nodes` is silently skipped rather than drawn as a dangling line. Empty `nodes` renders an
+/// empty string; callers that have an honest "nothing to show" case (like
+/// [`render_system_context_svg`]) should check that themselves rather than writing an empty SVG
+/// file to disk.
+fn render_graph_svg(nodes: &[(String, String)], edges: &[(String, String)]) -> String {
+    if nodes.is_empty() {
+        return String::new();
+    }
+
+    let layers = layer_nodes(nodes, edges);
+    let visual_rows: Vec<(Vec<usize>, bool)> = layers
+        .iter()
+        .flat_map(|layer| wrap_layer_into_rows(layer))
+        .collect();
+    let max_row_len = visual_rows
+        .iter()
+        .map(|(r, _)| r.len())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let width = SVG_MARGIN * 2.0
+        + max_row_len as f64 * SVG_NODE_WIDTH
+        + (max_row_len - 1) as f64 * SVG_NODE_GAP;
+
+    let mut row_tops: Vec<f64> = Vec::with_capacity(visual_rows.len());
+    let mut cursor = SVG_MARGIN;
+    for (i, (_, starts_new_layer)) in visual_rows.iter().enumerate() {
+        if i > 0 {
+            cursor += SVG_NODE_HEIGHT
+                + if *starts_new_layer {
+                    SVG_LAYER_GAP
+                } else {
+                    SVG_ROW_GAP
+                };
+        }
+        row_tops.push(cursor);
+    }
+    let height = cursor + SVG_NODE_HEIGHT + SVG_MARGIN;
+
+    let mut positions: HashMap<&str, (f64, f64)> = HashMap::new();
+    let mut boxes = String::new();
+    for (row_idx, (row, _)) in visual_rows.iter().enumerate() {
+        let y = row_tops[row_idx];
+        let row_width =
+            row.len() as f64 * SVG_NODE_WIDTH + (row.len().saturating_sub(1)) as f64 * SVG_NODE_GAP;
+        let start_x = (width - row_width) / 2.0;
+        for (i, &node_idx) in row.iter().enumerate() {
+            let x = start_x + i as f64 * (SVG_NODE_WIDTH + SVG_NODE_GAP);
+            let (id, label) = &nodes[node_idx];
+            let (cx, cy) = (x + SVG_NODE_WIDTH / 2.0, y + SVG_NODE_HEIGHT / 2.0);
+            positions.insert(id.as_str(), (cx, cy));
+            boxes.push_str(&format!(
+                "  <rect x=\"{x:.1}\" y=\"{y:.1}\" width=\"{SVG_NODE_WIDTH:.1}\" \
+                 height=\"{SVG_NODE_HEIGHT:.1}\" rx=\"6\" fill=\"#eef2ff\" stroke=\"#3355bb\"/>\n"
+            ));
+            boxes.push_str(&format!(
+                "  <text x=\"{cx:.1}\" y=\"{cy:.1}\" text-anchor=\"middle\" \
+                 dominant-baseline=\"middle\" font-family=\"sans-serif\" font-size=\"12\">{}</text>\n",
+                svg_escape(label)
+            ));
+        }
+    }
+
+    let mut lines = String::new();
+    for (from, to) in edges {
+        if let (Some(&(x1, y1)), Some(&(x2, y2))) =
+            (positions.get(from.as_str()), positions.get(to.as_str()))
+        {
+            let y1 = y1 + SVG_NODE_HEIGHT / 2.0;
+            let y2 = y2 - SVG_NODE_HEIGHT / 2.0;
+            lines.push_str(&format!(
+                "  <line x1=\"{x1:.1}\" y1=\"{y1:.1}\" x2=\"{x2:.1}\" y2=\"{y2:.1}\" \
+                 stroke=\"#555555\" stroke-width=\"1.5\" marker-end=\"url(#arrow)\"/>\n"
+            ));
+        }
+    }
+
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.1}\" height=\"{height:.1}\" \
+         viewBox=\"0 0 {width:.1} {height:.1}\">\n\
+         <defs><marker id=\"arrow\" markerWidth=\"10\" markerHeight=\"10\" refX=\"8\" refY=\"3\" \
+         orient=\"auto\" markerUnits=\"strokeWidth\"><path d=\"M0,0 L0,6 L9,3 z\" fill=\"#555555\"/>\
+         </marker></defs>\n{lines}{boxes}</svg>\n"
+    )
+}
+
+/// Render a C4 Component view (RFC 0068 §18): for each `Crate` (Container), link through to the
+/// `Rollup` (RFC 0044) whose group covers that exact directory, if one was compiled. Matches by
+/// exact `rollup.name == crate.path` — both are already computed the same way (path relative to
+/// wherever `ekos recover` was invoked from), confirmed against this repo's own real compiled
+/// data before relying on it, not assumed. A crate with no matching rollup is a real, honest,
+/// non-fatal outcome — RFC 0044's own `synthesize_rollups` only creates a `Rollup` for a group of
+/// 2+ member files, so a crate with 0-1 files legitimately has none — but (RFC 0083 Phase 4) it is
+/// still reported by name and count below the linked list, never silently vanishing with zero
+/// trace the way it used to.
+fn render_component_view(
+    crates: &[&KirObject],
+    objects: &[KirObject],
+    page_names: &HashMap<KirId, String>,
+) -> String {
+    let rollups_by_name: HashMap<&str, &KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Rollup"))
+        .map(|o| (o.name.as_str(), o))
+        .collect();
+
+    let mut sorted_crates: Vec<&&KirObject> = crates.iter().collect();
+    sorted_crates.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut out = String::new();
+    let mut linked = 0usize;
+    let mut unmatched: Vec<&str> = Vec::new();
+    for krate in sorted_crates {
+        let rollup = krate
+            .properties
+            .get("path")
+            .and_then(|v| v.as_str())
+            .and_then(|path| rollups_by_name.get(path));
+        let Some(rollup) = rollup else {
+            unmatched.push(krate.name.as_str());
+            continue;
+        };
+        let member_count = rollup
+            .properties
+            .get("member_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let rollup_label = match page_names.get(&rollup.id) {
+            Some(f) => format!("[{} member file(s)]({f})", member_count),
+            None => format!("{member_count} member file(s)"),
+        };
+        out.push_str(&format!("- **{}** — {rollup_label}\n", krate.name));
+        linked += 1;
+    }
+
+    const UNMATCHED_SAMPLE: usize = 10;
+    match (linked, unmatched.is_empty()) {
+        (0, true) => out.push_str("_No crate directory matched a compiled subsystem rollup._\n\n"),
+        (_, false) => {
+            let sample = unmatched
+                .iter()
+                .take(UNMATCHED_SAMPLE)
+                .copied()
+                .collect::<Vec<_>>();
+            let more = unmatched.len().saturating_sub(sample.len());
+            let more_suffix = if more > 0 {
+                format!(", and {more} more")
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(
+                "_{} crate(s) have no matching subsystem rollup — fewer than RFC 0044's 2-member \
+                 threshold, or no manifest `path` property compiled, not silently dropped: \
+                 {}{more_suffix}._\n\n",
+                unmatched.len(),
+                sample.join(", ")
+            ));
+        }
+        (_, true) => out.push('\n'),
+    }
     out
 }
 
@@ -828,6 +1592,63 @@ fn is_feeds_into(kind: &RelationshipKind) -> bool {
     matches!(kind, RelationshipKind::Custom(s) if s.as_str() == "FeedsInto")
 }
 
+/// RFC 0075: a `TransformNode` Source node's unambiguous, name-matched link to the real `Table`/
+/// `Dataset` it reads (`ekos_semantic::data_lineage::link_transform_nodes_to_tables`).
+fn is_reads_from(kind: &RelationshipKind) -> bool {
+    matches!(kind, RelationshipKind::Custom(s) if s.as_str() == "ReadsFrom")
+}
+
+/// RFC 0075: the `Sink`-side counterpart to [`is_reads_from`].
+fn is_writes_to(kind: &RelationshipKind) -> bool {
+    matches!(kind, RelationshipKind::Custom(s) if s.as_str() == "WritesTo")
+}
+
+/// RFC 0075 Data Domains: groups compiled data stores by the schema/database qualifier already
+/// present in their own `name` when the source DDL wrote one (e.g. `sales.orders` → domain
+/// `sales`) — reusing structure the store's name already carries rather than adding a new
+/// extractor. Unqualified names (the common case for the real fixtures this session tested
+/// against — neither ships schema-qualified DDL) are counted and reported honestly, not silently
+/// dropped or guessed into a domain.
+fn data_domains_section(stores: &[&KirObject]) -> String {
+    if stores.is_empty() {
+        return "_not yet computed — no compiled data stores to derive a domain from._\n\n"
+            .to_string();
+    }
+
+    let mut by_domain: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut unqualified = 0usize;
+    for store in stores {
+        match store.name.rsplit_once('.') {
+            Some((domain, table)) => by_domain.entry(domain).or_default().push(table),
+            None => unqualified += 1,
+        }
+    }
+
+    if by_domain.is_empty() {
+        return format!(
+            "_not yet computed — none of the {unqualified} compiled table name(s) is \
+             schema-qualified (e.g. `sales.orders`); EKOS derives a domain from that qualifier \
+             when the source DDL provides one, not from a separate extractor or human curation. \
+             No domain grouping is possible for unqualified names without one or the other \
+             (RFC 0068 §22)._\n\n"
+        );
+    }
+
+    let mut out = String::new();
+    for (domain, mut tables) in by_domain {
+        tables.sort_unstable();
+        out.push_str(&format!("- **{domain}** — {}\n", tables.join(", ")));
+    }
+    if unqualified > 0 {
+        out.push_str(&format!(
+            "\n_{unqualified} compiled table name(s) have no schema qualifier and aren't \
+             grouped above._\n"
+        ));
+    }
+    out.push('\n');
+    out
+}
+
 fn count_by_kind(
     objects: &[KirObject],
     include: impl Fn(&ObjectKind) -> bool,
@@ -914,11 +1735,136 @@ fn components_cross_reference(kind: &str) -> Option<&'static str> {
     match kind {
         "RustModule" | "RustSymbol" | "PythonModule" | "PythonSymbol" => Some("[API.md](API.md)"),
         "Crate" => Some("below, `## Crate & Workspace Topology`"),
-        "Technology" => Some("below, `## Technologies`"),
+        "Technology" => Some("below, `## Technology Inventory`"),
         "Pipeline" => Some("below, `## CI/CD Pipelines`"),
         "Rollup" => Some("below, `## Subsystems`"),
         _ => None,
     }
+}
+
+/// Render RFC 0068 §22 Data Architecture: real compiled `Table`/`Dataset` objects (data stores,
+/// with each one's real foreign-key edge count) and real compiled Transformation IR data flows
+/// (RFC 0027, `Custom("FeedsInto")` edges) — link-through to `SequenceDiagrams.md`'s existing
+/// "Data-Flow Sequences" section rather than duplicating it, the same precedent
+/// [`render_architecture`]'s Runtime View section immediately above already established.
+/// `Table`/`Dataset` aren't [`is_entity_page_kind`] — no curated per-object page exists for them
+/// today — so data stores are listed by name only here, not linked; linking would produce a
+/// dangling reference under `--layout curated`. Domain grouping, ownership, lifecycle, and data
+/// quality are RFC 0068 §22 dimensions with no compiled EKOS signal behind them yet, so each says
+/// so explicitly rather than being invented — the same honest-gap convention
+/// [`render_architecture_summary`] already established.
+fn render_data_architecture(objects: &[KirObject], relationships: &[KirRelationship]) -> String {
+    let mut out = String::new();
+
+    let mut stores: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset))
+        .collect();
+    stores.sort_by(|a, b| a.name.cmp(&b.name));
+
+    out.push_str("### Data Stores\n\n");
+    if stores.is_empty() {
+        out.push_str("_No compiled data stores (Tables/Datasets)._\n\n");
+    } else {
+        out.push_str(&format!(
+            "{} compiled data store(s). Listed individually — no domain/system grouping is \
+             extracted from source data today (see Data Domains below).\n\n",
+            stores.len()
+        ));
+        for store in &stores {
+            let fk_count = relationships
+                .iter()
+                .filter(|r| {
+                    matches!(r.kind, RelationshipKind::ForeignKey)
+                        && (r.from == store.id || r.to == store.id)
+                })
+                .count();
+            let reads = relationships
+                .iter()
+                .filter(|r| is_reads_from(&r.kind) && r.to == store.id)
+                .count();
+            let writes = relationships
+                .iter()
+                .filter(|r| is_writes_to(&r.kind) && r.to == store.id)
+                .count();
+            out.push_str(&format!(
+                "- **{}** — {fk_count} real foreign-key edge(s), read by {reads} \
+                 transformation(s), written by {writes} transformation(s)\n",
+                store.name
+            ));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("### Transformations & Lineage\n\n");
+    // Not `is_feeds_into` alone: a workspace can compile a real, single `TransformNode` (a bare
+    // `SELECT * FROM x` with no downstream step) with zero `FeedsInto` edges — a lone source/sink
+    // is still a real compiled transformation, not "nothing compiled".
+    let has_transform_nodes = objects
+        .iter()
+        .any(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "TransformNode"));
+    let has_lineage_links = relationships
+        .iter()
+        .any(|r| is_reads_from(&r.kind) || is_writes_to(&r.kind));
+    if has_transform_nodes {
+        out.push_str(
+            "See [SequenceDiagrams.md](SequenceDiagrams.md) for real compiled data-flow \
+             sequences (RFC 0027 Transformation IR).",
+        );
+        if has_lineage_links {
+            out.push_str(
+                " `TransformNode` source/sink nodes are cross-referenced to the Data Stores \
+                 above (RFC 0075) whenever their raw `object_name` matches exactly one compiled \
+                 table — see each store's read/write counts. A name matching zero or more than \
+                 one table (e.g. the same unqualified name in two different schemas) is \
+                 deliberately left unlinked rather than guessed at.\n\n",
+            );
+        } else {
+            out.push_str(
+                " None of this workspace's `TransformNode` source/sink names matched exactly \
+                 one compiled table (RFC 0075) — either no name overlaps a compiled `Table`, or \
+                 every overlapping name is ambiguous across two or more tables, so nothing was \
+                 linked rather than guessed at.\n\n",
+            );
+        }
+    } else {
+        out.push_str("_No transformations compiled._\n\n");
+    }
+
+    out.push_str("### Data Domains\n\n");
+    out.push_str(&data_domains_section(&stores));
+
+    out.push_str("### Ownership\n\n");
+    out.push_str(
+        "_not yet computed for data objects — `OwnedBy` edges are compiled from git history \
+         (`git_analyzer.rs`), but only from a commit event to the contributor who authored it, \
+         never onto a `File`/`Table`/`Dataset` object; there's no compiled per-file ownership \
+         signal today for a data store to link to, even setting aside that `Table`/`Dataset` \
+         objects also aren't yet linked to the `File` they were defined in. Two real gaps, not \
+         one: (1) `git_analyzer.rs` would need to derive a per-file top-contributor \
+         relationship, the way it already derives per-file `CoupledWith` coupling; (2) a data \
+         store would need the same kind of name/evidence-path linkage RFC 0075 just built for \
+         `TransformNode`s, but against `File` objects instead._\n\n",
+    );
+
+    out.push_str("### Lifecycle\n\n");
+    out.push_str(
+        "_not yet computed — blocked on the same missing `Table`\u{2192}`File` link Ownership \
+         above is (a real last-modified/commit-recency signal already exists per file via git \
+         history, RFC 0020's coupling analysis touches the same commit data, but nothing \
+         connects a compiled data store to the file whose history that would be)._\n\n",
+    );
+
+    out.push_str("### Data Quality\n\n");
+    out.push_str(
+        "_not yet computed — no data-quality signal (completeness, freshness, validation-rule \
+         pass/fail) is extractable from static DDL/transformation-logic recovery at all; this \
+         needs runtime data profiling (row counts, null rates, constraint violations against \
+         actual data), which is explicitly RFC 0068 §63 Phase 3 scope (runtime telemetry), not \
+         yet built._\n\n",
+    );
+
+    out
 }
 
 /// Render `Architecture.md`: component counts (linked out to the section/page where a kind's
@@ -933,10 +1879,52 @@ fn components_cross_reference(kind: &str) -> Option<&'static str> {
 pub fn render_architecture(
     objects: &[KirObject],
     relationships: &[KirRelationship],
+    layer_overrides: &[LayerOverride],
 ) -> RenderedPage {
     let mut out = String::from("# Architecture\n\n");
     let page_names = unique_page_file_names(objects, "md");
     let kind_by_id: HashMap<KirId, &ObjectKind> = objects.iter().map(|o| (o.id, &o.kind)).collect();
+
+    out.push_str("## Architecture Summary\n\n");
+    out.push_str(
+        "_Executive Overview (RFC 0068 §14) — only fields EKOS can back with real compiled \
+         evidence are populated; fields the standard names but nothing here computes yet say so \
+         explicitly rather than being silently omitted or guessed at._\n\n",
+    );
+    out.push_str(&render_architecture_summary(objects, relationships));
+
+    out.push_str("## System Context\n\n");
+    out.push_str(
+        "_C4 System Context (RFC 0068 §15) — the compiled workspace as one system, and the real \
+         external technologies it depends on. One level broader than the Container view below; \
+         only technologies with a real compiled dependency edge are shown, not every `Technology` \
+         object that happens to exist._\n\n",
+    );
+    out.push_str(&render_system_context(objects, relationships));
+    if system_context_graph(objects, relationships).is_some() {
+        out.push_str("[System Context diagram (SVG)](system-context.svg)\n\n");
+    } else {
+        out.push('\n');
+    }
+
+    out.push_str("## System Decomposition\n\n");
+    out.push_str(
+        "_C4 Container-level decomposition (RFC 0068 §16/§68), one level inside System Context \
+         above — real Backend/Frontend/Database layers, grouped from each compiled `File`/`Table` \
+         object's own path or `source_system` (RFC 0056/0083), never guessed. A path can be routed \
+         to a specific layer via `[[architecture.system-decomposition.overrides]]` in `ekos.toml` \
+         when the convention gets a project's layout wrong._\n\n",
+    );
+    out.push_str(&render_system_decomposition(
+        objects,
+        relationships,
+        layer_overrides,
+    ));
+    if system_decomposition_graph(objects, relationships, layer_overrides).is_some() {
+        out.push_str("[System Decomposition diagram (SVG)](system-decomposition.svg)\n\n");
+    } else {
+        out.push('\n');
+    }
 
     out.push_str("## Components\n\n");
     let counts = count_by_kind(objects, is_significant);
@@ -1016,10 +2004,24 @@ pub fn render_architecture(
             &crate_edges,
             &crate_name_by_id,
         ));
-        out.push('\n');
+        out.push_str("[Crate & Workspace Topology diagram (SVG)](crate-topology.svg)\n\n");
     }
 
-    out.push_str("## Technologies\n\n");
+    out.push_str("## Component View\n\n");
+    out.push_str(
+        "_C4 Component (RFC 0068 §18) — one level inside a Container. Each `Crate` below whose \
+         manifest directory matches a compiled `Rollup` (RFC 0044) links through to that \
+         subsystem's real member-file breakdown; a crate with no matching rollup either has too \
+         few member files to summarize (RFC 0044's own ≥2-member threshold) or none were \
+         compiled — not fabricated either way._\n\n",
+    );
+    out.push_str(&render_component_view(&crates, objects, &page_names));
+
+    out.push_str("## Technology Inventory\n\n");
+    out.push_str(
+        "_C4 External System-level dependencies (RFC 0068 §61's Technology Inventory), each \
+         linked to its own detail page where one was compiled._\n\n",
+    );
     let name_by_id: HashMap<KirId, &str> =
         objects.iter().map(|o| (o.id, o.name.as_str())).collect();
     let technologies: Vec<&KirObject> = objects
@@ -1030,20 +2032,63 @@ pub fn render_architecture(
         out.push_str("_No technology dependencies compiled._\n\n");
     } else {
         for tech in &technologies {
-            let dependents: Vec<&str> = relationships
+            // Deduplicated by name: `KirRelationship::new` mints a fresh random id every time
+            // (unlike `KirObject`'s deterministic ids), so `append_relationship`'s `(id,
+            // content_signature)` versioning never recognizes a logically-identical `DependsOn`
+            // edge re-derived by a later `recover`/`commit` as "the same one" — real duplicates
+            // accumulate in the ledger across repeated commits (found live verifying this exact
+            // view; the underlying ledger-level gap is real and larger than this view, tracked
+            // separately in TODO.md, not silently fixed everywhere here).
+            let mut dependents: Vec<&str> = relationships
                 .iter()
                 .filter(|r| r.to == tech.id && matches!(r.kind, RelationshipKind::DependsOn))
                 .filter_map(|r| name_by_id.get(&r.from).copied())
                 .collect();
+            dependents.sort_unstable();
+            dependents.dedup();
             let used_by = if dependents.is_empty() {
                 "_no linked files_".to_string()
             } else {
                 dependents.join(", ")
             };
-            out.push_str(&format!("- **{}** — used by: {used_by}\n", tech.name));
+            let label = match page_names.get(&tech.id) {
+                Some(f) => format!("[{}]({f})", tech.name),
+                None => format!("**{}**", tech.name),
+            };
+            out.push_str(&format!("- {label} — used by: {used_by}\n"));
         }
         out.push('\n');
     }
+
+    out.push_str("## Runtime View\n\n");
+    out.push_str(
+        "_Basic Runtime View (RFC 0068 §20) — real behavior, not structure. `SequenceDiagrams.md` \
+         (generated alongside this page) already renders every real compiled call/data-flow \
+         sequence (RFC 0041's `Calls` graph, RFC 0027's Transformation IR); this section links \
+         through rather than duplicating it. Naming *which* of those are the system's important \
+         business scenarios (RFC 0068's own examples: \"Create Order\", \"Process Payment\") needs \
+         either an LLM read of real intent or human curation — neither happens in this \
+         deterministic view, so no scenario names are invented here._\n\n",
+    );
+    let has_call_or_flow_edges = relationships
+        .iter()
+        .any(|r| matches!(r.kind, RelationshipKind::Calls) || is_feeds_into(&r.kind));
+    if has_call_or_flow_edges {
+        out.push_str(
+            "See [SequenceDiagrams.md](SequenceDiagrams.md) for the real compiled sequences.\n\n",
+        );
+    } else {
+        out.push_str("_No call or data-flow sequences compiled._\n\n");
+    }
+
+    out.push_str("## Data Architecture\n\n");
+    out.push_str(
+        "_RFC 0068 §22 (\"A major EKOS capability\") — real compiled data stores and real \
+         compiled transformations/lineage; domain grouping, ownership, lifecycle, and data \
+         quality each say explicitly why they're not computed yet rather than being guessed \
+         at._\n\n",
+    );
+    out.push_str(&render_data_architecture(objects, relationships));
 
     out.push_str("## Open Questions\n\n");
     out.push_str(
@@ -1237,26 +2282,34 @@ fn render_relationship_kind_graph(
 }
 
 fn is_symbol_kind(kind: &ObjectKind) -> bool {
-    matches!(kind, ObjectKind::Custom(s) if s == "RustSymbol" || s == "PythonSymbol")
+    matches!(
+        kind,
+        ObjectKind::Custom(s)
+            if s == "RustSymbol" || s == "PythonSymbol" || s == "ElixirSymbol" || s == "JsSymbol"
+    )
 }
 
-/// Render `API.md`: real `Custom("RustSymbol")`/`Custom("PythonSymbol")` program-entity objects
-/// (`rust_analyzer.rs`/`python_analyzer.rs`, RFC 0041/0038-0040) — each carrying a `kind` property
-/// (function/struct/enum/trait/class/…) — grouped by their containing *file* via `Contains` edges
-/// (`rust_analyzer.rs`/`python_analyzer.rs` both emit `Contains` from the defining `File`, not
-/// from `Custom("RustModule")`/`Custom("PythonModule")` — those two kinds represent `use`/import
-/// targets instead, a different relationship entirely: `DependsOn` from the file, not `Contains`
-/// into it). Each symbol links to its own detail page (written alongside this file by
-/// `--layout curated`, RFC 0042). Falls back to the legacy `File.symbols` text-scan (bare
-/// identifier names, no `kind`, no links) only when zero real symbol objects are compiled, so a
-/// non-Rust/Python workspace still gets *something* rather than an empty page.
+/// Render `API.md`: real `Custom("RustSymbol")`/`Custom("PythonSymbol")`/`Custom("ElixirSymbol")`
+/// program-entity objects (`rust_analyzer.rs`/`python_analyzer.rs`/`elixir_analyzer.rs`, RFC
+/// 0041/0038-0040/0081) — each carrying a `kind` property (function/struct/enum/trait/class/…) —
+/// grouped by their real immediate `Contains` parent: a `File` for Rust/Python
+/// (`Custom("RustModule")`/`Custom("PythonModule")` represent `use`/import targets instead, a
+/// `DependsOn` from the file, not a `Contains` into it), or an `ElixirModule` for Elixir — a real
+/// structural difference (Elixir's own module system is the direct container of its functions;
+/// `elixir_analyzer.rs` emits `File Contains Module Contains Symbol`, not `File Contains Symbol`
+/// directly), grouping by the more meaningful unit for that language rather than forcing every
+/// language into file-shaped grouping. Each symbol links to its own detail page (written alongside
+/// this file by `--layout curated`, RFC 0042). Falls back to the legacy `File.symbols` text-scan
+/// (bare identifier names, no `kind`, no links) only when zero real symbol objects are compiled,
+/// so a workspace with no real-AST-analyzed language still gets *something* rather than an empty
+/// page.
 pub fn render_api(objects: &[KirObject], relationships: &[KirRelationship]) -> RenderedPage {
     let mut out = String::from(
         "# API\n\n_Program entities (functions, structs, enums, traits, classes, …) compiled \
-         from real Rust/Python source analysis, grouped by containing file. Each entity links \
-         to its own detail page (relationships, evidence, 1-hop diagram), written alongside this \
-         file. Real `Api`/`Service` objects, if a future connector ever compiles them, would \
-         render here directly._\n\n",
+         from real Rust/Python/Elixir source analysis, grouped by containing file or module. \
+         Each entity links to its own detail page (relationships, evidence, 1-hop diagram), \
+         written alongside this file. Real `Api`/`Service` objects, if a future connector ever \
+         compiles them, would render here directly._\n\n",
     );
 
     let symbols: Vec<&KirObject> = objects.iter().filter(|o| is_symbol_kind(&o.kind)).collect();
@@ -1271,19 +2324,26 @@ pub fn render_api(objects: &[KirObject], relationships: &[KirRelationship]) -> R
         .filter(|o| o.kind == ObjectKind::File)
         .map(|o| (o.id, o))
         .collect();
-    let mut containing_file: HashMap<KirId, KirId> = HashMap::new();
+    let elixir_module_by_id: HashMap<KirId, &KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ElixirModule"))
+        .map(|o| (o.id, o))
+        .collect();
+    let mut containing_context: HashMap<KirId, KirId> = HashMap::new();
     for rel in relationships {
-        if matches!(rel.kind, RelationshipKind::Contains) && file_by_id.contains_key(&rel.from) {
-            containing_file.insert(rel.to, rel.from);
+        if matches!(rel.kind, RelationshipKind::Contains)
+            && (file_by_id.contains_key(&rel.from) || elixir_module_by_id.contains_key(&rel.from))
+        {
+            containing_context.insert(rel.to, rel.from);
         }
     }
 
     let mut by_module: BTreeMap<String, Vec<&KirObject>> = BTreeMap::new();
     for sym in &symbols {
-        let module_name = containing_file
+        let module_name = containing_context
             .get(&sym.id)
-            .and_then(|fid| file_by_id.get(fid))
-            .map(|f| f.name.clone())
+            .and_then(|cid| file_by_id.get(cid).or_else(|| elixir_module_by_id.get(cid)))
+            .map(|c| c.name.clone())
             .unwrap_or_else(|| "(containing file not compiled)".to_string());
         by_module.entry(module_name).or_default().push(sym);
     }
@@ -1612,6 +2672,48 @@ mod tests {
         assert!(page.content.contains("_No evidence cited._"));
     }
 
+    /// Phase 2 ("Real Descriptions, Purpose, and Links"): a real `"description"` property (Phase
+    /// 1's real doc-comment extraction) is promoted to its own `## Definition` section, not left
+    /// in the generic `## Properties` table where it would be shown twice.
+    #[test]
+    fn a_real_description_property_becomes_the_definition_section_not_a_duplicated_property() {
+        let module = KirObject::new(
+            "Plausible.Auth.Password",
+            ObjectKind::Custom("ElixirModule".into()),
+        )
+        .with_property(
+            "description",
+            serde_json::json!("Handles password hashing."),
+        );
+        let page = render_object_page(&module, &[], &[], &HashMap::new());
+        assert!(
+            page.content
+                .contains("## Definition\n\nHandles password hashing.")
+        );
+        // Not duplicated into the generic Properties table.
+        assert!(!page.content.contains("`description`"));
+    }
+
+    #[test]
+    fn no_real_description_property_renders_an_honest_not_documented_placeholder() {
+        let table = sample_table();
+        let page = render_object_page(&table, &[], &[], &HashMap::new());
+        assert!(
+            page.content
+                .contains("## Definition\n\n_Not documented in source._")
+        );
+    }
+
+    #[test]
+    fn the_html_page_also_promotes_description_into_its_own_definition_section() {
+        let module = KirObject::new("Foo", ObjectKind::Custom("ElixirModule".into()))
+            .with_property("description", serde_json::json!("Does the thing."));
+        let model = build_object_page_model(&module, &[], &[], &HashMap::new());
+        let page = render_html_object_page(&model);
+        assert!(page.content.contains("<h2>Definition</h2>"));
+        assert!(page.content.contains("<p>Does the thing.</p>"));
+    }
+
     #[test]
     fn relationship_with_resolved_evidence_cites_the_fragment() {
         let table = sample_table();
@@ -1629,7 +2731,10 @@ mod tests {
             &[ev.clone()],
             &HashMap::new(),
         );
-        assert!(page.content.contains("### ForeignKey"));
+        // Phase 2 ("Real Descriptions, Purpose, and Links"): real relationships now group by
+        // real structural meaning (direction), not raw kind — a real outgoing, non-`Contains`
+        // edge like this one is real "Dependent on" data, not its own `ForeignKey` header.
+        assert!(page.content.contains("### Dependent on"));
         assert!(page.content.contains(&format!("→ `{other}`")));
         assert!(
             page.content
@@ -1649,16 +2754,29 @@ mod tests {
     }
 
     #[test]
-    fn relationships_group_by_kind_without_dropping_non_foreign_key() {
+    fn relationships_group_by_real_structural_meaning_without_dropping_any_kind() {
         let table = sample_table();
         let a = KirId::new();
         let b = KirId::new();
+        let parent = KirId::new();
+        // Two different real outgoing, non-`Contains` kinds — both real "Dependent on" data,
+        // grouped together by direction (Phase 2), neither dropped.
         let fk = KirRelationship::new(RelationshipKind::ForeignKey, table.id, a);
         let coupled = KirRelationship::new(RelationshipKind::CoupledWith, table.id, b);
+        // A real incoming `Contains` edge — the table's own structural home.
+        let contains_parent = KirRelationship::new(RelationshipKind::Contains, parent, table.id);
 
-        let page = render_object_page(&table, &[fk, coupled], &[], &HashMap::new());
-        assert!(page.content.contains("### ForeignKey"));
-        assert!(page.content.contains("### CoupledWith"));
+        let page = render_object_page(
+            &table,
+            &[fk, coupled, contains_parent],
+            &[],
+            &HashMap::new(),
+        );
+        assert!(page.content.contains("### Dependent on"));
+        assert!(page.content.contains(&format!("→ `{a}`")));
+        assert!(page.content.contains(&format!("→ `{b}`")));
+        assert!(page.content.contains("### Based on"));
+        assert!(page.content.contains(&format!("← `{parent}`")));
     }
 
     #[test]
@@ -2121,17 +3239,48 @@ mod tests {
         let tech = KirObject::new("PostgreSQL", ObjectKind::Custom("Technology".to_string()));
         let rel = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
 
-        let page = render_architecture(&[file, tech], &[rel]);
+        let page = render_architecture(&[file, tech], &[rel], &[]);
         assert_eq!(page.file_name, "Architecture.md");
-        assert!(page.content.contains("**PostgreSQL** — used by: db.py"));
+        assert!(page.content.contains("## Technology Inventory"));
+        assert!(page.content.contains("PostgreSQL"));
+        assert!(page.content.contains("— used by: db.py"));
+    }
+
+    #[test]
+    fn architecture_technology_inventory_deduplicates_repeated_dependent_relationships() {
+        // Real bug, found live: `KirRelationship::new` mints a fresh random id every time, so
+        // ledger-level content-signature dedup never recognizes a logically-identical DependsOn
+        // edge re-derived by a later recover/commit as the same one — real duplicate edges
+        // accumulate across repeated commits. This view must not surface that as quadruplicated
+        // "used by" text.
+        let file = KirObject::new("db.py", ObjectKind::File);
+        let tech = KirObject::new("PostgreSQL", ObjectKind::Custom("Technology".to_string()));
+        let rel_a = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
+        let rel_b = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
+        assert_ne!(
+            rel_a.id, rel_b.id,
+            "reproduces the real non-deterministic id shape"
+        );
+
+        let page = render_architecture(&[file, tech], &[rel_a, rel_b], &[]);
+        assert!(page.content.contains("— used by: db.py\n"));
+        assert!(!page.content.contains("db.py, db.py"));
     }
 
     #[test]
     fn architecture_on_no_technologies_is_honest_not_a_fabricated_list() {
-        let page = render_architecture(&[], &[]);
+        let page = render_architecture(&[], &[], &[]);
+        assert!(
+            page.content
+                .contains("_No external technology dependencies compiled._")
+        );
         assert!(
             page.content
                 .contains("No technology dependencies compiled.")
+        );
+        assert!(
+            page.content
+                .contains("No crate directory matched a compiled subsystem rollup.")
         );
         assert!(
             page.content
@@ -2162,7 +3311,7 @@ mod tests {
             .with_property("member_count", serde_json::json!(2))
             .with_property("group_key", serde_json::json!("dir:ekos/crates/kir"));
 
-        let page = render_architecture(std::slice::from_ref(&rollup), &[]);
+        let page = render_architecture(std::slice::from_ref(&rollup), &[], &[]);
         assert!(page.content.contains("## Subsystems"));
         assert!(page.content.contains("2 member file(s)"));
         assert!(
@@ -2178,7 +3327,7 @@ mod tests {
         let dep = KirRelationship::new(RelationshipKind::DependsOn, cli.id, kir.id);
         let symbol = KirObject::new("run", ObjectKind::Custom("RustSymbol".to_string()));
 
-        let page = render_architecture(&[kir, cli, symbol], &[dep]);
+        let page = render_architecture(&[kir, cli, symbol], &[dep], &[]);
         assert!(page.content.contains("## Crate & Workspace Topology"));
         assert!(page.content.contains("ekos-cli"));
         assert!(page.content.contains("ekos-kir"));
@@ -2188,6 +3337,433 @@ mod tests {
         );
         assert!(page.content.contains("C4 mapping (RFC 0065 §23)"));
         assert!(page.content.contains("C4 **Container**"));
+    }
+
+    #[test]
+    fn architecture_summary_reports_real_counts_and_top_technologies() {
+        let file = KirObject::new("db.py", ObjectKind::File);
+        let popular = KirObject::new("serde", ObjectKind::Custom("Technology".to_string()));
+        let niche = KirObject::new("obscure-lib", ObjectKind::Custom("Technology".to_string()));
+        let rel_a = KirRelationship::new(RelationshipKind::DependsOn, file.id, popular.id);
+        let rel_b = KirRelationship::new(RelationshipKind::DependsOn, file.id, niche.id);
+
+        let page = render_architecture(&[file, popular, niche], &[rel_a, rel_b], &[]);
+        assert!(page.content.contains("## Architecture Summary"));
+        assert!(page.content.contains("RFC 0068 §14"));
+        assert!(page.content.contains("**Primary technologies:**"));
+        assert!(page.content.contains("serde (1 dependent(s))"));
+        assert!(page.content.contains("**Open questions:** 0"));
+        assert!(page.content.contains("**Purpose:** _not yet computed"));
+        assert!(
+            page.content
+                .contains("**Architecture confidence:** _not yet computed")
+        );
+    }
+
+    #[test]
+    fn architecture_summary_deduplicates_repeated_dependent_relationships() {
+        let file = KirObject::new("db.py", ObjectKind::File);
+        let tech = KirObject::new("serde", ObjectKind::Custom("Technology".to_string()));
+        let rel_a = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
+        let rel_b = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
+
+        let page = render_architecture(&[file, tech], &[rel_a, rel_b], &[]);
+        assert!(page.content.contains("serde (1 dependent(s))"));
+        assert!(!page.content.contains("serde (2 dependent(s))"));
+    }
+
+    #[test]
+    fn architecture_runtime_view_links_to_sequence_diagrams_when_calls_exist() {
+        let a = KirObject::new("foo", ObjectKind::Custom("RustSymbol".to_string()));
+        let b = KirObject::new("bar", ObjectKind::Custom("RustSymbol".to_string()));
+        let call = KirRelationship::new(RelationshipKind::Calls, a.id, b.id);
+
+        let page = render_architecture(&[a, b], &[call], &[]);
+        assert!(page.content.contains("## Runtime View"));
+        assert!(page.content.contains("RFC 0068 §20"));
+        assert!(
+            page.content
+                .contains("[SequenceDiagrams.md](SequenceDiagrams.md)")
+        );
+    }
+
+    #[test]
+    fn architecture_runtime_view_is_honest_when_no_call_or_flow_edges_exist() {
+        let page = render_architecture(&[], &[], &[]);
+        assert!(
+            page.content
+                .contains("_No call or data-flow sequences compiled._")
+        );
+        assert!(!page.content.contains("SequenceDiagrams.md]"));
+    }
+
+    #[test]
+    fn architecture_components_links_technology_to_its_renamed_inventory_section() {
+        // Regression: the Technology Inventory section was renamed from `## Technologies` to
+        // `## Technology Inventory` (RFC 0070), but `components_cross_reference`'s link text was
+        // never updated — a real stale cross-reference found while investigating RFC 0068
+        // Increment 6, fixed alongside it.
+        let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
+        let page = render_architecture(&[tech], &[], &[]);
+        assert!(
+            page.content
+                .contains("see below, `## Technology Inventory`")
+        );
+        assert!(!page.content.contains("see below, `## Technologies`"));
+    }
+
+    #[test]
+    fn data_architecture_lists_real_data_stores_with_foreign_key_counts() {
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let fk = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
+
+        let section = render_data_architecture(&[customers, orders], &[fk]);
+        assert!(section.contains("### Data Stores"));
+        assert!(section.contains("2 compiled data store(s)"));
+        assert!(section.contains("**customers** — 1 real foreign-key edge(s)"));
+        assert!(section.contains("**orders** — 1 real foreign-key edge(s)"));
+    }
+
+    #[test]
+    fn data_architecture_links_sequence_diagrams_when_transformations_exist() {
+        let source = KirObject::new(
+            "pipeline.ktr:0",
+            ObjectKind::Custom("TransformNode".to_string()),
+        );
+        let sink = KirObject::new(
+            "pipeline.ktr:1",
+            ObjectKind::Custom("TransformNode".to_string()),
+        );
+        let feeds = KirRelationship::new(
+            RelationshipKind::Custom("FeedsInto".to_string()),
+            source.id,
+            sink.id,
+        );
+
+        let section = render_data_architecture(&[source, sink], &[feeds]);
+        assert!(section.contains("### Transformations & Lineage"));
+        assert!(section.contains("[SequenceDiagrams.md](SequenceDiagrams.md)"));
+    }
+
+    #[test]
+    fn data_architecture_is_honest_about_every_uncomputed_dimension_on_an_empty_ledger() {
+        let section = render_data_architecture(&[], &[]);
+        assert!(section.contains("_No compiled data stores (Tables/Datasets)._"));
+        assert!(section.contains("_No transformations compiled._"));
+        assert!(section.contains("### Data Domains"));
+        assert!(section.contains("### Ownership"));
+        assert!(section.contains("### Lifecycle"));
+        assert!(section.contains("### Data Quality"));
+        assert!(!section.contains("SequenceDiagrams.md]"));
+    }
+
+    #[test]
+    fn data_architecture_shows_real_read_and_write_counts_per_data_store() {
+        let read_table = KirObject::new("customers", ObjectKind::Table);
+        let write_table = KirObject::new("customer_orders", ObjectKind::Table);
+        let untouched_table = KirObject::new("audit_log", ObjectKind::Table);
+        let source = KirObject::new("etl.sql:0", ObjectKind::Custom("TransformNode".to_string()));
+        let sink = KirObject::new("etl.sql:1", ObjectKind::Custom("TransformNode".to_string()));
+        let reads = KirRelationship::new(
+            RelationshipKind::Custom("ReadsFrom".to_string()),
+            source.id,
+            read_table.id,
+        );
+        let writes = KirRelationship::new(
+            RelationshipKind::Custom("WritesTo".to_string()),
+            sink.id,
+            write_table.id,
+        );
+
+        let section = render_data_architecture(
+            &[read_table, write_table, untouched_table],
+            &[reads, writes],
+        );
+        assert!(section.contains(
+            "**customers** — 0 real foreign-key edge(s), read by 1 transformation(s), written by 0 transformation(s)"
+        ));
+        assert!(section.contains(
+            "**customer_orders** — 0 real foreign-key edge(s), read by 0 transformation(s), written by 1 transformation(s)"
+        ));
+        assert!(section.contains(
+            "**audit_log** — 0 real foreign-key edge(s), read by 0 transformation(s), written by 0 transformation(s)"
+        ));
+    }
+
+    #[test]
+    fn data_architecture_lineage_note_names_rfc_0075_when_links_exist() {
+        let table = KirObject::new("customers", ObjectKind::Table);
+        let source = KirObject::new("etl.sql:0", ObjectKind::Custom("TransformNode".to_string()));
+        let reads = KirRelationship::new(
+            RelationshipKind::Custom("ReadsFrom".to_string()),
+            source.id,
+            table.id,
+        );
+        let section = render_data_architecture(&[table, source], &[reads]);
+        assert!(section.contains("cross-referenced to the Data Stores above (RFC 0075)"));
+    }
+
+    #[test]
+    fn data_architecture_lineage_note_is_honest_when_flows_exist_but_nothing_linked() {
+        let a = KirObject::new(
+            "pipeline.ktr:0",
+            ObjectKind::Custom("TransformNode".to_string()),
+        );
+        let b = KirObject::new(
+            "pipeline.ktr:1",
+            ObjectKind::Custom("TransformNode".to_string()),
+        );
+        let feeds = KirRelationship::new(
+            RelationshipKind::Custom("FeedsInto".to_string()),
+            a.id,
+            b.id,
+        );
+        let section = render_data_architecture(&[a, b], &[feeds]);
+        assert!(section.contains("None of this workspace's `TransformNode` source/sink names"));
+    }
+
+    #[test]
+    fn data_domains_groups_by_schema_qualifier_and_reports_unqualified_count() {
+        let orders = KirObject::new("sales.orders", ObjectKind::Table);
+        let customers = KirObject::new("sales.customers", ObjectKind::Table);
+        let bare = KirObject::new("audit_log", ObjectKind::Table);
+        let section = data_domains_section(&[&orders, &customers, &bare]);
+        assert!(section.contains("**sales** — customers, orders"));
+        assert!(section.contains("1 compiled table name(s) have no schema qualifier"));
+    }
+
+    #[test]
+    fn data_domains_is_honest_when_no_table_is_schema_qualified() {
+        let bare = KirObject::new("customers", ObjectKind::Table);
+        let section = data_domains_section(&[&bare]);
+        assert!(section.contains("_not yet computed"));
+        assert!(section.contains("none of the 1 compiled table name(s)"));
+    }
+
+    #[test]
+    fn data_domains_on_no_stores_is_honest_not_a_fabricated_grouping() {
+        let section = data_domains_section(&[]);
+        assert!(section.contains("_not yet computed — no compiled data stores"));
+    }
+
+    #[test]
+    fn architecture_includes_data_architecture_section_with_rfc_reference() {
+        let table = KirObject::new("customers", ObjectKind::Table);
+        let page = render_architecture(&[table], &[], &[]);
+        assert!(page.content.contains("## Data Architecture"));
+        assert!(page.content.contains("RFC 0068 §22"));
+        assert!(page.content.contains("**customers**"));
+    }
+
+    #[test]
+    fn architecture_renders_system_context_from_real_crate_technology_dependency() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
+        let dep = KirRelationship::new(RelationshipKind::DependsOn, krate.id, tech.id);
+
+        let page = render_architecture(&[krate, tech], &[dep], &[]);
+        assert!(page.content.contains("## System Context"));
+        assert!(page.content.contains("RFC 0068 §15"));
+        assert!(page.content.contains("[\"System\"]"));
+        assert!(page.content.contains("[\"clap\"]"));
+        assert!(page.content.contains("-->|DependsOn|"));
+    }
+
+    #[test]
+    fn architecture_system_context_excludes_technology_with_no_real_dependency_edge() {
+        // A Technology object that exists but that no compiled Crate actually depends on (e.g.
+        // detected by a different analyzer, or stale) must not appear in the System Context —
+        // only real, currently-compiled dependency edges count.
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let unused_tech =
+            KirObject::new("unused-lib", ObjectKind::Custom("Technology".to_string()));
+
+        let page = render_architecture(&[krate, unused_tech], &[], &[]);
+        assert!(page.content.contains("## System Context"));
+        assert!(
+            page.content
+                .contains("_No external technology dependencies compiled._")
+        );
+        assert!(!page.content.contains("unused-lib\"]"));
+    }
+
+    #[test]
+    fn architecture_links_system_context_svg_when_real_dependency_data_exists() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
+        let dep = KirRelationship::new(RelationshipKind::DependsOn, krate.id, tech.id);
+
+        let page = render_architecture(&[krate, tech], &[dep], &[]);
+        assert!(
+            page.content
+                .contains("[System Context diagram (SVG)](system-context.svg)")
+        );
+    }
+
+    #[test]
+    fn architecture_does_not_link_system_context_svg_when_no_real_dependency_data_exists() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let page = render_architecture(&[krate], &[], &[]);
+        assert!(!page.content.contains("system-context.svg"));
+    }
+
+    #[test]
+    fn render_system_context_svg_returns_none_without_real_dependency_data() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        assert!(render_system_context_svg(&[krate], &[]).is_none());
+    }
+
+    #[test]
+    fn render_system_context_svg_renders_a_real_svg_document_with_technology_nodes() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
+        let dep = KirRelationship::new(RelationshipKind::DependsOn, krate.id, tech.id);
+
+        let page = render_system_context_svg(&[krate, tech], &[dep]).unwrap();
+        assert_eq!(page.file_name, "system-context.svg");
+        assert!(page.content.starts_with("<svg "));
+        assert!(page.content.contains("</svg>"));
+        assert!(page.content.contains(">System<"));
+        assert!(page.content.contains(">clap<"));
+        assert!(page.content.contains("marker-end=\"url(#arrow)\""));
+    }
+
+    #[test]
+    fn render_crate_topology_svg_renders_real_internal_crate_dependencies() {
+        let core = KirObject::new("ekos-core", ObjectKind::Custom("Crate".to_string()));
+        let cli = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let dep = KirRelationship::new(RelationshipKind::DependsOn, cli.id, core.id);
+
+        let page = render_crate_topology_svg(&[core, cli], &[dep]).unwrap();
+        assert_eq!(page.file_name, "crate-topology.svg");
+        assert!(page.content.starts_with("<svg "));
+        assert!(page.content.contains(">ekos-core<"));
+        assert!(page.content.contains(">ekos-cli<"));
+    }
+
+    #[test]
+    fn render_crate_topology_svg_is_none_with_no_internal_dependencies() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        assert!(render_crate_topology_svg(&[krate], &[]).is_none());
+    }
+
+    #[test]
+    fn render_graph_svg_on_empty_nodes_is_an_empty_string() {
+        assert_eq!(render_graph_svg(&[], &[]), "");
+    }
+
+    #[test]
+    fn render_graph_svg_escapes_labels_and_lays_out_children_below_their_root() {
+        let nodes = vec![
+            ("root".to_string(), "Ro<ot> & \"Sons\"".to_string()),
+            ("a".to_string(), "A".to_string()),
+            ("b".to_string(), "B".to_string()),
+        ];
+        let edges = vec![
+            ("root".to_string(), "a".to_string()),
+            ("root".to_string(), "b".to_string()),
+        ];
+
+        let svg = render_graph_svg(&nodes, &edges);
+        assert!(svg.contains("Ro&lt;ot&gt; &amp; &quot;Sons&quot;"));
+        assert_eq!(svg.matches("<rect ").count(), 3);
+        assert_eq!(svg.matches("<line ").count(), 2);
+    }
+
+    #[test]
+    fn render_graph_svg_places_every_node_exactly_once_even_with_a_cycle() {
+        // A cycle means neither node ever reaches indegree 0 through the main loop — must still
+        // appear via the final "remaining nodes" fallback layer, not be silently dropped.
+        let nodes = vec![
+            ("a".to_string(), "A".to_string()),
+            ("b".to_string(), "B".to_string()),
+        ];
+        let edges = vec![
+            ("a".to_string(), "b".to_string()),
+            ("b".to_string(), "a".to_string()),
+        ];
+        let svg = render_graph_svg(&nodes, &edges);
+        assert_eq!(svg.matches("<rect ").count(), 2);
+        assert_eq!(svg.matches("<line ").count(), 2);
+    }
+
+    /// RFC 0083 Phase 4: a real System Context-shaped layer (one root, many same-layer children —
+    /// e.g. 46 real technologies) must wrap into multiple rows instead of one unreadably wide row.
+    #[test]
+    fn render_graph_svg_wraps_a_layer_wider_than_max_nodes_per_row() {
+        let mut nodes = vec![("root".to_string(), "Root".to_string())];
+        let mut edges = Vec::new();
+        for i in 0..12 {
+            let id = format!("n{i:02}");
+            nodes.push((id.clone(), format!("Node {i}")));
+            edges.push(("root".to_string(), id));
+        }
+
+        let svg = render_graph_svg(&nodes, &edges);
+        assert_eq!(svg.matches("<rect ").count(), 13);
+
+        // 12 same-layer children wrapped at MAX_NODES_PER_ROW=8 → two visual rows (8 + 4), plus
+        // the root's own row → 3 distinct y values, not the unwrapped 2 (root row + one 12-wide
+        // child row).
+        let y_values: HashSet<&str> = svg
+            .lines()
+            .filter(|l| l.starts_with("  <rect "))
+            .filter_map(|l| l.split("y=\"").nth(1))
+            .filter_map(|rest| rest.split('"').next())
+            .collect();
+        assert_eq!(
+            y_values.len(),
+            3,
+            "expected 3 distinct row y-positions: {svg}"
+        );
+
+        // Width must reflect the widest *row* (8 nodes), not the widest *layer* (12 nodes) —
+        // the whole point of wrapping.
+        let unwrapped_width = SVG_MARGIN * 2.0 + 12.0 * SVG_NODE_WIDTH + 11.0 * SVG_NODE_GAP;
+        let wrapped_width = SVG_MARGIN * 2.0 + 8.0 * SVG_NODE_WIDTH + 7.0 * SVG_NODE_GAP;
+        assert!(svg.contains(&format!("width=\"{wrapped_width:.1}\"")));
+        assert!(!svg.contains(&format!("width=\"{unwrapped_width:.1}\"")));
+    }
+
+    #[test]
+    fn architecture_component_view_links_a_crate_to_its_matching_rollup() {
+        let krate = KirObject::new("ekos-kir", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!("ekos/crates/kir"));
+        let rollup = KirObject::new("ekos/crates/kir", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(9));
+
+        let page = render_architecture(&[krate, rollup], &[], &[]);
+        assert!(page.content.contains("## Component View"));
+        assert!(page.content.contains("**ekos-kir**"));
+        assert!(page.content.contains("9 member file(s)"));
+    }
+
+    #[test]
+    fn architecture_component_view_honestly_reports_a_crate_with_no_matching_rollup() {
+        // RFC 0044's own >=2-member threshold means many real crates legitimately have no
+        // rollup — that's not an error, but (RFC 0083 Phase 4) it must still be named and
+        // counted, not silently vanish with zero trace.
+        let krate = KirObject::new("ekos-tiny", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!("ekos/crates/tiny"));
+
+        let page = render_architecture(&[krate], &[], &[]);
+        assert!(page.content.contains("## Component View"));
+        assert!(page.content.contains("ekos-tiny"));
+        assert!(
+            page.content
+                .contains("1 crate(s) have no matching subsystem rollup")
+        );
+        assert!(!page.content.contains("member file(s)"));
+    }
+
+    #[test]
+    fn architecture_component_view_reports_no_crates_at_all_when_none_are_compiled() {
+        let page = render_architecture(&[], &[], &[]);
+        assert!(
+            page.content
+                .contains("_No crate directory matched a compiled subsystem rollup._")
+        );
     }
 
     #[test]
@@ -2202,7 +3778,7 @@ mod tests {
         )
         .with_property("affected_crate", serde_json::json!("ekos-orphan"));
 
-        let page = render_architecture(&[gap], &[]);
+        let page = render_architecture(&[gap], &[], &[]);
         assert!(page.content.contains("## Open Questions"));
         assert!(
             page.content
@@ -2219,7 +3795,7 @@ mod tests {
                 serde_json::json!([{"name": "build", "steps": ["Checkout", "Test"]}]),
             );
 
-        let page = render_architecture(&[pipeline], &[]);
+        let page = render_architecture(&[pipeline], &[], &[]);
         assert!(page.content.contains("## CI/CD Pipelines"));
         assert!(page.content.contains("### CI"));
         assert!(page.content.contains("Triggers: `push`"));
@@ -2240,7 +3816,7 @@ mod tests {
         );
         let coupled = KirRelationship::new(RelationshipKind::CoupledWith, c.id, d.id);
 
-        let page = render_architecture(&[a, b, c, d], &[feeds_into, coupled]);
+        let page = render_architecture(&[a, b, c, d], &[feeds_into, coupled], &[]);
         assert!(page.content.contains("### CoupledWith"));
         assert!(
             !page.content.contains("### FeedsInto"),
@@ -2265,7 +3841,7 @@ mod tests {
 
         let mut all_objects = objects;
         all_objects.push(doc);
-        let page = render_architecture(&all_objects, &relationships);
+        let page = render_architecture(&all_objects, &relationships, &[]);
 
         assert!(page.content.contains("### Contains"));
         assert!(
@@ -2295,7 +3871,7 @@ mod tests {
         let customers = KirObject::new("customers", ObjectKind::Table);
         let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
 
-        let page = render_architecture(&[orders, customers], &[rel]);
+        let page = render_architecture(&[orders, customers], &[rel], &[]);
         assert!(page.content.contains("## Entity Relationships"));
         assert!(page.content.contains("erDiagram"));
     }
@@ -2337,6 +3913,32 @@ mod tests {
         assert!(page.content.contains("`function`"));
         assert!(page.content.contains("build_object_page_model"));
         assert!(!page.content.contains("falling back to symbol names only"));
+    }
+
+    #[test]
+    fn api_groups_elixir_symbols_by_their_owning_module_not_their_file() {
+        // RFC 0081: elixir_analyzer.rs emits `File Contains Module Contains Symbol`, not `File
+        // Contains Symbol` directly like Rust/Python — API.md must resolve the two-level
+        // containment instead of leaving every Elixir symbol in the "not compiled" bucket.
+        let file = KirObject::new("lib/plausible/auth/password.ex", ObjectKind::File);
+        let module = KirObject::new(
+            "Plausible.Auth.Password",
+            ObjectKind::Custom("ElixirModule".to_string()),
+        );
+        let function = KirObject::new("hash", ObjectKind::Custom("ElixirSymbol".to_string()))
+            .with_property("kind", serde_json::json!("function"));
+        let file_contains_module =
+            KirRelationship::new(RelationshipKind::Contains, file.id, module.id);
+        let module_contains_symbol =
+            KirRelationship::new(RelationshipKind::Contains, module.id, function.id);
+
+        let page = render_api(
+            &[file, module, function],
+            &[file_contains_module, module_contains_symbol],
+        );
+        assert!(page.content.contains("## Plausible.Auth.Password"));
+        assert!(page.content.contains("hash"));
+        assert!(!page.content.contains("(containing file not compiled)"));
     }
 
     #[test]
@@ -2438,5 +4040,88 @@ mod tests {
                 .contains("3 steps — no `FeedsInto` edges compiled")
         );
         assert!(!page.content.contains("single step"));
+    }
+
+    /// RFC 0086 (Phase 6): a real Ecto Repo `ElixirModule` (Backend, inherited from its owning
+    /// `File` via `Contains`) with a real `DependsOn` edge to a database-adapter `Technology`
+    /// object must produce a real Backend→Database cross-tier edge in System Decomposition.
+    #[test]
+    fn ecto_repo_adapter_produces_a_real_backend_to_database_edge() {
+        let file = KirObject::new("lib/plausible/repo.ex", ObjectKind::File);
+        let module = KirObject::new(
+            "Plausible.Repo",
+            ObjectKind::Custom("ElixirModule".to_string()),
+        );
+        let mut postgres =
+            KirObject::new("PostgreSQL", ObjectKind::Custom("Technology".to_string()));
+        postgres
+            .properties
+            .insert("ecosystem".into(), serde_json::json!("database"));
+        let contains = KirRelationship::new(RelationshipKind::Contains, file.id, module.id);
+        let depends_on = KirRelationship::new(RelationshipKind::DependsOn, module.id, postgres.id);
+
+        let (nodes, edges) =
+            system_decomposition_graph(&[file, module, postgres], &[contains, depends_on], &[])
+                .unwrap();
+
+        assert!(nodes.iter().any(|(id, _)| id == "layer_backend"));
+        assert!(nodes.iter().any(|(id, _)| id == "layer_sql"));
+        assert!(
+            edges
+                .iter()
+                .any(|(from, to)| from == "layer_backend" && to == "layer_sql")
+        );
+    }
+
+    #[test]
+    fn a_clickhouse_ecto_adapter_routes_to_the_clickhouse_bucket_not_sql() {
+        let file = KirObject::new("lib/plausible/clickhouse_repo.ex", ObjectKind::File);
+        let module = KirObject::new(
+            "Plausible.ClickhouseRepo",
+            ObjectKind::Custom("ElixirModule".to_string()),
+        );
+        let mut clickhouse =
+            KirObject::new("ClickHouse", ObjectKind::Custom("Technology".to_string()));
+        clickhouse
+            .properties
+            .insert("ecosystem".into(), serde_json::json!("database"));
+        let contains = KirRelationship::new(RelationshipKind::Contains, file.id, module.id);
+        let depends_on =
+            KirRelationship::new(RelationshipKind::DependsOn, module.id, clickhouse.id);
+
+        let (_, edges) =
+            system_decomposition_graph(&[file, module, clickhouse], &[contains, depends_on], &[])
+                .unwrap();
+
+        assert!(
+            edges
+                .iter()
+                .any(|(from, to)| from == "layer_backend" && to == "layer_clickhouse")
+        );
+        assert!(!edges.iter().any(|(_, to)| to == "layer_sql"));
+    }
+
+    /// Real Backend/Frontend *counts* must stay exactly the real `File` count — a module that
+    /// merely lives inside a Backend file must not inflate the displayed "Backend (N files)"
+    /// number, even though it does need to resolve to a layer for edge purposes.
+    #[test]
+    fn module_layer_inheritance_never_inflates_the_displayed_file_counts() {
+        let file = KirObject::new("lib/plausible/repo.ex", ObjectKind::File);
+        let module = KirObject::new(
+            "Plausible.Repo",
+            ObjectKind::Custom("ElixirModule".to_string()),
+        );
+        let contains = KirRelationship::new(RelationshipKind::Contains, file.id, module.id);
+
+        let (nodes, _) =
+            system_decomposition_graph(&[file, module], std::slice::from_ref(&contains), &[])
+                .unwrap();
+
+        let backend_label = &nodes
+            .iter()
+            .find(|(id, _)| id == "layer_backend")
+            .unwrap()
+            .1;
+        assert_eq!(backend_label, "Backend (1 file)");
     }
 }

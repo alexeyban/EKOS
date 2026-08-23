@@ -201,8 +201,18 @@ impl CompilerPass for GitAnalyzerPass {
             // excluded: the pair count is quadratic in files-per-commit, and
             // a vendoring/formatting commit says nothing about coupling.
             if files_changed.len() <= self.max_coupling_commit_files {
+                // RFC 0079: `id_a`/`id_b` below hash these path strings directly — qualify them
+                // here (this commit's own `data["project"]`, present only in a multi-`[observe]
+                // paths` workspace, `build.rs`'s own choke point) so `CoupledWith` lands on the
+                // same collision-safe ids `build.rs`'s own `File` objects use. The event payload
+                // above already captured the unqualified `files_changed` for display — this is a
+                // separate copy, not a mutation of it.
+                let project = data["project"].as_str();
                 let sorted_files: Vec<String> = {
-                    let mut f = files_changed.clone();
+                    let mut f: Vec<String> = files_changed
+                        .iter()
+                        .map(|p| ekos_common::project::project_qualify(p, project))
+                        .collect();
                     f.sort();
                     f
                 };

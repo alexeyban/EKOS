@@ -39,6 +39,10 @@ use uuid::Uuid;
 struct PythonArtifactData {
     path: String,
     source: String,
+    /// RFC 0079: present only in a multi-`[observe] paths` workspace (`build.rs`'s own choke
+    /// point). Qualifies id hashing only — `path` above stays bare everywhere it's displayed.
+    #[serde(default)]
+    project: Option<String>,
 }
 
 /// Coverage counters from one run, mirroring `PentahoStats`.
@@ -124,8 +128,18 @@ impl CompilerPass for PythonAnalyzerPass {
                 }
             };
 
-            let file_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, data.path.as_bytes()));
-            let result = match parse_python_file(&data.path, &data.source, file_id) {
+            // RFC 0079: `parse_python_file`'s `path` feeds both `add_symbol`'s id hash *and*
+            // `TransformOrigin.source_path` (a real displayed label, `"{path}#{index}"`, shown in
+            // `SequenceDiagrams.md` and used as `transform_node_kir_id`'s own hash input) — unlike
+            // `rust_analyzer.rs`, there's no id-only/display-only split to preserve here, so the
+            // qualified path is passed through everywhere: correct for id-safety, and arguably an
+            // improvement for the display case too (distinguishes which project's pipeline a
+            // sequence belongs to in a multi-project workspace); a no-op change for every
+            // single-project workspace, where `id_path == data.path`.
+            let id_path =
+                ekos_common::project::project_qualify(&data.path, data.project.as_deref());
+            let file_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, id_path.as_bytes()));
+            let result = match parse_python_file(&id_path, &data.source, file_id) {
                 Ok(r) => r,
                 Err(e) => {
                     ctx.diagnostics
@@ -235,7 +249,14 @@ fn add_import(module: &str, file_id: KirId, result: &mut PythonFileResult) {
     ));
 }
 
-fn add_symbol(name: &str, kind: &str, path: &str, file_id: KirId, result: &mut PythonFileResult) {
+fn add_symbol(
+    name: &str,
+    kind: &str,
+    path: &str,
+    file_id: KirId,
+    result: &mut PythonFileResult,
+    doc: Option<String>,
+) {
     let target_id = KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
         format!("python-symbol:{path}:{name}").as_bytes(),
@@ -243,12 +264,35 @@ fn add_symbol(name: &str, kind: &str, path: &str, file_id: KirId, result: &mut P
     let mut obj = KirObject::new(name, ObjectKind::Custom("PythonSymbol".to_string()))
         .with_property("kind", serde_json::Value::String(kind.to_string()));
     obj.id = target_id;
+    // Real, only when the body's own first statement is a real string-literal docstring — never
+    // fabricated.
+    if let Some(doc) = doc {
+        obj.properties
+            .insert("description".into(), serde_json::json!(doc));
+    }
     result.objects.push(obj);
     result.relationships.push(KirRelationship::new(
         RelationshipKind::Contains,
         file_id,
         target_id,
     ));
+}
+
+/// Real Python docstring extraction (Phase 1 of the "Real Descriptions, Purpose, and Links"
+/// plan) — the real PEP 257 convention: a function/class's docstring is its body's own *first*
+/// statement, a bare string-literal expression statement. Reuses `string_constant`, already used
+/// elsewhere in this file for PySpark chain-argument recognition — the same real AST shape.
+fn python_docstring(body: &[ast::Stmt]) -> Option<String> {
+    let ast::Stmt::Expr(first) = body.first()? else {
+        return None;
+    };
+    let text = string_constant(&first.value)?;
+    let text = text.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
 }
 
 fn walk_top_level_statement(
@@ -271,13 +315,15 @@ fn walk_top_level_statement(
             }
         }
         ast::Stmt::FunctionDef(f) => {
-            add_symbol(f.name.as_str(), "function", path, file_id, result);
+            let doc = python_docstring(&f.body);
+            add_symbol(f.name.as_str(), "function", path, file_id, result, doc);
             for inner in &f.body {
                 try_recognize_chain_statement(inner, path, source, result, graph_index);
             }
         }
         ast::Stmt::ClassDef(c) => {
-            add_symbol(c.name.as_str(), "class", path, file_id, result);
+            let doc = python_docstring(&c.body);
+            add_symbol(c.name.as_str(), "class", path, file_id, result, doc);
         }
         other => {
             try_recognize_chain_statement(other, path, source, result, graph_index);
@@ -599,6 +645,40 @@ mod tests {
         assert!(names.contains(&"Bar"));
         let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
         assert_eq!(foo.properties["kind"], "function");
+    }
+
+    #[test]
+    fn a_real_docstring_becomes_a_real_description() {
+        let result =
+            parse("def hash(pw):\n    \"\"\"Hashes a password using bcrypt.\"\"\"\n    pass\n");
+        let hash_fn = result.objects.iter().find(|o| o.name == "hash").unwrap();
+        assert_eq!(
+            hash_fn.properties["description"],
+            "Hashes a password using bcrypt."
+        );
+    }
+
+    #[test]
+    fn a_class_docstring_becomes_a_real_description() {
+        let result = parse("class Widget:\n    \"\"\"A real widget.\"\"\"\n    pass\n");
+        let widget = result.objects.iter().find(|o| o.name == "Widget").unwrap();
+        assert_eq!(widget.properties["description"], "A real widget.");
+    }
+
+    #[test]
+    fn a_function_with_no_real_docstring_has_no_description_property_at_all() {
+        let result = parse("def plain():\n    x = 1\n    return x\n");
+        let plain = result.objects.iter().find(|o| o.name == "plain").unwrap();
+        assert!(!plain.properties.contains_key("description"));
+    }
+
+    #[test]
+    fn a_real_statement_that_is_not_a_string_literal_is_not_mistaken_for_a_docstring() {
+        // The body's first statement is a real expression statement, but not a string literal —
+        // must not be misread as a docstring.
+        let result = parse("def f():\n    1 + 1\n    return None\n");
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert!(!f.properties.contains_key("description"));
     }
 
     #[test]

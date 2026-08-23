@@ -36,6 +36,10 @@ use uuid::Uuid;
 struct RustArtifactData {
     path: String,
     source: String,
+    /// RFC 0079: present only in a multi-`[observe] paths` workspace (`build.rs`'s own choke
+    /// point). Qualifies id hashing only — `path` above stays bare everywhere it's displayed.
+    #[serde(default)]
+    project: Option<String>,
 }
 
 /// Coverage counters from one run, mirroring `PythonStats`.
@@ -108,8 +112,16 @@ impl CompilerPass for RustAnalyzerPass {
                 }
             };
 
-            let file_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, data.path.as_bytes()));
-            let result = match parse_rust_file(&data.path, &data.source, file_id) {
+            // RFC 0079: `parse_rust_file`'s own `path` parameter is used *only* as an id-hash
+            // ingredient inside it (`add_symbol`'s `"rust-symbol:{path}:{name}"`) — this crate
+            // emits no evidence/`SourceLocation` at all, and every displayed `KirObject` name
+            // below is the bare symbol/module name, never `path` — so the qualified id path is
+            // the correct thing to pass in, not the bare one. (`data.path` itself is still used
+            // for the diagnostic message below, where a human does read it.)
+            let id_path =
+                ekos_common::project::project_qualify(&data.path, data.project.as_deref());
+            let file_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, id_path.as_bytes()));
+            let result = match parse_rust_file(&id_path, &data.source, file_id) {
                 Ok(r) => r,
                 Err(e) => {
                     ctx.diagnostics
@@ -202,21 +214,46 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
             }
             Item::Fn(f) => {
                 let name = f.sig.ident.to_string();
-                let id = add_symbol(&name, "function", path, file_id, &mut result);
+                let doc = extract_doc_comment(&f.attrs);
+                let id = add_symbol(&name, "function", path, file_id, &mut result, doc);
                 result.symbol_count += 1;
                 functions.insert(name, id);
                 bodies.push((id, f.block.as_ref(), None));
             }
             Item::Struct(s) => {
-                add_symbol(&s.ident.to_string(), "struct", path, file_id, &mut result);
+                let doc = extract_doc_comment(&s.attrs);
+                add_symbol(
+                    &s.ident.to_string(),
+                    "struct",
+                    path,
+                    file_id,
+                    &mut result,
+                    doc,
+                );
                 result.symbol_count += 1;
             }
             Item::Enum(e) => {
-                add_symbol(&e.ident.to_string(), "enum", path, file_id, &mut result);
+                let doc = extract_doc_comment(&e.attrs);
+                add_symbol(
+                    &e.ident.to_string(),
+                    "enum",
+                    path,
+                    file_id,
+                    &mut result,
+                    doc,
+                );
                 result.symbol_count += 1;
             }
             Item::Trait(t) => {
-                add_symbol(&t.ident.to_string(), "trait", path, file_id, &mut result);
+                let doc = extract_doc_comment(&t.attrs);
+                add_symbol(
+                    &t.ident.to_string(),
+                    "trait",
+                    path,
+                    file_id,
+                    &mut result,
+                    doc,
+                );
                 result.symbol_count += 1;
             }
             Item::Impl(imp) => {
@@ -227,7 +264,8 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     if let ImplItem::Fn(m) = ii {
                         let method_name = m.sig.ident.to_string();
                         let qualified = format!("{type_name}::{method_name}");
-                        let id = add_symbol(&qualified, "method", path, file_id, &mut result);
+                        let doc = extract_doc_comment(&m.attrs);
+                        let id = add_symbol(&qualified, "method", path, file_id, &mut result, doc);
                         result.symbol_count += 1;
                         methods_by_name
                             .entry(method_name.clone())
@@ -334,6 +372,7 @@ fn add_symbol(
     path: &str,
     file_id: KirId,
     result: &mut RustFileResult,
+    doc: Option<String>,
 ) -> KirId {
     let target_id = KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
@@ -342,6 +381,11 @@ fn add_symbol(
     let mut obj = KirObject::new(name, ObjectKind::Custom("RustSymbol".to_string()))
         .with_property("kind", serde_json::Value::String(kind.to_string()));
     obj.id = target_id;
+    // Real, only when the item actually has a real `///` doc comment — never fabricated.
+    if let Some(doc) = doc {
+        obj.properties
+            .insert("description".into(), serde_json::json!(doc));
+    }
     result.objects.push(obj);
     result.relationships.push(KirRelationship::new(
         RelationshipKind::Contains,
@@ -349,6 +393,39 @@ fn add_symbol(
         target_id,
     ));
     target_id
+}
+
+/// Real `///` doc-comment extraction (Phase 1 of the "Real Descriptions, Purpose, and Links"
+/// plan) — `syn` already desugars each `///` line into its own `#[doc = "..."]` attribute, so
+/// this is a real, direct read of the AST `syn::parse_file` already built, not new parsing.
+/// Consecutive `#[doc = "..."]` attributes (one per real source line) are joined with a space
+/// into one real description. `None` when the item has no real doc attribute at all — never
+/// fabricated.
+fn extract_doc_comment(attrs: &[syn::Attribute]) -> Option<String> {
+    let lines: Vec<String> = attrs
+        .iter()
+        .filter_map(|attr| {
+            if !attr.path().is_ident("doc") {
+                return None;
+            }
+            let syn::Meta::NameValue(nv) = &attr.meta else {
+                return None;
+            };
+            let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &nv.value
+            else {
+                return None;
+            };
+            Some(s.value().trim().to_string())
+        })
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join(" ").trim().to_string())
+    }
 }
 
 // ── Call-expression recognition ─────────────────────────────────────────────
@@ -440,6 +517,42 @@ mod tests {
         assert!(names.contains(&"Qux"));
         let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
         assert_eq!(foo.properties["kind"], "function");
+    }
+
+    #[test]
+    fn a_real_doc_comment_becomes_a_real_description() {
+        let result = parse("/// Hashes a password using bcrypt.\nfn hash(pw: &str) {}\n");
+        let hash_fn = result.objects.iter().find(|o| o.name == "hash").unwrap();
+        assert_eq!(
+            hash_fn.properties["description"],
+            "Hashes a password using bcrypt."
+        );
+    }
+
+    #[test]
+    fn a_multi_line_doc_comment_joins_into_one_real_description() {
+        let result = parse("/// Line one.\n/// Line two.\nstruct Widget;\n");
+        let widget = result.objects.iter().find(|o| o.name == "Widget").unwrap();
+        assert_eq!(widget.properties["description"], "Line one. Line two.");
+    }
+
+    #[test]
+    fn a_method_with_a_real_doc_comment_gets_a_real_description() {
+        let result =
+            parse("struct Foo;\nimpl Foo {\n    /// Does the thing.\n    fn bar(&self) {}\n}\n");
+        let method = result
+            .objects
+            .iter()
+            .find(|o| o.name == "Foo::bar")
+            .unwrap();
+        assert_eq!(method.properties["description"], "Does the thing.");
+    }
+
+    #[test]
+    fn an_item_with_no_real_doc_comment_has_no_description_property_at_all() {
+        let result = parse("fn plain() {}\n");
+        let plain = result.objects.iter().find(|o| o.name == "plain").unwrap();
+        assert!(!plain.properties.contains_key("description"));
     }
 
     #[test]

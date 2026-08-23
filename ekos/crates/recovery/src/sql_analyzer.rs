@@ -16,6 +16,7 @@ use sqlparser::ast::{ColumnOption, Statement, TableConstraint};
 use sqlparser::dialect::Dialect;
 use sqlparser::parser::Parser;
 use tracing::warn;
+use uuid::Uuid;
 
 use crate::llm::{LlmProvider, LlmRequest};
 
@@ -152,6 +153,47 @@ impl CompilerPass for SqlAnalyzerPass {
     }
 }
 
+// ── Deterministic ids (RFC 0076) ─────────────────────────────────────────────
+//
+// `parse_ddl_structural` used to let `KirObject::new`/`KirRelationship::new` mint their default
+// random ids — unlike every sibling analyzer in this crate (`clickhouse_analyzer.rs`,
+// `crate_topology_analyzer.rs`, `local_docs_analyzer.rs`, `git_analyzer.rs`, `github_analyzer.rs`,
+// `cicd_analyzer.rs`, `dependency_analyzer.rs`, `confluence_analyzer.rs`,
+// `document_semantics_analyzer.rs`, `crypto_analyzer.rs`), which all assign a deterministic id.
+// Found live, on a real project re-recovered a second time months after its first `ekos recover`
+// run: every one of that workspace's real tables existed twice in the ledger, with two different
+// random ids, because `append_object`'s `(id, content_signature)` versioning (RFC 0015) never
+// recognized the freshly re-parsed `Table` as "the same one" already committed. The exact failure
+// class RFC 0072 root-caused for `crate_topology_analyzer.rs`'s `DependsOn` edges — this is its
+// `Table`/`ForeignKey` counterpart.
+
+/// A table is a boolean fact per normalized name within this pass — no legitimate multiplicity,
+/// so this is exactly the shape RFC 0072 established as safe to key on a stable id. Lowercased to
+/// match `parse_ddl_structural`'s own internal `table_ids` lookup convention (unquoted SQL
+/// identifiers are case-folded by most real dialects). Prefixed distinctly from
+/// `clickhouse_analyzer.rs`'s own `table_kir_id` (`"clickhouse:"`) so a same-named table recovered
+/// by each analyzer never silently collides onto one id — two tables from two different systems
+/// merging is RFC 0029 cross-system identity's job, never an accidental hash collision.
+fn table_kir_id(table_name: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("sql-analyzer-table:{}", table_name.to_lowercase()).as_bytes(),
+    ))
+}
+
+/// Unlike `table_kir_id`, `(from, to)` alone is **not** safe here — RFC 0072 found a real,
+/// already-shipped case where it isn't: a table with two FK columns to the same target table
+/// produces two real, distinct `ForeignKey` edges sharing the same `(from, to)` pair, distinguished
+/// only by which columns are involved. `fk_desc` (`"from.col → to.col"`, already computed by every
+/// caller) is exactly that distinguishing signal, so it's part of the id input, not just the
+/// evidence text.
+fn foreign_key_kir_id(from: KirId, to: KirId, fk_desc: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("sql-analyzer-fk:{from}:{to}:{fk_desc}").as_bytes(),
+    ))
+}
+
 // ── Structural DDL parser ────────────────────────────────────────────────────
 
 /// Parse SQL DDL and return a `KirGraph` with tables as `KirObject`s and FK
@@ -196,6 +238,7 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect)
             let ev_id = graph.add_evidence(ev);
 
             let mut obj = KirObject::new(&table_name, ObjectKind::Table).with_evidence(ev_id);
+            obj.id = table_kir_id(&table_name);
             obj.properties.insert("columns".into(), columns_json(ct));
             let obj_id = graph.add_object(obj);
             table_ids.insert(table_name.to_lowercase(), obj_id);
@@ -292,6 +335,7 @@ fn add_fk_relationship(
     let ev = KirEvidence::new(SourceLocation::file(source_path), fk_desc.clone());
     let ev_id = graph.add_evidence(ev);
     let mut rel = KirRelationship::new(RelationshipKind::ForeignKey, from_id, to_id);
+    rel.id = foreign_key_kir_id(from_id, to_id, &fk_desc);
     rel.properties
         .insert("fk_desc".into(), serde_json::Value::String(fk_desc));
     rel.evidence.push(ev_id);
@@ -448,6 +492,68 @@ mod tests {
             graph.objects.len(),
             6,
             "ecommerce schema has 6 tables: categories, customers, products, orders, order_items, payments"
+        );
+    }
+
+    #[test]
+    fn table_ids_are_deterministic_across_two_independent_parses() {
+        // RFC 0076: found live on a real project re-recovered months after its first `ekos
+        // recover` run — every table existed twice in the ledger because `Table` objects got a
+        // fresh random id every parse. Two fully independent `parse_ddl_structural` calls over
+        // the same DDL (simulating two separate `recover` invocations) must agree on every id.
+        let run1 = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
+        let run2 = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
+
+        let mut ids1: Vec<String> = run1.objects.iter().map(|o| o.id.to_string()).collect();
+        let mut ids2: Vec<String> = run2.objects.iter().map(|o| o.id.to_string()).collect();
+        ids1.sort();
+        ids2.sort();
+        assert_eq!(ids1, ids2);
+
+        let mut rel_ids1: Vec<String> = run1
+            .relationships
+            .iter()
+            .map(|r| r.id.to_string())
+            .collect();
+        let mut rel_ids2: Vec<String> = run2
+            .relationships
+            .iter()
+            .map(|r| r.id.to_string())
+            .collect();
+        rel_ids1.sort();
+        rel_ids2.sort();
+        assert_eq!(rel_ids1, rel_ids2);
+    }
+
+    #[test]
+    fn table_id_is_case_insensitive_matching_the_internal_fk_lookup_convention() {
+        let a = table_kir_id("Users");
+        let b = table_kir_id("users");
+        let c = table_kir_id("USERS");
+        assert_eq!(a, b);
+        assert_eq!(b, c);
+    }
+
+    #[test]
+    fn two_foreign_keys_to_the_same_target_table_via_different_columns_get_distinct_ids() {
+        // RFC 0072's own counter-example, now guarded directly against `sql_analyzer.rs`'s real
+        // id: a table with two FK columns to the same target table is two real, distinct edges —
+        // `(from, to)` alone would collide them, so `fk_desc` must be part of the id input.
+        let sql = "CREATE TABLE customers (id INT PRIMARY KEY);\n\
+                   CREATE TABLE shipments (\n\
+                       id INT PRIMARY KEY,\n\
+                       sender_id INT REFERENCES customers(id),\n\
+                       receiver_id INT REFERENCES customers(id)\n\
+                   );";
+        let graph = parse_ddl_structural(sql, "shipments.sql", &GenericDialect {});
+        assert_eq!(
+            graph.relationships.len(),
+            2,
+            "two distinct FK columns to customers"
+        );
+        assert_ne!(
+            graph.relationships[0].id, graph.relationships[1].id,
+            "two real, distinct FK edges must not collapse onto one id"
         );
     }
 

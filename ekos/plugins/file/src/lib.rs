@@ -142,7 +142,28 @@ fn text_excerpt(content: &[u8]) -> Option<String> {
 /// prefix matching, not per-language parsing — covers the common case
 /// (`fn foo(...)`, `def foo(...):`, `class Foo:`, `func foo(...)`,
 /// `interface Foo {`) without a parser dependency.
-const DECL_PREFIXES: &[&str] = &["fn ", "def ", "class ", "func ", "interface "];
+///
+/// RFC 0076: the Elixir forms (`defp`/`defmodule`/`defmacro`/`defmacrop`/`defdelegate`) were
+/// missing entirely — `"def "` only matches a literal `def` token followed by a space, so
+/// `defp foo(...)` (a private function — as common as `def` in real Elixir: 1917 vs 2509
+/// occurrences in a real, large open-source Elixir codebase tested against) and `defmodule Foo
+/// do` (the language's primary structural unit — 522 occurrences in that same codebase) were both
+/// silently invisible to this fallback, on top of `Table.md#L164`-style ordinary code prose. Since
+/// this scan has no notion of "language" at all — a Rust/Go/Python/TS project never has a `defp`
+/// line to begin with — adding Elixir's forms costs nothing for every other language already
+/// covered here.
+const DECL_PREFIXES: &[&str] = &[
+    "fn ",
+    "def ",
+    "defp ",
+    "defmodule ",
+    "defmacro ",
+    "defmacrop ",
+    "defdelegate ",
+    "class ",
+    "func ",
+    "interface ",
+];
 
 /// Cap on symbols harvested per file — bounds indexed content size the same
 /// way `EXCERPT_MAX_CHARS` bounds the excerpt (RFC 0019).
@@ -208,6 +229,26 @@ mod tests {
                 "Authenticator"
             ]
         );
+    }
+
+    #[test]
+    fn harvest_symbols_finds_elixir_declaration_forms() {
+        let text = "defmodule Plausible.Auth do\n  def rate_limit(x) do\n  end\n\n  defp hash(pw) do\n  end\n\n  defmacro is_valid(x) do\n  end\nend\n";
+        let symbols = harvest_symbols(text);
+        assert_eq!(
+            symbols,
+            vec!["Plausible", "rate_limit", "hash", "is_valid"],
+            "defmodule/def/defp/defmacro must all be recognized — a real Elixir codebase uses \
+             defp almost as often as def (RFC 0076)"
+        );
+    }
+
+    #[test]
+    fn harvest_symbols_a_bare_def_line_is_not_mistaken_for_defp_or_defmodule() {
+        // Regression for the prefix-matching itself: `def ` must not accidentally swallow
+        // `defp `/`defmodule ` lines (or vice versa) since they share a `def` prefix.
+        let text = "def login(user) do\nend\n";
+        assert_eq!(harvest_symbols(text), vec!["login"]);
     }
 
     #[test]
