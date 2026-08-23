@@ -3251,3 +3251,17 @@ are excluded — see the full exclusion list in the planning history if needed.
     `recover.rs` already has the correct fix. `--prose` and `ekos marketing publish` against a
     configured non-default Ollama model silently use the wrong model today. Out of RFC 0088's own
     scope to fix; tracked here so it isn't rediscovered from scratch.
+
+- **Real gap found live 2026-08-23 testing RFC 0088 against a real, deliberately small subsystem
+  scope (`lib/plausible/auth`, 15 files) — fixed at its actual source, not worked around a second
+  time** (`devlog_94`):
+  - [x] `build.rs`'s RFC 0079 `project_key` (the mechanism that lets a real disk read reconstruct
+    a `File` object's real directory prefix) was only ever written when `[observe] paths` listed
+    *more than one* entry — conflating "the truly common `paths = ["."]` case" with "a single
+    scoped subdirectory" (`paths = ["lib/plausible/auth"]`, or this repo's own `paths = ["src"]`
+    test fixture), where a real, non-empty prefix exists but was silently dropped with no property
+    left to recover it. Fixed: `base != cwd` replaces the entry-count check — still empty for the
+    real `paths = ["."]` case (no id migration), now also correct for a single non-`"."` entry.
+    Found by RFC 0088's own real symbol descriptions reporting 0 described despite real compiled
+    `source_span` data existing — the analytics project's own real backend-only config (8 observe
+    path entries) never triggered this, only a smaller, more targeted real scope did.

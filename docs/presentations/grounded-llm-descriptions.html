@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grounded LLM Descriptions — EKOS</title>
+<meta name="description" content="Every entity page gets a real, evidence-grounded LLM overview — persisted to the ledger at commit time, never fabricated, flagged when a human comment goes stale. Verified end-to-end at zero real cost against a local model. Two real bugs found by that live run, fixed the same session.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>LLM descriptions, grounded in real code.<br><span class="arrow-word">Not vibes — persisted evidence.</span></h1>
+  <p class="lede">Most entity pages for undocumented code were empty — a name, a diagram, nothing
+  else. RFC 0088 asks an LLM to describe what a module or function actually does, grounded in its
+  real compiled structure or real source text, persists the answer to the ledger at
+  <code class="mono">commit</code> time, and — when a human comment already exists — flags a real
+  discrepancy instead of trusting it blindly. Verified end to end against a real local model, zero
+  API cost. That live run found two real bugs a passing test suite hadn't; both fixed the same
+  session.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">"Not documented in source." — nothing else</span><span class="sep mono">→</span>
+    <span class="chip">RFC 0088, post-commit, evidence-grounded</span><span class="sep mono">→</span>
+    <span class="chip hot">104/116 real symbols, 0 errors</span><span class="sep mono">→</span>
+    <span class="chip">2 real bugs found live, fixed same day</span>
+  </div>
+  <div class="byline"><span class="dot"></span> analytics/ (github.com/plausible/analytics, AGPL-3.0) — Elixir/Phoenix backend · RFC 0087, RFC 0088 · devlogs 91-94</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the real gap</div>
+  <div class="eyebrow">what a real, undocumented function's page looked like, before</div>
+  <h2>A name. A diagram. Nothing that says what it does.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">RFC 0087 already surfaces a real <code
+      class="mono">///</code>/<code class="mono">@moduledoc</code>/docstring/JSDoc comment when
+      one exists — real, but honest about doing nothing when it doesn't, which is most real code
+      in most real codebases. And even where a comment does exist, it can be stale, wrong, or
+      incomplete — RFC 0087 can only surface what a comment <em>claims</em>, never check it against
+      what the code actually does.</p>
+    </div>
+    <div class="codeblock">
+      <div class="tag">a real entity page, before RFC 0088</div>
+<pre style="margin:0;"><span class="k"># try_fetch (RustSymbol)</span>
+
+<span class="c">## Definition</span>
+<span class="bad">_Not documented in source._</span>
+
+<span class="c">## Properties</span>
+<span class="bad">_No compiled properties._</span>
+
+<span class="c">// no relationships, no diagram</span>
+<span class="c">// worth drawing either</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / a design correction, found before writing code</div>
+  <div class="eyebrow">reading semantic/ledger source directly, not assumed</div>
+  <h2>Not a CompilerPass. This pipeline's ledger versions whole objects, not patches.</h2>
+  <p class="lede" style="margin-top:0;">The obvious design — a new <code
+  class="mono">CompilerPass</code> writing <code class="mono">ai_overview</code> onto the same
+  object id an earlier pass already created — would have been actively dangerous. <code
+  class="mono">merge_graphs</code>/<code class="mono">build_ckm</code> never dedupe objects sharing
+  an id across two passes, and each ledger version is a <strong>complete snapshot</strong>, not a
+  diff. A bare partial object could become the new "current" version and silently regress every
+  real structural property (<code class="mono">kind</code>, <code class="mono">arity</code>, RFC
+  0087's own <code class="mono">description</code>) another pass already wrote.</p>
+  <ul class="facts">
+    <li><span class="k">Fix</span><span class="v">Runs post-<code class="mono">commit</code>, the same architectural slot <code class="mono">commit_rollups</code>/<code class="mono">commit_data_lineage</code> already occupy — reads the real current object, clones it, adds properties to <em>that</em> clone, re-appends the clone.</span></li>
+    <li><span class="k">Evidence</span><span class="v">Simpler than <code class="mono">ekos ask</code>'s citation validation — every prompt is built entirely from real, already-compiled data, nothing speculatively retrieved, so there's no "cited something it wasn't shown" risk to guard against.</span></li>
+  </ul>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / the actual feature</div>
+  <div class="eyebrow">ai_overview, ai_usage, ai_comment_check — new, persisted KIR properties</div>
+  <h2>Grounded in real source. Flagged, never silently trusted, when a comment might be wrong.</h2>
+  <div class="codeblock">
+    <div class="tag">a real generated page, after — real, unedited (local llama3:latest)</div>
+<pre style="margin:0;"><span class="k"># hash (ElixirSymbol)</span>
+
+<span class="c">## Definition</span>
+_Not documented in source._
+
+<span class="c">## AI-Assisted Overview</span>
+<span class="s">A function that takes a password as input and returns
+the hashed version of it, using the Bcrypt library.</span>
+
+<span class="c">## Evidence</span>
+- ai_overview grounded in hash's own real source lines</pre>
+  </div>
+  <p class="lede">Real source, sliced by a new compiled <code class="mono">source_span</code>
+  (Rust via <code class="mono">syn</code>'s joined spans, Elixir via the existing block-depth
+  stack), redacted through RFC 0043's baseline before it ever reaches a provider. When a real
+  human comment already exists, <code class="mono">ai_comment_check</code> answers
+  <code class="mono">consistent</code>/<code class="mono">stale</code>/<code
+  class="mono">incomplete</code> — a real, visible callout on the Definition section, never a
+  silent overwrite of the real extracted comment text.</p>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / live, zero real cost</div>
+  <div class="eyebrow">a real local Ollama model — no cloud API spend to verify this</div>
+  <h2>104 of 116 real symbols described. 0 errors.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">27</div><div class="label">real modules/subsystems described</div></div>
+    <div class="stat"><div class="num">104<span class="bad">/116</span></div><div class="label">real symbols described (12 honest, real skips — no block to span)</div></div>
+    <div class="stat"><div class="num">0</div><div class="label">errors — a small model's own JSON non-compliance degrades cleanly, confirmed separately</div></div>
+  </div>
+  <p class="lede">A real, deliberately small subsystem — <code
+  class="mono">lib/plausible/auth</code>, 15 files — kept a real end-to-end run to minutes on a
+  free local model instead of the multi-hour real cost the full 900-module backend would take.
+  <code class="mono">Plausible.Auth.Password</code>'s real page: "responsible for performing
+  password-related calculations and checks... hashing, and matching passwords" — grounded, not
+  guessed, and devlog_90's own identity-resolution fix still holds (exactly 3 real relationships,
+  no phantom edges).</p>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / found by that live run, not by 17 passing tests</div>
+  <div class="eyebrow">a real File.name is relative to its own [observe] paths entry, not the workspace root</div>
+  <h2>0 symbols described. Real source_span data. A real path bug, one layer down.</h2>
+  <table class="ttable">
+    <thead><tr><th>Symptom, first real run</th><th>Real root cause</th></tr></thead>
+    <tbody>
+      <tr><td class="bad">"116 skipped without a source span"</td><td class="desc">Compiled CKM genuinely had real <code class="mono">source_span</code> data on all of them — checked directly, not assumed</td></tr>
+      <tr><td class="bad"><code class="mono">File.name == "password.ex"</code></td><td class="desc">Real path relative to its own <code class="mono">[observe] paths</code> entry, not <code class="mono">cwd</code> — the real <code class="mono">lib/plausible/auth/</code> prefix silently dropped</td></tr>
+      <tr><td class="good">Fixed: real_file_path + a corrected project_key condition</td><td class="good"><code class="mono">base != cwd</code> replaces counting <code class="mono">[observe] paths</code> entries — still empty for the common <code class="mono">paths = ["."]</code> case, now also correct for one scoped subdirectory</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">The real analytics backend's own config never triggered this — it lists eight
+  separate observe path entries. Only a smaller, more targeted real scope (exactly what a "small
+  piece of backend architecture" test asked for) exercised the single-entry shape. A second,
+  separate live-found bug: this session's own new Ollama provider selection silently ignored
+  <code class="mono">[llm].model</code>, inherited from a pre-existing gap two other files still
+  have — flagged, fixed only where new code introduced it.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / same session, deterministic side</div>
+  <div class="eyebrow">no LLM involved — found reading real generated pages directly</div>
+  <h2>A phantom module, a dead-end Component View, a mixed layer — all real, all fixed.</h2>
+  <table class="ttable">
+    <thead><tr><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td class="bad">multi-target <code class="mono">alias X.{A, B}</code> → one phantom edge to the bare shared prefix, never <code class="mono">defmodule</code>'d anywhere</td><td class="good">real per-leaf edges — a lookahead pre-scan handles <code class="mono">mix format</code>'s own one-leaf-per-line wrapping</td></tr>
+      <tr><td class="bad">"no crate directory matched" on every non-Rust workspace</td><td class="good">real compiled <code class="mono">Rollup</code> fallback — 5 real subsystems, clearly labeled</td></tr>
+      <tr><td class="bad">System Decomposition: aggregate counts only</td><td class="good">new Layer Breakdown — <code class="mono">priv</code> correctly split, 291 real backend files + 1 real frontend asset</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">The exact page this whole effort's own multi-alias fix targeted —
+  <code class="mono">PlausibleWeb.Live.CustomerSupport.Team</code> — now lists all 7 real dependent
+  modules by name instead of one phantom object with no file, no properties, and no real
+  relationships of its own.</p>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / the honest scorecard</div>
+  <div class="eyebrow">shipped and real — not means finished</div>
+  <h2>What's real now. What's deliberately still open.</h2>
+  <table class="ttable">
+    <thead><tr><th>Real, shipped</th><th>Deliberately deferred</th></tr></thead>
+    <tbody>
+      <tr><td class="good">Module/subsystem/symbol overviews, Rust + Elixir <code class="mono">source_span</code></td><td class="desc">Python/JS <code class="mono">source_span</code> — same pattern, not yet wired</td></tr>
+      <tr><td class="good"><code class="mono">ai_comment_check</code> — stale comments flagged, never silently trusted</td><td class="desc">Per-symbol re-verification against real code regardless of scope size — a materially larger, separately-scoped ask</td></tr>
+      <tr><td class="good">Project-level Purpose/Architecture-style, honestly blank with no README to ground it</td><td class="desc"><code class="mono">Risk</code> KIR kind + real <code class="mono">## Major risks</code></td></tr>
+      <tr><td class="good">Cost-gated (<code class="mono">ekos commit --yes</code>), opt-in, same UX <code class="mono">--prose</code> established</td><td class="desc">Real <code class="mono">Architecture confidence</code> from an LLM judgment, not just the deterministic evaluator</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Nothing in the right column is a bug hidden from this deck — every one is named,
+  scoped, and reasoned about in its own RFC or devlog.</p>
+</section>
+
+<section class="slide cta" id="s9">
+  <div class="eyebrow">try it yourself — nothing hidden, before or after</div>
+  <h2>Same repo. Real local model. Real output.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ ekos commit --yes    <span class="c"># shows a real call-count estimate first</span>
+
+<span class="c"># [llm-description] in ekos.toml</span>
+enabled = true
+scope = "modules"      <span class="c"># cheaper default — "all" also covers symbols</span></pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Full workspace gate</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td class="tool"><code>cargo build/test/clippy -D warnings/fmt --check</code></td><td class="good">Clean, every fix</td></tr>
+      <tr><td class="tool">New tests this effort</td><td class="desc">30+ new tests — 17 for the LLM-description pass alone, each against real fixtures or a real bug found live</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · Grounded LLM Descriptions — RFC 0087, RFC 0088, devlogs 91-94 · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

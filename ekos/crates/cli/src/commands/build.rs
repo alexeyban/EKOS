@@ -210,13 +210,24 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
 
     for base in &observe_paths {
         // RFC 0044 Phase 1: distinguishes objects from different projects when `[observe] paths`
-        // lists more than one entry — empty for the overwhelmingly common single-path case, so
-        // existing single-project ledgers keep byte-identical ids (no migration needed there).
+        // lists more than one entry — empty for the overwhelmingly common `paths = ["."]` case,
+        // so existing single-project ledgers keep byte-identical ids (no migration needed there).
         // Without this, two unrelated projects that each happen to have e.g. `src/main.rs` at the
         // same relative path silently collided into one merged `KirObject` — ids below were
         // hashed from the bare within-project relative path only, with no project component. A
         // real bug found designing multi-project/estate-scale support, not a hypothetical.
-        let project_key = if observe_paths.len() > 1 {
+        //
+        // Condition fixed 2026-08-23 (RFC 0088's own live verification found this): the original
+        // `observe_paths.len() > 1` check meant a workspace with exactly *one* `[observe] paths`
+        // entry that isn't `"."` (a real, common shape — `paths = ["src"]`, or a single scoped
+        // subdirectory like the analytics project's own `lib/plausible/auth`) silently dropped
+        // the real directory prefix from every `File.name` with no `"project"` property left to
+        // reconstruct it — any later real disk read (RFC 0088's `read_symbol_source`) then
+        // silently failed. `base != cwd` is a strictly more precise condition than counting
+        // entries: it's still empty for the byte-identical-ids `paths = ["."]` case (there,
+        // `base == cwd` always), but now also correctly captures the real prefix for a single
+        // non-`"."` entry, which used to be wrongly treated as needing none.
+        let project_key = if base != cwd {
             base.strip_prefix(cwd)
                 .unwrap_or(base)
                 .to_string_lossy()

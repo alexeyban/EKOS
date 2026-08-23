@@ -322,11 +322,44 @@ async fn build_keeps_same_named_files_in_different_projects_distinct() {
     );
 }
 
-/// The common case (`paths = ["."]`, the config every other test in this file uses) must produce
-/// byte-identical ids to before this fix — no `project` property, no migration for existing
-/// single-project ledgers.
+/// The truly common case (`paths = ["."]`, `base == cwd`) must produce byte-identical ids to
+/// before this fix — no `project` property, no migration for existing single-project ledgers.
 #[tokio::test]
-async fn build_single_project_workspace_has_no_project_property() {
+async fn build_single_dot_path_workspace_has_no_project_property() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    std::fs::write(dir.join("main.rs"), b"fn main() {}").unwrap();
+    std::fs::write(
+        dir.join("ekos.toml"),
+        b"[workspace]\nroot = \".\"\n\n[observe]\npaths = [\".\"]\nignore-patterns = [\".ekos\"]\n",
+    )
+    .unwrap();
+
+    let config = load_config(dir);
+    ekos::commands::init::run(&config, dir).unwrap();
+    ekos::commands::build::run(&config, dir).await.unwrap();
+
+    let ledger = ekos::commands::store::open_store(&config, dir).unwrap();
+    let results = ledger.find_objects("main*").unwrap();
+    assert!(!results.is_empty(), "expected to find main.rs object");
+    let obj = ledger.get_object(&results[0].0).unwrap().unwrap();
+    assert!(
+        obj.properties.get("project").is_none(),
+        "a real `paths = [\".\"]` workspace must not gain a `project` property"
+    );
+    assert_eq!(obj.name, "main.rs");
+}
+
+/// Regression test for a real bug RFC 0088's own live verification found: a workspace with
+/// exactly *one* `[observe] paths` entry that isn't `"."` (this file's own `setup_workspace`
+/// fixture, `paths = ["src"]` — and the real shape the analytics project's own backend-only
+/// config uses, `paths = ["lib/plausible/auth"]` alone) used to silently drop the real directory
+/// prefix from every `File.name` (`"main.rs"`, not the real `"src/main.rs"`) with no `"project"`
+/// property left to reconstruct it — any later real disk read from that name alone then silently
+/// failed. Counting `[observe] paths` entries (the original condition) can't tell this case apart
+/// from the truly-common `paths = ["."]` case; comparing `base != cwd` can.
+#[tokio::test]
+async fn build_single_non_dot_path_workspace_gets_a_real_project_property() {
     let tmp = TempDir::new().unwrap();
     let dir = tmp.path();
     setup_workspace(dir);
@@ -339,8 +372,14 @@ async fn build_single_project_workspace_has_no_project_property() {
     let results = ledger.find_objects("main*").unwrap();
     assert!(!results.is_empty(), "expected to find main.rs object");
     let obj = ledger.get_object(&results[0].0).unwrap().unwrap();
-    assert!(
-        obj.properties.get("project").is_none(),
-        "single-path workspaces must not gain a `project` property"
+    assert_eq!(
+        obj.name, "main.rs",
+        "the displayed name must stay the plain within-project path, unlike the id hash"
+    );
+    assert_eq!(
+        obj.properties.get("project").and_then(|v| v.as_str()),
+        Some("src"),
+        "a single non-`.` observe path must leave a real `project` property behind so its \
+         directory prefix can be reconstructed later (e.g. by RFC 0088's own real source reads)"
     );
 }
