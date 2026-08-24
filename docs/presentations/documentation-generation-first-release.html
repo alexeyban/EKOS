@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Documentation Generation, First Release — EKOS</title>
+<meta name="description" content="Point ekos at a project it has never seen and get real, evidence-grounded docs back — module and symbol AI overviews, a real Purpose from the real README, zero fabrication. Verified cold against a brand-new project, zero API cost. The same compiled properties that make the generated pages precise are exactly what MCP tools read live.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>Documentation generation.<br><span class="arrow-word">First release — cold, on a project EKOS had never seen.</span></h1>
+  <p class="lede">Every prior documentation deck ran against the same familiar codebase. This time:
+  a brand-new, real FastAPI backend EKOS had zero prior ledger state for — <code
+  class="mono">pdf-reader</code>, a PDF reader with OCR and AI-assisted translation. Five real
+  pipeline commands later, every module and every symbol has a real, evidence-grounded AI overview,
+  the project's real README grounds a real Purpose statement, and nothing not in the source is ever
+  invented. This is the first release: the whole loop, working end to end, on a project it had
+  never touched before.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">never scanned before</span><span class="sep mono">→</span>
+    <span class="chip">init → build → recover → resolve → compile → commit --yes</span><span class="sep mono">→</span>
+    <span class="chip hot">28 modules + 31 symbols described, 0 errors</span><span class="sep mono">→</span>
+    <span class="chip">59 real entity pages, zero API cost</span>
+  </div>
+  <div class="byline"><span class="dot"></span> pdf-reader/backend/app — real FastAPI/PyMuPDF/Tesseract, 15 files, local <code class="mono">llama3:latest</code> · RFC 0035 · RFC 0087 · RFC 0088 · devlog_98</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the run, unedited</div>
+  <div class="eyebrow">five commands, one small scoped config, real terminal output</div>
+  <h2>Point it at any project. It doesn't need to already know it.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">No prior <code class="mono">.ekos/</code> state, no
+      hand-written fixture, no mock data — a real project cloned for other reasons, scoped to its
+      backend, plus the top-level <code class="mono">README.md</code> so the Purpose/Architecture
+      summary has something real to ground itself in. Every stage of the pipeline runs exactly the
+      same way it would on any workspace.</p>
+    </div>
+    <div class="codeblock">
+      <div class="tag">ekos.toml — backend/app scope only</div>
+<pre style="margin:0;"><span class="k">[observe]</span>
+paths = [<span class="s">"backend/app"</span>, <span class="s">"README.md"</span>]
+
+<span class="k">[llm]</span>
+provider = <span class="s">"ollama"</span>
+model = <span class="s">"llama3:latest"</span>
+
+<span class="k">[llm-description]</span>
+enabled = <span class="s">true</span>
+scope = <span class="s">"all"</span>       <span class="c"># modules + symbols</span></pre>
+    </div>
+  </div>
+  <div class="codeblock" style="margin-top:1.6rem;">
+    <div class="tag">terminal — real output</div>
+<pre style="margin:0;">$ ekos build
+  Files observed (new): 15
+
+$ ekos commit --yes
+  LLM description requested for up to 60 real call(s)
+  (28 module(s), 31 symbol(s), 1 project-level summary)
+  AI descriptions: 28 module(s), 31 symbol(s) described
+  <span class="c">(0 cached, 0 skipped without a source span, 0 errors)</span>
+
+$ ekos docs generate --layout curated --output doc
+  Entity detail pages written: 59</pre>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / real Purpose, not guessed</div>
+  <div class="eyebrow">Architecture.md — grounded in the project's own real README</div>
+  <h2>Nothing is invented. When there's nothing real to ground it, it says so.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">Scope the run to source only and <code
+      class="mono">Purpose</code> is honestly blank — <em>"not yet computed, no real EKOS source for
+      a project's stated purpose today."</em> Add the real README and RFC 0088's project-level
+      summary step reads it, once, and writes a real, grounded answer. No README, no answer —
+      never a fabricated placeholder either way.</p>
+    </div>
+    <div class="codeblock">
+      <div class="tag">doc/Architecture.md — real generated output</div>
+<pre style="margin:0;"><span class="k">**Purpose:**</span> Local, browser-based reader for
+technical/scanned PDFs with AI-assisted
+translation and explanation. <span class="c">(LLM-assisted,
+RFC 0088 — see the object's own evidence)</span>
+
+<span class="k">**Architecture style:**</span> layered <span class="c">(LLM-assisted,
+RFC 0088)</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / a real symbol page</div>
+  <div class="eyebrow">what an undocumented function's page looks like now</div>
+  <h2>No docstring in the source. A real reading of the code anyway.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">Most of this real codebase's route-handler and service
+      functions have no docstring — RFC 0087's real doc-comment extraction correctly says so, and
+      still does; nothing here fabricates one. What's new is the section below it: a real,
+      evidence-grounded reading of the function's own real source lines, cited by id, distinct in
+      the page from anything claiming to be human-written documentation.</p>
+    </div>
+    <div class="codeblock">
+      <div class="tag">doc/entities/pythonsymbol/de/delete-document.md</div>
+<pre style="margin:0;"><span class="k"># delete_document (PythonSymbol)</span>
+
+<span class="c">## Definition</span>
+<span class="bad">_Not documented in source._</span>
+<span class="k">**Lines:**</span> 76&ndash;87
+
+<span class="c">## AI-Assisted Overview</span>
+A Python function that deletes a document from
+the database and removes associated files. It
+takes a file hash as input, checks if the
+document exists, and then performs the deletion
+by removing the file, deleting related cache
+entries, and committing the changes to the
+database.
+
+<span class="c">## Evidence</span>
+<span class="c">ai_overview grounded in delete_document's own
+real source lines (confidence: 1.00)</span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / found live, fixed same session</div>
+  <div class="eyebrow">a real gap, only surfaced by asking why a real page was empty</div>
+  <h2>Python symbols were silently, honestly skipped. Every single one.</h2>
+  <table class="ttable">
+    <thead><tr><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td class="bad"><code class="mono">python_analyzer.rs</code> never captured a real <code class="mono">source_span</code> (Rust/Elixir only at RFC 0088's launch)</td><td class="good">real <code class="mono">line_number</code>/<code class="mono">item_span</code> — byte offset (<code class="mono">rustpython_parser::Ranged</code>) converted to a real 1-indexed line</td></tr>
+      <tr><td class="bad">every <code class="mono">PythonSymbol</code> honestly skipped — <code class="mono">scope = "symbols"</code>/<code class="mono">"all"</code> silently did nothing for Python, with no diagnostic saying why</td><td class="good">31/31 real symbols described, 0 skipped without a span, 0 errors</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">This deck's own predecessor listed <em>"Python/JS <code
+  class="mono">source_span</code> — same pattern, not yet wired"</em> as a deliberately deferred
+  item. It stayed deferred until a real user, reading a real generated page, asked directly why it
+  was empty — the same live-verification pattern this whole effort keeps converging on: a real
+  question about a real page finds what a passing test suite doesn't.</p>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / not just for docs</div>
+  <div class="eyebrow">the same compiled properties, a second real consumer</div>
+  <h2>What makes a doc page precise makes an MCP answer precise too.</h2>
+  <p class="lede" style="margin-top:0;">A generated Markdown page and an MCP tool response aren't
+  two different pipelines that happen to agree — they're two renderings of the exact same compiled
+  <code class="mono">KirObject</code>. <code class="mono">ekos_state</code>/<code
+  class="mono">ekos_neighborhood</code> return the object's real <code class="mono">properties</code>
+  map verbatim — the same <code class="mono">ai_overview</code>, the same <code
+  class="mono">source_span</code>, the same evidence id that renders into the page above. Fix the
+  gap for one, and every AI agent calling that tool live gets the fix too, with no separate change
+  needed on the MCP side.</p>
+  <div class="flow">
+    <div class="node active"><div class="l1">compiled once</div><div class="l2">KirObject.properties</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">rendered</div><div class="l2">doc/entities/*.md</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">queried live</div><div class="l2">ekos_state / ekos_neighborhood</div></div>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / the honest scorecard</div>
+  <div class="eyebrow">first release means working end to end — not means finished</div>
+  <h2>What's real now. What's deliberately still open.</h2>
+  <table class="ttable">
+    <thead><tr><th>Real, shipped</th><th>Deliberately deferred</th></tr></thead>
+    <tbody>
+      <tr><td class="good">Cold run against a project EKOS had zero prior state for — no fixture, no mock</td><td class="desc">JS/TS <code class="mono">source_span</code> — same pattern, still not wired</td></tr>
+      <tr><td class="good">Module + symbol AI overviews for Rust, Elixir, and now Python — <code class="mono">scope = "all"</code></td><td class="desc">A dedicated <code class="mono">File</code> entity page — symbol pages link to their file by name, not a page of its own</td></tr>
+      <tr><td class="good">Real Purpose/Architecture-style, grounded in the project's own README, honestly blank without one</td><td class="desc">Per-symbol re-verification against changed code at every scope size</td></tr>
+      <tr><td class="good">Zero API cost — real local <code class="mono">llama3:latest</code>, cost-gated (<code class="mono">ekos commit --yes</code>)</td><td class="desc">Real <code class="mono">Architecture confidence</code> from an LLM judgment</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Full workspace gate (<code class="mono">cargo build/test/clippy -D warnings/fmt</code>) clean after every fix; 4 new tests for the Python span fix alone, 25 for the run overall.</p>
+</section>
+
+<section class="slide cta" id="s8">
+  <div class="eyebrow">try it yourself — on a project you've never scanned either</div>
+  <h2>Point it at something real. See what comes back.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ ekos init && ekos build && ekos recover \
+    && ekos resolve && ekos compile && ekos commit --yes
+$ ekos docs generate --layout curated --output doc
+
+<span class="c"># same ledger, live, over MCP:</span>
+$ ekos mcp serve --workspace .</pre>
+  </div>
+  <div class="fineprint">EKOS · Documentation Generation, First Release — RFC 0035, RFC 0087, RFC 0088 · devlog_98 · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>
