@@ -101,6 +101,22 @@ pub struct ObjectPageModel {
     /// deterministic layer (`prose`, below, is where an opt-in LLM may add real heuristic
     /// enrichment on top). Promoted out of `properties` below so it isn't shown twice.
     pub definition: Option<String>,
+    /// Real `{start_line, end_line}` promoted out of the generic `properties` table (same
+    /// treatment `definition` gets from `"description"`) — currently only ever compiled for a
+    /// Rust or Elixir symbol (RFC 0088's `source_span`). `None` either because the object has no
+    /// `source_span` property or because it's shaped unexpectedly (left in the generic table in
+    /// that case, same fallback `definition` uses).
+    pub source_span: Option<(u32, u32)>,
+    /// The real file this object is structurally nested inside, found by walking the compiled
+    /// `Contains` parent chain more than one hop up (RFC 0089) — e.g. a symbol's *module* is its
+    /// direct `"Based on"` parent already shown in `## Relationships`; this is the *file* one hop
+    /// further up, which nothing else on the page surfaces. `None` for an object whose immediate
+    /// parent already is a `File` (the `## Relationships` section already shows that, so this
+    /// would just repeat it) or that isn't rooted in a compiled `File` at all. Not produced by
+    /// `build_object_page_model` itself (that only sees the one object's own touching
+    /// relationships, not the whole graph) — set by the caller afterward, same "layered on top"
+    /// pattern `prose` already uses.
+    pub defined_in_file: Option<String>,
     /// RFC 0088: a real, evidence-grounded LLM overview from the compile-time `describe_objects`
     /// step — `None` when that step hasn't run (disabled by default) or hasn't reached this
     /// object yet. Rendered in its own "## AI-Assisted Overview" subsection, kept visually
@@ -154,6 +170,14 @@ pub fn build_object_page_model(
         .get("description")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    // RFC 0089: same promote-out-of-the-generic-table treatment `description` gets, for the same
+    // reason — shown structured (in `## Definition`'s own "Defined in" line) rather than as a raw
+    // JSON blob in the generic properties table.
+    let source_span = object.properties.get("source_span").and_then(|v| {
+        let start = v.get("start_line")?.as_u64()?;
+        let end = v.get("end_line")?.as_u64()?;
+        Some((start as u32, end as u32))
+    });
     // RFC 0088: same promote-out-of-the-generic-table treatment `description` already gets —
     // `ai_evidence_hash` additionally excluded outright (an internal cache key, never meant for
     // a human reader) regardless of whether the other two are present.
@@ -177,6 +201,7 @@ pub fn build_object_page_model(
         .iter()
         .filter(|(k, _)| match k.as_str() {
             "description" => definition.is_none(),
+            "source_span" => source_span.is_none(),
             "ai_overview" | "ai_usage" | "ai_comment_check" | "ai_evidence_hash" => false,
             _ => true,
         })
@@ -253,6 +278,8 @@ pub fn build_object_page_model(
         kind: object.kind.clone(),
         name: object.name.clone(),
         definition,
+        source_span,
+        defined_in_file: None,
         ai_overview,
         ai_usage,
         ai_comment_check,
@@ -279,6 +306,48 @@ pub fn build_object_page_model(
 /// `object_names` resolves the *other* endpoint of each relationship to a human-readable name
 /// (e.g. `orders` instead of a raw id) when the caller has it available; an id missing from the
 /// map falls back to rendering the raw id rather than guessing or omitting the edge.
+/// Real, immediate `Contains` parent of every object that has one — `to -> from` for every real
+/// `Contains` relationship, first-writer-wins on a duplicate (matches the append-only ledger's own
+/// "first real edge compiled wins" convention elsewhere). Built once per `docs generate` run and
+/// passed into [`resolve_defining_file`] for every entity page, rather than rebuilt per object.
+pub fn build_contains_parent_map(relationships: &[KirRelationship]) -> HashMap<KirId, KirId> {
+    let mut parent_of = HashMap::new();
+    for rel in relationships {
+        if rel.kind == RelationshipKind::Contains {
+            parent_of.entry(rel.to).or_insert(rel.from);
+        }
+    }
+    parent_of
+}
+
+/// Walks `object_id`'s real `Contains` parent chain (`parent_of`, from [`build_contains_parent_map`])
+/// looking for a real `File` two or more hops up (RFC 0089) — e.g. a symbol's module is one hop,
+/// the module's own file is the second. Returns `None` when the *immediate* parent already is the
+/// `File` (one hop — already shown by the object's own `"Based on"` relationship row, so this
+/// would just repeat it), when the chain never reaches a `File` at all, or when a malformed cycle
+/// would otherwise loop forever (bounded by the map's own size).
+pub fn resolve_defining_file(
+    object_id: KirId,
+    parent_of: &HashMap<KirId, KirId>,
+    objects_by_id: &HashMap<KirId, &KirObject>,
+) -> Option<KirId> {
+    let mut current = object_id;
+    let mut hops = 0usize;
+    let max_hops = parent_of.len() + 1;
+    while let Some(&parent) = parent_of.get(&current) {
+        hops += 1;
+        if hops > max_hops {
+            return None;
+        }
+        let parent_obj = objects_by_id.get(&parent)?;
+        if parent_obj.kind == ObjectKind::File {
+            return if hops > 1 { Some(parent) } else { None };
+        }
+        current = parent;
+    }
+    None
+}
+
 pub fn render_object_page(
     object: &KirObject,
     relationships: &[KirRelationship],
@@ -298,6 +367,16 @@ pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
     match &model.definition {
         Some(text) => out.push_str(&format!("{}\n\n", text.trim())),
         None => out.push_str("_Not documented in source._\n\n"),
+    }
+    // RFC 0089: where in the real compiled source this is, when a file/line is known — never
+    // fabricated; each half renders only when it was actually resolved.
+    match (&model.defined_in_file, model.source_span) {
+        (Some(file), Some((start, end))) => out.push_str(&format!(
+            "**Defined in:** `{file}` (lines {start}\u{2013}{end})\n\n"
+        )),
+        (Some(file), None) => out.push_str(&format!("**Defined in:** `{file}`\n\n")),
+        (None, Some((start, end))) => out.push_str(&format!("**Lines:** {start}\u{2013}{end}\n\n")),
+        (None, None) => {}
     }
     // RFC 0088: right at the moment a reader is about to trust this comment — a visible flag
     // when the LLM-assisted check found a real discrepancy, never for "consistent" (nothing to
@@ -436,6 +515,20 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
     match &model.definition {
         Some(text) => body.push_str(&format!("<p>{}</p>\n", html_escape(text.trim()))),
         None => body.push_str("<p class=\"empty\">Not documented in source.</p>\n"),
+    }
+    match (&model.defined_in_file, model.source_span) {
+        (Some(file), Some((start, end))) => body.push_str(&format!(
+            "<p><strong>Defined in:</strong> <code>{}</code> (lines {start}&ndash;{end})</p>\n",
+            html_escape(file)
+        )),
+        (Some(file), None) => body.push_str(&format!(
+            "<p><strong>Defined in:</strong> <code>{}</code></p>\n",
+            html_escape(file)
+        )),
+        (None, Some((start, end))) => body.push_str(&format!(
+            "<p><strong>Lines:</strong> {start}&ndash;{end}</p>\n"
+        )),
+        (None, None) => {}
     }
     match model.ai_comment_check.as_deref() {
         Some("stale") => body.push_str(
@@ -4525,5 +4618,103 @@ mod tests {
         let file = KirObject::new("lib/plausible/repo.ex", ObjectKind::File);
         let page = render_architecture(&[file], &[], &[]);
         assert!(!page.content.contains("### Layer Breakdown"));
+    }
+
+    // ── RFC 0089 — real "Defined in" file resolution for a symbol two hops up ──────────────────
+
+    #[test]
+    fn resolve_defining_file_finds_the_real_file_two_hops_above_a_symbol() {
+        let file = KirObject::new("tools.ex", ObjectKind::File);
+        let module = KirObject::new(
+            "Plausible.IP.Tools",
+            ObjectKind::Custom("ElixirModule".into()),
+        );
+        let symbol = KirObject::new("allowed?", ObjectKind::Custom("ElixirSymbol".into()));
+        let objects = vec![file.clone(), module.clone(), symbol.clone()];
+        let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
+        let relationships = vec![
+            KirRelationship::new(RelationshipKind::Contains, file.id, module.id),
+            KirRelationship::new(RelationshipKind::Contains, module.id, symbol.id),
+        ];
+        let parent_of = build_contains_parent_map(&relationships);
+
+        let found = resolve_defining_file(symbol.id, &parent_of, &objects_by_id);
+        assert_eq!(found, Some(file.id));
+    }
+
+    #[test]
+    fn resolve_defining_file_is_none_when_the_immediate_parent_already_is_the_file() {
+        // A module's own "Based on" relationship row already shows its file one hop up — this
+        // would just repeat it, so it's deliberately not surfaced as a second "Defined in" line.
+        let file = KirObject::new("tools.ex", ObjectKind::File);
+        let module = KirObject::new(
+            "Plausible.IP.Tools",
+            ObjectKind::Custom("ElixirModule".into()),
+        );
+        let objects = vec![file.clone(), module.clone()];
+        let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
+        let relationships = vec![KirRelationship::new(
+            RelationshipKind::Contains,
+            file.id,
+            module.id,
+        )];
+        let parent_of = build_contains_parent_map(&relationships);
+
+        assert_eq!(
+            resolve_defining_file(module.id, &parent_of, &objects_by_id),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_defining_file_is_none_when_the_chain_never_reaches_a_real_file() {
+        let a = KirObject::new("A", ObjectKind::Custom("ElixirModule".into()));
+        let b = KirObject::new("b", ObjectKind::Custom("ElixirSymbol".into()));
+        let objects = vec![a.clone(), b.clone()];
+        let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
+        let relationships = vec![KirRelationship::new(RelationshipKind::Contains, a.id, b.id)];
+        let parent_of = build_contains_parent_map(&relationships);
+
+        assert_eq!(
+            resolve_defining_file(b.id, &parent_of, &objects_by_id),
+            None
+        );
+    }
+
+    #[test]
+    fn a_real_source_span_and_defined_in_file_render_together_under_definition() {
+        let symbol = KirObject::new("allowed?", ObjectKind::Custom("ElixirSymbol".into()))
+            .with_property("description", serde_json::json!("Checks validity."))
+            .with_property(
+                "source_span",
+                serde_json::json!({"start_line": 47, "end_line": 52}),
+            );
+        let mut model = build_object_page_model(&symbol, &[], &[], &HashMap::new());
+        model.defined_in_file = Some("tools.ex".to_string());
+
+        let page = render_markdown_object_page(&model);
+        assert!(page.content.contains("Checks validity."));
+        assert!(
+            page.content
+                .contains("**Defined in:** `tools.ex` (lines 47–52)")
+        );
+        // Promoted out of the generic table, same as `description`, not shown twice.
+        assert!(!page.content.contains("`source_span`"));
+
+        let html = render_html_object_page(&model);
+        assert!(
+            html.content
+                .contains("<strong>Defined in:</strong> <code>tools.ex</code>")
+        );
+        assert!(html.content.contains("47&ndash;52"));
+    }
+
+    #[test]
+    fn no_defined_in_file_and_no_source_span_renders_neither_line() {
+        let symbol = KirObject::new("combine_guards", ObjectKind::Custom("ElixirSymbol".into()));
+        let model = build_object_page_model(&symbol, &[], &[], &HashMap::new());
+        let page = render_markdown_object_page(&model);
+        assert!(!page.content.contains("**Defined in:**"));
+        assert!(!page.content.contains("**Lines:**"));
     }
 }

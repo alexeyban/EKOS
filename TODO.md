@@ -3298,3 +3298,24 @@ are excluded — see the full exclusion list in the planning history if needed.
     Not yet re-verified live against the real analytics backend end-to-end (next: fresh full
     `[llm-description]` re-run, ~2-3hr real cost, since a fresh ledger drops all cached
     `ai_evidence_hash` hits).
+
+- **Re-verified the sibling-plugin fix cheaply against a small real scope instead of the full
+  ~2-3hr backend run** (`analytics/lib/ip`, 2 real Elixir modules + `README.md`) — confirmed
+  `README.md` resolves correctly for both `File`/`Document` kinds and `Architecture.md`'s `Purpose`
+  reads the real project purpose. This surfaced two more real, previously-undiscovered gaps
+  (`devlog_96`/`devlog_97`), both fixed, tested, and pushed:
+  - [x] `elixir_analyzer.rs`'s `extract_doc_comments` only matched `@doc` when `def`/`defp` was the
+    *literal next source line* — any `@spec` (the standard, near-universal real Elixir convention:
+    `@doc` above `@spec` above `def`) or blank line in between silently broke the match. Every
+    public function's real doc comment in `lib/ip/tools.ex` was lost before this fix. Fixed: skips
+    blank lines and single-line `@spec ...`/`@spec(...)` lines before keying the match. 2 new tests,
+    all 261 `ekos-recovery` tests pass.
+  - [x] RFC 0089 (new, filed + implemented): symbol/module entity pages never showed which real
+    file they're defined in — `"Based on"` only ever renders the *immediate* `Contains` parent (a
+    symbol's module, not the file two hops up). Added `resolve_defining_file`/
+    `build_contains_parent_map` (real graph walk, zero LLM) and a `**Defined in:** \`file\` (lines
+    X–Y)` line under `## Definition`, wired into both `docs generate` layouts. Renders file-only
+    when no `source_span` exists (e.g. a multi-clause function whose spannable clause never got
+    captured), and nothing at all when neither resolves. 5 new `ekos-docs-gen` tests.
+  - Full workspace gate (`fmt`/`build`/`clippy -D warnings`/`test --workspace`) and
+    `tests/integration` clean after both fixes; live-verified on the real generated pages.

@@ -108,6 +108,11 @@ pub async fn generate(
     // e.g. `orders` instead of a raw id — cheap, since names are already
     // in the `all_objects()` result, no extra ledger reads needed.
     let object_names: HashMap<_, _> = objects.iter().map(|o| (o.id, o.name.clone())).collect();
+    // RFC 0089: real file two-plus hops up the compiled `Contains` chain (e.g. symbol -> module
+    // -> file) — built once over every real relationship in the ledger, not per object.
+    let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
+    let all_relationships = ledger.all_relationships()?;
+    let parent_of = ekos_docs_gen::build_contains_parent_map(&all_relationships);
 
     std::fs::create_dir_all(output)
         .with_context(|| format!("cannot create output dir {}", output.display()))?;
@@ -130,12 +135,16 @@ pub async fn generate(
             }
         }
 
-        models.push(ekos_docs_gen::build_object_page_model(
+        let mut model = ekos_docs_gen::build_object_page_model(
             object,
             &relationships,
             &evidence,
             &object_names,
-        ));
+        );
+        model.defined_in_file =
+            ekos_docs_gen::resolve_defining_file(object.id, &parent_of, &objects_by_id)
+                .and_then(|file_id| object_names.get(&file_id).cloned());
+        models.push(model);
     }
 
     // Pass 2 (opt-in): layer an LLM-written "## Overview" onto each model, reusing
@@ -424,6 +433,10 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
     // here (or vice versa).
     let object_names: HashMap<_, _> = objects.iter().map(|o| (o.id, o.name.clone())).collect();
     let unique_file_names = ekos_docs_gen::unique_page_file_names(&objects, "md");
+    // RFC 0089: same real multi-hop file resolution as the `--layout objects` entity pages, built
+    // once over the whole graph already loaded into `objects`/`relationships` above.
+    let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
+    let parent_of = ekos_docs_gen::build_contains_parent_map(&relationships);
     let mut entity_pages_written = 0usize;
     for object in objects
         .iter()
@@ -444,12 +457,15 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
                 evidence.push(ev);
             }
         }
-        let model = ekos_docs_gen::build_object_page_model(
+        let mut model = ekos_docs_gen::build_object_page_model(
             object,
             &obj_relationships,
             &evidence,
             &object_names,
         );
+        model.defined_in_file =
+            ekos_docs_gen::resolve_defining_file(object.id, &parent_of, &objects_by_id)
+                .and_then(|file_id| object_names.get(&file_id).cloned());
         let mut page = ekos_docs_gen::render_markdown_object_page(&model);
         if let Some(name) = unique_file_names.get(&object.id) {
             page.file_name = name.clone();
