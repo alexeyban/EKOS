@@ -59,6 +59,15 @@ impl Observer for PythonObserver {
 
             let abs_path = entry.path();
             let rel_path = match abs_path.strip_prefix(root) {
+                // A real, valid `[observe] paths` entry can be a single bare file, not a
+                // directory — `WalkDir::new(root)` then yields exactly one entry equal to
+                // `root` itself, and stripping it from itself leaves an empty relative path
+                // (the same real bug RFC 0088's own live verification found in `plugins/
+                // file` and `plugins/localdocs` first). Falls back to the file's own name.
+                Ok(r) if r.as_os_str().is_empty() => abs_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default(),
                 Ok(r) => r.to_string_lossy().replace('\\', "/"),
                 Err(_) => continue,
             };
@@ -137,6 +146,23 @@ catalog = dbutils.widgets.get("catalog")
                 .unwrap()
                 .contains("dbutils.widgets.get")
         );
+    }
+
+    #[tokio::test]
+    async fn a_single_bare_file_observe_path_gets_its_own_real_name_not_an_empty_one() {
+        // Real bug found live (RFC 0088's own verification): a real, valid `[observe] paths`
+        // entry can be a single bare file, not a directory. `WalkDir::new(root)` then yields
+        // exactly one entry equal to `root` itself, and stripping it from itself used to
+        // leave an empty relative path.
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("notebook.py");
+        std::fs::write(&file_path, SAMPLE_PY).unwrap();
+
+        let ctx = ScanContext::new(&file_path);
+        let pkg = PythonObserver::new().scan(&ctx).await.unwrap();
+
+        assert_eq!(pkg.artifacts.len(), 1);
+        assert_eq!(pkg.artifacts[0].content.data["path"], "notebook.py");
     }
 
     #[tokio::test]

@@ -3265,3 +3265,36 @@ are excluded — see the full exclusion list in the planning history if needed.
     Found by RFC 0088's own real symbol descriptions reporting 0 described despite real compiled
     `source_span` data existing — the analytics project's own real backend-only config (8 observe
     path entries) never triggered this, only a smaller, more targeted real scope did.
+
+- **Two more real bugs found running RFC 0088 at real, full scale (1,066 real modules, not a small
+  test subset) against the real analytics backend** (`devlog_95`):
+  - [x] `plugins/file/src/lib.rs`: a single bare *file* (not directory) used as its own
+    `[observe] paths` entry — a real, already-used shape (this project's own backend-only config:
+    `mix.exs`, `mix.lock`, `README.md`, `CHANGELOG.md`, all four) — got a silently empty
+    `name`/`path`, since `WalkDir::new(root)` yields exactly one entry equal to `root` itself when
+    `root` is a file, and stripping a path from itself leaves `""`, not an `Err` the existing
+    fallback caught. Fixed: falls back to the file's own basename. Found live: `Architecture.md`'s
+    new `Purpose` field read as a real but wrong document's content.
+  - [x] `llm_description.rs`'s `describe_project`: README detection was a loose
+    `.contains("readme")` substring match — matched a real vendored file
+    (`ua_inspector/ua_inspector.readme.md`, a real upstream license file this project bundles)
+    ahead of the real top-level README. Fixed: `is_real_readme_name` matches only a basename whose
+    own stem equals `readme` exactly.
+  - Live-verified: the user's own flagged real page, `PlausibleWeb.RequireAccountPlug`, now has a
+    real, accurate AI-Assisted Overview (1,062/1,066 real modules described, 4 errors, real local
+    `llama3:latest`, zero API cost, ≈2h40m real elapsed time for the full backend at
+    `scope = "modules"`).
+  - [x] Sibling bug: the `plugins/file` fix above only fixed `File`-kind objects — the real
+    `README.md` `Document` object (produced by `plugins/localdocs`, what `describe_project` actually
+    reads) was still empty-named afterward. Grepped the whole codebase for the same
+    `WalkDir::new(root)`/`abs_path.strip_prefix(root)` pattern and found it independently duplicated
+    in **six more** Observer plugins: `localdocs`, `pentaho`, `javascript`, `python`, `elixir`,
+    `rust` — none exercised against a bare-file `[observe] paths` entry before now.
+    `crates/simulation/src/ingest.rs` already had a comment documenting this exact bug class as a
+    known workaround (always scan the whole directory, never a single file) without ever
+    root-causing/fixing the underlying plugins. Fixed identically in all six, one new regression
+    test each. Full workspace gate re-run clean: `cargo fmt`, `build --workspace`,
+    `clippy --workspace -- -D warnings`, `test --workspace` (all green), `tests/integration` (3/3).
+    Not yet re-verified live against the real analytics backend end-to-end (next: fresh full
+    `[llm-description]` re-run, ~2-3hr real cost, since a fresh ledger drops all cached
+    `ai_evidence_hash` hits).

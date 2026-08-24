@@ -208,6 +208,17 @@ impl Observer for LocalDocsObserver {
 
             let abs_path = entry.path();
             let rel_path = match abs_path.strip_prefix(root) {
+                // Same real bug `plugins/file` had (RFC 0088's own live verification found
+                // it there first): a real, valid `[observe] paths` entry can be a single
+                // bare file, not a directory (this project's own config: `paths = [...,
+                // "README.md", "CHANGELOG.md"]`) — `WalkDir::new(root)` then yields exactly
+                // one entry equal to `root` itself, and stripping it from itself leaves an
+                // empty relative path. Falls back to the file's own name so a real README
+                // observed this way is never silently nameless.
+                Ok(r) if r.as_os_str().is_empty() => abs_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default(),
                 Ok(r) => r.to_string_lossy().replace('\\', "/"),
                 Err(_) => continue,
             };
@@ -428,6 +439,32 @@ mod tests {
             .scan(&ctx)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_single_bare_file_observe_path_gets_its_own_real_name_not_an_empty_one() {
+        // Real bug found live (RFC 0088's own project-level LLM summary picked the wrong
+        // real document because the real README's `name`/`path` were both empty strings):
+        // a real, valid `[observe] paths` entry can be a single bare file, not a directory
+        // (this project's own backend-only config does exactly this for `README.md`).
+        // `WalkDir::new(root)` then yields exactly one entry equal to `root` itself, and
+        // stripping it from itself used to leave an empty relative path.
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("README.md");
+        std::fs::write(&file_path, b"# Real Project\n\nA real description.\n").unwrap();
+
+        let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
+            text: String::new(),
+            calls: Mutex::new(0),
+        });
+        let ctx = ScanContext::new(&file_path);
+        let pkg = LocalDocsObserver::with_defaults(ocr)
+            .scan(&ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(pkg.artifacts.len(), 1);
+        assert_eq!(pkg.artifacts[0].content.data["path"], "README.md");
     }
 
     #[tokio::test]

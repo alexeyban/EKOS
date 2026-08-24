@@ -505,6 +505,18 @@ struct ProjectSummaryOutput {
     architecture_style: Option<String>,
 }
 
+/// True only for a real top-level README (`README.md`, `README`, `README.rst`, ... —
+/// case-insensitive on the basename's own stem), never a loose substring match. Found live:
+/// a real vendored file this project bundles, `ua_inspector/ua_inspector.readme.md`, matched
+/// a naive `.contains("readme")` check before the real project README did, because iteration
+/// order isn't alphabetical and (separately, see `plugins/file`'s own fix) the real README's
+/// `name` was empty at the time this was first written.
+fn is_real_readme_name(name: &str) -> bool {
+    let basename = name.rsplit('/').next().unwrap_or(name);
+    let stem = basename.split('.').next().unwrap_or(basename);
+    stem.eq_ignore_ascii_case("readme")
+}
+
 /// RFC 0088's project-level call — one real LLM call per `describe_objects` run (not per-object),
 /// writing `purpose`/`architecture_style` onto the one synthetic `ProjectSummary` object.
 /// `Architecture.md`'s `## Architecture Summary` reads it when present; keeps today's honest
@@ -517,8 +529,7 @@ pub async fn describe_project(
     let objects = store.all_objects().map_err(|e| e.to_string())?;
 
     let readme = objects.iter().find(|o| {
-        matches!(&o.kind, ObjectKind::Custom(s) if s == "Document")
-            && o.name.to_lowercase().contains("readme")
+        matches!(&o.kind, ObjectKind::Custom(s) if s == "Document") && is_real_readme_name(&o.name)
     });
     let readme_excerpt = readme
         .and_then(|o| o.properties.get("excerpt"))
@@ -1130,6 +1141,52 @@ mod tests {
         let sent = llm.requests.lock().unwrap();
         assert!(sent[0].contains("privacy-friendly analytics tool"));
         assert!(sent[0].contains("\"lib\""));
+    }
+
+    #[test]
+    fn is_real_readme_name_rejects_a_vendored_readme_lookalike() {
+        // The exact real shape found live: a real vendored file this project bundles under
+        // `priv/ua_inspector/`, which a naive substring check on "readme" would match ahead
+        // of the real top-level README depending on iteration order.
+        assert!(is_real_readme_name("README.md"));
+        assert!(is_real_readme_name("readme"));
+        assert!(is_real_readme_name("README.rst"));
+        assert!(!is_real_readme_name("ua_inspector/ua_inspector.readme.md"));
+        assert!(!is_real_readme_name(
+            "ref_inspector/ref_inspector.readme.md"
+        ));
+    }
+
+    #[tokio::test]
+    async fn describe_project_prefers_the_real_readme_over_a_vendored_lookalike() {
+        let (store, _dir) = temp_store();
+        // Inserted first, deliberately, so a naive substring/first-match check would win.
+        let vendored = KirObject::new(
+            "ua_inspector/ua_inspector.readme.md",
+            ObjectKind::Custom("Document".into()),
+        )
+        .with_property(
+            "excerpt",
+            serde_json::json!("A parser database for UAInspector."),
+        );
+        let real_readme = KirObject::new("README.md", ObjectKind::Custom("Document".into()))
+            .with_property(
+                "excerpt",
+                serde_json::json!("A privacy-friendly analytics tool."),
+            );
+        store.append_object(&vendored).unwrap();
+        store.append_object(&real_readme).unwrap();
+
+        let llm = RecordingLlmProvider::new(r#"{"purpose": "x", "architecture_style": "y"}"#);
+        describe_project(&store, &llm).await.unwrap();
+
+        let sent = llm.requests.lock().unwrap();
+        assert!(
+            sent[0].contains("privacy-friendly analytics tool"),
+            "the real top-level README must win, not the vendored lookalike: {}",
+            sent[0]
+        );
+        assert!(!sent[0].contains("UAInspector"));
     }
 
     #[tokio::test]
