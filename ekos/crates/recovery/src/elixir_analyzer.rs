@@ -309,7 +309,23 @@ fn extract_doc_comments(source: &str) -> DocComments {
         if is_moduledoc {
             result.moduledoc.insert(attr_line, text);
         } else {
-            result.doc.insert(i, text);
+            // Real Elixir convention (and the shape this was found broken against, live: `lib/ip/
+            // tools.ex`'s own `allowed?`/`ranges`) puts a `@spec` — and often a blank line either
+            // side of it — between `@doc` and the `def`/`defp` it documents, not immediately next
+            // to it. Skip blank lines and single-line `@spec ...` lines so `doc` is keyed at the
+            // real declaration line, not the `@spec` line sitting in between. A multi-line `@spec`
+            // (a wrapped type signature) is not unwound here — same accepted, documented limitation
+            // as this function's other real-syntax gaps (no sigil/heredoc awareness for `~S"""`).
+            let mut key = i;
+            while key < lines.len() {
+                let t = lines[key].trim();
+                if t.is_empty() || t.starts_with("@spec ") || t.starts_with("@spec(") {
+                    key += 1;
+                    continue;
+                }
+                break;
+            }
+            result.doc.insert(key, text);
         }
     }
     result
@@ -1165,6 +1181,34 @@ mod tests {
         assert_eq!(hash_fn.properties["description"], "Hashes a password.");
         let other_fn = result.objects.iter().find(|o| o.name == "other").unwrap();
         assert!(!other_fn.properties.contains_key("description"));
+    }
+
+    #[test]
+    fn a_doc_still_attaches_across_a_real_spec_line_in_between() {
+        // Real bug found live against `analytics/lib/ip/tools.ex`: `@doc` -> `@spec` -> `def` is
+        // the standard real Elixir convention (credo's own style guide puts spec directly above
+        // def, doc directly above spec) — every real public function in that file used this exact
+        // shape, and every one of them silently lost its doc before this fix.
+        let result = parse(
+            "defmodule M do\n  @doc \"Hashes a password.\"\n  @spec hash(String.t()) :: String.t()\n  def hash(pw) do\n    :ok\n  end\nend\n",
+        );
+        let hash_fn = result.objects.iter().find(|o| o.name == "hash").unwrap();
+        assert_eq!(hash_fn.properties["description"], "Hashes a password.");
+    }
+
+    #[test]
+    fn a_doc_still_attaches_across_a_blank_line_then_a_spec_line() {
+        // The other real shape found live: a blank line *and* a `@spec` both sit between `@doc`
+        // and `def` (`analytics/lib/ip/tools.ex`'s own `allowed?`).
+        let result = parse(
+            "defmodule M do\n  @doc \"Checks validity.\"\n\n  @spec allowed?(String.t()) :: boolean()\n  def allowed?(ip) do\n    true\n  end\nend\n",
+        );
+        let f = result
+            .objects
+            .iter()
+            .find(|o| o.name == "allowed?")
+            .unwrap();
+        assert_eq!(f.properties["description"], "Checks validity.");
     }
 
     #[test]
