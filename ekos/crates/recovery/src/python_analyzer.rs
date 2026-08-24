@@ -256,6 +256,7 @@ fn add_symbol(
     file_id: KirId,
     result: &mut PythonFileResult,
     doc: Option<String>,
+    span: Option<(u32, u32)>,
 ) {
     let target_id = KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
@@ -270,12 +271,47 @@ fn add_symbol(
         obj.properties
             .insert("description".into(), serde_json::json!(doc));
     }
+    // RFC 0088 (fast-follow — Rust/Elixir only at launch): the real `def`/`class` statement's own
+    // byte range, converted to 1-indexed lines via `line_number` below, so `llm_description.rs`
+    // can slice and send the real source text — without this, every Python symbol is honestly
+    // skipped, never described, regardless of `[llm-description] scope`.
+    if let Some((start, end)) = span {
+        obj.properties.insert(
+            "source_span".into(),
+            serde_json::json!({"start_line": start, "end_line": end}),
+        );
+    }
     result.objects.push(obj);
     result.relationships.push(KirRelationship::new(
         RelationshipKind::Contains,
         file_id,
         target_id,
     ));
+}
+
+/// 1-indexed line number containing byte offset `offset` in `source` — counts `\n` bytes before
+/// it. `rustpython_parser`'s `Ranged::range()` gives byte offsets (`TextSize`), not line/column;
+/// `syn`'s `LineColumn` (what `rust_analyzer.rs`'s own `item_span` uses) has no Python equivalent
+/// here, so this is the real conversion RFC 0088's `source_span` needs for a Python symbol.
+fn line_number(source: &str, offset: usize) -> u32 {
+    let offset = offset.min(source.len());
+    1 + source.as_bytes()[..offset]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count() as u32
+}
+
+/// Real `{start_line, end_line}` for `item`'s own AST range — both ends converted via
+/// `line_number`. Matches `rust_analyzer.rs`'s `item_span` in spirit (whole real declaration
+/// span, decorators included since they're part of the same statement's own range in
+/// `rustpython_parser`'s AST, same "don't try to exclude attached-comment-like syntax" choice
+/// RFC 0087 already made for Rust's own doc-comment-inclusive span).
+fn item_span<T: Ranged>(item: &T, source: &str) -> (u32, u32) {
+    let range = item.range();
+    (
+        line_number(source, range.start().to_usize()),
+        line_number(source, range.end().to_usize()),
+    )
 }
 
 /// Real Python docstring extraction (Phase 1 of the "Real Descriptions, Purpose, and Links"
@@ -316,14 +352,32 @@ fn walk_top_level_statement(
         }
         ast::Stmt::FunctionDef(f) => {
             let doc = python_docstring(&f.body);
-            add_symbol(f.name.as_str(), "function", path, file_id, result, doc);
+            let span = item_span(f, source);
+            add_symbol(
+                f.name.as_str(),
+                "function",
+                path,
+                file_id,
+                result,
+                doc,
+                Some(span),
+            );
             for inner in &f.body {
                 try_recognize_chain_statement(inner, path, source, result, graph_index);
             }
         }
         ast::Stmt::ClassDef(c) => {
             let doc = python_docstring(&c.body);
-            add_symbol(c.name.as_str(), "class", path, file_id, result, doc);
+            let span = item_span(c, source);
+            add_symbol(
+                c.name.as_str(),
+                "class",
+                path,
+                file_id,
+                result,
+                doc,
+                Some(span),
+            );
         }
         other => {
             try_recognize_chain_statement(other, path, source, result, graph_index);
@@ -679,6 +733,50 @@ mod tests {
         let result = parse("def f():\n    1 + 1\n    return None\n");
         let f = result.objects.iter().find(|o| o.name == "f").unwrap();
         assert!(!f.properties.contains_key("description"));
+    }
+
+    // ── RFC 0088 (fast-follow) — real source_span capture for Python ───────────────────────────
+
+    #[test]
+    fn a_single_line_function_gets_a_real_source_span() {
+        // Lines: 1 def, 2 body.
+        let result = parse("def f():\n    pass\n");
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert_eq!(
+            f.properties["source_span"],
+            serde_json::json!({"start_line": 1, "end_line": 2})
+        );
+    }
+
+    #[test]
+    fn a_multi_line_function_body_gets_a_real_source_span() {
+        let result = parse("def f():\n    x = 1\n    y = 2\n    return x + y\n");
+        let f = result.objects.iter().find(|o| o.name == "f").unwrap();
+        assert_eq!(
+            f.properties["source_span"],
+            serde_json::json!({"start_line": 1, "end_line": 4})
+        );
+    }
+
+    #[test]
+    fn a_class_gets_a_real_source_span_too() {
+        let result = parse("class Widget:\n    def method(self):\n        pass\n");
+        let widget = result.objects.iter().find(|o| o.name == "Widget").unwrap();
+        assert_eq!(
+            widget.properties["source_span"],
+            serde_json::json!({"start_line": 1, "end_line": 3})
+        );
+    }
+
+    #[test]
+    fn a_function_defined_after_other_real_code_gets_its_own_real_line_numbers() {
+        // The real case this matters for: a symbol isn't always the first thing in the file.
+        let result = parse("import os\n\nX = 1\n\n\ndef later():\n    return X\n");
+        let later = result.objects.iter().find(|o| o.name == "later").unwrap();
+        assert_eq!(
+            later.properties["source_span"],
+            serde_json::json!({"start_line": 6, "end_line": 7})
+        );
     }
 
     #[test]

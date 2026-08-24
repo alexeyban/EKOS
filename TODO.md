@@ -3319,3 +3319,15 @@ are excluded — see the full exclusion list in the planning history if needed.
     captured), and nothing at all when neither resolves. 5 new `ekos-docs-gen` tests.
   - Full workspace gate (`fmt`/`build`/`clippy -D warnings`/`test --workspace`) and
     `tests/integration` clean after both fixes; live-verified on the real generated pages.
+
+- **First real analysis of a new project this session (`pdf-reader/backend/app`, real FastAPI/
+  PyMuPDF/Tesseract, 15 files) surfaced a real RFC 0088 gap for Python specifically** (`devlog_98`):
+  - [x] `python_analyzer.rs` never captured `source_span` (Rust/Elixir only at RFC 0088's own
+    launch) — every `PythonSymbol` was silently, honestly skipped by `llm_description.rs` regardless
+    of `[llm-description] scope`, with nothing surfacing why. Fixed: `line_number`/`item_span` (byte
+    offset via `rustpython_parser::Ranged` → 1-indexed line, since Python has no `syn::LineColumn`
+    equivalent) wired into both `add_symbol` call sites (`FunctionDef`/`ClassDef`). 4 new tests, all
+    21 `python_analyzer` tests pass, full workspace gate + `tests/integration` clean.
+  - Most of `pdf-reader`'s real route-handler/service functions genuinely have no docstring —
+    `## Definition` correctly stays "Not documented in source" for those; this fix only unblocks the
+    separate, opt-in `## AI-Assisted Overview` section from running for Python symbols at all.

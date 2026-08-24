@@ -1,7 +1,8 @@
 //! `describe_objects` — RFC 0088's LLM-backed compile-time description step: real, evidence-
 //! grounded `ai_overview`/`ai_usage`/`ai_comment_check` properties for every `Module`/`Rollup`/
-//! `Crate` object and (when `source_span` was captured — Elixir and Rust so far, see the RFC's
-//! own "New requirement: symbol source spans") every `Symbol` object.
+//! `Crate` object and (when `source_span` was captured — Elixir and Rust at RFC 0088's own launch;
+//! Python added as a fast-follow, `python_analyzer.rs`'s own `item_span`, once a real project found
+//! every `PythonSymbol` honestly skipped with `scope = "symbols"`/`"all"`) every `Symbol` object.
 //!
 //! Deliberately **not** a `CompilerPass`: found before writing any code, by reading
 //! `semantic/src/lib.rs`/`ledger/src/fact_ledger.rs` directly, that `merge_graphs`/`build_ckm`
