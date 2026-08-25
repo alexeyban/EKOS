@@ -13,7 +13,8 @@ use chrono::{DateTime, Utc};
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_identity::{DefaultResolver, IdentityResolver, MergeProposal};
 use ekos_kir::{
-    KirEvidence, KirGraph, KirId, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
+    KirEvidence, KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind,
+    SourceLocation,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -108,6 +109,33 @@ impl CkModel {
         }
 
         errors
+    }
+
+    /// The distinct set of relationship `from`/`to` ids that don't resolve within this model's
+    /// own object set — the same ids `validate()` reports as `"unknown from/to-id"` errors, but
+    /// as real `KirId`s a caller can cross-reference against a broader "known ids" source instead
+    /// of parsing `validate()`'s formatted message text.
+    ///
+    /// Exists because the CKM's own object set is deliberately narrower than the full, post-
+    /// `commit` ledger: `File` objects are written straight to the ledger by `ekos build`, never
+    /// through a `KnowledgeArtifact` this crate reads (see `SemanticCompilerPass::run`'s own
+    /// comment), so any relationship pointing at a `File` — the overwhelming majority of real
+    /// `DependsOn`/`Contains` edges recovery passes emit — is structurally guaranteed to be
+    /// "unknown" here even though it resolves correctly once committed. `ekos compile`'s CLI
+    /// layer (which does have ledger access) uses this to tell that expected, by-design gap apart
+    /// from a genuinely dangling reference, instead of reporting every one as equally alarming.
+    pub fn dangling_relationship_target_ids(&self) -> HashSet<KirId> {
+        let object_ids: HashSet<KirId> = self.objects.iter().map(|o| o.id).collect();
+        let mut missing = HashSet::new();
+        for rel in &self.relationships {
+            if !object_ids.contains(&rel.from) {
+                missing.insert(rel.from);
+            }
+            if !object_ids.contains(&rel.to) {
+                missing.insert(rel.to);
+            }
+        }
+        missing
     }
 }
 
@@ -232,6 +260,87 @@ pub fn dedup_relationships(rels: Vec<KirRelationship>) -> Vec<KirRelationship> {
     }
 
     result
+}
+
+/// RFC 0094 §"Threshold": the smallest real dependent count where "more than a pair" starts to
+/// mean something — 1 or 2 dependents doesn't yet distinguish genuinely broad, coupled usage from
+/// a couple of unrelated call sites. Not a tuned/calibrated number, an explicit, named floor.
+const MIN_DEPENDENTS_FOR_CONCENTRATION_RISK: usize = 3;
+
+/// Caps how many of a risk's real justifying `DependsOn` edges get cited as evidence — a
+/// widely-used object can have dozens of real dependents; the point/count is already carried in
+/// `dependent_count`, a handful of real citations is enough to substantiate it without an
+/// unbounded evidence list.
+const MAX_CONCENTRATION_RISK_EVIDENCE: usize = 5;
+
+/// Deterministic id for one object's Observed Concentration Risk (RFC 0094), keyed by the target
+/// object's own id — re-derived identically on every `compile` run, matching every other
+/// deterministic-id precedent this codebase already established (RFC 0070/0071's fix for the
+/// unbounded-duplicate-accumulation failure mode a non-deterministic id causes across repeated
+/// runs).
+fn concentration_risk_kir_id(target_id: KirId) -> KirId {
+    KirId(uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        format!("risk:concentration:{target_id}").as_bytes(),
+    ))
+}
+
+/// RFC 0094: one real, deterministically-derived `Custom("Risk")` object per compiled object that
+/// is the target of `MIN_DEPENDENTS_FOR_CONCENTRATION_RISK` or more real `DependsOn` edges — a
+/// heavy real fan-in is the structural signature of a single-point-of-failure candidate (RFC 0068
+/// §29's own "tight coupling" technical-debt category). `risk_type: "observed"` only — no
+/// inference, no fabricated severity score, just the real count and the real edges that produced
+/// it. A `References` edge from the risk to the object it concerns makes it directly navigable.
+fn concentration_risks(graph: &KirGraph) -> Vec<(KirObject, KirRelationship)> {
+    let mut dependents_by_target: HashMap<KirId, Vec<&KirRelationship>> = HashMap::new();
+    for rel in &graph.relationships {
+        if rel.kind == RelationshipKind::DependsOn {
+            dependents_by_target.entry(rel.to).or_default().push(rel);
+        }
+    }
+    let objects_by_id: HashMap<KirId, &KirObject> =
+        graph.objects.iter().map(|o| (o.id, o)).collect();
+
+    let mut risks: Vec<(KirObject, KirRelationship)> = Vec::new();
+    let mut target_ids: Vec<&KirId> = dependents_by_target.keys().collect();
+    target_ids.sort_by_key(|id| id.to_string());
+    for target_id in target_ids {
+        let rels = &dependents_by_target[target_id];
+        if rels.len() < MIN_DEPENDENTS_FOR_CONCENTRATION_RISK {
+            continue;
+        }
+        // Honest: only a real, resolvable target ever gets a Risk object — never fabricated
+        // against a dangling id.
+        let Some(target) = objects_by_id.get(target_id) else {
+            continue;
+        };
+        let count = rels.len();
+        let risk_id = concentration_risk_kir_id(*target_id);
+        let mut risk = KirObject::new(
+            format!("Concentration risk: {}", target.name),
+            ObjectKind::Custom("Risk".to_string()),
+        )
+        .with_property("risk_type", serde_json::json!("observed"))
+        .with_property(
+            "statement",
+            serde_json::json!(format!(
+                "'{}' has {count} real compiled dependent(s)",
+                target.name
+            )),
+        )
+        .with_property("dependent_count", serde_json::json!(count));
+        risk.id = risk_id;
+        for ev_id in rels
+            .iter()
+            .flat_map(|r| r.evidence.iter().copied())
+            .take(MAX_CONCENTRATION_RISK_EVIDENCE)
+        {
+            risk.evidence.push(ev_id);
+        }
+        let rel = KirRelationship::new(RelationshipKind::References, risk_id, *target_id);
+        risks.push((risk, rel));
+    }
+    risks
 }
 
 /// Build a `CkModel` from a resolved `KirGraph`.
@@ -434,6 +543,14 @@ impl CompilerPass for SemanticCompilerPass {
         // set (which by then includes both `ekos build`'s `File` objects and this pass's own
         // CKM output) — see `cli/src/commands/commit.rs`.
 
+        // ── Observed Concentration Risk (RFC 0094) ──────────────────────────────
+        // Unlike rollups above, this only needs `DependsOn` edges + their targets — both already
+        // fully present in `resolved` at this point, no `File`-object dependency to defer for.
+        for (risk, rel) in concentration_risks(&resolved) {
+            resolved.add_object(risk);
+            resolved.add_relationship(rel);
+        }
+
         // ── Build CKM ────────────────────────────────────────────────────────
         let model = build_ckm(&resolved);
 
@@ -560,6 +677,123 @@ mod tests {
         });
         let errors = model.validate();
         assert!(errors.iter().any(|e| e.contains("unknown to-id")));
+    }
+
+    #[test]
+    fn dangling_relationship_target_ids_returns_the_real_missing_ids() {
+        let mut model = build_ckm(&two_object_graph());
+        let phantom_to = KirId::new();
+        let phantom_from = KirId::new();
+        model.relationships.push(CkmRelationship {
+            id: KirId::new(),
+            kind: RelationshipKind::References,
+            from: model.objects[0].id,
+            to: phantom_to,
+            properties: HashMap::new(),
+            evidence: vec![],
+        });
+        model.relationships.push(CkmRelationship {
+            id: KirId::new(),
+            kind: RelationshipKind::References,
+            from: phantom_from,
+            to: model.objects[0].id,
+            properties: HashMap::new(),
+            evidence: vec![],
+        });
+        let missing = model.dangling_relationship_target_ids();
+        assert_eq!(missing.len(), 2);
+        assert!(missing.contains(&phantom_to));
+        assert!(missing.contains(&phantom_from));
+        assert!(!missing.contains(&model.objects[0].id));
+    }
+
+    #[test]
+    fn dangling_relationship_target_ids_is_empty_for_a_valid_ckm() {
+        let model = build_ckm(&two_object_graph());
+        assert!(model.dangling_relationship_target_ids().is_empty());
+    }
+
+    /// Builds a graph with `dependent_count` real `File`-ish objects each `DependsOn` one shared
+    /// `target` (a `Custom("Technology")`), each edge carrying its own real evidence — the shape
+    /// `concentration_risks` is meant to detect.
+    fn graph_with_fan_in(target_name: &str, dependent_count: usize) -> (KirGraph, KirId) {
+        let mut g = KirGraph::new();
+        // A deterministic id (not `KirObject::new`'s random default) — mirrors how a real
+        // Technology object's id is actually derived in production (name-keyed, e.g.
+        // `dependency_analyzer.rs`'s `technology_kir_id`), so two separately-built graphs for the
+        // same real name produce the same target id, the precondition this test's own
+        // determinism check needs.
+        let mut target_obj =
+            KirObject::new(target_name, ObjectKind::Custom("Technology".to_string()));
+        target_obj.id = KirId(uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            format!("test-technology:{target_name}").as_bytes(),
+        ));
+        let target = g.add_object(target_obj);
+        for i in 0..dependent_count {
+            let ev = KirEvidence::new(
+                SourceLocation::at(format!("file{i}.py"), 1),
+                format!("import {target_name}"),
+            );
+            let ev_id = g.add_evidence(ev);
+            let dep = g.add_object(KirObject::new(format!("file{i}.py"), ObjectKind::File));
+            let mut rel = KirRelationship::new(RelationshipKind::DependsOn, dep, target);
+            rel.evidence.push(ev_id);
+            g.add_relationship(rel);
+        }
+        (g, target)
+    }
+
+    #[test]
+    fn below_threshold_fan_in_produces_no_risk() {
+        let (g, _target) =
+            graph_with_fan_in("small-lib", MIN_DEPENDENTS_FOR_CONCENTRATION_RISK - 1);
+        assert!(concentration_risks(&g).is_empty());
+    }
+
+    #[test]
+    fn at_threshold_fan_in_produces_exactly_one_observed_risk() {
+        let (g, target) = graph_with_fan_in("popular-lib", MIN_DEPENDENTS_FOR_CONCENTRATION_RISK);
+        let risks = concentration_risks(&g);
+        assert_eq!(risks.len(), 1);
+        let (risk, rel) = &risks[0];
+        assert_eq!(risk.kind, ObjectKind::Custom("Risk".to_string()));
+        assert_eq!(risk.properties["risk_type"], "observed");
+        assert_eq!(
+            risk.properties["dependent_count"],
+            MIN_DEPENDENTS_FOR_CONCENTRATION_RISK
+        );
+        assert!(
+            risk.properties["statement"]
+                .as_str()
+                .unwrap()
+                .contains("popular-lib")
+        );
+        assert_eq!(rel.kind, RelationshipKind::References);
+        assert_eq!(rel.from, risk.id);
+        assert_eq!(rel.to, target);
+        assert!(!risk.evidence.is_empty());
+    }
+
+    #[test]
+    fn concentration_risk_id_is_deterministic_across_separate_runs() {
+        let (g1, _) = graph_with_fan_in("popular-lib", MIN_DEPENDENTS_FOR_CONCENTRATION_RISK);
+        let (g2, _) = graph_with_fan_in("popular-lib", MIN_DEPENDENTS_FOR_CONCENTRATION_RISK);
+        let r1 = concentration_risks(&g1);
+        let r2 = concentration_risks(&g2);
+        assert_eq!(r1[0].0.id, r2[0].0.id);
+    }
+
+    #[test]
+    fn concentration_risk_evidence_is_capped() {
+        let (g, _) = graph_with_fan_in("very-popular-lib", MAX_CONCENTRATION_RISK_EVIDENCE + 10);
+        let risks = concentration_risks(&g);
+        assert_eq!(risks.len(), 1);
+        assert_eq!(risks[0].0.evidence.len(), MAX_CONCENTRATION_RISK_EVIDENCE);
+        assert_eq!(
+            risks[0].0.properties["dependent_count"],
+            MAX_CONCENTRATION_RISK_EVIDENCE + 10
+        );
     }
 
     #[test]

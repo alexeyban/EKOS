@@ -226,15 +226,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         // silently failed. `base != cwd` is a strictly more precise condition than counting
         // entries: it's still empty for the byte-identical-ids `paths = ["."]` case (there,
         // `base == cwd` always), but now also correctly captures the real prefix for a single
-        // non-`"."` entry, which used to be wrongly treated as needing none.
-        let project_key = if base != cwd {
-            base.strip_prefix(cwd)
-                .unwrap_or(base)
-                .to_string_lossy()
-                .replace('\\', "/")
-        } else {
-            String::new()
-        };
+        // non-`"."` entry, which used to be wrongly treated as needing none. Now the single
+        // source of truth for this rule (`ekos_common::project::project_key_for_base`) — found
+        // live, 2026-08-24: `recover.rs`'s several raw-content collection loops each duplicated
+        // this exact logic with the *old*, unfixed condition, silently diverging from this
+        // function's own real `File`-object ids the moment this fix landed here alone.
+        let project_key = ekos_common::project::project_key_for_base(base, cwd);
 
         let ctx =
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());

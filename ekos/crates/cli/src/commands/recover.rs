@@ -159,8 +159,16 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     // matched file so technology objects dedup within the batch before
     // append_object's content-addressed idempotency takes over across runs.
     const DEP_SCAN_EXTENSIONS: &[&str] = &["py", "js", "ts", "java", "go", "rb"];
-    let mut dep_files: Vec<(String, String)> = Vec::new();
+    // (relative path — to `base`, not `cwd`, matching `build.rs`'s own `File`-object convention
+    // exactly — raw file content, RFC 0079 project qualifier). Found live, 2026-08-24: this used
+    // to be a bare 2-tuple with no project qualifier at all, so every `DependsOn` edge
+    // `dependency_analyzer.rs` emitted pointed at a `file_kir_id` that never matched the real,
+    // project-qualified `File` object id `build.rs` actually wrote — silently orphaned
+    // relationships (`SEM002: ... has unknown from-id`) and a `## Technology Inventory` that
+    // could detect a technology but never resolve which file used it.
+    let mut dep_files: Vec<(String, String, String)> = Vec::new();
     for base in &observe_paths {
+        let project_key = ekos_common::project::project_key_for_base(base, cwd);
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -189,7 +197,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             if !is_candidate {
                 continue;
             }
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let rel = path.strip_prefix(base).unwrap_or(path);
             if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
@@ -203,7 +211,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 }
             };
             let content = ekos_common::redaction::redact(&content, &redaction_config);
-            dep_files.push((rel.to_string_lossy().replace('\\', "/"), content));
+            dep_files.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
         }
     }
     let dep_file_count = dep_files.len();
@@ -397,8 +409,17 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
 
     // ── Cargo.toml crate/workspace topology (RFC 0042) ────────────────────
-    let mut cargo_manifests: Vec<(String, String)> = Vec::new();
+    // (relative manifest path — to `base`, not `cwd`, matching `build.rs`'s own `File`-object
+    // convention — raw content, RFC 0079 project qualifier). Found live, 2026-08-25: this used to
+    // be a bare 2-tuple with no project qualifier at all — the same class of bug already fixed for
+    // `dependency_analyzer.rs`/`package_json_analyzer.rs` (`devlog_101`), not yet mirrored here.
+    // Internal path-dependency resolution (`normalize_rel_path`, `workspace_deps`) stays correct
+    // under this change: a single real Cargo workspace is never split across two different
+    // `[observe] paths` entries in practice, so every manifest within one project's own `run()`
+    // call still resolves against a consistent, self-relative directory namespace.
+    let mut cargo_manifests: Vec<(String, String, String)> = Vec::new();
     for base in &observe_paths {
+        let project_key = ekos_common::project::project_key_for_base(base, cwd);
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -415,7 +436,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 continue;
             }
             let path = entry.path();
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let rel = path.strip_prefix(base).unwrap_or(path);
             if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
@@ -428,7 +449,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 }
             };
             let content = ekos_common::redaction::redact(&content, &redaction_config);
-            cargo_manifests.push((rel.to_string_lossy().replace('\\', "/"), content));
+            cargo_manifests.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
         }
     }
 
@@ -436,17 +461,18 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     // RFC 0079's own qualification convention, computed fresh here — this collection loop reads
     // files directly (the same second raw-content entry point `crate_topology_analyzer.rs`'s own
     // collection above uses), so it has no `build.rs`-populated `data.project` field to read back.
+    // Found live, 2026-08-24: this used the *old*, since-corrected `observe_paths.len() > 1`
+    // condition (fixed in `build.rs` itself 2026-08-23, never propagated here) and a `cwd`-
+    // relative path where `build.rs`'s own `File`-object ids use a `base`-relative one — two
+    // independent mismatches, either one alone enough to make this pass's `DependsOn` edges
+    // silently point at a `File` id that never resolves for any single non-`"."` `[observe]
+    // paths` entry (this doc comment's own "matches build.rs exactly" claim was never actually
+    // true for that real, common shape until both are fixed here).
     let mut package_json_manifests: Vec<(String, String, Option<String>)> = Vec::new();
     for base in &observe_paths {
-        let project_key = if observe_paths.len() > 1 {
-            Some(
-                base.strip_prefix(cwd)
-                    .unwrap_or(base)
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-            )
-        } else {
-            None
+        let project_key = {
+            let key = ekos_common::project::project_key_for_base(base, cwd);
+            if key.is_empty() { None } else { Some(key) }
         };
         for entry in WalkDir::new(base)
             .follow_links(false)
@@ -464,7 +490,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 continue;
             }
             let path = entry.path();
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let rel = path.strip_prefix(base).unwrap_or(path);
             if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
@@ -500,7 +526,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     if !cargo_manifests.is_empty() {
         let crate_count = cargo_manifests
             .iter()
-            .filter(|(_, content)| content.contains("[package]"))
+            .filter(|(_, content, _)| content.contains("[package]"))
             .count();
         let crate_topology_pass = CrateTopologyAnalyzerPass::new(
             cwd.file_name()
@@ -524,8 +550,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
 
     // ── GitHub Actions CI/CD workflows (RFC 0042) ─────────────────────────
-    let mut cicd_workflows: Vec<(String, String)> = Vec::new();
+    // Same fix as `cargo_manifests` above — base-relative path + RFC 0079 project qualifier,
+    // previously a bare 2-tuple with no project awareness at all.
+    let mut cicd_workflows: Vec<(String, String, String)> = Vec::new();
     for base in &observe_paths {
+        let project_key = ekos_common::project::project_key_for_base(base, cwd);
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -556,7 +585,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             if !is_yaml || !under_workflows {
                 continue;
             }
-            let rel = path.strip_prefix(cwd).unwrap_or(path);
+            let rel = path.strip_prefix(base).unwrap_or(path);
             if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
@@ -569,7 +598,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 }
             };
             let content = ekos_common::redaction::redact(&content, &redaction_config);
-            cicd_workflows.push((rel.to_string_lossy().replace('\\', "/"), content));
+            cicd_workflows.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
         }
     }
     if !cicd_workflows.is_empty() {

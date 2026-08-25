@@ -59,6 +59,11 @@ pub struct EvaluationReport {
     pub evidence_coverage: f32,
     pub crates_total: usize,
     pub crates_classified: usize,
+    /// Real count `evidence_coverage`'s denominator was computed from — the number of
+    /// `Claim`/`ArchitectureGap` objects that actually exist. RFC 0095: lets a caller (`docs
+    /// generate`'s Executive Summary) tell a real score apart from `evidence_coverage`'s vacuous
+    /// `1.0` default (no such objects exist at all) without re-deriving this scan itself.
+    pub evidenced_total: usize,
     pub issues: Vec<EvaluationIssue>,
 }
 
@@ -150,6 +155,7 @@ pub fn evaluate_architecture(objects: &[KirObject]) -> EvaluationReport {
         evidence_coverage,
         crates_total,
         crates_classified,
+        evidenced_total: evidenced_kinds.len(),
         issues,
     }
 }
@@ -252,5 +258,23 @@ mod tests {
         let report = evaluate_architecture(&[]);
         assert_eq!(report.score, 1.0);
         assert!(report.issues.is_empty());
+        // RFC 0095: the real signal a caller needs to tell this vacuous 1.0 apart from a real,
+        // fully-evidenced score — zero real objects behind either dimension.
+        assert_eq!(report.crates_total, 0);
+        assert_eq!(report.evidenced_total, 0);
+    }
+
+    #[test]
+    fn evidenced_total_reports_the_real_denominator() {
+        let a = crate_obj("a");
+        let claim = role_claim(a.id, true);
+        let gap = KirObject::new(
+            "unresolved dependency 'foo' for a",
+            ObjectKind::Custom("ArchitectureGap".to_string()),
+        );
+        let objects = vec![a, claim, gap];
+
+        let report = evaluate_architecture(&objects);
+        assert_eq!(report.evidenced_total, 2, "1 Claim + 1 ArchitectureGap");
     }
 }

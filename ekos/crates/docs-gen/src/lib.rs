@@ -854,18 +854,39 @@ pub fn render_er_diagram(tables: &[KirObject], relationships: &[KirRelationship]
     out
 }
 
+/// RFC 0095: the subset of `ekos_recovery::architecture_evaluator::EvaluationReport` (RFC 0065
+/// Phase 3) this crate needs to render — a small, local mirror rather than a real dependency on
+/// `ekos-recovery`, matching `LayerOverride`'s own precedent (`layer_classification.rs`) for
+/// keeping this crate's own dependency surface to plain data, with the CLI layer (which already
+/// depends on both crates) doing the translation.
+#[derive(Debug, Clone, Copy)]
+pub struct ArchitectureConfidence {
+    pub score: f32,
+    pub completeness: f32,
+    pub evidence_coverage: f32,
+    pub crates_total: usize,
+    /// The real count `evidence_coverage`'s denominator was computed from — lets the renderer
+    /// tell a real score apart from its vacuous `1.0` default (no `Crate`/`Claim`/
+    /// `ArchitectureGap` objects exist at all for this project).
+    pub evidenced_total: usize,
+}
+
 /// Render the Executive Overview (RFC 0068 §14). Only the fields this project has real compiled
 /// signal for are populated with data: component/crate counts (`count_by_kind`, already this
-/// file's own established pattern), the technologies with the most real compiled dependents, and
-/// the Open Questions count (RFC 0065 §17). `Purpose`, `Architecture style`, `Major risks`, and
-/// `Architecture confidence` are named by RFC 0068's own template but have no real EKOS source yet
-/// — `Major risks` needs a `Risk` KIR kind this project doesn't have (RFC 0068 §62 Phase 2);
-/// `Architecture confidence` needs `evaluate_architecture` wired through from `cli` the same way
-/// RFC 0069 wired drift through, not yet done for the plain `docs generate` path (only
-/// `ekos architecture investigate` computes it today); `Purpose`/`Architecture style` need either
-/// an LLM read of real project documentation or human input, neither available to a zero-LLM
-/// deterministic renderer. Each says so explicitly rather than being silently dropped or guessed.
-fn render_architecture_summary(objects: &[KirObject], relationships: &[KirRelationship]) -> String {
+/// file's own established pattern), the technologies with the most real compiled dependents, the
+/// Open Questions count (RFC 0065 §17), real `Custom("Risk")` Observed Concentration Risk objects
+/// (RFC 0094, `crates/semantic/src/lib.rs`'s `concentration_risks`), and — since RFC 0095 — a real
+/// `evaluate_architecture` score (RFC 0065 Phase 3) when the caller has one (`docs.rs::
+/// generate_curated`, the same computation `ekos architecture investigate` already used, now also
+/// run from the plain `docs generate` path). `Purpose`/`Architecture style` are named by RFC
+/// 0068's own template but have no real EKOS source yet — they need either an LLM read of real
+/// project documentation or human input, neither available to a zero-LLM deterministic renderer.
+/// Each says so explicitly rather than being silently dropped or guessed.
+fn render_architecture_summary(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+    confidence: Option<ArchitectureConfidence>,
+) -> String {
     let mut out = String::new();
 
     let counts = count_by_kind(objects, is_significant);
@@ -951,11 +972,63 @@ fn render_architecture_summary(objects: &[KirObject], relationships: &[KirRelati
              yet_\n\n",
         ),
     }
-    out.push_str(
-        "**Major risks:** _not yet computed — no `Risk` KIR kind exists yet (RFC 0068 §29/§62)_\n\n\
-         **Architecture confidence:** _not yet computed here — see `ekos architecture investigate`'s \
-         own evaluation report (RFC 0065 Phase 3) for a real completeness/evidence-coverage score_\n\n",
-    );
+    // RFC 0094: real, deterministically-derived Observed Concentration Risk objects — never a
+    // fabricated severity judgment, just the real object and its real compiled dependent count.
+    let mut risks: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Risk"))
+        .collect();
+    risks.sort_by(|a, b| {
+        let count_a = a.properties["dependent_count"].as_u64().unwrap_or(0);
+        let count_b = b.properties["dependent_count"].as_u64().unwrap_or(0);
+        count_b.cmp(&count_a).then_with(|| a.name.cmp(&b.name))
+    });
+    if risks.is_empty() {
+        out.push_str(
+            "**Major risks:** _No concentration risk detected — no object has 3 or more real \
+             compiled dependents yet (RFC 0094)_\n\n",
+        );
+    } else {
+        let statements: Vec<&str> = risks
+            .iter()
+            .filter_map(|r| r.properties["statement"].as_str())
+            .collect();
+        out.push_str(&format!(
+            "**Major risks:** {} _(Observed, RFC 0068 §29/RFC 0094 — see each risk's own \
+             evidence)_\n\n",
+            statements.join("; ")
+        ));
+    }
+    // RFC 0095: real when the caller (`docs.rs::generate_curated`) ran `evaluate_architecture` —
+    // `evaluate_architecture`'s own dimensions default to a vacuous `1.0` when no
+    // `Crate`/`Claim`/`ArchitectureGap` objects exist at all (correct for the boolean "did we fail
+    // to classify anything" question it answers, wrong to render as a literal "100% confidence"
+    // for a project with nothing to evaluate — `pdf-reader`, with no `Cargo.toml`, is exactly this
+    // case today).
+    match confidence {
+        Some(c) if c.crates_total > 0 || c.evidenced_total > 0 => {
+            out.push_str(&format!(
+                "**Architecture confidence:** {:.0}% _(completeness: {:.0}% of {} crate(s) \
+                 classified, evidence coverage: {:.0}% of {} claim/gap object(s) — RFC 0065 \
+                 Phase 3)_\n\n",
+                c.score * 100.0,
+                c.completeness * 100.0,
+                c.crates_total,
+                c.evidence_coverage * 100.0,
+                c.evidenced_total
+            ));
+        }
+        Some(_) => out.push_str(
+            "**Architecture confidence:** _not meaningfully computed — no Crate/Claim/\
+             ArchitectureGap objects exist for this project (this dimension is Rust-workspace-\
+             specific today, RFC 0065 Phase 3 v1 scope)_\n\n",
+        ),
+        None => out.push_str(
+            "**Architecture confidence:** _not yet computed here — see `ekos architecture \
+             investigate`'s own evaluation report (RFC 0065 Phase 3) for a real completeness/\
+             evidence-coverage score_\n\n",
+        ),
+    }
 
     out
 }
@@ -967,8 +1040,21 @@ type IdGraph = (Vec<(String, String)>, Vec<(String, String)>);
 /// Shared node/edge extraction behind both [`render_system_context`] (Mermaid text) and
 /// [`render_system_context_svg`] (standalone SVG, RFC 0073) — computed once so the two renderers
 /// can never drift apart on which technologies actually qualify. `None` when there's no real data
-/// to show (no crates, no technologies, or no crate has a real `DependsOn` edge to one) — the
-/// same honest-empty-state condition both callers already had before this was factored out.
+/// to show (no technologies, or nothing real depends on one) — the same honest-empty-state
+/// condition both callers already had before this was factored out.
+///
+/// Strict Container-level precision (edge must originate from a `Custom("Crate")` object) only
+/// when this *is* a real Rust workspace — `crate_ids` non-empty. Found live, 2026-08-24, against
+/// a real non-Rust project (Python/TypeScript): the old code required a non-empty `crate_ids`
+/// unconditionally, so this always returned `None` for any non-Rust workspace regardless of how
+/// many real `Technology` objects/`DependsOn` edges existed — `## Technology Inventory` (no such
+/// origin-kind filter) correctly showed 12 real technologies on the same page while `## System
+/// Context` said "no external technology dependencies compiled." For a non-Rust workspace there's
+/// no `Crate`-equivalent Container object with its own `DependsOn` edges (`DependsOn` always
+/// originates from a `File`, "no container concept yet" by design — same reasoning
+/// `dependency_analyzer.rs`/`package_json_analyzer.rs` already state), so the honest fallback is
+/// simply: any real `DependsOn` edge to a `Technology` counts, the same criterion `## Technology
+/// Inventory` already uses.
 fn system_context_graph(
     objects: &[KirObject],
     relationships: &[KirRelationship],
@@ -984,14 +1070,14 @@ fn system_context_graph(
         .map(|o| (o.id, o.name.as_str()))
         .collect();
 
-    if crate_ids.is_empty() || technologies.is_empty() {
+    if technologies.is_empty() {
         return None;
     }
 
     let mut used: HashSet<KirId> = HashSet::new();
     for rel in relationships {
         if rel.kind == RelationshipKind::DependsOn
-            && crate_ids.contains(&rel.from)
+            && (crate_ids.is_empty() || crate_ids.contains(&rel.from))
             && technologies.contains_key(&rel.to)
         {
             used.insert(rel.to);
@@ -1588,6 +1674,45 @@ fn render_graph_svg(nodes: &[(String, String)], edges: &[(String, String)]) -> S
 /// 2+ member files, so a crate with 0-1 files legitimately has none — but (RFC 0083 Phase 4) it is
 /// still reported by name and count below the linked list, never silently vanishing with zero
 /// trace the way it used to.
+/// Real compiled `Rollup` objects (RFC 0044) rendered as a Container-level fallback listing for a
+/// non-Rust workspace (zero `Crate` objects) — shared by `## Component View` and `## Crate &
+/// Workspace Topology`, both of which need the identical "no Cargo manifests, show real rollups
+/// instead" fallback. `## Component View` got this fix live 2026-08-23 against a real Elixir/
+/// Phoenix project; `## Crate & Workspace Topology` still lacked it, found live 2026-08-24 against
+/// a real Python/TypeScript project — the same gap, not mirrored into the sibling section the
+/// first time, factored into one shared function now so that can't happen a third time. `intro`
+/// is the one line of framing text specific to each caller; the rollup listing itself is
+/// identical, clearly labeled as a fallback, never presented as if it were a real `Crate`.
+fn render_rollup_container_fallback(
+    objects: &[KirObject],
+    page_names: &HashMap<KirId, String>,
+    intro: &str,
+) -> String {
+    let mut rollups: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Rollup"))
+        .collect();
+    if rollups.is_empty() {
+        return "_No crate/workspace manifests or subsystem rollups compiled._\n\n".to_string();
+    }
+    rollups.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut out = String::from(intro);
+    for rollup in rollups {
+        let member_count = rollup
+            .properties
+            .get("member_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let label = match page_names.get(&rollup.id) {
+            Some(f) => format!("[{}]({f})", rollup.name),
+            None => rollup.name.clone(),
+        };
+        out.push_str(&format!("- **{label}** — {member_count} member file(s)\n"));
+    }
+    out.push('\n');
+    out
+}
+
 fn render_component_view(
     crates: &[&KirObject],
     objects: &[KirObject],
@@ -1599,42 +1724,14 @@ fn render_component_view(
         .map(|o| (o.name.as_str(), o))
         .collect();
 
-    // Real gap found live 2026-08-23 against the real analytics project (Elixir/Phoenix, zero
-    // `Cargo.toml`, zero `Crate` objects ever compiled): the crate-matching logic below can never
-    // produce anything for a non-Rust workspace, so this whole C4 Component slot always rendered
-    // the same honest-but-useless "no crate directory matched" line regardless of how much real
-    // subsystem structure *was* compiled. `Rollup` (RFC 0044) is this project's own
-    // language-agnostic real grouping — every non-Rust workspace already has it, it's exactly
-    // this section's own target granularity ("one level inside a Container"), and `## Subsystems`
-    // already proves each one carries a real member-file count. Falling back to it here — clearly
-    // labeled as a fallback, never presented as if it were a real `Crate` — replaces a dead-end
-    // message with the same real decomposition RFC 0068 §18 asks for, for every language this
-    // project's analyzers actually cover today (Elixir/Python/JS-TS), not just Rust.
     if crates.is_empty() {
-        let mut rollups: Vec<&KirObject> = rollups_by_name.values().copied().collect();
-        if rollups.is_empty() {
-            return "_No crate/workspace manifests or subsystem rollups compiled._\n\n".to_string();
-        }
-        rollups.sort_by(|a, b| a.name.cmp(&b.name));
-        let mut out = String::from(
+        return render_rollup_container_fallback(
+            objects,
+            page_names,
             "_No Cargo-based crate manifests compiled for this workspace — showing each real \
              compiled `Rollup` (RFC 0044) as this project's Container-level decomposition \
              instead, since \"crate\" doesn't apply outside a Rust workspace._\n\n",
         );
-        for rollup in rollups {
-            let member_count = rollup
-                .properties
-                .get("member_count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let label = match page_names.get(&rollup.id) {
-                Some(f) => format!("[{}]({f})", rollup.name),
-                None => rollup.name.clone(),
-            };
-            out.push_str(&format!("- **{label}** — {member_count} member file(s)\n"));
-        }
-        out.push('\n');
-        return out;
     }
 
     let mut sorted_crates: Vec<&&KirObject> = crates.iter().collect();
@@ -2126,6 +2223,27 @@ fn render_data_architecture(objects: &[KirObject], relationships: &[KirRelations
                  transformation(s), written by {writes} transformation(s)\n",
                 store.name
             ));
+            // RFC 0091: real column names, compiled by either raw SQL DDL parsing
+            // (`sql_analyzer.rs`) or ORM-model recognition (`python_analyzer.rs`) — both write the
+            // same `columns: [{"name", "data_type"}]` shape, so this reads identically regardless
+            // of origin. Omitted entirely (not "no columns compiled") when the property is simply
+            // absent — a store from a source that doesn't extract columns at all is a different,
+            // honest case from one that's real and known to be empty.
+            if let Some(columns) = store.properties.get("columns").and_then(|v| v.as_array())
+                && !columns.is_empty()
+            {
+                let names: Vec<String> = columns
+                    .iter()
+                    .map(|c| {
+                        let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        match c.get("data_type").and_then(|v| v.as_str()) {
+                            Some(dt) => format!("{name} ({dt})"),
+                            None => name.to_string(),
+                        }
+                    })
+                    .collect();
+                out.push_str(&format!("  - Columns: {}\n", names.join(", ")));
+            }
         }
         out.push('\n');
     }
@@ -2214,6 +2332,7 @@ pub fn render_architecture(
     objects: &[KirObject],
     relationships: &[KirRelationship],
     layer_overrides: &[LayerOverride],
+    confidence: Option<ArchitectureConfidence>,
 ) -> RenderedPage {
     let mut out = String::from("# Architecture\n\n");
     let page_names = unique_page_file_names(objects, "md");
@@ -2225,7 +2344,11 @@ pub fn render_architecture(
          evidence are populated; fields the standard names but nothing here computes yet say so \
          explicitly rather than being silently omitted or guessed at._\n\n",
     );
-    out.push_str(&render_architecture_summary(objects, relationships));
+    out.push_str(&render_architecture_summary(
+        objects,
+        relationships,
+        confidence,
+    ));
 
     out.push_str("## System Context\n\n");
     out.push_str(
@@ -2333,7 +2456,13 @@ pub fn render_architecture(
         })
         .collect();
     if crates.is_empty() {
-        out.push_str("_No crate/workspace manifests compiled._\n\n");
+        out.push_str(&render_rollup_container_fallback(
+            objects,
+            &page_names,
+            "_No Cargo-based crate manifests compiled for this workspace — showing each real \
+             compiled `Rollup` (RFC 0044) as this project's Container-level topology instead, \
+             since \"crate\" doesn't apply outside a Rust workspace._\n\n",
+        ));
     } else if crate_edges.is_empty() {
         out.push_str(
             "_No internal (path) crate dependencies compiled among the discovered manifests._\n\n",
@@ -2974,6 +3103,413 @@ fn render_call_sequences_section(
 
     RenderedPage {
         file_name: "SequenceDiagrams.md".to_string(),
+        content: out,
+    }
+}
+
+// ── RFC 0090 — Solution Architect Report (`--layout solution-architect`) ────────────────────
+//
+// Three additional pages, same zero-fabrication rule as everything above: `render_dependency_
+// risk_report`/`render_onboarding_guide` are pure deterministic rendering (no LLM), and the
+// Findings memo's candidate list (`build_findings_evidence`) is too — an LLM-written executive
+// summary (`FindingsProse`, set by the CLI layer after calling an `LlmProvider`, the same
+// "layered on top, Option set by caller" pattern `ObjectPageModel.prose` already established) is
+// strictly additive on top of that list, never a replacement, matching RFC 0088's `## AI-Assisted
+// Overview` convention rather than hiding real compiled content behind LLM output.
+//
+// Deliberately link-through, not re-listing, wherever `render_architecture` already renders the
+// same underlying objects in full (`## Technology Inventory`, `## CI/CD Pipelines`, `##
+// Subsystems`, `## Open Questions`) — these three pages exist to add a genuinely different framing
+// (risk/onboarding/actionable-findings) over data already compiled, not to duplicate
+// `Architecture.md`'s own listings a second time.
+
+/// An LLM-prioritized/phrased executive summary for the Findings memo (RFC 0090). Populated by
+/// the CLI after calling an `LlmProvider` directly — `docs-gen` itself never calls an LLM.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FindingsProse {
+    pub text: String,
+}
+
+/// One real, compiled finding surfaced for the Findings/Recommendations memo (RFC 0090) — always
+/// sourced from data another pass already compiled ([`build_findings_evidence`]), never newly
+/// detected here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FindingCandidate {
+    pub title: String,
+    pub detail: String,
+}
+
+/// Custom object kinds with a real, analyzer-captured `"description"` property when a doc
+/// comment/docstring exists (RFC 0087) — the same convention `rust_analyzer.rs`/
+/// `llm_description.rs` already use to mean "has a doc comment", reused here as the
+/// documentation-coverage finding's source signal rather than inventing a new heuristic.
+const DOC_BEARING_CUSTOM_KINDS: &[&str] = &[
+    "RustSymbol",
+    "RustModule",
+    "PythonSymbol",
+    "PythonModule",
+    "ElixirSymbol",
+    "ElixirModule",
+    "JsSymbol",
+    "JsModule",
+];
+
+/// Render `DependencyRiskReport.md`: real declared versions (`Crate.version`, and npm
+/// `DependsOn` relationships' `version_spec`/`dev_dependency` properties, RFC 0042/0082) plus a
+/// concentration-risk ranking over the same `DependsOn` fan-in `render_architecture`'s own
+/// Technology Inventory lists in full — this page ranks instead of listing, and states plainly
+/// that CVE/license data isn't available rather than fabricating a severity score (RFC 0090's own
+/// explicit non-goal).
+pub fn render_dependency_risk_report(
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+) -> RenderedPage {
+    let mut out = String::from(
+        "# Dependency & Risk Report\n\n_Generated by `ekos docs generate --layout \
+         solution-architect` — complements [Architecture.md](Architecture.md)'s `## Technology \
+         Inventory`/`## Crate & Workspace Topology` sections with a risk framing: real declared \
+         versions and dependency concentration. Nothing here is fabricated — a category with no \
+         compiled signal says so explicitly rather than guessing._\n\n",
+    );
+
+    let mut crates: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .collect();
+    crates.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let technologies: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Technology"))
+        .collect();
+    let tech_by_id: HashMap<KirId, &KirObject> = technologies.iter().map(|t| (t.id, *t)).collect();
+    let name_by_id: HashMap<KirId, &str> =
+        objects.iter().map(|o| (o.id, o.name.as_str())).collect();
+
+    // npm `DependsOn` edges carry real version data on the *relationship* itself
+    // (`package_json_analyzer.rs`, RFC 0082) rather than on the `Technology` object, since the
+    // same package can be declared with different version ranges by different manifests.
+    let mut npm_rows: Vec<(String, String, String, bool)> = Vec::new();
+    for rel in relationships {
+        if !matches!(rel.kind, RelationshipKind::DependsOn) {
+            continue;
+        }
+        let Some(tech) = tech_by_id.get(&rel.to) else {
+            continue;
+        };
+        let Some(version_spec) = rel.properties.get("version_spec").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let declared_in = name_by_id.get(&rel.from).copied().unwrap_or("unknown");
+        let dev = rel
+            .properties
+            .get("dev_dependency")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        npm_rows.push((
+            declared_in.to_string(),
+            tech.name.clone(),
+            version_spec.to_string(),
+            dev,
+        ));
+    }
+    npm_rows.sort();
+
+    out.push_str("## Declared Versions\n\n");
+    if crates.is_empty() && npm_rows.is_empty() {
+        out.push_str(
+            "_No dependency manifests compiled yet — run `ekos build && ekos recover && ekos \
+             resolve && ekos compile && ekos commit` first._\n\n",
+        );
+    } else {
+        if !crates.is_empty() {
+            out.push_str("| Crate | Version |\n|---|---|\n");
+            for c in &crates {
+                let version = c
+                    .properties
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("_not declared_");
+                out.push_str(&format!("| `{}` | {version} |\n", c.name));
+            }
+            out.push('\n');
+        }
+        if !npm_rows.is_empty() {
+            out.push_str("| Declared in | Package | Version | Type |\n|---|---|---|---|\n");
+            for (declared_in, tech, spec, dev) in &npm_rows {
+                let kind = if *dev { "dev" } else { "runtime" };
+                out.push_str(&format!(
+                    "| `{declared_in}` | `{tech}` | `{spec}` | {kind} |\n"
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    out.push_str("## Concentration Risk\n\n");
+    out.push_str(
+        "_Technologies with the most real dependents — a heavy fan-in is a single point of \
+         failure candidate worth a deliberate ownership/upgrade plan. See \
+         [Architecture.md](Architecture.md)'s `## Technology Inventory` for the full \
+         per-technology used-by breakdown; below is just the top 5 by count._\n\n",
+    );
+    let mut fan_in: HashMap<KirId, usize> = HashMap::new();
+    for rel in relationships {
+        if matches!(rel.kind, RelationshipKind::DependsOn) && tech_by_id.contains_key(&rel.to) {
+            *fan_in.entry(rel.to).or_default() += 1;
+        }
+    }
+    let mut ranked: Vec<(&KirObject, usize)> = fan_in
+        .into_iter()
+        .filter_map(|(id, n)| tech_by_id.get(&id).map(|t| (*t, n)))
+        .collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name)));
+    if ranked.is_empty() {
+        out.push_str("_No technology dependencies compiled._\n\n");
+    } else {
+        for (tech, count) in ranked.into_iter().take(5) {
+            out.push_str(&format!("- **{}** — {count} dependent(s)\n", tech.name));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("## Vulnerability & License Data\n\n");
+    out.push_str(
+        "_Not available in this workspace — EKOS has no CVE/vulnerability-feed or \
+         license-compatibility connector yet (an explicit non-goal in RFC 0090, not silently \
+         skipped). A severity score is never fabricated here; treat the tables above as a \
+         starting point for a manual or external audit._\n\n",
+    );
+
+    RenderedPage {
+        file_name: "DependencyRiskReport.md".to_string(),
+        content: out,
+    }
+}
+
+/// Render `OnboardingGuide.md`: a first-day path through real compiled facts, not a repeat of
+/// `Architecture.md`'s full detail — real repository layout (`Crate.path`, not rendered as a flat
+/// list anywhere else today) plus link-throughs to `## CI/CD Pipelines`/`## Subsystems` for the
+/// full breakdown those sections already render.
+pub fn render_onboarding_guide(objects: &[KirObject]) -> RenderedPage {
+    let mut out = String::from(
+        "# Onboarding Guide\n\n_Generated by `ekos docs generate --layout solution-architect` — \
+         a first-day path through real compiled facts. See [Architecture.md](Architecture.md) \
+         for full detail on anything summarized below._\n\n",
+    );
+
+    out.push_str("## Repository Layout\n\n");
+    let mut crates: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .collect();
+    crates.sort_by(|a, b| {
+        let path_of = |o: &&KirObject| {
+            o.properties
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        path_of(a).cmp(&path_of(b))
+    });
+    if crates.is_empty() {
+        out.push_str(
+            "_No crate/workspace manifests compiled — this workspace may not be a Rust project, \
+             or `ekos build`/`ekos commit` hasn't run yet._\n\n",
+        );
+    } else {
+        out.push_str("| Path | Crate |\n|---|---|\n");
+        for c in &crates {
+            let path = c
+                .properties
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("_unknown_");
+            out.push_str(&format!("| `{path}` | `{}` |\n", c.name));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("## Build & CI\n\n");
+    let pipeline_count = objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Pipeline)
+        .count();
+    if pipeline_count == 0 {
+        out.push_str("_No CI/CD pipeline definitions compiled._\n\n");
+    } else {
+        out.push_str(&format!(
+            "{pipeline_count} CI/CD pipeline definition(s) compiled from real workflow files — \
+             see [Architecture.md](Architecture.md)'s `## CI/CD Pipelines` section for the full \
+             trigger/job/step breakdown.\n\n"
+        ));
+    }
+
+    out.push_str("## Where to Look\n\n");
+    let mut rollups: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Rollup"))
+        .collect();
+    rollups.sort_by(|a, b| {
+        let count_of = |o: &&KirObject| {
+            o.properties
+                .get("member_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+        };
+        count_of(b).cmp(&count_of(a))
+    });
+    match rollups.first() {
+        Some(top) => {
+            let count = top
+                .properties
+                .get("member_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            out.push_str(&format!(
+                "The largest compiled subsystem is **{}** ({count} member file(s)) — a \
+                 reasonable first place to read. See [Architecture.md](Architecture.md)'s `## \
+                 Subsystems` section for the full ranked list.\n\n",
+                top.name
+            ));
+        }
+        None => out.push_str("_No subsystem rollups compiled._\n\n"),
+    }
+
+    RenderedPage {
+        file_name: "OnboardingGuide.md".to_string(),
+        content: out,
+    }
+}
+
+/// Deterministic candidate list for the Findings/Recommendations memo (RFC 0090) — every
+/// candidate sourced from data another pass already compiled, zero new detection:
+/// `Custom("ArchitectureGap")` objects (`crate_topology_analyzer.rs`, already evidence-backed real
+/// gaps — `render_architecture`'s own `## Open Questions` section surfaces these individually for
+/// transparency; this memo re-surfaces them as one category among several for a different
+/// audience, an actionable punch list rather than a per-object transparency note), `Crate` objects
+/// with no declared `version`, and doc-comment coverage (`"description"` property presence,
+/// RFC 0087) grouped by kind rather than one row per symbol so the memo stays scannable — the same
+/// grouping convention [`count_by_kind`] already established.
+pub fn build_findings_evidence(objects: &[KirObject]) -> Vec<FindingCandidate> {
+    let mut candidates = Vec::new();
+
+    let mut gaps: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ArchitectureGap"))
+        .collect();
+    gaps.sort_by(|a, b| a.name.cmp(&b.name));
+    for gap in gaps {
+        let question = gap
+            .properties
+            .get("question")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&gap.name);
+        let reason = gap.properties.get("reason").and_then(|v| v.as_str());
+        let affected = gap
+            .properties
+            .get("affected_crate")
+            .and_then(|v| v.as_str());
+        let mut detail = question.to_string();
+        if let Some(r) = reason {
+            detail.push_str(&format!(" — {r}"));
+        }
+        candidates.push(FindingCandidate {
+            title: match affected {
+                Some(c) => format!("Unresolved dependency affecting `{c}`"),
+                None => "Unresolved dependency".to_string(),
+            },
+            detail,
+        });
+    }
+
+    let mut versionless: Vec<&str> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .filter(|o| !o.properties.contains_key("version"))
+        .map(|o| o.name.as_str())
+        .collect();
+    versionless.sort_unstable();
+    if !versionless.is_empty() {
+        candidates.push(FindingCandidate {
+            title: format!("{} crate(s) with no declared version", versionless.len()),
+            detail: versionless.join(", "),
+        });
+    }
+
+    let mut undocumented_by_kind: HashMap<&str, usize> = HashMap::new();
+    let mut total_by_kind: HashMap<&str, usize> = HashMap::new();
+    for o in objects {
+        if let ObjectKind::Custom(kind) = &o.kind {
+            let kind = kind.as_str();
+            if DOC_BEARING_CUSTOM_KINDS.contains(&kind) {
+                *total_by_kind.entry(kind).or_default() += 1;
+                if !o.properties.contains_key("description") {
+                    *undocumented_by_kind.entry(kind).or_default() += 1;
+                }
+            }
+        }
+    }
+    let mut kinds: Vec<&&str> = undocumented_by_kind.keys().collect();
+    kinds.sort();
+    for kind in kinds {
+        let missing = undocumented_by_kind[kind];
+        let total = total_by_kind.get(kind).copied().unwrap_or(missing);
+        candidates.push(FindingCandidate {
+            title: format!("{missing}/{total} `{kind}` object(s) have no captured doc comment"),
+            detail: format!(
+                "Symbols/modules of kind `{kind}` with no source doc comment captured (RFC \
+                 0087) — undocumented code is harder to safely change and blocks RFC 0088's \
+                 AI-Assisted Overview from having real doc text to ground on."
+            ),
+        });
+    }
+
+    candidates
+}
+
+/// Render `FindingsMemo.md`. The deterministic candidate list always renders in full; when
+/// `prose` is `Some` (the CLI layer's `--prose` path), an LLM-written executive summary is added
+/// *above* it, never replacing it — RFC 0088's `## AI-Assisted Overview` convention (additive, not
+/// a substitute for real compiled content), not the "prose supersedes" shape some other pages use.
+pub fn render_findings_memo(
+    candidates: &[FindingCandidate],
+    prose: Option<&FindingsProse>,
+) -> RenderedPage {
+    let mut out = String::from(
+        "# Findings & Recommendations\n\n_Generated by `ekos docs generate --layout \
+         solution-architect` — every finding below traces to real compiled ledger data \
+         (`ArchitectureGap` objects, crate manifests, doc-comment coverage), nothing invented. \
+         Run with `--prose` for an LLM-prioritized executive summary layered on top of this same \
+         list._\n\n",
+    );
+
+    if let Some(p) = prose {
+        out.push_str("## Executive Summary (AI-Assisted)\n\n");
+        out.push_str(&p.text);
+        out.push_str(
+            "\n\n_Prioritized/phrased by an LLM strictly from the detailed findings below — it \
+             cannot cite a finding that isn't itself listed there._\n\n",
+        );
+    }
+
+    out.push_str("## Detailed Findings\n\n");
+    if candidates.is_empty() {
+        out.push_str(
+            "_No findings compiled — either the ledger is empty or genuinely clean against \
+             every category this memo checks today (unresolved dependencies, undeclared crate \
+             versions, missing doc comments)._\n\n",
+        );
+    } else {
+        for c in candidates {
+            out.push_str(&format!("- **{}** — {}\n", c.title, c.detail));
+        }
+        out.push('\n');
+    }
+
+    RenderedPage {
+        file_name: "FindingsMemo.md".to_string(),
         content: out,
     }
 }
@@ -3637,7 +4173,7 @@ mod tests {
         let tech = KirObject::new("PostgreSQL", ObjectKind::Custom("Technology".to_string()));
         let rel = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
 
-        let page = render_architecture(&[file, tech], &[rel], &[]);
+        let page = render_architecture(&[file, tech], &[rel], &[], None);
         assert_eq!(page.file_name, "Architecture.md");
         assert!(page.content.contains("## Technology Inventory"));
         assert!(page.content.contains("PostgreSQL"));
@@ -3660,14 +4196,14 @@ mod tests {
             "reproduces the real non-deterministic id shape"
         );
 
-        let page = render_architecture(&[file, tech], &[rel_a, rel_b], &[]);
+        let page = render_architecture(&[file, tech], &[rel_a, rel_b], &[], None);
         assert!(page.content.contains("— used by: db.py\n"));
         assert!(!page.content.contains("db.py, db.py"));
     }
 
     #[test]
     fn architecture_on_no_technologies_is_honest_not_a_fabricated_list() {
-        let page = render_architecture(&[], &[], &[]);
+        let page = render_architecture(&[], &[], &[], None);
         assert!(
             page.content
                 .contains("_No external technology dependencies compiled._")
@@ -3676,9 +4212,14 @@ mod tests {
             page.content
                 .contains("No technology dependencies compiled.")
         );
-        assert!(
+        // `## Crate & Workspace Topology` and `## Component View` now share the exact same
+        // "no crates, no rollups either" fallback message (`render_rollup_container_fallback`) —
+        // was two different strings before this fix, one per section.
+        assert_eq!(
             page.content
-                .contains("No crate/workspace manifests or subsystem rollups compiled.")
+                .matches("_No crate/workspace manifests or subsystem rollups compiled._")
+                .count(),
+            2
         );
         assert!(
             page.content
@@ -3687,10 +4228,6 @@ mod tests {
         assert!(
             page.content
                 .contains("No structural relationships compiled.")
-        );
-        assert!(
-            page.content
-                .contains("No crate/workspace manifests compiled.")
         );
         assert!(
             page.content
@@ -3709,7 +4246,7 @@ mod tests {
             .with_property("member_count", serde_json::json!(2))
             .with_property("group_key", serde_json::json!("dir:ekos/crates/kir"));
 
-        let page = render_architecture(std::slice::from_ref(&rollup), &[], &[]);
+        let page = render_architecture(std::slice::from_ref(&rollup), &[], &[], None);
         assert!(page.content.contains("## Subsystems"));
         assert!(page.content.contains("2 member file(s)"));
         assert!(
@@ -3719,13 +4256,32 @@ mod tests {
     }
 
     #[test]
+    fn architecture_crate_topology_falls_back_to_rollups_for_a_non_rust_workspace() {
+        // Real gap found live, 2026-08-24: `## Component View` already had a Rollup fallback for
+        // non-Rust workspaces (found live 2026-08-23 against a different real project) but `##
+        // Crate & Workspace Topology` didn't — it just said "not compiled" even with real
+        // `Rollup` data on the very same page.
+        let rollup = KirObject::new("backend/app/api", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(4));
+
+        let page = render_architecture(std::slice::from_ref(&rollup), &[], &[], None);
+        assert!(page.content.contains("## Crate & Workspace Topology"));
+        assert!(
+            page.content
+                .contains("_No Cargo-based crate manifests compiled for this workspace")
+        );
+        assert!(page.content.contains("backend/app/api"));
+        assert!(page.content.contains("4 member file(s)"));
+    }
+
+    #[test]
     fn architecture_renders_crate_topology_and_links_components_to_api() {
         let kir = KirObject::new("ekos-kir", ObjectKind::Custom("Crate".to_string()));
         let cli = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
         let dep = KirRelationship::new(RelationshipKind::DependsOn, cli.id, kir.id);
         let symbol = KirObject::new("run", ObjectKind::Custom("RustSymbol".to_string()));
 
-        let page = render_architecture(&[kir, cli, symbol], &[dep], &[]);
+        let page = render_architecture(&[kir, cli, symbol], &[dep], &[], None);
         assert!(page.content.contains("## Crate & Workspace Topology"));
         assert!(page.content.contains("ekos-cli"));
         assert!(page.content.contains("ekos-kir"));
@@ -3745,7 +4301,7 @@ mod tests {
         let rel_a = KirRelationship::new(RelationshipKind::DependsOn, file.id, popular.id);
         let rel_b = KirRelationship::new(RelationshipKind::DependsOn, file.id, niche.id);
 
-        let page = render_architecture(&[file, popular, niche], &[rel_a, rel_b], &[]);
+        let page = render_architecture(&[file, popular, niche], &[rel_a, rel_b], &[], None);
         assert!(page.content.contains("## Architecture Summary"));
         assert!(page.content.contains("RFC 0068 §14"));
         assert!(page.content.contains("**Primary technologies:**"));
@@ -3769,7 +4325,7 @@ mod tests {
             serde_json::json!("A privacy-friendly web analytics platform."),
         )
         .with_property("architecture_style", serde_json::json!("modular monolith"));
-        let page = render_architecture(&[summary], &[], &[]);
+        let page = render_architecture(&[summary], &[], &[], None);
         assert!(
             page.content
                 .contains("**Purpose:** A privacy-friendly web analytics platform.")
@@ -3789,7 +4345,7 @@ mod tests {
         let rel_a = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
         let rel_b = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
 
-        let page = render_architecture(&[file, tech], &[rel_a, rel_b], &[]);
+        let page = render_architecture(&[file, tech], &[rel_a, rel_b], &[], None);
         assert!(page.content.contains("serde (1 dependent(s))"));
         assert!(!page.content.contains("serde (2 dependent(s))"));
     }
@@ -3800,7 +4356,7 @@ mod tests {
         let b = KirObject::new("bar", ObjectKind::Custom("RustSymbol".to_string()));
         let call = KirRelationship::new(RelationshipKind::Calls, a.id, b.id);
 
-        let page = render_architecture(&[a, b], &[call], &[]);
+        let page = render_architecture(&[a, b], &[call], &[], None);
         assert!(page.content.contains("## Runtime View"));
         assert!(page.content.contains("RFC 0068 §20"));
         assert!(
@@ -3811,7 +4367,7 @@ mod tests {
 
     #[test]
     fn architecture_runtime_view_is_honest_when_no_call_or_flow_edges_exist() {
-        let page = render_architecture(&[], &[], &[]);
+        let page = render_architecture(&[], &[], &[], None);
         assert!(
             page.content
                 .contains("_No call or data-flow sequences compiled._")
@@ -3826,7 +4382,7 @@ mod tests {
         // never updated — a real stale cross-reference found while investigating RFC 0068
         // Increment 6, fixed alongside it.
         let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
-        let page = render_architecture(&[tech], &[], &[]);
+        let page = render_architecture(&[tech], &[], &[], None);
         assert!(
             page.content
                 .contains("see below, `## Technology Inventory`")
@@ -3845,6 +4401,31 @@ mod tests {
         assert!(section.contains("2 compiled data store(s)"));
         assert!(section.contains("**customers** — 1 real foreign-key edge(s)"));
         assert!(section.contains("**orders** — 1 real foreign-key edge(s)"));
+    }
+
+    #[test]
+    fn data_architecture_lists_real_columns_when_compiled_regardless_of_origin() {
+        // RFC 0091: same `columns` property shape whether it came from raw SQL DDL parsing
+        // (`sql_analyzer.rs`) or ORM-model recognition (`python_analyzer.rs`) — this must read
+        // identically either way.
+        let documents = KirObject::new("documents", ObjectKind::Table).with_property(
+            "columns",
+            serde_json::json!([
+                {"name": "file_hash", "data_type": "String"},
+                {"name": "page_count", "data_type": "Integer"},
+            ]),
+        );
+        let no_columns = KirObject::new("legacy_table", ObjectKind::Table);
+
+        let section = render_data_architecture(&[documents, no_columns], &[]);
+        assert!(section.contains("Columns: file_hash (String), page_count (Integer)"));
+        // A store with no `columns` property at all gets no "Columns:" line — honest, not a
+        // fabricated empty list. "documents" sorts before "legacy_table", so everything from
+        // "legacy_table" onward (to the next "###" section heading) is its own block.
+        let legacy_pos = section.find("**legacy_table**").unwrap();
+        let next_section = section[legacy_pos..].find("###").map(|i| legacy_pos + i);
+        let legacy_block = &section[legacy_pos..next_section.unwrap_or(section.len())];
+        assert!(!legacy_block.contains("Columns:"));
     }
 
     #[test]
@@ -3972,7 +4553,7 @@ mod tests {
     #[test]
     fn architecture_includes_data_architecture_section_with_rfc_reference() {
         let table = KirObject::new("customers", ObjectKind::Table);
-        let page = render_architecture(&[table], &[], &[]);
+        let page = render_architecture(&[table], &[], &[], None);
         assert!(page.content.contains("## Data Architecture"));
         assert!(page.content.contains("RFC 0068 §22"));
         assert!(page.content.contains("**customers**"));
@@ -3984,7 +4565,7 @@ mod tests {
         let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
         let dep = KirRelationship::new(RelationshipKind::DependsOn, krate.id, tech.id);
 
-        let page = render_architecture(&[krate, tech], &[dep], &[]);
+        let page = render_architecture(&[krate, tech], &[dep], &[], None);
         assert!(page.content.contains("## System Context"));
         assert!(page.content.contains("RFC 0068 §15"));
         assert!(page.content.contains("[\"System\"]"));
@@ -4001,7 +4582,7 @@ mod tests {
         let unused_tech =
             KirObject::new("unused-lib", ObjectKind::Custom("Technology".to_string()));
 
-        let page = render_architecture(&[krate, unused_tech], &[], &[]);
+        let page = render_architecture(&[krate, unused_tech], &[], &[], None);
         assert!(page.content.contains("## System Context"));
         assert!(
             page.content
@@ -4011,12 +4592,33 @@ mod tests {
     }
 
     #[test]
+    fn architecture_system_context_falls_back_to_any_origin_for_a_non_rust_workspace() {
+        // Real gap found live, 2026-08-24: a non-Rust project (no `Crate` objects at all) with
+        // real `Technology`/`DependsOn` data (e.g. a `File` -> `Technology` edge, the shape
+        // `dependency_analyzer.rs`/`package_json_analyzer.rs` actually produce) used to render
+        // "no external technology dependencies compiled" unconditionally, even though the same
+        // data correctly populated `## Technology Inventory` on the same page.
+        let file = KirObject::new("app.py", ObjectKind::File);
+        let tech = KirObject::new("OpenAI API", ObjectKind::Custom("Technology".to_string()));
+        let dep = KirRelationship::new(RelationshipKind::DependsOn, file.id, tech.id);
+
+        let page = render_architecture(&[file, tech], &[dep], &[], None);
+        assert!(page.content.contains("## System Context"));
+        assert!(page.content.contains("[\"OpenAI API\"]"));
+        assert!(
+            !page
+                .content
+                .contains("_No external technology dependencies compiled._")
+        );
+    }
+
+    #[test]
     fn architecture_links_system_context_svg_when_real_dependency_data_exists() {
         let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
         let tech = KirObject::new("clap", ObjectKind::Custom("Technology".to_string()));
         let dep = KirRelationship::new(RelationshipKind::DependsOn, krate.id, tech.id);
 
-        let page = render_architecture(&[krate, tech], &[dep], &[]);
+        let page = render_architecture(&[krate, tech], &[dep], &[], None);
         assert!(
             page.content
                 .contains("[System Context diagram (SVG)](system-context.svg)")
@@ -4026,7 +4628,7 @@ mod tests {
     #[test]
     fn architecture_does_not_link_system_context_svg_when_no_real_dependency_data_exists() {
         let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
-        let page = render_architecture(&[krate], &[], &[]);
+        let page = render_architecture(&[krate], &[], &[], None);
         assert!(!page.content.contains("system-context.svg"));
     }
 
@@ -4155,7 +4757,7 @@ mod tests {
         let rollup = KirObject::new("ekos/crates/kir", ObjectKind::Custom("Rollup".to_string()))
             .with_property("member_count", serde_json::json!(9));
 
-        let page = render_architecture(&[krate, rollup], &[], &[]);
+        let page = render_architecture(&[krate, rollup], &[], &[], None);
         assert!(page.content.contains("## Component View"));
         assert!(page.content.contains("**ekos-kir**"));
         assert!(page.content.contains("9 member file(s)"));
@@ -4169,7 +4771,7 @@ mod tests {
         let krate = KirObject::new("ekos-tiny", ObjectKind::Custom("Crate".to_string()))
             .with_property("path", serde_json::json!("ekos/crates/tiny"));
 
-        let page = render_architecture(&[krate], &[], &[]);
+        let page = render_architecture(&[krate], &[], &[], None);
         assert!(page.content.contains("## Component View"));
         assert!(page.content.contains("ekos-tiny"));
         assert!(
@@ -4181,7 +4783,7 @@ mod tests {
 
     #[test]
     fn architecture_component_view_reports_no_crates_at_all_when_none_are_compiled() {
-        let page = render_architecture(&[], &[], &[]);
+        let page = render_architecture(&[], &[], &[], None);
         assert!(
             page.content
                 .contains("_No crate/workspace manifests or subsystem rollups compiled._")
@@ -4197,7 +4799,7 @@ mod tests {
         let rollup = KirObject::new("lib", ObjectKind::Custom("Rollup".to_string()))
             .with_property("member_count", serde_json::json!(606));
 
-        let page = render_architecture(&[rollup], &[], &[]);
+        let page = render_architecture(&[rollup], &[], &[], None);
         assert!(page.content.contains("## Component View"));
         assert!(
             page.content
@@ -4219,11 +4821,81 @@ mod tests {
         )
         .with_property("affected_crate", serde_json::json!("ekos-orphan"));
 
-        let page = render_architecture(&[gap], &[], &[]);
+        let page = render_architecture(&[gap], &[], &[], None);
         assert!(page.content.contains("## Open Questions"));
         assert!(
             page.content
                 .contains("What does 'foo' resolve to for ekos-orphan? (affects `ekos-orphan`)")
+        );
+    }
+
+    #[test]
+    fn architecture_summary_reports_no_concentration_risk_honestly_when_none_compiled() {
+        let page = render_architecture(&[], &[], &[], None);
+        assert!(
+            page.content
+                .contains("**Major risks:** _No concentration risk detected")
+        );
+    }
+
+    /// RFC 0094: a real `Custom("Risk")` object (as `concentration_risks` would compile it)
+    /// renders its own real statement in the Executive Summary, not the placeholder.
+    #[test]
+    fn architecture_summary_renders_a_real_compiled_concentration_risk() {
+        let risk = KirObject::new(
+            "Concentration risk: popular-lib",
+            ObjectKind::Custom("Risk".to_string()),
+        )
+        .with_property("risk_type", serde_json::json!("observed"))
+        .with_property(
+            "statement",
+            serde_json::json!("'popular-lib' has 7 real compiled dependent(s)"),
+        )
+        .with_property("dependent_count", serde_json::json!(7));
+
+        let page = render_architecture(&[risk], &[], &[], None);
+        assert!(
+            page.content
+                .contains("'popular-lib' has 7 real compiled dependent(s)")
+        );
+        assert!(!page.content.contains("_No concentration risk detected"));
+    }
+
+    // ── RFC 0095 — architecture confidence ───────────────────────────────────
+
+    #[test]
+    fn architecture_confidence_renders_a_real_score_when_there_is_real_signal() {
+        let confidence = ArchitectureConfidence {
+            score: 0.85,
+            completeness: 0.8,
+            evidence_coverage: 0.9,
+            crates_total: 10,
+            evidenced_total: 20,
+        };
+        let page = render_architecture(&[], &[], &[], Some(confidence));
+        assert!(page.content.contains("**Architecture confidence:** 85%"));
+        assert!(page.content.contains("80% of 10 crate(s) classified"));
+        assert!(page.content.contains("90% of 20 claim/gap object(s)"));
+    }
+
+    /// `evaluate_architecture`'s own two dimensions default to a vacuous `1.0` (100%) when
+    /// nothing exists to evaluate — rendering that literally would be misleading for a project
+    /// with zero `Crate`/`Claim`/`ArchitectureGap` objects (e.g. any non-Rust project, `pdf-reader`
+    /// included). Must say so honestly instead of showing a fake-looking 100%.
+    #[test]
+    fn architecture_confidence_is_honest_about_the_vacuous_case() {
+        let confidence = ArchitectureConfidence {
+            score: 1.0,
+            completeness: 1.0,
+            evidence_coverage: 1.0,
+            crates_total: 0,
+            evidenced_total: 0,
+        };
+        let page = render_architecture(&[], &[], &[], Some(confidence));
+        assert!(!page.content.contains("**Architecture confidence:** 100%"));
+        assert!(
+            page.content
+                .contains("**Architecture confidence:** _not meaningfully computed")
         );
     }
 
@@ -4236,7 +4908,7 @@ mod tests {
                 serde_json::json!([{"name": "build", "steps": ["Checkout", "Test"]}]),
             );
 
-        let page = render_architecture(&[pipeline], &[], &[]);
+        let page = render_architecture(&[pipeline], &[], &[], None);
         assert!(page.content.contains("## CI/CD Pipelines"));
         assert!(page.content.contains("### CI"));
         assert!(page.content.contains("Triggers: `push`"));
@@ -4257,7 +4929,7 @@ mod tests {
         );
         let coupled = KirRelationship::new(RelationshipKind::CoupledWith, c.id, d.id);
 
-        let page = render_architecture(&[a, b, c, d], &[feeds_into, coupled], &[]);
+        let page = render_architecture(&[a, b, c, d], &[feeds_into, coupled], &[], None);
         assert!(page.content.contains("### CoupledWith"));
         assert!(
             !page.content.contains("### FeedsInto"),
@@ -4282,7 +4954,7 @@ mod tests {
 
         let mut all_objects = objects;
         all_objects.push(doc);
-        let page = render_architecture(&all_objects, &relationships, &[]);
+        let page = render_architecture(&all_objects, &relationships, &[], None);
 
         assert!(page.content.contains("### Contains"));
         assert!(
@@ -4312,7 +4984,7 @@ mod tests {
         let customers = KirObject::new("customers", ObjectKind::Table);
         let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
 
-        let page = render_architecture(&[orders, customers], &[rel], &[]);
+        let page = render_architecture(&[orders, customers], &[rel], &[], None);
         assert!(page.content.contains("## Entity Relationships"));
         assert!(page.content.contains("erDiagram"));
     }
@@ -4577,6 +5249,7 @@ mod tests {
             &[backend_file, rollup],
             std::slice::from_ref(&contains),
             &[],
+            None,
         );
         assert!(page.content.contains("### Layer Breakdown"));
         assert!(page.content.contains("**Backend:**"));
@@ -4602,6 +5275,7 @@ mod tests {
             &[backend_file, frontend_file, rollup],
             &[contains_backend, contains_frontend],
             &[],
+            None,
         );
         assert!(page.content.contains("**Backend:**"));
         assert!(page.content.contains("**Frontend:**"));
@@ -4616,7 +5290,7 @@ mod tests {
     #[test]
     fn system_decomposition_detail_is_empty_when_no_rollups_are_compiled() {
         let file = KirObject::new("lib/plausible/repo.ex", ObjectKind::File);
-        let page = render_architecture(&[file], &[], &[]);
+        let page = render_architecture(&[file], &[], &[], None);
         assert!(!page.content.contains("### Layer Breakdown"));
     }
 
@@ -4716,5 +5390,222 @@ mod tests {
         let page = render_markdown_object_page(&model);
         assert!(!page.content.contains("**Defined in:**"));
         assert!(!page.content.contains("**Lines:**"));
+    }
+
+    // ── RFC 0090 — Solution Architect Report ─────────────────────────────────
+
+    #[test]
+    fn risk_report_on_empty_ledger_is_honest_not_fabricated() {
+        let page = render_dependency_risk_report(&[], &[]);
+        assert_eq!(page.file_name, "DependencyRiskReport.md");
+        assert!(
+            page.content
+                .contains("No dependency manifests compiled yet")
+        );
+        assert!(
+            page.content
+                .contains("No technology dependencies compiled.")
+        );
+        assert!(
+            page.content.contains("## Vulnerability & License Data"),
+            "the not-available line must always render, even on an empty ledger"
+        );
+        assert!(page.content.contains("Not available in this workspace"));
+    }
+
+    #[test]
+    fn risk_report_shows_declared_and_undeclared_crate_versions() {
+        let with_version = KirObject::new("ekos-kir", ObjectKind::Custom("Crate".to_string()))
+            .with_property("version", serde_json::json!("0.1.0"));
+        let without_version = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+
+        let page = render_dependency_risk_report(&[with_version, without_version], &[]);
+        assert!(page.content.contains("| `ekos-kir` | 0.1.0 |"));
+        assert!(page.content.contains("| `ekos-cli` | _not declared_ |"));
+    }
+
+    #[test]
+    fn risk_report_shows_npm_version_spec_and_dev_dependency_flag() {
+        let package_json = KirObject::new("frontend/package.json", ObjectKind::File);
+        let react = KirObject::new("react", ObjectKind::Custom("Technology".to_string()));
+        let mut rel = KirRelationship::new(RelationshipKind::DependsOn, package_json.id, react.id);
+        rel.properties
+            .insert("version_spec".into(), serde_json::json!("^18.2.0"));
+        rel.properties
+            .insert("dev_dependency".into(), serde_json::json!(false));
+
+        let page = render_dependency_risk_report(&[package_json, react], &[rel]);
+        assert!(
+            page.content
+                .contains("| `frontend/package.json` | `react` | `^18.2.0` | runtime |")
+        );
+    }
+
+    #[test]
+    fn risk_report_ranks_technologies_by_fan_in_for_concentration_risk() {
+        let a = KirObject::new("a.py", ObjectKind::File);
+        let b = KirObject::new("b.py", ObjectKind::File);
+        let c = KirObject::new("c.py", ObjectKind::File);
+        let pg = KirObject::new("PostgreSQL", ObjectKind::Custom("Technology".to_string()));
+        let redis = KirObject::new("Redis", ObjectKind::Custom("Technology".to_string()));
+        let rel1 = KirRelationship::new(RelationshipKind::DependsOn, a.id, pg.id);
+        let rel2 = KirRelationship::new(RelationshipKind::DependsOn, b.id, pg.id);
+        let rel3 = KirRelationship::new(RelationshipKind::DependsOn, c.id, redis.id);
+
+        let page = render_dependency_risk_report(&[a, b, c, pg, redis], &[rel1, rel2, rel3]);
+        let pg_pos = page
+            .content
+            .find("**PostgreSQL** — 2 dependent(s)")
+            .unwrap();
+        let redis_pos = page.content.find("**Redis** — 1 dependent(s)").unwrap();
+        assert!(pg_pos < redis_pos, "higher fan-in must rank first");
+    }
+
+    #[test]
+    fn onboarding_guide_on_empty_ledger_is_honest_not_fabricated() {
+        let page = render_onboarding_guide(&[]);
+        assert_eq!(page.file_name, "OnboardingGuide.md");
+        assert!(
+            page.content
+                .contains("No crate/workspace manifests compiled")
+        );
+        assert!(
+            page.content
+                .contains("No CI/CD pipeline definitions compiled.")
+        );
+        assert!(page.content.contains("No subsystem rollups compiled."));
+    }
+
+    #[test]
+    fn onboarding_guide_lists_repository_layout_from_crate_paths() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!("crates/cli"));
+        let page = render_onboarding_guide(&[krate]);
+        assert!(page.content.contains("| `crates/cli` | `ekos-cli` |"));
+    }
+
+    #[test]
+    fn onboarding_guide_links_through_to_architecture_for_pipelines() {
+        let pipeline = KirObject::new(".github/workflows/ci.yml", ObjectKind::Pipeline);
+        let page = render_onboarding_guide(&[pipeline]);
+        assert!(
+            page.content
+                .contains("1 CI/CD pipeline definition(s) compiled")
+        );
+        assert!(page.content.contains("[Architecture.md](Architecture.md)"));
+    }
+
+    #[test]
+    fn onboarding_guide_highlights_only_the_largest_rollup() {
+        let small = KirObject::new("small-lib", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(2));
+        let large = KirObject::new("core-lib", ObjectKind::Custom("Rollup".to_string()))
+            .with_property("member_count", serde_json::json!(50));
+        let page = render_onboarding_guide(&[small, large]);
+        assert!(page.content.contains("**core-lib** (50 member file(s))"));
+        assert!(!page.content.contains("small-lib"));
+    }
+
+    #[test]
+    fn findings_evidence_surfaces_architecture_gaps() {
+        let gap = KirObject::new(
+            "unresolved dependency 'foo' for bar",
+            ObjectKind::Custom("ArchitectureGap".to_string()),
+        )
+        .with_property(
+            "question",
+            serde_json::json!("What does 'foo' resolve to for bar?"),
+        )
+        .with_property("affected_crate", serde_json::json!("bar"))
+        .with_property(
+            "reason",
+            serde_json::json!("workspace = true with no matching entry"),
+        );
+
+        let candidates = build_findings_evidence(&[gap]);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].title, "Unresolved dependency affecting `bar`");
+        assert!(
+            candidates[0]
+                .detail
+                .contains("What does 'foo' resolve to for bar?")
+        );
+        assert!(
+            candidates[0]
+                .detail
+                .contains("workspace = true with no matching entry")
+        );
+    }
+
+    #[test]
+    fn findings_evidence_flags_versionless_crates() {
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()));
+        let candidates = build_findings_evidence(&[krate]);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].title, "1 crate(s) with no declared version");
+        assert!(candidates[0].detail.contains("ekos-cli"));
+    }
+
+    #[test]
+    fn findings_evidence_groups_undocumented_symbols_by_kind_not_one_row_each() {
+        let documented = KirObject::new("known_fn", ObjectKind::Custom("RustSymbol".to_string()))
+            .with_property("description", serde_json::json!("Does the thing."));
+        let undocumented_a = KirObject::new("a_fn", ObjectKind::Custom("RustSymbol".to_string()));
+        let undocumented_b = KirObject::new("b_fn", ObjectKind::Custom("RustSymbol".to_string()));
+
+        let candidates = build_findings_evidence(&[documented, undocumented_a, undocumented_b]);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].title,
+            "2/3 `RustSymbol` object(s) have no captured doc comment"
+        );
+    }
+
+    #[test]
+    fn findings_evidence_on_clean_ledger_is_empty_not_fabricated() {
+        let documented = KirObject::new("known_fn", ObjectKind::Custom("RustSymbol".to_string()))
+            .with_property("description", serde_json::json!("Does the thing."));
+        let versioned = KirObject::new("ekos-kir", ObjectKind::Custom("Crate".to_string()))
+            .with_property("version", serde_json::json!("0.1.0"));
+        assert!(build_findings_evidence(&[documented, versioned]).is_empty());
+    }
+
+    #[test]
+    fn findings_memo_renders_deterministic_list_without_prose() {
+        let candidates = vec![FindingCandidate {
+            title: "1 crate(s) with no declared version".to_string(),
+            detail: "ekos-cli".to_string(),
+        }];
+        let page = render_findings_memo(&candidates, None);
+        assert_eq!(page.file_name, "FindingsMemo.md");
+        assert!(!page.content.contains("## Executive Summary"));
+        assert!(page.content.contains("## Detailed Findings"));
+        assert!(page.content.contains("1 crate(s) with no declared version"));
+    }
+
+    #[test]
+    fn findings_memo_layers_prose_above_the_deterministic_list_never_replacing_it() {
+        let candidates = vec![FindingCandidate {
+            title: "1 crate(s) with no declared version".to_string(),
+            detail: "ekos-cli".to_string(),
+        }];
+        let prose = FindingsProse {
+            text: "Declare a version for ekos-cli before the next release.".to_string(),
+        };
+        let page = render_findings_memo(&candidates, Some(&prose));
+        assert!(page.content.contains("## Executive Summary (AI-Assisted)"));
+        assert!(
+            page.content
+                .contains("Declare a version for ekos-cli before the next release.")
+        );
+        // The deterministic list must still be present, not replaced by the LLM summary.
+        assert!(page.content.contains("## Detailed Findings"));
+        assert!(page.content.contains("1 crate(s) with no declared version"));
+    }
+
+    #[test]
+    fn findings_memo_on_no_candidates_is_honest_not_fabricated() {
+        let page = render_findings_memo(&[], None);
+        assert!(page.content.contains("No findings compiled"));
     }
 }

@@ -178,12 +178,16 @@ fn resolve_dep_entry(value: &toml::Value) -> DepResolution {
 
 pub struct CrateTopologyAnalyzerPass {
     pass_id: String,
-    /// (relative manifest path, raw `Cargo.toml` content) pairs, one per discovered manifest.
-    manifests: Vec<(String, String)>,
+    /// (relative manifest path, raw `Cargo.toml` content, RFC 0079 project qualifier — empty
+    /// string means "no qualification needed") tuples, one per discovered manifest.
+    manifests: Vec<(String, String, String)>,
 }
 
 impl CrateTopologyAnalyzerPass {
-    pub fn new(workspace_name: impl Into<String>, manifests: Vec<(String, String)>) -> Self {
+    pub fn new(
+        workspace_name: impl Into<String>,
+        manifests: Vec<(String, String, String)>,
+    ) -> Self {
         Self {
             pass_id: format!("crate-topology-analyzer:{}", workspace_name.into()),
             manifests,
@@ -200,10 +204,10 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
     fn cache_inputs(&self) -> Vec<String> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        let mut paths: Vec<&str> = self.manifests.iter().map(|(p, _)| p.as_str()).collect();
+        let mut paths: Vec<&str> = self.manifests.iter().map(|(p, _, _)| p.as_str()).collect();
         paths.sort();
         for path in paths {
-            let (_, content) = self.manifests.iter().find(|(p, _)| p == path).unwrap();
+            let (_, content, _) = self.manifests.iter().find(|(p, _, _)| p == path).unwrap();
             hasher.update(path.as_bytes());
             hasher.update(content.as_bytes());
         }
@@ -221,6 +225,13 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
         let mut workspace_deps: HashMap<String, WorkspaceDep> = HashMap::new();
         struct ParsedCrate {
             dir: String,
+            /// RFC 0079 — empty means "no qualification needed". Applied only at the point a real
+            /// `KirId` is minted (`crate_kir_id`/`architecture_gap_kir_id`/the `Claim`'s own
+            /// subject dir below), never to `dir` itself — every internal directory comparison in
+            /// this pass (`workspace_deps` path resolution, `dir_to_id` lookups) stays on the raw,
+            /// unqualified directory, which is correct: a real Cargo path dependency only ever
+            /// resolves within its own workspace, never across a project boundary.
+            project: String,
             name: String,
             version: Option<String>,
             description: String,
@@ -228,7 +239,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
         }
         let mut crates: Vec<ParsedCrate> = Vec::new();
 
-        for (rel_path, content) in &self.manifests {
+        for (rel_path, content, project) in &self.manifests {
             let doc: toml::Value = match content.parse() {
                 Ok(v) => v,
                 Err(e) => {
@@ -284,6 +295,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                     .unwrap_or_default();
                 crates.push(ParsedCrate {
                     dir: manifest_dir.to_string_lossy().replace('\\', "/"),
+                    project: project.clone(),
                     name,
                     version,
                     description,
@@ -296,9 +308,43 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
             return Ok(());
         }
 
-        let dir_to_id: HashMap<String, KirId> = crates
+        // RFC 0079: qualifies the *hash input* only — `c.dir` itself stays raw/unqualified
+        // everywhere it's used for internal directory matching or display (`path` property,
+        // evidence text), per that RFC's own stated principle.
+        let qualified_dir = |c: &ParsedCrate| {
+            ekos_common::project::project_qualify(
+                &c.dir,
+                if c.project.is_empty() {
+                    None
+                } else {
+                    Some(c.project.as_str())
+                },
+            )
+        };
+
+        // RFC 0079 regression, found live 2026-08-25 verifying RFC 0095 against a real 2-crate
+        // multi-`[observe]-path` scratch scope (`crates/kir` + `crates/common`, each its own
+        // entry): keyed by the *bare* `c.dir` alone, this map silently collapsed both crates onto
+        // one entry, because a crate whose `Cargo.toml` sits at the root of its own `[observe]
+        // paths` entry always has `c.dir == ""` — the single most common real shape for exactly
+        // this multi-project scenario, not an edge case. Every crate object below then read its
+        // own id back out of this map (`dir_to_id[&c.dir]`), so the *second* crate processed
+        // silently overwrote the first's entry and both KirObjects were minted with the same id —
+        // a real, silent multi-project data-loss bug in the very fix (`devlog_104`) meant to
+        // prevent exactly this collision class, missed because that fix's own live verification
+        // only checked one crate's id, never checked a second crate in the same multi-path scope
+        // got a genuinely different one. Keyed by `(project, dir)` now — a path dependency can
+        // only ever resolve within its own real Cargo workspace (this file's own long-standing
+        // invariant, stated below at `qualified_dir`'s own comment), so every lookup site pairs a
+        // target directory with the *same* crate's own `project`, never a bare directory alone.
+        let dir_to_id: HashMap<(String, String), KirId> = crates
             .iter()
-            .map(|c| (c.dir.clone(), crate_kir_id(&c.dir)))
+            .map(|c| {
+                (
+                    (c.project.clone(), c.dir.clone()),
+                    crate_kir_id(&qualified_dir(c)),
+                )
+            })
             .collect();
 
         // RFC 0078: a version-pinned dependency (`ignore = "0.4"`, not `{ path = "../ignore" }`)
@@ -314,7 +360,12 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
         // observed twice under two different KIR shapes.
         let name_to_crate_id: HashMap<&str, KirId> = crates
             .iter()
-            .map(|c| (c.name.as_str(), dir_to_id[&c.dir]))
+            .map(|c| {
+                (
+                    c.name.as_str(),
+                    dir_to_id[&(c.project.clone(), c.dir.clone())],
+                )
+            })
             .collect();
 
         // Built upfront (independent of `graph.objects`' progressive insertion order) so
@@ -322,13 +373,18 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
         // target crate appears later in `crates` and hasn't been added to `graph` yet.
         let crate_name_by_id: HashMap<KirId, String> = crates
             .iter()
-            .map(|c| (dir_to_id[&c.dir], c.name.clone()))
+            .map(|c| {
+                (
+                    dir_to_id[&(c.project.clone(), c.dir.clone())],
+                    c.name.clone(),
+                )
+            })
             .collect();
 
         let mut technology_ids: HashMap<String, KirId> = HashMap::new();
 
         for c in &crates {
-            let crate_id = dir_to_id[&c.dir];
+            let crate_id = dir_to_id[&(c.project.clone(), c.dir.clone())];
             let mut obj = KirObject::new(c.name.clone(), ObjectKind::Custom("Crate".to_string()))
                 .with_property("path", serde_json::json!(c.dir))
                 .with_property("description", serde_json::json!(c.description));
@@ -364,7 +420,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                             // dropped, matching this project's own "Unmapped is deliberate, not a gap
                             // swept under the rug" philosophy (Transformation IR, RFC 0027).
                             None => {
-                                let gap_id = architecture_gap_kir_id(&c.dir, dep_name);
+                                let gap_id = architecture_gap_kir_id(&qualified_dir(c), dep_name);
                                 let ev = KirEvidence::new(
                                     SourceLocation::file(&manifest_path),
                                     format!(
@@ -403,7 +459,11 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
 
                 match resolution {
                     DepResolution::Path(target_dir) => {
-                        let Some(&target_id) = dir_to_id.get(&target_dir) else {
+                        // A path dependency only ever resolves within its own real Cargo
+                        // workspace — never across a project boundary — so the lookup is always
+                        // paired with `c`'s own project, never a bare directory alone.
+                        let Some(&target_id) = dir_to_id.get(&(c.project.clone(), target_dir))
+                        else {
                             continue;
                         };
                         if target_id == crate_id {
@@ -428,7 +488,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                             .unwrap_or(dep_name);
                         add_depends_on_claim(
                             &mut graph,
-                            &c.dir,
+                            &qualified_dir(c),
                             crate_id,
                             &c.name,
                             target_id,
@@ -472,7 +532,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                                 .unwrap_or(dep_name);
                             add_depends_on_claim(
                                 &mut graph,
-                                &c.dir,
+                                &qualified_dir(c),
                                 crate_id,
                                 &c.name,
                                 target_id,
@@ -506,7 +566,13 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                         graph.add_relationship(rel);
 
                         add_depends_on_claim(
-                            &mut graph, &c.dir, crate_id, &c.name, tech_id, dep_name, ev_id,
+                            &mut graph,
+                            &qualified_dir(c),
+                            crate_id,
+                            &c.name,
+                            tech_id,
+                            dep_name,
+                            ev_id,
                         );
                     }
                     // Unreachable: `resolution` is bound above only via `DepResolution::Path(_)`
@@ -556,10 +622,14 @@ mod tests {
     }
 
     async fn run_pass(manifests: Vec<(&str, &str)>) -> ekos_kir::KirGraph {
+        run_pass_qualified(manifests.into_iter().map(|(p, s)| (p, s, "")).collect()).await
+    }
+
+    async fn run_pass_qualified(manifests: Vec<(&str, &str, &str)>) -> ekos_kir::KirGraph {
         let (mut c, _dir) = ctx();
         let manifests = manifests
             .into_iter()
-            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .map(|(p, s, proj)| (p.to_string(), s.to_string(), proj.to_string()))
             .collect();
         let mut pass = CrateTopologyAnalyzerPass::new("test", manifests);
         pass.run(&mut c).await.unwrap();
@@ -622,6 +692,77 @@ tokio = "1"
         assert_eq!(
             kir_crate.properties["path"],
             serde_json::json!("crates/kir")
+        );
+    }
+
+    #[tokio::test]
+    async fn project_qualified_crate_id_matches_the_same_scheme_dependency_analyzer_uses() {
+        // Same bug class as dependency_analyzer.rs's
+        // `project_qualified_edge_lands_on_the_same_file_id_build_rs_writes` regression test: this
+        // pass used to mint every `Crate`/`ArchitectureGap`/`Claim` id from the bare, unqualified
+        // manifest directory, so a multi-`[observe] paths` workspace (RFC 0079) minted crate ids
+        // that never matched the qualified scheme every other analyzer already uses — a silent,
+        // never-collided-but-also-never-found identity for the object. Verifies the real id
+        // scheme directly rather than just checking the pass runs without error.
+        let graph = run_pass_qualified(vec![("Cargo.toml", KIR, "backend/rust-service")]).await;
+        let kir_crate = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "ekos-kir")
+            .expect("ekos-kir crate object");
+        let expected_id = crate_kir_id(&ekos_common::project::project_qualify(
+            "",
+            Some("backend/rust-service"),
+        ));
+        assert_eq!(kir_crate.id, expected_id);
+        // Never accidentally the unqualified id — the exact failure mode this regresses against.
+        assert_ne!(kir_crate.id, crate_kir_id(""));
+    }
+
+    /// Real bug, found live 2026-08-25 verifying RFC 0095 against a real 2-crate multi-
+    /// `[observe]-path` scratch scope (EKOS's own `crates/kir` + `crates/common`, each its own
+    /// entry): `dir_to_id` used to be keyed by the *bare* `c.dir` alone — a crate whose
+    /// `Cargo.toml` sits at the root of its own `[observe] paths` entry always has `c.dir == ""`,
+    /// the single most common real shape for exactly this scenario — so two crates from two
+    /// *different* projects silently collapsed onto one id (whichever was processed last), even
+    /// though `project_qualified_crate_id_matches_the_same_scheme_dependency_analyzer_uses` above
+    /// already passed — that test only ever checked one crate's id in isolation, never checked a
+    /// second crate in the same multi-path scope got a genuinely *different* one.
+    #[tokio::test]
+    async fn two_crates_from_different_projects_both_at_their_own_manifest_root_get_distinct_ids() {
+        let graph = run_pass_qualified(vec![
+            ("Cargo.toml", KIR, "crates/kir"),
+            ("Cargo.toml", CONSUMER, "crates/common"),
+        ])
+        .await;
+        let kir_crate = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "ekos-kir")
+            .expect("ekos-kir crate object");
+        let consumer_crate = graph
+            .objects
+            .iter()
+            .find(|o| o.name == "ekos-consumer")
+            .expect("ekos-consumer crate object");
+        assert_ne!(
+            kir_crate.id, consumer_crate.id,
+            "two crates from different projects must never collapse onto one id just because \
+             both have Cargo.toml at their own [observe] paths entry's root"
+        );
+        assert_eq!(
+            kir_crate.id,
+            crate_kir_id(&ekos_common::project::project_qualify(
+                "",
+                Some("crates/kir")
+            ))
+        );
+        assert_eq!(
+            consumer_crate.id,
+            crate_kir_id(&ekos_common::project::project_qualify(
+                "",
+                Some("crates/common")
+            ))
         );
     }
 
@@ -826,7 +967,7 @@ tokio = "1"
         let (mut c, _dir) = ctx();
         let mut pass = CrateTopologyAnalyzerPass::new(
             "test",
-            vec![("Cargo.toml".to_string(), ROOT.to_string())],
+            vec![("Cargo.toml".to_string(), ROOT.to_string(), String::new())],
         );
         pass.run(&mut c).await.unwrap();
         assert!(

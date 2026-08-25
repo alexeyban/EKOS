@@ -23,6 +23,7 @@ use ekos_artifact::ArtifactId;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
     KirEvidence, KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind,
+    SourceLocation,
 };
 use ekos_semantic::merge_graphs;
 use ekos_semantic::transform_ir::{
@@ -31,7 +32,7 @@ use ekos_semantic::transform_ir::{
 use rustpython_parser::Parse;
 use rustpython_parser::ast::{self, Ranged};
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -223,8 +224,46 @@ fn parse_python_file(
     };
     let mut graph_index = 0usize;
 
+    // RFC 0091: real `__tablename__`s declared anywhere in this file, collected before the main
+    // walk so a `ForeignKey("other_table.col")` resolves regardless of whether `other_table`'s
+    // own class appears earlier or later in the file (real shape: `pdf-reader`'s `db/models.py`
+    // declares `Document` before `PageCache`, which references it — but the reverse order is
+    // equally valid Python).
+    let known_tables: HashMap<String, KirId> = stmts
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ast::Stmt::ClassDef(c) => {
+                extract_tablename(&c.body).map(|t| (t.clone(), orm_table_kir_id(&t)))
+            }
+            _ => None,
+        })
+        .collect();
+
+    // RFC 0092: every real class declared in this file, collected before the main walk for the
+    // same reason as `known_tables` above — a base class can legitimately appear either before or
+    // after its subclass in real source.
+    let known_classes: HashMap<String, KirId> = stmts
+        .iter()
+        .filter_map(|stmt| match stmt {
+            ast::Stmt::ClassDef(c) => Some((
+                c.name.to_string(),
+                python_symbol_kir_id(path, c.name.as_str()),
+            )),
+            _ => None,
+        })
+        .collect();
+
     for stmt in &stmts {
-        walk_top_level_statement(stmt, path, source, file_id, &mut result, &mut graph_index);
+        walk_top_level_statement(
+            stmt,
+            path,
+            source,
+            file_id,
+            &mut result,
+            &mut graph_index,
+            &known_tables,
+            &known_classes,
+        );
     }
 
     Ok(result)
@@ -249,6 +288,28 @@ fn add_import(module: &str, file_id: KirId, result: &mut PythonFileResult) {
     ));
 }
 
+/// Deterministic id for a `Custom("PythonSymbol")` object — shared by `add_symbol` (which mints
+/// it for the object it creates) and RFC 0092's `known_classes` pre-pass (which needs the same id
+/// for a class *before* `add_symbol` runs for it, to resolve a same-file `Extends` base
+/// regardless of declaration order).
+fn python_symbol_kir_id(path: &str, name: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("python-symbol:{path}:{name}").as_bytes(),
+    ))
+}
+
+/// Deterministic id for a real `Extends` edge (RFC 0092), keyed by `(from, to)` — a class extends
+/// a given base as a boolean fact, matching `crate_topology_analyzer.rs`'s `depends_on_kir_id`
+/// precedent (RFC 0070/0071's fix for the failure mode a non-deterministic relationship id causes:
+/// unbounded duplicate accumulation across repeated `recover` runs).
+fn extends_kir_id(from: KirId, to: KirId) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("extends:{from}:{to}").as_bytes(),
+    ))
+}
+
 fn add_symbol(
     name: &str,
     kind: &str,
@@ -258,10 +319,7 @@ fn add_symbol(
     doc: Option<String>,
     span: Option<(u32, u32)>,
 ) {
-    let target_id = KirId(Uuid::new_v5(
-        &Uuid::NAMESPACE_URL,
-        format!("python-symbol:{path}:{name}").as_bytes(),
-    ));
+    let target_id = python_symbol_kir_id(path, name);
     let mut obj = KirObject::new(name, ObjectKind::Custom("PythonSymbol".to_string()))
         .with_property("kind", serde_json::Value::String(kind.to_string()));
     obj.id = target_id;
@@ -287,6 +345,210 @@ fn add_symbol(
         file_id,
         target_id,
     ));
+}
+
+// ── RFC 0091 — SQLAlchemy ORM model recognition ─────────────────────────────
+
+/// A real column extracted from an ORM model's class body.
+struct OrmColumn {
+    name: String,
+    /// Best-effort — the callable name of the column-type call (`String`/`Integer`/`DateTime`/
+    /// ...) when the first positional argument to `mapped_column(...)`/`Column(...)` is itself a
+    /// call. Never a real SQL type-system mapping; `None` when it can't be determined this way.
+    data_type: Option<String>,
+    /// `(referenced table, referenced column)` from a real `ForeignKey("table.column")` string
+    /// literal nested in this column's call — `None` when no `ForeignKey(...)` was found.
+    fk_target: Option<(String, String)>,
+}
+
+/// Real id for an ORM-recognized `Table` — same scheme `sql_analyzer.rs::table_kir_id` uses
+/// (lowercased, analyzer-prefixed so a same-named table recovered by DDL parsing and by ORM-model
+/// recognition never silently collides onto one id; cross-origin recognition that they describe
+/// the same real table is identity resolution's job, RFC 0029, not an accidental id match).
+fn orm_table_kir_id(tablename: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("python-orm-table:{}", tablename.to_lowercase()).as_bytes(),
+    ))
+}
+
+/// Same reasoning as `sql_analyzer.rs::foreign_key_kir_id` — `fk_desc` is part of the hash input,
+/// not just the evidence text, so two FK columns to the same target table produce two distinct
+/// real edges rather than colliding.
+fn orm_foreign_key_kir_id(from: KirId, to: KirId, fk_desc: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("python-orm-fk:{from}:{to}:{fk_desc}").as_bytes(),
+    ))
+}
+
+/// A real `__tablename__ = "..."` string-literal assignment in a class body — the one signal this
+/// recognizes an ORM model by (RFC 0091's own Motivation: deliberately not tracing `bases` back to
+/// a `declarative_base()`/`DeclarativeBase` definition, which is fragile against aliasing/
+/// re-exports; `__tablename__` is unambiguous and SQLAlchemy-specific).
+fn extract_tablename(body: &[ast::Stmt]) -> Option<String> {
+    body.iter().find_map(|stmt| {
+        let ast::Stmt::Assign(a) = stmt else {
+            return None;
+        };
+        let ast::Expr::Name(target) = a.targets.first()? else {
+            return None;
+        };
+        if target.id.as_str() != "__tablename__" {
+            return None;
+        }
+        string_constant(&a.value)
+    })
+}
+
+/// The callable name of `expr` when it's a `Call` — `mapped_column(String(64), ...)`'s first
+/// positional arg is `Call{func: Name{"String"}, ...}`, so this gives the real `"String"` hint;
+/// `sa.Integer` (qualified) resolves via the `Attribute` arm the same way `linearize_chain`
+/// already navigates `Expr::Attribute` elsewhere in this file.
+fn call_name(expr: &ast::Expr) -> Option<&str> {
+    let ast::Expr::Call(call) = expr else {
+        return None;
+    };
+    match call.func.as_ref() {
+        ast::Expr::Name(n) => Some(n.id.as_str()),
+        ast::Expr::Attribute(a) => Some(a.attr.as_str()),
+        _ => None,
+    }
+}
+
+/// Real `(table, column)` from a `ForeignKey("table.column")` call nested anywhere in `call`'s
+/// positional or keyword arguments — `mapped_column(String(64), ForeignKey("documents.file_hash"))`
+/// is the real shape this looks for.
+fn find_fk_target(call: &ast::ExprCall) -> Option<(String, String)> {
+    let candidates = call
+        .args
+        .iter()
+        .chain(call.keywords.iter().map(|k| &k.value));
+    for arg in candidates {
+        if call_name(arg) == Some("ForeignKey")
+            && let ast::Expr::Call(fk_call) = arg
+            && let Some(target) = positional_string_arg(fk_call, 0)
+            && let Some((table, column)) = target.split_once('.')
+        {
+            return Some((table.to_string(), column.to_string()));
+        }
+    }
+    None
+}
+
+/// Best-effort `data_type` hint from a column-type expression — either *called*
+/// (`String(64)`/`sa.String(64)`, via `call_name`) or a bare, uninstantiated type reference
+/// (`Integer`, real and common SQLAlchemy usage for a type with no constructor arguments).
+fn type_hint(expr: &ast::Expr) -> Option<&str> {
+    match expr {
+        ast::Expr::Call(_) => call_name(expr),
+        ast::Expr::Name(n) => Some(n.id.as_str()),
+        ast::Expr::Attribute(a) => Some(a.attr.as_str()),
+        _ => None,
+    }
+}
+
+/// Real columns from a class body — both SQLAlchemy 2.0 style (`field: Mapped[T] =
+/// mapped_column(...)`, `ast::Stmt::AnnAssign`) and classic style (`field = Column(...)`,
+/// `ast::Stmt::Assign`). Only a statement whose right-hand side is itself a `Call` counts — a
+/// plain class-body assignment with no column-constructor call (e.g. a real class-level constant)
+/// is never guessed at as a column.
+fn extract_orm_columns(body: &[ast::Stmt]) -> Vec<OrmColumn> {
+    let mut columns = Vec::new();
+    for stmt in body {
+        let (name, call_expr) = match stmt {
+            ast::Stmt::AnnAssign(a) => {
+                let ast::Expr::Name(n) = a.target.as_ref() else {
+                    continue;
+                };
+                let Some(value) = &a.value else { continue };
+                (n.id.as_str(), value.as_ref())
+            }
+            ast::Stmt::Assign(a) => {
+                let Some(ast::Expr::Name(n)) = a.targets.first() else {
+                    continue;
+                };
+                (n.id.as_str(), a.value.as_ref())
+            }
+            _ => continue,
+        };
+        let ast::Expr::Call(call) = call_expr else {
+            continue;
+        };
+        let data_type = call.args.first().and_then(type_hint).map(|s| s.to_string());
+        columns.push(OrmColumn {
+            name: name.to_string(),
+            data_type,
+            fk_target: find_fk_target(call),
+        });
+    }
+    columns
+}
+
+/// Adds a real `ObjectKind::Table` for a recognized ORM model, alongside (never replacing) its
+/// existing `PythonSymbol` object — see this function's caller and RFC 0091's own Design section
+/// for why these are two separate real objects, not one. `known_tables` (built once per file
+/// before any class is walked, so forward and backward references both resolve) supplies real FK
+/// targets found within *this same file*; a target not found there gets no FK edge at all —
+/// honest, not a fabricated edge to a possibly-nonexistent id.
+fn add_orm_table(
+    tablename: &str,
+    body: &[ast::Stmt],
+    path: &str,
+    file_id: KirId,
+    known_tables: &HashMap<String, KirId>,
+    result: &mut PythonFileResult,
+) {
+    let table_id = orm_table_kir_id(tablename);
+    let columns = extract_orm_columns(body);
+
+    let columns_json: Vec<serde_json::Value> = columns
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "name": c.name,
+                "data_type": c.data_type.as_deref().unwrap_or("unknown"),
+            })
+        })
+        .collect();
+
+    let ev = KirEvidence::new(
+        SourceLocation::file(path),
+        format!("class with __tablename__ = \"{tablename}\""),
+    );
+    let ev_id = ev.id;
+    result.evidence.push(ev);
+
+    let mut obj = KirObject::new(tablename, ObjectKind::Table)
+        .with_property("columns", serde_json::Value::Array(columns_json))
+        .with_evidence(ev_id);
+    obj.id = table_id;
+    result.objects.push(obj);
+    result.relationships.push(KirRelationship::new(
+        RelationshipKind::Contains,
+        file_id,
+        table_id,
+    ));
+
+    for column in &columns {
+        let Some((ref_table, ref_column)) = &column.fk_target else {
+            continue;
+        };
+        let Some(&to_id) = known_tables.get(ref_table) else {
+            continue;
+        };
+        let fk_desc = format!("{tablename}.{} → {ref_table}.{ref_column}", column.name);
+        let fk_ev = KirEvidence::new(SourceLocation::file(path), fk_desc.clone());
+        let fk_ev_id = fk_ev.id;
+        result.evidence.push(fk_ev);
+
+        let mut rel = KirRelationship::new(RelationshipKind::ForeignKey, table_id, to_id);
+        rel.id = orm_foreign_key_kir_id(table_id, to_id, &fk_desc);
+        rel.properties
+            .insert("fk_desc".into(), serde_json::Value::String(fk_desc));
+        rel.evidence.push(fk_ev_id);
+        result.relationships.push(rel);
+    }
 }
 
 /// 1-indexed line number containing byte offset `offset` in `source` — counts `\n` bytes before
@@ -331,6 +593,7 @@ fn python_docstring(body: &[ast::Stmt]) -> Option<String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_top_level_statement(
     stmt: &ast::Stmt,
     path: &str,
@@ -338,6 +601,8 @@ fn walk_top_level_statement(
     file_id: KirId,
     result: &mut PythonFileResult,
     graph_index: &mut usize,
+    known_tables: &HashMap<String, KirId>,
+    known_classes: &HashMap<String, KirId>,
 ) {
     match stmt {
         ast::Stmt::Import(imp) => {
@@ -347,7 +612,22 @@ fn walk_top_level_statement(
         }
         ast::Stmt::ImportFrom(imp) => {
             if let Some(module) = &imp.module {
-                add_import(module.as_str(), file_id, result);
+                // `from pkg import name` binds each real, distinct `name` — resolving every one
+                // to the bare `pkg` collapsed `from app.services import ai_service` and
+                // `from app.services import db_service` to the same object, losing exactly the
+                // distinction the real source draws. `pkg.name` is a real dotted reference the
+                // source itself makes, whether `name` turns out to be a submodule (the common
+                // case that motivated this fix) or a symbol re-exported from `pkg`'s `__init__` —
+                // both are real depends-on facts, not fabricated. A star import has no specific
+                // name to qualify with, so it falls back to the bare module, same as before.
+                for alias in &imp.names {
+                    let name = alias.name.as_str();
+                    if name == "*" {
+                        add_import(module.as_str(), file_id, result);
+                    } else {
+                        add_import(&format!("{module}.{name}"), file_id, result);
+                    }
+                }
             }
         }
         ast::Stmt::FunctionDef(f) => {
@@ -378,6 +658,28 @@ fn walk_top_level_statement(
                 doc,
                 Some(span),
             );
+            // RFC 0091: a real SQLAlchemy declarative model (`__tablename__` present) is *also*
+            // compiled as a real `Table` object, alongside its existing `PythonSymbol` — the class
+            // still gets its ordinary code-level representation unchanged.
+            if let Some(tablename) = extract_tablename(&c.body) {
+                add_orm_table(&tablename, &c.body, path, file_id, known_tables, result);
+            }
+            // RFC 0092: a real `Extends` edge per base class that resolves to another real,
+            // same-file `PythonSymbol` class — an `Attribute` base (`orm.DeclarativeBase`) can
+            // never refer to a same-file class by construction, so only `Name` bases are checked;
+            // a `Name` base with no matching local class (`BaseModel`, imported, not locally
+            // defined) is honestly left unmapped, not fabricated.
+            let class_id = python_symbol_kir_id(path, c.name.as_str());
+            for base in &c.bases {
+                if let ast::Expr::Name(n) = base
+                    && let Some(&base_id) = known_classes.get(n.id.as_str())
+                {
+                    let mut rel =
+                        KirRelationship::new(RelationshipKind::Extends, class_id, base_id);
+                    rel.id = extends_kir_id(class_id, base_id);
+                    result.relationships.push(rel);
+                }
+            }
         }
         other => {
             try_recognize_chain_statement(other, path, source, result, graph_index);
@@ -682,13 +984,52 @@ mod tests {
                 .iter()
                 .any(|o| o.name == "sys" && o.kind == ObjectKind::Custom("PythonModule".into()))
         );
-        assert!(result.objects.iter().any(|o| o.name == "dp.io.delta"));
+        // Real bug, found live 2026-08-24 against `pdf-reader`: this used to resolve to the bare
+        // `dp.io.delta` package, collapsing every real submodule imported from it onto the same
+        // object. `write_delta` is the actual thing the source references.
+        assert!(
+            result
+                .objects
+                .iter()
+                .any(|o| o.name == "dp.io.delta.write_delta")
+        );
+        assert!(!result.objects.iter().any(|o| o.name == "dp.io.delta"));
         assert!(
             result
                 .relationships
                 .iter()
                 .all(|r| r.kind == RelationshipKind::DependsOn)
         );
+    }
+
+    #[test]
+    fn from_import_with_multiple_names_resolves_each_to_its_own_qualified_module() {
+        // The real pdf-reader shape this fix targets: `from app.services import ai_service`
+        // previously compiled to one coarse `app.services` object shared by every name imported
+        // from that package — two distinct real submodules became indistinguishable.
+        let result = parse("from app.services import ai_service, db_service\n");
+        assert!(
+            result
+                .objects
+                .iter()
+                .any(|o| o.name == "app.services.ai_service")
+        );
+        assert!(
+            result
+                .objects
+                .iter()
+                .any(|o| o.name == "app.services.db_service")
+        );
+        assert!(!result.objects.iter().any(|o| o.name == "app.services"));
+    }
+
+    #[test]
+    fn star_import_falls_back_to_the_bare_module() {
+        // `from pkg import *` has no specific name to qualify with — `pkg` is the only real fact
+        // the source states, not a fabricated `pkg.*`.
+        let result = parse("from app.utils import *\n");
+        assert_eq!(result.objects.len(), 1);
+        assert_eq!(result.objects[0].name, "app.utils");
     }
 
     #[test]
@@ -699,6 +1040,121 @@ mod tests {
         assert!(names.contains(&"Bar"));
         let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
         assert_eq!(foo.properties["kind"], "function");
+    }
+
+    // ── RFC 0091 — SQLAlchemy ORM model recognition ─────────────────────────
+
+    #[test]
+    fn orm_model_produces_a_real_table_object_alongside_the_existing_symbol() {
+        // The real shape found live in `pdf-reader`'s `backend/app/db/models.py`.
+        let result = parse(
+            "class Document(Base):\n    __tablename__ = \"documents\"\n    file_hash: Mapped[str] = mapped_column(String(64), primary_key=True)\n    filename: Mapped[str] = mapped_column(String(512))\n    page_count: Mapped[int] = mapped_column(Integer)\n",
+        );
+
+        // The existing PythonSymbol object is unchanged.
+        let symbol = result
+            .objects
+            .iter()
+            .find(|o| o.name == "Document" && o.kind == ObjectKind::Custom("PythonSymbol".into()));
+        assert!(
+            symbol.is_some(),
+            "the class must still get its ordinary symbol object"
+        );
+
+        // A new, separate Table object, named by the real table name (not the class name).
+        let table = result
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Table)
+            .expect("a Table object must be compiled for a recognized ORM model");
+        assert_eq!(table.name, "documents");
+
+        let columns = table.properties["columns"].as_array().unwrap();
+        assert_eq!(columns.len(), 3);
+        assert_eq!(columns[0]["name"], "file_hash");
+        assert_eq!(columns[0]["data_type"], "String");
+        assert_eq!(columns[2]["name"], "page_count");
+        assert_eq!(columns[2]["data_type"], "Integer");
+
+        // Contains-linked from the same file, same convention `add_symbol` already uses.
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Contains && r.to == table.id)
+        );
+    }
+
+    #[test]
+    fn plain_class_with_no_tablename_produces_no_table_object() {
+        let result = parse("class Widget:\n    \"\"\"A real widget.\"\"\"\n    pass\n");
+        assert!(!result.objects.iter().any(|o| o.kind == ObjectKind::Table));
+    }
+
+    #[test]
+    fn orm_foreign_key_resolves_within_the_same_file_regardless_of_declaration_order() {
+        // Real shape: `PageCache` references `Document`'s real table, declared *after* it in the
+        // real source (`db/models.py`) — must still resolve.
+        let result = parse(
+            "class Document(Base):\n    __tablename__ = \"documents\"\n    file_hash: Mapped[str] = mapped_column(String(64), primary_key=True)\n\nclass PageCache(Base):\n    __tablename__ = \"page_cache\"\n    file_hash: Mapped[str] = mapped_column(String(64), ForeignKey(\"documents.file_hash\"))\n",
+        );
+
+        let documents = result
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Table && o.name == "documents")
+            .unwrap();
+        let page_cache = result
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Table && o.name == "page_cache")
+            .unwrap();
+
+        let fk = result
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::ForeignKey)
+            .expect("a real ForeignKey edge must be compiled");
+        assert_eq!(fk.from, page_cache.id);
+        assert_eq!(fk.to, documents.id);
+        assert_eq!(
+            fk.properties["fk_desc"],
+            "page_cache.file_hash → documents.file_hash"
+        );
+    }
+
+    #[test]
+    fn orm_foreign_key_to_a_table_outside_this_file_is_honestly_skipped_not_fabricated() {
+        let result = parse(
+            "class PageCache(Base):\n    __tablename__ = \"page_cache\"\n    file_hash: Mapped[str] = mapped_column(String(64), ForeignKey(\"documents.file_hash\"))\n",
+        );
+        assert!(
+            !result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::ForeignKey),
+            "no real Table for 'documents' exists in this file — no edge should be invented"
+        );
+        // The column itself is still real and extracted, just without a resolved FK edge.
+        let table = result
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Table)
+            .unwrap();
+        assert_eq!(table.properties["columns"][0]["name"], "file_hash");
+    }
+
+    #[test]
+    fn orm_column_with_unrecognizable_data_type_is_honest_not_fabricated() {
+        let result = parse(
+            "class Document(Base):\n    __tablename__ = \"documents\"\n    file_hash = some_dynamic_column_builder()\n",
+        );
+        let table = result
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Table)
+            .unwrap();
+        assert_eq!(table.properties["columns"][0]["data_type"], "unknown");
     }
 
     #[test]
@@ -928,5 +1384,117 @@ mod tests {
         let result = parse(source);
         assert_eq!(result.objects.len(), 1);
         assert_eq!(result.transform_graphs.len(), 1);
+    }
+
+    // ── RFC 0092 — class inheritance (`RelationshipKind::Extends`) ──────────
+
+    #[test]
+    fn subclass_of_a_same_file_class_gets_a_real_extends_edge() {
+        let result = parse("class Base:\n    pass\n\nclass Document(Base):\n    pass\n");
+        let base = result.objects.iter().find(|o| o.name == "Base").unwrap();
+        let document = result
+            .objects
+            .iter()
+            .find(|o| o.name == "Document")
+            .unwrap();
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Extends
+                    && r.from == document.id
+                    && r.to == base.id)
+        );
+    }
+
+    #[test]
+    fn base_declared_after_the_subclass_still_resolves() {
+        // Real, valid Python: nothing requires a base class to be declared before its subclass
+        // within the same module-level statement order this analyzer walks in.
+        let result = parse("class Document(Base):\n    pass\n\nclass Base:\n    pass\n");
+        let base = result.objects.iter().find(|o| o.name == "Base").unwrap();
+        let document = result
+            .objects
+            .iter()
+            .find(|o| o.name == "Document")
+            .unwrap();
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Extends
+                    && r.from == document.id
+                    && r.to == base.id)
+        );
+    }
+
+    #[test]
+    fn extending_an_import_only_base_is_honestly_skipped_not_fabricated() {
+        // `BaseModel` is never locally defined — no `PythonSymbol` object exists for it in this
+        // file, so no `Extends` edge is fabricated pointing at a nonexistent id.
+        let result = parse("class TranslateRequest(BaseModel):\n    pass\n");
+        assert!(
+            !result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Extends)
+        );
+    }
+
+    #[test]
+    fn attribute_form_base_is_never_treated_as_a_local_class() {
+        // A dotted base (`orm.DeclarativeBase`) can never refer to a same-file class by
+        // construction — must not accidentally match a same-named local class via `attr`.
+        let result = parse(
+            "class DeclarativeBase:\n    pass\n\nclass Base(orm.DeclarativeBase):\n    pass\n",
+        );
+        assert!(
+            !result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Extends)
+        );
+    }
+
+    /// End-to-end shape mirroring `pdf-reader`'s real `db/models.py`/`api/ai.py` exactly: a
+    /// locally-defined `Base` that itself extends an external, unresolvable `DeclarativeBase`,
+    /// and a real subclass of it — both the resolved and unresolved case in one real file.
+    #[test]
+    fn real_sqlalchemy_base_chain_resolves_the_local_link_and_skips_the_external_one() {
+        let source = "class Base(DeclarativeBase):\n    pass\n\n\
+                       class Document(Base):\n    __tablename__ = \"documents\"\n";
+        let result = parse(source);
+        let base = result.objects.iter().find(|o| o.name == "Base").unwrap();
+        let document = result
+            .objects
+            .iter()
+            .find(|o| o.name == "Document")
+            .unwrap();
+        let extends: Vec<_> = result
+            .relationships
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Extends)
+            .collect();
+        assert_eq!(extends.len(), 1, "only Document→Base should resolve");
+        assert_eq!(extends[0].from, document.id);
+        assert_eq!(extends[0].to, base.id);
+    }
+
+    #[test]
+    fn extends_relationship_id_is_deterministic_across_separate_parses() {
+        let source = "class Base:\n    pass\n\nclass Document(Base):\n    pass\n";
+        let r1 = parse(source);
+        let r2 = parse(source);
+        let e1 = r1
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Extends)
+            .unwrap();
+        let e2 = r2
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Extends)
+            .unwrap();
+        assert_eq!(e1.id, e2.id);
     }
 }

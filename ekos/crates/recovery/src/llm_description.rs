@@ -526,12 +526,24 @@ fn is_real_readme_name(name: &str) -> bool {
 pub async fn describe_project(
     store: &dyn KnowledgeStore,
     llm: &dyn LlmProvider,
+    workspace_name: &str,
 ) -> Result<bool, String> {
     let objects = store.all_objects().map_err(|e| e.to_string())?;
 
-    let readme = objects.iter().find(|o| {
-        matches!(&o.kind, ObjectKind::Custom(s) if s == "Document") && is_real_readme_name(&o.name)
-    });
+    // Real bug found live, 2026-08-25, against a real whole-project workspace with more than one
+    // legitimate `README.md` (the project's own root `README.md`, plus `frontend/README.md` — a
+    // real but generic Vite/React scaffold template README, not project-specific content): a bare
+    // `.find()` took whichever matched first in iteration order, which isn't guaranteed to be the
+    // most relevant one, and produced a "purpose" describing Vite/HMR scaffolding instead of the
+    // real project. Prefer the shallowest real match (fewest `/` in its name) — the root-level
+    // README a project actually introduces itself in, not a nested package's own boilerplate one.
+    let readme = objects
+        .iter()
+        .filter(|o| {
+            matches!(&o.kind, ObjectKind::Custom(s) if s == "Document")
+                && is_real_readme_name(&o.name)
+        })
+        .min_by_key(|o| o.name.matches('/').count());
     let readme_excerpt = readme
         .and_then(|o| o.properties.get("excerpt"))
         .and_then(|v| v.as_str());
@@ -561,13 +573,23 @@ pub async fn describe_project(
     }
 
     let user_message = serde_json::json!({
+        "workspace_name": workspace_name,
         "readme_excerpt": readme_excerpt,
         "top_subsystems": top_rollups,
         "technologies": technologies,
     })
     .to_string();
 
-    let system_prompt = "You are summarizing a real, already-compiled software workspace for an architecture knowledge base. You will be shown a real README excerpt (if any), the largest real compiled subsystems, and real compiled technology dependencies.\n\nRespond with a single JSON object, no markdown fences, matching exactly:\n{\"purpose\": \"1-2 sentences on what this real project is for, grounded only in what you were shown, or null if you cannot tell\", \"architecture_style\": \"a short real architectural style label (e.g. \\\"modular monolith\\\", \\\"microservices\\\", \\\"layered\\\", \\\"event-driven\\\"), grounded only in what you were shown, or null if you cannot tell\"}\n\nNever invent facts not present in what you were shown.";
+    // Real bug found live, 2026-08-24: against a real project (a Python/TypeScript PDF reader),
+    // a weak local model (`llama3:latest` via Ollama) produced a self-referential "purpose" that
+    // described *this analysis tool* ("generating knowledge ledger facts... AI overview") instead
+    // of the real project it was actually shown. No caching/prompt-construction bug explains
+    // this — the prompt genuinely was built from that project's own real compiled data — so this
+    // is a real model-quality failure, not something fixable with a guarantee. Two bounded,
+    // testable mitigations: (1) `workspace_name` above gives the model a concrete named anchor
+    // instead of only generic subsystem/technology name lists; (2) the explicit anti-self-
+    // reference sentence below, added after this exact failure was observed.
+    let system_prompt = "You are summarizing a real, already-compiled software workspace for an architecture knowledge base. You will be shown the real workspace's own name, a real README excerpt (if any), the largest real compiled subsystems, and real compiled technology dependencies — all real facts about that one specific workspace, not about the tool producing this summary.\n\nRespond with a single JSON object, no markdown fences, matching exactly:\n{\"purpose\": \"1-2 sentences on what this real project (named in workspace_name) is for, grounded only in what you were shown, or null if you cannot tell\", \"architecture_style\": \"a short real architectural style label (e.g. \\\"modular monolith\\\", \\\"microservices\\\", \\\"layered\\\", \\\"event-driven\\\"), grounded only in what you were shown, or null if you cannot tell\"}\n\nNever invent facts not present in what you were shown. Describe the real project named in workspace_name only — never describe EKOS, a knowledge ledger, an architecture knowledge base, or any analysis/compiler tool; that is not the project being analyzed.";
 
     let req = LlmRequest {
         system: system_prompt,
@@ -1128,7 +1150,7 @@ mod tests {
         let llm = RecordingLlmProvider::new(
             r#"{"purpose": "A privacy-friendly web analytics platform.", "architecture_style": "modular monolith"}"#,
         );
-        let wrote = describe_project(&store, &llm).await.unwrap();
+        let wrote = describe_project(&store, &llm, "analytics").await.unwrap();
         assert!(wrote);
 
         let summary = store.get_object(&project_summary_id()).unwrap().unwrap();
@@ -1142,6 +1164,9 @@ mod tests {
         let sent = llm.requests.lock().unwrap();
         assert!(sent[0].contains("privacy-friendly analytics tool"));
         assert!(sent[0].contains("\"lib\""));
+        // RFC 0088 fast-follow, 2026-08-24: a real concrete workspace-name anchor must reach the
+        // prompt, not just generic subsystem/technology name lists.
+        assert!(sent[0].contains("\"analytics\""));
     }
 
     #[test]
@@ -1179,7 +1204,7 @@ mod tests {
         store.append_object(&real_readme).unwrap();
 
         let llm = RecordingLlmProvider::new(r#"{"purpose": "x", "architecture_style": "y"}"#);
-        describe_project(&store, &llm).await.unwrap();
+        describe_project(&store, &llm, "analytics").await.unwrap();
 
         let sent = llm.requests.lock().unwrap();
         assert!(
@@ -1191,10 +1216,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn describe_project_prefers_the_root_readme_over_a_nested_packages_own_real_readme() {
+        // Real bug found live, 2026-08-25, against a real whole-project workspace: both a real
+        // project root `README.md` *and* a real, legitimate `frontend/README.md` (a generic
+        // Vite/React scaffold template, not vendored/fake — `is_real_readme_name` correctly
+        // accepts it) exist. Unlike the vendored-lookalike case above, both pass the name check;
+        // a bare first-match `.find()` picked whichever came first in iteration order and
+        // produced a "purpose" describing Vite/HMR scaffolding instead of the real project.
+        let (store, _dir) = temp_store();
+        let nested = KirObject::new("frontend/README.md", ObjectKind::Custom("Document".into()))
+            .with_property(
+                "excerpt",
+                serde_json::json!(
+                    "This template provides a minimal setup to get React working in Vite with HMR."
+                ),
+            );
+        let root = KirObject::new("README.md", ObjectKind::Custom("Document".into()))
+            .with_property(
+                "excerpt",
+                serde_json::json!("A PDF reader with AI-assisted explain and translate."),
+            );
+        // Inserted in the order that reproduced the real bug — the nested one first.
+        store.append_object(&nested).unwrap();
+        store.append_object(&root).unwrap();
+
+        let llm = RecordingLlmProvider::new(r#"{"purpose": "x", "architecture_style": "y"}"#);
+        describe_project(&store, &llm, "pdf-reader").await.unwrap();
+
+        let sent = llm.requests.lock().unwrap();
+        assert!(
+            sent[0].contains("PDF reader"),
+            "the real project root README must win over a nested package's own README: {}",
+            sent[0]
+        );
+        assert!(!sent[0].contains("Vite"));
+    }
+
+    #[tokio::test]
     async fn describe_project_writes_nothing_on_an_empty_workspace() {
         let (store, _dir) = temp_store();
         let llm = RecordingLlmProvider::new(r#"{"purpose": "x", "architecture_style": "y"}"#);
-        let wrote = describe_project(&store, &llm).await.unwrap();
+        let wrote = describe_project(&store, &llm, "empty-workspace")
+            .await
+            .unwrap();
         assert!(!wrote);
         assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
         assert!(store.get_object(&project_summary_id()).unwrap().is_none());
@@ -1207,7 +1271,7 @@ mod tests {
             .with_property("member_count", serde_json::json!(1));
         store.append_object(&rollup).unwrap();
         let llm = RecordingLlmProvider::new(r#"{"purpose": null, "architecture_style": null}"#);
-        let wrote = describe_project(&store, &llm).await.unwrap();
+        let wrote = describe_project(&store, &llm, "lib").await.unwrap();
         assert!(!wrote);
         assert!(store.get_object(&project_summary_id()).unwrap().is_none());
     }

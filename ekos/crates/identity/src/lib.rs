@@ -214,6 +214,36 @@ impl DefaultResolver {
     }
 }
 
+/// RFC 0093: a same-name-different-kind group is an expected, non-conflicting co-existence —
+/// not a genuine ambiguity worth flagging — when it consists of **exactly** a `Custom("Technology")`
+/// (a declared `package.json` dependency, `package_json_analyzer.rs`) and one or more
+/// `Custom("JsModule")` objects that all look like a real bare package specifier (not starting
+/// with `.`, `..`, or `/` — the same syntactic rule Node's own module resolution uses to tell
+/// "resolve from `node_modules`" apart from "resolve relative to this file"). A `JsModule` is
+/// created for *every* real `import` specifier equally (`javascript_analyzer.rs`'s
+/// `handle_import`), including local/relative ones with no `Technology` counterpart at all — the
+/// bare-specifier check keeps this exclusion from also silently hiding a real (if rare) collision
+/// between an unrelated `Technology` and a same-named local file import. A third kind mixed into
+/// the group still conflicts as before — this only ever narrows the specific, well-understood
+/// two-kind pair, never widens to "any name match involving a Technology or JsModule."
+fn is_expected_technology_jsmodule_pair<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
+    let technology = ObjectKind::Custom("Technology".to_string());
+    let js_module = ObjectKind::Custom("JsModule".to_string());
+    let mut saw_technology = false;
+    for obj in group {
+        if obj.kind == technology {
+            saw_technology = true;
+        } else if obj.kind == js_module {
+            if obj.name.starts_with('.') || obj.name.starts_with('/') {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    saw_technology
+}
+
 impl IdentityResolver for DefaultResolver {
     fn resolve(&self, graph: &KirGraph) -> ResolutionResult {
         let objects = &graph.objects;
@@ -247,6 +277,9 @@ impl IdentityResolver for DefaultResolver {
             let first_kind = &objects[indices[0]].kind;
             let has_kind_mismatch = indices[1..].iter().any(|&i| &objects[i].kind != first_kind);
             if has_kind_mismatch {
+                if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i])) {
+                    continue;
+                }
                 let ids: Vec<KirId> = indices.iter().map(|&i| objects[i].id).collect();
                 let kinds: Vec<String> = indices
                     .iter()
@@ -353,7 +386,20 @@ impl IdentityResolver for DefaultResolver {
             // kind-exclusion list") and both RFCs missed it. Each is self-identified by a
             // structural key (module: qualified name; symbol: owning module id + qualified name)
             // — no two distinct instances can legitimately be the same real-world entity.
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate" || k == "Claim" || k == "ArchitectureGap" || k == "ElixirModule" || k == "ElixirSymbol" || k == "JsModule" || k == "JsSymbol")
+            //
+            // `Custom("Document")` (RFC 0023/0025) is the ninth occurrence, found live 2026-08-25
+            // regenerating `pdf-reader`'s whole-project docs: two real, distinct `README.md`
+            // files (the project root's own, and `frontend`'s unmodified Vite scaffold template)
+            // both compile to a `Document` object literally named `"README.md"` — not just a
+            // shared prefix, an exact match, so `structural_score`'s same-kind 1.0 fallback (no
+            // `columns` property) merged them at maximum confidence. Originally misdiagnosed as
+            // an `local_docs_analyzer.rs` id-*collision* (its ids are real RFC 0079-qualified
+            // UUIDv5s and never actually collided — confirmed by direct inspection); the true
+            // cause was this same missing-exclusion class, one file away from where every prior
+            // instance was fixed. Each `Document` is already deterministically identified by its
+            // own (RFC 0079-qualified) path — no two distinct real files can legitimately be the
+            // same real-world entity.
+            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate" || k == "Claim" || k == "ArchitectureGap" || k == "ElixirModule" || k == "ElixirSymbol" || k == "JsModule" || k == "JsSymbol" || k == "Document")
             {
                 continue;
             }
@@ -854,10 +900,14 @@ mod tests {
             (
                 // A shared directory prefix (as the real RFC 0060 pair had) is required for
                 // both to land in the same `(kind, first-3-normalized-chars)` block — the
-                // differing part is only in the basename.
+                // differing part is only in the basename. `Custom("Page")`, not `"Document"`:
+                // `Document` became a blanket-excluded kind itself (2026-08-25, the real
+                // `pdf-reader` README over-merge) and would never reach comparison at all here,
+                // which is a different guarantee than this test's own (RFC 0060's exact-match
+                // flag on a pair that *does* get compared).
                 "docs/localization/ua_inspector.readme.md",
                 "docs/localization/ref_inspector.readme.md",
-                ObjectKind::Custom("Document".into()),
+                ObjectKind::Custom("Page".into()),
             ),
         ] {
             let g = make_graph(&[(name_a, kind.clone()), (name_b, kind.clone())]);
@@ -1002,6 +1052,54 @@ mod tests {
         );
     }
 
+    /// Regression test for a real false-positive conflict found live against `pdf-reader`'s real
+    /// whole-project ledger (RFC 0093): `react` real-compiles as both a `Custom("Technology")`
+    /// (`package_json_analyzer.rs`, declared dependency) and a `Custom("JsModule")`
+    /// (`javascript_analyzer.rs`, real `import` specifier) — an expected, legitimate co-existence
+    /// for *every* real JS/TS dependency that's both declared and imported, not a genuine
+    /// ambiguity. Before the fix, this fired on every one of them, and `ekos resolve` (no
+    /// `--force`) refuses to proceed at all when any conflict exists.
+    #[test]
+    fn technology_and_bare_specifier_jsmodule_sharing_a_name_do_not_conflict() {
+        let g = make_graph(&[
+            ("react", ObjectKind::Custom("Technology".to_string())),
+            ("react", ObjectKind::Custom("JsModule".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.conflicts.is_empty(),
+            "a declared Technology and an imported bare-specifier JsModule sharing a name is \
+             expected, not a conflict — got: {:?}",
+            result.conflicts
+        );
+    }
+
+    #[test]
+    fn a_third_kind_mixed_into_the_technology_jsmodule_group_still_conflicts() {
+        // The exclusion is exactly `{Technology, JsModule}` — any other kind sharing the name
+        // stays a genuine, worth-flagging surprise.
+        let g = make_graph(&[
+            ("utils", ObjectKind::Custom("Technology".to_string())),
+            ("utils", ObjectKind::Custom("JsModule".to_string())),
+            ("utils", ObjectKind::Custom("PythonModule".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.conflicts.len(), 1);
+    }
+
+    #[test]
+    fn a_relative_specifier_jsmodule_sharing_a_technology_name_still_conflicts() {
+        // A local/relative import (`./utils`) is a real, structurally different thing from an
+        // external npm package — the exclusion must not silently hide this collision, however
+        // unlikely it is in practice for a local file to share a declared dependency's name.
+        let g = make_graph(&[
+            ("./utils", ObjectKind::Custom("Technology".to_string())),
+            ("./utils", ObjectKind::Custom("JsModule".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.conflicts.len(), 1);
+    }
+
     /// Real bug, found 2026-08-03 rescanning a mixed-format real-content workspace with RFC
     /// 0025/0026's new mechanics: every file under this test's fixture directory shared the
     /// literal `docs/` path prefix, and `normalize()` never strips path segments — so the
@@ -1021,6 +1119,10 @@ mod tests {
     /// at that boundary. The "block on basename" and "no free floor for kinds without columns"
     /// alternatives named below were not needed to close this specific case, though either remains
     /// available if a future real file pushes a similarly-shaped merge just over 0.90 again.
+    ///
+    /// Also now covered by the blanket `Custom("Document")` kind exclusion added 2026-08-25 (the
+    /// real `pdf-reader` README over-merge) — kept as its own test regardless, since it exercises
+    /// the threshold fix on its own real-repro shape, not just the newer, stronger guarantee.
     #[test]
     fn unrelated_documents_sharing_a_folder_prefix_do_not_all_merge() {
         let g = make_graph(&[
@@ -1359,6 +1461,26 @@ mod tests {
         );
     }
 
+    /// Regression test for a real bug found live regenerating `pdf-reader`'s whole-project docs
+    /// (2026-08-25): two real, distinct files (the project root's own `README.md`, and
+    /// `frontend`'s unmodified Vite scaffold `README.md`) both compile to a `Custom("Document")`
+    /// object literally named `"README.md"` — an exact name match, not just a shared prefix, so
+    /// `structural_score`'s same-kind 1.0 fallback (no `columns` property) auto-merged them at
+    /// confidence 1.00, silently dropping one of two genuinely distinct real files from the
+    /// resolved ledger. The ninth occurrence of the identical failure shape as `Section`/
+    /// `TransformNode`/`RustSymbol`/etc.
+    #[test]
+    fn document_objects_are_never_merged_even_with_identical_names() {
+        let document = ObjectKind::Custom("Document".to_string());
+        let g = make_graph(&[("README.md", document.clone()), ("README.md", document)]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.proposals.is_empty(),
+            "Document objects must never be merge candidates, got {:?}",
+            result.proposals
+        );
+    }
+
     /// RFC 0026: the merge this feature exists to produce. The same real-world
     /// concept extracted from two different documents must resolve to one
     /// canonical object, even across case differences — otherwise cross-document
@@ -1411,19 +1533,18 @@ mod tests {
         );
     }
 
-    /// A non-"Section" `Custom` kind is unaffected by the exclusion — this
-    /// pins the fix to the literal string "Section", not `Custom` in
-    /// general (e.g. `Custom("Document")`/`Custom("Page")` still resolve
-    /// normally).
+    /// A non-excluded `Custom` kind is unaffected by the exclusion list — this pins the fix to
+    /// the specific listed kind strings, not `Custom` in general (e.g. `Custom("Page")` still
+    /// resolves normally).
     #[test]
     fn other_custom_kinds_still_resolve_normally() {
-        let doc = ObjectKind::Custom("Document".to_string());
-        let g = make_graph(&[("report.pdf", doc.clone()), ("report.pdf", doc)]);
+        let page = ObjectKind::Custom("Page".to_string());
+        let g = make_graph(&[("report.pdf", page.clone()), ("report.pdf", page)]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(
             result.proposals.len(),
             1,
-            "identical-name Documents should still merge"
+            "identical-name Pages should still merge"
         );
     }
 }

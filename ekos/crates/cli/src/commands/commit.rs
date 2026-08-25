@@ -212,8 +212,14 @@ async fn run_llm_description(
         .map_err(|e| anyhow::anyhow!("LLM description failed: {e}"))?;
 
     // Best-effort: a failed project-level summary shouldn't fail the whole `commit` run when the
-    // real per-object work above already succeeded.
-    if let Err(e) = ekos_recovery::describe_project(ledger, &*llm).await {
+    // real per-object work above already succeeded. `cwd`'s own directory name is a real, concrete
+    // anchor for the LLM prompt (RFC 0088 fast-follow, 2026-08-24 — see `describe_project`'s own
+    // doc comment for the real self-reference failure this fixes).
+    let workspace_name = cwd
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "workspace".to_string());
+    if let Err(e) = ekos_recovery::describe_project(ledger, &*llm, &workspace_name).await {
         eprintln!("warning: project-level LLM summary failed (skipped): {e}");
     }
 

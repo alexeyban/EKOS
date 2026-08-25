@@ -509,7 +509,7 @@ ekos-kir = { path = "../kir" }
     async fn seed_crates(ctx: &PassContext, manifests: Vec<(&str, &str)>) {
         let manifests = manifests
             .into_iter()
-            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .map(|(p, s)| (p.to_string(), s.to_string(), String::new()))
             .collect();
         let mut pass = CrateTopologyAnalyzerPass::new("test", manifests);
         let mut c2 = ctx.clone();

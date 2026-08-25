@@ -29,44 +29,68 @@ use regex::Regex;
 struct SecretPattern {
     label: &'static str,
     regex_src: &'static str,
+    /// When true, a match whose `value` capture group is a dotted chain of plain identifiers
+    /// (e.g. `settings.azure_openai_api_key`) is left untouched instead of redacted — real
+    /// second-order finding (see `looks_like_code_reference`'s doc comment): only
+    /// `generic-assigned-secret` sets this, since its unprefixed vendor-agnostic shape is the one
+    /// pattern here that can't tell "a literal secret value" from "a reference to a variable/
+    /// attribute that merely has a secret-sounding name" (`api_key=settings.azure_openai_api_key`
+    /// is real, common code, not a secret).
+    skip_dotted_identifier_refs: bool,
 }
 
 const BUILTIN_SECRET_PATTERNS: &[SecretPattern] = &[
     SecretPattern {
         label: "aws-access-key-id",
         regex_src: r"AKIA[0-9A-Z]{16}",
+        skip_dotted_identifier_refs: false,
     },
     SecretPattern {
         label: "github-token",
         regex_src: r"gh[pousr]_[A-Za-z0-9]{36,}",
+        skip_dotted_identifier_refs: false,
     },
     SecretPattern {
         label: "slack-token",
         regex_src: r"xox[baprs]-[0-9A-Za-z-]{10,}",
+        skip_dotted_identifier_refs: false,
     },
     SecretPattern {
         label: "google-api-key",
         regex_src: r"AIza[0-9A-Za-z\-_]{35}",
+        skip_dotted_identifier_refs: false,
     },
     SecretPattern {
         label: "stripe-key",
         regex_src: r"sk_(live|test)_[0-9a-zA-Z]{16,}",
+        skip_dotted_identifier_refs: false,
     },
     SecretPattern {
         label: "private-key-block",
         regex_src: r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+        skip_dotted_identifier_refs: false,
     },
     SecretPattern {
         label: "jwt",
         regex_src: r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}",
+        skip_dotted_identifier_refs: false,
     },
     // Generic "key/secret/password/token = value" assignment — catches project-specific secrets
     // that don't match a known vendor prefix. The whole match (including the key name) is
     // replaced; we don't need to preserve "password:" text, and over-redacting here is safer
-    // than under-redacting.
+    // than under-redacting — *except* for the one real false-positive class found live against a
+    // real project (`pdf-reader`'s `services/ai_service.py`, 2026-08-24): a keyword argument like
+    // `api_key=settings.azure_openai_api_key` is a reference to a config value, not a secret
+    // literal, and the previous version of this regex would truncate its match at the first `.`
+    // (outside the old char class) and splice in a colon-bearing `[REDACTED:...]` placeholder mid-
+    // expression — corrupting the source badly enough that the whole file failed to parse and
+    // silently dropped every real symbol/import it defined. `value` now includes `.` so a dotted
+    // reference is captured whole, and `skip_dotted_identifier_refs` (see `redact`) leaves it
+    // untouched entirely rather than redacting a non-secret and breaking the file either way.
     SecretPattern {
         label: "generic-assigned-secret",
-        regex_src: r#"(?i)(api[_-]?key|secret|passwd|password|access[_-]?key|auth[_-]?token)\s*[:=]\s*['"]?[A-Za-z0-9/+_\-]{8,}['"]?"#,
+        regex_src: r#"(?i)(?:api[_-]?key|secret|passwd|password|access[_-]?key|auth[_-]?token)\s*[:=]\s*['"]?(?P<value>[A-Za-z0-9/+_\-.]{8,})['"]?"#,
+        skip_dotted_identifier_refs: true,
     },
 ];
 
@@ -93,8 +117,8 @@ const BUILTIN_EXCLUDED_GLOBS: &[&str] = &[
     "*.keystore",
 ];
 
-fn compiled_builtin_patterns() -> &'static [(&'static str, Regex)] {
-    static COMPILED: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
+fn compiled_builtin_patterns() -> &'static [(&'static str, Regex, bool)] {
+    static COMPILED: OnceLock<Vec<(&'static str, Regex, bool)>> = OnceLock::new();
     COMPILED.get_or_init(|| {
         BUILTIN_SECRET_PATTERNS
             .iter()
@@ -102,10 +126,26 @@ fn compiled_builtin_patterns() -> &'static [(&'static str, Regex)] {
                 (
                     p.label,
                     Regex::new(p.regex_src).expect("built-in redaction pattern must compile"),
+                    p.skip_dotted_identifier_refs,
                 )
             })
             .collect()
     })
+}
+
+/// True when `value` is a dotted chain of plain code identifiers (e.g.
+/// `settings.azure_openai_api_key`, `os.environ`) — how source code refers to a *variable*,
+/// never how a real literal secret value looks (a real key/token is one contiguous alphanumeric/
+/// base64-ish run; it doesn't contain a `.` splitting it into valid-identifier segments). Used
+/// only by patterns with `skip_dotted_identifier_refs` set, so this never weakens a pattern
+/// matching an actual known secret shape (AWS/GitHub/Slack/... keys can't look like this).
+fn looks_like_code_reference(value: &str) -> bool {
+    value.contains('.')
+        && value.split('.').all(|segment| {
+            let mut chars = segment.chars();
+            matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
 }
 
 /// Additive-only extension of the built-in baseline (RFC 0043's `[security]` `ekos.toml`
@@ -145,19 +185,42 @@ pub fn is_excluded_path(rel_path: &str, config: &RedactionConfig) -> bool {
 /// out the whole call).
 pub fn redact(content: &str, config: &RedactionConfig) -> String {
     let mut out = content.to_string();
-    for (label, regex) in compiled_builtin_patterns() {
-        out = regex
-            .replace_all(&out, format!("[REDACTED:{label}]"))
-            .into_owned();
+    for (label, regex, skip_dotted_identifier_refs) in compiled_builtin_patterns() {
+        out = redact_with_pattern(&out, label, regex, *skip_dotted_identifier_refs);
     }
     for (label, regex_src) in &config.extra_patterns {
         if let Ok(regex) = Regex::new(regex_src) {
-            out = regex
-                .replace_all(&out, format!("[REDACTED:{label}]"))
-                .into_owned();
+            // Config-supplied patterns stay blanket-replace: they're arbitrary user regexes with
+            // no guaranteed `value` capture group, unlike the built-in table above.
+            out = redact_with_pattern(&out, label, &regex, false);
         }
     }
     out
+}
+
+fn redact_with_pattern(
+    content: &str,
+    label: &str,
+    regex: &Regex,
+    skip_dotted_identifier_refs: bool,
+) -> String {
+    if !skip_dotted_identifier_refs {
+        return regex
+            .replace_all(content, format!("[REDACTED:{label}]"))
+            .into_owned();
+    }
+    regex
+        .replace_all(content, |caps: &regex::Captures| {
+            let is_reference = caps
+                .name("value")
+                .is_some_and(|v| looks_like_code_reference(v.as_str()));
+            if is_reference {
+                caps[0].to_string()
+            } else {
+                format!("[REDACTED:{label}]")
+            }
+        })
+        .into_owned()
 }
 
 /// Recursively applies [`redact`] to every string value in a `serde_json::Value` — needed since
@@ -228,6 +291,31 @@ mod tests {
         let out = redact(r#"password = "hunter2fake""#, &cfg());
         assert!(out.contains("[REDACTED:generic-assigned-secret]"));
         assert!(!out.contains("hunter2fake"));
+    }
+
+    #[test]
+    fn generic_pattern_leaves_a_dotted_code_reference_untouched() {
+        // Real false positive, found live against a real project (`pdf-reader`'s
+        // `services/ai_service.py`, 2026-08-24): this is a keyword argument passing a config
+        // *reference*, not a secret literal. The old regex truncated its match at the `.` (outside
+        // its char class) and spliced a colon-bearing `[REDACTED:...]` placeholder mid-expression,
+        // corrupting the line badly enough that the whole file failed to parse — every real
+        // function/import it declared was silently dropped from the compiled ledger.
+        let line = "api_key=settings.azure_openai_api_key,";
+        let out = redact(line, &cfg());
+        assert_eq!(
+            out, line,
+            "a dotted identifier reference must be left untouched"
+        );
+    }
+
+    #[test]
+    fn generic_pattern_still_redacts_a_dotted_value_that_is_not_a_clean_identifier_chain() {
+        // A dotted-looking value that isn't actually a valid identifier chain (e.g. a real
+        // version-number-shaped or IP-shaped secret) must still be redacted — the exemption is
+        // narrowly for genuine code references, not "any value containing a dot".
+        let out = redact("api_key=1.2.3.4-not-an-identifier", &cfg());
+        assert!(out.contains("[REDACTED:generic-assigned-secret]"));
     }
 
     #[test]

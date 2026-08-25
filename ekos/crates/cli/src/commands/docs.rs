@@ -20,6 +20,13 @@
 //! from the same compiled objects/relationships via [`ekos_docs_gen::render_readme`] and friends.
 //! Markdown only in this phase; `--format html --layout curated` errors clearly rather than
 //! silently ignoring `--format`.
+//!
+//! `--layout solution-architect` (RFC 0090) renders a different fixed three-file set —
+//! `DependencyRiskReport.md`, `OnboardingGuide.md`, `FindingsMemo.md` — framed for a team
+//! handoff rather than architecture reference. The first two are always deterministic/zero-LLM;
+//! the findings memo's candidate list is too, but reuses the existing `--prose`/`--yes` flow (not
+//! a new flag) to optionally layer an LLM-written executive summary on top via
+//! [`enrich_findings_memo`], never replacing the deterministic list underneath it.
 
 use super::ask::ai_config;
 use super::store::open_store;
@@ -53,11 +60,13 @@ impl Format {
 
 /// Output layout for `ekos docs generate`. `--layout objects` (default, RFC 0035) is one page per
 /// significant object; `--layout curated` (RFC 0037) is the fixed four-file
-/// README/Architecture/API/SequenceDiagrams set.
+/// README/Architecture/API/SequenceDiagrams set; `--layout solution-architect` (RFC 0090) is a
+/// three-file team-facing bundle — DependencyRiskReport/OnboardingGuide/FindingsMemo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
     Objects,
     Curated,
+    SolutionArchitect,
 }
 
 impl Layout {
@@ -65,8 +74,10 @@ impl Layout {
         match s {
             "objects" => Ok(Layout::Objects),
             "curated" => Ok(Layout::Curated),
+            "solution-architect" => Ok(Layout::SolutionArchitect),
             other => Err(anyhow::anyhow!(
-                "unknown --layout '{other}' — expected 'objects' or 'curated'"
+                "unknown --layout '{other}' — expected 'objects', 'curated', or \
+                 'solution-architect'"
             )),
         }
     }
@@ -90,6 +101,15 @@ pub async fn generate(
             );
         }
         return generate_curated(config, cwd, output);
+    }
+    if layout == Layout::SolutionArchitect {
+        if format != Format::Markdown {
+            anyhow::bail!(
+                "--layout solution-architect only supports --format md today (same open \
+                 question RFC 0037 left open for --layout curated's HTML output)"
+            );
+        }
+        return generate_solution_architect(config, cwd, output, prose, yes).await;
     }
 
     let ledger = open_store(config, cwd).map_err(|e| {
@@ -391,9 +411,21 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
         })
         .collect();
 
+    // RFC 0095: the same `evaluate_architecture` computation `ekos architecture investigate`
+    // already used (RFC 0065 Phase 3), now also run from the plain `docs generate` path — a real,
+    // deterministic completeness/evidence-coverage score, not a fabricated one.
+    let evaluation = ekos_recovery::evaluate_architecture(&objects);
+    let confidence = Some(ekos_docs_gen::ArchitectureConfidence {
+        score: evaluation.score,
+        completeness: evaluation.completeness,
+        evidence_coverage: evaluation.evidence_coverage,
+        crates_total: evaluation.crates_total,
+        evidenced_total: evaluation.evidenced_total,
+    });
+
     let readme = ekos_docs_gen::render_readme(&objects);
     let architecture =
-        ekos_docs_gen::render_architecture(&objects, &relationships, &layer_overrides);
+        ekos_docs_gen::render_architecture(&objects, &relationships, &layer_overrides, confidence);
     let api = ekos_docs_gen::render_api(&objects, &relationships);
     let sequence_diagrams = ekos_docs_gen::render_sequence_diagrams(&objects, &relationships);
 
@@ -484,6 +516,107 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
     println!("  Output: {}", output.display());
 
     Ok(())
+}
+
+/// `--layout solution-architect` (RFC 0090): reads the committed ledger once, same entry point
+/// `generate_curated` uses, and writes three fixed-name files. `DependencyRiskReport.md`/
+/// `OnboardingGuide.md` are always deterministic; the findings memo's candidate list is too, but
+/// gains an LLM-written executive summary layered on top (never replacing the list) when `prose`
+/// is set, reusing the exact `--prose`/`--yes` spend-confirmation flow `--layout objects` already
+/// has (RFC 0090's resolved open question #2 — no new flags).
+async fn generate_solution_architect(
+    config: &EkosConfig,
+    cwd: &Path,
+    output: &Path,
+    prose: bool,
+    yes: bool,
+) -> Result<()> {
+    let ledger = open_store(config, cwd).map_err(|e| {
+        anyhow::anyhow!(
+            "{e}\nRun `ekos build && ekos recover && ekos resolve && ekos compile && ekos commit` first."
+        )
+    })?;
+
+    let objects = ledger.all_objects()?;
+    let relationships = ledger.all_relationships()?;
+
+    std::fs::create_dir_all(output)
+        .with_context(|| format!("cannot create output dir {}", output.display()))?;
+
+    let risk_report = ekos_docs_gen::render_dependency_risk_report(&objects, &relationships);
+    let onboarding_guide = ekos_docs_gen::render_onboarding_guide(&objects);
+    let candidates = ekos_docs_gen::build_findings_evidence(&objects);
+
+    let mut findings_prose = None;
+    if prose && !candidates.is_empty() {
+        println!(
+            "Findings memo executive summary requested. {} finding(s) will be sent to the LLM.",
+            candidates.len()
+        );
+        if !confirm_prose_spend(yes)? {
+            println!("Skipped — writing deterministic findings list only.");
+        } else {
+            let llm = select_llm_provider_for_prose(config, &config.artifact_dir(cwd))?;
+            findings_prose = enrich_findings_memo(&candidates, &*llm).await;
+        }
+    }
+    let findings_memo = ekos_docs_gen::render_findings_memo(&candidates, findings_prose.as_ref());
+
+    for page in [&risk_report, &onboarding_guide, &findings_memo] {
+        write_page(output, page)?;
+    }
+
+    println!("Solution architect report generated.");
+    println!(
+        "  Files: {}, {}, {}",
+        risk_report.file_name, onboarding_guide.file_name, findings_memo.file_name
+    );
+    println!("  Findings: {}", candidates.len());
+    println!("  Output: {}", output.display());
+
+    Ok(())
+}
+
+/// Calls the LLM once with the full deterministic findings list (RFC 0090) and asks it to
+/// prioritize/phrase an executive summary. Deliberately *not* `AiRuntime::ask` (unlike
+/// `enrich_with_prose` above): there's no single object name to retrieve grounding against here —
+/// the grounding *is* the candidate list itself, already deterministic — so this follows
+/// `llm_description.rs::describe_project`'s direct `LlmProvider::complete` pattern instead.
+/// Returns `None` (never fabricated) on any failure; the deterministic candidate list in
+/// `FindingsMemo.md` is unaffected either way.
+async fn enrich_findings_memo(
+    candidates: &[ekos_docs_gen::FindingCandidate],
+    llm: &dyn ekos_recovery::LlmProvider,
+) -> Option<ekos_docs_gen::FindingsProse> {
+    let user_message = serde_json::json!({
+        "findings": candidates
+            .iter()
+            .map(|c| serde_json::json!({"title": c.title, "detail": c.detail}))
+            .collect::<Vec<_>>(),
+    })
+    .to_string();
+    let system_prompt = "You are writing a short executive summary for a solution architect's \
+         findings memo about a real software project. You will be shown a real, already-compiled \
+         list of findings (unresolved dependencies, undeclared crate versions, missing \
+         documentation coverage). Prioritize and phrase them clearly in 3-6 sentences of prose. \
+         Never invent a finding that isn't in the list you were shown, and never invent numbers \
+         not present in it.";
+    let req = ekos_recovery::LlmRequest {
+        system: system_prompt,
+        user: &user_message,
+        prompt_version: "solution-architect-findings-v1",
+        max_tokens: 512,
+    };
+    match llm.complete(&req).await {
+        Ok(resp) => Some(ekos_docs_gen::FindingsProse { text: resp.content }),
+        Err(e) => {
+            eprintln!(
+                "warning: findings memo executive summary generation failed — keeping \
+                 deterministic findings list only: {e}"
+            );
+            None
+        }
+    }
 }
 
 /// Resolve the output directory: the `--output` flag if given, else `<cwd>/docs-generated`.
@@ -1148,6 +1281,143 @@ mod tests {
     fn layout_parse_accepts_objects_and_curated_rejects_unknown() {
         assert_eq!(Layout::parse("objects").unwrap(), Layout::Objects);
         assert_eq!(Layout::parse("curated").unwrap(), Layout::Curated);
+        assert_eq!(
+            Layout::parse("solution-architect").unwrap(),
+            Layout::SolutionArchitect
+        );
         assert!(Layout::parse("weird").is_err());
+    }
+
+    // ── RFC 0090 — `--layout solution-architect` ─────────────────────────────
+
+    #[tokio::test]
+    async fn generate_solution_architect_writes_exactly_the_three_named_files() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!("crates/cli"))
+            .with_property("version", serde_json::json!("0.1.0"));
+        ledger.append_object(&krate).unwrap();
+        let gap = KirObject::new(
+            "unresolved dependency",
+            ObjectKind::Custom("ArchitectureGap".to_string()),
+        )
+        .with_property("question", serde_json::json!("What does 'foo' resolve to?"))
+        .with_property("affected_crate", serde_json::json!("ekos-cli"));
+        ledger.append_object(&gap).unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::SolutionArchitect,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let mut names: Vec<String> = std::fs::read_dir(&output)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "DependencyRiskReport.md".to_string(),
+                "FindingsMemo.md".to_string(),
+                "OnboardingGuide.md".to_string(),
+            ]
+        );
+
+        let risk = std::fs::read_to_string(output.join("DependencyRiskReport.md")).unwrap();
+        assert!(risk.contains("| `ekos-cli` | 0.1.0 |"));
+
+        let onboarding = std::fs::read_to_string(output.join("OnboardingGuide.md")).unwrap();
+        assert!(onboarding.contains("| `crates/cli` | `ekos-cli` |"));
+
+        let findings = std::fs::read_to_string(output.join("FindingsMemo.md")).unwrap();
+        assert!(
+            !findings.contains("## Executive Summary"),
+            "no --prose was passed"
+        );
+        assert!(findings.contains("Unresolved dependency affecting `ekos-cli`"));
+    }
+
+    #[tokio::test]
+    async fn generate_solution_architect_rejects_html_format_with_a_clear_error() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let _ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+
+        let output = dir.path().join("out");
+        let result = generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Html,
+            Layout::SolutionArchitect,
+            false,
+            false,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("only supports --format md today")
+        );
+    }
+
+    #[tokio::test]
+    async fn enrich_findings_memo_sets_prose_on_success() {
+        let candidates = vec![ekos_docs_gen::FindingCandidate {
+            title: "1 crate(s) with no declared version".to_string(),
+            detail: "ekos-cli".to_string(),
+        }];
+        let llm = ekos_recovery::MockLlmProvider::new(
+            "Declare a version for ekos-cli before the next release.",
+        );
+        let prose = enrich_findings_memo(&candidates, &llm).await;
+        assert_eq!(
+            prose.unwrap().text,
+            "Declare a version for ekos-cli before the next release."
+        );
+    }
+
+    #[tokio::test]
+    async fn generate_solution_architect_with_prose_errors_clearly_instead_of_silently_degrading() {
+        let dir = tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.llm.api_key_env = Some("EKOS_DOCS_TEST_DEFINITELY_UNSET_KEY".to_string());
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+        ledger
+            .append_object(&KirObject::new(
+                "ekos-cli",
+                ObjectKind::Custom("Crate".to_string()),
+            ))
+            .unwrap();
+        drop(ledger);
+
+        let output = dir.path().join("out");
+        let result = generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::SolutionArchitect,
+            true,
+            true,
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "no API key configured — --prose must fail clearly, not silently degrade"
+        );
     }
 }

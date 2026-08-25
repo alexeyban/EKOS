@@ -83,12 +83,16 @@ fn extract_jobs(doc: &serde_yaml::Value) -> Vec<serde_json::Value> {
 
 pub struct CicdAnalyzerPass {
     pass_id: String,
-    /// (relative workflow-file path, raw YAML content) pairs, one per discovered workflow.
-    workflows: Vec<(String, String)>,
+    /// (relative workflow-file path, raw YAML content, RFC 0079 project qualifier — empty string
+    /// means "no qualification needed") tuples, one per discovered workflow.
+    workflows: Vec<(String, String, String)>,
 }
 
 impl CicdAnalyzerPass {
-    pub fn new(workspace_name: impl Into<String>, workflows: Vec<(String, String)>) -> Self {
+    pub fn new(
+        workspace_name: impl Into<String>,
+        workflows: Vec<(String, String, String)>,
+    ) -> Self {
         Self {
             pass_id: format!("cicd-analyzer:{}", workspace_name.into()),
             workflows,
@@ -105,10 +109,10 @@ impl CompilerPass for CicdAnalyzerPass {
     fn cache_inputs(&self) -> Vec<String> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
-        let mut paths: Vec<&str> = self.workflows.iter().map(|(p, _)| p.as_str()).collect();
+        let mut paths: Vec<&str> = self.workflows.iter().map(|(p, _, _)| p.as_str()).collect();
         paths.sort();
         for path in paths {
-            let (_, content) = self.workflows.iter().find(|(p, _)| p == path).unwrap();
+            let (_, content, _) = self.workflows.iter().find(|(p, _, _)| p == path).unwrap();
             hasher.update(path.as_bytes());
             hasher.update(content.as_bytes());
         }
@@ -118,7 +122,7 @@ impl CompilerPass for CicdAnalyzerPass {
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
         let mut graph = KirGraph::new();
 
-        for (rel_path, content) in &self.workflows {
+        for (rel_path, content, project) in &self.workflows {
             let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
                 Ok(v) => v,
                 Err(e) => {
@@ -145,7 +149,18 @@ impl CompilerPass for CicdAnalyzerPass {
                 .with_property("path", serde_json::json!(rel_path))
                 .with_property("triggers", serde_json::json!(triggers))
                 .with_property("jobs", serde_json::json!(jobs));
-            obj.id = pipeline_kir_id(rel_path);
+            // RFC 0079: the hash input is project-qualified; `rel_path` stays bare everywhere it's
+            // displayed (`path` property, evidence text) — same principle every other analyzer
+            // fixed for this bug class already follows.
+            let qualified_path = ekos_common::project::project_qualify(
+                rel_path,
+                if project.is_empty() {
+                    None
+                } else {
+                    Some(project.as_str())
+                },
+            );
+            obj.id = pipeline_kir_id(&qualified_path);
 
             let ev = KirEvidence::new(
                 SourceLocation::file(rel_path),
@@ -191,10 +206,14 @@ mod tests {
     }
 
     async fn run_pass(workflows: Vec<(&str, &str)>) -> ekos_kir::KirGraph {
+        run_pass_qualified(workflows.into_iter().map(|(p, s)| (p, s, "")).collect()).await
+    }
+
+    async fn run_pass_qualified(workflows: Vec<(&str, &str, &str)>) -> ekos_kir::KirGraph {
         let (mut c, _dir) = ctx();
         let workflows = workflows
             .into_iter()
-            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .map(|(p, s, proj)| (p.to_string(), s.to_string(), proj.to_string()))
             .collect();
         let mut pass = CicdAnalyzerPass::new("test", workflows);
         pass.run(&mut c).await.unwrap();
@@ -242,6 +261,30 @@ jobs:
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0], serde_json::json!("Checkout"));
         assert_eq!(steps[1], serde_json::json!("Run tests"));
+    }
+
+    #[tokio::test]
+    async fn project_qualified_pipeline_id_matches_the_same_scheme_other_analyzers_use() {
+        // Same bug class as dependency_analyzer.rs's
+        // `project_qualified_edge_lands_on_the_same_file_id_build_rs_writes` regression test: this
+        // pass used to mint every `Pipeline` id from the bare, unqualified workflow path, so a
+        // multi-`[observe] paths` workspace (RFC 0079) minted an id that never matched the
+        // qualified scheme every other analyzer already uses. Verifies the real id scheme
+        // directly rather than just checking the pass runs without error.
+        let graph = run_pass_qualified(vec![(
+            ".github/workflows/ci.yml",
+            CI_YML,
+            "backend/rust-service",
+        )])
+        .await;
+        let pipeline = &graph.objects[0];
+        let expected_id = pipeline_kir_id(&ekos_common::project::project_qualify(
+            ".github/workflows/ci.yml",
+            Some("backend/rust-service"),
+        ));
+        assert_eq!(pipeline.id, expected_id);
+        // Never accidentally the unqualified id — the exact failure mode this regresses against.
+        assert_ne!(pipeline.id, pipeline_kir_id(".github/workflows/ci.yml"));
     }
 
     #[tokio::test]

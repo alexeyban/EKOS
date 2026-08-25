@@ -3331,3 +3331,314 @@ are excluded — see the full exclusion list in the planning history if needed.
   - Most of `pdf-reader`'s real route-handler/service functions genuinely have no docstring —
     `## Definition` correctly stays "Not documented in source" for those; this fix only unblocks the
     separate, opt-in `## AI-Assisted Overview` section from running for Python symbols at all.
+
+- **RFC 0090 (filed and implemented same-day, 2026-08-24): `--layout solution-architect`, a
+  team-facing `docs generate` bundle** — `devlog_99`:
+  - [x] `render_dependency_risk_report`/`render_onboarding_guide`/`build_findings_evidence`+
+    `render_findings_memo` (new `ekos-docs-gen` functions) and `generate_solution_architect`/
+    `enrich_findings_memo` (`crates/cli/src/commands/docs.rs`) — `DependencyRiskReport.md` (real
+    `Crate.version`/npm `version_spec`/`dev_dependency` versions, `DependsOn` fan-in concentration
+    ranking, an honest "CVE/license data not available" section), `OnboardingGuide.md` (real
+    `Crate.path` repository layout, link-through to `Architecture.md` for CI/CD and subsystem
+    detail rather than re-listing it), and `FindingsMemo.md` (real `ArchitectureGap` objects +
+    undeclared crate versions + doc-comment coverage gaps, grouped by kind; `--prose` layers an
+    LLM executive summary *above* the deterministic list, never replacing it — reuses the existing
+    `--prose`/`--yes` flow, no new flags). 18 new `ekos-docs-gen` tests + 5 new `crates/cli` tests,
+    full workspace gate clean, `tests/integration` 3/3.
+  - Live-verified against this repo's own real committed ledger: real crate names/fan-in counts
+    (`serde_json` 132 dependents), and a real, honestly-surfaced finding (`1625/1625 RustSymbol`
+    objects with no captured `description`) cross-checked against this repo's own already-generated
+    `doc/entities/rustsymbol/re/render-readme.md` — confirmed a genuine gap in this ledger snapshot
+    (predates or wasn't recommitted since RFC 0087's doc-comment capture), not a bug in the new
+    code. `--prose` path verified via `MockLlmProvider` + the no-credentials error path only (no
+    `ANTHROPIC_API_KEY` in this environment), matching `--layout objects --prose`'s own existing
+    test-coverage convention. See RFC 0090 for the three open-question decisions (Findings
+    evidence lives in `docs-gen`+CLI, not `recovery`; one bundled layout reusing existing flags,
+    not new `--sections` flags; no speculative `vulnerabilities` field reserved) and explicit
+    non-goals (CVE feeds, git churn/hotspot, coverage %).
+
+- **Real redaction false positive found live against `pdf-reader`, 2026-08-24** (`devlog_100`):
+  - [x] `ekos_common::redaction`'s generic `api_key|secret|...=value` pattern matched a real,
+    legitimate keyword argument referencing a config value (`api_key=settings.azure_openai_api_key`
+    in `services/ai_service.py`), truncated its match at the first `.` (outside the old char class),
+    and spliced a colon-bearing `[REDACTED:...]` placeholder mid-expression — corrupting the file
+    enough that it failed to parse and silently dropped all 8 of its real functions from the ledger,
+    with no signal beyond a buried `recover.log` warning line. Fixed: the value char class now
+    includes `.`, and a match whose captured value is a dotted chain of plain identifiers (a code
+    reference, not a secret literal) is left untouched entirely. 2 new `ekos-common` tests, full
+    workspace gate clean.
+  - Two more real gaps found while assembling a combined system diagram for `pdf-reader`
+    (documented this session, first one since fixed 2026-08-25 — see below): (1) [x]
+    `python_analyzer.rs`'s `add_import` never resolved `from package import submodule` to the
+    submodule, only the package — so `from app.services import ai_service` compiled as
+    `DependsOn → app.services`, coarser than the real source. Fixed, `devlog_105`. (2)
+    [x] `RelationshipKind::Extends` (class inheritance) had zero producers across every
+    analyzer and zero `docs-gen` consumers — the real blocker behind wanting an auto-generated
+    class-level architecture diagram. RFC 0092 filed and implemented 2026-08-25, see below
+    (`devlog_108`).
+
+- **RFC 0079's `project_key` fix (2026-08-23, `build.rs`) never propagated to `recover.rs`'s own
+  duplicate copies of the same logic — found live, 2026-08-24** (`devlog_101`):
+  - [x] `dependency_analyzer.rs` never applied project-id qualification at all (a bare, unqualified
+    `file_kir_id(rel_path)`, with `rel_path` relative to `cwd` besides), so every `DependsOn` edge
+    it emitted pointed at a `File` id that only ever existed in a `paths = ["."]` workspace —
+    silently orphaned relationships (`SEM002: unknown from-id`) and a `## Technology Inventory`
+    that could detect a technology but never resolve which file used it. `package_json_analyzer.rs`
+    had the same `cwd`-relative-path bug plus a second, independent one: its `recover.rs` collection
+    loop still used the pre-fix `observe_paths.len() > 1` condition. New shared
+    `ekos_common::project::project_key_for_base` (matching `build.rs`'s real `base != cwd` rule) is
+    now the single source of truth `build.rs` itself calls too, plus fixes to both `recover.rs`
+    collection loops and `dependency_analyzer.rs`'s id computation. 4 new tests, full workspace gate
+    clean. `crate_topology_analyzer.rs`/`cicd_analyzer.rs` had the identical bug class, closed
+    2026-08-25 — see below (`devlog_104`).
+  - [x] Separately, `dependency_analyzer.rs`'s `PATTERNS` table gained an `OpenAI API` row (no AI-
+    provider SDK had a row at all) — named to avoid a real, live-found identity conflict: a bare
+    `"OpenAI"` Technology name case-insensitively collides with the `PythonModule` object the same
+    `import openai` also produces, and `ekos resolve` correctly refuses to silently merge across
+    kinds.
+  - Live-verified against `pdf-reader` (`paths = ["backend/app/api"]`): before the fix, `##
+    Technology Inventory` showed `used by: _no linked files_`; after, `used by: ai.py`. A real,
+    separate discrepancy noted but not chased: `compile.log`'s `SEM002` warnings still fire on ids
+    that now resolve correctly via `ekos query object` — `resolve`'s own stage reports 0 conflicts
+    and correct counts, so `ekos_semantic`'s compile-time validation appears to check against a
+    narrower object set than what actually lands in the ledger. Rendered output is correct either
+    way, so left for a future session.
+
+- **Four more real docs-gen gaps found live against `pdf-reader`'s whole-project scope
+  (`backend`+`frontend`+`README.md`), fixed same-day, 2026-08-25** (`devlog_102`):
+  - [x] `system_context_graph` (`docs-gen/src/lib.rs`) required a `Custom("Crate")`-origin
+    `DependsOn` edge — always empty for any non-Rust project regardless of real `Technology`
+    data. Fixed: accept any origin when no `Crate` objects exist, matching `## Technology
+    Inventory`'s existing behavior; strict Crate-only requirement preserved when Crates do exist.
+  - [x] `group_key_for` (`semantic/src/rollup.rs`) treated a `"project"` property as a terminal
+    group key, collapsing every file under one `[observe] paths` entry into one flat rollup
+    regardless of real subdirectory structure. Fixed to combine `project` + depth-limited `path`.
+    **Caught a real off-by-one in the first attempt via live re-verification**: `depth` (default
+    3) is calibrated for a workspace-root-relative path; a project-relative path is already one
+    level shallower, so `depth - 1` is the correct sub-depth — without it, `take(depth)` on a real
+    3-segment project-relative path (`"app/api/ai.py"`) grabbed the filename itself, producing
+    zero rollups. A new regression test now uses the real default depth and real path shapes
+    specifically because the first test (using a smaller hand-picked depth) passed while the real
+    call site still failed.
+  - [x] `## Crate & Workspace Topology` had no non-Rust fallback; `## Component View` already did
+    (found live once before, 2026-08-23, a different real project) but it was never mirrored into
+    this sibling section. Factored the shared fallback into one function both sections call now.
+  - [x] `describe_project` (RFC 0088) produced self-referential "purpose" text for a real project
+    on a weak local model — mitigated (not guaranteed-fixed) with a real `workspace_name` prompt
+    anchor and an explicit anti-self-reference instruction. Live-verified improvement (stopped
+    describing EKOS itself), then found a *second* real bug while re-verifying: with two
+    legitimate `README.md` files in scope (project root + `frontend`'s unmodified Vite scaffold
+    template), a bare `.find()` picked whichever came first in iteration order. Fixed with a
+    path-depth preference — then found, re-verifying *that* fix, that both real README.md Document
+    objects have zero path separators (one from being observed via its own single-file `[observe]
+    paths` entry, one from being the immediate child of the `frontend` entry), so the depth
+    preference can't break the tie; only one `Custom("Document")` object named `"README.md"`
+    survives in the ledger despite both files being real and processed — misdiagnosed at the time
+    as a `local_docs_analyzer.rs` id-collision; [x] root-caused and fixed 2026-08-25, see below
+    (`devlog_106`) — it was never an id collision, `DefaultResolver` was missing `Document` from
+    its blanket kind-exclusion list (the depth-preference fix is kept regardless — real, harmless
+    improvement for the general case).
+  - Also found live: 5 real identity conflicts in the whole-project ledger —
+    `react`/`vite`/`react-router-dom`/`pdfjs-dist`/`@vitejs/plugin-react` each exist as both a
+    `Technology` (`package_json_analyzer.rs`, one per declared npm dependency) and a `JsModule`
+    (the JS/TS structural analyzer, one per real import) object. Same cross-kind name-collision
+    shape as the earlier `openai` case, but here it's each analyzer's own default behavior
+    colliding, not one pattern-table row to rename. [x] RFC 0093 filed and implemented 2026-08-25
+    — see below (`devlog_109`).
+  - 15 new/updated tests, full workspace gate clean, `tests/integration` 3/3. Live-verified through
+    4 full `.ekos/` rebuild cycles against `pdf-reader`'s real whole-project ledger: `## System
+    Context` lists all 12 real technologies; `## Subsystems`/`## Component View`/`## Crate &
+    Workspace Topology` show 7 real per-directory rollups instead of 2 flat blobs.
+
+- **RFC 0091 (filed and implemented same-day, 2026-08-25): SQLAlchemy ORM model recognition** —
+  the last previously-deferred `pdf-reader` gap, resolved on request (`devlog_103`):
+  - [x] `python_analyzer.rs`'s existing `ClassDef` handling now also recognizes a real SQLAlchemy
+    declarative model (`__tablename__ = "..."` present) and compiles a real `ObjectKind::Table`
+    object (real column names + best-effort `data_type` hints + real `ForeignKey` edges resolved
+    within the same file) alongside its existing, unchanged `PythonSymbol` object. Reuses
+    `sql_analyzer.rs`'s exact `columns`/`ForeignKey` property/id conventions, so a small companion
+    `docs-gen::render_data_architecture` fix (real column names were compiled but never rendered,
+    for *either* origin) needed zero origin-specific branching. Python/SQLAlchemy only — Django/
+    other ORMs/languages are real, deferred extensions, not attempted without a real project to
+    verify against. 8 new tests, full workspace gate clean, `tests/integration` 3/3.
+  - Live-verified against `pdf-reader`'s real `db/models.py`: 3 new `Table` objects (`documents`,
+    `page_cache`, `translation_cache`) with real, correct columns; `## Entity Relationships` now
+    renders a real ER diagram matching the real `ForeignKey("documents.file_hash")` in source;
+    `translation_cache` correctly shows 0 FK edges (it has none), not force-fit to match its
+    siblings. `## Data Architecture`/`## Entity Relationships` were both previously empty/gap-only
+    for this project (no raw SQL DDL anywhere in scope) — both now render real content.
+  - Caught one real bug via live testing against the actual source rather than a hand-simplified
+    fixture: SQLAlchemy allows a bare, uninstantiated type reference (`mapped_column(Integer)`, no
+    parens) alongside the called form (`mapped_column(String(64))`) — the first `type_hint`
+    implementation only handled the called form.
+
+- **RFC 0079's `project_key` gap closed for `crate_topology_analyzer.rs`/`cicd_analyzer.rs`,
+  2026-08-25** (`devlog_104`) — the one item `devlog_101` explicitly deferred for lack of a real
+  Cargo/CI-workflow test project:
+  - [x] `recover.rs`'s `cargo_manifests`/`cicd_workflows` collection loops, `crate_topology_analyzer.rs`
+    (`Crate`/`ArchitectureGap`/`Claim` ids — `technology_kir_id` deliberately left unqualified,
+    external crates.io deps are global/shared, not project-scoped), `cicd_analyzer.rs` (`Pipeline`
+    ids), and `architecture_reasoning.rs`'s test helper all fixed with the identical
+    base-relative-path + `project_key_for_base` pattern `devlog_101` already established. 2 new
+    regression tests (real id recomputed and asserted, same shape as `devlog_101`'s precedent), full
+    workspace gate clean, `tests/integration` 3/3.
+  - Live-verified with a real target since `pdf-reader` has neither Cargo manifests nor CI
+    workflows: a scratch `ekos.toml` with `[observe] paths` pointing at two real absolute EKOS crate
+    directories (`crates/common`, `crates/kir`) plus the real repo's own `.github/workflows`, run
+    through the full pipeline. Independently recomputed both a `Crate` and a `Pipeline` object's
+    real id in Python (`uuid.uuid5`) from the qualified-path formula and confirmed byte-for-byte
+    matches against the real ledger objects.
+  - Same `SEM002` warning-volume discrepancy `devlog_101` flagged reproduced on this run too (still
+    not investigated — separate open item below).
+
+- **Python `from package import submodule` now resolves to the submodule, 2026-08-25**
+  (`devlog_105`) — second item on the gap-closure list, deferred since `devlog_100`:
+  - [x] `python_analyzer.rs`'s `ImportFrom` handling emitted one `DependsOn` edge to the bare base
+    module regardless of which names were imported, so `from app.services import ai_service` and
+    `from app.services import db_service` collapsed onto the same `app.services` object — losing
+    the real distinction the source draws. Fixed: one edge per imported name, qualified
+    `<module>.<name>`; a star import (`from pkg import *`) still falls back to the bare module,
+    the only real fact available in that case. 1 test updated, 2 new.
+  - Live-verified against the exact real line that motivated the gap
+    (`backend/app/api/ai.py:7: from app.services import ai_service`, rebuilt whole-project scope):
+    `ekos query find "ai_service"` now returns a real `app.services.ai_service` `PythonModule`
+    object with a real `DependsOn` edge from `ai.py`'s `File` object; no bare `app.services`
+    import-derived object exists anymore.
+  - Full workspace gate clean, `tests/integration` 3/3.
+
+- **The "`local_docs_analyzer.rs` id-collision" (`devlog_102`) root-caused and fixed, 2026-08-25**
+  (`devlog_106`) — third item on the gap-closure list; it was never an id collision:
+  - [x] `DefaultResolver`'s blanket kind-exclusion list (`crates/identity/src/lib.rs`) — already
+    covering `Section`/`TransformNode`/`RustSymbol`/`RustModule`/`PythonSymbol`/`PythonModule`/
+    `Crate`/`Claim`/`ArchitectureGap`/`ElixirModule`/`ElixirSymbol`/`JsModule`/`JsSymbol`, the
+    exact obligation CLAUDE.md's own crate-map names explicitly for every new self-identified
+    `Custom(_)` kind — was missing `Custom("Document")`, the ninth kind to hit this exact failure
+    shape. Two real, distinct `README.md` files (project root + `frontend`'s Vite scaffold) share
+    an *exact* normalized name, so the same-kind 1.0 structural-score fallback pushed them to
+    confidence 1.00 — RFC 0063 auto-merges exact matches without review, and `ekos compile`
+    silently dropped one of the two real files from the compiled CKM every run. Fixed: `Document`
+    added to the list. 1 new regression test, 2 pre-existing tests updated (both had used
+    `Custom("Document")` as their own example of a kind the exclusion *doesn't* apply to).
+  - Live-verified, including a real methodological trap caught mid-verification: `ekos compile`'s
+    own pass-level cache (keyed on upstream content, not the compiling code's version) silently
+    served the stale pre-fix CKM after only rebuilding the binary — object counts looked identical
+    before/after until specifically cross-checked. `ekos clean` alone then left a second
+    inconsistency (`build`'s own re-scan fingerprint isn't cleared with it, so a `clean`+`build` can
+    skip re-scanning against a now-empty artifact store). Full `rm -rf .ekos` + `init` was the
+    reliable reset. After that: `ekos compile` reports 148 objects (was 147); `ekos query object`
+    on both real `README.md` `Document` ids confirms genuinely distinct, correctly-attributed real
+    content (the actual project README vs. the actual untouched Vite scaffold text).
+  - Full workspace gate clean, `tests/integration` 3/3.
+
+- **`compile.log`'s `SEM002` warning noise root-caused and precisely classified, 2026-08-25**
+  (`devlog_107`) — fourth item on the gap-closure list, flagged three prior times
+  (`devlog_99`/`devlog_101`/`devlog_104`) without ever being traced:
+  - [x] Not a bug in identity resolution — `ekos_semantic`'s CKM validation checks relationships
+    against a genuinely narrower object set by architectural design (`File` objects are written
+    straight to the ledger by `ekos build`, never through the `KnowledgeArtifact`s the compile
+    stage reads; already documented in-line since RFC 0044, just never surfaced in the diagnostic
+    text itself). New `CkModel::dangling_relationship_target_ids()` exposes the same set
+    `validate()` already computes, as real ids; `compile.rs` (which already has ledger access)
+    cross-references them against the ledger's real `File` objects and reports a classified count
+    instead of one opaque number. 4 new tests.
+  - Live-verified: `pdf-reader`'s 184 raw warnings (23 distinct dangling ids) now report as "22
+    expected File-object references ... 1 other(s)". The 1 remaining traced to a *different*,
+    already-independently-documented gap (`git_analyzer.rs`'s `OwnedBy` edges point at a synthetic
+    commit-subject id, never a real `File` — `docs-gen`'s own `## Ownership` section text already
+    names this exact limitation and what a real fix would need) — correctly left unfixed here
+    (a scoped, RFC-worthy feature, not a bug), and correctly *not* silently absorbed into
+    "expected" by this fix's classification.
+  - Full workspace gate clean, `tests/integration` 3/3.
+
+- **RFC 0092 (filed and implemented same-day, 2026-08-25): class inheritance
+  (`RelationshipKind::Extends`), Python v1** — fifth item on the gap-closure list (`devlog_108`):
+  - [x] `python_analyzer.rs`'s existing `ClassDef` visit (already reused for RFC 0091's
+    `__tablename__` detection) now also emits a real `Extends` edge per base class that resolves
+    to another real, same-file `PythonSymbol` class (`known_classes` pre-pass, mirrors RFC 0091's
+    `known_tables` exactly). An unresolvable base (imported, not locally defined — `BaseModel`,
+    `DeclarativeBase`) is honestly left unmapped, same "no fabrication" discipline RFC 0091
+    established for `ForeignKey`. Python only — JS/TS `class X extends Y` is the same real shape
+    and a legitimate future extension, not attempted without a live target (`pdf-reader`'s
+    frontend is entirely functional-component React, no class declarations in scope). 6 new tests.
+  - The RFC's first draft wrongly claimed `docs-gen`'s object pages get a dedicated `### Extends`
+    section — corrected in place after live verification showed relationships are actually grouped
+    into 4 pre-existing structural buckets (`Based on`/`Contains`/`Used in`/`Dependent on`), not
+    one section per literal kind; `Extends` lands in `### Dependent on`. The real kind *is* still
+    visible with zero `docs-gen` changes, via the same page's Mermaid diagram edge label
+    (`Document -->|Extends|-> Base`) — a real, dedicated `### Extends`-style section is left as
+    future `docs-gen` work once a second language's worth of real data exists to design it against.
+  - Live-verified against `pdf-reader`'s real `db/models.py`: compiled relationship count went
+    189 → 192 (the 3 real `Document`/`PageCache`/`TranslationCache` → `Base` edges); `ekos query
+    neighbourhood` confirms the real edges and confirms `TranslateRequest(BaseModel)` correctly
+    produces no fabricated edge.
+  - Full workspace gate clean, `tests/integration` 3/3.
+
+- **RFC 0093 (filed and implemented same-day, 2026-08-25): `Technology`/`JsModule` cross-kind
+  conflict false positive** — sixth item on the gap-closure list (`devlog_109`):
+  - [x] `DefaultResolver`'s conflict detector flagged every real `Technology`
+    (`package_json_analyzer.rs`, declared dependency) that shares a name with a real `JsModule`
+    (`javascript_analyzer.rs`, imported specifier) — the expected shape for *every* real JS/TS
+    dependency that's both declared and imported, not a genuine ambiguity, and `ekos resolve` (no
+    `--force`) refuses to proceed at all when any conflict exists. New
+    `is_expected_technology_jsmodule_pair`: excludes exactly a `{Technology, JsModule}` group
+    (a third kind still conflicts) where every `JsModule` looks like a real bare package specifier
+    (not starting with `.`/`..`/`/`, the same rule Node's own resolution uses) — not a merge, only
+    stops the pair being *reported*; a relative-specifier `JsModule` sharing a `Technology`'s name
+    still correctly conflicts. 3 new tests.
+  - Live-verified against `pdf-reader`'s real whole-project ledger: `ekos resolve` (no `--force`)
+    conflict count dropped from 5 to 0 and now exits 0, for the first time all session on this
+    project. `compile`/`commit` object/relationship counts unaffected (148/192) — this fix only
+    changes conflict *reporting*, not what gets merged or compiled.
+  - Full workspace gate clean, `tests/integration` 3/3.
+
+- **RFC 0094 (filed and implemented same-day, 2026-08-25): `Custom("Risk")` KIR kind, Observed
+  Concentration Risk v1** — seventh item on the gap-closure list (`devlog_110`):
+  - [x] `Architecture.md`'s Executive Summary `**Major risks:**` line had said "not yet computed —
+    no `Risk` KIR kind exists yet" since the section was first written. New `Custom("Risk")` kind;
+    one v1 rule (an object with 3+ real compiled `DependsOn` dependents — `risk_type: "observed"`
+    only, no inference/fabricated severity), computed inside `SemanticCompilerPass::run()`
+    (`crates/semantic`, needs the whole-graph `DependsOn` view only available post-resolution),
+    kind-agnostic (not `Technology`-only — reused `DependencyRiskReport.md`'s existing render-time
+    fan-in computation as a starting point but widened it). 7 new tests.
+  - Live-verified against `pdf-reader`'s real whole-project ledger — the positive case turned out
+    stronger than planned: widening past `Technology`-only surfaced 11 real `Risk` objects
+    (`fastapi.HTTPException`, a shared `app.db.session.get_db` DI helper, a shared frontend
+    `../api/client` module, ...), rendered as real content in `Architecture.md`'s Executive
+    Summary, no scratch/self-verify scope needed.
+  - A real, separate, pre-existing gap found while verifying (not fixed here): `python_analyzer.rs`'s
+    `add_import` never attaches evidence to its `DependsOn` edges at all, so a real `Risk` object
+    derived from Python-sourced fan-in correctly has zero cited evidence — not a bug in this RFC's
+    logic (which correctly forwards whatever evidence exists), a gap in what the underlying edges
+    carry. Worth a future session: give `add_import`'s edges the same real evidence citation
+    `dependency_analyzer.rs`/`crate_topology_analyzer.rs` already provide theirs.
+  - Full workspace gate clean, `tests/integration` 3/3.
+
+- **RFC 0095 (filed and implemented same-day, 2026-08-25): Architecture confidence wired into
+  `docs generate`'s Executive Summary** — eighth and final item on the gap-closure list
+  (`devlog_111`):
+  - [x] `evaluate_architecture` (RFC 0065 Phase 3) already existed and was already used by `ekos
+    architecture investigate` — never called from the plain `docs generate` path. Small wiring fix:
+    `generate_curated` (`docs.rs`) now calls it and threads a new small local
+    `ArchitectureConfidence` struct (`docs-gen`, mirrors `EvaluationReport`, avoids a real
+    `ekos-recovery` dependency for this thin rendering crate — matches `LayerOverride`'s own
+    precedent) into `render_architecture`. New `evidenced_total` field on `EvaluationReport` lets
+    the renderer tell a real score apart from the evaluator's own vacuous `1.0` default (no
+    `Crate`/`Claim`/`ArchitectureGap` objects at all — `pdf-reader` today) — renders an honest
+    "not meaningfully computed" message instead of a misleading "100% confidence". 7 new tests.
+  - **A real, previously-undiscovered bug found live verifying the positive case**: [x]
+    `crate_topology_analyzer.rs`'s `dir_to_id` map was keyed by the *bare* manifest directory
+    alone, so two crates from *different* `[observe] paths` projects that both have `Cargo.toml`
+    at their own entry's root (`dir == ""` — the single most common real shape for a multi-project
+    workspace built from standalone crate directories) silently collapsed onto one `Crate` object
+    id. A real regression in the RFC 0079 fix `devlog_104` shipped earlier this session — missed
+    because that fix's own verification only ever checked one crate's id in isolation, never
+    checked whether a *second* crate in the same multi-path scope got a genuinely different one.
+    Fixed: `dir_to_id` re-keyed by `(project, dir)`, all 4 use sites updated (including the
+    internal path-dependency resolution site, which now correctly pairs a target directory with
+    the *declaring* crate's own project — path dependencies never cross a project boundary). 1 new
+    regression test reproducing the exact real shape.
+  - Live-verified against `pdf-reader` (honest vacuous-case message) and a real scratch 2-crate
+    multi-project scope (`crates/kir` + `crates/common`, EKOS's own real crates): after the
+    id-collision fix, `Architecture.md` correctly reports "40% (completeness: 0% of 2 crate(s)
+    classified..." — 2, not the pre-fix 1.
+  - Full workspace gate clean, `tests/integration` 3/3.

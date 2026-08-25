@@ -211,6 +211,19 @@ flow instead of an irreversible merge (RFC 0063) — no confidence threshold on 
 scoring formula reliably separates real correct fuzzy merges from real incorrect ones, so an
 irreversible auto-merge isn't a safe default for that case.
 
+### Real schema and class structure from source (RFC 0091/0092)
+
+Beyond raw SQL DDL, `ekos recover`'s Python analyzer recognizes a real SQLAlchemy declarative
+model (`__tablename__` present on a class) and compiles it into the same `Table` object shape as a
+`CREATE TABLE` statement — real column names, best-effort data-type hints, and `ForeignKey` edges
+resolved against other models in the same file — so a project whose entire schema is ORM-declared
+(the majority shape for a modern Python backend) still gets a real `## Data Architecture` and
+entity-relationship diagram instead of an empty section. The same analyzer also compiles real
+class inheritance (`class Document(Base):`) into `RelationshipKind::Extends` edges between the
+real `PythonSymbol` objects involved — visible on each class's own generated page and in its
+Mermaid diagram — resolved only when the base class is defined in the same file, never fabricated
+against an imported base EKOS can't see the definition of.
+
 ### Document semantic memory (RFC 0025/0026)
 
 Beyond structural parsing, an opt-in pass reads local documents through an LLM to extract real
@@ -234,10 +247,10 @@ talk to. `ekos ask` honors `[llm] provider = "ollama"` the same way `ekos recove
 commands select the LLM provider through one shared function, so a workspace configured for local
 Ollama works identically for recovery and for querying.
 
-### Documentation generation (RFC 0035/0037/0042)
+### Documentation generation (RFC 0035/0037/0042/0090/0094/0095)
 
 `ekos docs generate` renders the compiled ledger straight into Markdown/HTML documentation —
-zero LLM calls, every claim traceable to real compiled evidence. Two layouts:
+zero LLM calls, every claim traceable to real compiled evidence. Three layouts:
 
 ```bash
 ekos docs generate                              # --layout objects (default): one page per
@@ -246,6 +259,17 @@ ekos docs generate --layout curated --output doc # README.md/Architecture.md/API
                                                   # SequenceDiagrams.md — the shape a developer
                                                   # actually expects, plus one detail page per
                                                   # crate/technology/pipeline/program-entity object
+ekos docs generate --layout solution-architect --output doc-sa
+                                                  # DependencyRiskReport.md/OnboardingGuide.md/
+                                                  # FindingsMemo.md — a team-handoff bundle: real
+                                                  # declared dependency versions and concentration
+                                                  # risk, a first-day repository-layout guide, and
+                                                  # an actionable findings list (unresolved
+                                                  # dependencies, undeclared crate versions, missing
+                                                  # doc-comment coverage). `--prose` layers an
+                                                  # LLM-written executive summary on the findings
+                                                  # list, never replacing the deterministic list
+                                                  # underneath it.
 ```
 
 `--layout curated`'s `Architecture.md` includes a real crate/workspace dependency graph (parsed
@@ -265,6 +289,15 @@ section now shows the real human-written documentation from source when the anal
 "Not documented in source" rather than fabricating one when it didn't. `--prose` (opt-in) layers an LLM-written overview onto each
 object page, reusing `ekos ask`'s exact grounding+citation pipeline, with a token-cost estimate
 shown before any call.
+
+`Architecture.md`'s Executive Summary now surfaces two more real, deterministic signals instead of
+placeholder text: **Major risks** lists real "Observed Concentration Risk" objects — any object
+with 3 or more real compiled `DependsOn` dependents, a structural single-point-of-failure
+candidate, never an LLM-guessed severity score (RFC 0094) — and **Architecture confidence** shows
+the same real completeness/evidence-coverage score `ekos architecture investigate` computes (RFC
+0065 Phase 3), now also run from the plain `docs generate` path instead of only the investigation
+loop (RFC 0095). Both say so honestly when there's no real signal to compute from yet, rather than
+showing a misleading 100%.
 
 ### Architecture reasoning + investigation loop (RFC 0065/0066/0067, opt-in)
 
