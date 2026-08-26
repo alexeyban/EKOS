@@ -991,6 +991,7 @@ dependencies = [
 name = "ekos-ekl"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "ekos-kir",
  "ekos-ledger",
  "ekos-runtime",
@@ -1029,6 +1030,7 @@ dependencies = [
  "ekos-artifact",
  "ekos-common",
  "ekos-kir",
+ "fs4",
  "hex",
  "memmap2",
  "rusqlite",

@@ -35,7 +35,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
 
     // Write canonical objects.
     for ckm_obj in &model.objects {
-        let kir_obj = ckm_object_to_kir(ckm_obj);
+        let mut kir_obj = ckm_object_to_kir(ckm_obj);
+        preserve_claim_review_status(&*ledger, &mut kir_obj)?;
         if ledger.append_object(&kir_obj)? {
             objects_written += 1;
         } else {
@@ -165,6 +166,42 @@ fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
     }
 
     Ok(written)
+}
+
+/// RFC 0109: a freshly-compiled role `Claim` never carries `review_status` — the reasoning pass
+/// that produces it is deliberately ledger-free (RFC 0068 §31's own established precedent) and has
+/// no way to know whether a human already reviewed this exact claim id via `ekos_architecture_review`.
+/// Without this, a reviewed claim would silently revert to unconfirmed on the very next `commit`
+/// re-run: the pass's freshly-derived object never has `review_status`, so its content signature
+/// (RFC 0015) would always differ from the reviewed version already in the ledger, and
+/// `append_object` would write a new, unreviewed-looking version over it. Fixed here — the one
+/// place that already does real ledger-aware object enrichment before appending, matching
+/// `commit_rollups`/`commit_data_lineage`'s own precedent — by checking the ledger's *current*
+/// version of this claim id (if any) and carrying `review_status`/`reviewed_at` forward when the
+/// role `value` is unchanged. A genuinely changed `value` does *not* inherit the old review status
+/// — that confirmation was never about this new assertion.
+fn preserve_claim_review_status(ledger: &dyn KnowledgeStore, obj: &mut KirObject) -> Result<()> {
+    if !matches!(&obj.kind, ekos_kir::ObjectKind::Custom(k) if k == "Claim") {
+        return Ok(());
+    }
+    if obj.properties.get("predicate").and_then(|v| v.as_str()) != Some("has_role") {
+        return Ok(());
+    }
+    let Some(current) = ledger.get_object(&obj.id)? else {
+        return Ok(()); // brand-new claim, nothing to preserve
+    };
+    if current.properties.get("value") != obj.properties.get("value") {
+        return Ok(()); // the role genuinely changed — a new assertion, not a re-derivation
+    }
+    if let Some(status) = current.properties.get("review_status") {
+        obj.properties
+            .insert("review_status".to_string(), status.clone());
+    }
+    if let Some(reviewed_at) = current.properties.get("reviewed_at") {
+        obj.properties
+            .insert("reviewed_at".to_string(), reviewed_at.clone());
+    }
+    Ok(())
 }
 
 /// RFC 0088: shows a real cost estimate (an upper bound — a real run may skip some via caching
@@ -322,5 +359,108 @@ fn evidence_record_to_kir(ev: &EvidenceRecord) -> KirEvidence {
         fragment: ev.fragment.clone(),
         confidence: ev.confidence,
         created_at: Utc::now(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ekos_kir::{KirId, ObjectKind};
+    use ekos_ledger::FactLedger;
+
+    fn role_claim(id: KirId, crate_name: &str, value: &str) -> KirObject {
+        let mut o = KirObject::new(crate_name, ObjectKind::Custom("Claim".to_string()))
+            .with_property("predicate", serde_json::json!("has_role"))
+            .with_property("value", serde_json::json!(value));
+        o.id = id;
+        o
+    }
+
+    #[test]
+    fn a_reviewed_claim_keeps_its_status_and_writes_no_new_version_when_value_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = FactLedger::open(dir.path()).unwrap();
+        let id = KirId::new();
+
+        let mut reviewed = role_claim(id, "ekos-cli", "CLI entrypoint");
+        reviewed
+            .properties
+            .insert("review_status".into(), serde_json::json!("confirmed"));
+        reviewed.properties.insert(
+            "reviewed_at".into(),
+            serde_json::json!("2026-08-26T00:00:00Z"),
+        );
+        ledger.append_object(&reviewed).unwrap();
+
+        // A fresh re-derivation from the reasoning pass — same role value, no review_status at all.
+        let mut fresh = role_claim(id, "ekos-cli", "CLI entrypoint");
+        preserve_claim_review_status(&ledger, &mut fresh).unwrap();
+
+        assert_eq!(
+            fresh.properties.get("review_status"),
+            Some(&serde_json::json!("confirmed")),
+            "review status must be carried forward onto the fresh object"
+        );
+        let wrote_new_version = ledger.append_object(&fresh).unwrap();
+        assert!(
+            !wrote_new_version,
+            "an unchanged, already-reviewed claim must not gain a new version on re-commit"
+        );
+        let current = ledger.get_object(&id).unwrap().unwrap();
+        assert_eq!(
+            current.properties.get("review_status"),
+            Some(&serde_json::json!("confirmed"))
+        );
+    }
+
+    #[test]
+    fn a_changed_role_value_does_not_inherit_the_old_review_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = FactLedger::open(dir.path()).unwrap();
+        let id = KirId::new();
+
+        let mut reviewed = role_claim(id, "ekos-cli", "CLI entrypoint");
+        reviewed
+            .properties
+            .insert("review_status".into(), serde_json::json!("confirmed"));
+        ledger.append_object(&reviewed).unwrap();
+
+        // The reasoning pass reclassified the crate — a genuinely different assertion.
+        let mut reclassified = role_claim(id, "ekos-cli", "core library");
+        preserve_claim_review_status(&ledger, &mut reclassified).unwrap();
+
+        assert_eq!(
+            reclassified.properties.get("review_status"),
+            None,
+            "a changed role value must not inherit the previous claim's review status"
+        );
+        let wrote_new_version = ledger.append_object(&reclassified).unwrap();
+        assert!(
+            wrote_new_version,
+            "a genuinely changed claim must write a new version"
+        );
+    }
+
+    #[test]
+    fn a_brand_new_claim_with_no_prior_version_is_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = FactLedger::open(dir.path()).unwrap();
+        let mut fresh = role_claim(KirId::new(), "ekos-cli", "CLI entrypoint");
+
+        preserve_claim_review_status(&ledger, &mut fresh).unwrap();
+
+        assert_eq!(fresh.properties.get("review_status"), None);
+    }
+
+    #[test]
+    fn a_non_claim_object_is_left_completely_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = FactLedger::open(dir.path()).unwrap();
+        let mut table = KirObject::new("orders", ObjectKind::Table);
+        let original = table.clone();
+
+        preserve_claim_review_status(&ledger, &mut table).unwrap();
+
+        assert_eq!(table.properties, original.properties);
     }
 }

@@ -118,6 +118,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 zstd     = "0.13"
 tantivy  = "0.22"
 memmap2  = "0.9"
+# RFC 0104 Phase 1: real cross-process write lock for FactLedger — already a transitive
+# dependency via tantivy's own IndexWriter lock, promoted to direct/first-class here.
+fs4      = { version = "0.8", features = ["sync"] }
 
 # Filesystem
 walkdir = "2"

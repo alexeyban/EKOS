@@ -8,7 +8,7 @@
 use crate::{ObjectState, Runtime, RuntimeError};
 use ekos_compiler_core::Diagnostic;
 use ekos_kir::KirId;
-use ekos_recovery::llm::{LlmError, LlmProvider, LlmRequest};
+use ekos_recovery::llm::{LlmError, LlmProvider, LlmRequest, Message};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -82,6 +82,36 @@ struct CitationBlock {
     cited_evidence: Vec<String>,
 }
 
+/// One prior turn in a multi-turn `ekos ask --session` conversation (RFC
+/// 0099) — the clean question and citation-stripped answer, never the raw
+/// grounded prompt (`"Question: ...\n\nContext:\n...json..."`) or the raw
+/// LLM response (which still carries the trailing `{"cited_evidence":
+/// [...]}` block) a turn was actually produced from. Keeping history clean
+/// like this means a long session's prior turns don't re-inflate every
+/// later prompt with retrieved-context JSON nobody needs repeated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationTurn {
+    pub question: String,
+    pub answer: String,
+}
+
+/// Expands `history` into the `user`/`assistant` message pairs
+/// `LlmRequest::history` expects, oldest first.
+fn history_messages(history: &[ConversationTurn]) -> Vec<Message<'_>> {
+    let mut messages = Vec::with_capacity(history.len() * 2);
+    for turn in history {
+        messages.push(Message {
+            role: "user",
+            content: &turn.question,
+        });
+        messages.push(Message {
+            role: "assistant",
+            content: &turn.answer,
+        });
+    }
+    messages
+}
+
 /// Answers natural-language questions grounded in the Knowledge Ledger.
 ///
 /// Pipeline: retrieve candidate objects via `Runtime::find_objects`, expand
@@ -108,6 +138,23 @@ impl<'a> AiRuntime<'a> {
     }
 
     pub async fn ask(&self, question: &str) -> Result<AiAnswer, AiError> {
+        self.ask_with_history(question, &[]).await
+    }
+
+    /// Same as [`Self::ask`], but with `history` (RFC 0099) — prior clean
+    /// question/answer pairs, oldest first — inserted between the system
+    /// prompt and this turn's own grounded user message. Retrieval
+    /// (`gather_context`) is deliberately **not** history-aware in v1: each
+    /// turn's search still runs off that turn's own `question` text alone,
+    /// not the whole conversation — the simplest correct behavior, and the
+    /// one documented, named limitation of this RFC (see RFC 0099's own
+    /// Non-goals) rather than a second open research question folded in
+    /// silently.
+    pub async fn ask_with_history(
+        &self,
+        question: &str,
+        history: &[ConversationTurn],
+    ) -> Result<AiAnswer, AiError> {
         let (contexts, mut diagnostics) = self.gather_context(question)?;
 
         let known_evidence: HashSet<KirId> = contexts
@@ -117,14 +164,73 @@ impl<'a> AiRuntime<'a> {
 
         let context_json = serde_json::to_string_pretty(&contexts)?;
         let user = format!("Question: {question}\n\nContext:\n{context_json}");
+        let history_messages = history_messages(history);
 
         let req = LlmRequest {
             system: &self.config.system_prompt,
             user: &user,
             prompt_version: PROMPT_VERSION,
             max_tokens: self.config.max_tokens,
+            history: &history_messages,
         };
         let resp = self.llm.complete(&req).await?;
+
+        let (answer, evidence_refs, citation_diagnostics) =
+            extract_citations(&resp.content, &known_evidence);
+        diagnostics.extend(citation_diagnostics);
+
+        Ok(AiAnswer {
+            answer,
+            evidence_refs,
+            diagnostics,
+        })
+    }
+
+    /// Same pipeline as [`Self::ask`], but calls `on_chunk` with each piece
+    /// of the LLM's answer as it becomes available (RFC 0098) — retrieval
+    /// (`gather_context`) is unchanged and still runs synchronously up
+    /// front, only the completion call itself streams. Citation extraction
+    /// (`extract_citations`) still needs the *full* response text (it looks
+    /// for the trailing `{"cited_evidence": [...]}` block via `rfind('{')`,
+    /// which can't be resolved mid-stream), so `AiAnswer.answer`/
+    /// `evidence_refs`/`diagnostics` are only available once the stream
+    /// ends — `on_chunk` is the only way to see the answer progressively.
+    pub async fn ask_stream(
+        &self,
+        question: &str,
+        on_chunk: &mut (dyn FnMut(String) + Send),
+    ) -> Result<AiAnswer, AiError> {
+        self.ask_stream_with_history(question, &[], on_chunk).await
+    }
+
+    /// [`Self::ask_stream`] with `history` (RFC 0099) — see
+    /// [`Self::ask_with_history`] for the history-handling contract; the
+    /// only difference from that method is streaming the completion call.
+    pub async fn ask_stream_with_history(
+        &self,
+        question: &str,
+        history: &[ConversationTurn],
+        on_chunk: &mut (dyn FnMut(String) + Send),
+    ) -> Result<AiAnswer, AiError> {
+        let (contexts, mut diagnostics) = self.gather_context(question)?;
+
+        let known_evidence: HashSet<KirId> = contexts
+            .iter()
+            .flat_map(|s| s.evidence.iter().map(|e| e.id))
+            .collect();
+
+        let context_json = serde_json::to_string_pretty(&contexts)?;
+        let user = format!("Question: {question}\n\nContext:\n{context_json}");
+        let history_messages = history_messages(history);
+
+        let req = LlmRequest {
+            system: &self.config.system_prompt,
+            user: &user,
+            prompt_version: PROMPT_VERSION,
+            max_tokens: self.config.max_tokens,
+            history: &history_messages,
+        };
+        let resp = self.llm.complete_stream(&req, on_chunk).await?;
 
         let (answer, evidence_refs, citation_diagnostics) =
             extract_citations(&resp.content, &known_evidence);
@@ -419,6 +525,116 @@ mod tests {
 
         assert_eq!(answer.evidence_refs, vec![ev_id]);
         assert!(answer.diagnostics.is_empty());
+    }
+
+    // ── RFC 0098: ask_stream ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn ask_stream_delivers_chunks_and_returns_the_same_grounded_answer_as_ask() {
+        let (ledger, _dir) = temp_ledger();
+        let (_orders_id, ev_id) = seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+
+        let llm = Arc::new(MockLlmProvider::new(format!(
+            r#"Orders references customers via a foreign key. {{"cited_evidence": ["{ev_id}"]}}"#
+        )));
+        let ai = AiRuntime::new(&runtime, llm, AiRuntimeConfig::default());
+
+        let mut chunks = Vec::new();
+        let mut on_chunk = |s: String| chunks.push(s);
+        let answer = ai.ask_stream("orders", &mut on_chunk).await.unwrap();
+
+        assert_eq!(answer.evidence_refs, vec![ev_id]);
+        assert!(answer.diagnostics.is_empty());
+        assert!(
+            answer
+                .answer
+                .contains("Orders references customers via a foreign key")
+        );
+        // MockLlmProvider has no real incremental streaming — it uses
+        // LlmProvider::complete_stream's default fallback (one chunk, the
+        // whole response) — so this pins that ask_stream really does route
+        // through complete_stream (not silently falling back to `ask`'s own
+        // complete()) rather than proving true multi-chunk delivery, which
+        // is covered live against a real provider instead (devlog_115).
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].contains("cited_evidence"));
+    }
+
+    // ── RFC 0099: multi-turn history ─────────────────────────────────────
+
+    /// Records the `history` it was called with (as owned strings, since
+    /// `LlmRequest` borrows) instead of returning a fixed response —
+    /// proves `ask_with_history` actually threads `ConversationTurn`s
+    /// through to the provider, not just that it compiles.
+    struct RecordingMock {
+        seen_history: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for RecordingMock {
+        fn model_name(&self) -> &str {
+            "recording-mock"
+        }
+        async fn complete(
+            &self,
+            req: &LlmRequest<'_>,
+        ) -> Result<ekos_recovery::llm::LlmResponse, LlmError> {
+            *self.seen_history.lock().unwrap() = req
+                .history
+                .iter()
+                .map(|m| (m.role.to_string(), m.content.to_string()))
+                .collect();
+            Ok(ekos_recovery::llm::LlmResponse {
+                content: r#"An answer. {"cited_evidence": []}"#.to_string(),
+                model: "recording-mock".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_with_history_threads_prior_turns_into_the_llm_request() {
+        let (ledger, _dir) = temp_ledger();
+        seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+
+        let mock = Arc::new(RecordingMock {
+            seen_history: std::sync::Mutex::new(Vec::new()),
+        });
+        let ai = AiRuntime::new(&runtime, mock.clone(), AiRuntimeConfig::default());
+
+        let history = [ConversationTurn {
+            question: "what tables exist?".to_string(),
+            answer: "orders and customers.".to_string(),
+        }];
+        ai.ask_with_history("orders", &history).await.unwrap();
+
+        let seen = mock.seen_history.lock().unwrap();
+        assert_eq!(
+            *seen,
+            vec![
+                ("user".to_string(), "what tables exist?".to_string()),
+                ("assistant".to_string(), "orders and customers.".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_without_history_sends_an_empty_history() {
+        let (ledger, _dir) = temp_ledger();
+        seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+
+        let mock = Arc::new(RecordingMock {
+            seen_history: std::sync::Mutex::new(Vec::new()),
+        });
+        let ai = AiRuntime::new(&runtime, mock.clone(), AiRuntimeConfig::default());
+
+        ai.ask("orders").await.unwrap();
+
+        assert!(mock.seen_history.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

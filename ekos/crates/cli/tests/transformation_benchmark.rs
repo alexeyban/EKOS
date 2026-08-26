@@ -129,6 +129,7 @@ fn call_tool(
     id: u64,
     name: &str,
     arguments: serde_json::Value,
+    cache: &mut ekos::commands::mcp::StoreCache,
 ) -> serde_json::Value {
     let request = serde_json::json!({
         "jsonrpc": "2.0", "id": id, "method": "tools/call",
@@ -136,7 +137,7 @@ fn call_tool(
     })
     .to_string();
 
-    let response = ekos::commands::mcp::handle_message(config, dir, &request)
+    let response = ekos::commands::mcp::handle_message(config, dir, &request, cache)
         .expect("tools/call is a request and must be answered");
     let response: serde_json::Value = serde_json::from_str(&response).unwrap();
 
@@ -167,6 +168,8 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
         .await
         .unwrap();
 
+    let mut cache = ekos::commands::mcp::StoreCache::new();
+
     // ── Step 1: locate each pipeline's Sink purely via ekos_ekl + ekos_state ──
     // ("developer" doesn't know ids or node ordering yet, only that the job
     // writes gold.order_summary) — found by node_type, not by guessing an
@@ -179,6 +182,7 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
         1,
         "ekos_ekl",
         serde_json::json!({ "query": "FIND Object WHERE kind CONTAINS 'TransformNode'" }),
+        &mut cache,
     );
     let rows = nodes["rows"].as_array().unwrap();
     assert_eq!(
@@ -188,7 +192,9 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
          6 new SQL nodes (same shape) expected, got {rows:?}"
     );
 
-    let find_sink_id = |source_path_prefix: &str| -> String {
+    let find_sink_id = |source_path_prefix: &str,
+                        cache: &mut ekos::commands::mcp::StoreCache|
+     -> String {
         rows.iter()
             .filter(|r| r["name"].as_str().unwrap().starts_with(source_path_prefix))
             .map(|r| r["id"].as_str().unwrap().to_string())
@@ -199,14 +205,15 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
                     100,
                     "ekos_state",
                     serde_json::json!({ "id": id }),
+                    cache,
                 );
                 state["object"]["properties"]["node_type"] == "Sink"
             })
             .unwrap_or_else(|| panic!("no Sink node found with name prefix {source_path_prefix}"))
     };
 
-    let legacy_sink_id = find_sink_id("legacy_order_summary.ktr:");
-    let new_sink_id = find_sink_id("new_order_summary.sql");
+    let legacy_sink_id = find_sink_id("legacy_order_summary.ktr:", &mut cache);
+    let new_sink_id = find_sink_id("new_order_summary.sql", &mut cache);
 
     // ── Step 2: explain the legacy pipeline — no XML read, MCP tool only ────
     let explain = call_tool(
@@ -215,6 +222,7 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
         2,
         "ekos_transformation_explain",
         serde_json::json!({ "id": legacy_sink_id }),
+        &mut cache,
     );
     let steps = explain["steps"].as_array().unwrap();
     assert_eq!(
@@ -272,6 +280,7 @@ async fn phase7_benchmark_recover_explain_diff_over_mcp_only() {
         3,
         "ekos_transformation_diff",
         serde_json::json!({ "old_id": legacy_sink_id, "new_id": new_sink_id }),
+        &mut cache,
     );
 
     // Sources and sink are unchanged — same table names on both sides.

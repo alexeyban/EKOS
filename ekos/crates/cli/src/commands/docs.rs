@@ -2,9 +2,11 @@
 //!
 //! Reads every "significant" already-committed object from the ledger
 //! ([`ekos_docs_gen::is_significant`] — every kind except `Column`, which stays embedded in its
-//! parent's page) and renders one page per object — each with a 1-hop Mermaid dependency diagram
-//! — plus a whole-workspace ER diagram (`er-diagram.*`, when there's at least one `ForeignKey`
-//! relationship between two `Table` objects) and an `index.*` linking everything, grouped by kind.
+//! parent's page) and renders one page per object — each with a 1-hop Mermaid dependency diagram,
+//! plus a standalone `<kind>-<name>.svg` counterpart when the object has at least one relationship
+//! (RFC 0068 §61 follow-on, `ekos_docs_gen::render_object_neighborhood_svg`) — plus a
+//! whole-workspace ER diagram (`er-diagram.*`, when there's at least one `ForeignKey` relationship
+//! between two `Table` objects) and an `index.*` linking everything, grouped by kind.
 //! `--format md` (default) and `--format html` render the exact same
 //! [`ekos_docs_gen::ObjectPageModel`] through different renderers (RFC 0035 Phase 4) — pure
 //! rendering over compiled data either way, zero LLM calls, zero cost.
@@ -141,6 +143,7 @@ pub async fn generate(
     // original `KirObject`s aren't needed past this point except to drive the loop and re-fetch
     // relationships/evidence).
     let mut models: Vec<ObjectPageModel> = Vec::with_capacity(documented.len());
+    let mut svg_written = 0usize;
     for object in &documented {
         let relationships = ledger.relationships_for(&object.id)?;
 
@@ -165,6 +168,15 @@ pub async fn generate(
             ekos_docs_gen::resolve_defining_file(object.id, &parent_of, &objects_by_id)
                 .and_then(|file_id| object_names.get(&file_id).cloned());
         models.push(model);
+
+        // RFC 0068 §61 follow-on: a standalone SVG counterpart to the Mermaid diagram already
+        // embedded in the page above — same node/edge data, `render_graph_svg`'s generic renderer.
+        if let Some(svg) =
+            ekos_docs_gen::render_object_neighborhood_svg(object, &relationships, &object_names)
+        {
+            write_page(output, &svg)?;
+            svg_written += 1;
+        }
     }
 
     // Pass 2 (opt-in): layer an LLM-written "## Overview" onto each model, reusing
@@ -216,6 +228,18 @@ pub async fn generate(
             let er_page = render_er_diagram_page(&table_objects, &all_relationships, format);
             write_page(output, &er_page)?;
             diagrams.push(("Entity-Relationship Diagram".to_string(), er_page.file_name));
+
+            // RFC 0068 §61 follow-on: a standalone SVG counterpart, same reasoning as the
+            // per-object/per-relationship-kind SVGs above.
+            if let Some(svg_page) =
+                ekos_docs_gen::render_er_diagram_svg(&table_objects, &all_relationships)
+            {
+                write_page(output, &svg_page)?;
+                diagrams.push((
+                    "Entity-Relationship Diagram (SVG)".to_string(),
+                    svg_page.file_name,
+                ));
+            }
         }
     }
 
@@ -232,6 +256,7 @@ pub async fn generate(
     );
     println!("  Objects rendered: {written}");
     println!("  Diagrams rendered: {}", diagrams.len());
+    println!("  Neighborhood SVGs rendered: {svg_written}");
     println!("  Output: {}", output.display());
     if written == 0 {
         println!("  (No documented objects found in the ledger — nothing to render yet.)");
@@ -451,6 +476,20 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
     if let Some(svg_page) = ekos_docs_gen::render_crate_topology_svg(&objects, &relationships) {
         write_page(output, &svg_page)?;
     }
+    // RFC 0068 §61 follow-on: same reasoning, for each `## Dependency Graph` per-relationship-kind
+    // subsection. `dependency_graph_groups` is the exact same eligible-kind computation
+    // `render_architecture`'s own Markdown loop used to decide "real diagram" vs. "omitted, too
+    // large" — reusing it here (rather than re-deriving the same filter) is what guarantees every
+    // `dependency-graph-<kind>.svg` link the Markdown just emitted resolves to a file actually
+    // written below.
+    let name_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o.name.as_str())).collect();
+    for (kind, rels) in ekos_docs_gen::dependency_graph_groups(&relationships) {
+        if let Some(svg_page) =
+            ekos_docs_gen::render_relationship_kind_graph_svg(&kind, &rels, &name_by_id)
+        {
+            write_page(output, &svg_page)?;
+        }
+    }
 
     // RFC 0042: per-entity detail pages for the crate/program-entity/technology/pipeline kinds
     // `Architecture.md`/`API.md` now link to — reusing the exact same object-page renderer
@@ -606,6 +645,7 @@ async fn enrich_findings_memo(
         user: &user_message,
         prompt_version: "solution-architect-findings-v1",
         max_tokens: 512,
+        history: &[],
     };
     match llm.complete(&req).await {
         Ok(resp) => Some(ekos_docs_gen::FindingsProse { text: resp.content }),
@@ -677,6 +717,13 @@ mod tests {
             orders_content.contains("```mermaid"),
             "object page embeds a diagram"
         );
+
+        // RFC 0068 §61 follow-on: a standalone SVG counterpart alongside the Mermaid diagram,
+        // for every object real relationships were actually found for.
+        let svg = std::fs::read_to_string(output.join("table-orders.svg")).unwrap();
+        assert!(svg.starts_with("<svg "));
+        assert!(svg.contains(">orders<"));
+        assert!(svg.contains(">customers<"));
     }
 
     #[tokio::test]
@@ -709,8 +756,16 @@ mod tests {
         assert!(er.contains("erDiagram"));
         assert!(er.contains("\"orders\" }o--|| \"customers\""));
 
+        // RFC 0068 §61 follow-on: standalone SVG counterpart, written and linked alongside the
+        // Mermaid-in-Markdown ER diagram above.
+        let er_svg = std::fs::read_to_string(output.join("er-diagram.svg")).unwrap();
+        assert!(er_svg.starts_with("<svg "));
+        assert!(er_svg.contains(">orders<"));
+        assert!(er_svg.contains(">customers<"));
+
         let index = std::fs::read_to_string(output.join("index.md")).unwrap();
         assert!(index.contains("[Entity-Relationship Diagram](er-diagram.md)"));
+        assert!(index.contains("[Entity-Relationship Diagram (SVG)](er-diagram.svg)"));
     }
 
     #[tokio::test]
@@ -1147,6 +1202,48 @@ mod tests {
 
         let architecture = std::fs::read_to_string(output.join("Architecture.md")).unwrap();
         assert!(architecture.contains("[System Context diagram (SVG)](system-context.svg)"));
+    }
+
+    #[tokio::test]
+    async fn generate_curated_writes_dependency_graph_svg_and_links_it_from_architecture_md() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        ledger.append_object(&orders).unwrap();
+        ledger.append_object(&customers).unwrap();
+        let fk = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
+        ledger.append_relationship(&fk).unwrap();
+
+        let output = dir.path().join("out");
+        generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let svg_path = output.join("dependency-graph-foreignkey.svg");
+        assert!(
+            svg_path.exists(),
+            "dependency-graph-foreignkey.svg must be written for a real, within-cap relationship kind"
+        );
+        let svg = std::fs::read_to_string(&svg_path).unwrap();
+        assert!(svg.starts_with("<svg "));
+        assert!(svg.contains(">orders<"));
+        assert!(svg.contains(">customers<"));
+
+        let architecture = std::fs::read_to_string(output.join("Architecture.md")).unwrap();
+        assert!(architecture.contains(
+            "[ForeignKey Dependency Graph diagram (SVG)](dependency-graph-foreignkey.svg)"
+        ));
     }
 
     #[tokio::test]

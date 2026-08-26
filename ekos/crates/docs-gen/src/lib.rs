@@ -817,6 +817,61 @@ pub fn render_mermaid_graph(
     out
 }
 
+/// Node/edge data behind [`render_object_neighborhood_svg`] — the same 1-hop neighborhood
+/// [`render_mermaid_graph`] draws, boiled down to [`render_graph_svg`]'s plain `(id, label)`/
+/// `(from_id, to_id)` shape. Deliberately discards edge *kind* labels and arrow style (dashed for
+/// `CoupledWith`) — both a Mermaid-only concern the generic SVG renderer has no equivalent field
+/// for, matching how [`system_context_graph`] and [`crate_topology_graph`] already reduce a richer
+/// KIR neighborhood down to the same minimal shape for their own SVG counterparts.
+fn object_neighborhood_graph(
+    object: &KirObject,
+    relationships: &[KirRelationship],
+    object_names: &HashMap<KirId, String>,
+) -> IdGraph {
+    let mut nodes = vec![(mermaid_node_id(&object.id), object.name.clone())];
+    let mut edges = Vec::new();
+    let mut seen: HashSet<KirId> = HashSet::new();
+    seen.insert(object.id);
+    for rel in relationships {
+        let other_id = if rel.from == object.id {
+            rel.to
+        } else {
+            rel.from
+        };
+        if seen.insert(other_id) {
+            let label = object_names
+                .get(&other_id)
+                .cloned()
+                .unwrap_or_else(|| format!("{other_id}"));
+            nodes.push((mermaid_node_id(&other_id), label));
+        }
+        edges.push((mermaid_node_id(&rel.from), mermaid_node_id(&rel.to)));
+    }
+    (nodes, edges)
+}
+
+/// Render `object`'s 1-hop neighborhood (see [`render_mermaid_graph`]) as a standalone SVG file
+/// (RFC 0068 §61 follow-on: `render_graph_svg`/`layer_nodes` shipped generic for System Context,
+/// RFC 0073, and generalizes to any `(nodes, edges)` graph with zero modification — this is the
+/// first of the two named follow-on wiring sites). `None` under the same "nothing to draw"
+/// condition `build_object_page_model` already uses to skip the Mermaid diagram entirely
+/// (`relationships.is_empty()`) — callers writing `--layout objects` pages should check this the
+/// same way [`render_system_context_svg`]'s caller does, rather than writing an empty SVG file.
+pub fn render_object_neighborhood_svg(
+    object: &KirObject,
+    relationships: &[KirRelationship],
+    object_names: &HashMap<KirId, String>,
+) -> Option<RenderedPage> {
+    if relationships.is_empty() {
+        return None;
+    }
+    let (nodes, edges) = object_neighborhood_graph(object, relationships, object_names);
+    Some(RenderedPage {
+        file_name: page_file_name(&object.kind, &object.name, "svg"),
+        content: render_graph_svg(&nodes, &edges),
+    })
+}
+
 /// Render a Mermaid `erDiagram` of every `ForeignKey` relationship strictly between two objects
 /// in `tables` — a whole-workspace entity-relationship diagram, not a per-object one, since an ER
 /// diagram's whole point is showing how multiple tables relate at once. `ForeignKey` edges to/from
@@ -852,6 +907,62 @@ pub fn render_er_diagram(tables: &[KirObject], relationships: &[KirRelationship]
     }
     out.push_str("```\n");
     out
+}
+
+/// Node/edge data behind [`render_er_diagram_svg`] — the exact same filter
+/// [`render_er_diagram`] uses (only `ForeignKey` edges strictly between two objects in `tables`,
+/// deduplicated by `(from, to)` pair), reduced to [`render_graph_svg`]'s plain shape. `None` when
+/// no such edge exists — the same honest-empty condition [`render_er_diagram`]'s own caller
+/// (`## Entity Relationships`) already checks before rendering anything at all for this data.
+fn er_diagram_graph(tables: &[KirObject], relationships: &[KirRelationship]) -> Option<IdGraph> {
+    let table_ids: HashSet<KirId> = tables.iter().map(|t| t.id).collect();
+    let name_by_id: HashMap<KirId, &str> = tables.iter().map(|t| (t.id, t.name.as_str())).collect();
+
+    let mut seen_nodes: HashSet<KirId> = HashSet::new();
+    let mut seen_edges: HashSet<(KirId, KirId)> = HashSet::new();
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for rel in relationships {
+        if !matches!(rel.kind, RelationshipKind::ForeignKey) {
+            continue;
+        }
+        if !table_ids.contains(&rel.from) || !table_ids.contains(&rel.to) {
+            continue;
+        }
+        if !seen_edges.insert((rel.from, rel.to)) {
+            continue;
+        }
+        for id in [rel.from, rel.to] {
+            if seen_nodes.insert(id) {
+                nodes.push((mermaid_node_id(&id), name_by_id[&id].to_string()));
+            }
+        }
+        edges.push((mermaid_node_id(&rel.from), mermaid_node_id(&rel.to)));
+    }
+    if edges.is_empty() {
+        None
+    } else {
+        Some((nodes, edges))
+    }
+}
+
+/// Render the whole-workspace Entity-Relationship diagram (see [`render_er_diagram`]) as a
+/// standalone SVG file (RFC 0068 §61 follow-on — the `erDiagram` half of the family named as
+/// still open; `render_graph_svg`'s plain box-and-arrow layout is a real, if simplified, stand-in
+/// for `erDiagram`'s own crow's-foot notation — every `ForeignKey` edge and every table name is
+/// real and present, just without the cardinality glyphs Mermaid's own syntax draws. A
+/// `sequenceDiagram` SVG is deliberately **not** attempted alongside this one: a sequence diagram
+/// is fundamentally a different shape — participant lanes over a time axis, not a layered DAG —
+/// and would need its own real layout primitive, not a reuse of this one).
+pub fn render_er_diagram_svg(
+    tables: &[KirObject],
+    relationships: &[KirRelationship],
+) -> Option<RenderedPage> {
+    let (nodes, edges) = er_diagram_graph(tables, relationships)?;
+    Some(RenderedPage {
+        file_name: "er-diagram.svg".to_string(),
+        content: render_graph_svg(&nodes, &edges),
+    })
 }
 
 /// RFC 0095: the subset of `ekos_recovery::architecture_evaluator::EvaluationReport` (RFC 0065
@@ -2662,11 +2773,6 @@ pub fn render_architecture(
         for kind in kinds {
             out.push_str(&format!("### {kind}\n\n"));
             let rels = &by_kind[kind];
-            // A single relationship kind can itself be too large to render usefully — found by
-            // running this against a real Pentaho+PDF workspace, where `Contains` alone (PDF
-            // pages/sections) produced 74 edges. Excluding `FeedsInto` wasn't enough; the cap
-            // applies per kind, not just to the one kind known in advance to be large.
-            const MAX_GRAPH_EDGES: usize = 20;
             // A page-count budget, not a hard cap: for oversized kinds this still prints a real
             // linked sample instead of only a sentence pointing at a different CLI invocation —
             // each endpoint links to that object's own detail page (written alongside this file
@@ -2707,7 +2813,10 @@ pub fn render_architecture(
                 out.push('\n');
             } else {
                 out.push_str(&render_relationship_kind_graph(kind, rels, &name_by_id));
-                out.push('\n');
+                out.push_str(&format!(
+                    "[{kind} Dependency Graph diagram (SVG)](dependency-graph-{}.svg)\n\n",
+                    slugify(kind)
+                ));
             }
         }
     }
@@ -2748,6 +2857,100 @@ fn render_relationship_kind_graph(
     }
     out.push_str("```\n");
     out
+}
+
+/// Node/edge data behind [`render_relationship_kind_graph_svg`] — mirrors
+/// [`render_relationship_kind_graph`]'s own whole-kind node/edge shape (every distinct object at
+/// either end of a `kind` relationship, deduplicated by id), reduced to [`render_graph_svg`]'s
+/// plain `(id, label)`/`(from_id, to_id)` shape (edge *kind* label and arrow style are a
+/// Mermaid-only concern, same reasoning as [`object_neighborhood_graph`]).
+fn relationship_kind_ids_graph(
+    rels: &[&KirRelationship],
+    name_by_id: &HashMap<KirId, &str>,
+) -> IdGraph {
+    let mut nodes = Vec::new();
+    let mut seen: HashSet<KirId> = HashSet::new();
+    let mut edges = Vec::new();
+    for rel in rels {
+        for id in [rel.from, rel.to] {
+            if seen.insert(id) {
+                let label = name_by_id
+                    .get(&id)
+                    .copied()
+                    .unwrap_or("unknown")
+                    .to_string();
+                nodes.push((mermaid_node_id(&id), label));
+            }
+        }
+        edges.push((mermaid_node_id(&rel.from), mermaid_node_id(&rel.to)));
+    }
+    (nodes, edges)
+}
+
+/// Render one `## Dependency Graph` per-kind subsection's diagram (see
+/// [`render_relationship_kind_graph`]) as a standalone SVG file (RFC 0068 §61 follow-on — the
+/// second of the two named `render_graph_svg` wiring follow-ons, after
+/// [`render_object_neighborhood_svg`]). `None` for an empty `rels` — callers should drive this
+/// from [`dependency_graph_groups`], which already applies the exact same [`MAX_GRAPH_EDGES`]
+/// cap and non-emptiness the Markdown page's own diagram-vs-sample-list decision uses, so this is
+/// never called for a kind the page rendered as an omitted/sampled list instead of a real
+/// diagram.
+pub fn render_relationship_kind_graph_svg(
+    kind_label: &str,
+    rels: &[&KirRelationship],
+    name_by_id: &HashMap<KirId, &str>,
+) -> Option<RenderedPage> {
+    if rels.is_empty() {
+        return None;
+    }
+    let (nodes, edges) = relationship_kind_ids_graph(rels, name_by_id);
+    Some(RenderedPage {
+        file_name: format!("dependency-graph-{}.svg", slugify(kind_label)),
+        content: render_graph_svg(&nodes, &edges),
+    })
+}
+
+/// A single relationship kind can itself be too large to render usefully — found by running
+/// [`render_architecture`]'s `## Dependency Graph` section against a real Pentaho+PDF workspace,
+/// where `Contains` alone (PDF pages/sections) produced 74 edges. Excluding `FeedsInto` wasn't
+/// enough; the cap applies per kind, not just to the one kind known in advance to be large.
+/// Module-level (not scoped inside `render_architecture`) so [`dependency_graph_groups`] shares
+/// the exact same threshold rather than an independently redeclared copy that could drift.
+const MAX_GRAPH_EDGES: usize = 20;
+
+/// Every relationship kind (excluding `FeedsInto`, which gets its own Data-Flow Sequence
+/// treatment in `SequenceDiagrams.md`) small enough for [`render_architecture`]'s `## Dependency
+/// Graph` section to draw a real Mermaid diagram rather than a linked sample list
+/// ([`MAX_GRAPH_EDGES`]) — factored out so a caller writing standalone
+/// [`render_relationship_kind_graph_svg`] files (RFC 0068 §61 follow-on) computes the exact same
+/// eligible-kind set the Markdown page already rendered a diagram for, rather than a second,
+/// independently re-derived copy of the same filter that could silently drift from it (the
+/// recurring "logic duplicated across two spots, one drifts" bug shape this project has hit
+/// before — `DefaultResolver`'s kind-exclusion list, the two ledger backends' indexed-content
+/// field lists).
+pub fn dependency_graph_groups(
+    relationships: &[KirRelationship],
+) -> Vec<(String, Vec<&KirRelationship>)> {
+    let mut by_kind: HashMap<String, Vec<&KirRelationship>> = HashMap::new();
+    for rel in relationships {
+        if is_feeds_into(&rel.kind) {
+            continue;
+        }
+        by_kind.entry(rel.kind.to_string()).or_default().push(rel);
+    }
+    let mut kinds: Vec<String> = by_kind.keys().cloned().collect();
+    kinds.sort();
+    kinds
+        .into_iter()
+        .filter_map(|kind| {
+            let rels = by_kind.remove(&kind)?;
+            if rels.len() > MAX_GRAPH_EDGES {
+                None
+            } else {
+                Some((kind, rels))
+            }
+        })
+        .collect()
 }
 
 fn is_symbol_kind(kind: &ObjectKind) -> bool {
@@ -3945,6 +4148,35 @@ mod tests {
         assert!(diagram.contains("\"Order Details\""));
     }
 
+    // ── RFC 0068 §61 follow-on: whole-workspace ER diagram SVG ─────────────
+
+    #[test]
+    fn render_er_diagram_svg_renders_a_real_svg_document() {
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
+
+        let page = render_er_diagram_svg(&[customers, orders], &[rel]).unwrap();
+        assert_eq!(page.file_name, "er-diagram.svg");
+        assert!(page.content.starts_with("<svg "));
+        assert!(page.content.contains(">orders<"));
+        assert!(page.content.contains(">customers<"));
+    }
+
+    #[test]
+    fn render_er_diagram_svg_is_none_with_no_foreign_keys() {
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        assert!(render_er_diagram_svg(&[orders], &[]).is_none());
+    }
+
+    #[test]
+    fn render_er_diagram_svg_excludes_foreign_keys_to_objects_outside_the_table_set() {
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let outside = KirId::new();
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, outside);
+        assert!(render_er_diagram_svg(&[orders], &[rel]).is_none());
+    }
+
     // ── Phase 4 — page model + HTML renderer ────────────────────────────────
 
     #[test]
@@ -4672,6 +4904,40 @@ mod tests {
         assert!(render_crate_topology_svg(&[krate], &[]).is_none());
     }
 
+    // ── RFC 0068 §61 follow-on: per-object neighborhood SVG ────────────────
+
+    #[test]
+    fn render_object_neighborhood_svg_is_none_with_no_relationships() {
+        let table = sample_table();
+        assert!(render_object_neighborhood_svg(&table, &[], &HashMap::new()).is_none());
+    }
+
+    #[test]
+    fn render_object_neighborhood_svg_renders_center_and_neighbor_nodes() {
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
+        let names: HashMap<KirId, String> = [(customers.id, "customers".to_string())]
+            .into_iter()
+            .collect();
+
+        let page = render_object_neighborhood_svg(&orders, &[rel], &names).unwrap();
+        assert_eq!(page.file_name, "table-orders.svg");
+        assert!(page.content.starts_with("<svg "));
+        assert!(page.content.contains(">orders<"));
+        assert!(page.content.contains(">customers<"));
+    }
+
+    #[test]
+    fn render_object_neighborhood_svg_labels_an_unresolvable_neighbor_by_id_not_dropping_it() {
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let unresolvable = KirId::new();
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, unresolvable);
+
+        let page = render_object_neighborhood_svg(&orders, &[rel], &HashMap::new()).unwrap();
+        assert!(page.content.contains(&format!(">{unresolvable}<")));
+    }
+
     #[test]
     fn render_graph_svg_on_empty_nodes_is_an_empty_string() {
         assert_eq!(render_graph_svg(&[], &[]), "");
@@ -4976,6 +5242,76 @@ mod tests {
             !page.content.contains("[doc.pdf]("),
             "must never link an endpoint kind curated never writes a page for"
         );
+    }
+
+    // ── RFC 0068 §61 follow-on: per-relationship-kind Dependency Graph SVG ─
+
+    #[test]
+    fn architecture_links_a_dependency_graph_svg_for_a_kind_within_the_size_cap() {
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
+
+        let page = render_architecture(&[orders, customers], &[rel], &[], None);
+        assert!(page.content.contains(
+            "[ForeignKey Dependency Graph diagram (SVG)](dependency-graph-foreignkey.svg)"
+        ));
+    }
+
+    #[test]
+    fn architecture_does_not_link_a_dependency_graph_svg_for_an_oversized_kind() {
+        let objects: Vec<KirObject> = (0..50)
+            .map(|i| KirObject::new(format!("section-{i}"), ObjectKind::Custom("Section".into())))
+            .collect();
+        let doc = KirObject::new("doc.pdf", ObjectKind::File);
+        let relationships: Vec<KirRelationship> = objects
+            .iter()
+            .map(|o| KirRelationship::new(RelationshipKind::Contains, doc.id, o.id))
+            .collect();
+        let mut all_objects = objects;
+        all_objects.push(doc);
+
+        let page = render_architecture(&all_objects, &relationships, &[], None);
+        assert!(!page.content.contains("dependency-graph-contains.svg"));
+    }
+
+    #[test]
+    fn dependency_graph_groups_excludes_feeds_into_and_oversized_kinds() {
+        let a = KirObject::new("a", ObjectKind::Custom("TransformNode".to_string()));
+        let b = KirObject::new("b", ObjectKind::Custom("TransformNode".to_string()));
+        let feeds_into = KirRelationship::new(
+            RelationshipKind::Custom("FeedsInto".to_string()),
+            a.id,
+            b.id,
+        );
+        let coupled = KirRelationship::new(RelationshipKind::CoupledWith, a.id, b.id);
+
+        let relationships = [feeds_into, coupled];
+        let groups = dependency_graph_groups(&relationships);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].0, "CoupledWith");
+        assert_eq!(groups[0].1.len(), 1);
+    }
+
+    #[test]
+    fn render_relationship_kind_graph_svg_renders_a_real_svg_document() {
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        let rel = KirRelationship::new(RelationshipKind::ForeignKey, orders.id, customers.id);
+        let name_by_id: HashMap<KirId, &str> = [(orders.id, "orders"), (customers.id, "customers")]
+            .into_iter()
+            .collect();
+
+        let page = render_relationship_kind_graph_svg("ForeignKey", &[&rel], &name_by_id).unwrap();
+        assert_eq!(page.file_name, "dependency-graph-foreignkey.svg");
+        assert!(page.content.starts_with("<svg "));
+        assert!(page.content.contains(">orders<"));
+        assert!(page.content.contains(">customers<"));
+    }
+
+    #[test]
+    fn render_relationship_kind_graph_svg_is_none_for_an_empty_kind() {
+        assert!(render_relationship_kind_graph_svg("ForeignKey", &[], &HashMap::new()).is_none());
     }
 
     #[test]

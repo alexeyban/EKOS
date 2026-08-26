@@ -27,17 +27,30 @@ async fn run_pipeline(config: &EkosConfig, dir: &Path) -> Result<()> {
 }
 
 fn table_count(runtime: &Runtime) -> Result<usize> {
-    Ok(runtime.list_objects()?.iter().filter(|o| o.kind.to_string() == "Table").count())
+    Ok(runtime
+        .list_objects()?
+        .iter()
+        .filter(|o| o.kind.to_string() == "Table")
+        .count())
 }
 
 #[tokio::test]
 async fn ecommerce_pipeline_end_to_end() -> Result<()> {
     let dir = tempfile::tempdir()?;
     std::fs::create_dir_all(dir.path().join("schemas"))?;
-    std::fs::copy(fixtures_dir().join("ecommerce.sql"), dir.path().join("schemas/ecommerce.sql"))?;
+    std::fs::copy(
+        fixtures_dir().join("ecommerce.sql"),
+        dir.path().join("schemas/ecommerce.sql"),
+    )?;
     // sample_project/ gives FileObserver something else to observe alongside the schema.
-    copy_dir(&fixtures_dir().join("sample_project"), &dir.path().join("sample_project"))?;
-    copy_dir(&fixtures_dir().join("sample_docs"), &dir.path().join("sample_docs"))?;
+    copy_dir(
+        &fixtures_dir().join("sample_project"),
+        &dir.path().join("sample_project"),
+    )?;
+    copy_dir(
+        &fixtures_dir().join("sample_docs"),
+        &dir.path().join("sample_docs"),
+    )?;
 
     let config = EkosConfig::default();
     run_pipeline(&config, dir.path()).await?;
@@ -45,7 +58,11 @@ async fn ecommerce_pipeline_end_to_end() -> Result<()> {
     let store = ekos::commands::store::open_store(&config, dir.path())?;
     let runtime = Runtime::over(&*store);
 
-    assert_eq!(table_count(&runtime)?, 6, "ecommerce schema has exactly 6 tables");
+    assert_eq!(
+        table_count(&runtime)?,
+        6,
+        "ecommerce schema has exactly 6 tables"
+    );
 
     let (customers_id, _) = runtime
         .find_objects("customers")?
@@ -67,7 +84,10 @@ async fn ecommerce_pipeline_end_to_end() -> Result<()> {
 async fn northwind_pipeline_end_to_end() -> Result<()> {
     let dir = tempfile::tempdir()?;
     std::fs::create_dir_all(dir.path().join("schemas"))?;
-    std::fs::copy(fixtures_dir().join("northwind.sql"), dir.path().join("schemas/northwind.sql"))?;
+    std::fs::copy(
+        fixtures_dir().join("northwind.sql"),
+        dir.path().join("schemas/northwind.sql"),
+    )?;
 
     let config = EkosConfig::default();
     run_pipeline(&config, dir.path()).await?;
@@ -103,9 +123,16 @@ async fn odoo_git_fixture_pipeline_end_to_end() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let bundle = fixtures_dir().join("git_fixture/odoo_utm.bundle");
     let status = std::process::Command::new("git")
-        .args(["clone", &bundle.to_string_lossy(), &dir.path().to_string_lossy()])
+        .args([
+            "clone",
+            &bundle.to_string_lossy(),
+            &dir.path().to_string_lossy(),
+        ])
         .status()?;
-    assert!(status.success(), "git clone of the vendored bundle must succeed");
+    assert!(
+        status.success(),
+        "git clone of the vendored bundle must succeed"
+    );
 
     let config = EkosConfig::default();
     ekos::commands::build::run(&config, dir.path()).await?;
@@ -122,7 +149,10 @@ async fn odoo_git_fixture_pipeline_end_to_end() -> Result<()> {
         store.relationship_count()? > 0,
         "GitAnalyzerPass should find at least one CoupledWith relationship in real Odoo history"
     );
-    assert!(store.object_count()? > 0, "at least the observed files/commits should be objects");
+    assert!(
+        store.object_count()? > 0,
+        "at least the observed files/commits should be objects"
+    );
 
     Ok(())
 }

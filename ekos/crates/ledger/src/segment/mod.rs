@@ -86,6 +86,18 @@ pub struct SealedSegment {
     pub batches: u64,
 }
 
+/// One sealed segment's verification result (RFC 0105 Phase 2's repair-tool report) — `ok: false`
+/// means real, unrecoverable local corruption (a hash mismatch or an unreadable file); `detail` is
+/// human-readable, meant to be printed directly by a repair command, not parsed.
+#[derive(Debug, Clone)]
+pub struct SealedSegmentCheck {
+    pub seq: u32,
+    pub tx_min: TxId,
+    pub tx_max: TxId,
+    pub ok: bool,
+    pub detail: String,
+}
+
 /// The store's only long-lived mutable file. Updated by write-temp + atomic
 /// rename; everything it references is immutable.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -394,22 +406,62 @@ impl SegmentStore {
         Ok(batches)
     }
 
-    /// Verify every sealed segment against its manifest hash.
+    /// Verify every sealed segment against its manifest hash — fails fast at
+    /// the first bad one. Implemented on top of [`Self::verify_sealed_report`]
+    /// (RFC 0105 Phase 2) so there is exactly one place that decides what "a
+    /// segment fails verification" means, not two independently-maintained
+    /// checks that could drift.
     pub fn verify_sealed(&self) -> Result<(), SegmentError> {
-        for sealed in &self.manifest.sealed {
-            let path = segment_path(&self.root, sealed.seq);
-            let (sha256, len) = hash_file(&path)?;
-            if len != sealed.len || sha256 != sealed.sha256 {
-                return Err(SegmentError::Corrupt(format!(
-                    "sealed segment {} fails verification (len {} vs {}, hash mismatch: {})",
-                    sealed.seq,
-                    len,
-                    sealed.len,
-                    sha256 != sealed.sha256
-                )));
-            }
+        match self.verify_sealed_report().into_iter().find(|c| !c.ok) {
+            Some(check) => Err(SegmentError::Corrupt(check.detail)),
+            None => Ok(()),
         }
-        Ok(())
+    }
+
+    /// Verify every sealed segment against its manifest hash, unconditionally checking all of
+    /// them rather than stopping at the first failure (RFC 0105 Phase 2) — the report a real
+    /// repair tool needs, distinct from [`Self::verify_sealed`]'s fail-fast contract (kept for
+    /// existing internal callers/tests). One row per sealed segment, in manifest order.
+    pub fn verify_sealed_report(&self) -> Vec<SealedSegmentCheck> {
+        self.manifest
+            .sealed
+            .iter()
+            .map(|sealed| {
+                let path = segment_path(&self.root, sealed.seq);
+                match hash_file(&path) {
+                    Ok((sha256, len)) if len == sealed.len && sha256 == sealed.sha256 => {
+                        SealedSegmentCheck {
+                            seq: sealed.seq,
+                            tx_min: sealed.tx_min,
+                            tx_max: sealed.tx_max,
+                            ok: true,
+                            detail: "OK".to_string(),
+                        }
+                    }
+                    Ok((sha256, len)) => SealedSegmentCheck {
+                        seq: sealed.seq,
+                        tx_min: sealed.tx_min,
+                        tx_max: sealed.tx_max,
+                        ok: false,
+                        detail: format!(
+                            "sealed segment {} fails verification (len {} vs {}, hash mismatch: \
+                             {})",
+                            sealed.seq,
+                            len,
+                            sealed.len,
+                            sha256 != sealed.sha256
+                        ),
+                    },
+                    Err(e) => SealedSegmentCheck {
+                        seq: sealed.seq,
+                        tx_min: sealed.tx_min,
+                        tx_max: sealed.tx_max,
+                        ok: false,
+                        detail: format!("sealed segment {} unreadable: {e}", sealed.seq),
+                    },
+                }
+            })
+            .collect()
     }
 
     /// Persist the manifest now (atomic rename). Called by owners whenever
@@ -765,6 +817,65 @@ mod tests {
             store.verify_sealed(),
             Err(SegmentError::Corrupt(_))
         ));
+    }
+
+    // ── RFC 0105 Phase 2: repair-tool report ────────────────────────────────
+
+    #[test]
+    fn verify_sealed_report_is_all_ok_on_a_healthy_store() {
+        let dir = tempdir().unwrap();
+        let mut reg = AttributeRegistry::new();
+        let mut store = SegmentStore::open_with_seal_threshold(dir.path(), 1).unwrap();
+        for i in 0..3 {
+            store.append(sample_ops(&mut reg, i), i as i64).unwrap();
+        }
+        assert_eq!(store.manifest.sealed.len(), 3);
+
+        let report = store.verify_sealed_report();
+        assert_eq!(report.len(), 3);
+        assert!(
+            report.iter().all(|c| c.ok),
+            "every segment should verify clean"
+        );
+    }
+
+    #[test]
+    fn verify_sealed_report_names_exactly_the_corrupt_segment_others_still_ok() {
+        let dir = tempdir().unwrap();
+        let mut reg = AttributeRegistry::new();
+        let mut store = SegmentStore::open_with_seal_threshold(dir.path(), 1).unwrap();
+        for i in 0..3 {
+            store.append(sample_ops(&mut reg, i), i as i64).unwrap();
+        }
+        assert_eq!(store.manifest.sealed.len(), 3);
+        let corrupt_seq = store.manifest.sealed[1].seq;
+
+        // Flip a byte inside only the middle sealed segment.
+        let seg = segment_path(dir.path(), corrupt_seq);
+        let mut bytes = std::fs::read(&seg).unwrap();
+        let at = bytes.len() - 3;
+        bytes[at] ^= 0xFF;
+        std::fs::write(&seg, &bytes).unwrap();
+
+        let report = store.verify_sealed_report();
+        assert_eq!(
+            report.len(),
+            3,
+            "the report must still cover every segment, not stop at the first failure"
+        );
+        let bad: Vec<_> = report.iter().filter(|c| !c.ok).collect();
+        assert_eq!(
+            bad.len(),
+            1,
+            "exactly the one corrupted segment should fail"
+        );
+        assert_eq!(bad[0].seq, corrupt_seq);
+        let ok_seqs: Vec<u32> = report.iter().filter(|c| c.ok).map(|c| c.seq).collect();
+        assert_eq!(
+            ok_seqs.len(),
+            2,
+            "the other two segments must still report OK — the report is partial, not all-or-nothing"
+        );
     }
 
     #[test]

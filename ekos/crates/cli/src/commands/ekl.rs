@@ -33,7 +33,16 @@ pub fn run(config: &EkosConfig, cwd: &Path, query: &str, json: bool) -> Result<(
         return Ok(());
     }
 
-    let columns = if ast.returns.is_empty() {
+    // RFC 0096: aggregate rows (`{"<group_field>": key, "count": N}` or
+    // just `{"count": N}`) have a different shape than a plain entity row —
+    // default_returns' id/name/kind columns don't exist on them at all, and
+    // would render as silently-empty cells with no visible `count` column.
+    let columns = if ast.count {
+        match &ast.group_by {
+            Some(field) => vec![field.clone(), "count".to_string()],
+            None => vec!["count".to_string()],
+        }
+    } else if ast.returns.is_empty() {
         default_returns(&ast.entity)
     } else {
         ast.returns.clone()

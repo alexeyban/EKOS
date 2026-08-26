@@ -307,6 +307,7 @@ async fn call_and_apply(
         user: user_message,
         prompt_version: PROMPT_VERSION,
         max_tokens: 1024,
+        history: &[],
     };
     let resp = llm.complete(&req).await.map_err(|e| e.to_string())?;
     let output: LlmOutput =
@@ -596,6 +597,7 @@ pub async fn describe_project(
         user: &user_message,
         prompt_version: PROMPT_VERSION,
         max_tokens: 512,
+        history: &[],
     };
     let resp = llm.complete(&req).await.map_err(|e| e.to_string())?;
     let output: ProjectSummaryOutput =

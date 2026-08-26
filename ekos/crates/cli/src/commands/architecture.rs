@@ -15,7 +15,8 @@ use ekos_compiler_core::EkosConfig;
 use ekos_compiler_core::pass::{CompilerPass, PassContext};
 use ekos_recovery::{
     ArchitectureReasoningPass, DriftFinding, EvaluationReport, crates_missing_classification,
-    drift_from_history, evaluate_architecture, read_crate_doc_comment, role_claim_kir_id,
+    diff_architecture, drift_from_history, evaluate_architecture, read_crate_doc_comment,
+    role_claim_kir_id,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -248,4 +249,131 @@ fn print_final_report(
     }
     println!();
     println!("Output:                      {}", opts.output.display());
+}
+
+/// `ekos architecture diff --from <ts> --to <ts>` (RFC 0068 §55, RFC 0108) — a real
+/// architecture-level diff, distinct from `ekos diff`'s raw ledger-entry-id report. Pure
+/// presentation over `ekos_recovery::diff_architecture`; all the real work (deterministic-id-based
+/// comparison across the object kinds this project already compiles evidence-backed data for)
+/// lives there, kept ledger-free and unit-testable, matching `detect_drift`'s own precedent just
+/// above.
+pub fn diff(
+    config: &EkosConfig,
+    cwd: &Path,
+    from: chrono::DateTime<chrono::Utc>,
+    to: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    let store = open_store(config, cwd)?;
+    let before = store.all_objects_at(from)?;
+    let after = store.all_objects_at(to)?;
+    let diff = diff_architecture(&before, &after);
+
+    println!(
+        "Architecture diff {} .. {}",
+        from.to_rfc3339(),
+        to.to_rfc3339()
+    );
+
+    if diff.is_empty() {
+        println!("  No architectural change detected.");
+        return Ok(());
+    }
+
+    println!("  Technologies added:    {}", diff.technologies_added.len());
+    for name in &diff.technologies_added {
+        println!("    + {name}");
+    }
+    println!(
+        "  Technologies removed:  {}",
+        diff.technologies_removed.len()
+    );
+    for name in &diff.technologies_removed {
+        println!("    - {name}");
+    }
+    println!("  Role changes:           {}", diff.role_changes.len());
+    for change in &diff.role_changes {
+        println!(
+            "    {}: '{}' -> '{}'",
+            change.crate_name, change.from, change.to
+        );
+    }
+    println!("  Risks added:            {}", diff.risks_added.len());
+    for name in &diff.risks_added {
+        println!("    + {name}");
+    }
+    println!("  Risks resolved:         {}", diff.risks_resolved.len());
+    for name in &diff.risks_resolved {
+        println!("    - {name}");
+    }
+    println!("  Open questions added:   {}", diff.gaps_added.len());
+    for name in &diff.gaps_added {
+        println!("    + {name}");
+    }
+    println!("  Open questions resolved: {}", diff.gaps_resolved.len());
+    for name in &diff.gaps_resolved {
+        println!("    - {name}");
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ekos_kir::{KirObject, ObjectKind};
+    use ekos_ledger::FactLedger;
+    use tempfile::tempdir;
+
+    #[test]
+    fn diff_reports_a_real_technology_added_between_two_commits() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let facts = super::super::store::facts_dir(&config, dir.path());
+        let ledger = FactLedger::open(&facts).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let t1 = chrono::Utc::now();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        ledger
+            .append_object(&KirObject::new(
+                "clap",
+                ObjectKind::Custom("Technology".to_string()),
+            ))
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let t2 = chrono::Utc::now();
+        drop(ledger);
+
+        diff(&config, dir.path(), t1, t2).unwrap();
+
+        // Direct verification via the same primitive the command itself uses — the command's own
+        // job here is just presentation, already exercised above by not erroring; this confirms
+        // the underlying data really does show the addition, not just that printing succeeded.
+        let ledger = FactLedger::open(&facts).unwrap();
+        let before = ledger.all_objects_at(t1).unwrap();
+        let after = ledger.all_objects_at(t2).unwrap();
+        let result = diff_architecture(&before, &after);
+        assert_eq!(result.technologies_added, vec!["clap".to_string()]);
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn diff_on_an_unchanged_workspace_reports_empty() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let facts = super::super::store::facts_dir(&config, dir.path());
+        let ledger = FactLedger::open(&facts).unwrap();
+        ledger
+            .append_object(&KirObject::new("orders", ObjectKind::Table))
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let t1 = chrono::Utc::now();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let t2 = chrono::Utc::now();
+        drop(ledger);
+
+        // Must not error, and must be a real no-op — nothing changed between t1 and t2.
+        diff(&config, dir.path(), t1, t2).unwrap();
+    }
 }

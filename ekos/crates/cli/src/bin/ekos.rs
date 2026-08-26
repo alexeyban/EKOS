@@ -65,6 +65,17 @@ enum Commands {
         question: String,
         #[arg(long)]
         json: bool,
+        /// Print the answer as it's generated instead of waiting for the full
+        /// response (RFC 0098). Not compatible with --json, which needs the
+        /// complete structured result.
+        #[arg(long)]
+        stream: bool,
+        /// Continue a named multi-turn conversation (RFC 0099) — prior
+        /// question/answer pairs from `.ekos/ask-sessions/<name>.json` are
+        /// sent as real conversation history, and this turn is appended
+        /// back to it. Letters, digits, '_', and '-' only.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Live NL-to-SQL query engine over a compiled ClickHouse schema (RFC 0056)
     #[command(name = "clickhouse")]
@@ -190,6 +201,15 @@ enum ArchitectureCommands {
         #[arg(long, value_name = "DIR")]
         output: Option<PathBuf>,
     },
+    /// Real architecture-level diff between two points in time (RFC 0068 §55) — technologies,
+    /// crate role classifications, risks, and open questions that changed. Distinct from `ekos
+    /// diff`'s raw ledger-entry-id report.
+    Diff {
+        #[arg(long)]
+        from: DateTime<Utc>,
+        #[arg(long)]
+        to: DateTime<Utc>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -297,6 +317,9 @@ enum LedgerCommands {
         #[arg(long)]
         v3: bool,
     },
+    /// Verify every sealed segment's integrity and self-heal any torn active-segment tail or
+    /// stale index runs (RFC 0105 Phase 2). Fact engine (RFC 0016) only.
+    Repair,
 }
 
 #[derive(Subcommand)]
@@ -363,6 +386,7 @@ async fn main() -> Result<()> {
                 ekos::commands::ledger::status(&config, &cwd, storage)
             }
             LedgerCommands::Migrate { v3 } => ekos::commands::ledger::migrate(&config, &cwd, v3),
+            LedgerCommands::Repair => ekos::commands::ledger::repair(&config, &cwd),
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor => ekos::commands::doctor::run(&config, &cwd, &config_path),
@@ -375,8 +399,14 @@ async fn main() -> Result<()> {
                 ekos::commands::query::neighbourhood(&config, &cwd, &id, depth)
             }
         },
-        Commands::Ask { question, json } => {
-            ekos::commands::ask::run(&config, &cwd, &question, json).await
+        Commands::Ask {
+            question,
+            json,
+            stream,
+            session,
+        } => {
+            ekos::commands::ask::run(&config, &cwd, &question, json, stream, session.as_deref())
+                .await
         }
         Commands::ClickHouse { subcommand } => match subcommand {
             ClickHouseCommands::Ask { question, json } => {
@@ -441,6 +471,9 @@ async fn main() -> Result<()> {
                     output,
                 };
                 ekos::commands::architecture::investigate(&config, &cwd, opts).await
+            }
+            ArchitectureCommands::Diff { from, to } => {
+                ekos::commands::architecture::diff(&config, &cwd, from, to)
             }
         },
         Commands::Simulate {

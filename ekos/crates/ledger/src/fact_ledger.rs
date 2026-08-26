@@ -23,7 +23,8 @@
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
-use std::collections::{HashMap, HashSet};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -72,6 +73,81 @@ fn kind_of_payload(payload: &serde_json::Value) -> EntityKind {
 /// Compact runs once more than this many accumulate per sort order.
 const MERGE_RUNS_AT: usize = 8;
 
+/// Write a new checkpoint (RFC 0106 Phase 3) once an entity has accumulated this many real
+/// versions since its last one — small enough that a long-lived entity's fold cost stays bounded,
+/// large enough that checkpoint writes (each paying one real full-history fold) stay rare.
+const CHECKPOINT_INTERVAL: usize = 20;
+
+/// Where checkpoints are persisted — a plain JSON-Lines file, deliberately *not* named or shaped
+/// like the unrelated, already-existing `.ekos/snapshots/*.json.zst` build-index mechanism (RFC
+/// 0080's own investigation flagged the naming collision risk explicitly). No segment-grade
+/// fsync/atomic-rename durability: correctness never depends on this file (see
+/// [`load_checkpoints`]'s own doc comment), so a lost or torn write only costs a slower fold on
+/// the next read, never a wrong one.
+fn checkpoints_path(root: &Path) -> PathBuf {
+    root.join("checkpoints.jsonl")
+}
+
+/// One persisted checkpoint line — `(entity, tx, facts)`.
+#[derive(Serialize, Deserialize)]
+struct CheckpointRecord {
+    entity: Uuid,
+    tx: TxId,
+    facts: Vec<Fact>,
+}
+
+/// Load every checkpoint ever written for this ledger, grouped by entity and sorted by `tx`.
+/// Missing file → empty map (every pre-RFC-0106 workspace, and the common case of an entity that
+/// has never crossed [`CHECKPOINT_INTERVAL`]) — not an error, the same "derived, optional,
+/// additive" contract this whole feature is built on. A line that fails to parse (most plausibly
+/// a torn trailing line from a write interrupted by a crash) is silently skipped, not treated as
+/// corruption — checkpoints are never a source of truth, only a shortcut, so a bad one just means
+/// one fewer shortcut is available, not a wrong answer.
+fn load_checkpoints(root: &Path) -> HashMap<Uuid, BTreeMap<TxId, Vec<Fact>>> {
+    let mut out: HashMap<Uuid, BTreeMap<TxId, Vec<Fact>>> = HashMap::new();
+    let Ok(content) = std::fs::read_to_string(checkpoints_path(root)) else {
+        return out;
+    };
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(record) = serde_json::from_str::<CheckpointRecord>(line) {
+            out.entry(record.entity)
+                .or_default()
+                .insert(record.tx, record.facts);
+        }
+    }
+    out
+}
+
+/// Append one checkpoint record. Best-effort: an I/O error here is real but never a correctness
+/// problem (see [`load_checkpoints`]'s own doc comment) — propagated to the caller anyway rather
+/// than silently swallowed, since a real, unexpected I/O failure is worth surfacing even though
+/// this feature could technically continue without it.
+fn append_checkpoint(
+    root: &Path,
+    entity: Uuid,
+    tx: TxId,
+    facts: &[Fact],
+) -> Result<(), LedgerError> {
+    let record = CheckpointRecord {
+        entity,
+        tx,
+        facts: facts.to_vec(),
+    };
+    let mut line = serde_json::to_string(&record)?;
+    line.push('\n');
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(checkpoints_path(root))
+        .map_err(LedgerError::Io)?;
+    use std::io::Write;
+    file.write_all(line.as_bytes()).map_err(LedgerError::Io)?;
+    Ok(())
+}
+
 struct Inner {
     store: SegmentStore,
     /// On-disk index runs covering all batches with `tx ≤ runs_marker`.
@@ -87,6 +163,51 @@ struct Inner {
     sig_cache: HashMap<Uuid, String>,
     /// Tantivy object search (Phase 5): buffered upserts, lazy group commit.
     search: SearchIndex,
+    /// RFC 0097: `true` when opened via [`FactLedger::open_read_only`] —
+    /// checked once, up front, in `append_inner` so every write path
+    /// (`append_object`/`append_evidence`/`append_relationship`/
+    /// `append_event`) fails loudly with `LedgerError::ReadOnly` rather than
+    /// reaching `SearchIndex`'s already-silent no-op writer guard.
+    read_only: bool,
+    /// RFC 0106 Phase 3: per-entity periodic full-state checkpoints, tx-sorted — a pure
+    /// acceleration structure for [`Inner::state_at`], never consulted for correctness (see
+    /// [`checkpoints_path`]'s own doc comment). Loaded once at open.
+    checkpoints: HashMap<Uuid, BTreeMap<TxId, Vec<Fact>>>,
+    /// The `FactLedger`'s own root — where [`checkpoints_path`] writes new checkpoints.
+    checkpoints_root: PathBuf,
+}
+
+/// A real, designed cross-process write lock (RFC 0104 Phase 1) — a dedicated `write.lock` file
+/// acquired via `fs4`'s `flock`(2)-backed exclusive lock (the same mechanism tantivy's own
+/// `IndexWriter` lock already uses internally, promoted here to a direct, first-class dependency),
+/// held for the whole writable [`FactLedger`] handle's lifetime and released automatically by the
+/// OS when the returned `File` drops — including on a crash, so there is no separate cleanup step.
+///
+/// Before this, single-writer exclusion was only an *incidental* side effect of
+/// [`SearchIndex`]'s own tantivy `IndexWriter` lock (still acquired too — a redundant second
+/// safety net now, not the sole mechanism, and not removed here). That incidental lock is deep
+/// inside `SearchIndex::open`, several steps into a writable open; a second writable process would
+/// only discover the conflict there, as a tantivy-internal `LockBusy` error. This lock is acquired
+/// first, before `SegmentStore`/`SearchIndex` are touched at all, so the failure is immediate and
+/// named at the ledger's own level ([`LedgerError::Locked`]).
+fn acquire_write_lock(root: &Path) -> Result<std::fs::File, LedgerError> {
+    use fs4::FileExt;
+    let path = root.join("write.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(LedgerError::Io)?;
+    file.try_lock_exclusive().map_err(|_| {
+        LedgerError::Locked(format!(
+            "another writable process already holds the ledger's write lock at {} — only one \
+             writable ekos process (build/recover/resolve/compile/commit, or `ekos mcp serve` \
+             without --read-only) may run against this workspace at a time",
+            path.display()
+        ))
+    })?;
+    Ok(file)
 }
 
 /// The fact-segment ledger — RFC 0016's replacement for the SQLite backend,
@@ -94,6 +215,10 @@ struct Inner {
 pub struct FactLedger {
     inner: Mutex<Inner>,
     root: PathBuf,
+    /// `Some` for a writable handle (RFC 0104 Phase 1) — held only for its `Drop` side effect,
+    /// never read. `None` for a read-only handle, which must never hold this (see
+    /// [`Self::open_read_only`]'s own doc comment for why).
+    _write_lock: Option<std::fs::File>,
 }
 
 impl FactLedger {
@@ -105,6 +230,8 @@ impl FactLedger {
     /// `open` with a custom segment seal threshold (tests exercise the
     /// seal → run-flush path without writing megabytes).
     pub fn open_with_seal_threshold(root: &Path, seal_bytes: u64) -> Result<Self, LedgerError> {
+        std::fs::create_dir_all(root).map_err(LedgerError::Io)?;
+        let write_lock = acquire_write_lock(root)?;
         let store = SegmentStore::open_with_seal_threshold(root, seal_bytes)?;
         let (mut runs, runs_clean) = FactIndexes::open(root.join("indexes"))?;
         let mut runs_marker = std::fs::read_to_string(root.join("indexes/last_tx"))
@@ -132,6 +259,9 @@ impl FactLedger {
             runs_marker,
             sig_cache: HashMap::new(),
             search,
+            read_only: false,
+            checkpoints: load_checkpoints(root),
+            checkpoints_root: root.to_path_buf(),
         };
 
         // Catch the search index up: entities committed past its marker get
@@ -155,6 +285,77 @@ impl FactLedger {
         Ok(Self {
             inner: Mutex::new(inner),
             root: root.to_path_buf(),
+            _write_lock: Some(write_lock),
+        })
+    }
+
+    /// Open an **existing** fact ledger at `root` for reads only (RFC 0097).
+    ///
+    /// Unlike [`Self::open`]/[`Self::open_with_seal_threshold`], this never acquires the real,
+    /// designed cross-process write lock ([`acquire_write_lock`], RFC 0104 Phase 1) or tantivy's
+    /// exclusive `IndexWriter` lock ([`SearchIndex::open_read_only`]), and never re-indexes/commits
+    /// the search index on open — all of that is write-path work a concurrent real writer (a
+    /// separate `ekos build`/`commit` process) must stay free to do at any time, including while
+    /// this handle stays open. Meant for a long-lived caller (e.g. `ekos mcp serve`) that wants to
+    /// reuse one open handle across many reads without blocking a concurrent writer the way holding
+    /// a normal, writable handle open indefinitely would.
+    ///
+    /// **Known limitations, not bugs, both spec'd precisely rather than assumed (RFC 0104 Phase
+    /// 1)**:
+    /// - Because the search-index catchup step is skipped, `find_objects` (bm25 search)
+    ///   specifically may not reflect objects committed by a separate writer *after* this
+    ///   read-only handle's `search/` index was last written by some write-capable process.
+    /// - **More broadly, every read on *any* handle — writable or read-only — reflects the
+    ///   ledger's on-disk state as of this handle's own `open()` call (plus whatever this same
+    ///   handle has itself appended since), not automatically refreshed by a separate process's
+    ///   concurrent writes.** `Inner`'s `memtable`/`SegmentStore::head.committed_len` are loaded
+    ///   once at open and advanced only by this handle's own writes — nothing re-reads the on-disk
+    ///   head segment on each query. This is a real, material difference from SQLite's WAL mode,
+    ///   where a *new read transaction* on an already-open connection sees the latest committed
+    ///   state without reopening the connection object — no such automatic refresh exists here. A
+    ///   caller needing fresh cross-process visibility must re-open the handle.
+    ///
+    /// Fails with [`LedgerError::NotFound`] if `root` doesn't exist yet — a
+    /// read-only open never creates a fresh store the way a writable one
+    /// does for a genuinely new workspace. Every write method
+    /// (`append_object`, …) fails with [`LedgerError::ReadOnly`] on the
+    /// result.
+    pub fn open_read_only(root: &Path) -> Result<Self, LedgerError> {
+        if !root.exists() {
+            return Err(LedgerError::NotFound(root.display().to_string()));
+        }
+        let store = SegmentStore::open_with_seal_threshold(root, SEGMENT_SEAL_BYTES)?;
+        let (runs, runs_clean) = FactIndexes::open(root.join("indexes"))?;
+        if !runs_clean {
+            return Err(LedgerError::Corrupt(
+                "index runs need rebuilding, which a read-only open cannot do — open writable \
+                 (e.g. `ekos build`) once to self-heal, then reopen read-only"
+                    .to_string(),
+            ));
+        }
+        let runs_marker = std::fs::read_to_string(root.join("indexes/last_tx"))
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .map(TxId);
+        let (search, _search_marker) = SearchIndex::open_read_only(&root.join("search"))?;
+
+        let inner = Inner {
+            batch_times: store.batch_headers()?,
+            memtable: entries_from_batches(&store.batches_after(runs_marker)?),
+            store,
+            runs,
+            runs_marker,
+            sig_cache: HashMap::new(),
+            search,
+            read_only: true,
+            checkpoints: load_checkpoints(root),
+            checkpoints_root: root.to_path_buf(),
+        };
+
+        Ok(Self {
+            inner: Mutex::new(inner),
+            root: root.to_path_buf(),
+            _write_lock: None,
         })
     }
 
@@ -239,6 +440,9 @@ impl FactLedger {
         wall_override_us: Option<i64>,
     ) -> Result<bool, LedgerError> {
         let mut inner = self.inner.lock().unwrap();
+        if inner.read_only {
+            return Err(LedgerError::ReadOnly(self.root.display().to_string()));
+        }
         let sig = content_signature(&payload);
         if inner.current_sig(entity)?.as_ref() == Some(&sig) {
             return Ok(false); // logically identical — no new version
@@ -268,6 +472,7 @@ impl FactLedger {
         if sealed {
             inner.flush_memtable(tx)?;
         }
+        inner.maybe_checkpoint(entity, tx)?;
         Ok(true)
     }
 
@@ -403,6 +608,42 @@ impl FactLedger {
         Ok(out)
     }
 
+    /// Bulk counterpart to `object_at` (RFC 0096) — every object as it
+    /// existed at or before `at`, via one `all_payloads_at` pass instead of
+    /// a per-id `reconstruct_at` scan.
+    pub fn all_objects_at(&self, at: DateTime<Utc>) -> Result<Vec<KirObject>, LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        let Some(cut) = inner.tx_at(at) else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for (_, payload) in inner.all_payloads_at(Some(cut))? {
+            if kind_of_payload(&payload) == EntityKind::Object {
+                out.push(serde_json::from_value(payload)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Bulk counterpart to `relationships_at` (RFC 0096) — every
+    /// relationship as it existed at or before `at`.
+    pub fn all_relationships_at(
+        &self,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<KirRelationship>, LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        let Some(cut) = inner.tx_at(at) else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for (_, payload) in inner.all_payloads_at(Some(cut))? {
+            if kind_of_payload(&payload) == EntityKind::Relationship {
+                out.push(serde_json::from_value(payload)?);
+            }
+        }
+        Ok(out)
+    }
+
     /// Every historical version of the object at `id`, oldest to newest
     /// (RFC 0047).
     pub fn object_history(&self, id: &KirId) -> Result<Vec<KirObject>, LedgerError> {
@@ -468,6 +709,14 @@ impl FactLedger {
     pub fn relationship_count(&self) -> Result<usize, LedgerError> {
         let inner = self.inner.lock().unwrap();
         Ok(inner.entities_with_attr("from")?.len())
+    }
+
+    /// Real repair-tool report (RFC 0105 Phase 2): one row per sealed segment, checked
+    /// unconditionally against its manifest hash — see
+    /// [`crate::segment::SegmentStore::verify_sealed_report`] for what `ok: false` does and
+    /// doesn't mean.
+    pub fn verify_sealed_report(&self) -> Vec<crate::segment::SealedSegmentCheck> {
+        self.inner.lock().unwrap().store.verify_sealed_report()
     }
 
     // ── Branching / diff / merge ──────────────────────────────────────────
@@ -612,6 +861,19 @@ impl Inner {
     /// Every entity's current payload, from ONE sequential pass over the
     /// EAVT runs plus the memtable — the bulk-read path for listings.
     fn all_current_payloads(&self) -> Result<Vec<(Uuid, serde_json::Value)>, LedgerError> {
+        self.all_payloads_at(None)
+    }
+
+    /// Every entity's payload as of `cut` (or current, when `None`) — one
+    /// sequential pass over the EAVT runs plus the memtable, folding each
+    /// entity's history up to `cut` instead of taking its latest state
+    /// (RFC 0096: generalizes `all_current_payloads` to a bulk historical
+    /// read, the primitive EKL's `AS OF` clause needs — only single-entity
+    /// `reconstruct_at` existed before this RFC).
+    fn all_payloads_at(
+        &self,
+        cut: Option<TxId>,
+    ) -> Result<Vec<(Uuid, serde_json::Value)>, LedgerError> {
         let mut by_entity: HashMap<Uuid, Vec<IndexEntry>> = HashMap::new();
         for run in self.runs.runs_of(crate::index::SortOrder::Eavt) {
             for entry in run.all()? {
@@ -627,7 +889,7 @@ impl Inner {
 
         let mut out = Vec::with_capacity(by_entity.len());
         for (entity, entries) in by_entity {
-            let facts = fold_state(entity, &entries, None);
+            let facts = fold_state(entity, &entries, cut);
             if facts.is_empty() {
                 continue;
             }
@@ -674,11 +936,76 @@ impl Inner {
         Ok(out)
     }
 
-    /// Fold an entity's history (up to `cut`, if given) into its live fact
-    /// set — see [`fold_state`].
+    /// Latest checkpoint for `entity` at or before `cut` (`None` cut means "current state" —
+    /// the latest checkpoint overall). `None` when no checkpoint exists yet, or none is old
+    /// enough to apply — the correct, honest fallback to a full genesis fold (RFC 0106 Phase 3).
+    fn checkpoint_at(&self, entity: Uuid, cut: Option<TxId>) -> Option<(TxId, &[Fact])> {
+        let by_tx = self.checkpoints.get(&entity)?;
+        let (tx, facts) = match cut {
+            Some(cut) => by_tx.range(..=cut).next_back()?,
+            None => by_tx.iter().next_back()?,
+        };
+        Some((*tx, facts.as_slice()))
+    }
+
+    /// Fold an entity's history (up to `cut`, if given) into its live fact set — see
+    /// [`fold_state`]. RFC 0106 Phase 3: seeds the fold from the nearest applicable checkpoint
+    /// instead of always from genesis, when one exists — see [`Self::checkpoint_at`]'s own doc
+    /// comment for the exact equivalence this relies on. Never a source of correctness: a
+    /// missing, stale, or absent checkpoint just means this falls back to exactly today's
+    /// behavior (fold every real entry, unseeded).
     fn state_at(&self, entity: Uuid, cut: Option<TxId>) -> Result<Vec<Fact>, LedgerError> {
         let entries = self.entity_entries(entity)?;
-        Ok(fold_state(entity, &entries, cut))
+        match self.checkpoint_at(entity, cut) {
+            Some((checkpoint_tx, facts)) => {
+                let mut seeded: Vec<IndexEntry> = facts
+                    .iter()
+                    .map(|f| IndexEntry::from_fact(f, checkpoint_tx, FactOp::Assert))
+                    .collect();
+                seeded.extend(entries.into_iter().filter(|e| e.tx > checkpoint_tx));
+                Ok(fold_state(entity, &seeded, cut))
+            }
+            None => Ok(fold_state(entity, &entries, cut)),
+        }
+    }
+
+    /// Real entries for `entity` committed strictly after its latest checkpoint (or all of them,
+    /// if none exists yet) — the cheap, checkpoint-bounded count [`Self::maybe_checkpoint`] uses
+    /// to decide whether enough new history has accumulated to justify writing another one.
+    fn entries_since_checkpoint(&self, entity: Uuid) -> Result<Vec<IndexEntry>, LedgerError> {
+        let entries = self.entity_entries(entity)?;
+        Ok(match self.checkpoint_at(entity, None) {
+            Some((checkpoint_tx, _)) => entries
+                .into_iter()
+                .filter(|e| e.tx > checkpoint_tx)
+                .collect(),
+            None => entries,
+        })
+    }
+
+    /// Write a new checkpoint for `entity` at `tx` once [`CHECKPOINT_INTERVAL`] real versions
+    /// have accumulated since its last one (RFC 0106 Phase 3) — called from the write path
+    /// (`append_inner`), after the write that might cross the threshold has already committed.
+    /// Pays the one real O(full history) fold this design needs, but only once per interval, not
+    /// on every read. Never removes or supersedes an earlier checkpoint for the same entity —
+    /// every checkpoint ever written stays valid and queryable, so a point-in-time read for a
+    /// `cut` older than the newest checkpoint still finds the right, earlier one via
+    /// [`Self::checkpoint_at`].
+    fn maybe_checkpoint(&mut self, entity: Uuid, tx: TxId) -> Result<(), LedgerError> {
+        let since = self.entries_since_checkpoint(entity)?;
+        let mut versions: Vec<TxId> = since.iter().map(|e| e.tx).collect();
+        versions.sort_unstable();
+        versions.dedup();
+        if versions.len() < CHECKPOINT_INTERVAL {
+            return Ok(());
+        }
+        let facts = self.state_at(entity, Some(tx))?;
+        append_checkpoint(&self.checkpoints_root, entity, tx, &facts)?;
+        self.checkpoints
+            .entry(entity)
+            .or_default()
+            .insert(tx, facts);
+        Ok(())
     }
 
     fn reconstruct_at(
@@ -787,6 +1114,20 @@ impl Inner {
     }
 
     /// Buffer this object's current state into the tantivy index.
+    /// RFC 0100: deserializes into the real typed `KirObject` and reuses
+    /// its own `indexed_content()` rather than re-deriving the same field
+    /// list inline from raw JSON a second time. That inline copy (excerpt +
+    /// symbols only) had silently drifted from `indexed_content()`'s real
+    /// field list — found live: it never included `ocr_text` at all, so
+    /// OCR'd scanned-document text was unsearchable on this backend (the
+    /// RFC 0016 default for every new workspace) despite RFC 0024 adding it
+    /// to `indexed_content()` specifically to make it searchable. The
+    /// SQLite backend (`index_object_fts_v1`/`v2`) never had this bug — it
+    /// always called `obj.indexed_content()` directly; only this backend's
+    /// independent reimplementation had drifted. One shared field list
+    /// instead of two independently-maintained copies closes the whole
+    /// class of "fixed on one backend, not the other" bug, not just this
+    /// one instance of it.
     fn index_object(&mut self, entity: Uuid, payload: &serde_json::Value) {
         let name = payload
             .get("name")
@@ -796,31 +1137,14 @@ impl Inner {
             .get("kind")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        let properties = payload.get("properties");
-        let excerpt = properties
-            .and_then(|p| p.get("excerpt"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        // RFC 0019: harvested symbols ride alongside the excerpt so a
-        // declaration deep in a file is still searchable.
-        let symbols = properties
-            .and_then(|p| p.get("symbols"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .unwrap_or_default();
-        let content = if symbols.is_empty() {
-            excerpt.to_string()
-        } else if excerpt.is_empty() {
-            symbols
-        } else {
-            format!("{excerpt} {symbols}")
+        // RFC 0101: is_under_memory_path shares this one deserialization
+        // with indexed_content() rather than parsing the payload twice.
+        let (content, is_memory_path) = match serde_json::from_value::<KirObject>(payload.clone()) {
+            Ok(obj) => (obj.indexed_content(), obj.is_under_memory_path()),
+            Err(_) => (String::new(), false),
         };
-        self.search.upsert(entity, name, kind, &content);
+        self.search
+            .upsert(entity, name, kind, &content, is_memory_path);
     }
 
     /// The greatest tx whose batch wall time is ≤ `at` (RFC 0016 §2).
@@ -905,6 +1229,287 @@ mod tests {
         ledger.append_object(&obj).unwrap();
         let found = ledger.get_object(&id).unwrap().unwrap();
         assert_eq!(found.name, "orders");
+    }
+
+    // ── RFC 0100: index_object reuses indexed_content(), fixing a real ──────
+    // ── ocr_text gap and adding ai_overview/ai_usage search coverage ────────
+
+    #[test]
+    fn find_objects_matches_ocr_text_a_real_regression_this_backend_had() {
+        // Before RFC 0100, this backend's own index_object re-derived the
+        // indexed field list inline and never included ocr_text at all —
+        // the SQLite backend's equivalent path always had it (RFC 0024).
+        let (ledger, _dir) = temp_ledger();
+        let obj = KirObject::new("scan.pdf", ObjectKind::Custom("Document".into())).with_property(
+            "ocr_text",
+            serde_json::json!("a distinctive scanned phrase"),
+        );
+        ledger.append_object(&obj).unwrap();
+
+        let hits = ledger.find_objects("distinctive").unwrap();
+        assert!(
+            hits.iter().any(|(id, _)| *id == obj.id),
+            "OCR'd text must be searchable on this backend, same as SQLite"
+        );
+    }
+
+    #[test]
+    fn find_objects_matches_ai_overview_text() {
+        let (ledger, _dir) = temp_ledger();
+        let obj = KirObject::new("orders", ObjectKind::Table).with_property(
+            "ai_overview",
+            serde_json::json!("Tracks customer purchases and sales transactions."),
+        );
+        ledger.append_object(&obj).unwrap();
+
+        let hits = ledger.find_objects("purchases").unwrap();
+        assert!(
+            hits.iter().any(|(id, _)| *id == obj.id),
+            "a real LLM-generated overview term must be searchable even though \
+             the word 'purchases' never appears in the object's own name"
+        );
+    }
+
+    // ── RFC 0101: memory/-path structural search boost ──────────────────
+
+    #[test]
+    fn find_objects_ranks_a_memory_path_content_match_above_an_equal_ordinary_match() {
+        let (ledger, _dir) = temp_ledger();
+        // Same content term, same field, no other ranking signal that
+        // would otherwise separate them — only the memory/ path should
+        // move the memory note ahead of the ordinary project file.
+        let memory_note = KirObject::new(
+            "global--lesson--x.md",
+            ObjectKind::Custom("Document".into()),
+        )
+        .with_property("project", serde_json::json!("memory"))
+        .with_property("path", serde_json::json!("global--lesson--x.md"))
+        .with_property(
+            "excerpt",
+            serde_json::json!("a distinctive keyword appears here"),
+        );
+        let ordinary_file = KirObject::new("notes.md", ObjectKind::Custom("Document".into()))
+            .with_property("project", serde_json::json!("some-project"))
+            .with_property("path", serde_json::json!("docs/notes.md"))
+            .with_property(
+                "excerpt",
+                serde_json::json!("a distinctive keyword appears here"),
+            );
+        ledger.append_object(&memory_note).unwrap();
+        ledger.append_object(&ordinary_file).unwrap();
+
+        let hits = ledger.find_objects("distinctive").unwrap();
+        let memory_rank = hits.iter().position(|(id, _)| *id == memory_note.id);
+        let ordinary_rank = hits.iter().position(|(id, _)| *id == ordinary_file.id);
+        assert!(
+            memory_rank.is_some() && ordinary_rank.is_some(),
+            "both objects must match: {hits:?}"
+        );
+        assert!(
+            memory_rank < ordinary_rank,
+            "the memory-path object must rank above the otherwise-identical \
+             ordinary file, got hits: {hits:?}"
+        );
+    }
+
+    #[test]
+    fn find_objects_boost_never_makes_a_non_matching_memory_object_appear() {
+        // The Should clause must never widen the result set — a memory-path
+        // object that doesn't match the query terms at all must still be
+        // absent, same as any other non-matching document.
+        let (ledger, _dir) = temp_ledger();
+        let memory_note = KirObject::new(
+            "global--lesson--x.md",
+            ObjectKind::Custom("Document".into()),
+        )
+        .with_property("project", serde_json::json!("memory"))
+        .with_property("path", serde_json::json!("global--lesson--x.md"))
+        .with_property("excerpt", serde_json::json!("completely unrelated content"));
+        ledger.append_object(&memory_note).unwrap();
+
+        let hits = ledger.find_objects("nonexistentterm").unwrap();
+        assert!(hits.is_empty(), "got: {hits:?}");
+    }
+
+    // ── RFC 0097: open_read_only ────────────────────────────────────────────
+
+    #[test]
+    fn open_read_only_fails_cleanly_on_a_never_built_workspace() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        assert!(matches!(
+            FactLedger::open_read_only(&path),
+            Err(LedgerError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn open_read_only_reads_data_a_writable_open_committed() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        {
+            let writable = FactLedger::open(&path).unwrap();
+            writable
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+            // Force the search index's lazy group-commit (module doc: "commit
+            // lazily on the first query after a write") — an uncommitted
+            // tantivy writer discards its buffer on drop, so without this the
+            // read-only reopen below would legitimately find nothing via
+            // `find_objects`, a fact about the lazy-commit design, not this
+            // RFC's read-only path.
+            writable.find_objects("orders").unwrap();
+        } // dropped — releases the tantivy writer lock
+
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        assert_eq!(reader.object_count().unwrap(), 1);
+        let (id, _) = reader
+            .find_objects("orders")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(reader.get_object(&id).unwrap().unwrap().name, "orders");
+    }
+
+    #[test]
+    fn open_read_only_rejects_every_write_method() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        {
+            let writable = FactLedger::open(&path).unwrap();
+            writable
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        assert!(matches!(
+            reader.append_object(&KirObject::new("customers", ObjectKind::Table)),
+            Err(LedgerError::ReadOnly(_))
+        ));
+        assert!(matches!(
+            reader.append_relationship(&KirRelationship::new(
+                RelationshipKind::ForeignKey,
+                KirId::new(),
+                KirId::new(),
+            )),
+            Err(LedgerError::ReadOnly(_))
+        ));
+        assert_eq!(
+            reader.object_count().unwrap(),
+            1,
+            "the rejected write must not have landed"
+        );
+    }
+
+    #[test]
+    fn open_read_only_never_blocks_a_concurrent_writable_open() {
+        // The exact regression this RFC exists to prevent: a long-lived
+        // read-only handle must never hold tantivy's exclusive IndexWriter
+        // lock, or a real concurrent `ekos build`/`commit` (a fresh writable
+        // open) could never acquire it for as long as the reader stays open.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        {
+            let writable = FactLedger::open(&path).unwrap();
+            writable
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        // `reader` stays alive (not dropped) across this second writable
+        // open — the pre-fix design would fail here with a real
+        // tantivy `LockBusy` error.
+        let writable_again = FactLedger::open(&path).unwrap();
+        writable_again
+            .append_object(&KirObject::new("customers", ObjectKind::Table))
+            .unwrap();
+        assert_eq!(writable_again.object_count().unwrap(), 2);
+        drop(reader);
+    }
+
+    // ── RFC 0104 Phase 1: real cross-process write lock ─────────────────────
+
+    #[test]
+    fn a_second_writable_open_fails_fast_with_a_clear_locked_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let first = FactLedger::open(&path).unwrap();
+
+        let result = FactLedger::open(&path);
+        match result {
+            Err(LedgerError::Locked(msg)) => {
+                assert!(
+                    msg.contains("write.lock"),
+                    "error should name the real lock file, got: {msg}"
+                );
+            }
+            other => panic!(
+                "expected a clear LedgerError::Locked, got: {}",
+                match other {
+                    Ok(_) => "Ok(_)".to_string(),
+                    Err(e) => format!("{e:?}"),
+                }
+            ),
+        }
+        drop(first);
+    }
+
+    #[test]
+    fn dropping_a_writable_handle_releases_the_write_lock_for_the_next_one() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let first = FactLedger::open(&path).unwrap();
+        drop(first);
+
+        // Must succeed now that the first handle (and its lock file) is gone.
+        let second = FactLedger::open(&path).unwrap();
+        second
+            .append_object(&KirObject::new("orders", ObjectKind::Table))
+            .unwrap();
+        assert_eq!(second.object_count().unwrap(), 1);
+    }
+
+    /// The concurrent-read-visibility spec (RFC 0104 Phase 1), made concrete: a `FactLedger`
+    /// handle's view of the ledger is frozen as of its own `open()` call, not automatically
+    /// refreshed by a separate process's (here: a separate handle's) concurrent writes. This is a
+    /// real, documented limitation (see [`FactLedger::open_read_only`]'s own doc comment) — this
+    /// test proves it's actually true of the implementation, not just plausible from reading the
+    /// code.
+    #[test]
+    fn a_long_lived_handle_does_not_see_a_separate_handles_writes_until_reopened() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let writer = FactLedger::open(&path).unwrap();
+        writer
+            .append_object(&KirObject::new("orders", ObjectKind::Table))
+            .unwrap();
+        drop(writer);
+
+        let long_lived = FactLedger::open_read_only(&path).unwrap();
+        assert_eq!(long_lived.object_count().unwrap(), 1);
+
+        // A separate handle appends a second object — simulating a second process's
+        // `ekos build`/`commit` running while `long_lived` stays open.
+        let second_writer = FactLedger::open(&path).unwrap();
+        second_writer
+            .append_object(&KirObject::new("customers", ObjectKind::Table))
+            .unwrap();
+        drop(second_writer);
+
+        assert_eq!(
+            long_lived.object_count().unwrap(),
+            1,
+            "a long-lived handle's view must stay frozen as of its own open() call — it must \
+             not see a separate handle's write without being reopened"
+        );
+
+        // Re-opening does pick up the write — proves this is a real, spec'd staleness window,
+        // not a permanently broken read path.
+        let reopened = FactLedger::open_read_only(&path).unwrap();
+        assert_eq!(reopened.object_count().unwrap(), 2);
     }
 
     #[test]
@@ -1036,6 +1641,113 @@ mod tests {
         );
     }
 
+    // ── RFC 0106 Phase 3: version-chain checkpoints ─────────────────────────
+
+    #[test]
+    fn a_checkpoint_is_written_after_crossing_the_interval_and_reads_stay_correct() {
+        let (ledger, _dir) = temp_ledger();
+        let mut obj = KirObject::new("orders", ObjectKind::Table);
+        let id = obj.id;
+
+        let mut timestamps = Vec::new();
+        for i in 0..(CHECKPOINT_INTERVAL + 5) {
+            obj.properties
+                .insert("row_count".into(), serde_json::json!(i));
+            ledger.append_object(&obj).unwrap();
+            std::thread::sleep(StdDuration::from_millis(2));
+            timestamps.push((Utc::now(), i));
+        }
+
+        // A checkpoint must have been written for this entity once it crossed the interval.
+        let checkpoints = ledger.inner.lock().unwrap().checkpoints.clone();
+        assert!(
+            checkpoints.contains_key(&id.0),
+            "an entity crossing CHECKPOINT_INTERVAL versions must have a checkpoint written"
+        );
+
+        // Every historical read must still be exactly correct — before, at, and after the
+        // checkpoint boundary — proving checkpoint-seeded folding is equivalent to full replay.
+        for (ts, expected) in &timestamps {
+            let historical = ledger.object_at(&id, *ts).unwrap().unwrap();
+            assert_eq!(
+                historical.properties.get("row_count"),
+                Some(&serde_json::json!(expected)),
+                "wrong historical value at row_count={expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn object_at_between_two_checkpoints_picks_the_earlier_one_not_the_latest() {
+        let (ledger, _dir) = temp_ledger();
+        let mut obj = KirObject::new("orders", ObjectKind::Table);
+        let id = obj.id;
+
+        // Cross the interval twice, so two checkpoints exist.
+        let mut mid_ts = None;
+        for i in 0..(CHECKPOINT_INTERVAL * 2 + 3) {
+            obj.properties
+                .insert("row_count".into(), serde_json::json!(i));
+            ledger.append_object(&obj).unwrap();
+            std::thread::sleep(StdDuration::from_millis(2));
+            if i == CHECKPOINT_INTERVAL {
+                // Just after the first checkpoint, well before the second.
+                mid_ts = Some(Utc::now());
+            }
+        }
+        let checkpoints = ledger.inner.lock().unwrap().checkpoints.clone();
+        let by_tx = checkpoints
+            .get(&id.0)
+            .expect("two checkpoints should exist");
+        assert!(
+            by_tx.len() >= 2,
+            "expected at least two checkpoints, got {}",
+            by_tx.len()
+        );
+
+        let historical = ledger.object_at(&id, mid_ts.unwrap()).unwrap().unwrap();
+        assert_eq!(
+            historical.properties.get("row_count"),
+            Some(&serde_json::json!(CHECKPOINT_INTERVAL)),
+            "must reflect state as of the requested cut, not silently jump ahead to a later \
+             checkpoint"
+        );
+    }
+
+    #[test]
+    fn a_corrupted_trailing_checkpoint_line_is_skipped_not_treated_as_corruption() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let mut obj = KirObject::new("orders", ObjectKind::Table);
+        let id = obj.id;
+        {
+            let ledger = FactLedger::open(&path).unwrap();
+            for i in 0..(CHECKPOINT_INTERVAL + 1) {
+                obj.properties
+                    .insert("row_count".into(), serde_json::json!(i));
+                ledger.append_object(&obj).unwrap();
+            }
+        }
+
+        // Append a torn/garbage trailing line, simulating a crash mid-write.
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(path.join("checkpoints.jsonl"))
+            .unwrap();
+        file.write_all(b"{not valid json\n").unwrap();
+        drop(file);
+
+        // Must still open cleanly and read correctly — a broken checkpoint line degrades to
+        // "one fewer shortcut," never a wrong answer or an open-time failure.
+        let ledger = FactLedger::open(&path).unwrap();
+        let current = ledger.get_object(&id).unwrap().unwrap();
+        assert_eq!(
+            current.properties.get("row_count"),
+            Some(&serde_json::json!(CHECKPOINT_INTERVAL))
+        );
+    }
+
     #[test]
     fn relationships_for_returns_both_directions() {
         let (ledger, _dir) = temp_ledger();
@@ -1101,6 +1813,65 @@ mod tests {
         let current = ledger.relationships_at(&a, Utc::now()).unwrap();
         assert_eq!(current.len(), 1);
         assert_eq!(current[0].properties["value"], serde_json::json!(0.9));
+    }
+
+    // ── RFC 0096: all_objects_at / all_relationships_at (bulk AS OF) ────────
+
+    #[test]
+    fn all_objects_at_returns_empty_before_anything_written() {
+        let (ledger, _dir) = temp_ledger();
+        ledger
+            .append_object(&KirObject::new("orders", ObjectKind::Table))
+            .unwrap();
+        let before = Utc::now() - Duration::seconds(60);
+        assert!(ledger.all_objects_at(before).unwrap().is_empty());
+    }
+
+    #[test]
+    fn all_objects_at_returns_the_version_current_at_that_time_not_later_updates() {
+        let (ledger, _dir) = temp_ledger();
+        let mut orders = KirObject::new("orders", ObjectKind::Table);
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        ledger.append_object(&orders).unwrap();
+        ledger.append_object(&customers).unwrap();
+        std::thread::sleep(StdDuration::from_millis(2));
+        let mid = Utc::now();
+        std::thread::sleep(StdDuration::from_millis(2));
+
+        orders
+            .properties
+            .insert("row_count".into(), serde_json::json!(99));
+        ledger.append_object(&orders).unwrap();
+
+        let snapshot = ledger.all_objects_at(mid).unwrap();
+        assert_eq!(snapshot.len(), 2, "both objects existed by `mid`");
+        let orders_at_mid = snapshot.iter().find(|o| o.name == "orders").unwrap();
+        assert!(!orders_at_mid.properties.contains_key("row_count"));
+
+        let now_snapshot = ledger.all_objects_at(Utc::now()).unwrap();
+        let orders_now = now_snapshot.iter().find(|o| o.name == "orders").unwrap();
+        assert_eq!(
+            orders_now.properties.get("row_count"),
+            Some(&serde_json::json!(99))
+        );
+    }
+
+    #[test]
+    fn all_relationships_at_filters_by_time_across_multiple_relationships() {
+        let (ledger, _dir) = temp_ledger();
+        let (a, b, c) = (KirId::new(), KirId::new(), KirId::new());
+        ledger
+            .append_relationship(&KirRelationship::new(RelationshipKind::ForeignKey, a, b))
+            .unwrap();
+        std::thread::sleep(StdDuration::from_millis(2));
+        let mid = Utc::now();
+        std::thread::sleep(StdDuration::from_millis(2));
+        ledger
+            .append_relationship(&KirRelationship::new(RelationshipKind::ForeignKey, a, c))
+            .unwrap();
+
+        assert_eq!(ledger.all_relationships_at(mid).unwrap().len(), 1);
+        assert_eq!(ledger.all_relationships_at(Utc::now()).unwrap().len(), 2);
     }
 
     // ── RFC 0047: object_history / relationship_history ────────────────────

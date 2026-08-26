@@ -107,6 +107,7 @@ async fn draft_once(
         user: user_prompt,
         prompt_version: PROMPT_VERSION,
         max_tokens: MAX_TOKENS,
+        history: &[],
     };
     let resp = llm.complete(&req).await?;
     let cleaned = strip_json_fences(&resp.content);

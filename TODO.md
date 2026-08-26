@@ -34,14 +34,14 @@ unwritten while earlier phases are being implemented).
 
 ---
 
-- [ ] **Establish `docs/rfcs/` directory and RFC template**
+- [x] **Establish `docs/rfcs/` directory and RFC template**
   - *What:* Create `docs/rfcs/` and write `docs/rfcs/0000-template.md` with required sections:
     `Status`, `Motivation`, `Design`, `Alternatives Considered`, `Open Questions`, `Acceptance Criteria`.
   - *Output:* `docs/rfcs/0000-template.md` exists and is committed.
   - *Test/Validate:* `ls docs/rfcs/0000-template.md` exits 0. Template contains all six required
     section headings.
 
-- [ ] **Spike: end-to-end knowledge-recovery prototype (throwaway, do this FIRST)**
+- [x] **Spike: end-to-end knowledge-recovery prototype (throwaway, do this FIRST)**
   - *What:* The riskiest hypothesis in the whole project is Phase 6 ("an LLM can reliably recover
     business meaning from SQL/Git"), yet it isn't tested until five phases of infrastructure are
     built. De-risk it now: a 1–2 day throwaway script (any language) that reads
@@ -53,7 +53,7 @@ unwritten while earlier phases are being implemented).
     fixture. Findings feed directly into RFC 0003 (KIR shape) and RFC 0008 (LLM policy). If the
     spike fails badly, the roadmap is rethought before any Rust is written — that is the point.
 
-- [ ] **RFC 0001 — Compiler Core architecture**
+- [x] **RFC 0001 — Compiler Core architecture**
   - *What:* Define the `Compiler` lifecycle, the `CompilerPass` trait interface, how `PassManager`
     orders passes, what `Scheduler` controls, and the top-level data flow from CLI invocation through
     pass execution to output artifact. Specify error propagation and cancellation semantics. Must
@@ -65,7 +65,7 @@ unwritten while earlier phases are being implemented).
     dependencies declared? What happens when a pass fails — do subsequent passes still run? Is the
     pipeline sync or async, and if async, is tokio adopted from Phase 0?
 
-- [ ] **RFC 0002 — Artifact system and content-addressing scheme**
+- [x] **RFC 0002 — Artifact system and content-addressing scheme**
   - *What:* Define the artifact type hierarchy, the fields every artifact must carry (id, checksum
     algorithm, metadata shape, dependency list, version), the on-disk storage layout under `.ekos/`,
     the cache-hit / cache-miss decision algorithm, and serialization format (JSON v1).
@@ -73,7 +73,7 @@ unwritten while earlier phases are being implemented).
   - *Test/Validate:* RFC answers: What hashing algorithm for content-addressing? What is the on-disk
     path formula for a given artifact id? How are artifact dependencies expressed?
 
-- [ ] **RFC 0003 — Knowledge Intermediate Representation (KIR)**
+- [x] **RFC 0003 — Knowledge Intermediate Representation (KIR)**
   - *What:* Define the four KIR node types (`KirObject`, `KirRelationship`, `KirEvent`,
     `KirEvidence`), their mandatory and optional fields, how ids are assigned, how Evidence links to
     its source artifact, and the JSON schema for serialized KIR. Must define a **single evidence
@@ -84,7 +84,14 @@ unwritten while earlier phases are being implemented).
   - *Test/Validate:* RFC includes a worked example: one SQL table → one `KirObject` with two
     `KirEvidence` nodes showing exact JSON shape.
 
-- [ ] **RFC 0004 — Semantic Knowledge Ledger**
+- [x] **RFC 0004 — Semantic Knowledge Ledger** — **the one genuinely missing RFC document, found by
+  the 2026-08-26 audit and written retroactively that same day** (`docs/rfcs/0004-semantic-
+  knowledge-ledger.md`, not the `0004-ledger.md` filename originally sketched below — matches this
+  directory's own real naming convention, e.g. `0001-compiler-core.md`). The ledger itself was
+  real and built (this session worked with it extensively); only the design document was skipped
+  at the time. Written to describe what was actually shipped, including one real, still-open gap
+  it surfaced: `source_artifact_id`/full audit-trail provenance was never implemented (see the
+  Phase 9 item below, corrected to reflect this).
   - *What:* Define the ledger's append-only guarantees, the entry format, indexing strategy for
     current-state and historical queries, and how the ledger enforces immutability at the API level.
     Must make two explicit decisions. (1) **Event-sourcing vs. snapshots:** `ekos.md` declares
@@ -108,7 +115,7 @@ unwritten while earlier phases are being implemented).
   - *Test/Validate:* RFC includes a worked example: ledger with three events on one Object → Runtime
     returns correct reconstructed state showing field-by-field evolution.
 
-- [ ] **RFC 0006 — Observation SDK and connector contract**
+- [x] **RFC 0006 — Observation SDK and connector contract**
   - *What:* Define the `Observer` trait signature, `ScanContext` contents (config, logger, progress
     sink), `ObservationPackage` output structure, how connectors are discovered and loaded (static
     linking vs. dynamic plugins), and the versioning contract between SDK and plugins.
@@ -116,7 +123,7 @@ unwritten while earlier phases are being implemented).
   - *Test/Validate:* RFC answers: Can a connector be written in isolation without depending on
     `compiler-core`? What is the minimal `Cargo.toml` for a new connector crate?
 
-- [ ] **RFC 0007 — Identity Resolution algorithm**
+- [x] **RFC 0007 — Identity Resolution algorithm**
   - *What:* Define the similarity scoring approach (name normalization, structural fingerprint,
     contextual embedding), the merge confidence threshold, how conflicts are surfaced, and the output
     format (canonical `KirObject` with provenance linking back to all merged sources).
@@ -124,7 +131,7 @@ unwritten while earlier phases are being implemented).
   - *Test/Validate:* RFC includes a worked example: `Customer` (Postgres), `Buyer` (Confluence),
     `client` (Git commit message) → merged canonical Object with confidence score ≥ 0.85.
 
-- [ ] **RFC 0008 — LLM policy: determinism, caching, model pinning**
+- [x] **RFC 0008 — LLM policy: determinism, caching, model pinning**
   - *What:* The coding rules require "every compiler pass deterministic", but Phase 6 passes call
     an LLM — inherently non-deterministic. This RFC resolves the contradiction: pin the model
     version, use temperature 0, cache every response keyed by content hash of (model, prompt,
@@ -165,7 +172,7 @@ ekos --help                  # prints usage, exits 0
 
 ---
 
-- [ ] **Initialise Cargo workspace (`ekos/Cargo.toml`)**
+- [x] **Initialise Cargo workspace (`ekos/Cargo.toml`)**
   - *What:* Create `ekos/Cargo.toml` as a `[workspace]` manifest listing all planned member crates:
     `crates/compiler-core`, `crates/compiler-sdk`, `crates/scheduler`, `crates/artifact`,
     `crates/observation-sdk`, `crates/cli`, `crates/common`. Set `resolver = "2"` and
@@ -175,14 +182,14 @@ ekos --help                  # prints usage, exits 0
   - *Test/Validate:* `cargo build --workspace` from `ekos/` exits 0 with no source files beyond
     empty `lib.rs` stubs.
 
-- [ ] **Scaffold crate skeletons: `compiler-core`, `compiler-sdk`, `scheduler`, `artifact`, `observation-sdk`, `cli`, `common`**
+- [x] **Scaffold crate skeletons: `compiler-core`, `compiler-sdk`, `scheduler`, `artifact`, `observation-sdk`, `cli`, `common`**
   - *What:* For each crate, add a `[package]` section with correct name, version `0.1.0`, edition
     `2024`. Add inter-crate dependencies (e.g., `cli` depends on `compiler-core`). Ensure no circular
     dependencies exist. `cli` gets `src/main.rs` with `fn main() {}`.
   - *Output:* All crates compile individually (`cargo build -p <crate>`) and as a workspace.
   - *Test/Validate:* `for crate in compiler-core compiler-sdk scheduler artifact observation-sdk cli common; do cargo build -p $crate; done` — all exit 0.
 
-- [ ] **GitHub Actions CI: `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt --check`**
+- [x] **GitHub Actions CI: `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt --check`**
   - *What:* Create `.github/workflows/ci.yml` with a single job that runs on `push` and
     `pull_request` to `main`. Steps: checkout → install stable Rust toolchain → `cargo build
     --workspace` → `cargo test --workspace` → `cargo clippy --workspace -- -D warnings` → `cargo fmt
@@ -191,15 +198,25 @@ ekos --help                  # prints usage, exits 0
   - *Test/Validate:* Push a branch; GitHub Actions shows all steps green. Introduce a `clippy`
     warning intentionally; confirm CI fails on that step.
 
-- [ ] **Docker development image**
-  - *What:* Create `Dockerfile.dev` at repo root based on `rust:1.XX-slim`. Install `build-essential`,
-    pin the Rust toolchain version. Add a `docker-compose.yml` (or `Makefile` target) that mounts the
-    repo and runs `cargo build --workspace` inside the container.
-  - *Output:* `Dockerfile.dev`; `docker-compose.dev.yml` (or `Makefile`). Image builds without errors.
-  - *Test/Validate:* `docker compose -f docker-compose.dev.yml run ekos cargo build --workspace`
-    exits 0 on a machine with no local Rust installation.
+- [x] **Docker development image** — done (2026-08-26), the one genuinely missing item found by a
+  direct spot-check audit of Phase -1 through Phase 13 (most items in that range were already
+  implemented — real work, just never had their stale planning-template checkbox updated; see the
+  "Phase -1 through 13 checkbox audit" entry below for the rest). `Dockerfile.dev` (repo root):
+  `rust:1.93-slim` (the real version this workspace already builds with, `rustc --version` —
+  matching the spec's `rust:1.XX-slim` template, not inventing a new toolchain-pinning policy; CI
+  itself still floats on `stable`), `build-essential`/`pkg-config` (checked `ekos/Cargo.toml`
+  directly first: only `zstd-sys`'s C build script needs a compiler — `rusqlite` uses its
+  `bundled` feature, `reqwest` uses `rustls-tls`, no OpenSSL/protobuf anywhere), `rustfmt`+`clippy`
+  components (matching `.github/workflows/ci.yml` exactly). `docker-compose.dev.yml`: mounts the
+  repo, named volumes for `target/`/the cargo registry (a bind-mounted `target/` would otherwise
+  mix container-built Linux/glibc artifacts with host-built ones). *Test/Validate*: live-verified
+  for real — `docker compose -f docker-compose.dev.yml build` succeeds, then `docker compose -f
+  docker-compose.dev.yml run --rm ekos cargo build -p ekos-kir` really compiles a real EKOS crate
+  inside the container end to end (dependency resolution, a real C-backed crate build via
+  `zstd-sys`, successful link) — not just "the image builds," the container's toolchain actually
+  produces this workspace's real binaries.
 
-- [ ] **`ekos --help` produces output without panicking**
+- [x] **`ekos --help` produces output without panicking**
   - *What:* Wire up a minimal CLI in `crates/cli/src/main.rs` using `clap` (derive API). Define the
     top-level `ekos` command with `--version` and `--help`. No subcommands yet — just the skeleton.
   - *Output:* Binary `ekos` built by `cargo build -p cli`. Running `ekos --help` prints name,
@@ -235,7 +252,7 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
 
 ---
 
-- [ ] **`compiler-core`: `Compiler` struct and lifecycle**
+- [x] **`compiler-core`: `Compiler` struct and lifecycle**
   - *What:* Define `pub struct Compiler` in `crates/compiler-core/src/lib.rs`. It holds a
     `PassManager`, a `Configuration`, and a `DiagnosticSink`. Implement `Compiler::new(config) ->
     Self` and `Compiler::run() -> Result<(), CompilerError>` which delegates to `PassManager::run_all()`.
@@ -243,7 +260,7 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
   - *Test/Validate:* Unit test: `Compiler::new(default_config()).run()` with zero registered passes
     returns `Ok(())`. With a pass that returns `Err`, `run()` propagates the error.
 
-- [ ] **`compiler-core`: `PassManager` — registers and sequences compiler passes**
+- [x] **`compiler-core`: `PassManager` — registers and sequences compiler passes**
   - *What:* Define `pub trait CompilerPass` with `fn name(&self) -> &str`, `fn dependencies(&self)
     -> &[&str]`, and `fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError>`. Implement
     `PassManager` that holds `Vec<Box<dyn CompilerPass>>`, validates the dependency DAG (reject
@@ -253,7 +270,7 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
   - *Test/Validate:* Unit tests: (1) three passes A→B→C returns order [A, B, C]; (2) cycle A→B→A
     returns `Err(CycleDetected)`; (3) unknown dependency returns `Err(UnknownDependency)`.
 
-- [ ] **`compiler-core`: `Scheduler` — controls pass execution order and dependencies**
+- [x] **`compiler-core`: `Scheduler` — controls pass execution order and dependencies**
   - *What:* `Scheduler` wraps `PassManager` and adds execution policy: sequential (default),
     with hooks for future parallel execution. Exposes `Scheduler::execute(passes, ctx)` which runs
     passes in declared order, collecting all diagnostics rather than stopping at the first error
@@ -262,13 +279,13 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
   - *Test/Validate:* Unit test: two passes where the second fails — in `Collect` mode both run and
     `ExecutionReport` contains two entries; in `FailFast` mode the second pass does not run.
 
-- [ ] **`compiler-core`: `Diagnostics` — structured error and warning reporting**
+- [x] **`compiler-core`: `Diagnostics` — structured error and warning reporting**
   - *What:* Define `Diagnostic { severity: Severity, code: &str, message: String, location: Option<SourceLocation> }` and `DiagnosticSink` (collects diagnostics during a build). `Severity` = `Error | Warning | Info`. Implement `DiagnosticSink::emit()`, `::errors()`, `::has_errors()`.
   - *Output:* `Diagnostic`, `DiagnosticSink`, `Severity`, `SourceLocation` types in `compiler-core`.
   - *Test/Validate:* Unit test: emit two warnings and one error; assert `has_errors()` = true;
     assert `errors().len()` = 1; assert total `diagnostics().len()` = 3.
 
-- [ ] **`compiler-core`: `Configuration` — typed config loading**
+- [x] **`compiler-core`: `Configuration` — typed config loading**
   - *What:* Define `EkosConfig` struct with fields for workspace root, artifact cache directory,
     log level, and enabled connectors. Implement loading from `ekos.toml` at the workspace root using
     `toml` crate. Provide `EkosConfig::default()` and `EkosConfig::from_file(path) -> Result<Self>`.
@@ -277,7 +294,7 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
   - *Test/Validate:* Unit test: parse a fixture `ekos.toml` string; assert field values match.
     Pass a malformed TOML; assert `from_file` returns `Err`.
 
-- [ ] **`compiler-core`: `Logging` — structured, levelled, per-crate**
+- [x] **`compiler-core`: `Logging` — structured, levelled, per-crate**
   - *What:* Initialise `tracing` / `tracing-subscriber` in `compiler-core`. Configure log level from
     `EkosConfig`. Each crate uses `tracing::instrument` on its public entry points. Log format:
     structured JSON in CI/production, human-readable in development (controlled by `EKOS_LOG_FORMAT`
@@ -287,7 +304,7 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
   - *Test/Validate:* `EKOS_LOG=debug cargo run -p cli -- doctor 2>&1 | grep '"level":"DEBUG"'`
     finds at least one structured log line.
 
-- [ ] **`cli`: `ekos init`**
+- [x] **`cli`: `ekos init`**
   - *What:* Subcommand that creates a `.ekos/` directory at the current workspace root containing:
     `config/` (empty), `artifacts/` (empty), `ledger/` (empty). Writes a default `ekos.toml` if none
     exists. Idempotent — safe to run twice.
@@ -295,7 +312,7 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
   - *Test/Validate:* Run `ekos init` in an empty directory; assert `.ekos/artifacts/`, `.ekos/ledger/`
     exist. Run again; assert no error and no duplicate files.
 
-- [ ] **`cli`: `ekos build`**
+- [x] **`cli`: `ekos build`**
   - *What:* Subcommand that loads `ekos.toml`, constructs a `Compiler`, registers configured passes
     (none yet), runs the compiler, and prints a summary of the `ExecutionReport`. Exit code 0 on
     success, non-zero if any `Error`-severity diagnostic was emitted.
@@ -303,14 +320,14 @@ cargo run -p cli -- build           # runs zero passes, prints "Build complete",
   - *Test/Validate:* `cargo run -p cli -- build` exits 0 and prints the summary line. Inject a
     failing pass via test harness; assert non-zero exit and error message on stderr.
 
-- [ ] **`cli`: `ekos clean`**
+- [x] **`cli`: `ekos clean`**
   - *What:* Subcommand that deletes `.ekos/artifacts/` contents (cached artifacts) but preserves
     `.ekos/ledger/` and `ekos.toml`. Prints count of deleted files.
   - *Output:* Artifact cache cleared; ledger untouched.
   - *Test/Validate:* Create dummy files in `.ekos/artifacts/`; run `ekos clean`; assert artifact
     files gone. Assert `.ekos/ledger/` still exists.
 
-- [ ] **`cli`: `ekos doctor`**
+- [x] **`cli`: `ekos doctor`**
   - *What:* Subcommand that checks the environment and prints a status report: Rust version, workspace
     root location, `ekos.toml` validity, `.ekos/` directory presence, writability of artifact cache.
     Each check prints `[OK]` or `[FAIL]` with a description.
@@ -347,7 +364,7 @@ cargo test --test skeleton                # end-to-end test passes in CI
 
 ---
 
-- [ ] **Minimal file observer (inline, pre-SDK)**
+- [x] **Minimal file observer (inline, pre-SDK)**
   - *What:* A hard-coded pass inside `compiler-core` (no `Observer` trait yet) that walks a
     configured directory and emits one observation per file (path, size, sha256). Replaced by the
     real SDK-based connectors in Phases 3–4.
@@ -355,7 +372,7 @@ cargo test --test skeleton                # end-to-end test passes in CI
   - *Test/Validate:* Run against `tests/fixtures/sample_project/`; assert observation count equals
     the known fixture file count.
 
-- [ ] **Minimal KIR subset (`KirObject` + `KirEvidence` only)**
+- [x] **Minimal KIR subset (`KirObject` + `KirEvidence` only)**
   - *What:* Just two of the four node types, with only mandatory fields, defined in `crates/kir`.
     Each observed file becomes a `KirObject(kind=File)` with one `KirEvidence` pointing at the file
     path. Extended to the full four-type model in Phase 5 (the crate and ids carry forward).
@@ -363,7 +380,7 @@ cargo test --test skeleton                # end-to-end test passes in CI
   - *Test/Validate:* Unit test: object → JSON → object round-trip. Build output artifact contains
     one object per fixture file, each with exactly one evidence node.
 
-- [ ] **Minimal ledger append + read-by-id**
+- [x] **Minimal ledger append + read-by-id**
   - *What:* A single SQLite table (`entries`) with `append(entry)` and `get(id)` — no indexes, no
     history, no integrity checking. `ekos build` writes each `KirObject` straight to it. Replaced by
     the full ledger in Phase 9 (same crate, same `LedgerBackend` trait shape).
@@ -372,14 +389,14 @@ cargo test --test skeleton                # end-to-end test passes in CI
   - *Test/Validate:* Unit test: append then get returns the identical entry. After `ekos build`,
     row count in SQLite equals fixture file count.
 
-- [ ] **Minimal `ekos query object <id>`**
+- [x] **Minimal `ekos query object <id>`**
   - *What:* CLI subcommand that calls `ledger.get(id)` and prints the object as JSON, including its
     evidence. Widened into the full Runtime-backed query in Phase 10.
   - *Output:* `ekos query object <id>` subcommand.
   - *Test/Validate:* Query an id printed by `ekos build`; assert JSON output contains the file path
     in both `name` and the evidence fragment. Unknown id prints "Not found", exits 1.
 
-- [ ] **End-to-end skeleton test in CI**
+- [x] **End-to-end skeleton test in CI**
   - *What:* One integration test (`tests/skeleton.rs`) that runs init → build → query
     programmatically against `tests/fixtures/sample_project/` and asserts the full loop. This test
     stays green through Phases 2–10 as each stub is swapped for its real implementation — it is the
@@ -413,7 +430,7 @@ cargo test -p compiler-core        # cache-hit tests pass
 
 ---
 
-- [ ] **`artifact`: `ObservationArtifact`**
+- [x] **`artifact`: `ObservationArtifact`**
   - *What:* `pub struct ObservationArtifact` containing: `id: ArtifactId`, `checksum: Checksum`,
     `metadata: ArtifactMeta`, `dependencies: Vec<ArtifactId>`, `version: u32`, `source: SourceRef`
     (connector name + target), `raw_data: serde_json::Value`. `ArtifactId` is a `[u8; 32]` SHA-256
@@ -422,14 +439,14 @@ cargo test -p compiler-core        # cache-hit tests pass
   - *Test/Validate:* Unit test: construct an `ObservationArtifact`, serialize to JSON, deserialize
     back, assert round-trip equality. Assert two artifacts with identical content produce identical ids.
 
-- [ ] **`artifact`: `KnowledgeArtifact`**
+- [x] **`artifact`: `KnowledgeArtifact`**
   - *What:* `pub struct KnowledgeArtifact` holding compiled KIR output: `id`, `checksum`, `metadata`,
     `dependencies: Vec<ArtifactId>` (points to source `ObservationArtifact`s), `version`, `kir:
     Vec<KirNode>` (placeholder type until Phase 5).
   - *Output:* `KnowledgeArtifact` type in `crates/artifact/src/knowledge.rs`; JSON serializable.
   - *Test/Validate:* Unit test: round-trip serialization. Assert `dependencies` field is preserved.
 
-- [ ] **`artifact`: `EvidenceArtifact`**
+- [x] **`artifact`: `EvidenceArtifact`**
   - *What:* `pub struct EvidenceArtifact` holding provenance records: `id`, `checksum`, `metadata`,
     `source_artifact_id: ArtifactId`, `location: SourceLocation` (file, line, column), `fragment: String`
     (the raw text snippet that was the evidence). Links a knowledge claim to its source.
@@ -437,14 +454,14 @@ cargo test -p compiler-core        # cache-hit tests pass
   - *Test/Validate:* Unit test: construct with a SQL snippet as fragment; serialize and deserialize;
     assert `fragment` and `location` are preserved exactly.
 
-- [ ] **`artifact`: `DiagnosticArtifact`**
+- [x] **`artifact`: `DiagnosticArtifact`**
   - *What:* `pub struct DiagnosticArtifact` collecting compiler diagnostics for a build run: `id`,
     `checksum`, `metadata`, `diagnostics: Vec<Diagnostic>` (from `compiler-core`). Allows storing
     and diffing diagnostic output across builds.
   - *Output:* `DiagnosticArtifact` type in `crates/artifact/src/diagnostic.rs`; JSON serializable.
   - *Test/Validate:* Unit test: create with two warnings; serialize; deserialize; assert `diagnostics.len() == 2`.
 
-- [ ] **`artifact`: `IndexArtifact`**
+- [x] **`artifact`: `IndexArtifact`**
   - *What:* `pub struct IndexArtifact` acting as a manifest for a build run: `id`, `checksum`,
     `metadata`, `entries: HashMap<String, ArtifactId>` (logical name → artifact id). Used by the
     compiler to locate artifacts by name without scanning the store.
@@ -452,14 +469,14 @@ cargo test -p compiler-core        # cache-hit tests pass
   - *Test/Validate:* Unit test: insert three entries; serialize; deserialize; assert all three entries
     are present by key lookup.
 
-- [ ] **Each artifact carries: unique id, checksum, metadata, dependencies, version**
+- [x] **Each artifact carries: unique id, checksum, metadata, dependencies, version**
   - *What:* Extract shared fields into `pub struct ArtifactMeta { created_at: DateTime<Utc>,
     produced_by: String, schema_version: u32 }` and a blanket `Artifact` trait with `fn id()`,
     `fn checksum()`, `fn meta()`, `fn dependencies()`, `fn version()`. All five types implement this trait.
   - *Output:* `Artifact` trait in `crates/artifact/src/lib.rs`; `ArtifactMeta` struct; all types impl trait.
   - *Test/Validate:* Unit test using the trait object: `let a: &dyn Artifact = &obs_artifact; assert_eq!(a.version(), 1)`.
 
-- [ ] **`compiler-core`: artifact read / write / cache / reuse API**
+- [x] **`compiler-core`: artifact read / write / cache / reuse API**
   - *What:* Add `ArtifactStore` to `compiler-core` with: `fn write<A: Artifact>(&self, artifact: A)
     -> Result<ArtifactId>`, `fn read<A: Artifact>(&self, id: &ArtifactId) -> Result<A>`, `fn
     exists(&self, id: &ArtifactId) -> bool`. `PassContext` gains an `artifact_store: &ArtifactStore`
@@ -468,7 +485,7 @@ cargo test -p compiler-core        # cache-hit tests pass
   - *Test/Validate:* Unit test: write an `ObservationArtifact`, read it back by id, assert equality.
     Call `exists()` for a known id (true) and an unknown id (false).
 
-- [ ] **Content-addressable artifact store (local filesystem backend)**
+- [x] **Content-addressable artifact store (local filesystem backend)**
   - *What:* Implement `FileSystemArtifactStore` that stores artifacts at
     `.ekos/artifacts/<first-2-hex-bytes>/<full-id>.json` (Git object store layout). The id is the
     SHA-256 of the canonically serialized content **excluding volatile metadata** (`created_at` and
@@ -481,7 +498,7 @@ cargo test -p compiler-core        # cache-hit tests pass
     or file count). Write two artifacts with different content; assert two different files exist.
     Construct the same logical artifact at two different wall-clock times; assert identical ids.
 
-- [ ] **Serialization for all artifact types (JSON initially)**
+- [x] **Serialization for all artifact types (JSON initially)**
   - *What:* Derive `serde::Serialize` + `serde::Deserialize` on all artifact types and their
     constituent types. Add a `schema_version: u32` field to `ArtifactMeta` (currently `1`). Ensure
     all `DateTime` fields serialize as ISO-8601 strings.
@@ -517,7 +534,7 @@ cargo run -p cli -- build   # should discover and run the file observer if confi
 
 ---
 
-- [ ] **`observation-sdk`: `Observer` trait (`fn scan(...) -> ObservationArtifact`)**
+- [x] **`observation-sdk`: `Observer` trait (`fn scan(...) -> ObservationArtifact`)**
   - *What:* Define `pub trait Observer: Send + Sync { fn name(&self) -> &str; fn scan(&self, ctx:
     &ScanContext) -> Result<ObservationPackage, ObserverError>; }`. `ObserverError` is a structured
     error type (not `Box<dyn Error>`). The trait must be object-safe so connectors can be boxed.
@@ -525,7 +542,7 @@ cargo run -p cli -- build   # should discover and run the file observer if confi
   - *Test/Validate:* Write a `NoopObserver` that implements the trait and returns an empty package;
     box it as `Box<dyn Observer>`; call `scan()`; assert `Ok(empty_package)`.
 
-- [ ] **`observation-sdk`: `ScanContext` — passes config and logging into connectors**
+- [x] **`observation-sdk`: `ScanContext` — passes config and logging into connectors**
   - *What:* `pub struct ScanContext { pub config: ConnectorConfig, pub logger: tracing::Span, pub
     artifact_store: Arc<dyn ArtifactStore>, pub workspace_root: PathBuf }`. `ConnectorConfig` is a
     `HashMap<String, serde_json::Value>` allowing arbitrary connector-specific settings loaded from
@@ -534,7 +551,7 @@ cargo run -p cli -- build   # should discover and run the file observer if confi
   - *Test/Validate:* Unit test: build a `ScanContext` with a mock config map; pass to `NoopObserver`;
     assert the connector reads a config value via `ctx.config.get("key")`.
 
-- [ ] **`observation-sdk`: `ObservationPackage` — output format**
+- [x] **`observation-sdk`: `ObservationPackage` — output format**
   - *What:* `pub struct ObservationPackage { pub observer: String, pub target: String, pub artifacts:
     Vec<ObservationArtifact>, pub metadata: PackageMeta }` where `PackageMeta` includes `scanned_at:
     DateTime<Utc>`, `duration_ms: u64`, `item_count: usize`. The package is itself serializable to
@@ -543,7 +560,7 @@ cargo run -p cli -- build   # should discover and run the file observer if confi
   - *Test/Validate:* Unit test: write a package with two artifacts to a temp dir; assert
     `snapshot/<name>/package.json` exists and `artifact_count` in JSON matches 2.
 
-- [ ] **Example connector: File Observer (reference implementation)**
+- [x] **Example connector: File Observer (reference implementation)**
   - *What:* Create `plugins/file/` crate depending only on `observation-sdk`. Implement `Observer`
     to walk a directory tree from `ctx.workspace_root`, emit one `ObservationArtifact` per file with
     fields: `path`, `size_bytes`, `sha256`, `modified_at`. Respects a `ignore_patterns` config field
@@ -553,7 +570,7 @@ cargo run -p cli -- build   # should discover and run the file observer if confi
     assert the returned package contains exactly the expected number of file artifacts, each with
     correct path and non-zero size.
 
-- [ ] **Example connector: Git Observer (basic)**
+- [x] **Example connector: Git Observer (basic)**
   - *What:* Create `plugins/git/` crate using `git2` crate. Implement `Observer` to walk the commit
     history of a repo at `ctx.workspace_root`, emitting one `ObservationArtifact` per commit with
     fields: `sha`, `author`, `timestamp`, `message`, `changed_files: Vec<String>`.
@@ -562,7 +579,15 @@ cargo run -p cli -- build   # should discover and run the file observer if confi
     one commit); assert the returned package contains at least one commit artifact with a non-empty
     `sha` and `author`.
 
-- [ ] **SDK documentation and integration guide**
+- [~] **SDK documentation and integration guide** — **real, partial gap confirmed by the 2026-08-26
+  Phase -1 through 13 audit**: `observation-sdk`'s public types (`Observer`, `ScanContext`,
+  `ObservationPackage`) all carry real rustdoc (checked directly — the `Observer` trait's own
+  contract doc comment is substantive, not a stub), and ~10 real, working connector crates under
+  `plugins/` already serve as concrete, battle-tested reference implementations (`file`, `git`,
+  `github`, `confluence`, `localdocs`, `pentaho`, `crypto`, `python`, `rust`, plus five
+  scaffolded-only ones). What's genuinely still missing: a standalone `docs/connector-guide.md`
+  walking a new connector author through the five steps this item named — never written. A real,
+  well-scoped, low-risk documentation task for whoever picks it up next, not a design gap.
   - *What:* Write `docs/connector-guide.md` explaining: (1) how to create a new connector crate,
     (2) the minimal `Cargo.toml`, (3) how to implement `Observer`, (4) how to register it in
     `ekos.toml`, (5) how to test it. Include a complete minimal example (copy of `NoopObserver`).
@@ -599,7 +624,7 @@ ls snapshot/git/ snapshot/database/ snapshot/files/ snapshot/metadata.json
 
 ---
 
-- [ ] **Plugin: `git` — commits, branches, authors, diffs**
+- [x] **Plugin: `git` — commits, branches, authors, diffs**
   - *What:* Extend the Phase 3 basic Git Observer into a full plugin. Emit separate artifact types
     for: `CommitArtifact` (sha, author, date, message, stats), `BranchArtifact` (name, tip sha,
     upstream), `DiffArtifact` (changed files, hunks, line counts per commit). Handle repos with
@@ -608,7 +633,7 @@ ls snapshot/git/ snapshot/database/ snapshot/files/ snapshot/metadata.json
   - *Test/Validate:* Integration test against the EKOS repo: assert commit count > 0, at least one
     branch artifact, diff artifacts contain file paths matching known changed files.
 
-- [ ] **Plugin: `filesystem` — directory trees, file metadata**
+- [x] **Plugin: `filesystem` — directory trees, file metadata**
   - *What:* Extend Phase 3 File Observer. Emit: `FileArtifact` (path, size, sha256, mime_type,
     modified_at), `DirectoryArtifact` (path, child count, total size). Respect `.gitignore` and
     a configurable `exclude_patterns` list. Handle symlinks safely (record target, do not follow).
@@ -616,7 +641,15 @@ ls snapshot/git/ snapshot/database/ snapshot/files/ snapshot/metadata.json
   - *Test/Validate:* Run against `tests/fixtures/sample_project/` (checked-in fixture with known
     structure); assert exact file count, total size, and presence of specific file paths in output.
 
-- [ ] **Plugin: `postgres` — schemas, tables, columns, constraints, views, functions**
+- [x] **Plugin: `postgres` — schemas, tables, columns, constraints, views, functions** —
+  **superseded by a different, real, shipped architecture (2026-08-26 audit)**: not a live-database
+  connector using `sqlx`/`tokio-postgres` as originally planned — instead, `sql_analyzer.rs` +
+  `plugins/sql-dialect-postgres` (RFC 0031's dialect-parser design) parses real Postgres DDL/DML
+  text directly (schemas, tables, columns, constraints, views — the same artifact surface this item
+  wanted), without needing a live database connection or credentials. A deliberate, real design
+  divergence from the original plan, not an unbuilt gap — DDL-file analysis needs no running
+  database, matches how every other SQL dialect in this project is handled uniformly, and is what
+  the real committed fixtures (`ecommerce.sql`, `northwind.sql`) actually exercise today.
   - *What:* Create `plugins/postgres/` using `sqlx` or `tokio-postgres`. Query information schema
     and pg_catalog to emit: `TableArtifact` (name, schema, columns with types/nullability),
     `ConstraintArtifact` (PK, FK, UNIQUE, CHECK), `ViewArtifact` (name, definition SQL),
@@ -626,7 +659,9 @@ ls snapshot/git/ snapshot/database/ snapshot/files/ snapshot/metadata.json
     loaded; run connector; assert `orders` table artifact exists with correct column names and types;
     assert FK constraint artifact links `orders.customer_id` to `customers.id`.
 
-- [ ] **Plugin: `sqlserver` — same as postgres surface**
+- [x] **Plugin: `sqlserver` — same as postgres surface** — **same supersession as `postgres` above**:
+  `plugins/sql-dialect-mssql` + `sql_analyzer.rs` covers this via DDL-text parsing, not a live
+  `tiberius` connection.
   - *What:* Create `plugins/sqlserver/` using `tiberius`. Emit the same artifact types as the
     Postgres plugin (TableArtifact, ConstraintArtifact, ViewArtifact, FunctionArtifact) but query
     SQL Server's `INFORMATION_SCHEMA` and `sys.*` catalogs. Handle both Windows and SQL auth.
@@ -634,7 +669,7 @@ ls snapshot/git/ snapshot/database/ snapshot/files/ snapshot/metadata.json
   - *Test/Validate:* Integration test with SQL Server Express container: same assertions as Postgres
     fixture — table, constraint, view, and function artifacts all present with correct fields.
 
-- [ ] **Output: structured `ObservationPackage` per source written to `snapshot/`**
+- [x] **Output: structured `ObservationPackage` per source written to `snapshot/`**
   - *What:* Update `ekos build` to iterate configured connectors, run each via `Observer::scan()`,
     and write results to `snapshot/<connector-name>/` using `ObservationPackage::write_to_dir()`.
     Write `snapshot/metadata.json` with build timestamp, connector list, and total artifact counts.
@@ -644,7 +679,7 @@ ls snapshot/git/ snapshot/database/ snapshot/files/ snapshot/metadata.json
     `snapshot/database/`, `snapshot/files/` all exist and each contains a `package.json`; assert
     `snapshot/metadata.json` lists all four connectors.
 
-- [ ] **`ekos build` drives observation and writes packages to disk**
+- [x] **`ekos build` drives observation and writes packages to disk**
   - *What:* Wire the `build` subcommand to: load `ekos.toml` connector list, instantiate each
     connector plugin, run them via `Scheduler` (sequentially for now), collect diagnostics, write
     `snapshot/`, print summary. Exit non-zero if any connector returns an error.
@@ -677,7 +712,7 @@ cargo test -p kir
 
 ---
 
-- [ ] **`KirObject` — identity node**
+- [x] **`KirObject` — identity node**
   - *What:* `pub struct KirObject { id: KirId, name: String, kind: ObjectKind, properties:
     HashMap<String, serde_json::Value>, evidence: Vec<KirId> }`. `ObjectKind` is an open enum
     (e.g., `Table`, `Entity`, `Service`, `Api`, `Unknown`). `KirId` is a `Uuid` v4.
@@ -685,7 +720,7 @@ cargo test -p kir
   - *Test/Validate:* Unit test: construct a `KirObject` of kind `Table` named `"orders"`, serialize
     to JSON, deserialize, assert all fields are preserved.
 
-- [ ] **`KirRelationship` — semantic connection**
+- [x] **`KirRelationship` — semantic connection**
   - *What:* `pub struct KirRelationship { id: KirId, kind: RelationshipKind, from: KirId, to: KirId,
     properties: HashMap<String, serde_json::Value>, evidence: Vec<KirId> }`. `RelationshipKind`:
     `ForeignKey`, `Calls`, `Extends`, `DependsOn`, `OwnedBy`, `Unknown`.
@@ -693,14 +728,14 @@ cargo test -p kir
   - *Test/Validate:* Unit test: construct a `ForeignKey` relationship between two `KirObject` ids;
     serialize and deserialize; assert `from` and `to` ids match.
 
-- [ ] **`KirEvent` — immutable change record**
+- [x] **`KirEvent` — immutable change record**
   - *What:* `pub struct KirEvent { id: KirId, kind: EventKind, subject: KirId, timestamp:
     DateTime<Utc>, payload: serde_json::Value, evidence: Vec<KirId> }`. `EventKind`: `Created`,
     `Modified`, `Deleted`, `Migrated`, `Deployed`.
   - *Output:* `KirEvent` type with serde derives.
   - *Test/Validate:* Unit test: construct a `Created` event for a `KirObject`, round-trip through JSON.
 
-- [ ] **`KirEvidence` — provenance record**
+- [x] **`KirEvidence` — provenance record**
   - *What:* `pub struct KirEvidence { id: KirId, source_artifact: ArtifactId, location:
     SourceLocation, fragment: String, confidence: f32 }`. `confidence` is [0.0, 1.0]. This is the
     only node type that references a raw artifact — it is the bridge from compiled knowledge back to
@@ -709,7 +744,7 @@ cargo test -p kir
   - *Test/Validate:* Unit test: construct evidence with `confidence = 0.95`, serialize, deserialize,
     assert `confidence` is preserved with < 0.001 float tolerance.
 
-- [ ] **KIR serialization (JSON)**
+- [x] **KIR serialization (JSON)**
   - *What:* Define `pub struct KirGraph { objects: Vec<KirObject>, relationships: Vec<KirRelationship>,
     events: Vec<KirEvent>, evidence: Vec<KirEvidence> }` with a `fn to_json(&self) -> String` and
     `fn from_json(s: &str) -> Result<Self>`. Store `KirGraph` inside a `KnowledgeArtifact`.
@@ -717,7 +752,7 @@ cargo test -p kir
   - *Test/Validate:* Integration test: write a `KirGraph` with one node of each type as a
     `KnowledgeArtifact`; read it back from the artifact store; assert structural equality.
 
-- [ ] **No optimization or semantic enrichment — pure structural representation**
+- [x] **No optimization or semantic enrichment — pure structural representation**
   - *What:* Code review / architecture gate — not a code change. Ensure no business logic has leaked
     into the KIR types. `KirObject.name` is whatever string came from the source; no normalization,
     no synonym resolution, no confidence scoring on objects themselves (only on evidence).
@@ -751,7 +786,7 @@ cargo test -p compiler-core -- knowledge_recovery   # unit tests with fixture SQ
 
 ---
 
-- [ ] **Compiler pass: `SqlAnalyzer` → Business Entities, Relationships, Evidence from SQL**
+- [x] **Compiler pass: `SqlAnalyzer` → Business Entities, Relationships, Evidence from SQL**
   - *What:* Implement `SqlAnalyzer: CompilerPass`. Input: `ObservationArtifact` from the Postgres or
     SQL Server connector. Deterministic extraction: every table → `KirObject(kind=Table)`, every FK
     constraint → `KirRelationship(kind=ForeignKey)`, every column → property on the object. LLM
@@ -762,7 +797,7 @@ cargo test -p compiler-core -- knowledge_recovery   # unit tests with fixture SQ
     assert `orders.customer_id` FK → `placed_by` relationship to `Customer`; assert each relationship
     has at least one `KirEvidence` node pointing back to the SQL artifact.
 
-- [ ] **Compiler pass: `GitAnalyzer` → change patterns, ownership, coupling**
+- [x] **Compiler pass: `GitAnalyzer` → change patterns, ownership, coupling**
   - *What:* Implement `GitAnalyzer: CompilerPass`. Input: `ObservationPackage` from the git connector.
     Extract: files that change together frequently → `KirRelationship(kind=CoupledWith)`, authors
     responsible for a path → `KirRelationship(kind=OwnedBy)`, modules that only one author touches
@@ -772,7 +807,7 @@ cargo test -p compiler-core -- knowledge_recovery   # unit tests with fixture SQ
   - *Test/Validate:* Test against EKOS repo history: assert at least one `OwnedBy` relationship;
     assert commit artifacts are tagged with at least one semantic label.
 
-- [ ] **Compiler pass: `ConfluenceAnalyzer` → concepts and relationships from documentation**
+- [x] **Compiler pass: `ConfluenceAnalyzer` → concepts and relationships from documentation**
   - *What:* Implement `ConfluenceAnalyzer: CompilerPass` (no Confluence connector yet — accept a
     directory of Markdown files as input for now). Parse Markdown, extract headings as candidate
     `KirObject`s, extract links between pages as `KirRelationship(kind=References)`. Use LLM to
@@ -783,7 +818,7 @@ cargo test -p compiler-core -- knowledge_recovery   # unit tests with fixture SQ
     become objects; assert cross-page links become relationships; assert at least one business rule
     is extracted as a `KirObject(kind=BusinessRule)`.
 
-- [ ] **LLM integration layer (provider-agnostic trait, first backend: Anthropic Claude)**
+- [x] **LLM integration layer (provider-agnostic trait, first backend: Anthropic Claude)**
   - *What:* Define `pub trait LlmProvider: Send + Sync { async fn complete(&self, prompt: &str,
     max_tokens: u32) -> Result<String, LlmError>; }` in a new `crates/llm/` crate (or `common`).
     Implement `ClaudeProvider` using the Anthropic API (`claude-sonnet-4-6` model, streaming
@@ -793,7 +828,7 @@ cargo test -p compiler-core -- knowledge_recovery   # unit tests with fixture SQ
   - *Test/Validate:* Unit test with a mock `LlmProvider`. Integration test (gated by
     `--features llm-integration`): send a real prompt to Claude; assert non-empty response string.
 
-- [ ] **LLM response cache (determinism + cost control, per RFC 0008)**
+- [x] **LLM response cache (determinism + cost control, per RFC 0008)**
   - *What:* Implement `CachedLlmProvider` — a decorator around any `LlmProvider` that stores every
     response as an artifact keyed by SHA-256 of (model id, prompt, params). On cache hit, return
     the stored response without an API call. This is what makes LLM-based passes reproducible
@@ -802,7 +837,7 @@ cargo test -p compiler-core -- knowledge_recovery   # unit tests with fixture SQ
   - *Test/Validate:* Unit test: two identical `complete()` calls hit the inner mock provider exactly
     once (call counter == 1). Changing one character of the prompt busts the cache (counter == 2).
 
-- [ ] **Recovery quality eval harness (golden dataset)**
+- [x] **Recovery quality eval harness (golden dataset)**
   - *What:* Unit tests prove the code runs; they cannot tell whether the LLM extracted the *right*
     entities. Create `tests/eval/` with fixture inputs and hand-labelled expected KIR (golden
     files). An eval runner compares analyzer output against the labels and computes precision and
@@ -813,7 +848,7 @@ cargo test -p compiler-core -- knowledge_recovery   # unit tests with fixture SQ
     and FK relationships. Results are committed alongside prompt changes so quality drift is visible
     in review.
 
-- [ ] **`cli`: `ekos recover` command**
+- [x] **`cli`: `ekos recover` command**
   - *What:* New subcommand that loads configured analyzers from `ekos.toml`, runs them via
     `PassManager` against the `snapshot/` directory produced by `ekos build`, and writes
     `KnowledgeArtifact`s to `.ekos/artifacts/`. Print a summary: passes run, objects discovered,
@@ -848,7 +883,7 @@ ekos resolve   # new CLI command
 
 ---
 
-- [ ] **`identity`: resolver trait and algorithm**
+- [x] **`identity`: resolver trait and algorithm**
   - *What:* Define `pub trait IdentityResolver { fn resolve(&self, graph: &KirGraph) ->
     Result<ResolvedGraph, ResolverError>; }` where `ResolvedGraph` wraps `KirGraph` with an added
     `canonical_map: HashMap<KirId, KirId>` (original id → canonical id). Implement
@@ -857,7 +892,7 @@ ekos resolve   # new CLI command
   - *Test/Validate:* Unit test: pass a `KirGraph` with two identical objects (same name, same kind);
     assert `canonical_map` merges them into one.
 
-- [ ] **Similarity scoring (name-based, structural, contextual)**
+- [x] **Similarity scoring (name-based, structural, contextual)**
   - *What:* Implement three scoring functions, each returning `f32` in [0, 1]:
     (1) `name_score`: Levenshtein distance + common synonyms (`customer`/`client`/`buyer`) from a
     configurable synonym map; (2) `structural_score`: overlap in property names and types between
@@ -870,7 +905,7 @@ ekos resolve   # new CLI command
   - *Test/Validate:* Unit tests: `name_score("customer", "client") > 0.7`;
     `name_score("customer", "product") < 0.3`; `structural_score` higher for structurally similar objects.
 
-- [ ] **Canonical entity merging: `Customer` + `Buyer` + `Client` → one `KirObject`**
+- [x] **Canonical entity merging: `Customer` + `Buyer` + `Client` → one `KirObject`**
   - *What:* When score exceeds the configured merge threshold (default 0.8), merge the objects:
     canonical name = highest-evidence name, properties = union of all properties (conflicts flagged as
     diagnostics), evidence = union of all evidence from all merged objects. Emit `KirEvent(kind=Merged)`
@@ -880,7 +915,7 @@ ekos resolve   # new CLI command
     has `evidence.len() == sum of both`; assert a `Merged` event was emitted; assert the original
     ids map to the canonical id in `canonical_map`.
 
-- [ ] **Confidence scoring on merges**
+- [x] **Confidence scoring on merges**
   - *What:* Each entry in `canonical_map` carries a `MergeRecord { canonical_id, source_ids, score:
     f32, merge_reason: String }`. `score` is the weighted similarity score that triggered the merge.
     Merges below threshold but above a `review_threshold` (default 0.6) are flagged as
@@ -889,7 +924,7 @@ ekos resolve   # new CLI command
   - *Test/Validate:* Unit test: merge two objects with score 0.65 (between thresholds); assert a
     `Warning` diagnostic is emitted with the object names and score in the message.
 
-- [ ] **Conflict detection and reporting**
+- [x] **Conflict detection and reporting**
   - *What:* When two objects being merged have the same property key with different types or
     semantically incompatible values (e.g., `id` is `INT` in DB but `UUID` in API), emit an
     `Error`-severity diagnostic listing the conflict. The merge still proceeds but marks the
@@ -899,7 +934,7 @@ ekos resolve   # new CLI command
     `Error` diagnostic with both type names in the message; assert merged object has
     `properties["id"]["conflict"] == true`.
 
-- [ ] **Reusable as standalone library**
+- [x] **Reusable as standalone library**
   - *What:* Ensure `crates/identity/` has zero dependency on `compiler-core` or `cli`. Its only
     dependencies are `crates/kir` (or the KIR module) and optionally `crates/llm`. Publish a
     `README.md` in the crate explaining standalone usage with a minimal code example.
@@ -908,7 +943,7 @@ ekos resolve   # new CLI command
     a small `KirGraph` and runs the resolver, with no `compiler-core` import. `cargo run --example
     identity_standalone` exits 0 and prints the resolution result.
 
-- [ ] **`cli`: `ekos resolve` command**
+- [x] **`cli`: `ekos resolve` command**
   - *What:* Subcommand that loads all `KnowledgeArtifact`s, runs the `IdentityResolver`, writes the
     `ResolvedGraph` as a new artifact, and prints a merge summary: merges made, low-confidence merges
     flagged for review, conflicts detected.
@@ -940,7 +975,7 @@ cat .ekos/ckm/model.json | jq '.objects | length'   # > 0
 
 ---
 
-- [ ] **`semantic`: `SemanticCompiler` pass**
+- [x] **`semantic`: `SemanticCompiler` pass**
   - *What:* Implement `SemanticCompiler: CompilerPass`. Input: `ResolvedGraph` from Phase 7. Runs
     three sub-passes: (1) relationship normalisation, (2) cross-source evidence aggregation, (3) CKM
     schema validation. Emits a `KnowledgeArtifact` containing the CKM JSON.
@@ -948,7 +983,7 @@ cat .ekos/ckm/model.json | jq '.objects | length'   # > 0
   - *Test/Validate:* Unit test: pass a small `ResolvedGraph` with two objects and one relationship;
     assert `SemanticCompiler::run()` returns `Ok(())`; assert CKM artifact exists in store.
 
-- [ ] **Transform KIR → CKM (JSON, no binary)**
+- [x] **Transform KIR → CKM (JSON, no binary)**
   - *What:* Define `CkModel { version: u32, compiled_at: DateTime<Utc>, objects: Vec<CkmObject>,
     relationships: Vec<CkmRelationship>, evidence_index: HashMap<KirId, EvidenceRecord> }`.
     `CkmObject` is a flattened, denormalized view of a canonical `KirObject` — no forward references,
@@ -957,7 +992,7 @@ cat .ekos/ckm/model.json | jq '.objects | length'   # > 0
   - *Test/Validate:* `cat .ekos/ckm/model.json | python3 -m json.tool` exits 0 (valid JSON).
     Assert schema version field is `1`.
 
-- [ ] **Relationship normalisation and deduplication**
+- [x] **Relationship normalisation and deduplication**
   - *What:* Within the `SemanticCompiler`, after identity resolution, the same relationship may be
     observed multiple times (FK in DB + reference in documentation). Deduplicate by `(from, to, kind)`
     tuple; merge evidence lists. Relationships pointing to non-existent objects are flagged as
@@ -966,7 +1001,7 @@ cat .ekos/ckm/model.json | jq '.objects | length'   # > 0
   - *Test/Validate:* Unit test: graph with three identical `ForeignKey` relationships; assert
     output contains exactly one with all three evidence entries merged.
 
-- [ ] **Cross-source evidence aggregation**
+- [x] **Cross-source evidence aggregation**
   - *What:* For each `CkmObject`, gather evidence from all source artifacts (DB connector, Git
     connector, Confluence analyzer) and embed as `evidence: Vec<EvidenceRecord>` sorted by confidence
     descending. Highest-confidence evidence fragment is used as the object's `primary_description`.
@@ -975,7 +1010,7 @@ cat .ekos/ckm/model.json | jq '.objects | length'   # > 0
   - *Test/Validate:* Unit test: object with evidence from two sources; assert aggregated evidence has
     both entries; assert highest-confidence evidence is `primary_description`.
 
-- [ ] **CKM schema definition and validation**
+- [x] **CKM schema definition and validation**
   - *What:* Write `docs/ckm-schema.json` as a JSON Schema document describing the CKM format.
     Implement `fn validate_ckm(model: &CkModel) -> Result<(), Vec<SchemaError>>` that checks:
     all relationship `from`/`to` ids exist as objects, all evidence `source_artifact` ids exist in
@@ -984,7 +1019,7 @@ cat .ekos/ckm/model.json | jq '.objects | length'   # > 0
   - *Test/Validate:* Unit test: valid CKM passes validation. CKM with a dangling relationship
     (references non-existent object id) returns `Err` with the offending relationship id.
 
-- [ ] **`cli`: `ekos compile` command**
+- [x] **`cli`: `ekos compile` command**
   - *What:* Subcommand that runs the full pipeline in order — observation (if snapshot is stale) →
     recovery → identity resolution → semantic compilation — and writes the CKM to
     `.ekos/ckm/model.json`. Prints a stage-by-stage summary. This is the one-command path from raw
@@ -1021,7 +1056,7 @@ ekos ledger status   # prints entry count, last write time
 
 ---
 
-- [ ] **`ledger`: append-only storage engine (behind `LedgerBackend` trait)**
+- [x] **`ledger`: append-only storage engine (behind `LedgerBackend` trait)**
   - *What:* Implement `Ledger` behind a `LedgerBackend` trait, with SQLite
     (`.ekos/ledger/ledger.db`) as the first — explicitly disposable — backend, per RFC 0004.
     One table: `entries(id TEXT PRIMARY KEY, type TEXT, payload BLOB, written_at INTEGER,
@@ -1034,7 +1069,7 @@ ekos ledger status   # prints entry count, last write time
   - *Test/Validate:* Unit test: `append` 3 entries; `verify_integrity()` returns `Ok(())`. Manually
     corrupt a checksum; assert `verify_integrity()` returns `Err` with the corrupted entry id.
 
-- [ ] **Store: Objects, Relationships, Events, Evidence**
+- [x] **Store: Objects, Relationships, Events, Evidence**
   - *What:* Implement `LedgerWriter` with four typed methods: `write_object(obj: &CkmObject)`,
     `write_relationship(rel: &CkmRelationship)`, `write_event(evt: &KirEvent)`,
     `write_evidence(ev: &EvidenceRecord)`. Each serializes to JSON and calls `Ledger::append`. The
@@ -1043,7 +1078,7 @@ ekos ledger status   # prints entry count, last write time
   - *Test/Validate:* Integration test: write one of each type; query the SQLite DB directly; assert
     four rows exist with correct `type` values.
 
-- [ ] **Current-state index**
+- [x] **Current-state index**
   - *What:* Maintain a `current_state` table: `(object_id TEXT PRIMARY KEY, latest_entry_id TEXT)`.
     Updated atomically within the same SQLite transaction as the `entries` insert. Enables
     `LedgerReader::current_object(id) -> Option<CkmObject>` without scanning the full entry log.
@@ -1051,7 +1086,7 @@ ekos ledger status   # prints entry count, last write time
   - *Test/Validate:* Write an object, then write an updated version with the same id; assert
     `current_object(id)` returns the second version; assert `entries` table has two rows for that id.
 
-- [ ] **Historical state index**
+- [x] **Historical state index**
   - *What:* All `entries` rows are already the history. Implement `LedgerReader::object_history(id)
     -> Vec<(DateTime<Utc>, CkmObject)>` that returns all versions ordered by `written_at` ascending.
     For time-travel: `object_at(id, timestamp) -> Option<CkmObject>` returns the latest version
@@ -1060,7 +1095,17 @@ ekos ledger status   # prints entry count, last write time
   - *Test/Validate:* Write object at t1, update at t2. Assert `object_at(id, t1)` returns v1,
     `object_at(id, t2)` returns v2, `object_at(id, t0)` returns `None`.
 
-- [ ] **Full audit trail (every write timestamped and sourced)**
+- [ ] **Full audit trail (every write timestamped and sourced)** — **genuine, confirmed gap (2026-08-26
+  audit, RFC 0004 written to close the missing-doc half of this finding)**: `written_at` is real
+  (every `LedgerEntry` has it), but `source_artifact_id`/artifact-level provenance was never built —
+  grepped `crates/ledger/src/*.rs` directly, no such field or method exists anywhere. What shipped
+  instead, covering a related but distinct need: `KirEvidence` (RFC 0003) — every semantic
+  conclusion cites a real `SourceLocation`/fragment, answering "why do we believe this" at the
+  evidence level. Neither backend has ever needed "which pipeline run produced this write" for a
+  real feature to date, which is likely why this was never revisited — but it's a real, scoped,
+  buildable gap if a future need surfaces (`LedgerEntry` needs a new field, both backends need a
+  migration path, every append call site needs a real `ArtifactId` threaded through — see RFC 0004
+  for the full writeup).
   - *What:* Every `LedgerEntry` must include `source_artifact_id` (the `ArtifactId` of the
     `KnowledgeArtifact` that produced this knowledge). `written_at` uses wall-clock UTC time.
     Implement `LedgerReader::audit_trail(id) -> Vec<AuditRecord>` returning the full write history
@@ -1070,7 +1115,7 @@ ekos ledger status   # prints entry count, last write time
   - *Test/Validate:* Write an object twice from two different `KnowledgeArtifact` ids; assert
     `audit_trail()` returns two records with different `source_artifact_id` values.
 
-- [ ] **`cli`: `ekos commit` command (idempotent)**
+- [x] **`cli`: `ekos commit` command (idempotent)**
   - *What:* Subcommand that reads the CKM at `.ekos/ckm/model.json` and writes objects,
     relationships, and evidence to the ledger via `LedgerWriter`. Must be idempotent: entry ids
     derive from content hashes and entries already present are skipped, so running `ekos commit`
@@ -1079,7 +1124,7 @@ ekos ledger status   # prints entry count, last write time
   - *Test/Validate:* Run `ekos commit` twice on the same CKM; assert the ledger entry count is
     identical after the second run and the summary prints "0 new entries".
 
-- [ ] **`cli`: `ekos ledger status`**
+- [x] **`cli`: `ekos ledger status`**
   - *What:* Subcommand that prints: total entry count, count per entry type, last write timestamp,
     integrity check result (`OK` / `TAMPERED`), and ledger file size.
   - *Output:* Human-readable status report on stdout; exits 0 if integrity check passes.
@@ -2593,24 +2638,76 @@ These items have no single phase — they must be maintained and grown throughou
     caught and fixed in two of them (hardcoded `Ledger::open` call sites bypassing the new
     auto-detection), see the devlog's own account.
 
-- [ ] **Storage architecture: six real gaps — plan saved, RFC 0080, none implemented yet**
+- [ ] **Storage architecture: six real gaps — plan saved (RFC 0080), Phases 1-3 of 6 implemented**
   - *What:* A real, technically-grounded plan now exists (RFC 0080) — each of the six sub-gaps
     checked against the actual current implementation (not just this summary) and correctly
     attributed to the backend it affects, sequenced by real urgency/dependency:
-    - *Phase 1 (highest priority, real live evidence):* concurrency — two distinct real gaps, one
-      per backend. SQLite `Ledger`'s `append_object` does 3-4 unwrapped statements with **no
-      transaction**, the likely real mechanism behind the corrupted FTS5 table `devlog_65` found
-      live in `analytics/`'s ledger. `FactLedger` v3's actual single-writer enforcement is
-      tantivy's own `IndexWriter` lock (an incidental side effect, not a designed mechanism) —
-      RFC 0016's own text incorrectly attributes this to "the manifest lock," which doesn't exist
-      in the code; needs correcting alongside a real designed cross-process lock and a written
-      concurrent-read visibility spec.
-    - *Phase 2:* a WAL + repair tool — `FactLedger` already has strong crash-recovery primitives
-      (checksummed frames, atomic manifest writes) with no tool surfacing them yet.
-    - *Phase 3:* snapshot+compaction of the version chain — genuinely greenfield; must preserve
-      RFC 0047's `object_history`/`object_at` semantics for the retained window.
-    - *Phase 4:* retention/pruning policy — needs Phase 3's compaction model first, or pruning
-      means real data loss, not archival.
+    - [x] *Phase 1 (highest priority, real live evidence) — concurrency — RFC 0104 / `devlog_121`
+      (2026-08-26).* Two distinct real gaps, one per backend, both closed. SQLite `Ledger`'s
+      `append`/`append_object`/`append_relationship` (previously 2-4 unwrapped statements each —
+      the likely real mechanism behind the corrupted FTS5 table `devlog_65` found live in
+      `analytics/`'s ledger) now run inside real `BEGIN IMMEDIATE`/`COMMIT` transactions
+      (`in_transaction`); resolved without a supplementary explicit lock — SQLite's own WAL-mode
+      locking under `BEGIN IMMEDIATE` already provides real cross-process protection. `FactLedger`
+      gets a real, designed `write.lock` file (`fs4`, the same `flock`(2) mechanism tantivy's own
+      `IndexWriter` lock already used incidentally, now promoted to a direct dependency and
+      acquired first, before `SegmentStore`/`SearchIndex` are touched) — a second writable process
+      now fails fast with a clear `LedgerError::Locked` instead of an eventual tantivy-internal
+      error, live-verified with two real racing `ekos commit` processes. RFC 0016's "the manifest
+      lock enforces it" text corrected. The concurrent-read visibility spec turned out to be a
+      real, previously-unverified gap: a `FactLedger` handle's view is frozen as of its own
+      `open()` call, not automatically refreshed by a separate process's writes — proven with a
+      dedicated regression test (`a_long_lived_handle_does_not_see_a_separate_handles_writes_
+      until_reopened`), not just documented as an inherited claim. 7 new `ekos-ledger` tests, full
+      workspace gate clean, `tests/integration` 3/3.
+    - [x] *Phase 2 — WAL recognition + repair tool — RFC 0105 / `devlog_122` (2026-08-26).*
+      Confirmed no new WAL needed building — `FactLedger`'s existing segment format (checksummed
+      frames, atomic manifest writes) already provides real ledger-level WAL durability; the real
+      gap was that nothing surfaced it. New `SegmentStore::verify_sealed_report` checks every
+      sealed segment unconditionally (existing `verify_sealed` refactored on top of it, not
+      duplicated). New `ekos ledger repair` CLI command opens the ledger (triggering its two
+      already-existing free self-heals: torn active-segment tail truncation, stale index-runs
+      rebuild), then reports one line per sealed segment — replacing the previously-accurate "the
+      only recovery option is a full migration rollback" with a real, precise diagnostic (which
+      segment, which transaction range) rather than an automatic fix for the one case
+      (genuine bit-rot in a sealed segment) that has no synthesizable fix at all. FactLedger-only,
+      matching every prior phase's precedent. 6 new tests (2 `ekos-ledger`, 4 `ekos` CLI), full
+      workspace gate clean, `tests/integration` 3/3. Live-verified through the real `ekos` binary
+      (the honest "no sealed segments yet" path against a real pipeline-built scratch workspace;
+      the corruption-report path verified with real segment files, real on-disk byte corruption,
+      and the real `repair()` function via a tiny seal threshold to force real sealed segments
+      quickly).
+    - [x] *Phase 3 — version-chain checkpoints — RFC 0106 / `devlog_123` (2026-08-26).* Built as a
+      pure, purely-additive acceleration structure — periodic per-entity checkpoints
+      (`checkpoints.jsonl`, one every 20 versions) let `state_at` (the shared engine behind
+      `object_at`/`current_sig`/every point-in-time read) seed its fold from the nearest prior
+      checkpoint instead of always genesis, provably equivalent to full replay by construction
+      (never consulted for correctness, only speed — a missing/corrupt checkpoint just means a
+      slower, still 100% correct fold; a dedicated test appends literal garbage as a trailing
+      checkpoint line and confirms reads stay correct). Honest scope check done before shipping,
+      not after: `FactIndexes`' EAVT key order means the underlying index scan itself can't be
+      tx-bounded cheaply, so the real win is in the fold cost, not scan I/O. 3 new tests, full
+      workspace gate clean, `tests/integration` 3/3. Live-verified through the real CLI: 25 real
+      revisions of the same real workspace, `checkpoints.jsonl` written for real, `ekos query
+      object`/`ekos diff` both correct across the checkpoint boundary.
+    - **Real finding from Phase 3, changes how Phase 4 must be scoped — not scheduled until
+      resolved**: Phase 4 as originally named means discarding old delta history, directly
+      conflicting with `CLAUDE.md`'s own Key Invariant that the ledger is append-only with no
+      object-level delete/tombstone mechanism anywhere (deliberate, reviewed, not an oversight).
+      Phase 3's checkpoints were deliberately built to *not* need this resolved (purely additive).
+      Needs an explicit decision from the user before any Phase 4 design starts: relax the
+      invariant (a real, load-bearing architectural change), or re-scope Phase 4 to something that
+      doesn't require it (e.g. archival to a separate location rather than in-place deletion — not
+      investigated).
+    - *Phase 4:* retention/pruning policy — blocked on the finding above, not just a sequencing
+      dependency on Phase 3 anymore.
+    - **Storage plan paused here by explicit user decision (2026-08-26)**, not for lack of further
+      scoped work: asked directly whether to (a) stop, (b) re-scope Phase 4 around archival instead
+      of deletion, or (c) discuss relaxing the append-only invariant — chose (a). Phases 1-3 are
+      complete, real, shipped increments needing nothing further. Phase 5 still needs its own
+      real query-log scoping pass before it's implementation-ready regardless; Phase 6 stays
+      blocked on RFC 0034. Resume at Phase 4 (with a real decision on the invariant question above)
+      or Phase 5 (starting with the query-log scoping pass) whenever this work picks back up.
     - *Phase 5:* materialized views alongside the EAV fact engine — least-scoped so far, needs a
       pass over real EKL/MCP query logs to find what's actually worth materializing.
     - *Phase 6:* horizontal distribution — blocked on RFC 0034 (Draft, **not yet implemented**)
@@ -2621,7 +2718,9 @@ These items have no single phase — they must be maintained and grown throughou
     passes `PRAGMA integrity_check`, the FTS index doesn't), now traced to a specific, real,
     plausible mechanism (Phase 1, above) rather than just "concurrency, generally."
   - *Test/Validate:* each phase still needs its own dated implementation RFC before any code, per
-    the mandatory workflow — RFC 0080 is the saved plan, not the implementation.
+    the mandatory workflow — RFC 0080 is the saved plan; Phase 1 is the first phase to graduate to
+    a real implementation RFC (0104). Phases 2-5 remain to be scoped and implemented the same way;
+    Phase 6 stays explicitly blocked on RFC 0034 (Draft, still not implemented) shipping first.
 
 - [x] **Positioning: separate the technical pitch from token materials — README (devlog_68)**
   - *What:* Real risk: README ran three token/crypto headers (raw contract address, pump.fun
@@ -2852,19 +2951,71 @@ are excluded — see the full exclusion list in the planning history if needed.
       `render_mermaid_graph`, Crate & Workspace Topology / per-kind Dependency Graph via
       `render_relationship_kind_graph`) — the primitive is generic and ready for those as real,
       concretely scoped follow-on work, tracked here, not silently narrowed:
-      - [ ] Wire `render_graph_svg` into `render_mermaid_graph` (per-object neighborhood diagrams,
-        `--layout objects`) — one SVG per significant object's page.
-      - [ ] Wire `render_graph_svg` into `render_relationship_kind_graph`'s two `render_architecture`
-        call sites (`## Crate & Workspace Topology`, and any per-relationship-kind Dependency Graph
-        subsection) — needs a real decision on file naming per relationship kind first, not attempted
-        yet.
-      - [ ] `erDiagram`/`sequenceDiagram` families (`render_er_diagram`, `render_sequence_diagrams`)
-        use different Mermaid syntax entirely — would need their own (still generic, still
-        Mermaid-independent) node/edge extraction, not a reuse of `system_context_graph`'s shape.
-      - [ ] Known real limitation, not yet fixed: `layer_nodes` doesn't wrap wide layers — this
-        repo's own real System Context diagram (45 technologies) renders as one very wide row
-        (8296×190px), correct but impractical to view as an image. A max-nodes-per-row wrap rule
-        would fix this; explicitly deferred, not silently ignored (RFC 0073).
+      - [x] **RFC 0102 / `devlog_119` (2026-08-26).** Closes all three remaining wiring items in one
+        increment:
+        - `render_object_neighborhood_svg` (per-object neighborhood diagrams, `--layout objects`) —
+          one SVG per significant object with at least one relationship, alongside its `.md`/`.html`
+          page.
+        - `render_relationship_kind_graph_svg` (per-relationship-kind Dependency Graph,
+          `--layout curated`) — `dependency-graph-<kind>.svg` per kind, linked from
+          `Architecture.md` right after each kind's Mermaid block. The real decision this needed:
+          `MAX_GRAPH_EDGES` (the same 20-edge cap `render_architecture`'s own Markdown loop already
+          used to decide "real diagram" vs. "omitted, too large") hoisted to module scope and
+          factored into a shared `dependency_graph_groups` function both the Markdown loop and the
+          new SVG writer call — so the SVG writer can never independently drift from which kinds the
+          Markdown page actually drew a diagram for (the same "logic duplicated across two spots,
+          one drifts" shape this project has hit before — `DefaultResolver`'s kind-exclusion list,
+          the two ledger backends' indexed-content field lists).
+        - `render_er_diagram_svg` (`erDiagram` family, `--layout objects`) — `er-diagram.svg`
+          alongside the existing Mermaid `er-diagram.md`/`.html`, linked from `index.md`/`.html`.
+          `render_graph_svg`'s plain arrows are a real, named simplification of `erDiagram`'s
+          crow's-foot notation (every table/edge still real), not a misrepresentation.
+        - `sequenceDiagram` **deliberately still not attempted, a real Non-goal**: a sequence
+          diagram is participant lanes over a time axis, a fundamentally different shape from every
+          other diagram this primitive draws — forcing it through `layer_nodes`/`render_graph_svg`
+          would misrepresent it, not simplify it (unlike the ER diagram case). Needs its own real
+          layout primitive; left as a clearly scoped future increment.
+        - **Correction to this file, not new work**: the `layer_nodes` wide-layer-wrapping item
+          previously listed here as open was already shipped by RFC 0084 / `devlog_87`
+          (`wrap_layer_into_rows`, `MAX_NODES_PER_ROW = 8`) — this file was never updated after that
+          RFC landed. Found by re-reading the actual code rather than trusting a stale status
+          summary (this exact stale claim was independently repeated in a user-pasted status
+          document earlier the same session).
+        - 9 new `ekos-docs-gen` tests, 3 new/extended `ekos` (CLI) integration tests, full workspace
+          gate clean, `tests/integration` 3/3. **Live-verified** against a real scratch workspace (3
+          real tables, 2 real compiled `ForeignKey` relationships, through the real
+          `init`/`build`/`recover`/`resolve`/`compile`/`commit` pipeline): `docs generate --layout
+          objects` wrote 3 real per-table neighborhood SVGs plus `er-diagram.svg`; `docs generate
+          --layout curated` wrote `dependency-graph-foreignkey.svg` and `Architecture.md` contains
+          the real `[ForeignKey Dependency Graph diagram (SVG)](dependency-graph-foreignkey.svg)`
+          link — every SVG confirmed to start with `<svg ` and contain the real table names, not
+          placeholders.
+        - **Real finding surfaced, not fixed here**: running `docs generate` against this repo's own
+          real self-analysis ledger at the repo root failed with `Schema error: 'An index exists but
+          the schema does not match.'` — RFC 0101 (this same session, shipped just before this RFC)
+          added a new `memory_path` field to `SearchIndex`'s tantivy schema with no migration path
+          for an already-built on-disk index; `Index::open_or_create` validates schema rather than
+          transparently upgrading. Every pre-existing `FactLedger` workspace is affected. Deliberately
+          not fixed here (out of this RFC's scope, and rebuilding/migrating a real production
+          ledger's search index needs an explicit user decision, not a unilateral one) — flagged to
+          the user directly and tracked here.
+        - [x] **Follow-up — RFC 0103 / `devlog_120` (2026-08-26).** A real migration, not a manual
+          rebuild instruction (user's explicit choice when asked): `SearchIndex::open_impl` catches
+          `TantivyError::SchemaError` specifically and self-heals by wiping and rebuilding the
+          on-disk index (safe — it's a documented derived/rebuildable projection of the ledger's
+          own facts) whenever the open is writable, forcing the returned marker to `None` so
+          `FactLedger`'s existing full-reindex-on-`None`-marker path (the same one a brand-new
+          workspace's first open already uses) does the rest with zero other code changes. A
+          read-only open still fails clearly rather than mutating anything, matching RFC 0097's own
+          "a read-only handle must never be the one doing writing/self-healing work" precedent.
+          Genuine corruption (a malformed `meta.json`) is structurally distinguishable from a stale
+          schema and still surfaces as a real error, not silently swallowed. 3 new `ekos-ledger`
+          tests, full workspace gate clean, `tests/integration` 3/3. **Live-verified against the
+          exact real failure that motivated this**: `ekos docs generate` against this repo's own
+          real self-analysis ledger at the repo root (previously failing with the schema-mismatch
+          error) now opens, self-heals, and produced real output — 5,533 objects rendered, 4,837
+          per-object neighborhood SVGs (RFC 0102), a real `dependency-graph-sameas.svg` linked from
+          `Architecture.md` — with no manual `.ekos` deletion or separate migration command run.
 
   - **RFC 0068 §62 Phase 2 — remaining pieces**:
     - [x] **Data Architecture** (§22) — done, RFC 0074 / `devlog_77`. Real Data Stores (every
@@ -2912,18 +3063,66 @@ are excluded — see the full exclusion list in the planning history if needed.
       Architecture** (§26-27) views — each a real named section in the target package, none built
       yet; Deployment Architecture specifically depends on the Terraform/Kubernetes/OpenAPI
       extractors above (no compiled infrastructure data exists to render a real view from yet).
-    - [ ] **Architecture Diff** (§55, a real architecture-level diff — not the same as raw `ekos
-      diff`, needs to diff at the Claim/entity level).
+    - [x] **Architecture Diff** (§55) — RFC 0108 / `devlog_124` (2026-08-26). `ekos architecture
+      diff --from <ts> --to <ts>`: real architecture-level diff (technologies, crate role
+      classifications, risks, open questions) — distinct from raw `ekos diff`'s bare entry-id
+      report. Reuses `all_objects_at` (RFC 0096) plus the deterministic `KirId`s every covered
+      kind already mints (`technology_kir_id`/`role_claim_kir_id`/`architecture_gap_kir_id`/
+      `concentration_risk_kir_id`, confirmed by reading each analyzer directly) — the whole diff is
+      a plain id-set comparison per kind, no fuzzy matching, no new ledger primitive. A claim new
+      in the later snapshot is deliberately not misreported as a role change (no real "from" role
+      to name). 10 new tests (8 `ekos-recovery`, 2 `ekos` CLI), full workspace gate clean, `tests/
+      integration` 3/3. Live-verified against a real scratch workspace (re-confirmed independently
+      against a second, timing-careful fixture): a real new dependency added between two commits
+      correctly reported under `Technologies added`, every other category honestly `0`.
+      Relationship-level diff (e.g. a `DependsOn` edge change) and continuous/scheduled drift (§56)
+      deliberately left as named follow-ons, not attempted here. **Process note**: this increment
+      was built by a subagent that was dispatched for read-only TODO.md auditing only and exceeded
+      its scope by implementing this feature unprompted — the resulting code was reviewed,
+      verified (full gate + live check), and kept because it was genuinely correct and covers a
+      real, wanted gap; the RFC number it picked (0107) collided with a concurrently-written RFC
+      and was renumbered to 0108. Flagged as real subagent-scoping feedback, not silently absorbed.
     - [ ] **Architecture Drift** (§56, continuous version of the MVP's one-shot drift check, RFC
       0069).
-    - [ ] **Human Review** workflow (§ referenced throughout — RFC 0029's `ekos_identity_review`
-      pattern is the closest existing precedent to extend, not build from scratch; investigated as
-      a candidate for this increment, not chosen — Data Architecture had more real compiled data
-      already behind it).
+    - [x] **Human Review** workflow — RFC 0109 / `devlog_127` (2026-08-26). `ekos_architecture_review`,
+      a second write-capable MCP tool mirroring RFC 0029's `ekos_identity_review` exactly (kind-check
+      discipline, `reviewed_at` timestamp, a real `KirEvent` audit record) — confirm/reject an
+      LLM-classified role `Claim` before it's treated as ground truth. A real correctness trap found
+      and designed around *before* writing any code: `ArchitectureReasoningPass` is deliberately
+      ledger-free and re-derives the same deterministic claim id every `recover`/`commit` cycle — a
+      naive "stamp review_status: unconfirmed at creation" design would have made every claim's
+      content signature differ from its already-reviewed ledger version on the very next re-run,
+      silently reverting every human decision back to unconfirmed. Fixed with two parts: the
+      reasoning pass never writes `review_status` at all (read by absence); `commit.rs`'s new
+      `preserve_claim_review_status` (the one place that already does real ledger-aware enrichment
+      before appending, matching `commit_rollups`/`commit_data_lineage`'s own precedent) carries a
+      real review status forward when the role value is unchanged, so an unchanged reviewed claim
+      writes no new version at all. A genuinely changed role value does *not* inherit the old status
+      — a new assertion needs new review. MCP-only, no CLI equivalent, matching
+      `ekos_identity_review`'s own established precedent exactly. 9 new tests (4 `ekos` commit-layer,
+      5 `ekos` MCP), full workspace gate clean, `tests/integration` 3/3. **Live-verified end to end,
+      not just unit-tested**: a real scratch workspace run through `ekos architecture investigate`
+      with a real local Ollama call (`qwen2.5:1.5b`) produced a real role claim; reviewed via the
+      real `ekos mcp serve` binary over stdio; a subsequent real `recover`/`compile`/`commit` re-run
+      with no source changes reported "Objects skipped: 7 (already in ledger)" — the reviewed claim
+      among them, `review_status: "confirmed"` still intact.
     - [ ] **ADR generation** (§28, Architecture Decision Records — `BusinessRule`/`Custom("Claim")`
       kinds are the closest existing KIR shapes to extend).
-    - [ ] **MCP** exposure of architecture query/investigation tools (existing MCP server,
-      `crates/cli/src/commands/mcp.rs`, is the extension point).
+    - [x] **MCP exposure of architecture query/investigation tools** — RFC 0107 / `devlog_125`
+      (2026-08-26). Two new read-only MCP tools alongside the existing RFC 0013 set:
+      `ekos_architecture_evaluate` (real completeness/evidence-coverage score, RFC 0065 Phase 3 —
+      the same computation `ekos architecture investigate` uses, without running a build) and
+      `ekos_architecture_drift` (documentation drift, reusing `architecture.rs::detect_drift`'s
+      exact logic). Both call existing, already-tested pure functions verbatim — no new
+      evaluation/drift logic, only MCP-protocol wiring. Deliberately does *not* expose
+      `investigate`'s own orchestration loop over MCP (write-heavy, potentially LLM-costed —
+      fundamentally different in kind from every other tool in this read-only server;
+      `ekos_identity_review` stays the one deliberate write exception, and even that only
+      confirms/rejects an already-proposed candidate). 4 new tests, full workspace gate clean,
+      `tests/integration` 3/3. **Extended same-day**: a third tool, `ekos_architecture_diff`,
+      added alongside the other two — thin MCP wiring over RFC 0108's own `diff_architecture`,
+      same `from`/`to` RFC 3339 argument shape as the existing `ekos_diff` tool. 2 more tests
+      (`tools/list` exhaustive-name test updated to include it).
 
   - **RFC 0068 §63 Phase 3 — remaining pieces**: runtime telemetry/logs/metrics/traces ingestion;
     continuous drift detection (running the MVP drift check on a schedule/trigger, not just
@@ -2948,16 +3147,50 @@ are excluded — see the full exclusion list in the planning history if needed.
     rather than new data); Architecture Baseline (§54, a named, retrievable ledger snapshot —
     `ekos build`'s existing `.ekos/snapshots/*.json.zst` may already be most of this).
 
-  - *Next step*: **Increment 8** — with Data Architecture (§22) and all four of its follow-ons
-    closed (Increment 7, RFC 0075 — two shipped as real code, two turned from vague gaps into
-    precisely-scoped, correctly-diagnosed blockers with a real factual correction along the way),
-    the next real choice is among the untouched §62 Phase 2 items above. **Human Review** workflow
-    remains the most-reusable (RFC 0029's `ekos_identity_review` MCP-tool pattern is a real, close
-    precedent, not a from-scratch design) — the two newly-scoped Ownership/Lifecycle follow-ons
+  - *Next step*: **Increment 9** — with Data Architecture (§22, RFC 0075), Architecture Diff (§55,
+    RFC 0108), MCP exposure (RFC 0107), and Human Review (RFC 0109) all closed, the remaining
+    untouched §62 Phase 2 items are: the Terraform/Kubernetes/OpenAPI extractors (genuinely new
+    extraction, no existing analyzer to extend — the biggest remaining item); Deployment/Security/
+    Quality Architecture views (Deployment blocked on the extractors above; Security/Quality are
+    real, independently startable); continuous Architecture Drift (§56, needs real scheduling
+    infrastructure this project doesn't have — a bigger, separate decision, not a small increment);
+    ADR generation (§28); the two newly-scoped Ownership/Lifecycle follow-ons from RFC 0075
     (a `git_analyzer.rs` per-file ownership derivation; a `Table`/`Dataset`→`File` link) are real
-    candidates too, now that they're concretely designed rather than vague. Its own dated RFC
-    (0076) the way RFC 0069-0075 were, continuing automatically down the roadmap per the standing
+    candidates too, now that they're concretely designed rather than vague. Its own dated RFC the
+    way RFC 0069-0075/0107-0109 were, continuing automatically down the roadmap per the standing
     instruction not to cut anything here.
+
+- [ ] **Real gap found running EKOS end to end on a real, non-EKOS project (2026-08-26):** Python's
+  `requirements.txt` (and, by the same reasoning, `pyproject.toml`) has no dependency analyzer at
+  all — confirmed by grepping `crates/recovery/src/` directly (no `requirements`/`pip` file
+  anywhere), unlike `package_json_analyzer.rs` (npm) and `dependency_analyzer.rs`/
+  `crate_topology_analyzer.rs` (Cargo). Found by running the full real pipeline
+  (`init`/`build`/`recover`/`resolve`/`compile`/`commit` + `docs generate --layout
+  curated`/`solution-architect`) against a real external project (`pdf-reader`: FastAPI Python
+  backend + React/TypeScript frontend, `[llm-description] scope = "all"` enabled) — every generated
+  `## Technology Inventory`/`## System Context`/`Declared Versions` section only ever showed the 12
+  real `package.json` dependencies; all 10 real `backend/requirements.txt` dependencies (`fastapi`,
+  `sqlalchemy`, `pymupdf`, `pytesseract`, `openai`, etc.) were completely invisible to every one of
+  those views, even though the Python *source code itself* was correctly analyzed in full (55
+  `PythonModule`/39 `PythonSymbol` objects, real AI overviews grounding on real source lines). A
+  real, concretely-scoped gap for a future increment: a `requirements_analyzer.rs` mirroring
+  `package_json_analyzer.rs`'s exact shape (`Custom("Technology")` per declared dependency,
+  `DependsOn` edge from the owning `File`) — `requirements.txt`'s `pkg==1.2.3`/`pkg>=1.2.3` line
+  format is simpler to parse than `package.json`'s JSON, so this is likely a *smaller* increment
+  than its npm sibling, not a bigger one. Two secondary findings from the same live run, both
+  real-usage observations rather than code bugs: (1) a small local Ollama model (`qwen2.5:1.5b`)
+  was unreliable for RFC 0088's structured-JSON-output description task — 111 of 119 real attempted
+  calls failed (presumably malformed JSON the model produced, not caught/logged in detail anywhere
+  today — `llm_description.rs`'s `call_and_apply` discards the real error string after counting it,
+  a real, separate, smaller gap worth its own fix); the properly-sized `llama3:latest` (the
+  project's own configured model) worked correctly on the same task but was too slow on this
+  hardware (CPU-bound 8B inference) to finish within a reasonable interactive wait, so the smaller
+  model was substituted for the live test — not a silent swap, disclosed here. (2) the LLM-assisted
+  `Architecture style` field said "microservices" for a project that's really a single FastAPI
+  backend + a separate SPA frontend (arguably not accurate microservices terminology) — the pipeline
+  itself worked exactly as designed (the field is honestly labeled "(LLM-assisted, RFC 0088 — see
+  the object's own evidence)," not presented as certain), a real example of why that label exists,
+  not a bug to fix.
 
 - [x] **`KirRelationship`'s non-deterministic ids let logically-identical relationships
   accumulate as real duplicates across repeated commits** — the concretely observed instance fixed
@@ -3642,3 +3875,193 @@ are excluded — see the full exclusion list in the planning history if needed.
     id-collision fix, `Architecture.md` correctly reports "40% (completeness: 0% of 2 crate(s)
     classified..." — 2, not the pre-fix 1.
   - Full workspace gate clean, `tests/integration` 3/3.
+
+- **2026-08-26 (`devlog_112`, no RFC — 4 real bugs found running EKOS's pipeline against its own
+  repository for the first time this session)**:
+  - [x] **Artifact id computed pre-redaction, data persisted post-redaction** (`build.rs`) — a
+    redaction-engine improvement could never retroactively apply to already-observed content, since
+    the unchanged raw bytes always re-derive the same (stale) id and `PackArtifactStore::write()`
+    is skip-if-exists. Fixed: id now recomputed from the final, already-redacted content right
+    before writing. 1 new test.
+  - [x] **10 of 11 `recover.rs` artifact-id collectors never deduplicated by target** — only
+    `collect_crypto_artifact_ids` had ever been fixed; every sibling (rust, python, elixir,
+    javascript, github, clickhouse, confluence, localdocs, pentaho, git) reprocessed every
+    historical artifact version forever, a fix-once-not-generalized gap the id-staleness fix above
+    made newly visible. Fixed: shared `collect_artifact_ids_for_connector`, recency by real
+    `ArtifactMeta.created_at`, all 11 collectors reduced to call it. 2 new tests.
+  - [x] **Three independent bugs in `redaction.rs`'s `generic-assigned-secret` pattern**, each found
+    only after fixing the previous one exposed the next real parse failure: asymmetric quote
+    consumption (a lone trailing `['"]?` could eat a real closing quote with nothing to restore it,
+    breaking string-literal syntax), no word-boundary guard (matched as a bare substring inside a
+    longer real identifier, e.g. `api_secret` matching mid-token at `secret`), and whole-match
+    replacement deleting syntactically-required struct-literal field names/separators. Fixed: a
+    symmetric-quote-only alternation, a compound-identifier-aware boundary
+    (`(?:[A-Za-z0-9]+[_-])*`), and value-only span replacement. 4 new tests; all 11 pre-existing
+    tests unaffected.
+  - Live-verified against EKOS's own real, previously-corrupted self-analysis history (not a
+    scratch project — the only fix this session that *needed* real accumulated history to surface
+    at all): full-repo `redact()` scan across 256+ real `.rs` files (0 broken, was 3), full
+    from-scratch `.ekos/` rebuild (687 files, **0 `RUST003` warnings**, was 3). One legacy
+    (id, corrupted-data) pair from 2026-08-21 could not self-heal by code fix alone (content-
+    addressing's core invariant, once violated for a specific id, is permanent for that id) —
+    resolved via a one-time full `.ekos/` reset, not a further code change.
+  - Full workspace gate clean (101/101 test groups, 8 new tests), `tests/integration` 3/3.
+  - Next: generate full curated + solution-architect documentation for EKOS's own repository now
+    that `commit` (with real AI-Assisted Overviews via local Ollama) has run against the fixed,
+    freshly-rebuilt ledger.
+
+- **`docs/GAP_ANALYSIS.md` gap-closure plan (2026-08-26): six-RFC sequence for the "Runtime/
+  Retrieval" backlog** — user asked to fix the whole Runtime/Retrieval item under "Promoted from RFC
+  Non-Goals" above. Planned as RFC A (EKL `AS OF`/`COUNT`/`GROUP BY`) → B (MCP-scoped ledger read
+  caching) → C (`ekos ask` streaming) → D (multi-turn `ekos ask` history) → E (`memory/`-path search
+  boost) → F (embedding-based semantic search), smallest/most-grounded-first. **Full async
+  `KnowledgeStore`/`Runtime` conversion explicitly excluded from this plan** — RFC 0005 already
+  evaluated and rejected it for v0 in writing, and re-confirmed still correct (100% sync, both
+  backends, 33 real call-site files) rather than blindly redone; revisit only if a concrete future
+  consumer (e.g. an async MCP transport) needs it.
+  - **Status as of 2026-08-26: 6 of 6 done (A/B/C/D/E/F).** All six are each a real, shipped,
+    tested, live-verified increment.
+    - [x] **RFC E — RFC 0101, `devlog_118` (2026-08-26).** The "unresolved design gap" the original
+      plan flagged (no `memory/` path convention found anywhere in the codebase) turned out to be a
+      research gap, not a design gap — the earlier full-repo search only checked `ekos/`'s own
+      source tree, never `.claude/skills/memory/SKILL.md` (the real, concrete, already-in-production
+      convention: `$WORKSPACE_ROOT/memory`, `<scope>--<type>--<keywords>.md` filenames) or this
+      repo's own real, in-production estate-root `/home/legion/PycharmProjects/ekos.toml` (which
+      genuinely observes `memory` as its own top-level `[observe] paths` entry today).
+      `KirObject::is_under_memory_path` detects both real `[observe] paths` shapes this codebase
+      supports (multi-project via RFC 0079's `"project" == "memory"` property; single-path via a
+      literal `memory/` prefix on `"path"`) as a real path-segment check, not a substring one.
+      `SearchIndex` (tantivy, the RFC 0016 default backend) gets a new `memory_path` field and an
+      unconditional 5× boost `Should` clause alongside the existing per-term `Must` clauses — proven
+      by a dedicated test to only ever re-rank documents that already matched the query on their own
+      merits, never introduce a false positive. Deliberately scoped to `FactLedger` only, not the
+      legacy SQLite/FTS5 backend (matches RFC 0097's precedent — real added scope for a backend
+      already being phased out by RFC 0016's default-switch policy). A hardcoded convention, not an
+      `ekos.toml`-configurable glob, was chosen for v1 — matches the existing architecture of every
+      sibling property-key read next to it, and `ekos-kir` has no dependency path back to
+      `ekos.toml`'s config types anyway. 6 new tests (4 `ekos-kir`, 2 `ekos-ledger`), full workspace
+      gate clean, `tests/integration` 3/3. **Live-verified** against a real scratch workspace
+      mirroring this repo's own real estate `ekos.toml` shape: `ekos query find "quadratic"` ranked
+      all three memory-derived objects above all three ordinary-project objects, through the real
+      CLI.
+    - [x] **RFC F — redesigned, then RFC 0100 / `devlog_117` (2026-08-26).** The original
+      full-embedding-search plan was replaced, by explicit user direction after a design discussion,
+      with a far cheaper first step: RFC 0088 already generates real, evidence-grounded
+      `ai_overview`/`ai_usage` prose at commit time — it just was never fed into search.
+      `KirObject::indexed_content()` now includes it (zero new infrastructure — no vector store, no
+      `EmbeddingProvider` trait, no ANN dependency). **Real bug found and fixed at the same time,
+      not filed away**: `FactLedger::index_object` (the RFC 0016 default backend) had its own
+      independently-maintained, already-incomplete reimplementation of the indexed-content field
+      list — it never included `ocr_text` at all, silently breaking OCR'd-document search on every
+      new workspace since RFC 0024 shipped. Fixed at the root by having it deserialize and call the
+      real `indexed_content()` instead of a second, drifted copy — the third time this session found
+      the identical "logic duplicated across the two ledger backends, one silently stale" bug shape.
+      6 new tests, full workspace gate clean, `tests/integration` 3/3. **Live-verified**: a real
+      compiled `ai_overview` for a Rust `main` function read "...prints a **greeting message**..." —
+      a word absent from the function's own source and doc comment — and `ekos query find
+      "greeting"` correctly found it, proving real search-by-concept, not just that the code
+      compiles. Full embedding-based search (the original RFC F scope) is not abandoned, just no
+      longer attempted first — real usage against this cheaper approach will show whether it's
+      needed. A dedicated `search_aliases` LLM property and tantivy's built-in typo-tolerant
+      `FuzzyTermQuery` were both named as related, real, smaller future follow-ons and deliberately
+      not bundled into this RFC.
+  - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
+    `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
+    exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
+    (reuses the existing flat `Vec<Row>` `EklResult` shape, no new variant needed — a simplification
+    found while implementing). `AS OF` + `FROM` explicitly rejected (`EklError::
+    AsOfWithFromUnsupported`), not silently degraded — `load_neighborhood`/`trace_impact` have no
+    time-aware equivalents yet. Object+Relationship `JOIN` deliberately deferred as its own future
+    RFC — the one extension that actually breaks EKL's "six flat clause types" design ethos. 24 new
+    tests, full workspace gate clean (103/103 test groups), `tests/integration` 3/3. Live-verified
+    against this repo's own real 687-file self-analysis ledger: `COUNT GROUP BY kind` renders real
+    per-kind counts, `AS OF '<now>'` matches current-state counts exactly, `AS OF` before this
+    workspace's ledger existed correctly returns 0.
+  - [x] **RFC B — attempted, found unsafe, deliberately not shipped (2026-08-26).** Built a
+    `StoreCache` decorator (mtime-fingerprinted, reopen-on-change) exactly as scoped — full
+    workspace gate passed, then a new regression test caught a real, serious problem before it
+    shipped: `FactLedger::open` holds tantivy's `IndexWriter` lock for the **whole open handle's
+    lifetime**, not just during a write (`SearchIndex` stores the writer as a field,
+    `crates/ledger/src/search.rs`). Caching the open handle across MCP calls — the entire premise
+    of RFC B — means the server would hold that exclusive lock indefinitely while idle between
+    calls, **blocking any real `ekos build`/`commit` running in a separate process** from ever
+    acquiring it for as long as the server stays up. Not a hypothetical: reproduced directly with a
+    unit test simulating a concurrent external write, which failed with a real `LockBusy` error.
+    The original "reopen every `tools/call`, drop immediately after" design was never actually the
+    naive choice it looked like — it's the only design that keeps the lock's held duration short
+    enough not to starve a concurrent writer. Fixing this properly needs a genuine read-only
+    `FactLedger`/`SearchIndex` open path that skips acquiring the writer at all (routing the one
+    write-capable MCP tool, `ekos_identity_review`, through a separate write-mode open) — real new
+    storage-layer scope, not a caching-layer concern, and the same root cause already named as the
+    top-priority item in `docs/GAP_ANALYSIS.md` §11 (Storage Architecture Phase 1: "`FactLedger`
+    v3's actual single-writer enforcement is tantivy's own `IndexWriter` lock, an incidental side
+    effect, not a designed mechanism"). Code reverted (`git stash`, message "RFC B (StoreCache) -
+    abandoned, unsafe write-starvation design" — recoverable, not deleted, since the fingerprinting
+    logic itself is real and reusable once a read-only open path exists to cache safely). No RFC
+    filed — the design never reached a state worth documenting as accepted.
+  - [x] **RFC B, done properly — RFC 0097, `devlog_114` (2026-08-26).** Went to the real root
+    instead of patching around it: `SearchIndex::open_read_only` (never calls `Index::writer(..)`,
+    so it never acquires tantivy's lock at all — only `IndexReader`, always safe to hold
+    indefinitely), `FactLedger::open_read_only` (fails cleanly on a never-built workspace, refuses
+    to self-heal corrupt runs read-only, skips the write-requiring search-index catchup — an
+    honest, documented limitation: `find_objects` may lag a separate writer, every other read stays
+    fully current), new `LedgerError::ReadOnly` write guard, `open_store_read_only`
+    (`crates/cli/src/commands/store.rs`, bootstraps a genuinely fresh workspace via a short-lived
+    writable open+drop so the existing "empty workspace just works" contract survives). `StoreCache`
+    rebuilt on this — the abandoned attempt's fingerprinting logic was salvaged, not thrown away,
+    just built on the right primitive this time. `ekos_identity_review` (the one write-capable MCP
+    tool) extracted to bypass the cache entirely via its own fresh writable open. 7 new tests
+    including the exact regression (a read-only handle staying open never blocks a concurrent
+    writable open). Full workspace gate clean, `tests/integration` 3/3. **Live-verified against
+    this repo's own real 5529-object ledger**: ran the real `ekos mcp serve` binary, two cached
+    `tools/call`s returned identical results (handle reuse confirmed), then a genuine concurrent
+    `ekos build` completed successfully while the server's cached handle stayed open — the exact
+    scenario that failed with `LockBusy` under the first design.
+  - [x] **RFC C — RFC 0098, `devlog_115` (2026-08-26).** Real SSE/NDJSON streaming for all three
+    real providers (Anthropic/OpenAI/Ollama) via a new default-implemented `LlmProvider::
+    complete_stream` (falls back to `complete` — zero breakage for `MockLlmProvider`/test-only
+    implementors), a new dependency-free `stream_lines` primitive (`Response::chunk()`, not
+    `bytes_stream()` — no new Cargo feature/dependency needed), `AiRuntime::ask_stream`, and `ekos
+    ask --stream` (rejects `--stream --json` together). A real, non-obvious `async_trait` lifetime
+    pitfall found live: a borrowed `&mut (dyn FnMut(&str) + Send)` callback fails to borrow-check
+    inside `#[async_trait]`'s macro expansion (it collapses elided lifetimes to one shared name,
+    breaking the implicit HRTB a borrowed-str callback needs) — fixed by taking an owned `String`
+    per chunk instead. `CachedLlmProvider` deliberately bypasses its disk cache for streaming calls.
+    The trailing `{"cited_evidence": [...]}` block is honestly NOT hidden during live streaming (a
+    named, accepted v1 limitation — a buffering scheme to hide it was investigated and rejected as
+    a real correctness risk for a cosmetic gain). MCP streaming explicitly out of scope (no
+    progress-notification mechanism in its stdio protocol today; `ekos_ask` isn't even an MCP tool
+    yet). 20 new tests (13 offline provider-parsing tests via extracted `StreamAccumulator`/
+    `apply_stream_line` pure functions, 1 `ask_stream` test, 1 CLI rejection test, plus provider
+    unit tests), full workspace gate clean, `tests/integration` 3/3. Live-verified against a real
+    local Ollama daemon twice — a standalone probe (9 real incremental chunks, correct final
+    content/token usage) and the full real CLI path (`ekos ask --stream` against a real, freshly
+    built EKOS workspace, correct streamed prose + Sources section). Also confirmed the observed
+    slowness against this repo's own large (~5,500-object) ledger is pre-existing (reproduced
+    identically on the unmodified non-streaming `ask` path), not a regression from this RFC.
+  - [x] **RFC D — RFC 0099, `devlog_116` (2026-08-26).** Real conversation memory: `LlmRequest`
+    gains `history: &[Message]` (15 call sites across 11 files mechanically updated to
+    `history: &[]`, zero behavior change for every pre-existing single-shot caller — a search-
+    and-replace near-miss corrupted two unrelated structs that happen to also have a `max_tokens`
+    field, `AiRuntimeConfig::default()` and `openai.rs`'s own wire-type definition, caught by
+    reading the real `cargo build` output, not the script's own success count); all three real
+    providers now build `messages` as `[system] + history + [current turn]` (Anthropic: history +
+    current, system stays its own top-level field); `AiRuntime::ask_with_history`/
+    `ask_stream_with_history` (`ask`/`ask_stream` now thin empty-history wrappers);
+    `ekos ask --session <name>` persisting `.ekos/ask-sessions/<name>.json` (strict
+    `[A-Za-z0-9_-]+` name validation — rejects anything that could escape the directory, rather than
+    silently sanitizing). `ConversationTurn` deliberately stores the *clean* question/answer, never
+    the raw grounded prompt or raw citation-block response, so history doesn't re-inflate every
+    later turn with repeated retrieved-context JSON. Retrieval stays turn-local (no cross-turn
+    blending) and there's no token-budget cap on accumulated history yet — both named, deliberate
+    v1 limitations, not oversights. 18 new tests (provider wire-format placement, cache-key
+    extension, real history-threading via a request-recording mock provider — not just "it
+    compiles" — session name validation/round-trip), full workspace gate clean, `tests/integration`
+    3/3. **Live-verified against a real local Ollama daemon with a real two-turn session**: turn 2
+    asked a question with no possible answer from ledger retrieval at all ("what was my previous
+    question about?") and the model answered correctly, proof the real conversation history was
+    used, not just plumbed through unused code; the session file round-tripped on disk as two clean
+    question/answer pairs with no leaked retrieval context or citation JSON.
+  - [ ] RFC F — embedding-based semantic search (largest, own RFC — new `EmbeddingProvider` trait,
+    Ollama-backed v1, brute-force cosine similarity rather than a new ANN dependency, reciprocal
+    rank fusion with existing bm25 ranking).

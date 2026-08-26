@@ -1,0 +1,24 @@
+# TODO.md Phase 0's "Docker development image" — mounts the repo and runs cargo inside a
+# container matching CI's own toolchain, for a machine with no local Rust installation.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml run ekos cargo build --workspace
+#   docker compose -f docker-compose.dev.yml run ekos cargo test --workspace
+#   docker compose -f docker-compose.dev.yml run ekos cargo clippy --workspace -- -D warnings
+services:
+  ekos:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/workspace
+      # Named volume for the build cache — a bind-mounted target/ would otherwise mix container-
+      # built (Linux/glibc) artifacts with any host-built ones across host OS boundaries, and
+      # re-resolve/rebuild from scratch on every run without this.
+      - ekos-cargo-target:/workspace/ekos/target
+      - ekos-cargo-registry:/usr/local/cargo/registry
+    working_dir: /workspace/ekos
+
+volumes:
+  ekos-cargo-target:
+  ekos-cargo-registry:

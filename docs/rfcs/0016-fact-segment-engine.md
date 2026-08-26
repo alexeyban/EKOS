@@ -351,8 +351,16 @@ exactly as before.
 
 ## Non-goals
 
-- Multi-writer concurrency (EKOS has one writer by design; the manifest
-  lock enforces it).
+- Multi-writer concurrency (EKOS has one writer by design). **Correction (RFC 0104 Phase 1,
+  2026-08-26)**: this originally said "the manifest lock enforces it" — that was never accurate.
+  There is no manifest lock anywhere in `segment/mod.rs` (that module's own doc comment says
+  single-writer is "the caller ensures it," not enforced there). Until RFC 0104, the only thing
+  actually stopping a second writable process was an *incidental* side effect of tantivy's own
+  `IndexWriter` lock inside `SearchIndex` — real, but never a mechanism this project designed for
+  the purpose, and it surfaced as a tantivy-internal `LockBusy` error rather than a clear
+  ledger-level one. RFC 0104 added a real, designed cross-process `write.lock` file
+  (`fact_ledger::acquire_write_lock`), acquired first on every writable open, before tantivy's lock
+  is ever reached — the actual enforcement mechanism this Non-goal always should have named.
 - Distributed/replicated operation.
 - Query language changes — EKL and the MCP tools are unchanged consumers.
 - Compaction/retention policies (explicitly a later RFC; v1 never deletes).

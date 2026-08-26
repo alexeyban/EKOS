@@ -1,6 +1,6 @@
 use super::store::open_store;
 use anyhow::Result;
-use ekos_artifact::{ArtifactStore, IndexArtifact, PackArtifactStore};
+use ekos_artifact::{ArtifactId, ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
@@ -286,6 +286,32 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
                         serde_json::Value::String(project_key.clone()),
                     );
                 }
+
+                // Real bug, found live 2026-08-25 re-running `ekos build`/`recover` against
+                // EKOS's own repository: `observer.scan()` computes each `ObservationArtifact`'s
+                // content-addressed `id` from the *raw*, pre-redaction `data` (inside the
+                // observer's own `ObservationArtifact::new` call) — but `redact_json` above then
+                // mutates `data` in place, so the id on disk never matches what actually got
+                // written. `PackArtifactStore::write` is skip-if-exists (`if self.exists(id) {
+                // return Ok(false); }`, never an overwrite), so once a file's raw content is
+                // first observed, whatever `redact` happened to produce *that one time* is locked
+                // in under that id forever — every later fix to the redaction engine (this
+                // session shipped at least one real one, `devlog_100`) silently never applies to
+                // it again, since the same unchanged raw content always re-derives the same
+                // pre-redaction id and `write` sees "already have this" and skips. Confirmed live:
+                // `crates/clickhouse-query/src/client.rs`'s real `password: password.into()` field
+                // init was mangled by a since-fixed version of the `generic-assigned-secret`
+                // pattern into `[REDACTED:...].into()` — today's `redact()` no longer does this to
+                // fresh content, but the stale artifact from whenever this file was first observed
+                // kept serving the broken version, corrupting `rust_analyzer.rs`'s parse of it on
+                // every subsequent `recover` (RUST003) regardless of how many times `build`/
+                // `recover` reran. The fix: recompute the id from the *final*, already-redacted
+                // `content` right here, so a redaction-logic change that alters the output for
+                // unchanged raw source naturally becomes a new id — a real, fresh artifact `write`
+                // actually persists — instead of silently resolving to a stale one forever.
+                artifact.id = ArtifactId::compute(
+                    &serde_json::to_value(&artifact.content).expect("content must serialize"),
+                );
             }
 
             for artifact in &package.artifacts {
@@ -429,6 +455,7 @@ fn prune_snapshots(snapshot_dir: &Path, keep: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ekos_compiler_core::config::SecretPatternConfig;
     use ekos_kir::ObjectKind;
     use tempfile::tempdir;
 
@@ -469,6 +496,87 @@ mod tests {
             file_object_count(&config, dir.path()) > 0,
             "File objects must be reproduced after a ledger clear, even though the fingerprint \
              cache matches the unchanged source content"
+        );
+    }
+
+    /// The real `data.source` text `rust_analyzer.rs` (and every other recovery pass) actually
+    /// reads back from the persisted artifact store — the thing that stayed stale under the real
+    /// bug, unlike the ledger's own `File` KirObject (rebuilt fresh from in-memory data on every
+    /// `build` run regardless of what the artifact store's `write()` actually persisted, so it
+    /// can never expose this class of staleness).
+    /// Every real `data.source` text a "rust" connector artifact for `target` currently holds in
+    /// the store — plural, deliberately: the old, stale, pre-fix artifact and a freshly re-
+    /// redacted one legitimately coexist in the store under two different content-addressed ids
+    /// once the fix writes a new one (the fix's job is making sure a *fresh* one gets written at
+    /// all, not garbage-collecting the old one — that's a separate, real, un-addressed cleanup
+    /// question this test doesn't claim to answer).
+    fn rust_artifact_sources(config: &EkosConfig, cwd: &Path, target: &str) -> Vec<String> {
+        let store = ekos_artifact::PackArtifactStore::open(config.artifact_dir(cwd)).unwrap();
+        let mut found = Vec::new();
+        for id in store.list().unwrap() {
+            let Some(json) = store.read(&id).unwrap() else {
+                continue;
+            };
+            if json["connector_name"] == "rust" && json["target"] == target {
+                found.push(
+                    json["data"]["source"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+            }
+        }
+        found
+    }
+
+    /// Real bug, found live 2026-08-25 re-running `ekos build`/`recover` against EKOS's own
+    /// repository: an `ObservationArtifact`'s content-addressed id is computed from the *raw*,
+    /// pre-redaction data inside the observer's own `scan()`, but `redact_json` mutates that data
+    /// afterward — so `PackArtifactStore::write`'s skip-if-exists semantics permanently locks in
+    /// whatever redaction happened to run the *first* time a file's unchanged raw content was
+    /// ever observed, and no later fix to the redaction engine (or, as exercised here, no later
+    /// *addition* of a real `[security]` custom pattern) can ever re-redact it — the same
+    /// unchanged raw content always re-derives the same pre-redaction id, `write` sees "already
+    /// have this," and the stale, differently-redacted version keeps being served forever to
+    /// every recovery pass that reads it back (confirmed live: `rust_analyzer.rs` failing to
+    /// parse a real file whose stale artifact still held a since-fixed redaction mangling).
+    #[tokio::test]
+    async fn a_later_redaction_pattern_addition_actually_re_redacts_unchanged_source() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("secret.rs"),
+            b"const TOKEN: &str = \"myspecialtoken123\";\n",
+        )
+        .unwrap();
+
+        // First build: no custom pattern matches this content yet — it's stored untouched.
+        let config1 = EkosConfig::default();
+        run(&config1, dir.path()).await.unwrap();
+        let first = rust_artifact_sources(&config1, dir.path(), "secret.rs");
+        assert_eq!(first.len(), 1);
+        assert!(
+            first[0].contains("myspecialtoken123"),
+            "unmatched content must be stored as-is on the first build"
+        );
+
+        // Same real scenario the RFC 0077 test above already established forces a genuine
+        // rescan (not a cached-artifact re-derivation): clear just the ledger.
+        std::fs::remove_dir_all(config1.ekos_dir(dir.path()).join("ledger")).unwrap();
+
+        // Second build: a real `[security]` custom pattern now matches the *same, unchanged*
+        // raw file content — simulating a redaction-engine fix/addition between two runs.
+        let mut config2 = EkosConfig::default();
+        config2.security.extra_patterns.push(SecretPatternConfig {
+            label: "test-secret".to_string(),
+            regex: "myspecialtoken123".to_string(),
+        });
+        run(&config2, dir.path()).await.unwrap();
+
+        let second = rust_artifact_sources(&config2, dir.path(), "secret.rs");
+        assert!(
+            second.iter().any(|s| s.contains("[REDACTED:test-secret]")),
+            "a freshly, correctly re-redacted artifact must exist after the pattern addition — \
+             got: {second:?}"
         );
     }
 

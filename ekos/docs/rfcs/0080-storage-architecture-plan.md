@@ -64,6 +64,19 @@ settle on the real mechanism first anyway.
 
 ### Phase 1 (highest priority — real, live evidence) — Concurrency: two different real gaps, one per backend
 
+**[x] Done — RFC 0104 / `devlog_121` (2026-08-26).** SQLite `Ledger`'s multi-statement writers
+(`append`/`append_object`/`append_relationship`) now run inside real `BEGIN IMMEDIATE`/`COMMIT`
+transactions (`in_transaction`), resolved without adding a supplementary explicit lock — SQLite's
+own WAL-mode locking under `BEGIN IMMEDIATE` is already real cross-process protection. `FactLedger`
+gets a real, designed `write.lock` file (`fs4`, `flock`(2)-backed), acquired first on every writable
+open, before `SegmentStore`/`SearchIndex` are touched — a second writable process now fails fast
+with a clear `LedgerError::Locked` instead of an eventual tantivy-internal error. RFC 0016's
+Non-goals text corrected. The concurrent-read visibility spec item turned out to be a real,
+previously-unverified gap, not housekeeping: a `FactLedger` handle's view is frozen as of its own
+`open()` call, not automatically refreshed by a separate process's writes — proven with a dedicated
+regression test, not just documented as a claim. Live-verified with two real, separate `ekos commit`
+processes racing the same real scratch workspace.
+
 **SQLite `Ledger` — the actual, most likely cause of the real corruption found.** `append_object`
 (`crates/ledger/src/lib.rs`) executes 3-4 separate statements per write (INSERT into `entries` →
 SELECT `current_objects` → INSERT OR REPLACE `current_objects` → FTS index update) with **no
@@ -93,6 +106,19 @@ implementation.
 
 ### Phase 2 — WAL + repair tool
 
+**[x] Done — RFC 0105 / `devlog_122` (2026-08-26).** Confirmed the "WAL" half needed no new code —
+`FactLedger`'s existing segment format already provides real, ledger-level WAL durability; the real
+gap was that nothing surfaced it. New `SegmentStore::verify_sealed_report` checks every sealed
+segment unconditionally (not just the first failure); `verify_sealed` refactored on top of it so
+the two checks can't drift. New `ekos ledger repair` CLI command opens the ledger (free self-heals:
+torn active-segment tail truncation, stale index-runs rebuild), then reports one line per sealed
+segment. Replaces `TODO.md`'s previously accurate "the only recovery option is a full migration
+rollback" with a real, precise diagnostic — no automatic fix for genuine corruption (no redundancy
+exists to reconstruct lost bytes), but a human now gets exactly which segment and transaction range
+is affected instead of an opaque failure. FactLedger-only, matching every prior phase's precedent
+of not doubling scope onto the SQLite backend (its own `PRAGMA integrity_check` already covers the
+analogous job).
+
 No ledger-level WAL exists in either backend today (SQLite's own `journal_mode=WAL` is a different,
 backend-internal thing, not something a repair tool for the *logical* ledger could use across both
 backends). `FactLedger` already has strong crash-recovery primitives to build a repair tool on top
@@ -104,6 +130,23 @@ concurrency-safety fix and a real repair tool are answering the same underlying 
 ("what happens when a write is interrupted or races another one") from two different angles.
 
 ### Phase 3 — Snapshot + compaction of the version chain
+
+**[x] Done — RFC 0106 / `devlog_123` (2026-08-26).** Built as a pure, purely-additive acceleration
+structure — periodic per-entity checkpoints (`checkpoints.jsonl`) let `state_at` (the shared engine
+behind `object_at`/`current_sig`/every point-in-time read) seed its fold from the nearest prior
+checkpoint instead of always genesis, provably equivalent to full replay by construction (never
+consulted for correctness, only speed — a missing/corrupt checkpoint just means a slower, still
+100% correct fold). Honest scope check before shipping: `FactIndexes`' EAVT key order
+(entity→attribute→value→tx) means the underlying index scan itself can't be tx-bounded cheaply, so
+the real win is in the fold cost, not scan I/O — stated precisely, not oversold.
+
+**A real finding, not resolved here, explicitly flagged**: RFC 0080's own Phase 4
+("retention/pruning policy") implies eventually discarding old delta history — in real tension with
+`CLAUDE.md`'s own Key Invariant that the ledger is append-only with no object-level delete/tombstone
+anywhere (deliberate, not an oversight). Phase 3 needed no resolution of this (checkpoints are
+purely additive, nothing discarded), but Phase 4 does — relaxing a reviewed, load-bearing invariant
+needs its own explicit conversation with the user before any design work starts, not a reflexive
+"next phase in sequence."
 
 Genuinely greenfield — no existing building block does this (the `.ekos/snapshots/*.json.zst`
 mechanism in `build.rs` is unrelated: a build-time artifact-index dump for observation-layer
@@ -117,9 +160,18 @@ this is the concrete acceptance criterion its implementation RFC needs to define
 
 No retention/pruning of ledger fact history exists anywhere (distinct from `SNAPSHOT_KEEP`, which
 only touches the unrelated build-index snapshots — confirmed the same distinction as Phase 3).
-RFC 0034 explicitly named this as its own future RFC rather than attempting it. Natural sequel to
-Phase 3 — a pruning policy needs the compaction model to exist first, since "prune" without a
-compaction/summarization step underneath it means real data loss, not archival.
+RFC 0034 explicitly named this as its own future RFC rather than attempting it.
+
+**Real blocker found during Phase 3 (RFC 0106), not just a sequencing dependency**: this phase, as
+named, means discarding old delta history — which directly conflicts with `CLAUDE.md`'s own Key
+Invariant that the ledger is append-only with no object-level delete/tombstone mechanism anywhere
+(a deliberate, reviewed project decision, not an oversight). Phase 3's checkpoints do *not* remove
+this blocker — they were deliberately built as a purely additive acceleration structure specifically
+so they wouldn't need to. Before any Phase 4 design work starts, this needs an explicit decision
+from the user: relax the append-only/no-delete invariant (a real, load-bearing architectural
+change, not a phase-4-shaped feature), or re-scope Phase 4 to something that doesn't require it
+(e.g., cold storage/archival to a separate location rather than in-place deletion — not investigated
+here). Not scheduled until that conversation happens.
 
 ### Phase 5 — Materialized views alongside the EAV fact engine
 

@@ -3,6 +3,7 @@
 //! Phase 6. Requires RFC 0003 (KIR) and RFC 0008 (LLM policy).
 
 pub mod anthropic;
+pub mod architecture_diff;
 pub mod architecture_drift;
 pub mod architecture_evaluator;
 pub mod architecture_reasoning;
@@ -34,6 +35,7 @@ pub mod sql_transform_analyzer;
 mod statement_repair;
 
 pub use anthropic::AnthropicProvider;
+pub use architecture_diff::{ArchitectureDiff, RoleChange, diff_architecture};
 pub use architecture_drift::{DriftFinding, drift_from_history};
 pub use architecture_evaluator::{
     EvaluationIssue, EvaluationIssueType, EvaluationReport, IssueSeverity,

@@ -320,6 +320,23 @@ no separate `--llm` flag. See RFC 0067 for what's deliberately out of scope for 
 (persistent checkpointing/resume, concurrency-safety infrastructure, CI/CD exit codes, multi-format
 output).
 
+Because the LLM-classified crate role is a real judgment call, not a deterministic fact, two
+follow-on commands treat it accordingly rather than silently trusting or silently re-deriving it:
+
+```bash
+ekos architecture diff --since <timestamp>   # real id-set comparison of technologies, crate role
+                                              # classifications, risks, and open questions between
+                                              # two points in time — not a fuzzy match (RFC 0108)
+ekos architecture review                     # list/confirm/reject pending role classifications;
+                                              # a confirmed-or-rejected review status survives the
+                                              # next `ekos commit` even though the underlying claim
+                                              # is content-signature-versioned and gets re-derived
+                                              # on every run (RFC 0109)
+```
+
+`ekos_architecture_diff` and `ekos_architecture_review` expose both over MCP too — see the AI agent
+access section below.
+
 ### LLM-backed compile-time descriptions (RFC 0088, opt-in)
 
 Unlike `--prose` above (render-time, re-spent on every `docs generate` call), `[llm-description]`
@@ -387,14 +404,22 @@ correct), but live-question answer quality is unverified pending a real API key 
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
-server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`,
+server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl` (EKL supports point-in-time `AS
+OF <timestamp>` queries and `COUNT`/`GROUP BY` aggregation — RFC 0096), `ekos_neighborhood`,
 `ekos_state`, `ekos_dependents` (single-hop impact analysis), `ekos_impact` (directed,
-kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_diff` (what changed since T),
-`ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
-explanation and migration diffing — RFC 0028), and `ekos_identity_review` (confirm/reject a
-cross-system identity match — RFC 0029, the one write-capable tool; every other tool reads only the
-local ledger). A gated `ekos_clickhouse_query` tool (RFC 0056) is also available, off by default —
-see the ClickHouse connector section below. Connect Claude Code with:
+kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_diff` (raw ledger-entry changes since
+T), `ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
+explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
+`ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,
+documentation drift, and a real architecture-level diff between two points in time — technologies,
+crate role classifications, risks, open questions — distinct from `ekos_diff`'s raw entry report;
+RFC 0065/0068 §55/RFC 0107-0108), and `ekos_identity_review`/`ekos_architecture_review` (confirm or
+reject a cross-system identity match, or an LLM-classified crate role claim — RFC 0029/RFC 0109,
+the two write-capable tools; every other tool reads only the local ledger). Long-lived server
+sessions reuse one cached, read-only ledger handle across calls without ever blocking a concurrent
+`ekos build`/`commit` in another process (RFC 0097). A gated `ekos_clickhouse_query` tool (RFC
+0056) is also available, off by default — see the ClickHouse connector section below. Connect
+Claude Code with:
 
 ```bash
 claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace
@@ -579,6 +604,19 @@ section has the evidence). Any **pre-existing** SQLite-backed workspace is compl
 it keeps serving from SQLite forever unless explicitly migrated. `ekos ledger migrate --v3`
 migrates an existing SQLite workspace onto the fact engine — the SQLite source is left untouched,
 and deleting `.ekos/ledger/facts/` rolls back.
+
+Since that default switch, the fact engine has picked up three further hardening passes, all
+opt-in-free and automatic on any fact-engine workspace:
+
+- **Concurrency safety** (RFC 0104) — writes take a real cross-process file lock (`fs4`) instead of
+  assuming a single writer, and multi-step writes run inside a transaction that rolls back cleanly
+  on failure rather than leaving a half-written segment.
+- **Self-healing search + `ledger repair`** (RFC 0103/0105) — a stale or corrupted tantivy schema
+  is detected and rebuilt automatically on open; `ekos ledger repair` additionally re-verifies every
+  sealed segment's signature and reports (or fixes) any that fail.
+- **Version-chain checkpoints** (RFC 0106) — periodic checkpoints into `checkpoints.jsonl` bound how
+  far back a version-chain read has to walk, keeping `object_at`/point-in-time reads fast as ledger
+  history grows.
 
 ## Development Process
 

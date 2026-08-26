@@ -1,6 +1,7 @@
 //! Disk-backed LLM response cache (RFC 0008).
 //!
-//! Cache key = SHA-256(model ‖ 0x00 ‖ prompt_version ‖ 0x00 ‖ system ‖ 0x00 ‖ user)
+//! Cache key = SHA-256(model ‖ 0x00 ‖ prompt_version ‖ 0x00 ‖ system ‖ 0x00 ‖ user
+//! ‖ 0x00 ‖ history[0].role ‖ 0x00 ‖ history[0].content ‖ 0x00 ‖ history[1].role ‖ …)
 //! Store layout: `<cache_root>/<2-hex>/<64-hex>.json` — same as artifact store.
 
 use async_trait::async_trait;
@@ -9,6 +10,12 @@ use std::path::{Path, PathBuf};
 
 use crate::llm::{LlmError, LlmProvider, LlmRequest, LlmResponse};
 
+/// RFC 0099: `history` is folded into the key so two requests that differ
+/// only in prior conversation turns never collide on the same cache entry.
+/// Every single-shot caller (analyzer passes, `docs --prose`, `marketing`,
+/// the NL-to-SQL bridge, …) passes an empty `history`, so this is a no-op
+/// extension of the existing hash for every pre-RFC-0099 call site — same
+/// key as before, byte for byte, when `history` is empty.
 fn cache_key(model: &str, req: &LlmRequest<'_>) -> String {
     let mut h = Sha256::new();
     h.update(model.as_bytes());
@@ -18,6 +25,12 @@ fn cache_key(model: &str, req: &LlmRequest<'_>) -> String {
     h.update(req.system.as_bytes());
     h.update([0u8]);
     h.update(req.user.as_bytes());
+    for turn in req.history {
+        h.update([0u8]);
+        h.update(turn.role.as_bytes());
+        h.update([0u8]);
+        h.update(turn.content.as_bytes());
+    }
     hex::encode(h.finalize())
 }
 
@@ -73,6 +86,20 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
 
         Ok(resp)
     }
+
+    /// Deliberately **not** cached (RFC 0098): the disk cache needs one
+    /// complete `LlmResponse` to hash and persist, which a stream doesn't
+    /// have until it's already finished — and per-turn context for a
+    /// streamed call is typically unique anyway, so the cache-hit rate
+    /// would be near zero regardless. Delegates straight to the inner
+    /// provider.
+    async fn complete_stream(
+        &self,
+        req: &LlmRequest<'_>,
+        on_chunk: &mut (dyn FnMut(String) + Send),
+    ) -> Result<LlmResponse, LlmError> {
+        self.inner.complete_stream(req, on_chunk).await
+    }
 }
 
 #[cfg(test)]
@@ -121,6 +148,7 @@ mod tests {
             user: "analyse this",
             prompt_version: "test-v1",
             max_tokens: 100,
+            history: &[],
         };
 
         let r1 = provider.complete(&req).await.unwrap();
@@ -151,12 +179,14 @@ mod tests {
             user: "u",
             prompt_version: "v1",
             max_tokens: 10,
+            history: &[],
         };
         let req_v2 = LlmRequest {
             system: "s",
             user: "u",
             prompt_version: "v2",
             max_tokens: 10,
+            history: &[],
         };
 
         provider.complete(&req_v1).await.unwrap();
@@ -166,6 +196,83 @@ mod tests {
             calls.load(Ordering::SeqCst),
             2,
             "different prompt versions must be separate cache entries"
+        );
+    }
+
+    // ── RFC 0099: history folded into the cache key ─────────────────────
+
+    #[tokio::test]
+    async fn different_history_different_cache_entries() {
+        use crate::llm::Message;
+        let dir = TempDir::new().unwrap();
+        let calls = Arc::new(AtomicU32::new(0));
+        let provider = CachedLlmProvider::new(
+            CountingMock {
+                calls: calls.clone(),
+                response: "resp".into(),
+            },
+            dir.path(),
+        );
+
+        let no_history = LlmRequest {
+            system: "s",
+            user: "u",
+            prompt_version: "v1",
+            max_tokens: 10,
+            history: &[],
+        };
+        let with_history = LlmRequest {
+            system: "s",
+            user: "u",
+            prompt_version: "v1",
+            max_tokens: 10,
+            history: &[Message {
+                role: "user",
+                content: "an earlier turn",
+            }],
+        };
+
+        provider.complete(&no_history).await.unwrap();
+        provider.complete(&with_history).await.unwrap();
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "identical system/user/prompt_version but different history must not collide"
+        );
+    }
+
+    #[tokio::test]
+    async fn same_request_and_history_is_still_a_cache_hit() {
+        use crate::llm::Message;
+        let dir = TempDir::new().unwrap();
+        let calls = Arc::new(AtomicU32::new(0));
+        let provider = CachedLlmProvider::new(
+            CountingMock {
+                calls: calls.clone(),
+                response: "resp".into(),
+            },
+            dir.path(),
+        );
+        let history = [Message {
+            role: "user",
+            content: "an earlier turn",
+        }];
+        let req = LlmRequest {
+            system: "s",
+            user: "u",
+            prompt_version: "v1",
+            max_tokens: 10,
+            history: &history,
+        };
+
+        provider.complete(&req).await.unwrap();
+        provider.complete(&req).await.unwrap();
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "identical history on both calls must still hit the cache"
         );
     }
 }

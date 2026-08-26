@@ -267,6 +267,7 @@ impl CompilerPass for DocumentSemanticsAnalyzerPass {
                 user: &section.excerpt,
                 prompt_version: PROMPT_VERSION,
                 max_tokens: 2048,
+                history: &[],
             };
 
             let resp = match self.llm.complete(&req).await {

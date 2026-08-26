@@ -784,244 +784,129 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     Ok(())
 }
 
-/// Collect ArtifactIds for all git commit and repo artifacts currently in the store.
-fn collect_git_artifact_ids(store: &dyn ArtifactStore) -> (Vec<ArtifactId>, Option<ArtifactId>) {
+/// Every artifact for `connector_name` currently in the store, deduplicated by `target` — the
+/// real fix `collect_crypto_artifact_ids` alone used to carry (see git blame), now shared so the
+/// same real bug can't recur independently in each collector again. Found live 2026-08-25/26
+/// re-running `ekos build`/`recover` against EKOS's own repository, right after fixing the
+/// upstream cause: `build.rs`'s artifact-id-staleness fix (recomputing an `ObservationArtifact`'s
+/// content-addressed id from its *redacted* content, not the raw pre-redaction content the
+/// observer originally computed it from) means a single real target can legitimately now have
+/// more than one artifact in the store — an old, permanently-stale one plus a fresh, correctly
+/// re-redacted one — and every collector *except* `collect_crypto_artifact_ids` blindly passed
+/// every historical version through, re-processing the same real file once per version and
+/// re-raising a parse warning on the stale, permanently-broken copy forever, on every single
+/// future `recover` run, no matter how many times the underlying bug got fixed. Picks whichever
+/// `store.list()` iteration order happens to insert last for a given target — the same accepted
+/// imprecision the crypto version already shipped with; "some real, current version" beats
+/// "every historical one."
+fn collect_artifact_ids_for_connector(
+    store: &dyn ArtifactStore,
+    connector_name: &str,
+) -> Vec<ArtifactId> {
     let all_ids = match store.list() {
         Ok(ids) => ids,
-        Err(_) => return (vec![], None),
+        Err(_) => return Vec::new(),
     };
 
-    let mut commit_ids = vec![];
-    let mut repo_id = None;
-
+    // Keyed by target, valued by (id, created_at) so a real duplicate resolves to the *newest*
+    // one deterministically — plain "whichever `store.list()` happens to insert last" (this
+    // function's own first version, and the still-standalone `collect_crypto_artifact_ids` this
+    // replaced) has no defined relationship to recency at all: `PackArtifactStore::list()`'s
+    // order comes from segment/offset position, not time, so it silently picked the *stale* one
+    // for exactly the real files this fix exists for on a live run against EKOS's own repo.
+    // `ArtifactMeta.created_at` is a real RFC3339 timestamp every artifact already carries;
+    // lexicographic string comparison on a fixed-width RFC3339 string is a correct recency
+    // ordering, no timestamp parsing needed.
+    let mut by_target: HashMap<String, (ArtifactId, String)> = HashMap::new();
     for id in all_ids {
-        if let Ok(Some(json)) = store.read(&id) {
-            let connector = json["connector_name"].as_str().unwrap_or("");
-            let target = json["target"].as_str().unwrap_or("");
-            if connector == "git" {
-                if target == "repo" {
-                    repo_id = Some(id);
-                } else {
-                    commit_ids.push(id);
+        if let Ok(Some(json)) = store.read(&id)
+            && json["connector_name"].as_str() == Some(connector_name)
+        {
+            let target = json["target"].as_str().unwrap_or_default().to_string();
+            let created_at = json["meta"]["created_at"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            match by_target.get(&target) {
+                Some((_, existing_created_at)) if existing_created_at >= &created_at => {}
+                _ => {
+                    by_target.insert(target, (id, created_at));
                 }
             }
         }
     }
+    let mut ids: Vec<ArtifactId> = by_target.into_values().map(|(id, _)| id).collect();
+    ids.sort_by_key(|id| id.to_string());
+    ids
+}
 
-    (commit_ids, repo_id)
+/// Collect ArtifactIds for all git commit and repo artifacts currently in the store.
+fn collect_git_artifact_ids(store: &dyn ArtifactStore) -> (Vec<ArtifactId>, Option<ArtifactId>) {
+    let mut ids = collect_artifact_ids_for_connector(store, "git");
+    // `target == "repo"` is the one artifact per real git connector that isn't keyed by commit
+    // sha — pull it out into its own slot rather than the commit-id list.
+    let repo_id = ids
+        .iter()
+        .position(|id| {
+            store
+                .read(id)
+                .ok()
+                .flatten()
+                .is_some_and(|json| json["target"].as_str() == Some("repo"))
+        })
+        .map(|i| ids.remove(i));
+    (ids, repo_id)
 }
 
 /// Collect ArtifactIds for every crypto export-batch artifact currently in the store.
 fn collect_crypto_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    // Dedup by target (batch_id): content-addressing already makes re-processing an
-    // unchanged batch a no-op downstream, but there's no reason to pass duplicate ids.
-    let mut by_batch: HashMap<String, ArtifactId> = HashMap::new();
-    for id in all_ids {
-        if let Ok(Some(json)) = store.read(&id)
-            && json["connector_name"].as_str() == Some("crypto")
-        {
-            let batch_id = json["target"].as_str().unwrap_or_default().to_string();
-            by_batch.insert(batch_id, id);
-        }
-    }
-    let mut ids: Vec<ArtifactId> = by_batch.into_values().collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "crypto")
 }
 
 /// Collect ArtifactIds for every GitHub issue/PR artifact currently in the store (RFC 0020).
 fn collect_github_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("github"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "github")
 }
 
 /// Collect ArtifactIds for every ClickHouse table artifact currently in the store (RFC 0056).
 fn collect_clickhouse_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("clickhouse"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "clickhouse")
 }
 
 /// Collect ArtifactIds for every Confluence page artifact currently in the store (RFC 0022).
 fn collect_confluence_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("confluence"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "confluence")
 }
 
 /// Collect ArtifactIds for every local-document artifact currently in the store (RFC 0023).
 fn collect_localdocs_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("localdocs"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "localdocs")
 }
 
 /// Collect ArtifactIds for every Pentaho `.ktr`/`.kjb` artifact currently in
 /// the store (RFC 0027 Phase 3).
 fn collect_pentaho_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("pentaho"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "pentaho")
 }
 
 /// Collect ArtifactIds for every Python `.py` artifact currently in the store (RFC 0038/0040
 /// Phase 2).
 fn collect_python_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("python"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "python")
 }
 
 /// Collect ArtifactIds for every Rust `.rs` artifact currently in the store (RFC 0041).
 fn collect_rust_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("rust"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "rust")
 }
 
 fn collect_elixir_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("elixir"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "elixir")
 }
 
 /// Collect ArtifactIds for every JavaScript/TypeScript artifact currently in the store (RFC 0085).
 fn collect_javascript_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
-    let all_ids = match store.list() {
-        Ok(ids) => ids,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut ids: Vec<ArtifactId> = all_ids
-        .into_iter()
-        .filter(|id| {
-            store
-                .read(id)
-                .ok()
-                .flatten()
-                .is_some_and(|json| json["connector_name"].as_str() == Some("javascript"))
-        })
-        .collect();
-    ids.sort_by_key(|id| id.to_string());
-    ids
+    collect_artifact_ids_for_connector(store, "javascript")
 }
 
 /// RFC 0026's opt-in gate: the document-semantics pass costs one LLM call per
@@ -1105,8 +990,106 @@ pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn L
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ekos_artifact::ObservationArtifact;
     use ekos_compiler_core::config::{DocumentSemanticsConfig, LlmConfig};
     use tempfile::tempdir;
+
+    /// Real bug, found live 2026-08-25/26: every `collect_*_artifact_ids` function except
+    /// `collect_crypto_artifact_ids` passed *every* historical artifact for a real target
+    /// through, not just the current one — harmless when a target only ever has one real
+    /// artifact, but a real, silent problem once `build.rs`'s artifact-id-staleness fix
+    /// (recomputing an id from redacted, not raw, content) means the same real target can
+    /// legitimately gain a second artifact over time. The stale one (from before some redaction
+    /// fix) never goes away and gets reprocessed — and re-warned-about, if it's now unparseable —
+    /// forever.
+    #[test]
+    fn collect_artifact_ids_for_connector_dedupes_by_target() {
+        let dir = tempdir().unwrap();
+        let store = PackArtifactStore::open(dir.path()).unwrap();
+
+        // Two real artifacts for the *same* target — different `data`, so different real
+        // content-addressed ids, exactly the shape a stale-then-fixed redaction re-write leaves
+        // behind. `created_at` set explicitly (not relying on wall-clock ordering between two
+        // back-to-back `Utc::now()` calls) so the test pins down *which* one must win, not just
+        // that dedup happens at all — `PackArtifactStore::list()`'s own order has no relationship
+        // to recency, which is exactly the bug this test guards against.
+        let mut old =
+            ObservationArtifact::new("rust", "secret.rs", serde_json::json!({"source": "old"}));
+        old.meta.created_at = chrono::DateTime::from_timestamp(1_000, 0).unwrap();
+        let mut fresh =
+            ObservationArtifact::new("rust", "secret.rs", serde_json::json!({"source": "fresh"}));
+        fresh.meta.created_at = chrono::DateTime::from_timestamp(2_000, 0).unwrap();
+        assert_ne!(
+            old.id, fresh.id,
+            "different data must produce different real ids"
+        );
+        store
+            .write(&old.id, &serde_json::to_value(&old).unwrap())
+            .unwrap();
+        store
+            .write(&fresh.id, &serde_json::to_value(&fresh).unwrap())
+            .unwrap();
+
+        // A real, unrelated target for the same connector must still come through untouched.
+        let other =
+            ObservationArtifact::new("rust", "other.rs", serde_json::json!({"source": "x"}));
+        store
+            .write(&other.id, &serde_json::to_value(&other).unwrap())
+            .unwrap();
+
+        let ids = collect_artifact_ids_for_connector(&store, "rust");
+        assert_eq!(
+            ids.len(),
+            2,
+            "one id per real target (secret.rs, other.rs), not one per historical artifact"
+        );
+        assert!(ids.contains(&other.id));
+        assert!(
+            ids.contains(&fresh.id),
+            "the newer of the two secret.rs versions must be selected, not the stale one"
+        );
+        assert!(
+            !ids.contains(&old.id),
+            "the stale version must not survive dedup"
+        );
+    }
+
+    #[test]
+    fn collect_git_artifact_ids_splits_repo_from_commits_and_dedupes_each() {
+        let dir = tempdir().unwrap();
+        let store = PackArtifactStore::open(dir.path()).unwrap();
+
+        let repo = ObservationArtifact::new("git", "repo", serde_json::json!({"remote": "x"}));
+        let mut commit_a_stale =
+            ObservationArtifact::new("git", "sha-a", serde_json::json!({"message": "old"}));
+        commit_a_stale.meta.created_at = chrono::DateTime::from_timestamp(1_000, 0).unwrap();
+        // Same target (commit sha), different content, later timestamp — the same real
+        // duplicate shape a stale-then-fixed redaction re-write leaves behind.
+        let mut commit_a_fresh =
+            ObservationArtifact::new("git", "sha-a", serde_json::json!({"message": "one"}));
+        commit_a_fresh.meta.created_at = chrono::DateTime::from_timestamp(2_000, 0).unwrap();
+        let commit_b =
+            ObservationArtifact::new("git", "sha-b", serde_json::json!({"message": "two"}));
+        for a in [&repo, &commit_a_fresh, &commit_a_stale, &commit_b] {
+            store
+                .write(&a.id, &serde_json::to_value(a).unwrap())
+                .unwrap();
+        }
+
+        let (commit_ids, repo_id) = collect_git_artifact_ids(&store);
+        assert_eq!(repo_id, Some(repo.id));
+        assert_eq!(
+            commit_ids.len(),
+            2,
+            "one id per real commit sha, not per historical artifact"
+        );
+        assert!(commit_ids.contains(&commit_b.id));
+        assert!(
+            commit_ids.contains(&commit_a_fresh.id),
+            "the newer of the two sha-a versions must be selected"
+        );
+        assert!(!commit_ids.contains(&commit_a_stale.id));
+    }
 
     /// RFC 0026 acceptance criterion: zero LLM calls unless the user opted in.
     /// A config that never mentions `[document-semantics]` must leave the pass

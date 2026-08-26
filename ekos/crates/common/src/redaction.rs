@@ -87,12 +87,56 @@ const BUILTIN_SECRET_PATTERNS: &[SecretPattern] = &[
     // silently dropped every real symbol/import it defined. `value` now includes `.` so a dotted
     // reference is captured whole, and `skip_dotted_identifier_refs` (see `redact`) leaves it
     // untouched entirely rather than redacting a non-secret and breaking the file either way.
+    //
+    // A second, independent real bug found live 2026-08-25/26 (this file's *own* test fixtures,
+    // re-running `ekos recover` against EKOS's own repository): the old `['"]?` on each side of
+    // `value` matched *independently* — a real value with no leading quote (`api_key=1.2.3.4-not-
+    // an-identifier`, this file's own `redacts_ip_like_value_that_is_not_a_dotted_identifier`
+    // test) could still have a trailing `['"]?` consume a real, syntactically-necessary closing
+    // quote sitting right after it (e.g. inside `redact("api_key=1.2.3.4-not-an-identifier", ...)`)
+    // — an *asymmetric* quote consumption the `regex` crate has no backreference support to
+    // prevent directly (`(['"]?)...\1` isn't expressible: this crate is a non-backtracking DFA
+    // engine). The replacement text never restores what it ate, so the file's own closing `"`
+    // silently vanished, leaving every subsequent line swallowed into one unterminated string
+    // literal — the same `RUST003`/"cannot parse string into token stream" failure mode as the
+    // first bug, from a different regex mechanism. Fixed with an explicit alternation instead of
+    // two independent optionals: `"value"` (both quotes, matched as one unit) or `'value'` (both
+    // single quotes) or bare `value` (no quotes at all) — never one quote without its pair, so a
+    // quote can only ever be consumed alongside its real matching partner.
+    //
+    // A third, independent real bug found in the same live run (EKOS's own
+    // `crates/marketing/src/oauth1.rs` test fixtures): the label alternation had no word-boundary
+    // guard at all, so `secret` matched as a bare *substring* inside a longer real identifier —
+    // `api_secret: "consumer-secret".to_string()` matched starting mid-identifier at "secret"
+    // (the `api_` prefix was never part of the match), leaving the redacted line reading
+    // `api_[REDACTED:...].to_string()` — syntactically `api_` immediately followed by `[...]`,
+    // which `syn` parses as an array-index expression on an identifier `api_`, not a struct-
+    // literal field initializer, and fails with "expected identifier or integer". A first fix
+    // (requiring a real `\b` immediately on both sides of the bare alternatives) overcorrected:
+    // it stopped `api_secret`/`access_token_secret` from matching *at all*, since `\b` never
+    // fires between two word characters (`_` and `s`) — real compound field names ending in
+    // `secret`/`password`/... are exactly as real a target as `api_key`/`access_key` (already
+    // explicit compounds in this same list) and must still redact. Fixed properly:
+    // `(?:[A-Za-z0-9]+[_-])*` consumes zero or more real leading `word_`/`word-` segments as part
+    // of the match itself (not asserted — a `\b` at the very start still guards against starting
+    // mid-identifier), so `access_token_secret` matches its *whole* real identifier, never a
+    // fragment of it either way.
     SecretPattern {
         label: "generic-assigned-secret",
-        regex_src: r#"(?i)(?:api[_-]?key|secret|passwd|password|access[_-]?key|auth[_-]?token)\s*[:=]\s*['"]?(?P<value>[A-Za-z0-9/+_\-.]{8,})['"]?"#,
+        regex_src: r#"(?i)\b(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|secret|passwd|password|access[_-]?key|auth[_-]?token)\b\s*[:=]\s*(?:"(?P<value_dq>[A-Za-z0-9/+_\-.]{8,})"|'(?P<value_sq>[A-Za-z0-9/+_\-.]{8,})'|(?P<value_bare>[A-Za-z0-9/+_\-.]{8,}))"#,
         skip_dotted_identifier_refs: true,
     },
 ];
+
+/// The one real captured value out of `generic-assigned-secret`'s three mutually-exclusive
+/// quote-shape alternatives (`value_dq`/`value_sq`/`value_bare` — see that pattern's own comment
+/// for why there are three instead of one `['"]?value['"]?`). Every other built-in pattern has no
+/// named group at all, so this is only ever consulted when `skip_dotted_identifier_refs` is set.
+fn captured_value<'a>(caps: &'a regex::Captures) -> Option<regex::Match<'a>> {
+    caps.name("value_dq")
+        .or_else(|| caps.name("value_sq"))
+        .or_else(|| caps.name("value_bare"))
+}
 
 /// Files whose names match one of these globs are excluded from observation entirely — near-100%
 /// secret material, no useful non-secret structure worth redacting-and-keeping.
@@ -211,14 +255,30 @@ fn redact_with_pattern(
     }
     regex
         .replace_all(content, |caps: &regex::Captures| {
-            let is_reference = caps
-                .name("value")
-                .is_some_and(|v| looks_like_code_reference(v.as_str()));
-            if is_reference {
-                caps[0].to_string()
-            } else {
-                format!("[REDACTED:{label}]")
+            let whole = caps.get(0).expect("whole match always present");
+            let Some(value) = captured_value(caps) else {
+                // No named group at all (shouldn't happen for this pattern, but never panic on
+                // a regex-shape assumption) — fall back to the old whole-match behavior.
+                return format!("[REDACTED:{label}]");
+            };
+            if looks_like_code_reference(value.as_str()) {
+                return whole.as_str().to_string();
             }
+            // A real, third bug in this same pattern's blast radius, found live in the same run
+            // (EKOS's own `crates/marketing/src/oauth1.rs` test fixtures): replacing the *whole*
+            // match — including the real field name (`api_key`) and its separator — deletes
+            // syntax that's structurally required wherever this text sits inside a real struct
+            // literal (`api_key: "consumer-key"` → `[REDACTED:...]` leaves a bare expression
+            // where `field_name: value` was required, which `syn` correctly refuses to parse).
+            // Only the *value* span gets replaced now — everything else in the match (the real
+            // field/env-var name, its `:`/`=` separator, and a real quote character on either
+            // side, verbatim) stays untouched, so the result is always a drop-in replacement for
+            // only the secret-shaped text itself, never the surrounding structure.
+            format!(
+                "{}[REDACTED:{label}]{}",
+                &content[whole.start()..value.start()],
+                &content[value.end()..whole.end()]
+            )
         })
         .into_owned()
 }
@@ -291,6 +351,45 @@ mod tests {
         let out = redact(r#"password = "hunter2fake""#, &cfg());
         assert!(out.contains("[REDACTED:generic-assigned-secret]"));
         assert!(!out.contains("hunter2fake"));
+    }
+
+    /// Real bug, found live 2026-08-25/26 against EKOS's own `crates/marketing/src/oauth1.rs`
+    /// test fixtures: redacting the *whole* `label: "value"` match (including the real field
+    /// name and its separator, the original design) deletes syntax a real struct literal
+    /// requires — `api_key: "consumer-key".to_string()` became a bare `[REDACTED:...]` where
+    /// Rust needed `field_name: value`, and `syn` correctly refused to parse the result. Only the
+    /// value itself must be replaced; the real field/env-var name, separator, and any real quote
+    /// character must survive untouched.
+    #[test]
+    fn redaction_preserves_the_real_field_name_and_quotes_replacing_only_the_value() {
+        let out = redact(r#"api_key: "consumer-key".to_string(),"#, &cfg());
+        assert_eq!(
+            out,
+            r#"api_key: "[REDACTED:generic-assigned-secret]".to_string(),"#
+        );
+    }
+
+    /// The word-boundary companion to the fix above, same real file: `secret` must not match as
+    /// a bare *substring* of a longer real identifier like `api_secret`/`access_token_secret` —
+    /// doing so silently dropped the identifier's own real prefix (`api_`/`access_token_`) from
+    /// the output entirely, a second, independent way the same bug broke real struct-literal
+    /// syntax.
+    #[test]
+    fn label_match_requires_a_real_word_boundary_not_a_substring_of_a_longer_identifier() {
+        let out = redact(r#"api_secret: "consumer-secret".to_string(),"#, &cfg());
+        assert_eq!(
+            out,
+            r#"api_secret: "[REDACTED:generic-assigned-secret]".to_string(),"#
+        );
+
+        let out2 = redact(
+            r#"access_token_secret: "access-token-secret".to_string(),"#,
+            &cfg(),
+        );
+        assert_eq!(
+            out2,
+            r#"access_token_secret: "[REDACTED:generic-assigned-secret]".to_string(),"#
+        );
     }
 
     #[test]

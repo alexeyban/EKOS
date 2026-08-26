@@ -1,0 +1,27 @@
+# EKOS development image (TODO.md Phase 0) — a consistent build environment for a machine with
+# no local Rust installation, matching the exact toolchain CI actually verifies against
+# (.github/workflows/ci.yml: rustfmt + clippy components, cargo build/test/clippy/fmt --check).
+#
+# Pinned to the real Rust version this workspace is built with today (`rustc --version`), not a
+# new floating/pinning policy — CI itself still floats on `stable` via `dtolnay/rust-toolchain`;
+# this image exists for a reproducible local dev shell, not to change CI's own toolchain policy.
+FROM rust:1.93-slim
+
+# `build-essential` — a C compiler is needed by this workspace's C-backed crates (zstd-sys, the
+# sha2/tantivy build scripts); no other system library is needed (rusqlite uses its "bundled"
+# feature, reqwest uses rustls-tls) — confirmed by checking ekos/Cargo.toml directly before
+# writing this rather than copying a generic dependency list.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup component add rustfmt clippy
+
+WORKDIR /workspace
+
+# The Cargo workspace root is ekos/, not the repo root (CLAUDE.md) — every cargo invocation in
+# this image runs from there, matching every CI step's own `working-directory: ekos`.
+WORKDIR /workspace/ekos
+
+CMD ["cargo", "build", "--workspace"]

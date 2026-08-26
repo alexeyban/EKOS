@@ -109,6 +109,7 @@ impl CompilerPass for SqlAnalyzerPass {
             user: &self.sql,
             prompt_version: PROMPT_VERSION,
             max_tokens: 4096,
+            history: &[],
         };
 
         match self.llm.complete(&req).await {

@@ -52,6 +52,55 @@ pub fn open_store(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeSt
     })?))
 }
 
+/// Open the workspace's knowledge store for reads only (RFC 0097).
+///
+/// For the fact engine, this is [`FactLedger::open_read_only`] — it never
+/// acquires tantivy's exclusive `IndexWriter` lock, so a long-lived caller
+/// (e.g. `ekos mcp serve`, reusing one open handle across many calls) never
+/// blocks a concurrent real writer (`ekos build`/`commit` in a separate
+/// process) from opening the same store. For the SQLite backend, this is
+/// just [`Ledger::open`] — SQLite has no equivalent whole-handle-lifetime
+/// exclusive lock, so there's nothing special to do; every write already
+/// goes through SQLite's own file-level locking regardless of which
+/// `Ledger` opened it.
+///
+/// A genuinely fresh workspace (neither backend ever written to) is *not*
+/// an error — [`open_store`] itself silently creates an empty store for
+/// this exact case, and every MCP tool is expected to keep working
+/// gracefully against it (empty results, not a "run `ekos build`" error;
+/// several real tests pin this). To preserve that without ever caching a
+/// writable handle, this bootstraps the empty on-disk store via a
+/// short-lived writable open that's opened and immediately dropped —
+/// never returned, never held past this function call — then does the
+/// real read-only open, which now succeeds since the store exists. The
+/// brief writable-open window is no new race: any two processes calling
+/// `open_store` on a truly fresh workspace at the same moment already had
+/// this exact narrow bootstrap race before this RFC.
+pub fn open_store_read_only(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    if uses_fact_engine(config, cwd) {
+        let dir = facts_dir(config, cwd);
+        return Ok(Box::new(FactLedger::open_read_only(&dir).map_err(|e| {
+            anyhow::anyhow!("cannot open fact ledger at {}: {e}", dir.display())
+        })?));
+    }
+
+    let sqlite_path = config.ledger_path(cwd);
+    if sqlite_path.exists() {
+        return Ok(Box::new(Ledger::open(&sqlite_path).map_err(|e| {
+            anyhow::anyhow!("cannot open ledger at {}: {e}", sqlite_path.display())
+        })?));
+    }
+
+    let dir = facts_dir(config, cwd);
+    drop(
+        FactLedger::open(&dir)
+            .map_err(|e| anyhow::anyhow!("cannot create fact ledger at {}: {e}", dir.display()))?,
+    );
+    Ok(Box::new(FactLedger::open_read_only(&dir).map_err(|e| {
+        anyhow::anyhow!("cannot open fact ledger at {}: {e}", dir.display())
+    })?))
+}
+
 /// Human-readable location of whatever backend [`open_store`] would open right now — mirrors its
 /// exact three-way logic so this stays accurate even before a fresh workspace's first
 /// `open_store` call has run.
@@ -126,5 +175,67 @@ mod tests {
             displayed,
             facts_dir(&config, dir.path()).display().to_string()
         );
+    }
+
+    #[test]
+    fn open_store_read_only_bootstraps_an_empty_store_on_a_never_built_workspace() {
+        // Matches open_store's own existing contract: a genuinely fresh
+        // workspace is not an error — every MCP tool must keep working
+        // gracefully against it (empty results), a real behavior several
+        // `crates/cli/src/commands/mcp.rs` tests pin.
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        std::fs::create_dir_all(config.ledger_dir(dir.path())).unwrap();
+
+        let store = open_store_read_only(&config, dir.path())
+            .expect("a fresh workspace must bootstrap an empty store, not error");
+        assert_eq!(store.object_count().unwrap(), 0);
+        // manifest.json itself is written lazily by the fact engine only
+        // after a real write happens (see uses_fact_engine's own doc
+        // comment and fresh_workspace_defaults_to_the_fact_engine above) —
+        // the bootstrap open+drop never writes anything, so `segments/` is
+        // the real, always-created signal a store now exists on disk.
+        assert!(
+            facts_dir(&config, dir.path()).join("segments").exists(),
+            "the bootstrap must have created a real on-disk store"
+        );
+    }
+
+    #[test]
+    fn open_store_read_only_reads_a_fact_engine_workspace_built_by_open_store() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        std::fs::create_dir_all(config.ledger_dir(dir.path())).unwrap();
+        {
+            let store = open_store(&config, dir.path()).unwrap();
+            store
+                .append_object(&ekos_kir::KirObject::new(
+                    "orders",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+        }
+
+        let reader = open_store_read_only(&config, dir.path()).unwrap();
+        assert_eq!(reader.object_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn open_store_read_only_reads_a_pre_existing_sqlite_workspace() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        std::fs::create_dir_all(config.ledger_dir(dir.path())).unwrap();
+        {
+            let sqlite = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+            sqlite
+                .append_object(&ekos_kir::KirObject::new(
+                    "orders",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+        }
+
+        let reader = open_store_read_only(&config, dir.path()).unwrap();
+        assert_eq!(reader.object_count().unwrap(), 1);
     }
 }

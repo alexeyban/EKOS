@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
-pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig};
+pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig, ConversationTurn};
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
@@ -262,6 +262,21 @@ impl<'a> Runtime<'a> {
     /// Every relationship currently in the ledger (RFC 0010 — EKL entity enumeration).
     pub fn list_relationships(&self) -> Result<Vec<KirRelationship>, RuntimeError> {
         Ok(self.ledger.all_relationships()?)
+    }
+
+    /// Every object as it existed at or before `at` (RFC 0096 — the bulk
+    /// primitive EKL's `AS OF` clause needs; `reconstruct_state_at` below
+    /// only ever handled one id at a time).
+    pub fn list_objects_at(&self, at: DateTime<Utc>) -> Result<Vec<KirObject>, RuntimeError> {
+        Ok(self.ledger.all_objects_at(at)?)
+    }
+
+    /// Every relationship as it existed at or before `at` (RFC 0096).
+    pub fn list_relationships_at(
+        &self,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<KirRelationship>, RuntimeError> {
+        Ok(self.ledger.all_relationships_at(at)?)
     }
 
     /// All relationships touching `id`, in either direction (RFC 0013 —

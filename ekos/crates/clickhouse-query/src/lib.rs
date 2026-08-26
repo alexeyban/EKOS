@@ -118,6 +118,7 @@ pub async fn ask_clickhouse(
         user: &user,
         prompt_version: PROMPT_VERSION,
         max_tokens: DEFAULT_MAX_TOKENS,
+        history: &[],
     };
     let resp = llm.complete(&req).await?;
     let raw_sql = strip_sql_fences(&resp.content);

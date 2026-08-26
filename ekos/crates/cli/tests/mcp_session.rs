@@ -46,13 +46,17 @@ fn load_config(dir: &Path) -> ekos_compiler_core::EkosConfig {
 }
 
 /// One agent turn: send a tools/call, decode the JSON body out of the MCP
-/// content envelope the way an MCP client does.
+/// content envelope the way an MCP client does. `cache` is the same
+/// `StoreCache` across every turn in a session (RFC 0097) — this test's
+/// whole point is exercising that a real multi-turn session behaves
+/// correctly against one cached store, not a fresh one per call.
 fn call_tool(
     config: &ekos_compiler_core::EkosConfig,
     dir: &Path,
     id: u64,
     name: &str,
     arguments: serde_json::Value,
+    cache: &mut ekos::commands::mcp::StoreCache,
 ) -> serde_json::Value {
     let request = serde_json::json!({
         "jsonrpc": "2.0", "id": id, "method": "tools/call",
@@ -60,7 +64,7 @@ fn call_tool(
     })
     .to_string();
 
-    let response = ekos::commands::mcp::handle_message(config, dir, &request)
+    let response = ekos::commands::mcp::handle_message(config, dir, &request, cache)
         .expect("tools/call is a request and must be answered");
     let response: serde_json::Value = serde_json::from_str(&response).unwrap();
 
@@ -90,6 +94,8 @@ async fn claude_code_session_over_mcp() {
         .await
         .unwrap();
 
+    let mut cache = ekos::commands::mcp::StoreCache::new();
+
     // ── Turn 0: MCP handshake (what `claude mcp list` verifies) ─────────────
     let init = ekos::commands::mcp::handle_message(
         &config,
@@ -99,13 +105,21 @@ async fn claude_code_session_over_mcp() {
             "params": { "protocolVersion": "2025-06-18" }
         })
         .to_string(),
+        &mut cache,
     )
     .unwrap();
     let init: serde_json::Value = serde_json::from_str(&init).unwrap();
     assert_eq!(init["result"]["serverInfo"]["name"], "ekos");
 
     // ── Turn 1: "is there anything here?" ───────────────────────────────────
-    let status = call_tool(&config, dir, 1, "ekos_status", serde_json::json!({}));
+    let status = call_tool(
+        &config,
+        dir,
+        1,
+        "ekos_status",
+        serde_json::json!({}),
+        &mut cache,
+    );
     assert!(
         status["objects"].as_u64().unwrap() >= 5,
         "files + tables expected"
@@ -118,6 +132,7 @@ async fn claude_code_session_over_mcp() {
         2,
         "ekos_ekl",
         serde_json::json!({ "query": "FIND Object WHERE kind = 'Table' ORDER BY name" }),
+        &mut cache,
     );
     let names: Vec<&str> = tables["rows"]
         .as_array()
@@ -148,6 +163,7 @@ async fn claude_code_session_over_mcp() {
         3,
         "ekos_neighborhood",
         serde_json::json!({ "id": orders_id, "depth": 1 }),
+        &mut cache,
     );
     let neighbor_names: Vec<&str> = neighborhood["objects"]
         .as_array()
@@ -167,6 +183,7 @@ async fn claude_code_session_over_mcp() {
         4,
         "ekos_state",
         serde_json::json!({ "id": orders_id }),
+        &mut cache,
     );
     assert_eq!(state["object"]["name"], "orders");
     let evidence = state["evidence"].as_array().unwrap();
@@ -191,6 +208,7 @@ async fn claude_code_session_over_mcp() {
         5,
         "ekos_search",
         serde_json::json!({ "query": "orders" }),
+        &mut cache,
     );
     assert!(
         !search["matches"].as_array().unwrap().is_empty(),
@@ -214,6 +232,7 @@ async fn claude_code_session_over_mcp() {
         6,
         "ekos_dependents",
         serde_json::json!({ "id": customers_id }),
+        &mut cache,
     );
     assert_eq!(impact["target"]["name"], "customers");
     let dependent_names: Vec<&str> = impact["dependents"]
@@ -234,6 +253,7 @@ async fn claude_code_session_over_mcp() {
         7,
         "ekos_diff",
         serde_json::json!({ "from": "2020-01-01T00:00:00Z" }),
+        &mut cache,
     );
     assert!(
         diff["changed_total"].as_u64().unwrap() >= 2,
@@ -257,6 +277,7 @@ async fn claude_code_session_over_mcp() {
         8,
         "ekos_search",
         serde_json::json!({ "query": "Shop Service" }),
+        &mut cache,
     );
     let hit_names: Vec<&str> = content_hit["matches"]
         .as_array()

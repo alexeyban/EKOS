@@ -10,29 +10,113 @@
 //! The ledger is opened per `tools/call`, so the server starts before a first
 //! `ekos build` and returns a readable tool error until a ledger exists.
 
-use super::store::open_store;
+use super::store::{facts_dir, open_store, open_store_read_only, uses_fact_engine};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
+use ekos_ledger::KnowledgeStore;
 use ekos_runtime::{ImpactDirection, Runtime};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::SystemTime;
+
+/// RFC 0097 — a per-server-process cache over a **read-only**-opened
+/// [`KnowledgeStore`] ([`open_store_read_only`]), invalidated by a cheap
+/// on-disk mtime fingerprint rather than either reopening unconditionally
+/// (this module's original design) or caching unconditionally.
+///
+/// Caching a *writable* handle unconditionally across the server's lifetime
+/// would be actively unsafe, not just stale: `FactLedger`'s writable open
+/// holds tantivy's exclusive `IndexWriter` lock for the handle's whole
+/// lifetime (`crates/ledger/src/search.rs`), so a cached writable handle
+/// would block any real `ekos build`/`commit` in a separate process from
+/// ever acquiring it for as long as the server stays up — reproduced live by
+/// a regression test before this design shipped (see `devlog_113`/RFC 0097's
+/// own history). `open_store_read_only` never acquires that lock at all, so
+/// caching *it* is safe to hold indefinitely. It's still not safe to cache
+/// unconditionally on correctness grounds, though — a read-only handle's
+/// `runs`/`memtable` are populated once at open time and never re-scan disk
+/// for facts appended by a separate writer afterward — so [`StoreCache::get`]
+/// compares a cheap filesystem fingerprint (the newest mtime under the store
+/// root — metadata-only, no segment/index rebuild) against the fingerprint
+/// recorded when the cached handle was opened, and only reopens when the two
+/// disagree.
+pub struct StoreCache {
+    store: Option<Box<dyn KnowledgeStore>>,
+    fingerprint: Option<SystemTime>,
+}
+
+impl StoreCache {
+    pub fn new() -> Self {
+        Self {
+            store: None,
+            fingerprint: None,
+        }
+    }
+
+    /// The currently-fresh read-only store, reopening only when the on-disk
+    /// fingerprint has changed since the last successful open (also true on
+    /// the very first call, and after any previous open attempt failed —
+    /// `self.store` stays `None` until one succeeds).
+    fn get(&mut self, config: &EkosConfig, workspace: &Path) -> Result<&dyn KnowledgeStore> {
+        let root = store_root(config, workspace);
+        let current = store_fingerprint(&root);
+        if self.store.is_none() || current != self.fingerprint {
+            self.store = Some(open_store_read_only(config, workspace)?);
+            self.fingerprint = store_fingerprint(&root);
+        }
+        Ok(self.store.as_deref().expect("just set above"))
+    }
+}
+
+impl Default for StoreCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Where `open_store` would read from right now, without opening it —
+/// mirrors `open_store`'s own backend-detection logic (`store.rs`).
+fn store_root(config: &EkosConfig, workspace: &Path) -> PathBuf {
+    if uses_fact_engine(config, workspace) {
+        facts_dir(config, workspace)
+    } else {
+        config.ledger_path(workspace)
+    }
+}
+
+/// The newest modification time among every file under `root` — a cheap,
+/// metadata-only proxy for "has anything changed since we last opened this
+/// store." `None` when `root` doesn't exist yet (workspace never built) or
+/// contains no files at all.
+fn store_fingerprint(root: &Path) -> Option<SystemTime> {
+    if root.is_file() {
+        return std::fs::metadata(root).ok()?.modified().ok();
+    }
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok()?.modified().ok())
+        .max()
+}
 
 /// Blocking serve loop: one JSON-RPC message per line on stdin, one response
 /// per line on stdout. Exits cleanly on EOF (client disconnect).
 pub fn run(config: &EkosConfig, workspace: &Path) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
+    let mut cache = StoreCache::new();
     for line in stdin.lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handle_message(config, workspace, &line) {
+        if let Some(response) = handle_message(config, workspace, &line, &mut cache) {
             let mut out = stdout.lock();
             writeln!(out, "{response}")?;
             out.flush()?;
@@ -42,8 +126,17 @@ pub fn run(config: &EkosConfig, workspace: &Path) -> Result<()> {
 }
 
 /// Dispatch one raw JSON-RPC line. Returns `None` for notifications (which
-/// must never be answered), `Some(response-line)` for requests.
-pub fn handle_message(config: &EkosConfig, workspace: &Path, line: &str) -> Option<String> {
+/// must never be answered), `Some(response-line)` for requests. `cache`
+/// carries the opened store across calls within one server session (RFC
+/// 0097) — pass the same [`StoreCache`] for every call in a session, a
+/// fresh one per independent session (tests do this explicitly; `run`
+/// above does it for the real stdio server).
+pub fn handle_message(
+    config: &EkosConfig,
+    workspace: &Path,
+    line: &str,
+    cache: &mut StoreCache,
+) -> Option<String> {
     let msg: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
@@ -68,7 +161,7 @@ pub fn handle_message(config: &EkosConfig, workspace: &Path, line: &str) -> Opti
         "initialize" => ok_response(id, initialize_result(&params)),
         "ping" => ok_response(id, json!({})),
         "tools/list" => ok_response(id, json!({ "tools": tool_definitions(config) })),
-        "tools/call" => ok_response(id, tools_call(config, workspace, &params)),
+        "tools/call" => ok_response(id, tools_call(config, workspace, &params, cache)),
         other => error_response(id, -32601, &format!("method not found: {other}")),
     };
     Some(response)
@@ -238,8 +331,30 @@ fn base_tool_definitions() -> Vec<Value> {
             }
         },
         {
+            "name": "ekos_architecture_evaluate",
+            "description": "Real, deterministic architecture completeness/evidence-coverage score (RFC 0065 Phase 3) — the same computation `ekos architecture investigate` and generated docs' Executive Summary use, without running a build. Reports crates_total/crates_classified and any open issues (e.g. missing role classification). No LLM call; a vacuous score (crates_total == 0) means nothing has been compiled yet, not 100% confidence.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "ekos_architecture_drift",
+            "description": "Documentation drift (RFC 0068 §32): compares each compiled crate's oldest and newest recorded architectural role classification and reports any that genuinely changed — 'the docs said X, the evidence now says Y'. Empty result means no drift detected, not an error.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "ekos_architecture_diff",
+            "description": "Real architecture-level diff between two points in time (RFC 0068 §55) — technologies, crate role classifications, risks, and open questions that changed. Distinct from ekos_diff's raw ledger-entry-id report: this is semantic, at the Claim/entity level.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Window start, RFC 3339" },
+                    "to": { "type": "string", "description": "Window end, RFC 3339 (default: now)" }
+                },
+                "required": ["from"]
+            }
+        },
+        {
             "name": "ekos_identity_review",
-            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger. The only write-capable MCP tool; only Custom(\"SameAs\") relationships are reviewable this way.",
+            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger. A write-capable MCP tool; only Custom(\"SameAs\") relationships are reviewable this way.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -247,6 +362,18 @@ fn base_tool_definitions() -> Vec<Value> {
                     "decision": { "type": "string", "description": "\"confirmed\" or \"rejected\"" }
                 },
                 "required": ["relationship_id", "decision"]
+            }
+        },
+        {
+            "name": "ekos_architecture_review",
+            "description": "Confirm or reject an LLM-classified crate role Claim (RFC 0065 Phase 2, RFC 0068's Human Review workflow) — e.g. 'ekos-cli has_role CLI entrypoint', proposed by ArchitectureReasoningPass. Confirming or rejecting writes a new Event to the ledger. A write-capable MCP tool; only Custom(\"Claim\") objects with predicate \"has_role\" are reviewable this way. An unreviewed claim has no review_status property at all — read that absence as unconfirmed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "claim_id": { "type": "string", "description": "Id of the role Claim, from ekos_ekl (FIND Object WHERE kind CONTAINS 'Claim')" },
+                    "decision": { "type": "string", "description": "\"confirmed\" or \"rejected\"" }
+                },
+                "required": ["claim_id", "decision"]
             }
         }
     ]);
@@ -256,7 +383,12 @@ fn base_tool_definitions() -> Vec<Value> {
 /// Execute a tools/call request. Tool failures (bad query, unknown id,
 /// missing ledger) are reported as `isError: true` results — readable by the
 /// agent — never as protocol errors.
-fn tools_call(config: &EkosConfig, workspace: &Path, params: &Value) -> Value {
+fn tools_call(
+    config: &EkosConfig,
+    workspace: &Path,
+    params: &Value,
+    cache: &mut StoreCache,
+) -> Value {
     let name = params
         .get("name")
         .and_then(Value::as_str)
@@ -266,7 +398,7 @@ fn tools_call(config: &EkosConfig, workspace: &Path, params: &Value) -> Value {
         .cloned()
         .unwrap_or_else(|| json!({}));
 
-    match call_tool(config, workspace, name, &arguments) {
+    match call_tool(config, workspace, name, &arguments, cache) {
         Ok(result) => {
             let text = serde_json::to_string_pretty(&result)
                 .unwrap_or_else(|e| format!("serialization error: {e}"));
@@ -278,10 +410,29 @@ fn tools_call(config: &EkosConfig, workspace: &Path, params: &Value) -> Value {
     }
 }
 
-fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) -> Result<Value> {
-    let ledger = open_store(config, workspace)
-        .map_err(|e| anyhow::anyhow!("{e}\nRun `ekos build` in the workspace first."))?;
-    let runtime = Runtime::over(&*ledger);
+fn call_tool(
+    config: &EkosConfig,
+    workspace: &Path,
+    name: &str,
+    args: &Value,
+    cache: &mut StoreCache,
+) -> Result<Value> {
+    // The write-capable tools bypass the read-only cache entirely — a real
+    // write needs a real writable store, and `StoreCache` deliberately
+    // never holds one open (see its doc comment). Opening fresh here, then
+    // dropping it before this function returns, matches this whole module's
+    // original short-lived-write pattern; the *next* `cache.get()` call
+    // picks up the change automatically via its normal fingerprint check —
+    // no explicit invalidation needed.
+    if name == "ekos_identity_review" {
+        return identity_review(config, workspace, args);
+    }
+    if name == "ekos_architecture_review" {
+        return architecture_review(config, workspace, args);
+    }
+
+    let ledger = cache.get(config, workspace)?;
+    let runtime = Runtime::over(ledger);
 
     match name {
         "ekos_search" => {
@@ -463,6 +614,44 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
             "relationships": ledger.relationship_count()?,
             "ledger_path": super::store::store_display(config, workspace),
         })),
+        "ekos_architecture_evaluate" => {
+            let objects = ledger.all_objects()?;
+            let report = ekos_recovery::evaluate_architecture(&objects);
+            Ok(serde_json::to_value(report)?)
+        }
+        "ekos_architecture_drift" => {
+            let objects = ledger.all_objects()?;
+            let mut findings = Vec::new();
+            for c in objects
+                .iter()
+                .filter(|o| matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == "Crate"))
+            {
+                let Some(dir) = c.properties.get("path").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let claim_id = ekos_recovery::role_claim_kir_id(dir);
+                let history = ledger.object_history(&claim_id)?;
+                if let Some(finding) = ekos_recovery::drift_from_history(&c.name, c.id, &history) {
+                    findings.push(finding);
+                }
+            }
+            Ok(json!({ "drift_count": findings.len(), "findings": findings }))
+        }
+        "ekos_architecture_diff" => {
+            let from: DateTime<Utc> = required_str(args, "from")?
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid `from` timestamp (want RFC 3339): {e}"))?;
+            let to: DateTime<Utc> = match args.get("to").and_then(Value::as_str) {
+                Some(raw) => raw
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("invalid `to` timestamp (want RFC 3339): {e}"))?,
+                None => Utc::now(),
+            };
+            let before = ledger.all_objects_at(from)?;
+            let after = ledger.all_objects_at(to)?;
+            let diff = ekos_recovery::diff_architecture(&before, &after);
+            Ok(serde_json::to_value(diff)?)
+        }
         "ekos_transformation_explain" => {
             let id = required_id(args)?;
             let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(50) as u32;
@@ -470,7 +659,7 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
 
             let steps: Vec<Value> = chain
                 .iter()
-                .map(|obj| explain_node(&*ledger, obj))
+                .map(|obj| explain_node(ledger, obj))
                 .collect::<Result<_>>()?;
 
             Ok(json!({
@@ -495,51 +684,6 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
                 "diff": diff_chains(&old_chain, &new_chain),
             }))
         }
-        "ekos_identity_review" => {
-            let rel_id = KirId::from_str(required_str(args, "relationship_id")?)
-                .map_err(|_| anyhow::anyhow!("invalid `relationship_id`"))?;
-            let decision = required_str(args, "decision")?;
-            if decision != "confirmed" && decision != "rejected" {
-                anyhow::bail!(
-                    "invalid `decision`: {decision} (want \"confirmed\" or \"rejected\")"
-                );
-            }
-
-            let mut rel = ledger
-                .get_relationship(&rel_id)?
-                .ok_or_else(|| anyhow::anyhow!("relationship not found: {rel_id}"))?;
-            if !matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs") {
-                anyhow::bail!(
-                    "not a SameAs candidate, cannot be reviewed through this tool: {rel_id}"
-                );
-            }
-
-            rel.properties.insert("status".into(), json!(decision));
-            rel.properties
-                .insert("reviewed_at".into(), json!(Utc::now().to_rfc3339()));
-            ledger.append_relationship(&rel)?;
-
-            let event_kind = if decision == "confirmed" {
-                EventKind::Merged
-            } else {
-                EventKind::Modified
-            };
-            let event = KirEvent {
-                id: KirId::new(),
-                kind: event_kind,
-                subject: rel_id,
-                payload: json!({ "decision": decision, "relationship_id": rel_id.to_string() }),
-                evidence: Vec::new(),
-                occurred_at: Utc::now(),
-            };
-            ledger.append_event(&event)?;
-
-            Ok(json!({
-                "relationship_id": rel_id.to_string(),
-                "decision": decision,
-                "status": "recorded",
-            }))
-        }
         "ekos_clickhouse_query" => {
             // Defense-in-depth: re-check the gate even though an ungated server never lists
             // this tool in `tools/list` — a client could still call it by name directly.
@@ -553,6 +697,103 @@ fn call_tool(config: &EkosConfig, workspace: &Path, name: &str, args: &Value) ->
         }
         other => Err(anyhow::anyhow!("unknown tool: {other}")),
     }
+}
+
+/// `ekos_identity_review`'s implementation — the one write-capable MCP
+/// tool, deliberately bypassing `StoreCache` entirely (see `call_tool`'s own
+/// comment at its call site): opens a fresh, short-lived, writable store
+/// directly, same as this whole module did for every tool before RFC 0097.
+fn identity_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Result<Value> {
+    let ledger = open_store(config, workspace)
+        .map_err(|e| anyhow::anyhow!("{e}\nRun `ekos build` in the workspace first."))?;
+
+    let rel_id = KirId::from_str(required_str(args, "relationship_id")?)
+        .map_err(|_| anyhow::anyhow!("invalid `relationship_id`"))?;
+    let decision = required_str(args, "decision")?;
+    if decision != "confirmed" && decision != "rejected" {
+        anyhow::bail!("invalid `decision`: {decision} (want \"confirmed\" or \"rejected\")");
+    }
+
+    let mut rel = ledger
+        .get_relationship(&rel_id)?
+        .ok_or_else(|| anyhow::anyhow!("relationship not found: {rel_id}"))?;
+    if !matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs") {
+        anyhow::bail!("not a SameAs candidate, cannot be reviewed through this tool: {rel_id}");
+    }
+
+    rel.properties.insert("status".into(), json!(decision));
+    rel.properties
+        .insert("reviewed_at".into(), json!(Utc::now().to_rfc3339()));
+    ledger.append_relationship(&rel)?;
+
+    let event_kind = if decision == "confirmed" {
+        EventKind::Merged
+    } else {
+        EventKind::Modified
+    };
+    let event = KirEvent {
+        id: KirId::new(),
+        kind: event_kind,
+        subject: rel_id,
+        payload: json!({ "decision": decision, "relationship_id": rel_id.to_string() }),
+        evidence: Vec::new(),
+        occurred_at: Utc::now(),
+    };
+    ledger.append_event(&event)?;
+
+    Ok(json!({
+        "relationship_id": rel_id.to_string(),
+        "decision": decision,
+        "status": "recorded",
+    }))
+}
+
+/// `ekos_architecture_review`'s implementation (RFC 0109) — mirrors `identity_review` above
+/// exactly, substituting a role `Claim` object for a `SameAs` relationship. Also opens a fresh,
+/// short-lived, writable store directly, bypassing `StoreCache` for the same reason.
+fn architecture_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Result<Value> {
+    let ledger = open_store(config, workspace)
+        .map_err(|e| anyhow::anyhow!("{e}\nRun `ekos build` in the workspace first."))?;
+
+    let claim_id = KirId::from_str(required_str(args, "claim_id")?)
+        .map_err(|_| anyhow::anyhow!("invalid `claim_id`"))?;
+    let decision = required_str(args, "decision")?;
+    if decision != "confirmed" && decision != "rejected" {
+        anyhow::bail!("invalid `decision`: {decision} (want \"confirmed\" or \"rejected\")");
+    }
+
+    let mut claim = ledger
+        .get_object(&claim_id)?
+        .ok_or_else(|| anyhow::anyhow!("claim not found: {claim_id}"))?;
+    let is_role_claim = matches!(&claim.kind, ekos_kir::ObjectKind::Custom(k) if k == "Claim")
+        && claim.properties.get("predicate").and_then(|v| v.as_str()) == Some("has_role");
+    if !is_role_claim {
+        anyhow::bail!("not a role Claim, cannot be reviewed through this tool: {claim_id}");
+    }
+
+    claim
+        .properties
+        .insert("review_status".into(), json!(decision));
+    claim
+        .properties
+        .insert("reviewed_at".into(), json!(Utc::now().to_rfc3339()));
+    ledger.append_object(&claim)?;
+
+    let event = KirEvent {
+        id: KirId::new(),
+        kind: EventKind::Modified,
+        subject: claim_id,
+        payload: json!({ "decision": decision, "claim_id": claim_id.to_string() }),
+        evidence: Vec::new(),
+        occurred_at: Utc::now(),
+    };
+    ledger.append_event(&event)?;
+
+    Ok(json!({
+        "claim_id": claim_id.to_string(),
+        "decision": decision,
+        "status": "recorded",
+    }))
 }
 
 /// Bridges `call_tool`'s synchronous context (the stdio serve loop is a blocking `for line in
@@ -869,13 +1110,126 @@ mod tests {
         assert_eq!(diff["joins"]["removed"], json!([]));
     }
 
+    // ── RFC 0097: StoreCache fingerprinting ───────────────────────────────
+
+    #[test]
+    fn store_fingerprint_is_none_for_a_workspace_never_built() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("does-not-exist");
+        assert!(store_fingerprint(&root).is_none());
+    }
+
+    #[test]
+    fn store_fingerprint_changes_after_a_new_file_is_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("a.txt"), b"one").unwrap();
+        let first = store_fingerprint(root);
+        assert!(first.is_some());
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::fs::write(root.join("b.txt"), b"two").unwrap();
+        let second = store_fingerprint(root);
+        assert_ne!(
+            first, second,
+            "a new file's mtime must move the fingerprint"
+        );
+    }
+
+    #[test]
+    fn store_fingerprint_of_a_single_file_tracks_its_own_mtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("ledger.db");
+        std::fs::write(&file, b"v1").unwrap();
+        let first = store_fingerprint(&file);
+        assert!(first.is_some());
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::fs::write(&file, b"v2-longer-content").unwrap();
+        let second = store_fingerprint(&file);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn store_cache_reuses_the_open_handle_across_repeated_calls_without_external_changes() {
+        // Regression, caught live by crates/cli/tests/mcp_session.rs before
+        // this fix: `FactLedger::open` re-indexes stale entities and commits
+        // the tantivy search index as a side effect of opening, changing
+        // on-disk mtimes *after* the open completes. The first version of
+        // `StoreCache::get` snapshotted the fingerprint *before* opening, so
+        // every second call in a row saw a spuriously "changed" fingerprint
+        // and tried to reopen — while the first handle, still cached and
+        // alive, still held tantivy's exclusive `IndexWriter` lock, failing
+        // with `LockBusy`. This reproduces the exact repeated-call shape
+        // that caught it, directly against `StoreCache`, not just through
+        // the full MCP session integration test.
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        // Force the fact-engine backend (RFC 0016's default) — the bug is
+        // specific to it; the SQLite backend has no analogous open-time
+        // write.
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+
+        let mut cache = StoreCache::new();
+        for i in 0..3 {
+            let store = cache
+                .get(&config, dir)
+                .unwrap_or_else(|e| panic!("call {i} failed: {e}"));
+            assert!(store.object_count().unwrap() >= 1);
+        }
+    }
+
+    #[test]
+    fn store_cache_reopens_after_a_real_external_write() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+
+        let mut cache = StoreCache::new();
+        assert_eq!(cache.get(&config, dir).unwrap().object_count().unwrap(), 1);
+
+        // A separate process (a real `ekos build`/`commit`) writes more data
+        // after the cache already opened once.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger
+                .append_object(&KirObject::new("customers", ObjectKind::Table))
+                .unwrap();
+        }
+
+        assert_eq!(
+            cache.get(&config, dir).unwrap().object_count().unwrap(),
+            2,
+            "the cache must pick up the externally-written object, not serve a stale count"
+        );
+    }
+
     #[test]
     fn initialize_echoes_protocol_version_and_names_server() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
         let line = req(1, "initialize", json!({ "protocolVersion": "2025-03-26" }));
 
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["protocolVersion"], "2025-03-26");
         assert_eq!(resp["result"]["serverInfo"]["name"], "ekos");
         assert!(resp["result"]["capabilities"]["tools"].is_object());
@@ -886,7 +1240,7 @@ mod tests {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
         let line = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }).to_string();
-        assert!(handle_message(&config, tmp.path(), &line).is_none());
+        assert!(handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).is_none());
     }
 
     #[test]
@@ -894,7 +1248,13 @@ mod tests {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
         let resp = parse(
-            &handle_message(&config, tmp.path(), &req(2, "resources/list", json!({}))).unwrap(),
+            &handle_message(
+                &config,
+                tmp.path(),
+                &req(2, "resources/list", json!({})),
+                &mut StoreCache::new(),
+            )
+            .unwrap(),
         );
         assert_eq!(resp["error"]["code"], -32601);
     }
@@ -903,8 +1263,15 @@ mod tests {
     fn tools_list_exposes_the_runtime_tools() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
-        let resp =
-            parse(&handle_message(&config, tmp.path(), &req(3, "tools/list", json!({}))).unwrap());
+        let resp = parse(
+            &handle_message(
+                &config,
+                tmp.path(),
+                &req(3, "tools/list", json!({})),
+                &mut StoreCache::new(),
+            )
+            .unwrap(),
+        );
         let tools = resp["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(
@@ -920,7 +1287,11 @@ mod tests {
                 "ekos_status",
                 "ekos_transformation_explain",
                 "ekos_transformation_diff",
-                "ekos_identity_review"
+                "ekos_architecture_evaluate",
+                "ekos_architecture_drift",
+                "ekos_architecture_diff",
+                "ekos_identity_review",
+                "ekos_architecture_review"
             ]
         );
         for tool in tools {
@@ -937,8 +1308,15 @@ mod tests {
     fn clickhouse_query_tool_absent_without_opt_in() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
-        let resp =
-            parse(&handle_message(&config, tmp.path(), &req(3, "tools/list", json!({}))).unwrap());
+        let resp = parse(
+            &handle_message(
+                &config,
+                tmp.path(),
+                &req(3, "tools/list", json!({})),
+                &mut StoreCache::new(),
+            )
+            .unwrap(),
+        );
         let tools = resp["result"]["tools"].as_array().unwrap();
         assert!(
             tools.iter().all(|t| t["name"] != "ekos_clickhouse_query"),
@@ -951,8 +1329,15 @@ mod tests {
         let mut config = EkosConfig::default();
         config.clickhouse.enable_mcp_query = true;
         let tmp = tempfile::tempdir().unwrap();
-        let resp =
-            parse(&handle_message(&config, tmp.path(), &req(3, "tools/list", json!({}))).unwrap());
+        let resp = parse(
+            &handle_message(
+                &config,
+                tmp.path(),
+                &req(3, "tools/list", json!({})),
+                &mut StoreCache::new(),
+            )
+            .unwrap(),
+        );
         let tools = resp["result"]["tools"].as_array().unwrap();
         assert!(
             tools.iter().any(|t| t["name"] == "ekos_clickhouse_query"),
@@ -967,8 +1352,15 @@ mod tests {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
         let params = json!({ "name": "ekos_clickhouse_query", "arguments": { "question": "how many orders?" } });
-        let resp =
-            parse(&handle_message(&config, tmp.path(), &req(4, "tools/call", params)).unwrap());
+        let resp = parse(
+            &handle_message(
+                &config,
+                tmp.path(),
+                &req(4, "tools/call", params),
+                &mut StoreCache::new(),
+            )
+            .unwrap(),
+        );
         assert_eq!(resp["result"]["isError"], true);
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("disabled"), "unexpected message: {text}");
@@ -984,7 +1376,8 @@ mod tests {
             json!({ "name": "ekos_dependents",
                     "arguments": { "id": "00000000-0000-0000-0000-000000000000" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
         assert!(
             resp["result"]["content"][0]["text"]
@@ -1004,7 +1397,8 @@ mod tests {
             json!({ "name": "ekos_impact",
                     "arguments": { "id": "00000000-0000-0000-0000-000000000000" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
         assert!(
             resp["result"]["content"][0]["text"]
@@ -1045,7 +1439,8 @@ mod tests {
             json!({ "name": "ekos_impact",
                     "arguments": { "id": orders_id.to_string(), "direction": "dependents" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1066,7 +1461,8 @@ mod tests {
             json!({ "name": "ekos_impact",
                     "arguments": { "id": orders_id.to_string(), "direction": "sideways" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
         assert!(
             resp["result"]["content"][0]["text"]
@@ -1085,7 +1481,8 @@ mod tests {
             "tools/call",
             json!({ "name": "ekos_diff", "arguments": { "from": "2020-01-01T00:00:00Z" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1102,7 +1499,8 @@ mod tests {
             "tools/call",
             json!({ "name": "ekos_diff", "arguments": { "from": "yesterday-ish" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
         assert!(
             resp["result"]["content"][0]["text"]
@@ -1122,12 +1520,198 @@ mod tests {
             json!({ "name": "ekos_status", "arguments": {} }),
         );
 
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(body["objects"], 0);
         assert_eq!(body["entries"], 0);
+    }
+
+    // ── RFC 0107: MCP architecture query tools ──────────────────────────────
+
+    #[test]
+    fn architecture_evaluate_reports_real_completeness_not_fabricated() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!("crates/cli"));
+        let ev =
+            ekos_kir::KirEvidence::new(ekos_kir::SourceLocation::file("Cargo.toml"), "[package]");
+        let claim = KirObject::new(
+            "ekos-cli has_role CLI",
+            ObjectKind::Custom("Claim".to_string()),
+        )
+        .with_property("predicate", serde_json::json!("has_role"))
+        .with_property("subject_id", serde_json::json!(krate.id.to_string()))
+        .with_property("value", serde_json::json!("CLI entrypoint"))
+        .with_evidence(ev.id);
+
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger.append_object(&krate).unwrap();
+            ledger.append_object(&claim).unwrap();
+            ledger.append_evidence(&ev).unwrap();
+        }
+
+        let line = req(
+            20,
+            "tools/call",
+            json!({ "name": "ekos_architecture_evaluate", "arguments": {} }),
+        );
+        let resp = parse(&handle_message(&config, dir, &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["crates_total"], 1);
+        assert_eq!(body["crates_classified"], 1);
+        assert_eq!(body["score"], 1.0);
+    }
+
+    #[test]
+    fn architecture_evaluate_on_an_empty_ledger_reports_zero_crates() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let line = req(
+            21,
+            "tools/call",
+            json!({ "name": "ekos_architecture_evaluate", "arguments": {} }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["crates_total"], 0);
+    }
+
+    #[test]
+    fn architecture_drift_reports_a_real_role_change() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let crate_dir = "crates/cli";
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!(crate_dir));
+        let claim_id = ekos_recovery::role_claim_kir_id(crate_dir);
+
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger.append_object(&krate).unwrap();
+            let mut v1 =
+                KirObject::new("ekos-cli has_role", ObjectKind::Custom("Claim".to_string()))
+                    .with_property("predicate", serde_json::json!("has_role"))
+                    .with_property("value", serde_json::json!("shared utility"));
+            v1.id = claim_id;
+            ledger.append_object(&v1).unwrap();
+            let mut v2 = v1.clone();
+            v2.properties
+                .insert("value".to_string(), serde_json::json!("CLI entrypoint"));
+            ledger.append_object(&v2).unwrap();
+        }
+
+        let line = req(
+            22,
+            "tools/call",
+            json!({ "name": "ekos_architecture_drift", "arguments": {} }),
+        );
+        let resp = parse(&handle_message(&config, dir, &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["drift_count"], 1);
+        assert_eq!(body["findings"][0]["documented_value"], "shared utility");
+        assert_eq!(body["findings"][0]["observed_value"], "CLI entrypoint");
+    }
+
+    #[test]
+    fn architecture_drift_with_no_changes_is_empty_not_an_error() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let crate_dir = "crates/cli";
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!(crate_dir));
+
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger.append_object(&krate).unwrap();
+        }
+
+        let line = req(
+            23,
+            "tools/call",
+            json!({ "name": "ekos_architecture_drift", "arguments": {} }),
+        );
+        let resp = parse(&handle_message(&config, dir, &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["drift_count"], 0);
+    }
+
+    #[test]
+    fn architecture_diff_reports_a_real_technology_added_between_two_timestamps() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let facts = facts_dir(&config, dir);
+
+        let (from, to);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            from = chrono::Utc::now();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            ledger
+                .append_object(&KirObject::new(
+                    "clap",
+                    ObjectKind::Custom("Technology".to_string()),
+                ))
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            to = chrono::Utc::now();
+        }
+
+        let line = req(
+            24,
+            "tools/call",
+            json!({
+                "name": "ekos_architecture_diff",
+                "arguments": { "from": from.to_rfc3339(), "to": to.to_rfc3339() }
+            }),
+        );
+        let resp = parse(&handle_message(&config, dir, &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["technologies_added"], json!(["clap"]));
+        assert_eq!(body["technologies_removed"], json!([]));
+    }
+
+    #[test]
+    fn architecture_diff_missing_from_is_a_clear_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let line = req(
+            25,
+            "tools/call",
+            json!({ "name": "ekos_architecture_diff", "arguments": {} }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
     }
 
     #[test]
@@ -1140,7 +1724,8 @@ mod tests {
             json!({ "name": "ekos_search", "arguments": { "query": "anything" } }),
         );
 
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1157,7 +1742,8 @@ mod tests {
             json!({ "name": "ekos_ekl", "arguments": { "query": "FIND Widget" } }),
         );
 
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert!(
             resp.get("error").is_none(),
             "tool failures must not be JSON-RPC errors"
@@ -1175,7 +1761,8 @@ mod tests {
             json!({ "name": "ekos_write", "arguments": {} }),
         );
 
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
     }
 
@@ -1183,7 +1770,9 @@ mod tests {
     fn malformed_json_returns_parse_error_with_null_id() {
         let config = EkosConfig::default();
         let tmp = tempfile::tempdir().unwrap();
-        let resp = parse(&handle_message(&config, tmp.path(), "{not json").unwrap());
+        let resp = parse(
+            &handle_message(&config, tmp.path(), "{not json", &mut StoreCache::new()).unwrap(),
+        );
         assert_eq!(resp["error"]["code"], -32700);
         assert!(resp["id"].is_null());
     }
@@ -1266,7 +1855,8 @@ mod tests {
             json!({ "name": "ekos_transformation_explain",
                     "arguments": { "id": sink_id.to_string() } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1307,7 +1897,8 @@ mod tests {
             json!({ "name": "ekos_transformation_explain",
                     "arguments": { "id": "00000000-0000-0000-0000-000000000000" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
         assert!(
             resp["result"]["content"][0]["text"]
@@ -1332,7 +1923,8 @@ mod tests {
             json!({ "name": "ekos_transformation_diff",
                     "arguments": { "old_id": old_sink.to_string(), "new_id": new_sink.to_string() } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1363,7 +1955,8 @@ mod tests {
             json!({ "name": "ekos_transformation_diff",
                     "arguments": { "old_id": sink_a.to_string(), "new_id": sink_b.to_string() } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
 
@@ -1419,7 +2012,8 @@ mod tests {
             json!({ "name": "ekos_identity_review",
                     "arguments": { "relationship_id": rel_id.to_string(), "decision": "confirmed" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
         let body: Value =
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1444,7 +2038,8 @@ mod tests {
             json!({ "name": "ekos_identity_review",
                     "arguments": { "relationship_id": rel_id.to_string(), "decision": "rejected" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], false);
 
         let ledger = ekos_ledger::Ledger::open(&config.ledger_path(tmp.path())).unwrap();
@@ -1464,7 +2059,8 @@ mod tests {
             json!({ "name": "ekos_identity_review",
                     "arguments": { "relationship_id": rel_id.to_string(), "decision": "maybe" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
     }
 
@@ -1490,7 +2086,8 @@ mod tests {
             json!({ "name": "ekos_identity_review",
                     "arguments": { "relationship_id": rel_id.to_string(), "decision": "confirmed" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
     }
 
@@ -1504,7 +2101,136 @@ mod tests {
             json!({ "name": "ekos_identity_review",
                     "arguments": { "relationship_id": "00000000-0000-0000-0000-000000000000", "decision": "confirmed" } }),
         );
-        let resp = parse(&handle_message(&config, tmp.path(), &line).unwrap());
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("not found")
+        );
+    }
+
+    fn seeded_role_claim(config: &EkosConfig, tmp: &Path) -> ekos_kir::KirId {
+        use ekos_kir::{KirObject, ObjectKind};
+        use ekos_ledger::Ledger;
+
+        let ledger = Ledger::open(&config.ledger_path(tmp)).unwrap();
+        let claim = KirObject::new(
+            "ekos-cli has_role CLI entrypoint",
+            ObjectKind::Custom("Claim".to_string()),
+        )
+        .with_property("predicate", json!("has_role"))
+        .with_property("value", json!("CLI entrypoint"));
+        let claim_id = claim.id;
+        ledger.append_object(&claim).unwrap();
+        claim_id
+    }
+
+    #[test]
+    fn architecture_review_confirms_a_claim_and_writes_an_event() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let claim_id = seeded_role_claim(&config, tmp.path());
+
+        let line = req(
+            35,
+            "tools/call",
+            json!({ "name": "ekos_architecture_review",
+                    "arguments": { "claim_id": claim_id.to_string(), "decision": "confirmed" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["decision"], "confirmed");
+
+        let ledger = ekos_ledger::Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let claim = ledger.get_object(&claim_id).unwrap().unwrap();
+        assert_eq!(claim.properties["review_status"], "confirmed");
+        assert!(claim.properties.contains_key("reviewed_at"));
+
+        // The original, unreviewed version is still there in history.
+        let history = ledger.object_history(&claim_id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert!(!history[0].properties.contains_key("review_status"));
+    }
+
+    #[test]
+    fn architecture_review_rejects_a_claim() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let claim_id = seeded_role_claim(&config, tmp.path());
+
+        let line = req(
+            36,
+            "tools/call",
+            json!({ "name": "ekos_architecture_review",
+                    "arguments": { "claim_id": claim_id.to_string(), "decision": "rejected" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+
+        let ledger = ekos_ledger::Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let claim = ledger.get_object(&claim_id).unwrap().unwrap();
+        assert_eq!(claim.properties["review_status"], "rejected");
+    }
+
+    #[test]
+    fn architecture_review_with_invalid_decision_is_a_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let claim_id = seeded_role_claim(&config, tmp.path());
+
+        let line = req(
+            37,
+            "tools/call",
+            json!({ "name": "ekos_architecture_review",
+                    "arguments": { "claim_id": claim_id.to_string(), "decision": "maybe" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn architecture_review_of_a_non_role_claim_object_is_a_tool_error() {
+        use ekos_kir::{KirObject, ObjectKind};
+        use ekos_ledger::Ledger;
+
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let ledger = Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let table = KirObject::new("orders", ObjectKind::Table);
+        let table_id = table.id;
+        ledger.append_object(&table).unwrap();
+
+        let line = req(
+            38,
+            "tools/call",
+            json!({ "name": "ekos_architecture_review",
+                    "arguments": { "claim_id": table_id.to_string(), "decision": "confirmed" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn architecture_review_of_unknown_claim_is_a_tool_error() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let line = req(
+            39,
+            "tools/call",
+            json!({ "name": "ekos_architecture_review",
+                    "arguments": { "claim_id": "00000000-0000-0000-0000-000000000000", "decision": "confirmed" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
         assert_eq!(resp["result"]["isError"], true);
         assert!(
             resp["result"]["content"][0]["text"]

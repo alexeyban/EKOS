@@ -309,6 +309,7 @@ impl CompilerPass for ArchitectureReasoningPass {
                 user: &user_message,
                 prompt_version: PROMPT_VERSION,
                 max_tokens: 4096,
+                history: &[],
             };
 
             let resp = match self.llm.complete(&req).await {

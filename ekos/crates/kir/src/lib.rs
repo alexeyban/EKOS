@@ -222,13 +222,19 @@ impl KirObject {
 
     /// Text fed to full-text search (RFC 0014's `excerpt`, extended by RFC
     /// 0019's `symbols` and RFC 0024's `ocr_text`): the file-opening
-    /// excerpt, any harvested declaration-line symbol names, and any
-    /// OCR'd image text, space-joined. Shared by both ledger backends so
-    /// `ekos_search` finds a symbol or OCR'd phrase whether or not it
-    /// happens to fall within the excerpt's leading window. Before RFC
-    /// 0024, `ocr_text` rode on an object's properties but was never
-    /// actually searchable — an object's scanned-page text was only
-    /// reachable if its id was already known through some other path.
+    /// excerpt, any harvested declaration-line symbol names, any OCR'd
+    /// image text, and (RFC 0100) any real LLM-generated `ai_overview`/
+    /// `ai_usage` prose (RFC 0088) — space-joined. Shared by both ledger
+    /// backends so `ekos_search` finds a symbol, OCR'd phrase, or a concept
+    /// the AI overview names in different words than the source itself
+    /// (e.g. an `orders` table whose overview happens to say "purchases")
+    /// without needing embeddings or a dedicated synonym list — the
+    /// overview text was already being generated and paid for by RFC 0088,
+    /// it just wasn't searchable. Before RFC 0024, `ocr_text` rode on an
+    /// object's properties but was never actually searchable — an object's
+    /// scanned-page text was only reachable if its id was already known
+    /// through some other path; `ai_overview`/`ai_usage` had the identical
+    /// gap until this RFC.
     pub fn indexed_content(&self) -> String {
         let excerpt = self
             .properties
@@ -251,11 +257,62 @@ impl KirObject {
             .get("ocr_text")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        [excerpt, symbols.as_str(), ocr_text]
+        let ai_overview = self
+            .properties
+            .get("ai_overview")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let ai_usage = self
+            .properties
+            .get("ai_usage")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        [excerpt, symbols.as_str(), ocr_text, ai_overview, ai_usage]
             .into_iter()
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// RFC 0101: `true` when this object was observed under a `memory/`
+    /// directory — the real, already-in-production convention the
+    /// `.claude/skills/memory` skill and RFC 0014 (`next_steps.md` §1/§5,
+    /// "Personal Memory OS") both establish (`$WORKSPACE_ROOT/memory`,
+    /// filenames like `global--lesson--fabric-capacity-pause.md`). Search
+    /// ranking (RFC 0101) structurally boosts these — RFC 0014 explicitly
+    /// left this as a Non-goal to "revisit with real usage"; the skill has
+    /// been real, live usage since 2026-07-17.
+    ///
+    /// Path detection has to account for two real, both-observed
+    /// `[observe] paths` shapes, not just one: a multi-project workspace
+    /// (this repo's own real `/home/legion/PycharmProjects/ekos.toml`
+    /// observes `memory` as its own top-level entry — RFC 0079's
+    /// `"project"` property then holds exactly `"memory"`, and `"path"` is
+    /// relative to *that* entry, never containing a `memory/` prefix
+    /// itself) and a single-path workspace with an internal `memory/`
+    /// subdirectory (no `"project"` property at all — RFC 0079's own
+    /// "absent entirely for the single-path case" rule — so `"path"` itself
+    /// carries the `memory/` prefix directly). Reconstructing
+    /// `[project]/[path]` and checking its *first path segment* handles
+    /// both without the caller needing to know which shape produced the
+    /// object. A segment check (`"memory"` exactly, or `"memory/..."`), not
+    /// a substring check — `memory-old/x` or `not-memory/x` must not match.
+    pub fn is_under_memory_path(&self) -> bool {
+        let project = self
+            .properties
+            .get("project")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let path = self
+            .properties
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let full_path = match project {
+            Some(p) => format!("{p}/{path}"),
+            None => path.to_string(),
+        };
+        full_path == "memory" || full_path.starts_with("memory/")
     }
 }
 
@@ -461,6 +518,92 @@ mod tests {
         let obj = KirObject::new("scan.pdf", ObjectKind::Custom("Document".into()))
             .with_property("ocr_text", serde_json::json!("hello from a scanned page"));
         assert_eq!(obj.indexed_content(), "hello from a scanned page");
+    }
+
+    // ── RFC 0100: ai_overview/ai_usage become searchable ────────────────
+
+    #[test]
+    fn indexed_content_includes_ai_overview_and_ai_usage() {
+        let obj = KirObject::new("orders", ObjectKind::Table)
+            .with_property(
+                "ai_overview",
+                serde_json::json!("Tracks customer purchases and sales transactions."),
+            )
+            .with_property(
+                "ai_usage",
+                serde_json::json!("Referenced by the billing service."),
+            );
+        let content = obj.indexed_content();
+        assert!(content.contains("purchases"));
+        assert!(content.contains("billing service"));
+    }
+
+    #[test]
+    fn indexed_content_without_ai_properties_is_unaffected() {
+        // No regression for the overwhelming majority of objects that
+        // don't have [llm-description] enabled at all.
+        let obj = KirObject::new("plain", ObjectKind::Table)
+            .with_property("excerpt", serde_json::json!("CREATE TABLE plain (id INT)"));
+        assert_eq!(obj.indexed_content(), "CREATE TABLE plain (id INT)");
+    }
+
+    // ── RFC 0101: is_under_memory_path ───────────────────────────────────
+
+    #[test]
+    fn is_under_memory_path_true_for_the_multi_project_shape() {
+        // The real shape this repo's own /home/legion/PycharmProjects/ekos.toml
+        // uses: `memory` is its own top-level [observe] paths entry, so
+        // "project" == "memory" and "path" is relative to that entry.
+        let obj = KirObject::new(
+            "global--lesson--x.md",
+            ObjectKind::Custom("Document".into()),
+        )
+        .with_property("project", serde_json::json!("memory"))
+        .with_property("path", serde_json::json!("global--lesson--x.md"));
+        assert!(obj.is_under_memory_path());
+    }
+
+    #[test]
+    fn is_under_memory_path_true_for_the_single_path_shape() {
+        // A single-path workspace (paths = ["."]) with an internal memory/
+        // subdirectory: no "project" property at all (RFC 0079's "absent
+        // for the single-path case" rule), "path" carries the prefix
+        // directly.
+        let obj = KirObject::new(
+            "memory/global--lesson--x.md",
+            ObjectKind::Custom("Document".into()),
+        )
+        .with_property("path", serde_json::json!("memory/global--lesson--x.md"));
+        assert!(obj.is_under_memory_path());
+    }
+
+    #[test]
+    fn is_under_memory_path_false_for_a_similarly_named_but_different_directory() {
+        // A substring match ("memory" appearing anywhere) must not count —
+        // only a real path segment.
+        for (project, path) in [
+            (None, "memory-old/x.md"),
+            (None, "not-memory/x.md"),
+            (Some("memory-archive"), "x.md"),
+        ] {
+            let mut obj = KirObject::new("x.md", ObjectKind::File)
+                .with_property("path", serde_json::json!(path));
+            if let Some(p) = project {
+                obj = obj.with_property("project", serde_json::json!(p));
+            }
+            assert!(
+                !obj.is_under_memory_path(),
+                "must not match for project={project:?} path={path}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_under_memory_path_false_for_an_ordinary_project_object() {
+        let obj = KirObject::new("main.rs", ObjectKind::File)
+            .with_property("project", serde_json::json!("EKOS"))
+            .with_property("path", serde_json::json!("src/main.rs"));
+        assert!(!obj.is_under_memory_path());
     }
 
     #[test]

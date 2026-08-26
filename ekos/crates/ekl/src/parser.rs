@@ -4,6 +4,7 @@
 //! recursive expression precedence, so a hand-written parser stays simple and
 //! is easy to fuzz for "never panics, only returns `ParseError`".
 
+use chrono::{DateTime, Utc};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,6 +59,18 @@ pub struct EklAst {
     pub returns: Vec<String>,
     pub order_by: Option<(String, Order)>,
     pub limit: Option<u64>,
+    /// RFC 0096: reconstructs every matching row as it existed at or before
+    /// this point in time, via `Runtime::list_objects_at`/
+    /// `list_relationships_at` (RFC 0047's point-in-time reads, generalized
+    /// to a bulk scan). Not yet supported combined with `FROM` — see
+    /// `EklError::AsOfWithFromUnsupported`.
+    pub as_of: Option<DateTime<Utc>>,
+    /// RFC 0096: aggregate mode — `COUNT` alone yields one row `{count: N}`;
+    /// `COUNT ... GROUP BY <field>` yields one row per distinct value of
+    /// `field` among the matched rows. Mutually exclusive with `RETURN`
+    /// (rejected at parse time, not silently ignored).
+    pub count: bool,
+    pub group_by: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -286,6 +299,9 @@ impl Parser {
         let mut returns = Vec::new();
         let mut order_by = None;
         let mut limit = None;
+        let mut as_of = None;
+        let mut count = false;
+        let mut group_by = None;
 
         if self.peek_keyword("WHERE") {
             self.advance();
@@ -331,6 +347,25 @@ impl Parser {
             } else if self.peek_keyword("LIMIT") {
                 self.advance();
                 limit = Some(self.expect_num()? as u64);
+            } else if self.peek_keyword("AS") {
+                self.advance();
+                self.expect_keyword("OF")?;
+                let pos = self.peek_pos();
+                let raw = self.expect_string()?;
+                let parsed = DateTime::parse_from_rfc3339(&raw)
+                    .map_err(|e| ParseError {
+                        message: format!("invalid AS OF timestamp '{raw}': {e}"),
+                        position: pos,
+                    })?
+                    .with_timezone(&Utc);
+                as_of = Some(parsed);
+            } else if self.peek_keyword("COUNT") {
+                self.advance();
+                count = true;
+            } else if self.peek_keyword("GROUP") {
+                self.advance();
+                self.expect_keyword("BY")?;
+                group_by = Some(self.expect_ident()?);
             } else {
                 break;
             }
@@ -352,6 +387,22 @@ impl Parser {
             });
         }
 
+        if group_by.is_some() && !count {
+            let pos = self.peek_pos();
+            return Err(ParseError {
+                message: "GROUP BY requires COUNT".to_string(),
+                position: pos,
+            });
+        }
+
+        if count && !returns.is_empty() {
+            let pos = self.peek_pos();
+            return Err(ParseError {
+                message: "RETURN is not compatible with COUNT".to_string(),
+                position: pos,
+            });
+        }
+
         Ok(EklAst {
             entity,
             predicates,
@@ -361,6 +412,9 @@ impl Parser {
             returns,
             order_by,
             limit,
+            as_of,
+            count,
+            group_by,
         })
     }
 
@@ -559,6 +613,48 @@ mod tests {
     }
 
     #[test]
+    fn parses_as_of_clause() {
+        let ast =
+            ekl_parse("FIND Object WHERE kind = 'Table' AS OF '2026-01-01T00:00:00Z'").unwrap();
+        assert_eq!(
+            ast.as_of,
+            Some("2026-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap())
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_as_of_timestamp() {
+        let err = ekl_parse("FIND Object AS OF 'not-a-timestamp'").unwrap_err();
+        assert!(err.message.contains("AS OF"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn parses_bare_count() {
+        let ast = ekl_parse("FIND Object WHERE kind = 'Table' COUNT").unwrap();
+        assert!(ast.count);
+        assert_eq!(ast.group_by, None);
+    }
+
+    #[test]
+    fn parses_count_with_group_by() {
+        let ast = ekl_parse("FIND Object COUNT GROUP BY kind").unwrap();
+        assert!(ast.count);
+        assert_eq!(ast.group_by, Some("kind".to_string()));
+    }
+
+    #[test]
+    fn rejects_group_by_without_count() {
+        let err = ekl_parse("FIND Object GROUP BY kind").unwrap_err();
+        assert!(err.message.contains("GROUP BY requires COUNT"));
+    }
+
+    #[test]
+    fn rejects_count_combined_with_return() {
+        let err = ekl_parse("FIND Object COUNT RETURN name").unwrap_err();
+        assert!(err.message.contains("RETURN is not compatible with COUNT"));
+    }
+
+    #[test]
     fn fuzz_random_strings_never_panic() {
         let seeds = [
             "",
@@ -573,6 +669,12 @@ mod tests {
             "FIND Relationship FROM",
             ",,,,",
             "FIND Object RETURN ,",
+            "FIND Object AS OF",
+            "FIND Object AS OF '",
+            "FIND Object AS",
+            "FIND Object COUNT GROUP",
+            "FIND Object GROUP BY",
+            "FIND Object COUNT RETURN",
         ];
         for s in seeds {
             let _ = ekl_parse(s); // must not panic

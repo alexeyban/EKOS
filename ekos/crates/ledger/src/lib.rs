@@ -47,6 +47,21 @@ pub enum LedgerError {
     Corrupt(String),
     #[error("ledger not initialized at {0}")]
     NotFound(String),
+    /// RFC 0097: a write attempted against a store opened via
+    /// `FactLedger::open_read_only` — that constructor deliberately never
+    /// acquires tantivy's exclusive `IndexWriter` lock (see `search.rs`),
+    /// so it cannot durably record a write; this fails loudly instead of
+    /// silently discarding one.
+    #[error("cannot write: ledger opened read-only at {0}")]
+    ReadOnly(String),
+    /// RFC 0104 Phase 1: another writable process already holds
+    /// `FactLedger`'s real, designed cross-process `write.lock` — a fast,
+    /// clear failure at open time, rather than an eventual `LockBusy`
+    /// surfacing from deep inside tantivy's own `IndexWriter` lock (still
+    /// acquired too, now a redundant second safety net rather than the sole
+    /// mechanism).
+    #[error("cannot write: {0}")]
+    Locked(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,6 +241,14 @@ impl Ledger {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        // RFC 0104 Phase 1: without this, a second writer racing `BEGIN IMMEDIATE` against an
+        // already-locked database fails instantly (SQLite's own default busy timeout is 0ms) —
+        // under completely ordinary contention (two `ekos build` runs a few ms apart), that's a
+        // spurious failure `in_transaction`'s new real transaction wrapping would otherwise make
+        // more, not less, likely to surface. 5s is long enough for one writer's transaction to
+        // finish under this project's own write volumes, short enough not to hang a CLI command
+        // indefinitely against a genuinely stuck lock.
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
 
         let user_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         let has_entries: bool = conn
@@ -270,6 +293,7 @@ impl Ledger {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
         init_schema_v2(&conn)?;
 
         let dict = match dict_bytes {
@@ -431,6 +455,33 @@ impl Ledger {
 
     // ── Append methods ────────────────────────────────────────────────────────
 
+    /// Runs `f` inside a real SQLite transaction (RFC 0104 Phase 1) — `BEGIN IMMEDIATE` (acquires
+    /// SQLite's RESERVED lock immediately, at the very start of the critical section, rather than
+    /// on the first write statement, so two racing writers serialize there instead of one
+    /// discovering the conflict mid-sequence) followed by `COMMIT` on success or `ROLLBACK` on any
+    /// error. Every multi-statement writer (`append`, `append_object`, `append_relationship`) goes
+    /// through this — without it, a crash or a racing writer partway through, e.g., `entries` →
+    /// `current_objects` → `object_fts` could leave those tables inconsistent with each other, the
+    /// concrete real mechanism `devlog_65` traced a live `object_fts` corruption to.
+    fn in_transaction<T>(
+        &self,
+        f: impl FnOnce() -> Result<T, LedgerError>,
+    ) -> Result<T, LedgerError> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        match f() {
+            Ok(value) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(value)
+            }
+            Err(e) => {
+                // Best-effort: if the rollback itself fails (e.g. the connection is already
+                // gone), the original error `e` is still the one that matters to the caller.
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    }
+
     /// Append an entry, versioned by (id, content signature).
     ///
     /// Unlike a plain content-addressable store, the ledger's logical id
@@ -475,43 +526,56 @@ impl Ledger {
 
     /// Append an entry. Idempotent — if the exact `(id, payload)` pair already
     /// exists, skip. Returns `true` if a new version was written.
+    ///
+    /// RFC 0104 Phase 1: wrapped in a real transaction — `append_versioned`'s own SELECT-then-INSERT
+    /// is a check-then-act pair that two racing writers could otherwise both pass the "not found"
+    /// check on before either has inserted, producing a duplicate version row.
     pub fn append(&self, entry: &LedgerEntry) -> Result<bool, LedgerError> {
-        let (is_new, _rowid) = self.append_versioned(entry)?;
-        Ok(is_new)
+        self.in_transaction(|| {
+            let (is_new, _rowid) = self.append_versioned(entry)?;
+            Ok(is_new)
+        })
     }
 
     /// Write a KirObject. Updates the current-state index and FTS to point at
     /// this version, even if the exact payload was already present (repointing
     /// is a cheap no-op in that case). Returns `true` if a new version was
     /// recorded — `false` means this exact content was already the latest.
+    ///
+    /// RFC 0104 Phase 1: the whole body runs in a real transaction — the real, concrete mechanism
+    /// `devlog_65` traced a live `object_fts` corruption to was exactly this method's 3-4
+    /// statements (`entries` insert, `current_objects` read-then-write, FTS update) previously
+    /// running unwrapped.
     pub fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
-        let entry = LedgerEntry {
-            id: obj.id.to_string(),
-            entry_type: EntryType::Object,
-            payload: serde_json::to_value(obj)?,
-            written_at: Utc::now(),
-        };
-        let (is_new, rowid) = self.append_versioned(&entry)?;
+        self.in_transaction(|| {
+            let entry = LedgerEntry {
+                id: obj.id.to_string(),
+                entry_type: EntryType::Object,
+                payload: serde_json::to_value(obj)?,
+                written_at: Utc::now(),
+            };
+            let (is_new, rowid) = self.append_versioned(&entry)?;
 
-        let old_rowid: Option<i64> = self
-            .conn
-            .query_row(
-                "SELECT entry_rowid FROM current_objects WHERE object_id = ?1",
-                params![obj.id.to_string()],
-                |row| row.get(0),
-            )
-            .ok();
+            let old_rowid: Option<i64> = self
+                .conn
+                .query_row(
+                    "SELECT entry_rowid FROM current_objects WHERE object_id = ?1",
+                    params![obj.id.to_string()],
+                    |row| row.get(0),
+                )
+                .ok();
 
-        self.conn.execute(
-            "INSERT OR REPLACE INTO current_objects (object_id, entry_rowid) VALUES (?1, ?2)",
-            params![obj.id.to_string(), rowid],
-        )?;
-        match self.format {
-            Format::V1 => self.index_object_fts_v1(obj)?,
-            Format::V2 => self.index_object_fts_v2(obj, rowid, old_rowid)?,
-        }
+            self.conn.execute(
+                "INSERT OR REPLACE INTO current_objects (object_id, entry_rowid) VALUES (?1, ?2)",
+                params![obj.id.to_string(), rowid],
+            )?;
+            match self.format {
+                Format::V1 => self.index_object_fts_v1(obj)?,
+                Format::V2 => self.index_object_fts_v2(obj, rowid, old_rowid)?,
+            }
 
-        Ok(is_new)
+            Ok(is_new)
+        })
     }
 
     /// Write a KirEvidence. Idempotent.
@@ -542,28 +606,32 @@ impl Ledger {
 
     /// Write a KirRelationship. Updates the relationship index to point at
     /// this version. Returns `true` if a new version was recorded.
+    ///
+    /// RFC 0104 Phase 1: wrapped in a real transaction, same reasoning as `append_object`.
     pub fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
-        let entry = LedgerEntry {
-            id: rel.id.to_string(),
-            entry_type: EntryType::Relationship,
-            payload: serde_json::to_value(rel)?,
-            written_at: Utc::now(),
-        };
-        let (is_new, rowid) = self.append_versioned(&entry)?;
+        self.in_transaction(|| {
+            let entry = LedgerEntry {
+                id: rel.id.to_string(),
+                entry_type: EntryType::Relationship,
+                payload: serde_json::to_value(rel)?,
+                written_at: Utc::now(),
+            };
+            let (is_new, rowid) = self.append_versioned(&entry)?;
 
-        self.conn.execute(
-            "INSERT OR REPLACE INTO current_relationships \
-             (rel_id, entry_rowid, from_id, to_id, kind) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                rel.id.to_string(),
-                rowid,
-                rel.from.to_string(),
-                rel.to.to_string(),
-                format!("{:?}", rel.kind),
-            ],
-        )?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO current_relationships \
+                 (rel_id, entry_rowid, from_id, to_id, kind) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    rel.id.to_string(),
+                    rowid,
+                    rel.from.to_string(),
+                    rel.to.to_string(),
+                    format!("{:?}", rel.kind),
+                ],
+            )?;
 
-        Ok(is_new)
+            Ok(is_new)
+        })
     }
 
     // ── Read methods — current state ──────────────────────────────────────────
@@ -762,6 +830,55 @@ impl Ledger {
             }
         }
         Ok(relationships)
+    }
+
+    /// Every object as it existed at or before `at` — the latest version per
+    /// distinct object id with `written_at <= at`, one row per id (RFC 0096:
+    /// generalizes `object_at`'s single-id point-in-time read to a bulk scan,
+    /// the primitive EKL's `AS OF` clause needs and that didn't exist before
+    /// this RFC — only single-id historical reads did). The correlated
+    /// subquery picks, per `id`, the same "newest `written_at`, tie-broken by
+    /// `rowid`" row `object_at` already uses for one id at a time.
+    pub fn all_objects_at(&self, at: DateTime<Utc>) -> Result<Vec<KirObject>, LedgerError> {
+        let ts = self.ts_param(at);
+        let payloads = self.query_payloads(
+            "SELECT e1.payload FROM entries e1
+             WHERE e1.entry_type = 'object' AND e1.written_at <= ?1
+             AND e1.rowid = (
+                 SELECT e2.rowid FROM entries e2
+                 WHERE e2.id = e1.id AND e2.entry_type = 'object' AND e2.written_at <= ?1
+                 ORDER BY e2.written_at DESC, e2.rowid DESC LIMIT 1
+             )",
+            &[&ts],
+        )?;
+        payloads
+            .iter()
+            .map(|p| serde_json::from_str::<KirObject>(p).map_err(Into::into))
+            .collect()
+    }
+
+    /// Every relationship as it existed at or before `at` — the bulk
+    /// counterpart to `all_objects_at`, same correlated-subquery shape,
+    /// scoped to `entry_type = 'relationship'` (RFC 0096).
+    pub fn all_relationships_at(
+        &self,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<KirRelationship>, LedgerError> {
+        let ts = self.ts_param(at);
+        let payloads = self.query_payloads(
+            "SELECT e1.payload FROM entries e1
+             WHERE e1.entry_type = 'relationship' AND e1.written_at <= ?1
+             AND e1.rowid = (
+                 SELECT e2.rowid FROM entries e2
+                 WHERE e2.id = e1.id AND e2.entry_type = 'relationship' AND e2.written_at <= ?1
+                 ORDER BY e2.written_at DESC, e2.rowid DESC LIMIT 1
+             )",
+            &[&ts],
+        )?;
+        payloads
+            .iter()
+            .map(|p| serde_json::from_str::<KirRelationship>(p).map_err(Into::into))
+            .collect()
     }
 
     /// Every historical version of the object at `id`, oldest to newest
@@ -1456,6 +1573,12 @@ pub trait KnowledgeStore {
         id: &KirId,
         at: DateTime<Utc>,
     ) -> Result<Vec<KirRelationship>, LedgerError>;
+    /// Bulk counterpart to `object_at` (RFC 0096) — every object as it
+    /// existed at or before `at`, one row per distinct id.
+    fn all_objects_at(&self, at: DateTime<Utc>) -> Result<Vec<KirObject>, LedgerError>;
+    /// Bulk counterpart to `relationships_at` (RFC 0096) — every
+    /// relationship as it existed at or before `at`.
+    fn all_relationships_at(&self, at: DateTime<Utc>) -> Result<Vec<KirRelationship>, LedgerError>;
     /// Every historical version of one object's own id, oldest to newest
     /// (RFC 0047) — unlike `object_at`, which reconstructs a single
     /// point-in-time cut, this returns the full version sequence.
@@ -1523,6 +1646,15 @@ macro_rules! delegate_store {
                 at: DateTime<Utc>,
             ) -> Result<Vec<KirRelationship>, LedgerError> {
                 <$ty>::relationships_at(self, id, at)
+            }
+            fn all_objects_at(&self, at: DateTime<Utc>) -> Result<Vec<KirObject>, LedgerError> {
+                <$ty>::all_objects_at(self, at)
+            }
+            fn all_relationships_at(
+                &self,
+                at: DateTime<Utc>,
+            ) -> Result<Vec<KirRelationship>, LedgerError> {
+                <$ty>::all_relationships_at(self, at)
             }
             fn object_history(&self, id: &KirId) -> Result<Vec<KirObject>, LedgerError> {
                 <$ty>::object_history(self, id)
@@ -1780,6 +1912,110 @@ mod tests {
         ledger.append_object(&obj).unwrap();
         let found = ledger.get_object(&id).unwrap().unwrap();
         assert_eq!(found.name, "orders");
+    }
+
+    // ── RFC 0104 Phase 1: real transactions around multi-statement writes ──
+
+    #[test]
+    fn in_transaction_rolls_back_every_statement_on_error() {
+        let (ledger, _dir) = temp_ledger();
+        ledger
+            .conn
+            .execute("CREATE TABLE test_probe (v INTEGER)", [])
+            .unwrap();
+
+        let result: Result<(), LedgerError> = ledger.in_transaction(|| {
+            ledger
+                .conn
+                .execute("INSERT INTO test_probe (v) VALUES (1)", [])?;
+            Err(LedgerError::Corrupt("forced failure".to_string()))
+        });
+        assert!(result.is_err());
+
+        let count: i64 = ledger
+            .conn
+            .query_row("SELECT COUNT(*) FROM test_probe", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "a failed transaction must roll back every statement inside it, not just fail to \
+             commit the last one"
+        );
+    }
+
+    #[test]
+    fn append_object_commits_current_objects_and_fts_atomically() {
+        let (ledger, _dir) = temp_ledger();
+        let obj = KirObject::new("orders", ObjectKind::Table);
+        ledger.append_object(&obj).unwrap();
+
+        // A real update (not just the first insert) exercises the read-then-write
+        // `current_objects` step too, not only the simpler first-write path.
+        let mut updated = obj.clone();
+        updated.properties.insert(
+            "note".to_string(),
+            serde_json::Value::String("updated".to_string()),
+        );
+        ledger.append_object(&updated).unwrap();
+
+        let current: i64 = ledger
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM current_objects WHERE object_id = ?1",
+                params![obj.id.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(current, 1, "exactly one current_objects row per object");
+
+        let hits = ledger.find_objects("orders").unwrap();
+        assert!(
+            hits.iter().any(|(id, _)| *id == obj.id),
+            "object_fts must stay consistent with current_objects after the update"
+        );
+    }
+
+    /// Real concurrent writers (two separate SQLite connections to the same file, from two real
+    /// OS threads — the same cross-connection locking a second real `ekos` *process* would hit)
+    /// must never leave `current_objects`/`object_fts` missing or inconsistent for any object,
+    /// even when writing concurrently. This is the regression test for the real mechanism
+    /// `devlog_65` traced a live `object_fts` corruption to.
+    #[test]
+    fn concurrent_writers_never_corrupt_current_objects_or_fts() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ledger.db");
+        // Bootstrap the schema first so both threads open an already-initialized database —
+        // this test's target is concurrent *writes*, not concurrent schema creation.
+        drop(Ledger::open(&path).unwrap());
+
+        let ids: Vec<KirId> = (0..40).map(|_| KirId::new()).collect();
+        let (first, second) = ids.split_at(20);
+        let spawn_writer = |path: std::path::PathBuf, ids: Vec<KirId>| {
+            std::thread::spawn(move || {
+                let ledger = Ledger::open(&path).unwrap();
+                for id in ids {
+                    let mut obj = KirObject::new(format!("concurrent-{id}"), ObjectKind::Table);
+                    obj.id = id;
+                    ledger.append_object(&obj).unwrap();
+                }
+            })
+        };
+        let t1 = spawn_writer(path.clone(), first.to_vec());
+        let t2 = spawn_writer(path.clone(), second.to_vec());
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        let ledger = Ledger::open(&path).unwrap();
+        for id in &ids {
+            let obj = ledger.get_object(id).unwrap().unwrap_or_else(|| {
+                panic!("object {id} written by a concurrent writer must be readable")
+            });
+            let hits = ledger.find_objects(&obj.name).unwrap();
+            assert!(
+                hits.iter().any(|(hit_id, _)| hit_id == id),
+                "object_fts must be consistent with current_objects for {id}"
+            );
+        }
     }
 
     /// RFC 0029: first real write path for `EntryType::Event` — round-trip
@@ -2176,6 +2412,67 @@ mod tests {
             current.properties.get("row_count"),
             Some(&serde_json::json!(99))
         );
+    }
+
+    // ── RFC 0096: all_objects_at / all_relationships_at (bulk AS OF) ────────
+
+    #[test]
+    fn all_objects_at_returns_empty_before_anything_written() {
+        let (ledger, _dir) = temp_ledger();
+        ledger
+            .append_object(&KirObject::new("orders", ObjectKind::Table))
+            .unwrap();
+        let before = Utc::now() - chrono::Duration::seconds(60);
+        assert!(ledger.all_objects_at(before).unwrap().is_empty());
+    }
+
+    #[test]
+    fn all_objects_at_returns_the_version_current_at_that_time_not_later_updates() {
+        let (ledger, _dir) = temp_ledger();
+        let mut orders = KirObject::new("orders", ObjectKind::Table);
+        let customers = KirObject::new("customers", ObjectKind::Table);
+        ledger.append_object(&orders).unwrap();
+        ledger.append_object(&customers).unwrap();
+        let mid = Utc::now();
+
+        // Update orders after `mid` — must not be visible in the `mid` snapshot.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        orders
+            .properties
+            .insert("row_count".into(), serde_json::json!(99));
+        ledger.append_object(&orders).unwrap();
+
+        let snapshot = ledger.all_objects_at(mid).unwrap();
+        assert_eq!(snapshot.len(), 2, "both objects existed by `mid`");
+        let orders_at_mid = snapshot.iter().find(|o| o.name == "orders").unwrap();
+        assert!(
+            !orders_at_mid.properties.contains_key("row_count"),
+            "must be the pre-update version, matching what object_at(id, mid) would return"
+        );
+
+        let now_snapshot = ledger.all_objects_at(Utc::now()).unwrap();
+        let orders_now = now_snapshot.iter().find(|o| o.name == "orders").unwrap();
+        assert_eq!(
+            orders_now.properties.get("row_count"),
+            Some(&serde_json::json!(99))
+        );
+    }
+
+    #[test]
+    fn all_relationships_at_filters_by_time_across_multiple_relationships() {
+        let (ledger, _dir) = temp_ledger();
+        let (a, b, c) = (KirId::new(), KirId::new(), KirId::new());
+        ledger
+            .append_relationship(&KirRelationship::new(RelationshipKind::ForeignKey, a, b))
+            .unwrap();
+        let mid = Utc::now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        ledger
+            .append_relationship(&KirRelationship::new(RelationshipKind::ForeignKey, a, c))
+            .unwrap();
+
+        assert_eq!(ledger.all_relationships_at(mid).unwrap().len(), 1);
+        assert_eq!(ledger.all_relationships_at(Utc::now()).unwrap().len(), 2);
     }
 
     // ── RFC 0047: object_history / relationship_history ────────────────────
