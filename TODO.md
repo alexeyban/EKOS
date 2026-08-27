@@ -2754,13 +2754,19 @@ truth for *why* it was deferred. Items already fulfilled by a later RFC, or alre
 (RFC 0061's README ranking gap, RFC 0062's full-URL reference gap — both closed in `devlog_65`),
 are excluded — see the full exclusion list in the planning history if needed.
 
-- [ ] **Runtime/retrieval**: embedding/semantic search for retrieval (restated as open across RFC
-  0009/0014/0015/0016 — one consolidated item); streaming LLM responses (RFC 0008/0009); ledger
-  read caching (RFC 0005); multi-turn conversation history (RFC 0009); async ledger methods
-  (RFC 0005); EKL joins across Object+Relationship in one query, `COUNT`/`GROUP BY` aggregation,
-  and `AS OF <timestamp>` historical queries exposed in EKL syntax (RFC 0010 — note
-  `object_at`/`relationships_at` already exist in `Runtime`, just not surfaced in EKL grammar);
-  structurally boosting `memory/`-path search results beyond bm25 name-weighting (RFC 0014).
+- [x] **Runtime/retrieval — 6 of 6 closed (2026-08-26), see the full six-RFC sequence under
+  `docs/GAP_ANALYSIS.md` gap-closure plan below** for real implementation detail: EKL `AS OF
+  <timestamp>` + `COUNT`/`GROUP BY` (RFC 0096); MCP-scoped read-only ledger caching, `StoreCache`
+  (RFC 0097, after an unsafe first attempt was caught and reverted); `ekos ask --stream` (RFC 0098);
+  multi-turn `ekos ask --session` history (RFC 0099); `memory/`-path search boost (RFC 0101);
+  embedding/semantic search — redesigned by explicit user direction into indexing RFC 0088's
+  existing `ai_overview`/`ai_usage` prose instead of new vector infrastructure (RFC 0100). **Async
+  `KnowledgeStore`/`Runtime` methods stay deliberately excluded, not closed** — RFC 0005's original
+  sync-by-design decision was re-confirmed correct (100% sync, both backends, 33 real call-site
+  files), a trade-off not a gap; revisit only if a concrete future consumer (e.g. an async MCP
+  transport) needs it. EKL Object+Relationship `JOIN` in one query also stays open — found live to
+  be the one extension that actually breaks EKL's flat-clause-type design, deferred as its own
+  future RFC.
 
 - [ ] **MCP / connector infrastructure**: MCP HTTP/SSE transport + auth + multi-workspace routing,
   and MCP resources/prompts capabilities beyond tools-only (RFC 0013); generic
@@ -4062,6 +4068,3 @@ are excluded — see the full exclusion list in the planning history if needed.
     question about?") and the model answered correctly, proof the real conversation history was
     used, not just plumbed through unused code; the session file round-tripped on disk as two clean
     question/answer pairs with no leaked retrieval context or citation JSON.
-  - [ ] RFC F — embedding-based semantic search (largest, own RFC — new `EmbeddingProvider` trait,
-    Ollama-backed v1, brute-force cosine similarity rather than a new ANN dependency, reciprocal
-    rank fusion with existing bm25 ranking).

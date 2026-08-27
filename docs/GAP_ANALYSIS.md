@@ -1,13 +1,16 @@
 # EKOS — Gaps, Trade-offs, and Not-in-Scope Items vs. RFCs
 
-**As of:** 2026-08-26 (devlogs 1–112, RFCs 0001–0095)
+**As of:** 2026-08-27 (devlogs 1–127, RFCs 0001–0109)
 **Author's method:** This is a synthesis, not a fresh re-derivation. EKOS already tracks this
 continuously in `TODO.md`'s `## Ongoing / Cross-cutting` section — a 2026-08-21 full read-through
 of every RFC's own Non-Goals section (58 of 95 RFCs carry one) promoted ~40 genuine deferred items
 into tracked backlog, and every RFC/devlog since has kept that list current (most recently the
-eight-item "gap-closure list" closed across devlogs 104–111, and devlog_112's four bugs, closed the
-same session). This document reorganizes that material by subsystem instead of chronologically, adds
-nothing invented, and calls out where the tracking itself is stale.
+eight-item "gap-closure list" closed across devlogs 104–111, devlog_112's four bugs closed the same
+session, and — since this document was first written — the entire "Runtime/Retrieval" backlog
+closed via a six-RFC sequence, RFC 0068 §62's Architecture Diff/Human Review/MCP-exposure items, and
+Storage Architecture Plan Phases 1–3, all across devlogs 113–127). This document reorganizes that
+material by subsystem instead of chronologically, adds nothing invented, and calls out where the
+tracking itself is stale.
 
 ---
 
@@ -30,15 +33,33 @@ disagrees with the real state of the code, found while compiling this report.
 
 ## 1. Runtime / Retrieval
 
-**Gap.** No embedding/semantic search — retrieval is bm25-style structural + name matching only
-(RFC 0009/0014/0015/0016, restated four times, never closed). No streaming LLM responses (RFC
-0008/0009). No ledger read caching (RFC 0005). No multi-turn conversation history in `ekos ask`
-(RFC 0009). No async `KnowledgeStore`/`Runtime` methods (RFC 0005 — sync throughout, a decision made
-at RFC 0001 and never revisited). EKL (the query language) doesn't expose joins across
-Object+Relationship in one query, `COUNT`/`GROUP BY` aggregation, or `AS OF <timestamp>` historical
-syntax — the underlying primitives (`object_at`/`relationships_at`, RFC 0047) exist in `Runtime`
-already, just aren't reachable from EKL's grammar (RFC 0010). Search doesn't structurally boost
-`memory/`-path results beyond plain bm25 name-weighting (RFC 0014).
+**Closed (2026-08-26) — was the longest-standing gap in this document, restated across four RFCs
+without closure until this session's six-RFC sequence** (`TODO.md`'s `## Ongoing / Cross-cutting`
+has the full implementation detail per item): EKL now has `AS OF <timestamp>` point-in-time queries
+and `COUNT`/`GROUP BY` aggregation (RFC 0096, on top of new bulk `all_objects_at`/
+`all_relationships_at` primitives — `object_at`/`relationships_at` existed per-id already, RFC
+0047). `ekos mcp serve` caches ledger reads via a real read-only `StoreCache` (RFC 0097 — a first
+caching attempt was built, caught as unsafe by its own regression test, and reverted before
+shipping: caching `FactLedger`'s writable open handle would have held tantivy's `IndexWriter` lock
+indefinitely, starving any concurrent `ekos build`/`commit` in another process; RFC 0097 instead
+built a genuine read-only open path that never acquires that lock). `ekos ask --stream` streams real
+SSE/NDJSON responses from all three providers (RFC 0098). `ekos ask --session <name>` gives real
+multi-turn conversation history (RFC 0099). Search structurally boosts `memory/`-path results 5×
+(RFC 0101). Semantic/embedding search was **redesigned by explicit user direction, not built as
+originally scoped**: rather than new vector-store infrastructure, RFC 0088's existing
+`ai_overview`/`ai_usage` LLM prose is now indexed into search (RFC 0100) — zero new infrastructure,
+and it found a real, separately-fixed bug along the way (`FactLedger::index_object` never indexed
+`ocr_text`, silently breaking OCR'd-document search on every fact-engine workspace since RFC 0024).
+A full ANN/vector-embedding implementation is not abandoned, just no longer attempted first — deferred
+until real usage against this cheaper approach shows it's still needed.
+
+**Still open, by deliberate choice, not oversight.** No async `KnowledgeStore`/`Runtime` methods —
+RFC 0005's original sync-by-design decision (RFC 0001) was re-confirmed correct this session (100%
+sync, both backends, 33 real call-site files), a trade-off, not a gap; revisit only if a concrete
+future consumer (e.g. an async MCP transport) needs it. EKL still has no join across
+Object+Relationship in one query — found live during RFC 0096 to be the one extension that actually
+breaks EKL's flat-clause-type design (`parser.rs`'s own design comment), deferred as its own future
+RFC rather than forced into the current grammar.
 
 **Trade-off.** `World` (RFC 0048) is a computed projection over `KnowledgeStore` queries, not a
 persisted entity — deliberately rejecting the source planning document's literal "world is a stored
@@ -97,6 +118,18 @@ directory — same word reused, not a true synonym) shipped via `cross_system.rs
 choice — Django and other ORMs, and JS/TS `class X extends Y`, are named as legitimate future
 extensions not attempted without a real target project to verify against, not oversights.
 
+**Gap found live against a real external project (`pdf-reader`, 2026-08-26).** No analyzer reads
+`requirements.txt`/`pyproject.toml` at all — real `package.json` dependencies compile into
+`Technology` objects with a `DependsOn` edge from the owning `File`, but the equivalent
+`requirements.txt` `pkg==1.2.3`/`pkg>=1.2.3` line format has no analyzer, so a real Python project's
+whole runtime dependency surface is invisible to the compiled ledger. Same real run also surfaced
+two usage findings worth tracking alongside the RFC gaps above, not code bugs: small local Ollama
+models (`qwen2.5:1.5b`) failed structured-JSON output for 111 of 119 real `[llm-description]` calls
+— the parse-failure error string is discarded (`llm_description.rs::call_and_apply`, only
+`stats.llm_errors` increments, no detail logged) — and `docs generate`'s LLM-based "microservices"
+architecture label was not clearly earned by the actual code shape observed, worth a closer look
+before trusting that classification generally.
+
 ---
 
 ## 5. Docs generation
@@ -138,13 +171,22 @@ the *whole* thing, only sequence it, never trim it. State as of this document:
   live-observed real problem (this repo's own System Context rendered as an unreadable
   8296×190px row before RFC 0084's fix; the wrap-within-a-row case, as opposed to across rows, is
   still unaddressed).
-- **§62 Phase 2 — mostly open:** Terraform/Kubernetes/OpenAPI extractors don't exist (blocks
-  Deployment Architecture entirely, since there's no compiled infrastructure data to render from).
-  Security Architecture and Quality Architecture views are unbuilt. Architecture Diff (claim-level,
-  distinct from raw `ekos diff`) and Architecture Drift (continuous, vs. the MVP's one-shot check)
-  are unbuilt. Human Review workflow is unbuilt (RFC 0029's `ekos_identity_review` is named as the
-  closest reusable pattern, not started). ADR generation is unbuilt. MCP exposure of architecture
-  tools is unbuilt.
+- **§62 Phase 2 — partially closed this session (2026-08-26).** Architecture Diff (claim-level,
+  distinct from raw `ekos diff`) shipped as `ekos architecture diff` — a real id-set comparison
+  (technologies, crate role classifications, risks, open questions) between two points in time, not
+  fuzzy matching, since every covered `KirId` is already deterministic (RFC 0108). Human Review
+  workflow shipped as `ekos architecture review` — confirm/reject an LLM-classified crate role
+  claim, following RFC 0029's `ekos_identity_review` pattern as intended; a real content-signature-
+  versioning hazard (re-`commit`ing would silently reset a human's review decision, since the
+  underlying claim is re-derived on every run) was found and designed around before implementation,
+  not discovered after (RFC 0109). MCP exposure of architecture tools shipped —
+  `ekos_architecture_evaluate`/`ekos_architecture_drift`/`ekos_architecture_diff`/
+  `ekos_architecture_review` (RFC 0107/0108/0109). **Still open:** Terraform/Kubernetes/OpenAPI
+  extractors don't exist (blocks Deployment Architecture entirely, since there's no compiled
+  infrastructure data to render from). Security Architecture and Quality Architecture views are
+  unbuilt. Architecture Drift as a *continuous*, scheduled check (vs. the MVP's one-shot
+  `ekos architecture investigate` run) is unbuilt — `ekos_architecture_drift`'s MCP tool computes a
+  one-shot comparison, not a background job. ADR generation is unbuilt.
 - **§63 Phase 3 — entirely open:** runtime telemetry/logs/metrics/traces ingestion, continuous drift
   detection on a schedule, Architecture Q&A, Target/Migration Architecture (an *aspirational* future
   state compared against the observed one — genuinely new concept, no existing primitive), fitness
@@ -294,30 +336,50 @@ Distinct from RFC 0068's build-out above — this is the smaller MVP reasoning l
   `traceability`, and the rest have no real signal to compute yet and are deliberately left unscored
   rather than faked.
 - Persistent checkpointing/resume, concurrency-safety infrastructure, a CI/CD exit-code matrix +
-  PR-comment workflow, a human-review UI, further MCP additions, and `Assumption`/`Contradiction`
-  claim types are all named as deliberately not started — each is real RFC-sized work on its own,
-  not begun speculatively ahead of an actual need.
+  PR-comment workflow, and `Assumption`/`Contradiction` claim types are all named as deliberately
+  not started — each is real RFC-sized work on its own, not begun speculatively ahead of an actual
+  need. (A human-review workflow and further MCP tool additions, both named here as not started when
+  this document was first written, shipped this session as `ekos architecture review`/
+  `ekos_architecture_review` — RFC 0109 — and `ekos_architecture_evaluate`/`ekos_architecture_diff`
+  — RFC 0107/0108; see §5 above. No human-review *UI* beyond the CLI/MCP tool exists.)
 
 ---
 
 ## 11. Storage / Ledger (RFC 0080 — Storage Architecture Plan)
 
-Real, live evidence-driven, six-phase plan; **only the plan itself has shipped (RFC 0080) — none of
-its six implementation phases have started**:
+Real, live evidence-driven, six-phase plan. **Phases 1–3 of 6 shipped this session (2026-08-26);
+paused after Phase 3 by explicit user decision, not for lack of scoped work:**
 
-1. **Concurrency** (highest priority, real live evidence). Two distinct real gaps: SQLite
-   `Ledger::append_object` runs 3–4 unwrapped statements with no transaction — the likely real
-   mechanism behind a corrupted FTS5 table found live in a real external project's ledger.
-   `FactLedger` v3's actual single-writer enforcement is an *incidental* side effect of tantivy's own
-   `IndexWriter` lock, not a designed mechanism — RFC 0016's own text incorrectly attributes this to
-   "the manifest lock," which doesn't exist in the code, and needs correcting alongside a real
-   designed cross-process lock and a written concurrent-read visibility spec.
-2. A WAL + repair tool surfacing `FactLedger`'s existing crash-recovery primitives (checksummed
-   frames, atomic manifest writes) — the primitives exist, no tool exposes them.
-3. Snapshot + compaction of the version chain — genuinely greenfield, must preserve RFC 0047's
-   `object_history`/`object_at` semantics for whatever window is retained.
-4. Retention/pruning policy — blocked on Phase 3 (pruning without compaction first means real data
-   loss, not archival).
+1. **Concurrency — shipped, RFC 0104.** Both real gaps closed: SQLite `Ledger::append`/
+   `append_object`/`append_relationship` now run inside real `BEGIN IMMEDIATE`/`COMMIT`
+   transactions — the likely real mechanism behind a corrupted FTS5 table found live in a real
+   external project's ledger. `FactLedger` gets a real, designed cross-process `write.lock` file
+   (`fs4`, promoted from transitive to direct dependency) acquired before any segment/index touch —
+   a second writable process now fails fast with `LedgerError::Locked` instead of an eventual
+   tantivy-internal error. RFC 0016's "the manifest lock enforces it" text (incorrect — no such lock
+   existed in the code) has been corrected. The concurrent-read visibility spec turned out to be a
+   real, previously-unverified gap in its own right: a `FactLedger` handle's view is frozen as of its
+   own `open()` call, not auto-refreshed by a separate process's writes — now proven by a dedicated
+   regression test, not just documented as an inherited claim.
+2. **WAL recognition + repair tool — shipped, RFC 0105.** No new WAL needed building — `FactLedger`'s
+   existing segment format (checksummed frames, atomic manifest writes) already provided real
+   ledger-level durability; the real gap was that nothing surfaced it. New `ekos ledger repair`
+   opens the ledger (triggering its existing free self-heals), then reports a precise per-segment
+   diagnostic — which segment, which transaction range — for the one case (genuine bit-rot in a
+   sealed segment) with no synthesizable automatic fix.
+3. **Snapshot + compaction — shipped as version-chain checkpoints, RFC 0106.** Periodic per-entity
+   checkpoints (`checkpoints.jsonl`, one every 20 versions) bound how far back a point-in-time read
+   has to fold, provably equivalent to full replay by construction (a missing/corrupt checkpoint only
+   costs speed, never correctness). Deliberately purely additive — built to *not* need Phase 4's
+   retention question resolved first.
+4. **Retention/pruning policy — blocked on a real invariant conflict found by Phase 3, not just a
+   sequencing dependency.** Phase 4 as originally named means discarding old delta history, directly
+   conflicting with `CLAUDE.md`'s own Key Invariant that the ledger is append-only with no
+   object-level delete/tombstone mechanism anywhere (confirmed: none exists in the codebase). Needs
+   an explicit decision before any Phase 4 design starts: relax the invariant (a real, load-bearing
+   architectural change), or re-scope Phase 4 to something that doesn't require it (e.g. archival to
+   a separate location rather than in-place deletion — not yet investigated). **Asked directly this
+   session; user chose to stop the plan here rather than decide the invariant question yet.**
 5. Materialized views alongside the EAV fact engine — least-scoped of the six; needs a pass over
    real EKL/MCP query logs to find what's actually worth materializing before design starts.
 6. Horizontal distribution — blocked on RFC 0034 (status: Draft, not yet implemented) shipping a
@@ -333,7 +395,9 @@ workspace, resolving correctly after `commit`'s content-addressed dedup each tim
 not patched with a guessed fix** — the real fix is either an artifact-store lifecycle change
 (prune/supersede old `KnowledgeArtifact`s per pass) or a blocking-key improvement, both larger
 changes with genuine risk of dropping evidence a narrower fix hasn't been tested against. This is
-exactly Storage Architecture Phase 2's territory (`ekos ledger` still has no real prune tool).
+exactly Storage Architecture Phase 4's territory (retention/pruning) — `ekos ledger` still has no
+real prune tool, and Phase 4 is the item explicitly paused on the append-only-invariant question
+above, not merely unscheduled.
 
 ---
 
@@ -360,9 +424,12 @@ session — see `devlogs/devlog_112.md` for full detail:
 (`RustSymbol`/`RustModule`) surfaced during `resolve --force`, and 157 of the 5,035 `compile`
 warnings classified only as "other" (non-`File`-object) `SEM002`s — proceeded past both with
 `--force`/acknowledgment rather than deep-diving, given the size of this repo's own real corpus and
-that they were non-blocking. Worth checking against RFC 0107's `dangling_relationship_target_ids()`
-classifier (§ 11 above) — the "other" bucket is exactly what that classifier already isolates for
-investigation, just not yet investigated for *this specific* run.
+that they were non-blocking. Worth checking against `devlog_107`'s `dangling_relationship_target_ids()`
+classifier (`CkModel`, `crates/semantic/src/lib.rs`) — the "other" bucket is exactly what that
+classifier already isolates for investigation, just not yet investigated for *this specific* run.
+(Corrected here from an earlier "RFC 0107" mislabel in this document — that devlog number
+predates, and is unrelated to, RFC 0107 / MCP architecture tools, which now really exists as of
+this session; see §5/§10.)
 
 ---
 
@@ -378,8 +445,9 @@ investigation, just not yet investigated for *this specific* run.
 - **One canonical evidence model** (`KirEvidence`), never a second parallel evidence type, even
   where a new KIR extension (Claims, temporal validity, World, Agents) might have tempted one.
 - **Sync end-to-end, decided once at RFC 0001** (`Observer::scan`, `LlmProvider::complete`, and
-  parallel scheduling all share one model) — never revisited, so async remains a project-wide gap
-  rather than a per-feature one (§1).
+  parallel scheduling all share one model) — re-confirmed correct this session rather than
+  revisited blindly (100% sync, both ledger backends, 33 real call-site files), so this stays a
+  named trade-off, not a project-wide gap (§1).
 - **Fuzzy identity matches are never silently merged**, only ever surfaced as reviewable
   `unconfirmed` relationships (RFC 0060/0063) — a decision made explicitly *because* no confidence
   threshold reliably separated known-good from known-wrong real pairs, not a caution taken for its
@@ -410,17 +478,25 @@ pass so a future reader doesn't mistake `TODO.md`'s top half for current status.
 
 Ordered by real leverage, not RFC number:
 
-1. **Storage Architecture Phase 1 (concurrency, RFC 0080)** — the only item on this list with a
-   real, already-observed production incident behind it (a corrupted FTS5 table). Everything else
-   here is a missing feature; this one is a live data-integrity risk.
+1. **Storage Architecture Phase 4 — the append-only-vs-retention decision (§11)** — the top item on
+   the previous version of this list (concurrency, RFC 0080 Phase 1) shipped this session (RFC
+   0104); Phases 2–3 (RFC 0105/0106) shipped alongside it. Phase 4 is now the live blocker: a real
+   architectural choice — relax the append-only invariant, or re-scope pruning as archival — needed
+   before the plan can resume, already surfaced to the user once and deliberately left undecided.
 2. **The `KirRelationship` non-deterministic-id gap at 134 remaining call sites (§6)** — this exact
    bug shape (id computed independently of, and out of sync with, the content actually persisted)
    has now caused real duplicate/dangling data at least four separate times across four different
-   subsystems (Technology Inventory, Architecture Summary, `sql_analyzer.rs`, and this session's
+   subsystems (Technology Inventory, Architecture Summary, `sql_analyzer.rs`, and a prior session's
    artifact-id bug). A recurring root cause, not four unrelated bugs.
 2b. **`GitObserver::is_git_repo()`'s ancestor-`.git` false positive (§3)** — can nondeterministically
    surface the *wrong repository's* commit history in a multi-project workspace; small, scoped fix.
-3. **RFC 0068's Phase 2/3 build-out (§5)** — the largest single body of explicitly-scoped, still-open
-   work in the project, under a standing instruction not to trim it, only sequence it.
-4. **Env-var-only connector secrets + `ekos doctor` verification (§7)** — small, well-scoped, and
+3. **RFC 0068's remaining §62/§63 work (§5)** — Architecture Diff, Human Review, and MCP exposure
+   closed this session; Terraform/Kubernetes/OpenAPI extractors, Security/Quality Architecture views,
+   continuous drift, and ADR generation are what's left of the largest single body of
+   explicitly-scoped work in the project, still under a standing instruction not to trim it, only
+   sequence it.
+4. **`requirements.txt`/`pyproject.toml` Python dependency analysis (§4)** — a real, live-found gap:
+   a Python project's whole runtime dependency surface is currently invisible to the compiled ledger,
+   the one gap class (declared dependencies) that already has a working analogue for `package.json`.
+5. **Env-var-only connector secrets + `ekos doctor` verification (§7)** — small, well-scoped, and
    directly closes a real credential-hygiene gap for every non-file connector.
