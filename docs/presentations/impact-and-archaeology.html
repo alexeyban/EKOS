@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Impact Analysis &amp; System Archaeology — EKOS</title>
+<meta name="description" content="Two questions a grep can't answer: what breaks if I change this, and what does this system actually contain when nobody left who knows. Real multi-hop impact traces, real transformation diffs, and a real cold run over a 2,022-file open-source estate — honest gaps included.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a>
+  <a href="#s10"></a><a href="#s11"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>What breaks if I change this?<br><span class="arrow-word">Who knew how this worked?</span></h1>
+  <p class="lede">Two questions every engineer inheriting a legacy estate asks, and neither one
+  has a grep-shaped answer. They span an ETL job, a schema, an ORM layer, a service, and eight
+  years of commit history at the same time. EKOS compiles all of that into one evidence-backed
+  ledger and answers from it — every claim traceable to the line it came from. This deck is real
+  output from real runs, unedited, including the places it doesn't work yet.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">grep across 5 systems, by hand</span><span class="sep mono">→</span>
+    <span class="chip">one compiled ledger, one query</span><span class="sep mono">→</span>
+    <span class="chip hot">multi-hop impact, cited</span><span class="sep mono">→</span>
+    <span class="chip">gaps named, never guessed</span>
+  </div>
+  <div class="byline"><span class="dot"></span> real runs against a real Pentaho ETL repo and a real Elixir/JS/ClickHouse estate · RFC 0018 · RFC 0028 · RFC 0096</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the real problem</div>
+  <div class="eyebrow">what "legacy" actually means in practice</div>
+  <h2>The knowledge didn't get lost. It got scattered across formats no single tool reads.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">A real estate is an ETL repository, a SQL schema, a
+      columnar warehouse, a backend in one language, a frontend in another, a CI config, and a git
+      history — each of which has a tool that reads it well and nothing that reads them
+      <em>together</em>. So the answer to a cross-boundary question lives in an engineer's head,
+      and that engineer left.</p>
+      <p class="lede">A code indexer sees the code. A lineage tool sees the warehouse. Neither sees
+      the Kettle XML, and no one sees all three at once.</p>
+    </div>
+    <div class="inv-grid" style="grid-template-columns:1fr; margin-top:0;">
+      <div class="inv warn"><h3>Impact analysis</h3><p>"If I edit step 2 of this 12-step pipeline, what downstream steps and tables am I touching?"</p></div>
+      <div class="inv warn"><h3>Archaeology</h3><p>"What does this system contain, who owned which parts, and which parts had exactly one owner?"</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / why not just ask an LLM</div>
+  <div class="eyebrow">the difference that matters when the answer is wrong</div>
+  <h2>An LLM will answer confidently either way. A ledger tells you where the answer came from.</h2>
+  <p class="lede">Every object, relationship, and claim in EKOS carries evidence pointing back to a
+  real file, line, or commit. Nothing in the deterministic path is inferred; the opt-in LLM tier is
+  layered <em>on top of</em> the compiled data, never in place of it, and never silently. When a
+  relationship isn't backed by real compiled evidence, the diagram says so instead of drawing a
+  line that doesn't exist.</p>
+  <div class="codeblock" style="max-width:46rem;">
+    <div class="tag">a real System Decomposition diagram, when a layer edge isn't yet evidenced</div>
+<pre style="margin:0;"><span class="c">%% No real compiled relationship yet connects these layers to each other.</span></pre>
+  </div>
+  <p class="lede">That comment is generated output, not a caveat added to this slide. The system's
+  posture toward its own gaps is the product.</p>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / impact analysis</div>
+  <div class="eyebrow">real MCP call, real Pentaho transformation, unedited</div>
+  <h2>Five hops of downstream impact, without opening the file.</h2>
+  <div class="codeblock" style="max-width:44rem;">
+    <div class="tag">ekos_impact — dependents of an early step</div>
+<pre style="margin:0;"><span class="k">→ tools/call</span> ekos_impact { "id": "f7238521-...", "direction": "dependents", "max_hops": 5 }
+
+<span class="s">← result</span> { "count": 5, "hops": [
+  { "hop": 1, "name": "...ktr:4", "via": "FeedsInto" },
+  { "hop": 2, "name": "...ktr:6", "via": "FeedsInto" },
+  { "hop": 3, "name": "...ktr:8", "via": "FeedsInto" },
+  { "hop": 4, "name": "...ktr:7", "via": "FeedsInto" },
+  { "hop": 5, "name": "...ktr:3", "via": "FeedsInto" }
+]}</pre>
+  </div>
+  <p class="lede">Directed and kind-filtered — <code class="mono">dependents</code> answers "what
+  do I break," <code class="mono">dependencies</code> answers "what do I depend on." The step order
+  is recovered from real Kettle XML, not from a naming convention or a guess.</p>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / impact analysis</div>
+  <div class="eyebrow">migration, not just inspection</div>
+  <h2>Rewrite a pipeline in a different technology. Prove exactly one rule changed.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ekos_transformation_diff — Pentaho .ktr vs. a SQL CREATE VIEW redraft</div>
+<pre style="margin:0;"><span class="c">filters:</span>
+<span class="bad">- status = 'active'</span>
+<span class="s">+ status = 'active' AND region = 'EU'</span>
+
+<span class="c">sources, sinks, joins,</span>
+<span class="c">aggregates, calculates,</span>
+<span class="c">unmapped: unchanged</span></pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">The exact reassurance a migration needs and code review
+      can't give: the two pipelines are compiled to the same intermediate representation, so the
+      diff is over <em>logic</em>, not over text in two different languages.</p>
+      <p class="lede">This ran as a real end-to-end benchmark, not a demo script — a real Pentaho
+      job and a real SQL redraft through the full pipeline, queried only through the MCP tools.
+      Coverage: zero unmapped nodes on either side, every explanation step evidenced.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / impact analysis</div>
+  <div class="eyebrow">the same session, an honest gap</div>
+  <h2>Impact tracing doesn't yet cross the SQL ↔ Pentaho boundary.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ekos_dependents — a SQL-defined fact table</div>
+<pre style="margin:0;"><span class="k">→ tools/call</span> ekos_dependents
+   { "id": "a77168f6-..." }
+
+<span class="bad">← result</span> {
+  "target": { "kind": "Table" },
+  "dependents_count": 0,
+  "dependencies_count": 0
+}</pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">A real <code class="mono">.ktr</code> in the same
+      workspace writes exactly this table. But the SQL <code class="mono">Table</code> object and
+      the Pentaho <code class="mono">Sink</code> node referencing it by name aren't yet resolved to
+      one identity with an edge between them.</p>
+      <p class="lede">Worth knowing before you rely on cross-format impact for a table that only
+      Pentaho touches. It's on the record because a tool you can't calibrate is a tool you can't
+      use for a deploy decision.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / archaeology</div>
+  <div class="eyebrow">a real open-source estate, never seen before, from cold</div>
+  <h2>What comes out of an unmodified repo on the first run.</h2>
+  <div class="facts">
+    <div><span class="k">Files observed</span><span class="v">2,022 — Elixir backend, JS/TS frontend, SQL + ClickHouse</span></div>
+    <div><span class="k">Backend</span><span class="v">1,231 Elixir files → ~1,260 real modules, ~4,800 real functions</span></div>
+    <div><span class="k">Frontend</span><span class="v">324 files, real npm dependency data from package.json</span></div>
+    <div><span class="k">Databases</span><span class="v">57 real SQL tables · 15 real ClickHouse tables (after the parser gaps below were closed)</span></div>
+    <div><span class="k">Git</span><span class="v">501 commits, 124 contributors compiled into the ledger</span></div>
+    <div><span class="k">CI/CD</span><span class="v">14 real pipelines parsed from .github/workflows</span></div>
+    <div><span class="k">Issues/PRs</span><span class="v">1,600 analysed as first-class evidence</span></div>
+    <div><span class="k">Recover stage</span><span class="v">2.23s wall clock across 9 passes</span></div>
+  </div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / archaeology</div>
+  <div class="eyebrow">the artifact nobody thinks of as documentation</div>
+  <h2>Git history is the only surviving record of who understood what.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">The git analyser compiles change patterns into real
+      graph relationships: files that consistently change together become
+      <code class="mono">CoupledWith</code> edges — hidden coupling no import graph shows — and
+      authorship over a path becomes <code class="mono">OwnedBy</code>. Commit messages get
+      semantic labels, so "which changes were breaking" is a query rather than an afternoon of
+      scrolling.</p>
+      <p class="lede">On a system whose authors are gone, this is the closest thing to a rationale
+      record that still exists — and unlike a wiki, it can't be stale, because it <em>is</em> the
+      history.</p>
+    </div>
+    <div class="inv-grid" style="grid-template-columns:1fr; margin-top:0;">
+      <div class="inv"><h3>CoupledWith</h3><p>Files that change together, whether or not they reference each other.</p></div>
+      <div class="inv"><h3>OwnedBy</h3><p>Who actually touched this path — and which modules only ever had one person.</p></div>
+      <div class="inv"><h3>Point-in-time</h3><p>EKL supports <code class="mono">AS OF &lt;timestamp&gt;</code>: ask what the system looked like before the change.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / archaeology</div>
+  <div class="eyebrow">the check that separates real recovery from plausible output</div>
+  <h2>Spot-checked against the source by hand. Not "looks about right."</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">two real modules, verified against the files directly</div>
+<pre style="margin:0;"><span class="c">// a real auth module</span>
+Plausible.Auth.Password
+  → <span class="s">exactly its 3 real functions</span>
+
+<span class="c">// a real controller</span>
+PlausibleWeb.AuthController
+  → <span class="s">exactly 9 real dependency edges</span></pre>
+    </div>
+    <div>
+      <p class="lede" style="margin-top:0;">Counts that merely look plausible are the failure mode
+      of every "AI reads your codebase" tool. These were read out of the compiled ledger and then
+      checked against the real source, line by line.</p>
+      <p class="lede">The compiled result also names its own uncertainty: a real ClickHouse
+      dependency with no schema recovered renders as
+      <code class="mono">"ClickHouse Database (config only, no tables compiled)"</code> — a
+      genuinely different fact from "no dependency," and kept visibly different.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / what doesn't work yet</div>
+  <div class="eyebrow">every one of these was found by running against real data, and published</div>
+  <h2>The gap list is part of the deliverable.</h2>
+  <table class="ttable">
+    <thead><tr><th>Gap</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">SQL Table ↔ Pentaho Sink identity</td><td class="desc">Not resolved to one identity — cross-format impact returns 0 for these tables</td></tr>
+      <tr><td class="tool">Identity over-merging</td><td class="desc">6 of 15 real ClickHouse tables merged into one by the resolver; found live, reported openly</td></tr>
+      <tr><td class="tool">Data ownership / lifecycle</td><td class="desc">Blocked on a Table→File link and per-file (not per-commit) ownership derivation</td></tr>
+      <tr><td class="tool">Deployment view</td><td class="desc">No Terraform/K8s extractors — CI/CD pipelines only</td></tr>
+      <tr><td class="tool">Frontend → Backend edges</td><td class="desc">Deliberately unattempted; route/fetch matching is lower confidence than the rest</td></tr>
+      <tr><td class="tool">ClickHouse schema without a live connection</td><td class="desc">Config-only, and labeled as such rather than inferred</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Two real SQL parser gaps in this list were closed after being found this way. The
+  rest are open, and the honest label is what makes the working parts trustworthy.</p>
+</section>
+
+<section class="slide cta" id="s11">
+  <div class="eyebrow">Point it at your own estate</div>
+  <h2>Compile once. Then ask the questions the docs never answered.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile the estate into one ledger</span>
+$ ekos init
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># what breaks if I touch this?</span>
+$ ekos mcp serve   <span class="c"># ekos_impact / ekos_dependents / ekos_transformation_diff</span>
+
+<span class="c"># what did this look like before the change?</span>
+$ ekos ekl "... AS OF 2026-01-01"</pre>
+  </div>
+  <div class="fineprint">EKOS · RFC 0018 (impact tracing) · RFC 0028 (Transformation IR diff) · RFC 0096 (point-in-time EKL) · every example on this page is real output, unedited · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>
