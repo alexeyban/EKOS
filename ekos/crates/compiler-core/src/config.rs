@@ -28,6 +28,8 @@ pub struct EkosConfig {
     pub clickhouse: ClickHouseConfig,
     #[serde(default)]
     pub architecture: ArchitectureConfig,
+    #[serde(default)]
+    pub storage: StorageConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +311,96 @@ pub struct LayerOverrideConfig {
     pub layer: String,
 }
 
+/// RFC 0111 groundwork (`[storage]` in `ekos.toml`): a config-driven mapping from a named
+/// "storage container" to an arbitrary local folder. Lets a workspace's whole `.ekos` tree be
+/// redirected to a configured folder instead of the default `<cwd>/.ekos` — the mechanism used to
+/// simulate RFC 0111's distributed storage containers (S3/ADLS buckets, eventually) locally today:
+/// point two `ekos.toml`s at two different container folders and each behaves as an independent
+/// storage location, provable without any cloud dependency. Same shape as `[architecture.
+/// system-decomposition]`'s `overrides` list (`SystemDecompositionConfig`, above) — a Vec of named
+/// entries, first/only match by name wins, nothing fancier.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct StorageConfig {
+    /// Name of the container this workspace's `.ekos` tree resolves into. `None` (the default)
+    /// keeps today's behavior — `<cwd>/.ekos` — completely unaffected; existing workspaces with
+    /// no `[storage]` section see no change at all.
+    #[serde(default)]
+    pub active_container: Option<String>,
+    #[serde(default)]
+    pub containers: Vec<StorageContainerConfig>,
+    /// RFC 0111 §1 — the partition model (`[storage.partition]`). Defaults to "no partitioning"
+    /// (`dimension` unset), which is today's single-`FactLedger` behavior, unaffected.
+    #[serde(default)]
+    pub partition: StoragePartitionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct StorageContainerConfig {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+/// RFC 0111 §1's `[storage.partition]` block. Held here as plain strings — `compiler-core` does
+/// not depend on `ekos-ledger`, so `ekos_ledger::{PartitionDimension, TimeBucket}` translation is
+/// the `cli` layer's job (the same split CLAUDE.md documents for `ArchitectureConfidence`). Time
+/// bucket has a global default plus per-scope glob overrides, reusing the first-match-wins
+/// `[[recover.sql.dialect-rules]]` shape rather than inventing a second override convention.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct StoragePartitionConfig {
+    /// `"source-scope"` | `"entity-kind"` | `"composite"`. `None` = no partitioning (default).
+    #[serde(default)]
+    pub dimension: Option<String>,
+    /// Global default time bucket: `"daily"` | `"weekly"` | `"monthly"`. `None` → `"monthly"`.
+    #[serde(default)]
+    pub time_bucket: Option<String>,
+    /// Checked in order; first `scope-glob` match wins over `time_bucket` for that scope.
+    #[serde(default)]
+    pub time_bucket_overrides: Vec<TimeBucketOverrideConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TimeBucketOverrideConfig {
+    pub scope_glob: String,
+    pub time_bucket: String,
+}
+
+impl StoragePartitionConfig {
+    /// Whether `[storage.partition]` actually asks for partitioning. `false` (the default) means
+    /// the single-`FactLedger` path is unchanged.
+    pub fn is_enabled(&self) -> bool {
+        self.dimension.is_some()
+    }
+
+    /// The global default time bucket string, `"monthly"` when unset. Per-scope
+    /// `time_bucket_overrides` resolution (needs a glob matcher) is the wiring layer's job, not
+    /// this data-only config struct's.
+    pub fn default_time_bucket(&self) -> &str {
+        self.time_bucket.as_deref().unwrap_or("monthly")
+    }
+}
+
+impl StorageConfig {
+    /// The active container's config, if `active-container` names one that actually exists in
+    /// `containers`. A name set but not found logs a warning and falls back to `None` (→ default
+    /// `<cwd>/.ekos` behavior) rather than erroring — consistent with `from_file_or_default`'s
+    /// existing graceful-fallback convention for this crate's config loading.
+    pub fn active_container(&self) -> Option<&StorageContainerConfig> {
+        let name = self.active_container.as_ref()?;
+        let found = self.containers.iter().find(|c| &c.name == name);
+        if found.is_none() {
+            tracing::warn!(
+                "storage.active-container = \"{name}\" does not match any storage.containers \
+                 entry; falling back to the default <workspace>/.ekos location"
+            );
+        }
+        found
+    }
+}
+
 #[allow(clippy::derivable_impls)]
 impl Default for EkosConfig {
     fn default() -> Self {
@@ -325,6 +417,7 @@ impl Default for EkosConfig {
             security: SecurityConfig::default(),
             clickhouse: ClickHouseConfig::default(),
             architecture: ArchitectureConfig::default(),
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -352,8 +445,16 @@ impl EkosConfig {
         }
     }
 
-    /// Absolute path to the .ekos/ metadata directory.
+    /// Absolute path to the .ekos/ metadata directory — the whole artifact/ledger/facts tree
+    /// hangs off this one path. RFC 0111 groundwork: when `[storage] active-container` names a
+    /// configured container, that container's folder is used directly as this root instead of
+    /// `<cwd>/.ekos`, so the entire storage tree (artifacts, SQLite ledger or fact-engine facts)
+    /// lives under the configured container folder. No `[storage]` section, or an unmatched
+    /// `active-container`, behaves exactly as before this field existed.
     pub fn ekos_dir(&self, cwd: &Path) -> PathBuf {
+        if let Some(container) = self.storage.active_container() {
+            return container.path.clone();
+        }
         cwd.join(".ekos")
     }
 
@@ -577,5 +678,159 @@ dry-run = true
         assert!(cfg.marketing.twitter.dry_run);
         assert_eq!(cfg.marketing.github, "https://github.com/example/repo");
         assert_eq!(cfg.marketing.hashtags, vec!["Foo", "Bar"]);
+    }
+
+    /// RFC 0111 groundwork: no `[storage]` section at all must leave `ekos_dir` byte-identical to
+    /// its pre-existing behavior — the whole point of defaulting `active-container` to `None`.
+    #[test]
+    fn storage_defaults_to_no_container_redirect() {
+        let cfg = EkosConfig::default();
+        assert!(cfg.storage.active_container.is_none());
+        assert!(cfg.storage.containers.is_empty());
+        let cwd = PathBuf::from("/workspace");
+        assert_eq!(cfg.ekos_dir(&cwd), cwd.join(".ekos"));
+
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert_eq!(cfg.ekos_dir(&cwd), cwd.join(".ekos"));
+    }
+
+    #[test]
+    fn storage_parses_containers_from_kebab_case_table() {
+        let toml = r#"
+[storage]
+active-container = "container-a"
+
+[[storage.containers]]
+name = "container-a"
+path = "/tmp/ekos-containers/a"
+
+[[storage.containers]]
+name = "container-b"
+path = "/tmp/ekos-containers/b"
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.storage.active_container.as_deref(), Some("container-a"));
+        assert_eq!(cfg.storage.containers.len(), 2);
+        assert_eq!(cfg.storage.containers[0].name, "container-a");
+        assert_eq!(
+            cfg.storage.containers[0].path,
+            PathBuf::from("/tmp/ekos-containers/a")
+        );
+    }
+
+    /// The core RFC 0111 groundwork claim: naming an active container redirects the *entire*
+    /// `.ekos` tree to that container's folder, completely independent of `cwd` — this is the
+    /// mechanism that lets two different folders stand in for two different storage containers.
+    #[test]
+    fn active_container_redirects_ekos_dir_independent_of_cwd() {
+        let toml = r#"
+[storage]
+active-container = "container-a"
+
+[[storage.containers]]
+name = "container-a"
+path = "/tmp/ekos-containers/a"
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        let container_path = PathBuf::from("/tmp/ekos-containers/a");
+        assert_eq!(
+            cfg.ekos_dir(&PathBuf::from("/workspace/one")),
+            container_path
+        );
+        assert_eq!(
+            cfg.ekos_dir(&PathBuf::from("/workspace/two")),
+            container_path
+        );
+        assert_eq!(
+            cfg.ledger_dir(&PathBuf::from("/workspace/one")),
+            container_path.join("ledger")
+        );
+        assert_eq!(
+            cfg.ledger_path(&PathBuf::from("/workspace/one")),
+            container_path.join("ledger").join("ledger.db")
+        );
+    }
+
+    /// Two different container configs must resolve to two genuinely separate roots — the actual
+    /// "simulate distributed storage with different folders" property this exists for.
+    #[test]
+    fn different_active_containers_resolve_to_different_roots() {
+        let toml_a = r#"
+[storage]
+active-container = "a"
+[[storage.containers]]
+name = "a"
+path = "/tmp/ekos-containers/a"
+"#;
+        let toml_b = r#"
+[storage]
+active-container = "b"
+[[storage.containers]]
+name = "b"
+path = "/tmp/ekos-containers/b"
+"#;
+        let cfg_a: EkosConfig = toml::from_str(toml_a).unwrap();
+        let cfg_b: EkosConfig = toml::from_str(toml_b).unwrap();
+        let cwd = PathBuf::from("/workspace");
+        assert_ne!(cfg_a.ekos_dir(&cwd), cfg_b.ekos_dir(&cwd));
+        assert_eq!(
+            cfg_a.ekos_dir(&cwd),
+            PathBuf::from("/tmp/ekos-containers/a")
+        );
+        assert_eq!(
+            cfg_b.ekos_dir(&cwd),
+            PathBuf::from("/tmp/ekos-containers/b")
+        );
+    }
+
+    /// An `active-container` name that doesn't match any declared container must fall back to
+    /// default behavior, not error or panic — matches `from_file_or_default`'s existing
+    /// graceful-fallback convention.
+    #[test]
+    fn unmatched_active_container_falls_back_to_default() {
+        let toml = r#"
+[storage]
+active-container = "does-not-exist"
+
+[[storage.containers]]
+name = "container-a"
+path = "/tmp/ekos-containers/a"
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.storage.active_container().is_none());
+        let cwd = PathBuf::from("/workspace");
+        assert_eq!(cfg.ekos_dir(&cwd), cwd.join(".ekos"));
+    }
+
+    /// RFC 0111 §1: no `[storage.partition]` block → partitioning disabled, monthly default.
+    #[test]
+    fn storage_partition_defaults_to_disabled_monthly() {
+        let cfg = EkosConfig::default();
+        assert!(!cfg.storage.partition.is_enabled());
+        assert_eq!(cfg.storage.partition.default_time_bucket(), "monthly");
+
+        let cfg: EkosConfig = toml::from_str("[storage]\nactive-container = \"a\"\n").unwrap();
+        assert!(!cfg.storage.partition.is_enabled());
+    }
+
+    #[test]
+    fn storage_partition_parses_dimension_bucket_and_overrides() {
+        let toml = r#"
+[storage.partition]
+dimension = "entity-kind"
+time-bucket = "weekly"
+
+[[storage.partition.time-bucket-overrides]]
+scope-glob = "discord:*"
+time-bucket = "daily"
+"#;
+        let cfg: EkosConfig = toml::from_str(toml).unwrap();
+        let p = &cfg.storage.partition;
+        assert!(p.is_enabled());
+        assert_eq!(p.dimension.as_deref(), Some("entity-kind"));
+        assert_eq!(p.default_time_bucket(), "weekly");
+        assert_eq!(p.time_bucket_overrides.len(), 1);
+        assert_eq!(p.time_bucket_overrides[0].scope_glob, "discord:*");
+        assert_eq!(p.time_bucket_overrides[0].time_bucket, "daily");
     }
 }

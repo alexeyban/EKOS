@@ -35,13 +35,15 @@ EKOS has two ledger backends behind one `KnowledgeStore` trait (`crates/ledger/s
 snapshot/CKM compression, the Pack v1 artifact format. A different axis entirely from sub-gap 1
 below (smaller bytes per version, not fewer retained versions) — not a foundation for it.
 
-**RFC 0034** (**Draft, not implemented**) is single-machine vertical partitioning
-(`PartitionedLedger` composing multiple `FactLedger`s by `(source_scope, time_bucket)`) plus
-hot/cold tiering. It explicitly scopes retention/deletion and horizontal distribution out as
-"a distinct, larger RFC" — this one. Important correction to how TODO.md's phrasing could be read:
-RFC 0034 itself isn't built yet, so sub-gap 6 (horizontal distribution) has no completed
-single-machine foundation to build "beyond" — it would need RFC 0034 shipped first, or to be
-re-scoped as not depending on it.
+**RFC 0034** (single-machine vertical partitioning) and **RFC 0110** (horizontal distribution, built
+directly on top of RFC 0034) were merged 2026-08-27, per explicit user direction, into **RFC 0111**
+(**Under Review, not implemented**) — one conformed design covering the partition model (dimension,
+time bucket, tiering, `entity_id → Set<PartitionId>` correctness) plus two deployment modes built on
+it: Local (single-machine, default, RFC 0034's original scope) and Distributed (opt-in,
+object-storage-backed, RFC 0110's three-service scope). Both source RFCs are now Withdrawn, kept on
+disk as historical record. Sub-gap 6 (horizontal distribution) now has a real target: RFC 0111's
+Phase B (Distributed mode), which depends only on RFC 0111's own Phase A (Local mode) shipping
+first — a within-RFC sequencing dependency, not a cross-RFC one anymore.
 
 **RFC 0047**'s `object_history`/`relationship_history`/`object_at`/`relationships_at` (point-in-time
 reconstruction) already give real read primitives any compaction design (sub-gap 1) must preserve
@@ -103,6 +105,15 @@ choice for this purpose, and nothing stops a future tantivy upgrade from changin
 (3) a written spec for what a concurrent reader observes mid-write — RFC 0016 claims "the same
 visibility SQLite WAL gives today" but this hasn't been independently verified against the real
 implementation.
+
+**Update:** item (3) was verified by RFC 0104 Phase 1 (`devlog_121`) — the claim was found false and
+corrected: a `FactLedger` handle's view is frozen as of its own `open()` call, not automatically
+refreshed by a separate process's writes, a real, material difference from SQLite's WAL mode. RFC
+0104 shipped that as a documented, accepted limitation rather than closing it. **RFC 0112** (Draft,
+2026-08-27) is the follow-on that actually closes it — a lock-free, per-read incremental snapshot
+refresh (reusing the existing watermark/`batches_after` recovery-scan logic and tantivy's already-
+present-but-unused-on-read `IndexReader::reload()`), replacing RFC 0097's coarser full-tree-mtime-
+scan-then-full-reopen `StoreCache` workaround.
 
 ### Phase 2 — WAL + repair tool
 
@@ -184,10 +195,18 @@ lowest-urgency item with the least grounding work done so far.
 
 ### Phase 6 — Horizontal distribution
 
-Blocked on RFC 0034 (Draft, unimplemented) shipping first, or being explicitly re-scoped to not
-require it. No code exists for this today, which is expected — nothing single-machine to
-distribute "beyond" yet. Not schedulable with a real design until Phase 1-4's answers (which shape
-what "correct" distributed writes/reads even mean for this ledger) are settled.
+**Re-scoped 2026-08-27, per the option this RFC itself left open** ("or being explicitly re-scoped
+to not require it"), **then merged into RFC 0111 the same day** per explicit user direction: RFC
+0034 (single-machine partitioning) and RFC 0110 (horizontal distribution, built on top of RFC 0034)
+are now one conformed design — **RFC 0111**, Under Review — rather than two cross-referencing RFCs.
+RFC 0111's Phase A is RFC 0034's original single-machine scope; its Phase B is RFC 0110's
+storage/compute-separated, three-service architecture (object storage as the ledger's single
+durable copy via the `object_store` crate; a distributed MPP compile/ingest cluster; a distributed
+MPP query cluster of stateless workers running the existing EAVT/AEVT/AVET fold against
+cached-from-object-storage partitions; a single logical, load-balanced query gateway) plus
+distributed search with an explicit cross-shard BM25 caveat. It ships no code. Phase B's acceptance
+still requires Phase A shipping first and resolving the `entity_id → Set<PartitionId>` correctness
+gap — now a within-RFC phase dependency (RFC 0111 §2, §11) rather than a cross-RFC one.
 
 ## What this RFC does not do
 

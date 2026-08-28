@@ -238,4 +238,61 @@ mod tests {
         let reader = open_store_read_only(&config, dir.path()).unwrap();
         assert_eq!(reader.object_count().unwrap(), 1);
     }
+
+    /// RFC 0111 groundwork: two `ekos.toml`s each naming a different `[storage]
+    /// active-container` must produce two genuinely independent stores on disk — the actual
+    /// "different folders simulate different storage containers" property this exists for, proven
+    /// end-to-end through `open_store` rather than just at the config-parsing level
+    /// (`compiler-core`'s own `config.rs` tests already cover path resolution in isolation).
+    #[test]
+    fn different_storage_containers_are_genuinely_independent_stores() {
+        let container_a = tempdir().unwrap();
+        let container_b = tempdir().unwrap();
+        // A shared "workspace" cwd — irrelevant to where data actually lands once a container is
+        // active, which is exactly the property under test.
+        let shared_cwd = tempdir().unwrap();
+
+        let toml_a = format!(
+            "[storage]\nactive-container = \"a\"\n[[storage.containers]]\nname = \"a\"\npath = \"{}\"\n",
+            container_a.path().display()
+        );
+        let toml_b = format!(
+            "[storage]\nactive-container = \"b\"\n[[storage.containers]]\nname = \"b\"\npath = \"{}\"\n",
+            container_b.path().display()
+        );
+        let config_a: EkosConfig = toml::from_str(&toml_a).unwrap();
+        let config_b: EkosConfig = toml::from_str(&toml_b).unwrap();
+
+        {
+            let store_a = open_store(&config_a, shared_cwd.path()).unwrap();
+            store_a
+                .append_object(&ekos_kir::KirObject::new(
+                    "orders",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+        }
+        {
+            let store_b = open_store(&config_b, shared_cwd.path()).unwrap();
+            store_b
+                .append_object(&ekos_kir::KirObject::new(
+                    "customers",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+        }
+
+        // Each container's folder holds its own real on-disk store...
+        assert!(container_a.path().join("ledger/facts/segments").exists());
+        assert!(container_b.path().join("ledger/facts/segments").exists());
+        // ...and nothing was ever written under the shared cwd's own .ekos at all.
+        assert!(!shared_cwd.path().join(".ekos").exists());
+
+        let reader_a = open_store_read_only(&config_a, shared_cwd.path()).unwrap();
+        let reader_b = open_store_read_only(&config_b, shared_cwd.path()).unwrap();
+        assert_eq!(reader_a.object_count().unwrap(), 1);
+        assert_eq!(reader_b.object_count().unwrap(), 1);
+        assert_eq!(reader_a.all_objects().unwrap()[0].name, "orders");
+        assert_eq!(reader_b.all_objects().unwrap()[0].name, "customers");
+    }
 }

@@ -2706,13 +2706,33 @@ These items have no single phase — they must be maintained and grown throughou
       of deletion, or (c) discuss relaxing the append-only invariant — chose (a). Phases 1-3 are
       complete, real, shipped increments needing nothing further. Phase 5 still needs its own
       real query-log scoping pass before it's implementation-ready regardless; Phase 6 stays
-      blocked on RFC 0034. Resume at Phase 4 (with a real decision on the invariant question above)
-      or Phase 5 (starting with the query-log scoping pass) whenever this work picks back up.
+      blocked on RFC 0111's Phase A (below). Resume at Phase 4 (with a real decision on the
+      invariant question above) or Phase 5 (starting with the query-log scoping pass) whenever this
+      work picks back up.
     - *Phase 5:* materialized views alongside the EAV fact engine — least-scoped so far, needs a
       pass over real EKL/MCP query logs to find what's actually worth materializing.
-    - *Phase 6:* horizontal distribution — blocked on RFC 0034 (Draft, **not yet implemented**)
-      shipping first; TODO's own earlier phrasing ("beyond RFC 0034") was misleading since RFC
-      0034 itself has no completed foundation to build beyond yet.
+    - *Phase 6:* horizontal distribution — RFC 0034 (single-machine partitioning) and RFC 0110
+      (horizontal distribution) were **merged 2026-08-27 into RFC 0111** (Under Review), one
+      conformed design, per explicit user direction — both source RFCs are now Withdrawn, kept on
+      disk as historical record. RFC 0111 Phase A = single-machine partitioning (RFC 0034's original
+      scope: configurable partition dimension, time-bucket tiering, `entity_id → Set<PartitionId>`
+      correctness built into the base design). RFC 0111 Phase B = this Phase 6 (RFC 0110's original
+      scope: object storage (S3/ADLS Gen2, via `object_store`) as the ledger's single durable copy,
+      three services around it — a distributed MPP compile/ingest cluster, a distributed MPP query
+      cluster of stateless workers running the existing EAVT/AEVT/AVET fold against cached
+      partitions, a single logical load-balanced query gateway — plus distributed search with an
+      explicit cross-shard BM25 caveat). Implementation still blocked on Phase A shipping first, but
+      that is now a within-RFC 0111 phase dependency, not a cross-RFC one.
+    - *Phase A progress (2026-08-28):* being built incrementally against RFC 0111
+      directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
+      `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with `EntityKind` routing,
+      configurable `TimeBucket` (Daily/Weekly/Monthly), `entity_id → Set<PartitionKey>` fan-out
+      (§2), pruned scoped reads (`objects_in_kind`, §1), and genuine concurrent multi-partition
+      writers (`Arc<FactLedger>` per partition); `compiler-core` `[storage.partition]` config
+      parsing. Next: on-disk `PartitionCatalog` (partition discovery across process restarts) +
+      `entity_partitions` persistence; then `SourceScope` routing (needs a source field on
+      `KirObject`); then hot/cold tiering + `SegmentBackend` seam; then make `PartitionedLedger`
+      a real `KnowledgeStore` so `open_store` can serve it. See RFC 0111 Phase A checklist.
   - *Why it matters now, not just eventually:* `devlog_65` found real, physical evidence this is
     already biting — `analytics/`'s local ledger has a corrupted FTS5 virtual table (base DB
     passes `PRAGMA integrity_check`, the FTS index doesn't), now traced to a specific, real,
@@ -2720,7 +2740,7 @@ These items have no single phase — they must be maintained and grown throughou
   - *Test/Validate:* each phase still needs its own dated implementation RFC before any code, per
     the mandatory workflow — RFC 0080 is the saved plan; Phase 1 is the first phase to graduate to
     a real implementation RFC (0104). Phases 2-5 remain to be scoped and implemented the same way;
-    Phase 6 stays explicitly blocked on RFC 0034 (Draft, still not implemented) shipping first.
+    Phase 6 stays explicitly blocked on RFC 0111's Phase A shipping first.
 
 - [x] **Positioning: separate the technical pitch from token materials — README (devlog_68)**
   - *What:* Real risk: README ran three token/crypto headers (raw contract address, pump.fun

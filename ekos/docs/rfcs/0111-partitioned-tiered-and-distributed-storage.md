@@ -1,0 +1,512 @@
+# RFC 0111 — Partitioned, Tiered, and Distributed Fact-Segment Storage
+
+**Status:** Under Review — merges and supersedes RFC 0034 and RFC 0110 (below). 5 Open Questions
+remain (1 partially). Not yet Accepted.
+
+**Implementation note (2026-08-28):** per explicit user direction, Phase A (Local mode) is being
+built **incrementally against this RFC directly** — this document doubles as the Phase A
+implementation RFC rather than spawning a separate one (a separate implementation RFC is still
+expected for Phase B / Distributed mode). Progress is tracked in the Phase A checklist under
+Acceptance Criteria (`[x]` done / `[~]` partial / `[ ]` not started), each item pointing at the
+real code. Landed so far: `crates/ledger/src/partitioned.rs` (`PartitionedLedger` — `EntityKind`
+routing, configurable `TimeBucket`, `entity_id → Set<PartitionKey>`, pruned scoped reads,
+concurrent multi-partition writers) and `compiler-core`'s `[storage.partition]` config parsing.
+**Author:** EKOS team
+**Created:** 2026-08-27
+**Supersedes:** RFC 0034 (2026-08-07, "Partitioned, Tiered Fact-Segment Storage") and RFC 0110
+(2026-08-27, "Horizontal Distribution and Distributed Search"), merged into one conformed design per
+explicit user direction. Both source RFCs are marked Withdrawn/superseded and kept on disk as the
+historical record of how this design was reached — nothing in them is invalidated, only unified into
+one document so a reader no longer has to hold two cross-referencing files in their head to
+understand one system.
+
+---
+
+## Motivation
+
+`FactLedger::open(root)` (`crates/ledger/src/fact_ledger.rs:226`) composes exactly **one**
+`SegmentStore`, **one** `FactIndexes`, **one** tantivy `SearchIndex`, all rooted at **one** local
+directory — for the *entire* workspace, on **one** machine, in **one** process. Every fact from
+every connector shares one segment stream, one set of order-preserving indexes, one full-text index.
+`SegmentStore` is explicitly single-writer (`fs4`/`flock`-enforced as of RFC 0104), and its `open`
+(`segment/mod.rs:157`) takes a bare `PathBuf` — there is no storage-backend abstraction, local disk
+is the only option. `ekos mcp serve` (`crates/cli/src/commands/mcp.rs:110`) opens one
+`KnowledgeStore` per workspace process and answers every tool call from it directly.
+
+RFC 0016's segment/frame/compression design is sound and log-structured — the right foundation, the
+same pattern the industry uses to hold terabytes (Kafka/LSM-tree-style immutable segments). What's
+missing is a **partition dimension**, a **hot/cold tiering policy**, and — for workspaces that
+outgrow one machine — a way to place those same partitions **across machines**, backed by durable
+object storage (S3, ADLS Gen2) instead of node-local disk.
+
+These were originally written as two RFCs: RFC 0034 (single-machine partitioning/tiering) and RFC
+0110 (multi-machine distribution, built directly on top of RFC 0034's partition model — amending its
+`PartitionMeta`, consuming its catalog, inheriting its correctness fixes). By the time RFC 0110 was
+drafted, it depended on RFC 0034 for almost everything load-bearing, and RFC 0034 pointed forward at
+RFC 0110 in its own Non-goals section. That cross-referencing was accurate but made the *actual*
+architecture — one partition model, two ways of physically realizing it — harder to see than it
+needs to be. **This RFC is that one conformed design**, at the user's explicit request: a single
+partition model (dimension, time bucket, tiering, entity→partition-set correctness) with two
+deployment modes built on it — **Local** (single-machine, default, exactly RFC 0034's original
+design) and **Distributed** (opt-in, object-storage-backed, RFC 0110's three-service architecture).
+
+## Scope
+
+- The partition model: a configurable dimension (`SourceScope` | `EntityKind` | `Composite`), a time
+  bucket (globally defaulted, per-scope overridable), hot/cold tiering, and a catalog — §1–§3.
+- Correctness: `entity_id → Set<PartitionId>`, built into the base design from the start rather than
+  bolted on as a later correction — §2.
+- A storage-backend seam (`SegmentBackend`: `LocalFs` | `ObjectStore`) so the same partition model
+  can be backed by either — §4.
+- **Deployment mode: Local** (default) — one process, one machine, in-process catalog, no
+  coordinator, no network — §5.
+- **Deployment mode: Distributed** (opt-in) — object storage as the durable copy, a coordinator for
+  metadata/leases, and three independently-scalable services (compile/ingest MPP, query/EAV-assembly
+  MPP, a single logical query gateway) — §6.
+- Distributed search across the pruned partition set in Distributed mode — §7.
+
+## Non-goals
+
+- **Implementation.** Design only, per CLAUDE.md's Mandatory Development Workflow — implementation
+  RFCs (one for the Local-mode phase, one for the Distributed-mode phase, matching RFC 0080's own
+  precedent of one dated implementation RFC per phase) follow once this is Accepted.
+- **Distributed transactions across partitions.** Every write is scoped to exactly one partition in
+  both deployment modes — no fact ever needs atomic writes to two partitions.
+- **Changing the append-only invariant, the segment/frame format, or `FactIndexes`.** Reused
+  byte-for-byte in both modes; only where the bytes live and who can reach them changes.
+- **Retention or deletion policy.** Purely about access/compaction efficiency for data that is kept.
+  RFC 0033's per-channel opt-in remains the actual lever for not ingesting unwanted volume; any
+  future "delete data older than N" policy is a distinct RFC given the ledger's append-only
+  invariant.
+- **Replacing the SQLite backend.** Applies to the fact engine (RFC 0016) only.
+- **A general-purpose cloud-storage abstraction, or multi-cloud beyond what one crate gives for
+  free.** Scopes to `object_store` (Apache Arrow/DataFusion ecosystem) — S3, Azure (ADLS Gen2), GCS,
+  S3-compatible (MinIO), and local disk behind one trait.
+
+## What already exists and is reused as-is
+
+- Frame/segment format, seal-on-8MB-threshold (`SEGMENT_SEAL_BYTES`, `segment/mod.rs:53`),
+  manifest+SHA-256 verification, crash recovery (torn-tail truncation, stale-watermark catch-up) —
+  `segment/mod.rs`. Unchanged; every partition, in either deployment mode, gets its own instance of
+  exactly this.
+- `FactIndexes`/`merge_runs` compaction, order-preserving EAVT/AEVT/AVET byte-key runs — `index.rs`.
+  Unchanged in mechanism; scoped per-partition instead of globally.
+- Tantivy `SearchIndex`, BM25, mmap'd reads — `search.rs`. Unchanged in mechanism.
+- RFC 0104's single-writer `write.lock` — reused directly in Local mode; its *invariant* (exactly one
+  writer per partition at a time) is reused in Distributed mode too, just brokered by a coordinator
+  lease instead of a local `flock`.
+- RFC 0033's per-channel allowlist — the primary noise-reduction lever, still the first line of
+  defense before storage engineering even matters.
+
+## Design
+
+### 1. Partition model: configurable dimension + time bucket
+
+```rust
+pub enum PartitionDimension {
+    /// e.g. "sql", "discord:#governance"
+    SourceScope(String),
+    /// KIR object/entity kind — e.g. Table, Module, Symbol, Custom("Risk").
+    /// Useful when a workspace's query load skews toward "all Tables"
+    /// rather than "everything from one connector."
+    EntityKind(String),
+    /// Both axes at once. Finer-grained placement; an unscoped query fans
+    /// out to the product of both dimensions' cardinalities (§8).
+    Composite(Box<PartitionDimension>, Box<PartitionDimension>),
+}
+
+pub struct PartitionMeta {
+    pub id: PartitionId,
+    pub dimension: PartitionDimension,
+    pub wall_time_range: (i64, i64),
+    pub tx_range: (TxId, TxId),
+    pub tier: Tier,                    // Hot | Cold
+    pub location: PartitionLocation,   // §4/§5/§6 — Local(PathBuf) | Distributed(ObjectStoreUrl)
+}
+
+pub struct PartitionCatalog {
+    pub partitions: Vec<PartitionMeta>,
+}
+```
+
+Time bucket defaults globally, with per-scope overrides — reusing this codebase's existing
+glob-override config shape (`[[recover.sql.dialect-rules]]`, `compiler-core/src/config.rs`) rather
+than inventing a second one:
+
+```toml
+[storage.partition]
+dimension = "source-scope"   # "source-scope" | "entity-kind" | "composite"
+time-bucket = "monthly"      # global default
+
+[[storage.partition.time-bucket-overrides]]
+scope-glob = "discord:*"
+time-bucket = "daily"        # a firehose source opts into finer buckets
+```
+
+**Writes** route to the partition matching a fact's dimension value + *current* time bucket,
+opening (or creating) that partition's `FactLedger` on demand — the fix for the single-writer
+bottleneck, since N partitions admit N concurrent writers instead of one global `SegmentStore`.
+**Broad reads** (`ekos_search`, `ekos_ekl` range/full-text queries) fan out only to partitions whose
+dimension value/time range could match, pruned by the catalog — the same pruning principle
+`batches_after` already applies at the segment level, lifted one level up to whole partitions.
+
+### 2. Correctness: `entity_id → Set<PartitionId>`, not `→ PartitionId`
+
+Because writes route by *current* time bucket, later versions of a long-lived entity can land in a
+*different* partition than earlier versions once a time-bucket boundary is crossed — so the
+entity→partition lookup must be a **set**, not a single id, from the start:
+
+- **Point reads** (`get_object`, current state): resolve to exactly one partition — the entity's
+  *most recent* one, since current state always lives in the newest partition. No fan-out, in either
+  deployment mode.
+- **Full-history reads** (`object_history`, or `object_at`/`relationships_at` for a timestamp that
+  could predate the entity's most recent time-bucket partition): fan out to every partition in the
+  entity's set. In Local mode this is N in-process `FactLedger` reads; in Distributed mode (§6) it's
+  N RPC calls to whichever Service B workers hold those partitions.
+
+The set is naturally bounded, not a runaway structure: it grows by one entry only when an entity's
+writes cross into a *new* time-bucket partition, not per version — most versions of an
+actively-mutated entity land in the same (current) partition between boundaries. Set size is bounded
+by `workspace_age ÷ time_bucket_granularity`: even a 10-year-old, monthly-partitioned, continuously
+mutated entity accumulates at most ~120 entries. No cap or compaction policy is needed.
+
+### 3. Hot/cold tiering
+
+A partition's tier is a property of the catalog entry, not a different storage format:
+
+- **Hot**: full `FactLedger` (segments + indexes + tantivy search), mmap'd.
+- **Cold**: a sealed partition past a configurable age (e.g. 90 days with no new writes) is
+  recompressed — reusing the existing `BODY_ZSTD_LEVEL = 19` dict-zstd mechanism (RFC 0016 §7) via
+  an additive cold-tier dictionary generation (`dict_version`/`SegDict`), not a new compression
+  lever — its tantivy `SearchIndex` is dropped (rebuildable on demand, `search.rs`'s existing
+  rebuild-from-scratch capability), and the partition directory becomes eligible to move to cheaper
+  backing storage.
+- **Promotion back to hot** happens automatically on any read that touches a cold partition (lazy
+  rehydration) — no separate "unfreeze" operation.
+
+In Local mode, "cheaper backing storage" for a cold partition stays local-disk (v1, simplest — no
+cloud dependency for a single-machine deployment). In Distributed mode, *every* tier already lives in
+object storage (§4) — cold partitions there simply mean "not cached by any Service B worker right
+now," not a separate storage location; tiering there is a caching policy, not a placement one.
+
+### 4. Storage backend seam
+
+```rust
+/// Follows this project's existing dependency-injection convention
+/// (Observer, LlmProvider, CompilerPass are all traits selected by config).
+trait SegmentBackend {
+    fn put(&self, path: &str, bytes: Bytes) -> Result<(), SegmentError>;   // sealed objects only
+    fn get(&self, path: &str) -> Result<Bytes, SegmentError>;
+    fn list(&self, prefix: &str) -> Result<Vec<String>, SegmentError>;
+}
+```
+
+`LocalFsBackend` wraps today's unmodified `std::fs` calls. `ObjectStoreBackend` is new, built on the
+`object_store` crate's `ObjectStore` trait (`AmazonS3` / `MicrosoftAzure` / S3-compatible / local —
+one dependency covers both providers named, plus a free local/dev-mode option). Layout mirrors
+today's local directory 1:1 either way: `<root>/<partition-id>/segments/seg-<seq>.bin`,
+`.../indexes/<order>/run-*.bin`, `.../search/*`.
+
+- **Sealed segments map cleanly onto object storage**: immutable once sealed — one `PUT`, many
+  `GET`s. No read-modify-write, ever, for sealed data.
+- **The active (unsealed) segment does not** — object stores have no append operation. It stays
+  buffered on whichever writer currently holds the partition (§5's local process, or §6's
+  lease-holding Service A worker), durable in object storage only once it seals at
+  `SEGMENT_SEAL_BYTES` (8 MB, unchanged) and uploads as one immutable object. **Stated precisely:** a
+  writer crash in Distributed mode loses at most that one partition's current unsealed segment,
+  bounded at 8 MB — everything before it is already sealed and durable. (Local mode has no analogous
+  loss window: a crash there is recovered the same way `SegmentStore` has always recovered, via
+  torn-tail truncation on next open.)
+- **Manifest commits need atomicity object stores don't natively give.** Rather than depend on a
+  provider-specific primitive (S3 needs an external lock table for compare-and-swap; ADLS Gen2 has
+  native blob leases but that's Azure-only), Distributed mode's coordinator (§6) — which already
+  grants write leases — also arbitrates manifest commits: one mechanism, portable across both named
+  providers, needed only in Distributed mode (Local mode's manifest commit is the existing
+  write-temp→fsync→rename `SegmentStore` already does, unchanged).
+
+### 5. Deployment mode: Local (single-machine, default)
+
+Exactly RFC 0034's original design, unchanged in mechanism:
+
+```rust
+pub struct PartitionedLedger {
+    catalog: PartitionCatalog,               // in-process struct, no network
+    open: HashMap<PartitionId, FactLedger>,  // lazily opened, LocalFsBackend
+}
+```
+
+One process, one machine. The catalog is a plain in-process struct — no coordinator, no RPC, no
+leases: RFC 0104's local `write.lock` already gives one-writer-per-partition within a process, and a
+single process opening `PartitionedLedger` is the only writer by construction. `PartitionLocation`
+for every partition is `Local(PathBuf)`. This is the default for every workspace; nothing above this
+mode requires any of §6's machinery to exist or run.
+
+### 6. Deployment mode: Distributed (opt-in, multi-machine)
+
+Object storage (§4) becomes the ledger's single durable copy; three independently-scalable services
+replace the single in-process `PartitionedLedger`:
+
+**Coordinator** — holds the partition catalog (§1, unchanged in shape), who currently holds a
+partition's write lease (short-lived, renewable, fencing-tokened — §9), and the tx watermark per
+partition. Same shape as a Delta Lake/Iceberg transaction log or a Hive Metastore — a small,
+centralized metadata service in front of object storage holding the real data. **v1 is a single
+coordinator process, an acknowledged SPOF** (§9); Raft-replicated metadata is a named v2 question,
+not attempted here ahead of real evidence it's needed.
+
+**Service A — Compile/Ingest MPP** (`ekos compile-worker serve --coordinator <addr>`). Maps to
+today's `build/recover/resolve/compile/commit` pipeline, made horizontally distributed. Work unit =
+one partition-scoped shard `(dimension_value, time_bucket)`. A worker leases a shard from the
+coordinator, becomes its sole writer, runs the **existing, unmodified** recovery/semantic-compile
+passes, appends to a locally buffered active segment, seals+uploads at threshold, commits the
+manifest through the coordinator. N workers on N shards write fully in parallel.
+
+**Service B — Query/EAV-Assembly MPP** (`ekos query-worker serve --coordinator <addr>`). Stateless
+compute, no durable local state. On assignment to a partition, pulls its sealed segments + index runs
++ tantivy index from object storage into a bounded local cache (mmap'd once downloaded — RFC 0016
+Phase 6's mmap reads apply unchanged to the cached copy), then runs the **existing, unmodified**
+`FactIndexes` EAVT/AEVT/AVET fold and tantivy search locally. Because sealed segments are immutable
+and object storage is the one durable copy, **any** query worker can serve **any** partition — no
+owned/replica-set concept. Losing a worker loses only its warm cache; the coordinator reassigns.
+
+**Service C — Query Gateway** (single logical, load-balanced). Maps to today's `ekos mcp serve`/
+`ekos ask`/`Runtime`. Stateless: any number of interchangeable replicas, since it holds no partition
+data itself, only routing/merge logic. Resolves the pruned partition set via the coordinator's
+catalog, dispatches parallel sub-queries to whichever Service B workers hold those partitions, merges
+results (point reads pass through; full-history reads merge in tx order per §2; full-text search
+merges per-partition BM25 top-K per §7). `KnowledgeStore` stays the seam: Service C's core is a
+`DistributedLedger` implementing `KnowledgeStore`, its RPC client talking to Service B workers — no
+caller of `KnowledgeStore` (Runtime, MCP tool handlers, `docs-gen`) changes at all.
+
+**Failure handling**: because Service A/B workers are stateless compute over shared durable storage,
+failover is simple — a crashed compile worker's lease expires, another worker re-leases the shard and
+resumes from the last committed manifest (loss bounded at 8 MB per §4); a crashed query worker is
+just reassigned, since it held no durable state.
+
+### 7. Distributed search
+
+Only meaningful in Distributed mode (Local mode's single process already has one tantivy index per
+hot partition, queried directly, no fan-out design needed). Service C fans out
+`search(partition, query, limit)` to the Service B workers holding the pruned partition set, merges
+top-K by each worker's local BM25 score. **Stated plainly:** per-partition BM25 uses each partition's
+own local term statistics, so the merged ranking is the same well-known "query-then-fetch"
+approximation every distributed search engine makes (Elasticsearch's default behavior included) —
+not a mathematically global ranking. Accepted for v1; global term-statistics aggregation is a
+possible follow-up, not designed here.
+
+### 8. What the merge actually simplifies
+
+Concretely, not just organizationally:
+
+- **No more cross-RFC acceptance dependency.** RFC 0110 could not be Accepted until RFC 0034 shipped
+  and fixed its own `entity_id → Set<PartitionId>` gap; RFC 0034 pointed forward at an RFC that
+  depended back on it. As one document, that circularity dissolves into an ordinary two-phase
+  Acceptance Criteria (§11) within a single RFC — Local mode first, Distributed mode second, both
+  gated by the same review, not two.
+- **The correctness fix is base design, not a correction.** §2 is written as the *real* model from
+  the start; a new reader never encounters the wrong "one partition per entity" claim before being
+  told it's wrong, the way the original RFC 0034 → amendment sequence required.
+- **One partition model, read once.** `PartitionDimension`, the catalog shape, and tiering are
+  described exactly once (§1–§3) and reused by reference from both deployment-mode sections (§5, §6),
+  instead of being defined in RFC 0034 and re-explained/amended from RFC 0110.
+
+## Alternatives Considered
+
+- **Change the segment/frame format itself to carry a partition key inline, one global segment
+  stream.** Rejected: reintroduces the "everything shares one manifest/one active segment/one writer"
+  bottleneck this design exists to remove — partitioning must happen *above* `SegmentStore`.
+- **Partition by source only, no time dimension** (and the reverse: time only, no source dimension).
+  Both rejected: source-only reintroduces unbounded per-source growth (no tiering boundary); time-only
+  can't skip irrelevant sources within a matching time window, defeating RFC 0033's per-channel
+  scoping at the storage layer.
+- **Consistent-hash sharding over entity id** instead of dimension-keyed partitions. Rejected:
+  destroys the scoped-pruning property this design exists for — a hash has no relationship to query
+  scope.
+- **Node-owned local disks with app-level replication** for Distributed mode (RFC 0110's original,
+  pre-revision draft). Rejected: duplicates durability object storage already provides (both S3 and
+  ADLS Gen2 give multi-AZ durability natively), and needs a coordinator to track replica sets —
+  strictly more moving parts for the same guarantee as reading from one shared durable store.
+- **Provider-native locking** (S3 via an external conditional-write lock table; ADLS Gen2 via native
+  blob leases) instead of coordinator-brokered leases. Rejected for v1: two separate implementations
+  to support both named providers, versus one coordinator-brokered, storage-provider-agnostic
+  mechanism, given a coordinator is already needed for the catalog.
+- **A hand-rolled S3/Azure SDK integration** instead of `object_store`. Rejected: one crate already
+  implements one trait for both named providers plus MinIO (local dev) and local disk — one
+  dependency instead of two bespoke SDK integrations, already backing a widely-used ecosystem
+  (DataFusion, delta-rs).
+- **Raft-replicated coordinator metadata from day one.** Rejected for v1 as engineering weight not
+  yet justified by evidence — this project's own storage roadmap (RFC 0080) escalates scope only
+  after a real, physical incident demands it (e.g. Phase 1's concurrency fix followed real corruption
+  found in `devlog_65`, not a hypothetical). Kept as the named v2 path, not silently dropped.
+
+## Architecture Review (2026-08-27)
+
+Carried forward from both source RFCs' own reviews, reconfirmed against the merged whole — no new
+inconsistency introduced by unifying them.
+
+**Validated against `ekos.md` and CLAUDE.md, both deployment modes:** storage-technology
+independence (`ekos.md` §"Technology Independent" — `SegmentBackend`'s `LocalFs`/`ObjectStore` split
+is exactly the substitution this principle anticipates); single source of semantic truth (`ekos.md`
+§5 — in Distributed mode, object storage is the one durable copy every Service B worker reads from,
+never a worker's local cache); append-only and evidence-traceable (unchanged — this design moves
+*where* bytes live, never mutates them); Runtime read-only (`DistributedLedger`/`PartitionedLedger`
+both implement exactly `KnowledgeStore`'s existing contract, no new mutation surface); deterministic,
+side-effect-free compiler passes (Service A runs the existing, unmodified passes; Local mode doesn't
+touch them at all); dependency injection through traits (`SegmentBackend` follows the same pattern as
+`Observer`/`LlmProvider`/`CompilerPass`).
+
+**Resolved** (concrete decisions, not left open):
+
+- Time-bucket granularity — global default + per-scope glob overrides (§1), reusing an existing
+  config pattern rather than inventing a second one.
+- Entity→partition lookup index needing its own partitioning at scale — no, for realistic scale: it's
+  the same AEVT-style run-file index technology already serving the live estate's ~88K entries, two
+  orders of magnitude below where this would matter; `merge_runs` already bounds growth if it ever
+  does.
+- `entity_id → Set<PartitionId>` cap/compaction — not needed; naturally bounded by wall-clock time
+  (§2), not write frequency.
+- Object-storage backing for cold partitions — resolved by this merge itself: Local mode's cold tier
+  stays local-disk (§3); Distributed mode already puts every tier in object storage (§4) — the
+  question "should cold partitions get cloud backing" is answered by which deployment mode is chosen,
+  not left as a separate v2 maybe.
+- Cold-tier recompression level — reuse the existing `BODY_ZSTD_LEVEL = 19`, no new lever.
+- Sync vs. async transport (Distributed mode only) — async (tokio) at the coordinator/RPC boundary
+  only; Service A workers still run the existing sync compiler passes internally via
+  `spawn_blocking`. RFC 0001's sync-pipeline decision is preserved untouched; this is a new edge
+  alongside it, not a retrofit through it.
+- Write-lease timing (Distributed mode) — short TTL (e.g. 30s) with heartbeat renewal (e.g. 10s); on
+  expiry, no attempt to recover a dead worker's local unsealed buffer — the next lease-holder starts
+  fresh from the last committed manifest, accepting the already-bounded ≤8MB loss rather than
+  promising unreachable-machine recovery.
+- Manifest-commit contention (Distributed mode) — fencing tokens: each lease grant carries a
+  monotonically increasing token; the coordinator rejects a stale-token commit rather than silently
+  applying a race.
+- Transport security (Distributed mode) — mutual TLS over a cluster-internal CA (v1 default);
+  rotation mechanics deferred to the implementation RFC.
+- Default deployment mode — Local, indefinitely, consistent with RFC 0016's own opt-in-through-soak
+  precedent; `Distributed` is explicitly opt-in for workspaces that need it.
+
+**Partially resolved:**
+
+- `PartitionDimension::Composite` fan-out cost — the *shape* is settled by reasoning: `Composite`
+  partitions by the product of both dimensions' cardinalities, so a *scoped* query is unaffected
+  (still one partition) while an *unscoped* query fans out to N×M instead of N or M. The concrete
+  N×M threshold at which that matters in practice is not resolved — needs a real multi-dimension
+  fixture.
+
+**Deliberately deferred, not avoided:**
+
+- Coordinator consensus (Distributed mode): single (v1, named SPOF) vs. Raft-replicated (v2) — a
+  real, named scope decision (Alternatives Considered), revisited only if the v1 SPOF causes a real
+  incident, matching this project's bias against speculative engineering ahead of evidence.
+
+## Open Questions
+
+- [ ] **Cold-tier rehydration cost budget** (Local mode) — needs real measurement against a
+      realistic multi-partition fixture, not assumed.
+- [ ] **`PartitionDimension::Composite`'s concrete fan-out threshold** (both modes) — see "partially
+      resolved," above.
+- [ ] **Service B cache eviction policy** (Distributed mode; LRU by partition, size-bounded) — needs
+      real query-pattern data before a concrete policy is chosen.
+- [ ] **Shrinking the bounded unsealed-segment loss window** below 8 MB (Distributed mode; periodic
+      partial upload vs. a local WAL survived by lease handoff) — a real durability/complexity
+      trade-off needing its own comparison.
+- [ ] Coordinator consensus v1→v2 timing (Distributed mode) — deliberately deferred, see above; not
+      a blocker for Accepting this RFC.
+
+## Acceptance Criteria
+
+Two phases, gated by the same review, sequenced within this one RFC rather than across two:
+
+**Phase A — Local mode** (matches RFC 0034's original scope):
+
+- [~] `PartitionedLedger` (§5) routes point reads to a single partition and broad reads to a pruned
+      partition set. — *point reads: done (`get_object` → one partition). Pruned broad reads: done
+      for the dimension-value axis (`objects_in_kind` touches only matching-`dimension_value`
+      partitions); time-range pruning and an on-disk `PartitionCatalog` (so a fresh process
+      discovers partitions it hasn't written to this run) are the next increment.
+      `crates/ledger/src/partitioned.rs`.*
+- [x] `entity_id → Set<PartitionId>` (§2) implemented; full-history reads for an entity spanning ≥2
+      time-bucket partitions return complete, correctly ordered history via fan-out, while
+      `get_object` still resolves to a single partition. — *`entity_partitions` map + tested
+      (`entity_spanning_two_time_buckets_…`). In-memory only so far (rebuilt from writes, not
+      rescanned from disk) — folded into the catalog-persistence increment above.*
+- [~] `PartitionDimension` (`SourceScope` | `EntityKind` | `Composite`) implemented and configurable
+      via `ekos.toml`'s `[storage.partition]`, including time-bucket overrides. — *`EntityKind`
+      routable; `SourceScope`/`Composite` declared but return `UnsupportedDimension` (no
+      source/connector field on `KirObject` to route `SourceScope` by yet). Time bucket is
+      configurable (`TimeBucket::{Daily,Weekly,Monthly}`, lexical==chronological labels).
+      `[storage.partition]` (`dimension` / `time-bucket` / `time-bucket-overrides`) parses in
+      `compiler-core`; per-scope glob override resolution and the config→`PartitionedLedger`
+      wiring are still to do.*
+- [ ] Cold-tier round-trip passes with byte-identical read results. — *not started; every partition
+      is a plain local-disk `FactLedger`, no `SegmentBackend` seam or tier field yet.*
+- [x] Concurrent-writer test passes across ≥2 partitions. — *`concurrent_writers_across_two_partitions`:
+      two threads append to two entity-kind partitions in parallel (each partition an
+      `Arc<FactLedger>`, own lock), all writes land correctly routed.*
+
+**Phase B — Distributed mode** (matches RFC 0110's scope; depends on Phase A shipping first, within
+this same RFC — no cross-RFC dependency):
+
+- [ ] `SegmentBackend` (§4) implemented for both `LocalFsBackend` (wraps Phase A's code unmodified)
+      and `ObjectStoreBackend`, with byte-identical segment contents in both.
+- [ ] Coordinator, Service A, Service B, Service C (§6) implemented and pass the fixtures in
+      Testing, below.
+- [ ] Distributed search (§7) merge behavior tested, including the cross-shard BM25 caveat.
+
+**Both phases:**
+
+- [x] At least one review completed — Architecture Review (2026-08-27), above.
+- [ ] Remaining Open Questions resolved or explicitly re-scoped with the user's sign-off (coordinator
+      consensus timing does **not** block acceptance — deliberately scoped v1 decision, not an
+      unresolved question).
+- [x] Design is consistent with `ekos.md`'s compiler architecture and CLAUDE.md's key invariants —
+      confirmed by the Architecture Review above.
+- [ ] A dated implementation RFC per phase is written before any code (matching RFC 0080's
+      precedent), per the Mandatory Development Workflow.
+
+## Testing
+
+**Phase A (Local mode):**
+
+- Fixture with 3+ partitions (mixed hot/cold, mixed dimension values), asserting: a point read
+  routes to exactly one partition (no fan-out), a scoped broad query touches only matching
+  partitions, an unscoped query correctly fans out to all.
+- Entity-spanning-partitions fixture: one entity mutated across ≥2 time-bucket boundaries, asserting
+  `get_object` still routes to exactly one partition while `object_history`/`object_at` correctly
+  fans out and returns complete, correctly ordered history.
+- Configurable-dimension fixture: the same partitioning/pruning tests, run once with
+  `dimension = "source-scope"` and once with `"entity-kind"`.
+- Cold-tier round-trip: seal a partition, mark it cold, read from it — assert correct rehydration,
+  byte-identical to before going cold.
+- Concurrent-writer test: two partitions accept concurrent appends without contention, verified via
+  the existing crash-recovery/torn-tail tests, run per-partition.
+- Compaction-cost test: assert `merge_runs` cost on an N-partition estate scales with one partition's
+  size, not total estate size.
+
+**Phase B (Distributed mode):**
+
+- Multi-service local harness: one coordinator, N compile workers, M query workers, one gateway
+  replica set, against a local S3-compatible test double (`object_store`'s in-memory backend, or
+  MinIO in a container) — no real cloud dependency needed.
+- Lease contention test: two compile workers request the same shard, exactly one gets it, the loser
+  gets a clear "already leased" error.
+- Bounded-loss-on-crash test: kill a compile worker mid-active-segment, assert loss ≤ 8 MB and every
+  previously sealed segment is intact and durable.
+- Cache-miss-then-hit test: a query worker re-hydrates correctly from object storage on first
+  assignment, hits its warm cache on the next request.
+- Manifest-commit-race test: exercise the lease-expiry-during-upload race, assert no corrupted or
+  lost manifest.
+- Distributed search merge test: fixture with matching documents split across ≥2 partitions on
+  different query workers, assert the merged top-K is correctly ranked per-shard, exercising the
+  cross-shard BM25 caveat.
+- Entity-spanning-partitions test (builds on Phase A's fixture): full-history read for an entity
+  crossing ≥2 time-bucket partitions correctly fans out to every Service B worker holding a relevant
+  partition.
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `ekos/docs/rfcs/0111-partitioned-tiered-and-distributed-storage.md` | This RFC — merges and supersedes RFC 0034 and RFC 0110 |
+| `ekos/docs/rfcs/0034-partitioned-tiered-storage.md` | Marked Withdrawn — superseded by RFC 0111 |
+| `ekos/docs/rfcs/0110-horizontal-distribution-and-distributed-search.md` | Marked Withdrawn — superseded by RFC 0111 |

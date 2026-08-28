@@ -1,10 +1,14 @@
 pub mod fact;
 pub mod fact_ledger;
 pub mod index;
+pub mod partitioned;
 pub mod search;
 pub mod segment;
 
 pub use fact_ledger::FactLedger;
+pub use partitioned::{
+    PartitionDimension, PartitionError, PartitionKey, PartitionedLedger, TimeBucket,
+};
 
 use chrono::{DateTime, Utc};
 use ekos_artifact::ArtifactId;
