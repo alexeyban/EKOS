@@ -12,26 +12,32 @@ Pump.fun: https://pump.fun/coin/CwubepDFJndzSKFmAMAm9u8Xx3PrizAwSq8hcGimpump
 
 ## Total Supply
 
-1,000,000,000 EKOS
+**967,410,000 EKOS** (current).
+
+Originally minted at 1,000,000,000 EKOS; **32,590,000 EKOS has since been burned**, permanently
+removing it from supply. All percentages in this document are relative to the current
+967,410,000 supply.
+
+_Burn transaction reference: to be recorded here (Solscan link + date)._
 
 ## Allocation
 
 | Purpose | Quantity | % of Supply | Custody / Mechanism |
 |---|---|---|---|
-| Founder — Vesting | 14,000,000 | 1.4% | Streamflow Vesting |
-| Community Rewards | 5,000,000 | 0.5% | Separate Metamask wallet |
-| Founder Lock | 4,000,000 | 0.4% | Streamflow Lock |
-| Bounty Fund | 3,600,000 | 0.36% | Dedicated wallet — community bounties (see below) |
-| Founder — Personal Wallet | 3,550,000 | ~0.36% | Personal wallet, left for flexibility |
+| Founder — Vesting | 14,000,000 | ~1.45% | Streamflow Vesting |
+| Community Rewards | 5,000,000 | ~0.52% | Separate Metamask wallet |
+| Founder Lock | 4,000,000 | ~0.41% | Streamflow Lock |
+| Bounty Fund | 3,600,000 | ~0.37% | Dedicated wallet — community bounties (see below) |
+| Founder — Personal Wallet | 3,550,000 | ~0.37% | Personal wallet, left for flexibility |
 | Treasury | 0 | 0% | Fully allocated to the Bounty Fund on 2026-08-27 |
-| Public / Circulating | ~969,850,000 | ~97.0% | Pump.fun bonding curve / open market |
+| Public / Circulating | ~937,260,000 | ~96.9% | Pump.fun bonding curve / open market |
 
-Founder-associated total: 30,150,000 EKOS (1.4% vesting + 0.4% Founder Lock + 0.5% Community
-Rewards + 0.36% Bounty Fund + ~0.36% personal wallet = ~3.0% of supply). The increase from the
-earlier 2.8% figure reflects a 2,000,000 EKOS open-market purchase by the founder on 2026-08-27
-(see Bounty Fund & Disbursements below). The Bounty Fund and Community Rewards are earmarked for
-community distribution, not founder-held value, but are counted here for transparency because the
-founder currently has custody of both wallets.
+Founder-associated total: 30,150,000 EKOS (~1.45% vesting + ~0.41% Founder Lock + ~0.52% Community
+Rewards + ~0.37% Bounty Fund + ~0.37% personal wallet = ~3.1% of supply). This is up from the
+earlier ~2.8% figure partly from a 2,000,000 EKOS open-market purchase by the founder on 2026-08-27
+(see Bounty Fund & Disbursements below), and partly because the burn shrank the denominator. The
+Bounty Fund and Community Rewards are earmarked for community distribution, not founder-held value,
+but are counted here for transparency because the founder currently has custody of both wallets.
 
 The Public / Circulating figure is the remainder of supply after the allocations above and
 is not a separate reserved pool — it reflects tokens available via the Pump.fun bonding
