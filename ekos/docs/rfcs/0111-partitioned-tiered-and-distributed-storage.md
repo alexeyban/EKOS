@@ -486,8 +486,12 @@ sub-phases B1–B5 and pins the interface-level decisions this section left at d
 - [x] **B2** (2026-08-29) — `crates/segment-backend` crate; `ObjectStoreBackend` (`object_store`
       0.14, `object-store` feature) + `MemBackend`; `SegmentStore` round-trips on object storage.
       RFC 0113.
-- [ ] **B3** — Coordinator (catalog, leases, fencing tokens, watermarks) + Service A compile/ingest
-      workers.
+- [x] **B3** (2026-08-29) — `crates/cluster` (`ekos-cluster`): `Coordinator` (catalog, leases,
+      fencing tokens, watermarks, entity index; single-JSON-file state) + `serve` (newline-delimited
+      JSON-RPC over TCP, the `ekos mcp serve` pattern — not tonic) + `CoordinatorClient` +
+      `CompileWorker`/`LeaseGuard` (Service A transport+lifecycle). `ekos coordinator serve`/`status`
+      + `ekos compile-worker run`. Multi-service harness: lease contention, expired-lease fencing +
+      watermark resume, restart durability. Lease→real `build`/`commit` binding is B4. RFC 0113.
 - [ ] **B4** — Service B query workers + Service C `DistributedLedger` gateway (`impl KnowledgeStore`).
 - [ ] **B5** — Distributed search (§7) fan-out + per-partition BM25 merge, cross-shard caveat.
 

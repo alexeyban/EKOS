@@ -752,6 +752,7 @@ dependencies = [
  "dotenvy",
  "ekos-artifact",
  "ekos-clickhouse-query",
+ "ekos-cluster",
  "ekos-common",
  "ekos-compiler-core",
  "ekos-dbt-gen",
@@ -828,6 +829,18 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "ekos-cluster"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

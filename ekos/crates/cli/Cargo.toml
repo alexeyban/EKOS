@@ -18,6 +18,7 @@ ekos-kir.workspace = true
 ekos-artifact.workspace = true
 ekos-compiler-core.workspace = true
 ekos-ledger.workspace = true
+ekos-cluster.workspace = true
 ekos-runtime.workspace = true
 ekos-simulation.workspace = true
 ekos-observation-sdk.workspace = true

@@ -1,8 +1,7 @@
 # RFC 0113 — Storage Phase B: Distributed Mode Implementation
 
-**Status:** Draft — **B1 + B2 landed 2026-08-29** (per user direction, building incrementally
-against this RFC while it's still Draft, same as RFC 0111 Phase A). B3–B5 not started; Accept
-before B3 (the first sub-phase that adds a network service).
+**Status:** Draft — **B1 + B2 + B3 landed 2026-08-29** (per user direction, building incrementally
+against this RFC while it's still Draft, same as RFC 0111 Phase A). B4–B5 not started.
 **Author:** EKOS team
 **Created:** 2026-08-29
 **Implements:** RFC 0111 §4, §6, §7 (Distributed mode). RFC 0111 doubles as the Phase A
@@ -275,14 +274,50 @@ assigned, or skipped with a flag, same as Phase A's `find_objects`.
 
 ## Wire protocol
 
-- **Transport**: gRPC (tonic) over mutual TLS, cluster-internal CA (RFC 0111 Architecture Review).
-  Chosen over a bespoke framing for streaming (large `catalog_get` / segment transfers), built-in
-  deadlines, and mature tooling. Rotation mechanics: **decided in B3**, deferred here.
-- **Async boundary**: tonic services are async; every call into a compiler pass or `FactIndexes`
-  fold is `spawn_blocking`. RFC 0001's sync-pipeline decision is untouched — this is a new edge
-  beside it.
-- All three services and the coordinator are new binaries in `crates/cli` (subcommands) or a new
-  `crates/cluster` crate — **decided in B3**.
+**Decided in B3 (deviations from the design-altitude sketch above, recorded here):**
+
+- **Transport — newline-delimited JSON-RPC over TCP, not gRPC/tonic.** One JSON `Request` per line
+  in, one `Response` per line out (`crates/cluster/src/protocol.rs`). Rationale: this is the exact
+  pattern `ekos mcp serve` already uses (RFC 0013) — no protobuf toolchain, no tonic dependency
+  tree, one framing the codebase already understands. The coordinator's RPCs are all small
+  request/response (no segment bytes ever cross it — those go object-store↔worker directly), so
+  gRPC's streaming advantage doesn't apply. tonic stays on the table for B4's Service-B segment
+  transfers if a real need shows up.
+- **Mutual TLS — deferred.** v1 assumes a trusted cluster network / localhost. The transport is a
+  plain `TcpStream`; wrapping it in `tokio-rustls` is a transport-level follow-on that changes no
+  protocol code. Cert-rotation mechanics deferred with it.
+- **Metadata store — a single JSON file (atomic temp+rename), not sled/SQLite.** The coordinator's
+  entire persisted state (catalog + per-partition watermarks + entity→partitions index) is a few
+  KB of `serde_json`; an embedded KV/SQL engine is unwarranted weight for v1. Leases are **not**
+  persisted — they are TTL-bounded, so a coordinator restart correctly invalidates every
+  outstanding one (the monotonic fencing-token counter restarts too, which is safe because every
+  pre-restart lease is definitionally dead). Raft-replicated metadata remains the named v2.
+- **Crate — new `crates/cluster` (`ekos-cluster`)**, not `crates/cli` subcommands. It carries the
+  coordinator, the client, the lease table, the protocol types, and `CompileWorker` (Service A's
+  transport/lifecycle half). `PartitionId` is an **opaque `String`** here (`"<dimension_value>/
+  <time_bucket>"`) so `ekos-cluster` needs no `ekos-ledger` dependency. `crates/cli` gets thin
+  `ekos coordinator serve` / `ekos coordinator status` / `ekos compile-worker run` wrappers.
+- **Async boundary**: the coordinator server and clients are async (tokio); when B4 wires Service
+  A's lease to a real shard-scoped `build → commit`, every call into a compiler pass or
+  `FactIndexes` fold is `spawn_blocking`. RFC 0001's sync-pipeline decision is untouched.
+
+### `ekos-cluster` public surface (as built)
+
+```
+Coordinator::open(state_path) | ::ephemeral() | .with_ttl(d)     // in-memory state + JSON persistence
+serve(Arc<Mutex<Coordinator>>, TcpListener)                       // NDJSON accept loop
+spawn_ephemeral(addr, ttl) -> (SocketAddr, JoinHandle)            // test/`main` helper
+CoordinatorClient::connect(addr) + typed helpers                  // one held-open TCP conn
+CompileWorker::new(client, id).with_heartbeat(d).run_shard(p, |guard| async { … })
+LeaseGuard { .token(), .partition(), .commit(watermark) }         // owned; fenced commit -> LostLease
+LeaseTable::{acquire, check, renew, release}                      // fencing-token core (unit-tested)
+```
+
+RPC surface actually implemented: `CatalogRegister`, `CatalogGet{prefix}`, `LeaseAcquire`,
+`LeaseRenew`, `LeaseRelease`, `ManifestCommit{watermark}`, `RecordEntityPartitions`,
+`PartitionsForEntity`, `Watermark`. (`ManifestCommit` carries the new watermark directly rather
+than a full manifest blob — the coordinator only ever needs the generation number; the manifest
+itself lives with the partition.)
 
 ## Sequencing & Acceptance
 
@@ -292,7 +327,7 @@ Each sub-phase gated by its own review; B(n+1) does not start until B(n)'s accep
 |---|---|
 | **B1 ✅ (2026-08-29)** | `SegmentBackend` + `LocalFsBackend` (`crates/ledger/src/backend.rs`); `SegmentStore` routes sealed-segment publish/fetch (`seal_active`, `batches_after`, `batch_headers`, `verify_sealed_report`) through it; `open`/`open_with_seal_threshold` default to `LocalFsBackend`, `open_with_backend` for the rest. All 139 prior `ekos-ledger` tests green unchanged + `sealed_io_routes_through_the_segment_backend` (a counting backend proves the routing) + `local_fs_backend_round_trips`. |
 | **B2 ✅ (2026-08-29)** | `crates/segment-backend` extracted (`SegmentBackend` + `LocalFsBackend` + `MemBackend` + `BackendError`, `get`/`get_range` added). `ObjectStoreBackend` behind the `object-store` feature (`object_store` 0.14, dedicated current-thread runtime). Contract test vs `InMemory`; `SegmentStore` round-trip on object storage with the local cache wiped mid-test. `ekos-ledger` lib build never compiles `object_store` (dev-dep only). MinIO integration check deferred (not a blocker). |
-| **B3** | Coordinator + Service A; multi-worker local harness (1 coordinator, N compile workers) against `InMemory`/MinIO; lease-contention test (two workers, one shard, exactly one wins, loser gets a clear error); bounded-loss-on-crash test (kill mid-active-segment, loss ≤ 8 MB, every sealed segment intact); manifest-commit-race test (lease expiry during upload → no corrupt/lost manifest, stale token rejected). |
+| **B3 ✅ (2026-08-29)** | `crates/cluster` (`ekos-cluster`): `Coordinator` (catalog + leases + fencing tokens + watermarks + entity index, JSON persistence), `serve` (NDJSON-over-TCP), `CoordinatorClient`, `CompileWorker`/`LeaseGuard` (Service A transport+lifecycle), `LeaseTable`. `crates/cli`: `ekos coordinator serve`/`status`, `ekos compile-worker run`. Harness (`crates/cluster/tests/harness.rs`, 4 tests): disjoint-shard concurrent commit; **lease contention** (two workers, one shard, exactly one wins, loser gets an "already leased" error); **expired-lease fencing** (worker stops heartbeating → TTL lapses → next worker takes over with a higher token, resumes from the committed watermark, the stale worker's late `manifest_commit` is rejected, no partial/lost write); coordinator-restart durability (catalog + watermarks survive, leases don't). Plus 3 `LeaseTable` unit tests. Binding a lease to a real shard-scoped `build → commit` run is **B4**. |
 | **B4** | Service B + Service C; `DistributedLedger` passes the same `KnowledgeStore` behavioural suite `PartitionedLedger` does, over RPC; cache-miss-then-hit test; entity-spanning-partitions full-history read fans to the right workers. |
 | **B5** | Distributed search merge test — matching docs split across ≥2 partitions on different workers, merged top-K correctly ranked per-shard, cross-shard BM25 caveat exercised. |
 
@@ -336,15 +371,20 @@ implementation-level choices don't reintroduce a violation.
 
 ## Open Questions
 
-- [ ] Coordinator metadata store — `sled` vs one SQLite file (B3 interface pass).
+- [x] Coordinator metadata store — **resolved in B3**: a single JSON file (atomic temp+rename),
+      not `sled`/SQLite; leases not persisted (TTL-bounded).
 - [x] `object_store` sync bridge — **resolved in B2**: a dedicated current-thread `Runtime` per
       `ObjectStoreBackend`.
-- [ ] Coordinator RPC location — `crates/cli` subcommands vs a new `crates/cluster` (B3).
+- [x] Coordinator RPC location — **resolved in B3**: new `crates/cluster` (`ekos-cluster`);
+      `crates/cli` gets thin wrapper subcommands.
+- [x] Transport — **resolved in B3**: newline-delimited JSON-RPC over TCP (the `ekos mcp serve`
+      pattern), not gRPC/tonic. Revisit for B4 Service-B segment transfers only if needed.
 - [ ] Service B cache eviction beyond size-bounded LRU (RFC 0111 Open Question — needs real
       query-pattern data; not a B4 blocker).
 - [ ] Shrinking the ≤8 MB unsealed-segment loss window (RFC 0111 Open Question — periodic partial
       upload vs a lease-handoff-survived local WAL; not a B3 blocker, v1 accepts 8 MB).
-- [ ] TLS cert rotation mechanics (B3).
+- [ ] Mutual TLS + cert rotation — **deferred past B3**: v1 assumes a trusted cluster network;
+      wrapping the `TcpStream` in `tokio-rustls` changes no protocol code.
 - [ ] Coordinator consensus v1→v2 timing (RFC 0111 — deliberately deferred, not an acceptance
       blocker).
 
@@ -355,7 +395,9 @@ implementation-level choices don't reintroduce a violation.
 | `crates/segment-backend/` ✅ | `SegmentBackend` trait, `LocalFsBackend`, `MemBackend`, `ObjectStoreBackend` (feature-gated), `BackendError` |
 | `crates/ledger/src/segment/mod.rs` | Route sealed-object reads/writes + run discovery through `SegmentBackend`; active segment + Local-mode manifest unchanged |
 | `crates/ledger/src/partitioned/` | `PartitionLocation::ObjectStore`; catalog/index served from the coordinator in Distributed mode |
-| `crates/cluster/` or `crates/cli` (new subcommands) | `ekos coordinator serve`, `ekos compile-worker serve`, `ekos query-worker serve`, `ekos gateway serve` |
+| `crates/cluster/` ✅ | `ekos-cluster`: `Coordinator` + `serve` (NDJSON/TCP) + `CoordinatorClient` + `CompileWorker`/`LeaseGuard` + `LeaseTable` + protocol types; harness test |
+| `crates/cli/src/commands/cluster.rs` ✅ | `ekos coordinator serve`/`status`, `ekos compile-worker run` (thin wrappers over `ekos-cluster`) |
+| `crates/cli` `query-worker`/`gateway` | B4 |
 | `crates/runtime` / `crates/cli/src/commands/store.rs` | `DistributedLedger: KnowledgeStore`; `open_store` `[storage.distributed]` branch |
 | `crates/compiler-core/src/config.rs` | `[storage.backend]`, `[storage.distributed]`, `[storage.query-cache]` |
 | `ekos/docs/rfcs/0111-…md` | Phase B checklist ticked as B1–B5 land |

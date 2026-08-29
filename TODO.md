@@ -2731,8 +2731,20 @@ These items have no single phase — they must be maintained and grown throughou
       extracted (`SegmentBackend` + `LocalFsBackend` + `MemBackend` + `BackendError`, `get`/`get_range`);
       `ObjectStoreBackend` behind the `object-store` feature (`object_store` 0.14, dedicated
       current-thread runtime); `SegmentStore` round-trips on object storage with the cache wiped
-      mid-test; a Local `cargo build` never compiles `object_store` (dev-dep only). Next: B3
-      (coordinator + Service A) — needs RFC 0113 Accepted first.
+      mid-test; a Local `cargo build` never compiles `object_store` (dev-dep only). **B3 landed
+      2026-08-29** — `crates/cluster` (`ekos-cluster`): `Coordinator` (catalog + write leases +
+      fencing tokens + per-partition tx watermarks + entity→partitions index, persisted as one
+      atomic JSON file; leases not persisted, TTL-bounded), `serve` over newline-delimited JSON-RPC
+      on TCP (the `ekos mcp serve` pattern — chose it over tonic/gRPC: no protobuf toolchain, small
+      request/response only, no segment bytes cross the coordinator), `CoordinatorClient`,
+      `CompileWorker`/`LeaseGuard` (Service A's transport+lifecycle half — lease→heartbeat→fenced
+      `commit`→release). `ekos coordinator serve`/`status` + `ekos compile-worker run` (thin CLI
+      wrappers). Harness (`crates/cluster/tests/harness.rs`): disjoint-shard concurrent commit,
+      lease contention (one winner, loser gets "already leased"), expired-lease fencing (stale
+      `manifest_commit` rejected, next worker resumes from the committed watermark, no partial/lost
+      write), coordinator-restart durability. mTLS deferred (trusted cluster network for v1).
+      Binding a lease to a real shard-scoped `build → commit` is B4. Next: B4 (Service B query
+      workers + Service C `DistributedLedger` gateway).
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

@@ -1,0 +1,16 @@
+[package]
+name = "ekos-cluster"
+description = "RFC 0113 B3 — distributed-mode coordinator + compile-worker (partition catalog, write leases, fencing tokens, tx watermarks)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

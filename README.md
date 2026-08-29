@@ -634,8 +634,15 @@ persisted catalog and a run-file index so a reopened store resolves any object/r
 partition scan; aged partitions tier to cold (handle evicted, promoted back on read). It is a
 drop-in for the single-ledger backend — every command, the MCP server, and `docs generate` work
 unchanged. Existing SQLite or fact-engine workspaces are **never** switched implicitly, same rule
-as the fact-engine default. Multi-machine distribution (Phase B — object storage, distributed
-compile/query) is designed in RFC 0111 but not yet built.
+as the fact-engine default.
+
+**Multi-machine distribution (Phase B, RFC 0113)** is being built incrementally. Landed so far: a
+`SegmentBackend` seam with `LocalFsBackend` (default) and an `ObjectStoreBackend` (S3 / Azure /
+in-memory, behind a feature flag); and a **coordinator** (`ekos coordinator serve`) that hands out
+fencing-tokened write leases and tracks per-partition commit watermarks over newline-delimited
+JSON-RPC, with `ekos compile-worker run` as the single-writer worker's smoke path. The full
+distributed read path (`DistributedLedger` gateway, query workers, distributed search) is not yet
+built. None of this affects Local mode, which stays the default.
 
 ## Development Process
 

@@ -116,6 +116,16 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ArtifactCommands,
     },
+    /// Distributed-mode metadata coordinator (RFC 0113 B3)
+    Coordinator {
+        #[command(subcommand)]
+        subcommand: CoordinatorCommands,
+    },
+    /// Distributed-mode compile worker — Service A (RFC 0113 B3)
+    CompileWorker {
+        #[command(subcommand)]
+        subcommand: CompileWorkerCommands,
+    },
     /// Marketing agent: devlog -> tweet draft -> approval -> X publish (RFC 0030)
     Marketing {
         #[command(subcommand)]
@@ -168,6 +178,50 @@ enum Commands {
         /// Read from this ledger instead of the default scenario-scoped one
         #[arg(long)]
         ledger: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CoordinatorCommands {
+    /// Run the coordinator over newline-delimited JSON-RPC on TCP until killed
+    Serve {
+        /// Address to bind, e.g. 0.0.0.0:7333 or 127.0.0.1:0
+        #[arg(long, default_value = "127.0.0.1:7333")]
+        listen: String,
+        /// JSON state file to load/persist (catalog + watermarks + entity index).
+        /// Omit for an ephemeral, non-persisting coordinator.
+        #[arg(long)]
+        state: Option<PathBuf>,
+        /// Write-lease TTL in seconds (default 30)
+        #[arg(long)]
+        ttl_seconds: Option<i64>,
+    },
+    /// Connect to a running coordinator and print its catalog + watermarks
+    Status {
+        #[arg(long, default_value = "127.0.0.1:7333")]
+        coordinator: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CompileWorkerCommands {
+    /// Acquire a shard lease, hold it (heartbeating), commit a watermark, release.
+    /// Smoke path against a live coordinator; shard-scoped pass execution is RFC 0113 B4.
+    Run {
+        #[arg(long, default_value = "127.0.0.1:7333")]
+        coordinator: String,
+        /// Opaque partition id, e.g. "kind=table/2026-08"
+        #[arg(long)]
+        partition: String,
+        /// Local root recorded for this partition in the catalog
+        #[arg(long, default_value = ".")]
+        root: String,
+        /// Seconds to hold the lease before committing
+        #[arg(long, default_value_t = 5)]
+        hold_seconds: u64,
+        /// Watermark (highest committed tx / manifest generation) to record
+        #[arg(long, default_value_t = 1)]
+        watermark: u64,
     },
 }
 
@@ -429,6 +483,37 @@ async fn main() -> Result<()> {
         },
         Commands::Artifact { subcommand } => match subcommand {
             ArtifactCommands::Repack => ekos::commands::artifact::repack(&config, &cwd),
+        },
+        Commands::Coordinator { subcommand } => match subcommand {
+            CoordinatorCommands::Serve {
+                listen,
+                state,
+                ttl_seconds,
+            } => {
+                ekos::commands::cluster::serve_coordinator(&listen, state.as_deref(), ttl_seconds)
+                    .await
+            }
+            CoordinatorCommands::Status { coordinator } => {
+                ekos::commands::cluster::status(&coordinator).await
+            }
+        },
+        Commands::CompileWorker { subcommand } => match subcommand {
+            CompileWorkerCommands::Run {
+                coordinator,
+                partition,
+                root,
+                hold_seconds,
+                watermark,
+            } => {
+                ekos::commands::cluster::worker_run(
+                    &coordinator,
+                    &partition,
+                    &root,
+                    hold_seconds,
+                    watermark,
+                )
+                .await
+            }
         },
         Commands::Marketing { subcommand } => match subcommand {
             MarketingCommands::Publish {

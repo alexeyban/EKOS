@@ -5,6 +5,7 @@ pub mod branch;
 pub mod build;
 pub mod clean;
 pub mod clickhouse;
+pub mod cluster;
 pub mod commit;
 pub mod compile;
 pub mod dbt;
