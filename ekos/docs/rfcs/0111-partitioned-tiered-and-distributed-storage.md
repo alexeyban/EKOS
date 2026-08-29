@@ -14,14 +14,18 @@ since `KirObject` has no source field yet), configurable `TimeBucket`, catalog-r
 dimension/bucket with a `DimensionMismatch` guard on reopen, `entity_id → Set<PartitionKey>`
 fan-out, pruned scoped reads, concurrent multi-partition writers, a **persisted `PartitionCatalog`**
 (`catalog.json`, §5), a **persisted AEVT-style run-file index** (`index/run-*.jsonl`, unified
-`{k, id, p}` lines for objects + relationships + relationship endpoints, `merge_runs`-style
-compaction + a `rebuild_entity_index` repair path) so a reopened ledger resolves any
-object/relationship/`relationships_for` with **zero partition scans**, **relationships**
-(`append_relationship`/`get_relationship`/`all_relationships`/`relationship_history`/
-`relationship_count`/`relationships_for` — routed by `"rel:"+kind`, amendment 2026-08-29), and
-**cold tiering** (`Tier::Cold` in the catalog via `mark_cold_before` — handle eviction +
-read-triggered rehydration, RFC §3 policy layer)) and `compiler-core`'s `[storage.partition]`
-config parsing.
+`{k, id, p}` lines for objects, relationships, endpoints, events, evidence; `merge_runs`-style
+compaction + a `rebuild_entity_index` repair path) so a reopened ledger resolves anything with
+**zero partition scans**, **relationships** (routed by `"rel:"+kind`, amendment 2026-08-29),
+**events + evidence + point-in-time + full-text search + `diff` + `vacuum_into`**, so
+**`impl KnowledgeStore for PartitionedLedger`** — a drop-in for `FactLedger`, tested through a
+`Box<dyn KnowledgeStore>` — and **cold tiering** (`Tier::Cold` via `mark_cold_before` — handle
+eviction + read-triggered rehydration, RFC §3 policy layer)), `compiler-core`'s
+`[storage.partition]` config parsing, and the **`open_store` wiring** (`PartitionedLedger` +
+`.read_only()` served for a fresh workspace opting into `[storage.partition]`, existing workspaces
+untouched). **Phase A (Local mode) is functionally complete for `entity-kind`.** Remaining
+polish: `source-scope`/`composite` from `open_store` (needs a `KirObject` source field), per-scope
+time-bucket overrides, and the RFC §3 search-index-drop half of cold tiering.
 **Author:** EKOS team
 **Created:** 2026-08-27
 **Supersedes:** RFC 0034 (2026-08-07, "Partitioned, Tiered Fact-Segment Storage") and RFC 0110
@@ -560,10 +564,21 @@ for `to`). Load, `merge_runs`-style compaction, torn-tail tolerance, and `rebuil
   (`{k, id, p}`, `k` ∈ obj/rel/endpoint); `rebuild_entity_index` re-derives all three; tests
   `relationships_route_by_kind_and_relationships_for_is_pruned`,
   `rebuild_also_repairs_the_relationship_index`.*
-- [ ] Events, evidence, `object_at`/`all_objects_at`/`relationships_at`/`all_relationships_at`,
-  `find_objects`, `diff`, `vacuum_into`, `entry_count` per §3.
-- [ ] `impl KnowledgeStore for PartitionedLedger`; `open_store` builds it when
-  `[storage.partition]` is enabled; the existing store tests pass against it unchanged.
+- [x] Events, evidence, `object_at`/`all_objects_at`/`relationships_at`/`all_relationships_at`,
+  `find_objects`, `diff`, `vacuum_into`, `entry_count` per §3. — *done. Events/evidence route to
+  `"events"`/`"evidence"` partitions with `evt`/`evid` index kinds (self-healing only; `FactLedger`
+  can't enumerate them for `rebuild`). `find_objects` fans out hot object partitions, merges
+  per-partition BM25, skips cold. `diff` merges per-partition `LedgerDiff`s. `vacuum_into` writes a
+  self-contained copy (rewritten `catalog.json` + `index/` + each partition under `dest/p/<key>/`).*
+- [x] `impl KnowledgeStore for PartitionedLedger` (via `From<PartitionError> for LedgerError`,
+  tested through a `Box<dyn KnowledgeStore>`); **`open_store` / `open_store_read_only` build it**
+  when `[storage.partition]` is enabled on a genuinely fresh workspace (or one that already has
+  `partitioned/catalog.json`) — an existing SQLite/fact workspace is never implicitly switched,
+  same rule as the fact-engine default. `PartitionedLedger::read_only()` opens each partition via
+  `FactLedger::open_read_only` (RFC 0097). Only `entity-kind` wires from config
+  (`source-scope`/`composite` need a source resolver `open_store` can't provide yet — clear
+  error). Tests: `partitioned_workspace_round_trips_through_open_store`,
+  `existing_fact_workspace_is_not_switched_to_partitioned` (`crates/cli/src/commands/store.rs`).
 
 ## Testing
 

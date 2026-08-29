@@ -618,6 +618,25 @@ opt-in-free and automatic on any fact-engine workspace:
   far back a version-chain read has to walk, keeping `object_at`/point-in-time reads fast as ledger
   history grows.
 
+### Partitioned storage (RFC 0111 Phase A) — opt-in
+
+A **brand-new** workspace can opt into a partitioned store by setting `[storage.partition]` in
+`ekos.toml`:
+
+```toml
+[storage.partition]
+dimension = "entity-kind"   # partition by ObjectKind (Table, File, …); relationships by kind
+time-bucket = "monthly"     # "daily" | "weekly" | "monthly"
+```
+
+Data then splits across many independent fact-segment ledgers keyed by kind + time bucket, with a
+persisted catalog and a run-file index so a reopened store resolves any object/relationship with no
+partition scan; aged partitions tier to cold (handle evicted, promoted back on read). It is a
+drop-in for the single-ledger backend — every command, the MCP server, and `docs generate` work
+unchanged. Existing SQLite or fact-engine workspaces are **never** switched implicitly, same rule
+as the fact-engine default. Multi-machine distribution (Phase B — object storage, distributed
+compile/query) is designed in RFC 0111 but not yet built.
+
 ## Development Process
 
 All significant architectural decisions begin as RFCs in `docs/rfcs/`. No feature is implemented until its RFC is accepted. See `CLAUDE.md` for the full mandatory development workflow.

@@ -2737,13 +2737,24 @@ These items have no single phase — they must be maintained and grown throughou
       for ids absent from the index, `rebuild_entity_index()` repair path) so a reopened ledger
       resolves any object/relationship with zero partition scans; **relationships** (RFC 0111
       amendment 2026-08-29 — routed by `"rel:"+kind`; unified `index/run-*.jsonl` `{k,id,p}` lines
-      for obj/rel/endpoint; `relationships_for` pruned via the endpoint index, not fanned out);
+      for obj/rel/endpoint/evt/evid; `relationships_for` pruned via the endpoint index, not fanned
+      out); **events + evidence** (own `"events"`/`"evidence"` partitions), **point-in-time**
+      (`object_at`/`all_objects_at`/`relationships_at`/`all_relationships_at`), **full-text search**
+      (hot object partitions, per-partition BM25 merge, cold skipped), **`diff`** (merged
+      `LedgerDiff`), **`vacuum_into`** (self-contained copy) — so **`impl KnowledgeStore for
+      PartitionedLedger`**, a drop-in for `FactLedger`, tested through `Box<dyn KnowledgeStore>`;
       **cold tiering** (`Tier::Cold`, `mark_cold_before(cutoff)` demotes past-bucket partitions +
       evicts handles, any read rehydrates — RFC §3 policy layer); `compiler-core`
-      `[storage.partition]` config parsing. Next: events, evidence, `*_at`, `find_objects`, `diff`,
-      `vacuum_into`, `entry_count`; then `impl KnowledgeStore for PartitionedLedger` + `open_store`
-      wiring (also unlocks config→ledger wiring, per-scope bucket overrides, search-index-drop half
-      of cold tiering); then the `SegmentBackend` seam (Phase B). See RFC 0111 amendment §4.
+      `[storage.partition]` config parsing; and the **`open_store` wiring** — `open_store` /
+      `open_store_read_only` build a `PartitionedLedger` (`.read_only()` opens partitions via
+      `FactLedger::open_read_only`) for a fresh workspace opting into `[storage.partition]`
+      (`entity-kind` only for now — source-scope/composite need a `KirObject` source field);
+      existing SQLite/fact workspaces untouched. **Phase A (Local mode) is functionally complete
+      for `entity-kind`.** Remaining: source-scope/composite wiring, per-scope bucket overrides,
+      the §3 search-index-drop half of cold tiering; then the `SegmentBackend` seam (Phase B). The
+      module is now a `partitioned/` submodule (`mod.rs` routing/index core + `types.rs` +
+      `knowledge_store.rs` + `tests.rs`); `mod.rs` is still ~1.4k lines — the `impl PartitionedLedger`
+      read/write methods could move to a `reads.rs` if it grows further. See RFC 0111 amendment §4.
   - *Why it matters now, not just eventually:* `devlog_65` found real, physical evidence this is
     already biting — `analytics/`'s local ledger has a corrupted FTS5 virtual table (base DB
     passes `PRAGMA integrity_check`, the FTS index doesn't), now traced to a specific, real,

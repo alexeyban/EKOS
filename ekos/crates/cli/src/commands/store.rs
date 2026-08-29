@@ -11,12 +11,20 @@
 
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
-use ekos_ledger::{FactLedger, KnowledgeStore, Ledger};
+use ekos_ledger::{
+    FactLedger, KnowledgeStore, Ledger, PartitionDimension, PartitionKey, PartitionedLedger,
+    TimeBucket,
+};
 use std::path::{Path, PathBuf};
 
 /// Where a fact-engine-backed workspace's store lives (migrated or newly created).
 pub fn facts_dir(config: &EkosConfig, cwd: &Path) -> PathBuf {
     config.ledger_dir(cwd).join("facts")
+}
+
+/// Where a partitioned workspace's catalog + index + partitions live (RFC 0111 Phase A).
+pub fn partitioned_root(config: &EkosConfig, cwd: &Path) -> PathBuf {
+    config.ledger_dir(cwd).join("partitioned")
 }
 
 /// True when this workspace already has a real fact store on disk — either migrated via
@@ -26,8 +34,73 @@ pub fn uses_fact_engine(config: &EkosConfig, cwd: &Path) -> bool {
     facts_dir(config, cwd).join("manifest.json").exists()
 }
 
+/// True when this workspace is served by [`PartitionedLedger`] — either it already has a
+/// `partitioned/catalog.json`, or `[storage.partition]` is enabled **and** neither of the other
+/// two backends has ever been written to (a genuinely fresh workspace opting in, mirroring the
+/// fact-engine default-switch rule — an existing SQLite/fact workspace is never implicitly
+/// switched).
+pub fn uses_partitioned(config: &EkosConfig, cwd: &Path) -> bool {
+    if partitioned_root(config, cwd).join("catalog.json").exists() {
+        return true;
+    }
+    config.storage.partition.is_enabled()
+        && !uses_fact_engine(config, cwd)
+        && !config.ledger_path(cwd).exists()
+}
+
+/// The default on-disk layout for a partition: `<partitioned>/p/<dimension_value>/<time_bucket>`,
+/// with `:` and the unit separator (which appear in `"rel:*"` and `Composite` values) sanitized.
+fn default_root_for(root: PathBuf) -> impl Fn(&PartitionKey) -> PathBuf + Send + Sync + 'static {
+    move |key: &PartitionKey| {
+        root.join("p")
+            .join(key.dimension_value.replace([':', '\u{1f}'], "_"))
+            .join(&key.time_bucket)
+    }
+}
+
+/// Build a [`PartitionedLedger`] from `[storage.partition]` config. `compiler-core` holds the
+/// dimension/bucket as strings (it can't depend on `ekos-ledger`); the string→enum translation is
+/// this layer's job (the split CLAUDE.md documents for `ArchitectureConfidence`).
+fn build_partitioned(
+    config: &EkosConfig,
+    cwd: &Path,
+    read_only: bool,
+) -> Result<PartitionedLedger> {
+    let root = partitioned_root(config, cwd);
+    let p = &config.storage.partition;
+    let dim_str = p.dimension.as_deref().unwrap_or("entity-kind");
+    let dimension = PartitionDimension::parse(dim_str)
+        .ok_or_else(|| anyhow::anyhow!("unknown [storage.partition] dimension: {dim_str:?}"))?;
+    if dimension != PartitionDimension::EntityKind {
+        anyhow::bail!(
+            "[storage.partition] dimension {dim_str:?} needs a source resolver that open_store \
+             cannot provide yet (KirObject has no source field) — use \"entity-kind\""
+        );
+    }
+    let bucket_str = p.default_time_bucket();
+    let time_bucket = TimeBucket::parse(bucket_str).ok_or_else(|| {
+        anyhow::anyhow!("unknown [storage.partition] time-bucket: {bucket_str:?}")
+    })?;
+
+    let ledger = PartitionedLedger::new(
+        &root,
+        dimension,
+        time_bucket,
+        default_root_for(root.clone()),
+    )
+    .map_err(|e| anyhow::anyhow!("cannot open partitioned ledger at {}: {e}", root.display()))?;
+    Ok(if read_only {
+        ledger.read_only()
+    } else {
+        ledger
+    })
+}
+
 /// Open the workspace's knowledge store with backend auto-detection.
 pub fn open_store(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    if uses_partitioned(config, cwd) {
+        return Ok(Box::new(build_partitioned(config, cwd, false)?));
+    }
     if uses_fact_engine(config, cwd) {
         let dir = facts_dir(config, cwd);
         return Ok(Box::new(FactLedger::open(&dir).map_err(|e| {
@@ -77,6 +150,11 @@ pub fn open_store(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeSt
 /// `open_store` on a truly fresh workspace at the same moment already had
 /// this exact narrow bootstrap race before this RFC.
 pub fn open_store_read_only(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    if uses_partitioned(config, cwd) {
+        // `PartitionedLedger::new` is safe on a fresh dir (empty catalog → empty reads); the
+        // `.read_only()` handle then opens every partition via `FactLedger::open_read_only`.
+        return Ok(Box::new(build_partitioned(config, cwd, true)?));
+    }
     if uses_fact_engine(config, cwd) {
         let dir = facts_dir(config, cwd);
         return Ok(Box::new(FactLedger::open_read_only(&dir).map_err(|e| {
@@ -105,7 +183,9 @@ pub fn open_store_read_only(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn K
 /// exact three-way logic so this stays accurate even before a fresh workspace's first
 /// `open_store` call has run.
 pub fn store_display(config: &EkosConfig, cwd: &Path) -> String {
-    if uses_fact_engine(config, cwd) || !config.ledger_path(cwd).exists() {
+    if uses_partitioned(config, cwd) {
+        partitioned_root(config, cwd).display().to_string()
+    } else if uses_fact_engine(config, cwd) || !config.ledger_path(cwd).exists() {
         facts_dir(config, cwd).display().to_string()
     } else {
         config.ledger_path(cwd).display().to_string()
@@ -294,5 +374,74 @@ mod tests {
         assert_eq!(reader_b.object_count().unwrap(), 1);
         assert_eq!(reader_a.all_objects().unwrap()[0].name, "orders");
         assert_eq!(reader_b.all_objects().unwrap()[0].name, "customers");
+    }
+
+    /// RFC 0111 Phase A: a fresh workspace with `[storage.partition]` enabled is served by
+    /// `PartitionedLedger` through `open_store`, and reads back through `open_store_read_only`.
+    #[test]
+    fn partitioned_workspace_round_trips_through_open_store() {
+        let dir = tempdir().unwrap();
+        let config: EkosConfig = toml::from_str(
+            "[storage.partition]\ndimension = \"entity-kind\"\ntime-bucket = \"monthly\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(config.ledger_dir(dir.path())).unwrap();
+
+        assert!(uses_partitioned(&config, dir.path()));
+        {
+            let store = open_store(&config, dir.path()).unwrap();
+            store
+                .append_object(&ekos_kir::KirObject::new(
+                    "orders",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+            store
+                .append_relationship(&ekos_kir::KirRelationship::new(
+                    ekos_kir::RelationshipKind::DependsOn,
+                    ekos_kir::KirId::new(),
+                    ekos_kir::KirId::new(),
+                ))
+                .unwrap();
+        }
+        assert!(
+            partitioned_root(&config, dir.path())
+                .join("catalog.json")
+                .exists()
+        );
+
+        let reader = open_store_read_only(&config, dir.path()).unwrap();
+        assert_eq!(reader.object_count().unwrap(), 1);
+        assert_eq!(reader.relationship_count().unwrap(), 1);
+        assert_eq!(reader.all_objects().unwrap()[0].name, "orders");
+        assert_eq!(
+            store_display(&config, dir.path()),
+            partitioned_root(&config, dir.path()).display().to_string()
+        );
+    }
+
+    /// An existing fact-engine workspace is **not** switched to partitioned just because the
+    /// config flag is set — same guarantee the SQLite→fact switch has.
+    #[test]
+    fn existing_fact_workspace_is_not_switched_to_partitioned() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(EkosConfig::default().ledger_dir(dir.path())).unwrap();
+        // Build a real fact-engine workspace first, with no partition config.
+        {
+            let store = open_store(&EkosConfig::default(), dir.path()).unwrap();
+            store
+                .append_object(&ekos_kir::KirObject::new(
+                    "orders",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+        }
+        // Now turn the partition flag on.
+        let config: EkosConfig =
+            toml::from_str("[storage.partition]\ndimension = \"entity-kind\"\n").unwrap();
+        assert!(!uses_partitioned(&config, dir.path()));
+        assert!(uses_fact_engine(&config, dir.path()));
+        let reader = open_store_read_only(&config, dir.path()).unwrap();
+        assert_eq!(reader.object_count().unwrap(), 1);
     }
 }

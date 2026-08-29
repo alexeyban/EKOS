@@ -1,16 +1,17 @@
-//! RFC 0111 Phase A: real, tested partitioning and fan-out for `KirObject`s, keyed by
-//! `PartitionDimension::EntityKind` + a configurable time bucket, with a **persisted catalog and
-//! entity index** so partitions — and each entity's partition set — survive process restarts.
+//! RFC 0111 Phase A: real, tested partitioning and fan-out for the whole knowledge model, keyed by
+//! a configurable [`PartitionDimension`] + [`TimeBucket`], with a **persisted catalog and run-file
+//! index** so partitions — and each id's partition set — survive process restarts.
 //!
-//! **Scope, stated precisely rather than overclaimed:** only object reads/writes are implemented
-//! (`append_object`, `get_object`, `object_history`, `objects_in_kind`, `all_objects`,
-//! `object_count`). Relationships/events/evidence and the rest of `KnowledgeStore`'s surface
-//! (`diff`, `vacuum_into`, full-text search, …) are out of scope for this slice —
-//! `PartitionedLedger` is **not** a `KnowledgeStore` yet and cannot be opened through
-//! `open_store`. All three `PartitionDimension`s route; `SourceScope` and `Composite` need a
-//! caller-supplied source resolver ([`PartitionedLedger::with_source_resolver`]) because
-//! `KirObject` has no explicit source field yet — a `None` from the resolver under a source-based
-//! dimension is a [`PartitionError::UnresolvedSource`], never a silent misroute.
+//! **Scope:** [`PartitionedLedger`] implements the full [`KnowledgeStore`] trait — objects,
+//! relationships, events, evidence, point-in-time reads, full-text search, `diff`, `vacuum_into`,
+//! counts — so it is a drop-in for [`FactLedger`]/`Ledger` (RFC 0111 amendment 2026-08-29). All
+//! three `PartitionDimension`s route; `SourceScope`/`Composite` need a caller-supplied source
+//! resolver ([`PartitionedLedger::with_source_resolver`]) because `KirObject` has no explicit
+//! source field yet — a `None` under a source-based dimension is
+//! [`PartitionError::UnresolvedSource`], never a silent misroute. `open_store` /
+//! `open_store_read_only` (`crates/cli`) build this when `[storage.partition]` is enabled on a
+//! fresh workspace; [`PartitionedLedger::read_only`] opens each partition via
+//! [`FactLedger::open_read_only`].
 //!
 //! Each partition is an ordinary, unmodified [`FactLedger`] — this module only adds routing and
 //! fan-out above it, exactly RFC 0111's own "no format/invariant change, purely an access-path
@@ -46,8 +47,14 @@
 //!   fsync'd — same durability profile as the `FactLedger` segment they mirror (RFC 0104). An id
 //!   *absent* from the loaded index is re-derived by a one-time catalog scan on first read (and
 //!   the discovered pairs appended, self-healing). An id whose *partition-crossing* line was lost
-//!   to an OS/power crash needs [`PartitionedLedger::rebuild_entity_index`] (the `ekos ledger
-//!   repair`-style full re-derive — rebuilds obj/rel/endpoint alike).
+//!   to an OS/power crash needs [`PartitionedLedger::rebuild_entity_index`] — it rebuilds
+//!   obj/rel/endpoint from the partitions, but **not** evt/evid (`FactLedger` can't enumerate
+//!   events/evidence); those recover only via the per-read self-healing scan.
+//! - **`find_objects` skips cold partitions** (documented on the method) and merges per-partition
+//!   BM25 — RFC §7's query-then-fetch approximation. **`diff`'s `added` entry-ids are
+//!   per-partition-local** (concatenated, not globally unique); `touched`/`unchanged` merge
+//!   cleanly. **Events all share one `"events"` partition per time bucket** (`EventKind` has no
+//!   `Display`); fine — `KnowledgeStore` has no `events_for`/`all_events`.
 //! - **Cold tiering is a policy flag, not yet a format change.** [`PartitionedLedger::mark_cold_before`]
 //!   demotes aged partitions ([`Tier::Cold`]) — evicting the open handle and marking them "eligible
 //!   to relocate to cheaper storage" — and any read promotes one back to hot. The RFC §3
@@ -67,17 +74,20 @@
 //! **same** partition serialize on that partition's own lock — the single-writer-per-partition
 //! invariant RFC 0104's `write.lock` also enforces cross-process.
 
-use crate::FactLedger;
-use crate::LedgerError;
+use crate::{FactLedger, KnowledgeStore, LedgerDiff, LedgerError};
+
 use chrono::{DateTime, Utc};
-use ekos_kir::{KirId, KirObject, KirRelationship};
+use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use thiserror::Error;
+
+mod knowledge_store;
+mod types;
+pub use types::*;
 
 /// Merge every index run into one once this many accumulate (`merge_runs`-style bound).
 pub const COMPACT_AT: usize = 16;
@@ -91,173 +101,6 @@ type RootResolver = Box<dyn Fn(&PartitionKey) -> PathBuf + Send + Sync>;
 /// Resolves a `KirObject`'s originating source/connector for `SourceScope`/`Composite` routing.
 type SourceResolver = Box<dyn Fn(&KirObject) -> Option<String> + Send + Sync>;
 
-#[derive(Debug, Error)]
-pub enum PartitionError {
-    #[error("ledger error in partition {key:?}: {source}")]
-    Ledger {
-        key: PartitionKey,
-        #[source]
-        source: LedgerError,
-    },
-    #[error("partition catalog I/O error at {path}: {source}")]
-    Catalog {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("partition catalog at {path} is corrupt: {source}")]
-    CatalogParse {
-        path: PathBuf,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error(
-        "SourceScope/Composite routing needs a source for entity {entity}, but the source \
-         resolver returned None — set one with PartitionedLedger::with_source_resolver"
-    )]
-    UnresolvedSource { entity: KirId },
-    #[error(
-        "this ledger's partitions were created with {field} = {stored:?}, but it is being opened \
-         with {requested:?} — routing/tiering config cannot change after partitions exist"
-    )]
-    DimensionMismatch {
-        field: &'static str,
-        stored: String,
-        requested: String,
-    },
-}
-
-/// RFC 0111 §1's routing dimension. All three variants route; `SourceScope` and `Composite`
-/// require a source resolver ([`PartitionedLedger::with_source_resolver`]) since a `KirObject`
-/// carries no explicit source field yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PartitionDimension {
-    /// Partition by `ObjectKind` — e.g. `Table`, `File`, `Custom("Risk")`.
-    EntityKind,
-    /// Partition by the object's originating source/connector — e.g. `sql`, `git`,
-    /// `discord:#governance` — as returned by the source resolver.
-    SourceScope,
-    /// Partition by `source` + `kind` together (`"<source>\u{1f}<kind>"`); more partitions, so a
-    /// scoped query prunes to an exact composite value (prefix scoping is a later refinement).
-    Composite,
-}
-
-impl PartitionDimension {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            PartitionDimension::EntityKind => "entity-kind",
-            PartitionDimension::SourceScope => "source-scope",
-            PartitionDimension::Composite => "composite",
-        }
-    }
-
-    /// Parse the `ekos.toml` `[storage.partition] dimension` string.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
-            "entity-kind" => Some(PartitionDimension::EntityKind),
-            "source-scope" => Some(PartitionDimension::SourceScope),
-            "composite" => Some(PartitionDimension::Composite),
-            _ => None,
-        }
-    }
-}
-
-/// RFC 0111 §1's time-bucket granularity. Labels are chosen so that **lexical order equals
-/// chronological order** — [`PartitionKey`]'s derived `Ord` relies on this to merge partitions in
-/// the correct order in [`PartitionedLedger::object_history`] without a separate timestamp
-/// comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum TimeBucket {
-    Daily,
-    Weekly,
-    #[default]
-    Monthly,
-}
-
-impl TimeBucket {
-    /// The bucket label for a timestamp — the string that becomes [`PartitionKey::time_bucket`].
-    pub fn label(&self, at: DateTime<Utc>) -> String {
-        match self {
-            // ISO-8601 forms, all lexically == chronologically ordered.
-            TimeBucket::Daily => at.format("%Y-%m-%d").to_string(),
-            TimeBucket::Weekly => at.format("%G-W%V").to_string(),
-            TimeBucket::Monthly => at.format("%Y-%m").to_string(),
-        }
-    }
-
-    /// Parse the `ekos.toml` `[storage.partition] time-bucket` string. `None` for an unknown value
-    /// (caller decides whether to warn-and-default or error).
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "daily" => Some(TimeBucket::Daily),
-            "weekly" => Some(TimeBucket::Weekly),
-            "monthly" => Some(TimeBucket::Monthly),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            TimeBucket::Daily => "daily",
-            TimeBucket::Weekly => "weekly",
-            TimeBucket::Monthly => "monthly",
-        }
-    }
-}
-
-/// `(time_bucket, dimension_value)` — field order matters: it makes the derived `Ord` sort
-/// chronologically first, which [`PartitionedLedger::object_history`] relies on to merge partitions
-/// in the correct order without needing a separate timestamp comparison.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct PartitionKey {
-    /// e.g. `"2026-08"` (monthly), `"2026-W35"` (weekly), `"2026-08-27"` (daily).
-    pub time_bucket: String,
-    /// e.g. `"Table"`, `"File"` (an `ObjectKind`'s `Display` output) for `EntityKind` routing.
-    pub dimension_value: String,
-}
-
-/// RFC 0111 §3 hot/cold tier. **Hot**: kept in the open-handle cache, eligible for indexing, lives
-/// on local disk. **Cold**: an aged-out, sealed partition — its handle is evicted and it is
-/// flagged "eligible to relocate to cheaper storage"; reads still work (they open it transiently
-/// and promote it back to Hot). Search-index drop + recompression (RFC §3) need `FactLedger`
-/// support and land with the `KnowledgeStore`/`SegmentBackend` work.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Tier {
-    #[default]
-    Hot,
-    Cold,
-}
-
-impl Tier {
-    fn is_hot(&self) -> bool {
-        matches!(self, Tier::Hot)
-    }
-}
-
-/// One persisted catalog row: a partition's key, where its [`FactLedger`] lives on disk, and its
-/// [`Tier`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct PartitionEntry {
-    pub key: PartitionKey,
-    pub root: PathBuf,
-    #[serde(default, skip_serializing_if = "Tier::is_hot")]
-    pub tier: Tier,
-}
-
-/// RFC 0111 §5's `PartitionCatalog`, persisted as `<catalog_root>/catalog.json`. One entry per
-/// partition (never per entity), kept sorted for a deterministic file. `dimension`/`time_bucket`
-/// are recorded on first write and then frozen — reopening with a different value is an error
-/// (`DimensionMismatch`), since the on-disk partition names encode both.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PartitionCatalog {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dimension: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub time_bucket: Option<String>,
-    pub partitions: Vec<PartitionEntry>,
-}
-
 /// `id → partitions` cache entry. `complete` is true when the set is known to be the full
 /// membership — either loaded from the persisted index on open, or filled in by a one-time catalog
 /// scan (see the module doc's "Known limits").
@@ -267,7 +110,7 @@ struct Sites {
     complete: bool,
 }
 
-/// What a run-file line's `id` refers to (RFC 0111 amendment 2026-08-29 §2).
+/// What a run-file line's `id` refers to (RFC 0111 amendment 2026-08-29 §2/§3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum IndexKind {
@@ -278,7 +121,25 @@ enum IndexKind {
     Rel,
     /// an endpoint entity id (`from`/`to`) → a relationship partition it participates in
     Endpoint,
+    /// event id → the `"events:"` partition it lives in
+    Evt,
+    /// evidence id → the `"evidence:"` partition it lives in
+    Evid,
 }
+
+impl IndexKind {
+    const ALL: [IndexKind; 5] = [
+        IndexKind::Obj,
+        IndexKind::Rel,
+        IndexKind::Endpoint,
+        IndexKind::Evt,
+        IndexKind::Evid,
+    ];
+}
+
+/// The `dimension_value` events and evidence route to (one partition per time bucket each).
+const EVENTS_DV: &str = "events";
+const EVIDENCE_DV: &str = "evidence";
 
 /// One line of an `index/run-*.jsonl` file: `{k, id, p}`. `k` is omitted for the common `obj`
 /// case (serde default), keeping object lines compact.
@@ -300,7 +161,41 @@ fn is_relationship_partition(key: &PartitionKey) -> bool {
     key.dimension_value.starts_with("rel:")
 }
 
-/// Wrap a `LedgerError` from a partition read where the exact key isn't threaded through.
+/// An object partition holds `KirObject`s — anything that isn't a relationship, event, or evidence
+/// partition.
+fn is_object_partition(key: &PartitionKey) -> bool {
+    !is_relationship_partition(key)
+        && key.dimension_value != EVENTS_DV
+        && key.dimension_value != EVIDENCE_DV
+}
+
+/// A filesystem-safe folder name for a partition (used by `vacuum_into`).
+fn sanitize_key(key: &PartitionKey) -> String {
+    format!("{}__{}", key.dimension_value, key.time_bucket).replace(['/', '\\', '\u{1f}', ':'], "_")
+}
+
+/// Copy the flat `index/` directory (only `run-*.jsonl` files) into `dst`.
+fn copy_dir_shallow(src: &Path, dst: &Path) -> Result<(), PartitionError> {
+    std::fs::create_dir_all(dst).map_err(|source| PartitionError::Catalog {
+        path: dst.to_path_buf(),
+        source,
+    })?;
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                std::fs::copy(&p, dst.join(entry.file_name())).map_err(|source| {
+                    PartitionError::Catalog {
+                        path: p.clone(),
+                        source,
+                    }
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+/// Wrap a `LedgerError` from a partition read where the exact key is not threaded through.
 fn ledger_err(source: LedgerError) -> PartitionError {
     PartitionError::Ledger {
         key: PartitionKey {
@@ -361,12 +256,14 @@ impl IndexWriter {
     }
 }
 
-/// The three `id → Sites` maps the run-file index resolves into, by [`IndexKind`].
+/// The `id → Sites` maps the run-file index resolves into, one per [`IndexKind`].
 #[derive(Default)]
 struct IndexMaps {
     obj: HashMap<KirId, Sites>,
     rel: HashMap<KirId, Sites>,
     endpoint: HashMap<KirId, Sites>,
+    evt: HashMap<KirId, Sites>,
+    evid: HashMap<KirId, Sites>,
 }
 
 impl IndexMaps {
@@ -375,11 +272,25 @@ impl IndexMaps {
             IndexKind::Obj => &self.obj,
             IndexKind::Rel => &self.rel,
             IndexKind::Endpoint => &self.endpoint,
+            IndexKind::Evt => &self.evt,
+            IndexKind::Evid => &self.evid,
         }
     }
+    fn map_mut(&mut self, k: IndexKind) -> &mut HashMap<KirId, Sites> {
+        match k {
+            IndexKind::Obj => &mut self.obj,
+            IndexKind::Rel => &mut self.rel,
+            IndexKind::Endpoint => &mut self.endpoint,
+            IndexKind::Evt => &mut self.evt,
+            IndexKind::Evid => &mut self.evid,
+        }
+    }
+    fn is_empty(&self) -> bool {
+        IndexKind::ALL.iter().all(|k| self.map(*k).is_empty())
+    }
     fn mark_all_complete(&mut self) {
-        for m in [&mut self.obj, &mut self.rel, &mut self.endpoint] {
-            for s in m.values_mut() {
+        for k in IndexKind::ALL {
+            for s in self.map_mut(k).values_mut() {
                 s.complete = true;
             }
         }
@@ -390,7 +301,7 @@ impl IndexMaps {
 /// `(kind, id, partition key)` — the AEVT-style ordering compaction/rebuild produce.
 fn write_run(dir: &Path, num: u32, maps: &IndexMaps) -> Result<(), PartitionError> {
     let mut lines: Vec<(IndexKind, KirId, &PartitionKey)> = Vec::new();
-    for k in [IndexKind::Obj, IndexKind::Rel, IndexKind::Endpoint] {
+    for k in IndexKind::ALL {
         for (id, sites) in maps.map(k) {
             for p in &sites.partitions {
                 lines.push((k, *id, p));
@@ -448,7 +359,15 @@ pub struct PartitionedLedger {
     rel_sites: Mutex<HashMap<KirId, Sites>>,
     /// endpoint entity id → relationship partitions it participates in (`IndexKind::Endpoint`)
     endpoint_rels: Mutex<HashMap<KirId, Sites>>,
+    /// event id → `"events"` partitions (`IndexKind::Evt`)
+    evt_sites: Mutex<HashMap<KirId, Sites>>,
+    /// evidence id → `"evidence"` partitions (`IndexKind::Evid`)
+    evid_sites: Mutex<HashMap<KirId, Sites>>,
     index: Mutex<IndexWriter>,
+    /// When set, each partition opens via [`FactLedger::open_read_only`] (RFC 0097) — never
+    /// acquiring tantivy's exclusive writer lock, so a long-lived reader can't block a concurrent
+    /// writer process. Writes on a read-only handle fail inside `FactLedger`.
+    read_only: bool,
 }
 
 impl PartitionedLedger {
@@ -502,8 +421,7 @@ impl PartitionedLedger {
 
         let index_dir = catalog_root.join("index");
         let (mut maps, mut next_run, run_files) = Self::load_index(&index_dir)?;
-        let nonempty = !maps.obj.is_empty() || !maps.rel.is_empty() || !maps.endpoint.is_empty();
-        if run_files.len() >= COMPACT_AT && nonempty {
+        if run_files.len() >= COMPACT_AT && !maps.is_empty() {
             write_run(&index_dir, next_run, &maps)?;
             for old in &run_files {
                 let _ = std::fs::remove_file(old);
@@ -524,11 +442,22 @@ impl PartitionedLedger {
             obj_sites: Mutex::new(maps.obj),
             rel_sites: Mutex::new(maps.rel),
             endpoint_rels: Mutex::new(maps.endpoint),
+            evt_sites: Mutex::new(maps.evt),
+            evid_sites: Mutex::new(maps.evid),
             index: Mutex::new(IndexWriter {
                 next_run,
                 current: None,
             }),
+            read_only: false,
         })
+    }
+
+    /// Open for reads only — every partition opens via [`FactLedger::open_read_only`] (RFC 0097).
+    /// Read paths never register new partitions, so nothing is written; a stray `append_*` on the
+    /// returned handle fails inside `FactLedger`.
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
     }
 
     /// Supply the resolver `PartitionDimension::SourceScope` / `Composite` route by: given a
@@ -585,12 +514,11 @@ impl PartitionedLedger {
                 }
                 match serde_json::from_str::<IndexLine>(line) {
                     Ok(l) => {
-                        let m = match l.k {
-                            IndexKind::Obj => &mut maps.obj,
-                            IndexKind::Rel => &mut maps.rel,
-                            IndexKind::Endpoint => &mut maps.endpoint,
-                        };
-                        m.entry(l.id).or_default().partitions.insert(l.p);
+                        maps.map_mut(l.k)
+                            .entry(l.id)
+                            .or_default()
+                            .partitions
+                            .insert(l.p);
                     }
                     Err(_) => break,
                 }
@@ -608,7 +536,7 @@ impl PartitionedLedger {
         id: KirId,
         keys: &[PartitionKey],
     ) -> Result<(), PartitionError> {
-        if keys.is_empty() {
+        if keys.is_empty() || self.read_only {
             return Ok(());
         }
         let mut writer = self.index.lock().unwrap();
@@ -771,6 +699,8 @@ impl PartitionedLedger {
         key: &PartitionKey,
         register: bool,
     ) -> Result<Arc<FactLedger>, PartitionError> {
+        // A read-only handle never mutates the catalog (no registers, no tier promotion, no writes).
+        let register = register && !self.read_only;
         if let Some(ledger) = self.open.lock().unwrap().get(key) {
             return Ok(Arc::clone(ledger));
         }
@@ -780,7 +710,7 @@ impl PartitionedLedger {
             let root = match catalog.partitions.iter_mut().find(|e| &e.key == key) {
                 Some(entry) => {
                     // RFC 0111 §3: any access to a cold partition promotes it back to hot.
-                    if entry.tier == Tier::Cold {
+                    if entry.tier == Tier::Cold && !self.read_only {
                         entry.tier = Tier::Hot;
                         changed = true;
                     }
@@ -811,13 +741,15 @@ impl PartitionedLedger {
             }
             root
         };
-        let ledger =
-            Arc::new(
-                FactLedger::open(&root).map_err(|source| PartitionError::Ledger {
-                    key: key.clone(),
-                    source,
-                })?,
-            );
+        let opened = if self.read_only {
+            FactLedger::open_read_only(&root)
+        } else {
+            FactLedger::open(&root)
+        };
+        let ledger = Arc::new(opened.map_err(|source| PartitionError::Ledger {
+            key: key.clone(),
+            source,
+        })?);
         self.open
             .lock()
             .unwrap()
@@ -868,6 +800,8 @@ impl PartitionedLedger {
             IndexKind::Obj => &self.obj_sites,
             IndexKind::Rel => &self.rel_sites,
             IndexKind::Endpoint => &self.endpoint_rels,
+            IndexKind::Evt => &self.evt_sites,
+            IndexKind::Evid => &self.evid_sites,
         }
     }
 
@@ -1081,6 +1015,291 @@ impl PartitionedLedger {
         Ok(self.all_relationships()?.len())
     }
 
+    // ── events & evidence (RFC 0111 amendment §3) ───────────────────────────
+
+    fn events_key(&self, at: DateTime<Utc>) -> PartitionKey {
+        PartitionKey {
+            time_bucket: self.time_bucket.label(at),
+            dimension_value: EVENTS_DV.to_string(),
+        }
+    }
+
+    fn evidence_key(&self, at: DateTime<Utc>) -> PartitionKey {
+        PartitionKey {
+            time_bucket: self.time_bucket.label(at),
+            dimension_value: EVIDENCE_DV.to_string(),
+        }
+    }
+
+    /// Append an event to the `"events"` partition for its `occurred_at` bucket; index its id.
+    pub fn append_event(&self, ev: &KirEvent) -> Result<(), PartitionError> {
+        let key = self.events_key(ev.occurred_at);
+        let ledger = self.partition(&key, true)?;
+        ledger
+            .append_event(ev)
+            .map_err(|source| PartitionError::Ledger {
+                key: key.clone(),
+                source,
+            })?;
+        if insert_site(&self.evt_sites, ev.id, &key) {
+            self.record(IndexKind::Evt, ev.id, std::slice::from_ref(&key))?;
+        }
+        Ok(())
+    }
+
+    /// Append evidence to the `"evidence"` partition for its `created_at` bucket; index its id.
+    pub fn append_evidence(&self, ev: &KirEvidence) -> Result<(), PartitionError> {
+        let key = self.evidence_key(ev.created_at);
+        let ledger = self.partition(&key, true)?;
+        ledger
+            .append_evidence(ev)
+            .map_err(|source| PartitionError::Ledger {
+                key: key.clone(),
+                source,
+            })?;
+        if insert_site(&self.evid_sites, ev.id, &key) {
+            self.record(IndexKind::Evid, ev.id, std::slice::from_ref(&key))?;
+        }
+        Ok(())
+    }
+
+    fn evt_id_sites(&self, id: &KirId) -> Result<BTreeSet<PartitionKey>, PartitionError> {
+        self.resolve_sites(
+            IndexKind::Evt,
+            id,
+            || self.catalog_snapshot(Some(EVENTS_DV)),
+            |ledger, id| Ok(ledger.get_event(id).map_err(ledger_err)?.is_some()),
+        )
+    }
+
+    fn evid_id_sites(&self, id: &KirId) -> Result<BTreeSet<PartitionKey>, PartitionError> {
+        self.resolve_sites(
+            IndexKind::Evid,
+            id,
+            || self.catalog_snapshot(Some(EVIDENCE_DV)),
+            |ledger, id| Ok(ledger.get_evidence(id).map_err(ledger_err)?.is_some()),
+        )
+    }
+
+    pub fn get_event(&self, id: &KirId) -> Result<Option<KirEvent>, PartitionError> {
+        let Some(newest) = self.evt_id_sites(id)?.into_iter().next_back() else {
+            return Ok(None);
+        };
+        self.partition(&newest, false)?
+            .get_event(id)
+            .map_err(|source| PartitionError::Ledger {
+                key: newest,
+                source,
+            })
+    }
+
+    pub fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, PartitionError> {
+        let Some(newest) = self.evid_id_sites(id)?.into_iter().next_back() else {
+            return Ok(None);
+        };
+        self.partition(&newest, false)?
+            .get_evidence(id)
+            .map_err(|source| PartitionError::Ledger {
+                key: newest,
+                source,
+            })
+    }
+
+    // ── point-in-time (RFC 0111 amendment §3) ───────────────────────────────
+
+    /// The entity's state as the ledger knew it at `at`. Fan out to the entity's partitions
+    /// newest→oldest; the first that has a version at or before `at` wins.
+    pub fn object_at(
+        &self,
+        id: &KirId,
+        at: DateTime<Utc>,
+    ) -> Result<Option<KirObject>, PartitionError> {
+        let keys: Vec<PartitionKey> = self.sites(id)?.into_iter().collect();
+        for key in keys.into_iter().rev() {
+            let ledger = self.partition(&key, false)?;
+            if let Some(obj) =
+                ledger
+                    .object_at(id, at)
+                    .map_err(|source| PartitionError::Ledger {
+                        key: key.clone(),
+                        source,
+                    })?
+            {
+                return Ok(Some(obj));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Every object as it existed at or before `at`, one row per id.
+    pub fn all_objects_at(&self, at: DateTime<Utc>) -> Result<Vec<KirObject>, PartitionError> {
+        let mut rows = Vec::new();
+        for (key, ledger) in self.catalog_snapshot_where(is_object_partition)? {
+            let objs = ledger
+                .all_objects_at(at)
+                .map_err(|source| PartitionError::Ledger {
+                    key: key.clone(),
+                    source,
+                })?;
+            rows.push((key, objs));
+        }
+        Ok(Self::dedup_current(rows))
+    }
+
+    /// Relationships touching `id` as the ledger knew them at `at` — pruned to `id`'s relationship
+    /// partitions.
+    pub fn relationships_at(
+        &self,
+        id: &KirId,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<KirRelationship>, PartitionError> {
+        let mut out = Vec::new();
+        for key in self.endpoint_sites(id)? {
+            let ledger = self.partition(&key, false)?;
+            out.extend(ledger.relationships_at(id, at).map_err(|source| {
+                PartitionError::Ledger {
+                    key: key.clone(),
+                    source,
+                }
+            })?);
+        }
+        Ok(dedup_current_rels(out))
+    }
+
+    /// Every relationship as it existed at or before `at`.
+    pub fn all_relationships_at(
+        &self,
+        at: DateTime<Utc>,
+    ) -> Result<Vec<KirRelationship>, PartitionError> {
+        let mut out = Vec::new();
+        for (key, ledger) in self.catalog_snapshot_where(is_relationship_partition)? {
+            out.extend(
+                ledger
+                    .all_relationships_at(at)
+                    .map_err(|source| PartitionError::Ledger { key, source })?,
+            );
+        }
+        Ok(dedup_current_rels(out))
+    }
+
+    // ── search, diff, vacuum, counts (RFC 0111 amendment §3) ────────────────
+
+    /// Full-text object search fanned out across every **hot** object partition's tantivy index,
+    /// results concatenated and deduplicated by id. Per-partition BM25 (RFC 0111 §7's
+    /// query-then-fetch approximation); cold partitions are skipped — a query needing them must
+    /// rehydrate first (touch them with another read).
+    pub fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, PartitionError> {
+        let hot: Vec<PartitionKey> = {
+            let catalog = self.catalog.lock().unwrap();
+            catalog
+                .partitions
+                .iter()
+                .filter(|e| e.tier == Tier::Hot && is_object_partition(&e.key))
+                .map(|e| e.key.clone())
+                .collect()
+        };
+        let mut seen: std::collections::HashSet<KirId> = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for key in hot {
+            let ledger = self.partition(&key, false)?;
+            for (id, name) in
+                ledger
+                    .find_objects(query)
+                    .map_err(|source| PartitionError::Ledger {
+                        key: key.clone(),
+                        source,
+                    })?
+            {
+                if seen.insert(id) {
+                    out.push((id, name));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Total ledger entries across every partition.
+    pub fn entry_count(&self) -> Result<usize, PartitionError> {
+        let mut total = 0;
+        for (key, ledger) in self.catalog_snapshot_where(|_| true)? {
+            total += ledger
+                .entry_count()
+                .map_err(|source| PartitionError::Ledger { key, source })?;
+        }
+        Ok(total)
+    }
+
+    /// Merge per-partition [`LedgerDiff`]s over `(from, to]`. `added` entry-ids are per-partition
+    /// local (concatenated); `touched` (logical ids) and `unchanged` merge cleanly.
+    pub fn diff(
+        &self,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<LedgerDiff, PartitionError> {
+        let mut merged = LedgerDiff {
+            added: Vec::new(),
+            touched: Vec::new(),
+            unchanged: 0,
+        };
+        let mut touched: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (key, ledger) in self.catalog_snapshot_where(|_| true)? {
+            let d = ledger
+                .diff(from, to)
+                .map_err(|source| PartitionError::Ledger { key, source })?;
+            merged.added.extend(d.added);
+            touched.extend(d.touched);
+            merged.unchanged += d.unchanged;
+        }
+        merged.touched = touched.into_iter().collect();
+        Ok(merged)
+    }
+
+    /// Write a self-contained branch copy of the whole partitioned ledger to `dest` — a fresh
+    /// `catalog.json` (roots rewritten to `dest`), the `index/`, and every partition's `FactLedger`
+    /// under `dest/p/<key>/`.
+    pub fn vacuum_into(&self, dest: &Path) -> Result<(), PartitionError> {
+        std::fs::create_dir_all(dest.join("p")).map_err(|source| PartitionError::Catalog {
+            path: dest.to_path_buf(),
+            source,
+        })?;
+        copy_dir_shallow(&self.index_dir, &dest.join("index"))?;
+
+        let mut new_catalog = PartitionCatalog {
+            dimension: Some(self.dimension.as_str().to_string()),
+            time_bucket: Some(self.time_bucket.as_str().to_string()),
+            partitions: Vec::new(),
+        };
+        for (key, ledger) in self.catalog_snapshot_where(|_| true)? {
+            let sub = dest.join("p").join(sanitize_key(&key));
+            ledger
+                .vacuum_into(&sub)
+                .map_err(|source| PartitionError::Ledger {
+                    key: key.clone(),
+                    source,
+                })?;
+            let tier = self.partition_tier(&key).unwrap_or(Tier::Hot);
+            new_catalog.partitions.push(PartitionEntry {
+                key,
+                root: sub,
+                tier,
+            });
+        }
+        new_catalog.partitions.sort();
+        let json = serde_json::to_vec_pretty(&new_catalog).map_err(|source| {
+            PartitionError::CatalogParse {
+                path: dest.to_path_buf(),
+                source,
+            }
+        })?;
+        std::fs::write(dest.join("catalog.json"), json).map_err(|source| {
+            PartitionError::Catalog {
+                path: dest.join("catalog.json"),
+                source,
+            }
+        })?;
+        Ok(())
+    }
+
     /// Deduplicate current-state objects fanned in from multiple partitions: an entity that spans
     /// K partitions appears once per partition (a stale version in each older one). Iterating
     /// oldest→newest and letting later inserts win keeps exactly the newest-partition version.
@@ -1224,759 +1443,8 @@ impl PartitionedLedger {
     }
 }
 
+/// `PartitionedLedger` is a drop-in [`KnowledgeStore`] (RFC 0111 amendment §4). `PartitionError`
+/// maps to `LedgerError` via `From` (a wrapped `Ledger` error is unwrapped; anything else becomes
+/// `Corrupt`).
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use ekos_kir::{ObjectKind, RelationshipKind};
-    use tempfile::tempdir;
-
-    fn rel(from: KirId, to: KirId, kind: RelationshipKind) -> KirRelationship {
-        KirRelationship::new(kind, from, to)
-    }
-
-    fn ledger_with_root(dir: &Path) -> PartitionedLedger {
-        ledger_with_bucket(dir, TimeBucket::Monthly)
-    }
-
-    fn ledger_with_bucket(dir: &Path, bucket: TimeBucket) -> PartitionedLedger {
-        let root = dir.to_path_buf();
-        let part_root = root.clone();
-        PartitionedLedger::new(root, PartitionDimension::EntityKind, bucket, move |key| {
-            part_root.join(&key.dimension_value).join(&key.time_bucket)
-        })
-        .unwrap()
-    }
-
-    #[test]
-    fn different_entity_kinds_route_to_different_partitions() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-
-        ledger
-            .append_object(&KirObject::new("orders", ObjectKind::Table))
-            .unwrap();
-        ledger
-            .append_object(&KirObject::new("main.rs", ObjectKind::File))
-            .unwrap();
-
-        let mut keys: Vec<String> = ledger
-            .partition_keys()
-            .into_iter()
-            .map(|k| k.dimension_value)
-            .collect();
-        keys.sort();
-        assert_eq!(keys, vec!["File".to_string(), "Table".to_string()]);
-        let this_month = chrono::Utc::now().format("%Y-%m").to_string();
-        assert!(
-            dir.path()
-                .join("Table")
-                .join(&this_month)
-                .join("segments")
-                .exists()
-        );
-        assert!(
-            dir.path()
-                .join("File")
-                .join(&this_month)
-                .join("segments")
-                .exists()
-        );
-    }
-
-    #[test]
-    fn point_read_routes_to_a_single_partition_no_fan_out() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-        let obj = KirObject::new("orders", ObjectKind::Table);
-        ledger.append_object(&obj).unwrap();
-
-        let fetched = ledger.get_object(&obj.id).unwrap();
-        assert_eq!(fetched.unwrap().name, "orders");
-        // Only the one partition this write actually routed to was ever opened.
-        assert_eq!(ledger.partition_keys().len(), 1);
-    }
-
-    #[test]
-    fn unknown_id_returns_none_without_touching_any_partition() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-        assert!(ledger.get_object(&KirId::new()).unwrap().is_none());
-        assert!(ledger.partition_keys().is_empty());
-    }
-
-    #[test]
-    fn all_objects_fans_out_across_every_partition() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-        ledger
-            .append_object(&KirObject::new("orders", ObjectKind::Table))
-            .unwrap();
-        ledger
-            .append_object(&KirObject::new("main.rs", ObjectKind::File))
-            .unwrap();
-
-        assert_eq!(ledger.object_count().unwrap(), 2);
-        let mut names: Vec<String> = ledger
-            .all_objects()
-            .unwrap()
-            .into_iter()
-            .map(|o| o.name)
-            .collect();
-        names.sort();
-        assert_eq!(names, vec!["main.rs".to_string(), "orders".to_string()]);
-    }
-
-    /// RFC 0111 §1's scoped-query fast path: a broad read scoped to one entity kind touches only
-    /// that kind's partitions, never the others.
-    #[test]
-    fn scoped_broad_read_is_pruned_to_matching_partitions() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-        for i in 0..3 {
-            ledger
-                .append_object(&KirObject::new(format!("t{i}"), ObjectKind::Table))
-                .unwrap();
-        }
-        for i in 0..5 {
-            ledger
-                .append_object(&KirObject::new(format!("f{i}"), ObjectKind::File))
-                .unwrap();
-        }
-
-        assert_eq!(ledger.catalog_partition_keys().len(), 2);
-        assert_eq!(ledger.partition_keys_in_scope("Table").len(), 1);
-        assert!(
-            ledger.partition_keys_in_scope("Table").len() < ledger.catalog_partition_keys().len()
-        );
-
-        let tables = ledger.objects_in_kind("Table").unwrap();
-        assert_eq!(tables.len(), 3);
-        assert!(tables.iter().all(|o| o.kind == ObjectKind::Table));
-
-        assert_eq!(ledger.objects_in_kind("File").unwrap().len(), 5);
-        // A scope that matches no partition reads nothing.
-        assert!(ledger.objects_in_kind("Module").unwrap().is_empty());
-    }
-
-    /// The RFC 0111 §2 correctness property: force one entity's two writes into two different
-    /// time-bucket partitions and confirm `get_object` still resolves to a single (the newest)
-    /// partition while `object_history` fans out to both, in chronological order.
-    #[test]
-    fn entity_spanning_two_time_buckets_gets_single_partition_point_reads_and_full_fan_out_history()
-    {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-
-        let id = KirId::new();
-        let mut v1 = KirObject::new("orders", ObjectKind::Table);
-        v1.id = id;
-        v1.created_at = "2026-07-15T00:00:00Z".parse().unwrap();
-        let mut v2 = KirObject::new("orders_renamed", ObjectKind::Table);
-        v2.id = id;
-        v2.created_at = "2026-08-15T00:00:00Z".parse().unwrap();
-
-        ledger.append_object(&v1).unwrap();
-        ledger.append_object(&v2).unwrap();
-
-        assert_eq!(ledger.catalog_partition_keys().len(), 2);
-
-        let current = ledger.get_object(&id).unwrap().unwrap();
-        assert_eq!(current.name, "orders_renamed");
-
-        let history = ledger.object_history(&id).unwrap();
-        assert_eq!(history.len(), 2);
-        assert_eq!(history[0].name, "orders");
-        assert_eq!(history[1].name, "orders_renamed");
-    }
-
-    /// Time-bucket granularity is configurable (RFC 0111 §1): `Daily` splits partitions by day.
-    #[test]
-    fn daily_time_bucket_splits_partitions_by_day() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_bucket(dir.path(), TimeBucket::Daily);
-
-        let mut a = KirObject::new("a", ObjectKind::Table);
-        a.created_at = "2026-08-27T09:00:00Z".parse().unwrap();
-        let mut b = KirObject::new("b", ObjectKind::Table);
-        b.created_at = "2026-08-27T21:00:00Z".parse().unwrap();
-        let mut c = KirObject::new("c", ObjectKind::Table);
-        c.created_at = "2026-08-28T01:00:00Z".parse().unwrap();
-
-        ledger.append_object(&a).unwrap();
-        ledger.append_object(&b).unwrap();
-        ledger.append_object(&c).unwrap();
-
-        let mut buckets: Vec<String> = ledger
-            .catalog_partition_keys()
-            .into_iter()
-            .map(|k| k.time_bucket)
-            .collect();
-        buckets.sort();
-        buckets.dedup();
-        assert_eq!(
-            buckets,
-            vec!["2026-08-27".to_string(), "2026-08-28".to_string()]
-        );
-        assert_eq!(ledger.object_count().unwrap(), 3);
-    }
-
-    #[test]
-    fn time_bucket_parses_config_strings() {
-        assert_eq!(TimeBucket::parse("daily"), Some(TimeBucket::Daily));
-        assert_eq!(TimeBucket::parse("  Weekly "), Some(TimeBucket::Weekly));
-        assert_eq!(TimeBucket::parse("MONTHLY"), Some(TimeBucket::Monthly));
-        assert_eq!(TimeBucket::parse("hourly"), None);
-        assert_eq!(TimeBucket::default(), TimeBucket::Monthly);
-    }
-
-    /// RFC 0111 §1 / Acceptance Criteria: "N partitions admit N concurrent writers instead of one
-    /// global `SegmentStore`."
-    #[test]
-    fn concurrent_writers_across_two_partitions() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-        const N: usize = 60;
-
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                for i in 0..N {
-                    ledger
-                        .append_object(&KirObject::new(format!("t{i}"), ObjectKind::Table))
-                        .unwrap();
-                }
-            });
-            s.spawn(|| {
-                for i in 0..N {
-                    ledger
-                        .append_object(&KirObject::new(format!("f{i}"), ObjectKind::File))
-                        .unwrap();
-                }
-            });
-        });
-
-        assert_eq!(ledger.object_count().unwrap(), 2 * N);
-        assert_eq!(ledger.objects_in_kind("Table").unwrap().len(), N);
-        assert_eq!(ledger.objects_in_kind("File").unwrap().len(), N);
-        assert_eq!(ledger.catalog_partition_keys().len(), 2);
-
-        let this_month = chrono::Utc::now().format("%Y-%m").to_string();
-        for kind in ["Table", "File"] {
-            assert!(
-                dir.path()
-                    .join(kind)
-                    .join(&this_month)
-                    .join("segments")
-                    .exists()
-            );
-        }
-    }
-
-    /// RFC 0111 §5: the catalog **and** the entity index are persisted, so a brand-new
-    /// `PartitionedLedger` at the same root sees every partition and resolves any entity with no
-    /// partition scan at all.
-    #[test]
-    fn catalog_and_entities_survive_a_reopen() {
-        let dir = tempdir().unwrap();
-        let legacy_id = KirId::new();
-        {
-            let ledger = ledger_with_root(dir.path());
-            ledger
-                .append_object(&KirObject::new("orders", ObjectKind::Table))
-                .unwrap();
-            ledger
-                .append_object(&KirObject::new("main.rs", ObjectKind::File))
-                .unwrap();
-            // one entity with history across two older time-bucket partitions
-            let mut v1 = KirObject::new("legacy", ObjectKind::Table);
-            v1.id = legacy_id;
-            v1.created_at = "2026-05-10T00:00:00Z".parse().unwrap();
-            let mut v2 = KirObject::new("legacy_v2", ObjectKind::Table);
-            v2.id = legacy_id;
-            v2.created_at = "2026-06-10T00:00:00Z".parse().unwrap();
-            ledger.append_object(&v1).unwrap();
-            ledger.append_object(&v2).unwrap();
-        }
-        assert!(dir.path().join("catalog.json").exists());
-        assert!(
-            std::fs::read_dir(dir.path().join("index"))
-                .unwrap()
-                .any(|e| e.unwrap().file_name().to_string_lossy().starts_with("run-")),
-            "index run file written"
-        );
-
-        // fresh handle, same root, zero writes
-        let reopened = ledger_with_root(dir.path());
-        assert!(
-            reopened.partition_keys().is_empty(),
-            "nothing open until a read touches it"
-        );
-        // Table/2026-05, Table/2026-06, Table/<now>, File/<now>
-        assert_eq!(reopened.catalog_partition_keys().len(), 4);
-
-        // Point read: resolved from the persisted entity index — opens ONLY the entity's newest
-        // partition, never scans the other three.
-        assert_eq!(
-            reopened.get_object(&legacy_id).unwrap().unwrap().name,
-            "legacy_v2"
-        );
-        assert_eq!(
-            reopened.partition_keys().len(),
-            1,
-            "no catalog scan — only the entity's newest partition was opened"
-        );
-
-        // Full history: opens exactly the two partitions the entity spans, still no scan.
-        let hist: Vec<String> = reopened
-            .object_history(&legacy_id)
-            .unwrap()
-            .into_iter()
-            .map(|o| o.name)
-            .collect();
-        assert_eq!(hist, vec!["legacy".to_string(), "legacy_v2".to_string()]);
-        assert_eq!(reopened.partition_keys().len(), 2);
-
-        // pruned broad read works off the persisted catalog, deduplicated to current state
-        let mut table_names: Vec<String> = reopened
-            .objects_in_kind("Table")
-            .unwrap()
-            .into_iter()
-            .map(|o| o.name)
-            .collect();
-        table_names.sort();
-        assert_eq!(
-            table_names,
-            vec!["legacy_v2".to_string(), "orders".to_string()]
-        );
-        assert_eq!(reopened.objects_in_kind("File").unwrap().len(), 1);
-        assert!(reopened.objects_in_kind("Module").unwrap().is_empty());
-
-        // an unknown id resolves cleanly (scans, finds nothing, caches)
-        assert!(reopened.get_object(&KirId::new()).unwrap().is_none());
-
-        // the reopened handle's own writes still route + register correctly
-        reopened
-            .append_object(&KirObject::new(
-                "new_svc",
-                ObjectKind::Custom("Service".into()),
-            ))
-            .unwrap();
-        assert_eq!(reopened.catalog_partition_keys().len(), 5);
-    }
-
-    /// The entity index tolerates a lost partition-crossing pair line: after open, the affected
-    /// entity's history is short one partition until `rebuild_entity_index` re-derives it from the
-    /// partitions themselves.
-    #[test]
-    fn rebuild_entity_index_repairs_a_dropped_pair_line() {
-        let dir = tempdir().unwrap();
-        let id = KirId::new();
-        {
-            let ledger = ledger_with_root(dir.path());
-            let mut v1 = KirObject::new("svc", ObjectKind::Table);
-            v1.id = id;
-            v1.created_at = "2026-03-10T00:00:00Z".parse().unwrap();
-            let mut v2 = KirObject::new("svc_v2", ObjectKind::Table);
-            v2.id = id;
-            v2.created_at = "2026-04-10T00:00:00Z".parse().unwrap();
-            ledger.append_object(&v1).unwrap();
-            ledger.append_object(&v2).unwrap();
-        }
-
-        // Simulate a lost crossing line: drop the newer partition's pair from every run file.
-        let idx = dir.path().join("index");
-        for entry in std::fs::read_dir(&idx).unwrap() {
-            let p = entry.unwrap().path();
-            let kept: String = std::fs::read_to_string(&p)
-                .unwrap()
-                .lines()
-                .filter(|l| !l.contains("2026-04"))
-                .map(|l| format!("{l}\n"))
-                .collect();
-            std::fs::write(&p, kept).unwrap();
-        }
-
-        let reopened = ledger_with_root(dir.path());
-        // history is short the newer partition…
-        assert_eq!(reopened.object_history(&id).unwrap().len(), 1);
-
-        // …until a rebuild re-derives the index from the partitions.
-        reopened.rebuild_entity_index().unwrap();
-        let hist: Vec<String> = reopened
-            .object_history(&id)
-            .unwrap()
-            .into_iter()
-            .map(|o| o.name)
-            .collect();
-        assert_eq!(hist, vec!["svc".to_string(), "svc_v2".to_string()]);
-        assert_eq!(reopened.get_object(&id).unwrap().unwrap().name, "svc_v2");
-    }
-
-    /// Entity-index runs are merged once [`COMPACT_AT`] accumulate: many reopen-with-write cycles
-    /// leave a bounded number of run files, and every entity still resolves.
-    #[test]
-    fn entity_index_runs_compact_on_open() {
-        let dir = tempdir().unwrap();
-        let mut ids = Vec::new();
-        // COMPACT_AT + a few write sessions, each creating its own run file
-        for i in 0..(COMPACT_AT + 3) {
-            let ledger = ledger_with_root(dir.path());
-            let obj = KirObject::new(format!("e{i}"), ObjectKind::Table);
-            ids.push(obj.id);
-            ledger.append_object(&obj).unwrap();
-        }
-
-        let run_count = std::fs::read_dir(dir.path().join("index"))
-            .unwrap()
-            .filter(|e| {
-                e.as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("run-")
-            })
-            .count();
-        assert!(
-            run_count <= 5,
-            "runs compacted, got {run_count} (COMPACT_AT = {COMPACT_AT})"
-        );
-
-        let reopened = ledger_with_root(dir.path());
-        for id in &ids {
-            assert!(reopened.get_object(id).unwrap().is_some());
-        }
-    }
-
-    /// `PartitionDimension::SourceScope` routes by the source resolver's answer, independent of
-    /// `ObjectKind`.
-    #[test]
-    fn source_scope_routes_by_resolver_not_kind() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        let part_root = root.clone();
-        let ledger = PartitionedLedger::new(
-            root,
-            PartitionDimension::SourceScope,
-            TimeBucket::Monthly,
-            move |key| part_root.join(&key.dimension_value).join(&key.time_bucket),
-        )
-        .unwrap()
-        .with_source_resolver(|obj| {
-            // pretend name prefix carries the source
-            obj.name.split_once(':').map(|(src, _)| src.to_string())
-        });
-
-        // Same kind (Table), different sources → different partitions.
-        ledger
-            .append_object(&KirObject::new("sql:orders", ObjectKind::Table))
-            .unwrap();
-        ledger
-            .append_object(&KirObject::new("pentaho:orders_stg", ObjectKind::Table))
-            .unwrap();
-        // Different kind, same source as the first → same partition.
-        ledger
-            .append_object(&KirObject::new(
-                "sql:load_orders",
-                ObjectKind::Custom("View".into()),
-            ))
-            .unwrap();
-
-        let mut scopes: Vec<String> = ledger
-            .catalog_partition_keys()
-            .into_iter()
-            .map(|k| k.dimension_value)
-            .collect();
-        scopes.sort();
-        assert_eq!(scopes, vec!["pentaho".to_string(), "sql".to_string()]);
-        assert_eq!(ledger.objects_in_kind("sql").unwrap().len(), 2);
-        assert_eq!(ledger.objects_in_kind("pentaho").unwrap().len(), 1);
-    }
-
-    /// A source-based dimension with no resolver answer is a hard error, never a silent misroute.
-    #[test]
-    fn source_scope_without_a_resolved_source_errors() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        let ledger = PartitionedLedger::new(
-            root.clone(),
-            PartitionDimension::SourceScope,
-            TimeBucket::Monthly,
-            move |key| root.join(&key.dimension_value),
-        )
-        .unwrap(); // no with_source_resolver → default returns None
-
-        let err = ledger
-            .append_object(&KirObject::new("orders", ObjectKind::Table))
-            .unwrap_err();
-        assert!(matches!(err, PartitionError::UnresolvedSource { .. }));
-    }
-
-    /// `Composite` partitions by `source` + `kind` together.
-    #[test]
-    fn composite_partitions_by_source_and_kind() {
-        let dir = tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        let part_root = root.clone();
-        let ledger = PartitionedLedger::new(
-            root,
-            PartitionDimension::Composite,
-            TimeBucket::Monthly,
-            move |key| part_root.join(key.dimension_value.replace('\u{1f}', "__")),
-        )
-        .unwrap()
-        .with_source_resolver(|obj| obj.name.split_once(':').map(|(s, _)| s.to_string()));
-
-        ledger
-            .append_object(&KirObject::new("sql:orders", ObjectKind::Table))
-            .unwrap();
-        ledger
-            .append_object(&KirObject::new(
-                "sql:load",
-                ObjectKind::Custom("View".into()),
-            ))
-            .unwrap();
-        ledger
-            .append_object(&KirObject::new("git:main.rs", ObjectKind::File))
-            .unwrap();
-
-        // sql+Table, sql+View, git+File → three distinct composite partitions.
-        assert_eq!(ledger.catalog_partition_keys().len(), 3);
-        assert_eq!(
-            ledger
-                .objects_in_kind(&format!("sql\u{1f}{}", ObjectKind::Table))
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    /// The routing/tiering config is frozen once partitions exist: reopening with a different
-    /// dimension or time bucket is a `DimensionMismatch` error, not a silent re-route.
-    #[test]
-    fn reopening_with_a_changed_dimension_or_bucket_errors() {
-        let dir = tempdir().unwrap();
-        {
-            let ledger = ledger_with_bucket(dir.path(), TimeBucket::Monthly);
-            ledger
-                .append_object(&KirObject::new("orders", ObjectKind::Table))
-                .unwrap();
-        }
-        // same dimension + bucket → fine
-        assert!(
-            ledger_with_bucket(dir.path(), TimeBucket::Monthly)
-                .get_object(&KirId::new())
-                .is_ok()
-        );
-
-        // changed time bucket → error
-        let root = dir.path().to_path_buf();
-        let res = PartitionedLedger::new(
-            root.clone(),
-            PartitionDimension::EntityKind,
-            TimeBucket::Daily,
-            move |k| root.join(&k.dimension_value),
-        );
-        assert!(matches!(
-            res,
-            Err(PartitionError::DimensionMismatch {
-                field: "time-bucket",
-                ..
-            })
-        ));
-
-        // changed dimension → error
-        let root = dir.path().to_path_buf();
-        let res = PartitionedLedger::new(
-            root.clone(),
-            PartitionDimension::SourceScope,
-            TimeBucket::Monthly,
-            move |k| root.join(&k.dimension_value),
-        );
-        assert!(matches!(
-            res,
-            Err(PartitionError::DimensionMismatch {
-                field: "dimension",
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn dimension_and_bucket_parse_config_strings() {
-        assert_eq!(
-            PartitionDimension::parse("entity-kind"),
-            Some(PartitionDimension::EntityKind)
-        );
-        assert_eq!(
-            PartitionDimension::parse("SOURCE_SCOPE"),
-            Some(PartitionDimension::SourceScope)
-        );
-        assert_eq!(
-            PartitionDimension::parse("composite").unwrap().as_str(),
-            "composite"
-        );
-        assert_eq!(PartitionDimension::parse("nope"), None);
-        assert_eq!(TimeBucket::Weekly.as_str(), "weekly");
-    }
-
-    /// RFC 0111 §3: `mark_cold_before` demotes aged partitions (evicting their handles), the tier
-    /// survives a reopen, reads still return byte-identical data, and any read promotes a cold
-    /// partition back to hot.
-    #[test]
-    fn aged_partitions_go_cold_evict_handles_and_rehydrate() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-
-        let mut legacy = KirObject::new("legacy", ObjectKind::Table);
-        legacy.created_at = "2026-01-15T00:00:00Z".parse().unwrap();
-        ledger.append_object(&legacy).unwrap();
-        ledger
-            .append_object(&KirObject::new("orders", ObjectKind::Table))
-            .unwrap(); // current month
-
-        let old_key = ledger
-            .catalog_partition_keys()
-            .into_iter()
-            .find(|k| k.time_bucket == "2026-01")
-            .unwrap();
-        assert_eq!(ledger.partition_tier(&old_key), Some(Tier::Hot));
-        assert_eq!(ledger.partition_keys().len(), 2);
-
-        // sweep: anything before 2026-06 goes cold
-        let cutoff = "2026-06-01T00:00:00Z".parse().unwrap();
-        assert_eq!(ledger.mark_cold_before(cutoff).unwrap(), 1);
-        assert_eq!(ledger.mark_cold_before(cutoff).unwrap(), 0, "idempotent");
-        assert_eq!(ledger.partition_tier(&old_key), Some(Tier::Cold));
-        assert_eq!(ledger.cold_partition_keys(), vec![old_key.clone()]);
-        assert_eq!(
-            ledger.partition_keys().len(),
-            1,
-            "cold partition's open handle was evicted"
-        );
-
-        // read the cold partition → data intact, tier auto-promoted
-        assert_eq!(
-            ledger.get_object(&legacy.id).unwrap().unwrap().name,
-            "legacy"
-        );
-        assert_eq!(ledger.partition_tier(&old_key), Some(Tier::Hot));
-
-        // re-cold, drop, reopen — persisted tier survives
-        ledger.mark_cold_before(cutoff).unwrap();
-        assert!(dir.path().join("catalog.json").exists());
-        drop(ledger);
-
-        let reopened = ledger_with_root(dir.path());
-        assert_eq!(reopened.partition_tier(&old_key), Some(Tier::Cold));
-        // unscoped read is still complete and byte-identical across hot + cold
-        let mut names: Vec<String> = reopened
-            .objects_in_kind("Table")
-            .unwrap()
-            .into_iter()
-            .map(|o| o.name)
-            .collect();
-        names.sort();
-        assert_eq!(names, vec!["legacy".to_string(), "orders".to_string()]);
-        // …and that read promoted the cold one
-        assert_eq!(reopened.partition_tier(&old_key), Some(Tier::Hot));
-    }
-
-    /// RFC 0111 amendment §1: relationships route by `"rel:"+kind`, disjoint from object
-    /// partitions; §2: `relationships_for` prunes to the endpoint's relationship partitions.
-    #[test]
-    fn relationships_route_by_kind_and_relationships_for_is_pruned() {
-        let dir = tempdir().unwrap();
-        let ledger = ledger_with_root(dir.path());
-
-        let a = KirObject::new("a", ObjectKind::Table);
-        let b = KirObject::new("b", ObjectKind::Table);
-        let c = KirObject::new("c", ObjectKind::File);
-        ledger.append_object(&a).unwrap();
-        ledger.append_object(&b).unwrap();
-        ledger.append_object(&c).unwrap();
-
-        let r_ab = rel(a.id, b.id, RelationshipKind::DependsOn);
-        let r_bc = rel(b.id, c.id, RelationshipKind::Calls);
-        ledger.append_relationship(&r_ab).unwrap();
-        ledger.append_relationship(&r_bc).unwrap();
-
-        // object + relationship partitions are disjoint; rel partitions are "rel:*"
-        let rel_parts: Vec<String> = ledger
-            .catalog_partition_keys()
-            .into_iter()
-            .map(|k| k.dimension_value)
-            .filter(|d| d.starts_with("rel:"))
-            .collect();
-        let mut rel_parts = rel_parts;
-        rel_parts.sort();
-        assert_eq!(rel_parts, vec!["rel:Calls", "rel:DependsOn"]);
-        assert!(ledger.objects_in_kind("rel:DependsOn").unwrap().is_empty());
-
-        assert_eq!(ledger.relationship_count().unwrap(), 2);
-        assert_eq!(
-            ledger
-                .get_relationship(&r_ab.id)
-                .unwrap()
-                .unwrap()
-                .kind
-                .to_string(),
-            "DependsOn"
-        );
-
-        // relationships_for(b): both rels touch b → both, from exactly two partitions
-        assert_eq!(ledger.relationships_for(&b.id).unwrap().len(), 2);
-        // relationships_for(a): only r_ab → touches only the "rel:DependsOn" partition
-        assert_eq!(ledger.relationships_for(&a.id).unwrap().len(), 1);
-        assert_eq!(ledger.endpoint_sites(&a.id).unwrap().len(), 1);
-        assert!(
-            ledger.endpoint_sites(&a.id).unwrap().len() < ledger.catalog_partition_keys().len()
-        );
-
-        // history + reopen: the rel index persists → resolves with zero scans
-        assert_eq!(ledger.relationship_history(&r_bc.id).unwrap().len(), 1);
-        drop(ledger);
-
-        let reopened = ledger_with_root(dir.path());
-        assert!(reopened.partition_keys().is_empty());
-        assert_eq!(reopened.relationships_for(&c.id).unwrap().len(), 1);
-        assert_eq!(
-            reopened.partition_keys().len(),
-            1,
-            "pruned to c's one rel partition, no scan"
-        );
-        assert_eq!(
-            reopened.get_relationship(&r_ab.id).unwrap().unwrap().from,
-            a.id
-        );
-    }
-
-    /// `rebuild_entity_index` re-derives the relationship + endpoint index, not just objects.
-    #[test]
-    fn rebuild_also_repairs_the_relationship_index() {
-        let dir = tempdir().unwrap();
-        let x = KirId::new();
-        let y = KirId::new();
-        let r = rel(x, y, RelationshipKind::DependsOn);
-        {
-            let ledger = ledger_with_root(dir.path());
-            ledger
-                .append_object(&{
-                    let mut o = KirObject::new("x", ObjectKind::Table);
-                    o.id = x;
-                    o
-                })
-                .unwrap();
-            ledger.append_relationship(&r).unwrap();
-        }
-        // wipe the index dir entirely
-        std::fs::remove_dir_all(dir.path().join("index")).unwrap();
-
-        let reopened = ledger_with_root(dir.path());
-        // index gone → relationships_for falls back to a scan, still correct
-        assert_eq!(reopened.relationships_for(&x).unwrap().len(), 1);
-
-        reopened.rebuild_entity_index().unwrap();
-        // now served from the rebuilt index
-        assert_eq!(reopened.get_relationship(&r.id).unwrap().unwrap().to, y);
-        assert_eq!(reopened.relationships_for(&y).unwrap().len(), 1);
-    }
-}
+mod tests;
