@@ -47,8 +47,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::backend::{BackendError, LocalFsBackend, SegmentBackend};
 use crate::fact::{AttributeRegistry, Fact, FactOp, TxId};
+use ekos_segment_backend::{BackendError, LocalFsBackend, SegmentBackend};
 use map::MappedSegment;
 
 /// The backend-relative key for sealed segment `seq`.
@@ -728,9 +728,9 @@ fn hash_file(path: &Path) -> Result<(String, u64), SegmentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::LocalFsBackend;
     use crate::fact::{FactValue, decompose};
     use ekos_kir::{KirObject, ObjectKind};
+    use ekos_segment_backend::LocalFsBackend;
     use std::sync::Mutex;
     use tempfile::tempdir;
     use uuid::Uuid;
@@ -759,6 +759,16 @@ mod tests {
         fn fetch(&self, key: &str) -> Result<PathBuf, BackendError> {
             self.fetched.lock().unwrap().push(key.to_string());
             self.inner.fetch(key)
+        }
+        fn get(&self, key: &str) -> Result<Vec<u8>, BackendError> {
+            self.inner.get(key)
+        }
+        fn get_range(
+            &self,
+            key: &str,
+            range: std::ops::Range<u64>,
+        ) -> Result<Vec<u8>, BackendError> {
+            self.inner.get_range(key, range)
         }
         fn list(&self, p: &str) -> Result<Vec<String>, BackendError> {
             self.inner.list(p)
@@ -805,6 +815,52 @@ mod tests {
         .unwrap();
         assert_eq!(reopened.batches().unwrap().len(), 3);
         assert_eq!(reopened.next_tx(), TxId(3));
+    }
+
+    /// RFC 0113 B2 acceptance: a full `SegmentStore` write / seal / drop / **reopen** / read
+    /// round-trip works with the ledger's data living only in `object_store` (`InMemory` here) —
+    /// sealed segments are `put` there and `fetch`ed back into a cache dir to be mmap'd, and the
+    /// reopened store replays every batch and continues its tx sequence.
+    #[test]
+    fn segment_store_round_trips_on_object_store_backend() {
+        use ekos_segment_backend::ObjectStoreBackend;
+        use ekos_segment_backend::object_store::memory::InMemory;
+
+        let store_root = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let object_store = std::sync::Arc::new(InMemory::new());
+        let mk = || -> Arc<dyn SegmentBackend> {
+            Arc::new(ObjectStoreBackend::new(object_store.clone(), "part-x", cache.path()).unwrap())
+        };
+
+        let mut reg = AttributeRegistry::new();
+        let want: Vec<Vec<(FactOp, Fact)>> = {
+            let mut s = SegmentStore::open_with_backend(store_root.path(), mk(), 1).unwrap();
+            let mut out = Vec::new();
+            for i in 0..4 {
+                let ops = sample_ops(&mut reg, i);
+                s.append(ops.clone(), 100 + i as i64).unwrap();
+                out.push(ops);
+            }
+            out
+        };
+
+        // Nuke the local cache: the reopen must fetch every sealed segment from object storage.
+        std::fs::remove_dir_all(cache.path()).unwrap();
+        std::fs::create_dir_all(cache.path()).unwrap();
+
+        let reopened = SegmentStore::open_with_backend(store_root.path(), mk(), 1).unwrap();
+        reopened.verify_sealed().unwrap();
+        let batches = reopened.batches().unwrap();
+
+        assert_eq!(batches.len(), 4);
+        for (i, (b, ops)) in batches.iter().zip(&want).enumerate() {
+            assert_eq!(b.tx, TxId(i as u64));
+            assert_eq!(b.wall_time_us, 100 + i as i64);
+            assert_eq!(&b.ops, ops);
+        }
+        assert_eq!(reopened.next_tx(), TxId(4));
+        assert!(mk().exists("segments/seg-000000.facts").unwrap());
     }
 
     fn sample_ops(registry: &mut AttributeRegistry, n: usize) -> Vec<(FactOp, Fact)> {

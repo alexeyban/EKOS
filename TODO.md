@@ -2727,8 +2727,12 @@ These items have no single phase — they must be maintained and grown throughou
       search). **B1 landed 2026-08-29** — `SegmentBackend` trait + `LocalFsBackend`
       (`crates/ledger/src/backend.rs`), `SegmentStore` routes sealed publish/fetch through it,
       zero behaviour change (all 139 prior ledger tests green). Accept RFC 0113 before B3 (the
-      first sub-phase with a network service). Next: B2 (`ObjectStoreBackend` on the `object_store`
-      crate, extract to an `ekos-segment-backend` crate).
+      first sub-phase with a network service). **B2 landed 2026-08-29** — `crates/segment-backend`
+      extracted (`SegmentBackend` + `LocalFsBackend` + `MemBackend` + `BackendError`, `get`/`get_range`);
+      `ObjectStoreBackend` behind the `object-store` feature (`object_store` 0.14, dedicated
+      current-thread runtime); `SegmentStore` round-trips on object storage with the cache wiped
+      mid-test; a Local `cargo build` never compiles `object_store` (dev-dep only). Next: B3
+      (coordinator + Service A) — needs RFC 0113 Accepted first.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

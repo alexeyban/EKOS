@@ -1,4 +1,3 @@
-pub mod backend;
 pub mod fact;
 pub mod fact_ledger;
 pub mod index;
@@ -6,7 +5,9 @@ pub mod partitioned;
 pub mod search;
 pub mod segment;
 
-pub use backend::{BackendError, LocalFsBackend, SegmentBackend};
+/// RFC 0113 — the storage-backend seam. Re-exported so `ekos_ledger::SegmentBackend` stays the
+/// import path; the impls live in the `ekos-segment-backend` crate.
+pub use ekos_segment_backend::{BackendError, LocalFsBackend, MemBackend, SegmentBackend};
 pub use fact_ledger::FactLedger;
 pub use partitioned::{
     PartitionCatalog, PartitionDimension, PartitionEntry, PartitionError, PartitionKey,

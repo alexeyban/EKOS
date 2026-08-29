@@ -1,0 +1,24 @@
+[package]
+name = "ekos-segment-backend"
+description = "RFC 0113 — the storage-backend seam for sealed fact-segment objects (local FS / object storage)"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+# Pulls the `object_store` crate + a tokio runtime for `ObjectStoreBackend` (RFC 0111 Distributed
+# mode). Off by default so a Local-mode build never compiles it.
+object-store = ["dep:object_store", "dep:tokio", "dep:futures"]
+# Cloud providers — each implies `object-store`.
+aws = ["object-store", "object_store/aws"]
+azure = ["object-store", "object_store/azure"]
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+object_store = { version = "0.14", default-features = false, optional = true }
+tokio = { workspace = true, optional = true }
+futures = { version = "0.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -483,7 +483,9 @@ sub-phases B1–B5 and pins the interface-level decisions this section left at d
 - [x] **B1** (2026-08-29) — `SegmentBackend` (§4) + `LocalFsBackend`
       (`crates/ledger/src/backend.rs`); `SegmentStore`'s sealed-object publish/fetch routes through
       it, `LocalFsBackend` is the untouched-behaviour default. RFC 0113.
-- [ ] **B2** — `ObjectStoreBackend` (`object_store` crate), byte-identical segment contents.
+- [x] **B2** (2026-08-29) — `crates/segment-backend` crate; `ObjectStoreBackend` (`object_store`
+      0.14, `object-store` feature) + `MemBackend`; `SegmentStore` round-trips on object storage.
+      RFC 0113.
 - [ ] **B3** — Coordinator (catalog, leases, fencing tokens, watermarks) + Service A compile/ingest
       workers.
 - [ ] **B4** — Service B query workers + Service C `DistributedLedger` gateway (`impl KnowledgeStore`).

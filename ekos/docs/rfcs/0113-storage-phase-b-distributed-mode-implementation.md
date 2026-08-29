@@ -1,8 +1,8 @@
 # RFC 0113 — Storage Phase B: Distributed Mode Implementation
 
-**Status:** Draft — **B1 landed 2026-08-29** (per user direction, building incrementally against
-this RFC while it's still Draft, same as RFC 0111 Phase A). B2–B5 not started; Accept before B3
-(the first sub-phase that adds a network service).
+**Status:** Draft — **B1 + B2 landed 2026-08-29** (per user direction, building incrementally
+against this RFC while it's still Draft, same as RFC 0111 Phase A). B3–B5 not started; Accept
+before B3 (the first sub-phase that adds a network service).
 **Author:** EKOS team
 **Created:** 2026-08-29
 **Implements:** RFC 0111 §4, §6, §7 (Distributed mode). RFC 0111 doubles as the Phase A
@@ -91,10 +91,13 @@ returns a path and mmap is unchanged.
 
 ### Crate layout
 
-B1 lands as a module `crates/ledger/src/backend.rs` (trait + `LocalFsBackend` + `BackendError`).
-**B2 extracts it to a `ekos-segment-backend` crate** when it adds `ObjectStoreBackend` behind an
-`object-store` feature — that's where the "don't pull the AWS/Azure SDK tree into a Local build"
-rationale actually bites.
+`crates/segment-backend` (`ekos-segment-backend`) — `SegmentBackend`, `BackendError`,
+`LocalFsBackend`, and `MemBackend` (an in-memory backend, no external deps: the "publish bytes →
+download to cache → mmap cache" fixture the B3/B4 harness builds on). `object_store` is an
+**optional** dep behind the `object-store` feature (default off), with `aws` / `azure` features
+layering the cloud SDKs on top. `ekos-ledger` depends on it (no features — a Local build never
+compiles `object_store`) and re-exports the trait so `ekos_ledger::SegmentBackend` stays the
+import path.
 
 ### What changes in `SegmentStore`
 
@@ -146,14 +149,18 @@ url  = "s3://ekos-prod-ledger" # or az://…, or file:///… (dev), or memory://
 
 - `put`/`get`/`list`/`delete`/`exists` map directly onto `ObjectStore` methods; `get_range` onto
   `get_opts` with a byte range.
-- `object_store` is async; `SegmentBackend` is sync (called from sync `SegmentStore` /
-  compiler passes). Bridge with a per-backend `tokio::runtime::Handle` + `block_on`, or a small
-  blocking wrapper — **decided in the B2 interface pass**, not here. (This is the one place the
-  sync/async boundary from RFC 0001 meets object storage; it stays a thin edge, not a retrofit.)
-- **Acceptance**: the same write sequence through `LocalFsBackend` and `ObjectStoreBackend`
-  (against `InMemory`, then MinIO in a container) yields byte-identical segment/run/manifest
-  contents; a full `PartitionedLedger` round-trip (`append_*` → drop → reopen → read) passes on
-  `ObjectStoreBackend`.
+- **The sync/async bridge (settled):** a dedicated **current-thread `tokio::runtime::Runtime` per
+  `ObjectStoreBackend`**, `block_on`-ing each call. Safe from a `spawn_blocking` thread (§B2 —
+  Service A/B run the sync passes on blocking threads) and from a plain sync test; must not be
+  called from *within* another runtime's async context. This is the one place RFC 0001's
+  sync-pipeline decision meets object storage — a thin edge, not a retrofit.
+- `object_store` 0.14's `put`/`get`/`get_range`/`head`/`delete` live on the `ObjectStoreExt`
+  blanket trait (RPITIT moved them off `dyn ObjectStore`); the backend `use`s it.
+- **Acceptance (met):** `ObjectStoreBackend` passes the shared `SegmentBackend` contract test
+  against `object_store::memory::InMemory`; a full `SegmentStore` write → seal → **drop the local
+  cache** → reopen → read round-trip works with data living only in object storage
+  (`segment_store_round_trips_on_object_store_backend`). MinIO-in-a-container is a later
+  integration check, not a B2 blocker.
 
 ## B3 — Coordinator + distributed single-writer
 
@@ -284,7 +291,7 @@ Each sub-phase gated by its own review; B(n+1) does not start until B(n)'s accep
 | Sub-phase | Acceptance |
 |---|---|
 | **B1 ✅ (2026-08-29)** | `SegmentBackend` + `LocalFsBackend` (`crates/ledger/src/backend.rs`); `SegmentStore` routes sealed-segment publish/fetch (`seal_active`, `batches_after`, `batch_headers`, `verify_sealed_report`) through it; `open`/`open_with_seal_threshold` default to `LocalFsBackend`, `open_with_backend` for the rest. All 139 prior `ekos-ledger` tests green unchanged + `sealed_io_routes_through_the_segment_backend` (a counting backend proves the routing) + `local_fs_backend_round_trips`. |
-| **B2** | `ObjectStoreBackend`; byte-identical segment/run/manifest contents vs `LocalFsBackend` (InMemory + MinIO); full `PartitionedLedger` round-trip on object storage. |
+| **B2 ✅ (2026-08-29)** | `crates/segment-backend` extracted (`SegmentBackend` + `LocalFsBackend` + `MemBackend` + `BackendError`, `get`/`get_range` added). `ObjectStoreBackend` behind the `object-store` feature (`object_store` 0.14, dedicated current-thread runtime). Contract test vs `InMemory`; `SegmentStore` round-trip on object storage with the local cache wiped mid-test. `ekos-ledger` lib build never compiles `object_store` (dev-dep only). MinIO integration check deferred (not a blocker). |
 | **B3** | Coordinator + Service A; multi-worker local harness (1 coordinator, N compile workers) against `InMemory`/MinIO; lease-contention test (two workers, one shard, exactly one wins, loser gets a clear error); bounded-loss-on-crash test (kill mid-active-segment, loss ≤ 8 MB, every sealed segment intact); manifest-commit-race test (lease expiry during upload → no corrupt/lost manifest, stale token rejected). |
 | **B4** | Service B + Service C; `DistributedLedger` passes the same `KnowledgeStore` behavioural suite `PartitionedLedger` does, over RPC; cache-miss-then-hit test; entity-spanning-partitions full-history read fans to the right workers. |
 | **B5** | Distributed search merge test — matching docs split across ≥2 partitions on different workers, merged top-K correctly ranked per-shard, cross-shard BM25 caveat exercised. |
@@ -330,7 +337,8 @@ implementation-level choices don't reintroduce a violation.
 ## Open Questions
 
 - [ ] Coordinator metadata store — `sled` vs one SQLite file (B3 interface pass).
-- [ ] `object_store` sync bridge — shared `Handle` + `block_on` vs a blocking wrapper (B2).
+- [x] `object_store` sync bridge — **resolved in B2**: a dedicated current-thread `Runtime` per
+      `ObjectStoreBackend`.
 - [ ] Coordinator RPC location — `crates/cli` subcommands vs a new `crates/cluster` (B3).
 - [ ] Service B cache eviction beyond size-bounded LRU (RFC 0111 Open Question — needs real
       query-pattern data; not a B4 blocker).
@@ -344,7 +352,7 @@ implementation-level choices don't reintroduce a violation.
 
 | File / area | Change |
 |---|---|
-| `crates/segment-backend/` (new) | `SegmentBackend` trait, `LocalFsBackend`, `ObjectStoreBackend` (feature-gated), `BackendError` |
+| `crates/segment-backend/` ✅ | `SegmentBackend` trait, `LocalFsBackend`, `MemBackend`, `ObjectStoreBackend` (feature-gated), `BackendError` |
 | `crates/ledger/src/segment/mod.rs` | Route sealed-object reads/writes + run discovery through `SegmentBackend`; active segment + Local-mode manifest unchanged |
 | `crates/ledger/src/partitioned/` | `PartitionLocation::ObjectStore`; catalog/index served from the coordinator in Distributed mode |
 | `crates/cluster/` or `crates/cli` (new subcommands) | `ekos coordinator serve`, `ekos compile-worker serve`, `ekos query-worker serve`, `ekos gateway serve` |

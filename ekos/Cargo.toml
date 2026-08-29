@@ -9,6 +9,7 @@ members = [
     "crates/scheduler",
     "crates/observation-sdk",
     "crates/sql-dialect-sdk",
+    "crates/segment-backend",
     "crates/ledger",
     "crates/runtime",
     "crates/simulation",
@@ -59,6 +60,7 @@ ekos-common    = { path = "crates/common" }
 ekos-kir       = { path = "crates/kir" }
 ekos-artifact  = { path = "crates/artifact" }
 ekos-compiler-core = { path = "crates/compiler-core" }
+ekos-segment-backend = { path = "crates/segment-backend" }
 ekos-ledger    = { path = "crates/ledger" }
 ekos-runtime   = { path = "crates/runtime" }
 ekos-simulation = { path = "crates/simulation" }

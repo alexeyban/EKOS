@@ -574,6 +574,7 @@ dependencies = [
  "ekos-artifact",
  "ekos-common",
  "ekos-kir",
+ "ekos-segment-backend",
  "fs4",
  "hex",
  "memmap2",
@@ -725,6 +726,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ekos-segment-backend"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

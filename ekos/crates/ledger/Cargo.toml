@@ -6,11 +6,15 @@ edition.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# Tests exercise a full SegmentStore round-trip on ObjectStoreBackend (RFC 0113 B2); the lib build
+# never enables this feature, so a production `cargo build` doesn't compile `object_store`.
+ekos-segment-backend = { workspace = true, features = ["object-store"] }
 
 [dependencies]
 ekos-common.workspace = true
 ekos-kir.workspace = true
 ekos-artifact.workspace = true
+ekos-segment-backend.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
