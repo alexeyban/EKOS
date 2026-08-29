@@ -476,14 +476,17 @@ Two phases, gated by the same review, sequenced within this one RFC rather than 
       two threads append to two entity-kind partitions in parallel (each partition an
       `Arc<FactLedger>`, own lock), all writes land correctly routed.*
 
-**Phase B — Distributed mode** (matches RFC 0110's scope; depends on Phase A shipping first, within
-this same RFC — no cross-RFC dependency):
+**Phase B — Distributed mode** (matches RFC 0110's scope; depends on Phase A shipping first). Its
+dated implementation RFC is **RFC 0113** (Draft, 2026-08-29), which sequences §4/§6/§7 into
+sub-phases B1–B5 and pins the interface-level decisions this section left at design altitude:
 
-- [ ] `SegmentBackend` (§4) implemented for both `LocalFsBackend` (wraps Phase A's code unmodified)
-      and `ObjectStoreBackend`, with byte-identical segment contents in both.
-- [ ] Coordinator, Service A, Service B, Service C (§6) implemented and pass the fixtures in
-      Testing, below.
-- [ ] Distributed search (§7) merge behavior tested, including the cross-shard BM25 caveat.
+- [ ] **B1** — `SegmentBackend` (§4) + `LocalFsBackend`, a no-behaviour-change refactor of
+      `SegmentStore`'s sealed-object I/O (RFC 0113).
+- [ ] **B2** — `ObjectStoreBackend` (`object_store` crate), byte-identical segment contents.
+- [ ] **B3** — Coordinator (catalog, leases, fencing tokens, watermarks) + Service A compile/ingest
+      workers.
+- [ ] **B4** — Service B query workers + Service C `DistributedLedger` gateway (`impl KnowledgeStore`).
+- [ ] **B5** — Distributed search (§7) fan-out + per-partition BM25 merge, cross-shard caveat.
 
 **Both phases:**
 
@@ -493,8 +496,10 @@ this same RFC — no cross-RFC dependency):
       unresolved question).
 - [x] Design is consistent with `ekos.md`'s compiler architecture and CLAUDE.md's key invariants —
       confirmed by the Architecture Review above.
-- [ ] A dated implementation RFC per phase is written before any code (matching RFC 0080's
-      precedent), per the Mandatory Development Workflow.
+- [~] A dated implementation RFC per phase is written before any code (matching RFC 0080's
+      precedent), per the Mandatory Development Workflow. — *Phase A: this RFC doubles as it
+      (Implementation note above). Phase B: **RFC 0113** (Draft) — Accept it before any B-phase
+      code.*
 
 ## Amendment (2026-08-29): Phase A — relationships, events, evidence, and the full `KnowledgeStore` surface
 

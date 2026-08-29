@@ -2721,8 +2721,10 @@ These items have no single phase — they must be maintained and grown throughou
       three services around it — a distributed MPP compile/ingest cluster, a distributed MPP query
       cluster of stateless workers running the existing EAVT/AEVT/AVET fold against cached
       partitions, a single logical load-balanced query gateway — plus distributed search with an
-      explicit cross-shard BM25 caveat). Implementation still blocked on Phase A shipping first, but
-      that is now a within-RFC 0111 phase dependency, not a cross-RFC one.
+      explicit cross-shard BM25 caveat). **Phase B's dated implementation RFC is RFC 0113** (Draft,
+      2026-08-29) — sequences §4/§6/§7 into B1 (`SegmentBackend` seam) → B2 (`ObjectStoreBackend`) →
+      B3 (coordinator + Service A) → B4 (Service B/C + `DistributedLedger`) → B5 (distributed
+      search). Accept RFC 0113 before any B-phase code.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s
@@ -2751,10 +2753,12 @@ These items have no single phase — they must be maintained and grown throughou
       (`entity-kind` only for now — source-scope/composite need a `KirObject` source field);
       existing SQLite/fact workspaces untouched. **Phase A (Local mode) is functionally complete
       for `entity-kind`.** Remaining: source-scope/composite wiring, per-scope bucket overrides,
-      the §3 search-index-drop half of cold tiering; then the `SegmentBackend` seam (Phase B). The
+      the §3 search-index-drop half of cold tiering. Phase B (distribution) now has its own
+      implementation RFC (0113) — start at B1 (`SegmentBackend` seam) once it's Accepted. The
       module is now a `partitioned/` submodule (`mod.rs` routing/index core + `types.rs` +
       `knowledge_store.rs` + `tests.rs`); `mod.rs` is still ~1.4k lines — the `impl PartitionedLedger`
-      read/write methods could move to a `reads.rs` if it grows further. See RFC 0111 amendment §4.
+      read/write methods could move to a `reads.rs` if it grows further. See RFC 0111 amendment §4
+      + RFC 0113.
   - *Why it matters now, not just eventually:* `devlog_65` found real, physical evidence this is
     already biting — `analytics/`'s local ledger has a corrupted FTS5 virtual table (base DB
     passes `PRAGMA integrity_check`, the FTS index doesn't), now traced to a specific, real,
