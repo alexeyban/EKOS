@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod fact;
 pub mod fact_ledger;
 pub mod index;
@@ -5,6 +6,7 @@ pub mod partitioned;
 pub mod search;
 pub mod segment;
 
+pub use backend::{BackendError, LocalFsBackend, SegmentBackend};
 pub use fact_ledger::FactLedger;
 pub use partitioned::{
     PartitionCatalog, PartitionDimension, PartitionEntry, PartitionError, PartitionKey,

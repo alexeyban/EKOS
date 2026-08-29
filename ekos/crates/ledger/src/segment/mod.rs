@@ -44,10 +44,17 @@ use sha2::{Digest, Sha256};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use thiserror::Error;
 
+use crate::backend::{BackendError, LocalFsBackend, SegmentBackend};
 use crate::fact::{AttributeRegistry, Fact, FactOp, TxId};
 use map::MappedSegment;
+
+/// The backend-relative key for sealed segment `seq`.
+fn seg_key(seq: u32) -> String {
+    format!("segments/seg-{seq:06}.facts")
+}
 
 /// Active segment seals at this size (RFC 0016 §3).
 pub const SEGMENT_SEAL_BYTES: u64 = 8 * 1024 * 1024;
@@ -64,6 +71,8 @@ pub enum SegmentError {
     Json(#[from] serde_json::Error),
     #[error("corrupt segment store: {0}")]
     Corrupt(String),
+    #[error(transparent)]
+    Backend(#[from] BackendError),
 }
 
 /// One committed transaction: the ordered assert/retract facts it wrote.
@@ -124,6 +133,11 @@ struct Head {
 /// SQLite ledger today); readers open independently and see committed data.
 pub struct SegmentStore {
     root: PathBuf,
+    /// Where sealed segment objects are published and fetched (RFC 0113 B1). Defaults to
+    /// [`LocalFsBackend`] — today's exact behaviour; a remote backend slots in for RFC 0111's
+    /// Distributed mode. The active segment, `HEAD`, `manifest.json`, and `dict.bin` stay local
+    /// regardless.
+    backend: Arc<dyn SegmentBackend>,
     pub manifest: Manifest,
     head: Head,
     active: File,
@@ -162,6 +176,18 @@ impl SegmentStore {
     /// sealing without writing megabytes.
     pub fn open_with_seal_threshold(
         root: impl Into<PathBuf>,
+        seal_bytes: u64,
+    ) -> Result<Self, SegmentError> {
+        let root = root.into();
+        let backend: Arc<dyn SegmentBackend> = Arc::new(LocalFsBackend::new(&root));
+        Self::open_with_backend(root, backend, seal_bytes)
+    }
+
+    /// `open_with_seal_threshold` with an explicit sealed-segment backend (RFC 0113 B1). Every
+    /// other constructor defaults it to [`LocalFsBackend`] — today's exact behaviour.
+    pub fn open_with_backend(
+        root: impl Into<PathBuf>,
+        backend: Arc<dyn SegmentBackend>,
         seal_bytes: u64,
     ) -> Result<Self, SegmentError> {
         let root = root.into();
@@ -223,6 +249,7 @@ impl SegmentStore {
 
         Ok(Self {
             root,
+            backend,
             manifest,
             head,
             active,
@@ -305,23 +332,28 @@ impl SegmentStore {
             )));
         }
 
-        let map = MappedSegment::open(&path, len)?;
-        let (_, headers) = scan_headers_slice(map.bytes());
-        let (tx_min, tx_max) = match (headers.first(), headers.last()) {
-            (Some(first), Some(last)) => (first.0, last.0),
-            _ => {
-                return Err(SegmentError::Corrupt(format!(
-                    "sealed segment {seq} has no batches"
-                )));
+        let (tx_min, tx_max, batch_count) = {
+            let map = MappedSegment::open(&path, len)?;
+            let (_, headers) = scan_headers_slice(map.bytes());
+            match (headers.first(), headers.last()) {
+                (Some(first), Some(last)) => (first.0, last.0, headers.len() as u64),
+                _ => {
+                    return Err(SegmentError::Corrupt(format!(
+                        "sealed segment {seq} has no batches"
+                    )));
+                }
             }
         };
+        // The local active file is now frozen and validated — publish it as an immutable object
+        // (RFC 0113 B1). LocalFsBackend: an fsync; a remote backend: a PUT.
+        self.backend.publish_sealed(&seg_key(seq), &path)?;
         self.manifest.sealed.push(SealedSegment {
             seq,
             len,
             sha256,
             tx_min,
             tx_max,
-            batches: headers.len() as u64,
+            batches: batch_count,
         });
         save_manifest(&self.root, &self.manifest)?;
 
@@ -356,7 +388,7 @@ impl SegmentStore {
             if !keep(sealed.tx_max) {
                 continue;
             }
-            let map = MappedSegment::open(&segment_path(&self.root, sealed.seq), sealed.len)?;
+            let map = MappedSegment::open(&self.backend.fetch(&seg_key(sealed.seq))?, sealed.len)?;
             let (valid, batches) = scan_batches_filtered(map.bytes(), &keep, self.dict.as_ref());
             if valid != sealed.len {
                 return Err(SegmentError::Corrupt(format!(
@@ -376,7 +408,7 @@ impl SegmentStore {
     pub fn batch_headers(&self) -> Result<Vec<(TxId, i64)>, SegmentError> {
         let mut out = Vec::new();
         for sealed in &self.manifest.sealed {
-            let map = MappedSegment::open(&segment_path(&self.root, sealed.seq), sealed.len)?;
+            let map = MappedSegment::open(&self.backend.fetch(&seg_key(sealed.seq))?, sealed.len)?;
             let (valid, headers) = scan_headers_slice(map.bytes());
             if valid != sealed.len {
                 return Err(SegmentError::Corrupt(format!(
@@ -427,7 +459,18 @@ impl SegmentStore {
             .sealed
             .iter()
             .map(|sealed| {
-                let path = segment_path(&self.root, sealed.seq);
+                let path = match self.backend.fetch(&seg_key(sealed.seq)) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return SealedSegmentCheck {
+                            seq: sealed.seq,
+                            tx_min: sealed.tx_min,
+                            tx_max: sealed.tx_max,
+                            ok: false,
+                            detail: format!("sealed segment {} unreachable: {e}", sealed.seq),
+                        };
+                    }
+                };
                 match hash_file(&path) {
                     Ok((sha256, len)) if len == sealed.len && sha256 == sealed.sha256 => {
                         SealedSegmentCheck {
@@ -685,10 +728,84 @@ fn hash_file(path: &Path) -> Result<(String, u64), SegmentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::LocalFsBackend;
     use crate::fact::{FactValue, decompose};
     use ekos_kir::{KirObject, ObjectKind};
+    use std::sync::Mutex;
     use tempfile::tempdir;
     use uuid::Uuid;
+
+    /// Wraps `LocalFsBackend`, counting the sealed-object calls `SegmentStore` makes through the
+    /// seam — the RFC 0113 B1 acceptance check that sealed I/O really goes through `SegmentBackend`.
+    struct CountingBackend {
+        inner: LocalFsBackend,
+        published: Mutex<Vec<String>>,
+        fetched: Mutex<Vec<String>>,
+    }
+    impl CountingBackend {
+        fn new(root: &Path) -> Self {
+            Self {
+                inner: LocalFsBackend::new(root),
+                published: Mutex::new(Vec::new()),
+                fetched: Mutex::new(Vec::new()),
+            }
+        }
+    }
+    impl SegmentBackend for CountingBackend {
+        fn publish_sealed(&self, key: &str, staged: &Path) -> Result<(), BackendError> {
+            self.published.lock().unwrap().push(key.to_string());
+            self.inner.publish_sealed(key, staged)
+        }
+        fn fetch(&self, key: &str) -> Result<PathBuf, BackendError> {
+            self.fetched.lock().unwrap().push(key.to_string());
+            self.inner.fetch(key)
+        }
+        fn list(&self, p: &str) -> Result<Vec<String>, BackendError> {
+            self.inner.list(p)
+        }
+        fn exists(&self, k: &str) -> Result<bool, BackendError> {
+            self.inner.exists(k)
+        }
+        fn delete(&self, k: &str) -> Result<(), BackendError> {
+            self.inner.delete(k)
+        }
+    }
+
+    #[test]
+    fn sealed_io_routes_through_the_segment_backend() {
+        let dir = tempdir().unwrap();
+        let backend = Arc::new(CountingBackend::new(dir.path()));
+        let mut reg = AttributeRegistry::new();
+
+        let mut store = SegmentStore::open_with_backend(dir.path(), backend.clone(), 1).unwrap(); // seal every batch
+        for i in 0..3 {
+            store.append(sample_ops(&mut reg, i), i as i64).unwrap();
+        }
+        // three batches, seal threshold 1 → three sealed segments, each published once
+        assert_eq!(
+            *backend.published.lock().unwrap(),
+            vec![seg_key(0), seg_key(1), seg_key(2)]
+        );
+
+        // a replay reads every sealed segment through `fetch`
+        backend.fetched.lock().unwrap().clear();
+        let batches = store.batches().unwrap();
+        assert_eq!(batches.len(), 3);
+        let fetched = backend.fetched.lock().unwrap().clone();
+        assert!(fetched.contains(&seg_key(0)) && fetched.contains(&seg_key(2)));
+
+        // verify + reopen still work through the seam
+        store.verify_sealed().unwrap();
+        drop(store);
+        let reopened = SegmentStore::open_with_backend(
+            dir.path(),
+            Arc::new(CountingBackend::new(dir.path())),
+            1,
+        )
+        .unwrap();
+        assert_eq!(reopened.batches().unwrap().len(), 3);
+        assert_eq!(reopened.next_tx(), TxId(3));
+    }
 
     fn sample_ops(registry: &mut AttributeRegistry, n: usize) -> Vec<(FactOp, Fact)> {
         let obj = KirObject::new(format!("table_{n}"), ObjectKind::Table)

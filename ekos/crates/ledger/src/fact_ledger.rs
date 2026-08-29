@@ -43,6 +43,7 @@ impl From<SegmentError> for LedgerError {
             SegmentError::Io(io) => LedgerError::Io(io),
             SegmentError::Json(j) => LedgerError::Json(j),
             SegmentError::Corrupt(msg) => LedgerError::Corrupt(msg),
+            SegmentError::Backend(b) => LedgerError::Corrupt(b.to_string()),
         }
     }
 }

@@ -2724,7 +2724,11 @@ These items have no single phase — they must be maintained and grown throughou
       explicit cross-shard BM25 caveat). **Phase B's dated implementation RFC is RFC 0113** (Draft,
       2026-08-29) — sequences §4/§6/§7 into B1 (`SegmentBackend` seam) → B2 (`ObjectStoreBackend`) →
       B3 (coordinator + Service A) → B4 (Service B/C + `DistributedLedger`) → B5 (distributed
-      search). Accept RFC 0113 before any B-phase code.
+      search). **B1 landed 2026-08-29** — `SegmentBackend` trait + `LocalFsBackend`
+      (`crates/ledger/src/backend.rs`), `SegmentStore` routes sealed publish/fetch through it,
+      zero behaviour change (all 139 prior ledger tests green). Accept RFC 0113 before B3 (the
+      first sub-phase with a network service). Next: B2 (`ObjectStoreBackend` on the `object_store`
+      crate, extract to an `ekos-segment-backend` crate).
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

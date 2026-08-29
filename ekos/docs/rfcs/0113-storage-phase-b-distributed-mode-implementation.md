@@ -1,6 +1,8 @@
 # RFC 0113 — Storage Phase B: Distributed Mode Implementation
 
-**Status:** Draft
+**Status:** Draft — **B1 landed 2026-08-29** (per user direction, building incrementally against
+this RFC while it's still Draft, same as RFC 0111 Phase A). B2–B5 not started; Accept before B3
+(the first sub-phase that adds a network service).
 **Author:** EKOS team
 **Created:** 2026-08-29
 **Implements:** RFC 0111 §4, §6, §7 (Distributed mode). RFC 0111 doubles as the Phase A
@@ -53,44 +55,68 @@ Raft-replicated metadata a named v2.
 
 ## B1 — The `SegmentBackend` seam
 
-### Interface
+### Interface (settled in the B1 interface pass)
+
+Sealed, immutable objects only — one publish, many reads, never read-modify-write. Same DI pattern
+as `Observer`/`LlmProvider`/`CompilerPass`.
 
 ```rust
-/// Sealed, immutable objects only — one PUT, many GETs, never read-modify-write.
-/// Selected by config, same DI pattern as Observer/LlmProvider/CompilerPass.
 pub trait SegmentBackend: Send + Sync {
-    fn put(&self, key: &str, bytes: &[u8]) -> Result<(), BackendError>;
-    fn get(&self, key: &str) -> Result<Vec<u8>, BackendError>;
-    fn get_range(&self, key: &str, range: Range<u64>) -> Result<Vec<u8>, BackendError>;
+    /// Make a just-sealed object durable in the backend. Its bytes currently live at `staged`
+    /// (the writer's local file, already fsynced). `LocalFsBackend`: the file *is* the durable
+    /// copy — fsync it and its dir. `ObjectStoreBackend`: PUT it; the staging copy may then be
+    /// dropped.
+    fn publish_sealed(&self, key: &str, staged: &Path) -> Result<(), BackendError>;
+
+    /// A readable **local path** for a sealed object — fetched into a bounded local cache first if
+    /// the backend is remote. `LocalFsBackend` returns the file in place. Callers `mmap` the
+    /// result (`MappedSegment`), so a path (not `Vec<u8>`) keeps B1 a true zero-behaviour-change
+    /// refactor.
+    fn fetch(&self, key: &str) -> Result<PathBuf, BackendError>;
+
+    /// Sealed objects present under `prefix` (e.g. `"segments/"`). Used by Service B (B4) to pull a
+    /// whole partition; `SegmentStore` itself discovers segments from the manifest, not this.
     fn list(&self, prefix: &str) -> Result<Vec<String>, BackendError>;
-    fn delete(&self, key: &str) -> Result<(), BackendError>; // compaction/vacuum only
     fn exists(&self, key: &str) -> Result<bool, BackendError>;
+    /// Compaction / vacuum only.
+    fn delete(&self, key: &str) -> Result<(), BackendError>;
 }
 ```
 
-`key` is the object-storage-relative path, mirroring today's local layout 1:1:
-`<partition-id>/segments/seg-<seq>.bin`, `<partition-id>/indexes/<order>/run-*.bin`,
-`<partition-id>/search/*`. `get_range` exists so a query worker can pull only the frames it needs
-from a sealed segment without downloading the whole object (matters once partitions are large).
+`key` is backend-relative, mirroring today's local layout 1:1 within a partition:
+`segments/seg-<seq>.facts`, `indexes/<order>/run-*.bin`, `search/*`. **B2 adds `get(key) ->
+Vec<u8>` and `get_range(key, Range<u64>) -> Vec<u8>`** for the remote query path (Service B pulling
+individual frames without a full download); B1 doesn't need them because `LocalFsBackend::fetch`
+returns a path and mmap is unchanged.
+
+### Crate layout
+
+B1 lands as a module `crates/ledger/src/backend.rs` (trait + `LocalFsBackend` + `BackendError`).
+**B2 extracts it to a `ekos-segment-backend` crate** when it adds `ObjectStoreBackend` behind an
+`object-store` feature — that's where the "don't pull the AWS/Azure SDK tree into a Local build"
+rationale actually bites.
 
 ### What changes in `SegmentStore`
 
-`SegmentStore` today calls `std::fs` directly in ~12 places (`create_dir_all`, `File::open`,
-`read_to_string`, `write` + `fsync` + `rename` for the manifest, `read_dir` for run discovery).
-Only the **sealed-object** reads/writes route through `SegmentBackend`:
+Exactly four call sites — the ones that touch a **sealed** segment by path:
 
-- **Sealed segment writes** — `put` instead of `write`. The seal step is the only place a segment
-  becomes a `put` target; before that it's a local buffer (unchanged).
-- **Sealed segment / run-file reads** — `get` / `get_range`.
-- **Run-file discovery** — `list(prefix)` instead of `read_dir`.
-- **The active (unsealed) segment stays local** on the writing process — object stores have no
-  append. It's `put` as one immutable object at `SEGMENT_SEAL_BYTES` (8 MB, unchanged).
-- **The manifest** stays a local write-temp→fsync→rename in Local mode; in Distributed mode the
-  coordinator arbitrates it (B3). `SegmentBackend` does **not** carry manifest-commit atomicity —
-  that's a coordinator concern, kept out of the trait so `LocalFsBackend` needs nothing extra.
-- **tantivy `search/`** — tantivy owns its own directory I/O. For B1/B2 the search dir is either
-  local (Local mode, unchanged) or, in Distributed mode, downloaded to a local cache dir by
-  Service B before opening (B4). tantivy is never asked to read directly from `SegmentBackend`.
+- `seal_active()` — after the local active file is frozen and hashed, call
+  `backend.publish_sealed("segments/seg-<seq>.facts", &local_path)`. Hashing + the tx-range mmap
+  still read the local staged file directly (it is local at seal time in every mode).
+- `batches_after()`, `batch_headers()`, `verify_sealed_report()` — replace
+  `segment_path(&self.root, seq)` with `backend.fetch(&seg_key(seq))?` before `MappedSegment::open`
+  / `hash_file`.
+
+Everything else is **unchanged and stays local**: the active (unsealed) segment (object stores
+have no append — it uploads only when it seals), `HEAD`, `manifest.json` (write-temp→fsync→rename
+in Local mode; coordinator-arbitrated in Distributed, B3 — `SegmentBackend` carries no
+manifest-commit atomicity), `dict.bin`, and tantivy's own `search/` I/O (Service B downloads that
+directory into a cache before opening it, B4 — tantivy is never handed a `SegmentBackend`).
+
+`SegmentStore` gains a `backend: Arc<dyn SegmentBackend>` field and an `open_with_backend`
+constructor; `open` / `open_with_seal_threshold` default it to `LocalFsBackend::new(root)`, so
+`FactLedger` and every existing caller are untouched. `SegmentStore` never calls `list` (it uses
+the manifest); that method exists for B4.
 
 ### `LocalFsBackend` — the equivalence proof
 
@@ -257,7 +283,7 @@ Each sub-phase gated by its own review; B(n+1) does not start until B(n)'s accep
 
 | Sub-phase | Acceptance |
 |---|---|
-| **B1** | `SegmentBackend` + `LocalFsBackend`; every `ekos-ledger` test green unchanged; byte-identical-tree test vs pre-seam `SegmentStore`. |
+| **B1 ✅ (2026-08-29)** | `SegmentBackend` + `LocalFsBackend` (`crates/ledger/src/backend.rs`); `SegmentStore` routes sealed-segment publish/fetch (`seal_active`, `batches_after`, `batch_headers`, `verify_sealed_report`) through it; `open`/`open_with_seal_threshold` default to `LocalFsBackend`, `open_with_backend` for the rest. All 139 prior `ekos-ledger` tests green unchanged + `sealed_io_routes_through_the_segment_backend` (a counting backend proves the routing) + `local_fs_backend_round_trips`. |
 | **B2** | `ObjectStoreBackend`; byte-identical segment/run/manifest contents vs `LocalFsBackend` (InMemory + MinIO); full `PartitionedLedger` round-trip on object storage. |
 | **B3** | Coordinator + Service A; multi-worker local harness (1 coordinator, N compile workers) against `InMemory`/MinIO; lease-contention test (two workers, one shard, exactly one wins, loser gets a clear error); bounded-loss-on-crash test (kill mid-active-segment, loss ≤ 8 MB, every sealed segment intact); manifest-commit-race test (lease expiry during upload → no corrupt/lost manifest, stale token rejected). |
 | **B4** | Service B + Service C; `DistributedLedger` passes the same `KnowledgeStore` behavioural suite `PartitionedLedger` does, over RPC; cache-miss-then-hit test; entity-spanning-partitions full-history read fans to the right workers. |
