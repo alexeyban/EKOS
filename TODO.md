@@ -2723,16 +2723,27 @@ These items have no single phase — they must be maintained and grown throughou
       partitions, a single logical load-balanced query gateway — plus distributed search with an
       explicit cross-shard BM25 caveat). Implementation still blocked on Phase A shipping first, but
       that is now a within-RFC 0111 phase dependency, not a cross-RFC one.
-    - *Phase A progress (2026-08-28):* being built incrementally against RFC 0111
+    - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
-      `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with `EntityKind` routing,
-      configurable `TimeBucket` (Daily/Weekly/Monthly), `entity_id → Set<PartitionKey>` fan-out
-      (§2), pruned scoped reads (`objects_in_kind`, §1), and genuine concurrent multi-partition
-      writers (`Arc<FactLedger>` per partition); `compiler-core` `[storage.partition]` config
-      parsing. Next: on-disk `PartitionCatalog` (partition discovery across process restarts) +
-      `entity_partitions` persistence; then `SourceScope` routing (needs a source field on
-      `KirObject`); then hot/cold tiering + `SegmentBackend` seam; then make `PartitionedLedger`
-      a real `KnowledgeStore` so `open_store` can serve it. See RFC 0111 Phase A checklist.
+      `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s
+      routing (`SourceScope`/`Composite` via a `with_source_resolver` closure — `KirObject` has no
+      source field yet; `UnresolvedSource` on a missing source, never a misroute), configurable
+      `TimeBucket` (Daily/Weekly/Monthly), catalog-recorded dimension/bucket with a
+      `DimensionMismatch` guard on reopen, `entity_id → Set<PartitionKey>` fan-out (§2), pruned
+      scoped reads (`objects_in_kind`, §1), genuine concurrent multi-partition writers
+      (`Arc<FactLedger>` per partition), a **persisted `PartitionCatalog`** (`catalog.json`, atomic
+      temp+rename, §5), and a **persisted AEVT-style entity index** (`entity-index/run-*.jsonl` —
+      append-only pair lines, `merge_runs`-style compaction at `COMPACT_AT`, self-healing scan only
+      for ids absent from the index, `rebuild_entity_index()` repair path) so a reopened ledger
+      resolves any object/relationship with zero partition scans; **relationships** (RFC 0111
+      amendment 2026-08-29 — routed by `"rel:"+kind`; unified `index/run-*.jsonl` `{k,id,p}` lines
+      for obj/rel/endpoint; `relationships_for` pruned via the endpoint index, not fanned out);
+      **cold tiering** (`Tier::Cold`, `mark_cold_before(cutoff)` demotes past-bucket partitions +
+      evicts handles, any read rehydrates — RFC §3 policy layer); `compiler-core`
+      `[storage.partition]` config parsing. Next: events, evidence, `*_at`, `find_objects`, `diff`,
+      `vacuum_into`, `entry_count`; then `impl KnowledgeStore for PartitionedLedger` + `open_store`
+      wiring (also unlocks config→ledger wiring, per-scope bucket overrides, search-index-drop half
+      of cold tiering); then the `SegmentBackend` seam (Phase B). See RFC 0111 amendment §4.
   - *Why it matters now, not just eventually:* `devlog_65` found real, physical evidence this is
     already biting — `analytics/`'s local ledger has a corrupted FTS5 virtual table (base DB
     passes `PRAGMA integrity_check`, the FTS index doesn't), now traced to a specific, real,

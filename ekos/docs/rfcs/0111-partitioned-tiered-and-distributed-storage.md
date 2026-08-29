@@ -3,14 +3,25 @@
 **Status:** Under Review — merges and supersedes RFC 0034 and RFC 0110 (below). 5 Open Questions
 remain (1 partially). Not yet Accepted.
 
-**Implementation note (2026-08-28):** per explicit user direction, Phase A (Local mode) is being
-built **incrementally against this RFC directly** — this document doubles as the Phase A
+**Implementation note (updated 2026-08-29):** per explicit user direction, Phase A (Local mode) is
+being built **incrementally against this RFC directly** — this document doubles as the Phase A
 implementation RFC rather than spawning a separate one (a separate implementation RFC is still
 expected for Phase B / Distributed mode). Progress is tracked in the Phase A checklist under
 Acceptance Criteria (`[x]` done / `[~]` partial / `[ ]` not started), each item pointing at the
-real code. Landed so far: `crates/ledger/src/partitioned.rs` (`PartitionedLedger` — `EntityKind`
-routing, configurable `TimeBucket`, `entity_id → Set<PartitionKey>`, pruned scoped reads,
-concurrent multi-partition writers) and `compiler-core`'s `[storage.partition]` config parsing.
+real code. Landed so far: `crates/ledger/src/partitioned.rs` (`PartitionedLedger` — all three
+`PartitionDimension`s routing (`SourceScope`/`Composite` via a `with_source_resolver` closure,
+since `KirObject` has no source field yet), configurable `TimeBucket`, catalog-recorded
+dimension/bucket with a `DimensionMismatch` guard on reopen, `entity_id → Set<PartitionKey>`
+fan-out, pruned scoped reads, concurrent multi-partition writers, a **persisted `PartitionCatalog`**
+(`catalog.json`, §5), a **persisted AEVT-style run-file index** (`index/run-*.jsonl`, unified
+`{k, id, p}` lines for objects + relationships + relationship endpoints, `merge_runs`-style
+compaction + a `rebuild_entity_index` repair path) so a reopened ledger resolves any
+object/relationship/`relationships_for` with **zero partition scans**, **relationships**
+(`append_relationship`/`get_relationship`/`all_relationships`/`relationship_history`/
+`relationship_count`/`relationships_for` — routed by `"rel:"+kind`, amendment 2026-08-29), and
+**cold tiering** (`Tier::Cold` in the catalog via `mark_cold_before` — handle eviction +
+read-triggered rehydration, RFC §3 policy layer)) and `compiler-core`'s `[storage.partition]`
+config parsing.
 **Author:** EKOS team
 **Created:** 2026-08-27
 **Supersedes:** RFC 0034 (2026-08-07, "Partitioned, Tiered Fact-Segment Storage") and RFC 0110
@@ -419,27 +430,44 @@ Two phases, gated by the same review, sequenced within this one RFC rather than 
 
 **Phase A — Local mode** (matches RFC 0034's original scope):
 
-- [~] `PartitionedLedger` (§5) routes point reads to a single partition and broad reads to a pruned
-      partition set. — *point reads: done (`get_object` → one partition). Pruned broad reads: done
-      for the dimension-value axis (`objects_in_kind` touches only matching-`dimension_value`
-      partitions); time-range pruning and an on-disk `PartitionCatalog` (so a fresh process
-      discovers partitions it hasn't written to this run) are the next increment.
+- [x] `PartitionedLedger` (§5) routes point reads to a single partition and broad reads to a pruned
+      partition set. — *point reads: `get_object` → the entity's newest partition only. Pruned broad
+      reads: `objects_in_kind` touches only matching-`dimension_value` partitions, resolved from the
+      **persisted `PartitionCatalog`** (`<catalog_root>/catalog.json`), so a fresh process sees
+      every partition without a prior write (`catalog_and_entities_survive_a_reopen`). Broad reads
+      dedup cross-partition entities to current state. Time-range pruning *within* the matched
+      dimension set is a later refinement, not a gap in the criterion as written.
       `crates/ledger/src/partitioned.rs`.*
 - [x] `entity_id → Set<PartitionId>` (§2) implemented; full-history reads for an entity spanning ≥2
       time-bucket partitions return complete, correctly ordered history via fan-out, while
-      `get_object` still resolves to a single partition. — *`entity_partitions` map + tested
-      (`entity_spanning_two_time_buckets_…`). In-memory only so far (rebuilt from writes, not
-      rescanned from disk) — folded into the catalog-persistence increment above.*
+      `get_object` still resolves to a single partition. — *tested by
+      `entity_spanning_two_time_buckets_…` and, across a reopen with an assertion that **no scan
+      happens** (only the entity's own partitions are opened), by
+      `catalog_and_entities_survive_a_reopen`. The map is now backed by a **persisted AEVT-style
+      run-file index** (`entity-index/run-*.jsonl`, RFC Architecture Review): append-only pair
+      lines, `merge_runs`-style compaction at `COMPACT_AT` runs (`entity_index_runs_compact_on_open`),
+      a self-healing catalog scan only for an entity absent from the index, and
+      `rebuild_entity_index()` as the `ekos ledger repair`-style full re-derive
+      (`rebuild_entity_index_repairs_a_dropped_pair_line`).*
 - [~] `PartitionDimension` (`SourceScope` | `EntityKind` | `Composite`) implemented and configurable
-      via `ekos.toml`'s `[storage.partition]`, including time-bucket overrides. — *`EntityKind`
-      routable; `SourceScope`/`Composite` declared but return `UnsupportedDimension` (no
-      source/connector field on `KirObject` to route `SourceScope` by yet). Time bucket is
-      configurable (`TimeBucket::{Daily,Weekly,Monthly}`, lexical==chronological labels).
-      `[storage.partition]` (`dimension` / `time-bucket` / `time-bucket-overrides`) parses in
-      `compiler-core`; per-scope glob override resolution and the config→`PartitionedLedger`
-      wiring are still to do.*
-- [ ] Cold-tier round-trip passes with byte-identical read results. — *not started; every partition
-      is a plain local-disk `FactLedger`, no `SegmentBackend` seam or tier field yet.*
+      via `ekos.toml`'s `[storage.partition]`, including time-bucket overrides. — *All three
+      dimensions **route**: `EntityKind` off `ObjectKind`; `SourceScope`/`Composite` off a
+      caller-supplied `with_source_resolver` closure (a `None` under a source dimension is a hard
+      `UnresolvedSource` error, never a misroute — `KirObject` has no source field yet, so the
+      closure is the seam). `Composite` value is `"<source>\u{1f}<kind>"`. Tests:
+      `source_scope_routes_by_resolver_not_kind`, `composite_partitions_by_source_and_kind`,
+      `source_scope_without_a_resolved_source_errors`. `TimeBucket::{Daily,Weekly,Monthly}` +
+      `PartitionDimension` both `parse`/`as_str`; the catalog records both and a reopen with a
+      changed value is a `DimensionMismatch` error (`reopening_with_a_changed_dimension_or_bucket_errors`).
+      Still to do: per-scope glob time-bucket overrides, and the config→`PartitionedLedger`
+      wiring (needs `PartitionedLedger` to be a `KnowledgeStore` first).*
+- [~] Cold-tier round-trip passes with byte-identical read results. — *`aged_partitions_go_cold_evict_handles_and_rehydrate`:
+      `mark_cold_before(cutoff)` demotes past-bucket partitions to `Tier::Cold` (catalog-persisted,
+      survives reopen), evicts their open handles, and any read promotes one back to hot returning
+      byte-identical data. Still `[~]` because "cold" here is a **policy flag + handle eviction +
+      relocate-eligible marker**, not yet the §3 search-index drop + zstd recompression — those
+      need `FactLedger` support and land with the `KnowledgeStore`/`SegmentBackend` work. The
+      `SegmentBackend` seam (§4, object storage) is Phase B.*
 - [x] Concurrent-writer test passes across ≥2 partitions. — *`concurrent_writers_across_two_partitions`:
       two threads append to two entity-kind partitions in parallel (each partition an
       `Arc<FactLedger>`, own lock), all writes land correctly routed.*
@@ -463,6 +491,79 @@ this same RFC — no cross-RFC dependency):
       confirmed by the Architecture Review above.
 - [ ] A dated implementation RFC per phase is written before any code (matching RFC 0080's
       precedent), per the Mandatory Development Workflow.
+
+## Amendment (2026-08-29): Phase A — relationships, events, evidence, and the full `KnowledgeStore` surface
+
+The Phase A slice so far (`crates/ledger/src/partitioned.rs`) covers **objects only**. To become a
+drop-in `KnowledgeStore` (so `open_store` can serve it and every `Runtime`/MCP/`docs-gen` caller
+works unchanged), it needs relationships, events, evidence, point-in-time reads, search, `diff`,
+and `vacuum_into`. Object routing (§1) doesn't answer how a *relationship* — which links two
+entities that may live in different partitions — routes to **one** partition (§Non-goals: no fact
+ever needs an atomic two-partition write). This amendment settles that, per the same
+build-incrementally-against-this-RFC direction.
+
+### 1. Relationship routing — by `RelationshipKind`, independent of the object dimension
+
+A relationship routes to `PartitionKey { time_bucket: <bucket of created_at>, dimension_value:
+"rel:" + <RelationshipKind> }`. Rationale:
+
+- Relationships have no clean "source" and their `from`/`to` may sit in different partitions —
+  neither endpoint is a natural home, and co-locating with one endpoint makes the *other*
+  direction's lookup a full fan-out.
+- `RelationshipKind` **is** the query axis in practice — impact/neighborhood analysis routinely
+  scopes by kind (`DependsOn`, `Calls`, `Extends`).
+- The `"rel:"` prefix keeps relationship partitions disjoint from object partitions in the one
+  shared catalog, so `objects_in_kind("Table")` never touches a relationship partition and vice
+  versa. Under a `SourceScope`/`Composite` *object* dimension, relationships still route by
+  `"rel:"+kind` — a deliberate, documented asymmetry, not a bug.
+- Each relationship partition is self-contained: it holds the relationship facts **and** the
+  `KirEvidence` they cite.
+
+### 2. The unified run-file index (`<catalog_root>/index/run-*.jsonl`)
+
+The `entity-index/` of §5's amendment generalizes to one `index/` subsystem. Each line is
+`{ "k": <kind>, "id": <uuid>, "p": <partition-key> }` with `k` one of:
+
+| `k` | meaning | serves |
+|---|---|---|
+| `obj` (default) | object entity id → an object partition it has a version in | `get_object`, `object_history`, entity fan-out (unchanged) |
+| `rel` | relationship id → the relationship partition it lives in | `get_relationship`, `relationship_history` |
+| `endpoint` | an endpoint entity id (`from` **or** `to`) → a relationship partition it participates in | **`relationships_for(X)`** — pruned to X's relationship partitions, never a full fan-out |
+
+One `append_relationship` appends three lines (`rel` for the id, `endpoint` for `from`, `endpoint`
+for `to`). Load, `merge_runs`-style compaction, torn-tail tolerance, and `rebuild_entity_index`
+(now also re-deriving `rel`/`endpoint` from the relationship partitions) all work exactly as for
+`obj`. Back-compatible: `k` defaults to `obj`, so pre-amendment run files still load.
+
+### 3. Everything else
+
+- **Events** (`KirEvent`) route by the event's own `created_at` bucket + `"evt:"+<kind-or-fixed>`;
+  a dedicated `evt`-tagged index entry keyed by the event's subject id serves subject lookups.
+- **Evidence** (`KirEvidence`) is content-addressed and co-located with the fact that cites it
+  (§1); a bare `append_evidence` with no citing fact yet routes to `"evidence:"+bucket`.
+- **`object_at` / `all_objects_at` / `relationships_at` / `all_relationships_at`** — fan out to the
+  relevant partition set (an entity's sites, or all partitions for the `all_*` forms), delegate to
+  each `FactLedger`'s own `*_at`, merge keeping the newest-partition row per id.
+- **`find_objects(query)`** — fan out to each **hot** object partition's tantivy index, merge
+  per-partition top-K by local BM25 (§7's "query-then-fetch" approximation, Local-mode flavour;
+  cold partitions are skipped, documented — a query needing them rehydrates first).
+- **`diff(from, to)`** — per-partition `diff`, merged into one `LedgerDiff`.
+- **`vacuum_into(dest)`** — recursively copy the whole `catalog_root` tree (catalog + index + every
+  partition dir).
+- **`entry_count`** — sum across partitions.
+
+### 4. Acceptance (folds into the Phase A checklist above)
+
+- [x] `append_relationship`/`get_relationship`/`all_relationships`/`relationship_count`/
+  `relationship_history` route by `"rel:"+kind`; `relationships_for(X)` prunes via the `endpoint`
+  index. — *done. The `entity-index/` generalised to one unified `index/run-*.jsonl`
+  (`{k, id, p}`, `k` ∈ obj/rel/endpoint); `rebuild_entity_index` re-derives all three; tests
+  `relationships_route_by_kind_and_relationships_for_is_pruned`,
+  `rebuild_also_repairs_the_relationship_index`.*
+- [ ] Events, evidence, `object_at`/`all_objects_at`/`relationships_at`/`all_relationships_at`,
+  `find_objects`, `diff`, `vacuum_into`, `entry_count` per §3.
+- [ ] `impl KnowledgeStore for PartitionedLedger`; `open_store` builds it when
+  `[storage.partition]` is enabled; the existing store tests pass against it unchanged.
 
 ## Testing
 

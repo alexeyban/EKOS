@@ -7,7 +7,8 @@ pub mod segment;
 
 pub use fact_ledger::FactLedger;
 pub use partitioned::{
-    PartitionDimension, PartitionError, PartitionKey, PartitionedLedger, TimeBucket,
+    PartitionCatalog, PartitionDimension, PartitionEntry, PartitionError, PartitionKey,
+    PartitionedLedger, Tier, TimeBucket,
 };
 
 use chrono::{DateTime, Utc};
