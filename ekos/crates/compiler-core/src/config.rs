@@ -333,6 +333,32 @@ pub struct StorageConfig {
     /// (`dimension` unset), which is today's single-`FactLedger` behavior, unaffected.
     #[serde(default)]
     pub partition: StoragePartitionConfig,
+    /// RFC 0113 B4 — point this workspace's reads at a Distributed-mode cluster
+    /// (`[storage.distributed]`). `coordinator` unset (the default) keeps every read local.
+    #[serde(default)]
+    pub distributed: StorageDistributedConfig,
+}
+
+/// RFC 0113 B4b's `[storage.distributed]` block. Strings only — `compiler-core` does not depend on
+/// `ekos-distributed`; the `cli` layer builds the `DistributedLedger` from these.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct StorageDistributedConfig {
+    /// `host:port` of the cluster coordinator. `None` = not distributed (default) — reads stay
+    /// local against the SQLite / fact-engine / partitioned store.
+    #[serde(default)]
+    pub coordinator: Option<String>,
+    /// `host:port` of each query worker (Service B). At least one required when `coordinator` is
+    /// set.
+    #[serde(default)]
+    pub query_workers: Vec<String>,
+}
+
+impl StorageDistributedConfig {
+    /// Whether `[storage.distributed]` asks reads to go through a cluster gateway.
+    pub fn is_enabled(&self) -> bool {
+        self.coordinator.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

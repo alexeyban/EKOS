@@ -636,13 +636,26 @@ drop-in for the single-ledger backend — every command, the MCP server, and `do
 unchanged. Existing SQLite or fact-engine workspaces are **never** switched implicitly, same rule
 as the fact-engine default.
 
-**Multi-machine distribution (Phase B, RFC 0113)** is being built incrementally. Landed so far: a
-`SegmentBackend` seam with `LocalFsBackend` (default) and an `ObjectStoreBackend` (S3 / Azure /
-in-memory, behind a feature flag); and a **coordinator** (`ekos coordinator serve`) that hands out
-fencing-tokened write leases and tracks per-partition commit watermarks over newline-delimited
-JSON-RPC, with `ekos compile-worker run` as the single-writer worker's smoke path. The full
-distributed read path (`DistributedLedger` gateway, query workers, distributed search) is not yet
-built. None of this affects Local mode, which stays the default.
+**Multi-machine distribution (Phase B, RFC 0113)** is being built incrementally. Landed so far:
+
+- a `SegmentBackend` seam — `LocalFsBackend` (default) or `ObjectStoreBackend` (S3 / Azure /
+  in-memory, behind a feature flag);
+- a **coordinator** (`ekos coordinator serve`) that hands out fencing-tokened write leases and
+  tracks per-partition commit watermarks over newline-delimited JSON-RPC, with
+  `ekos compile-worker run` as the single-writer worker's smoke path;
+- **query workers** (`ekos query-worker serve`) that pull a partition into a local cache and serve
+  reads for it, and a **`DistributedLedger` gateway** that implements the same `KnowledgeStore`
+  trait every command already uses — fanning reads across the workers and merging — so pointing a
+  workspace at a cluster is just `[storage.distributed]` in `ekos.toml`:
+
+  ```toml
+  [storage.distributed]
+  coordinator   = "coordinator.internal:7333"
+  query-workers = ["qw1.internal:7334", "qw2.internal:7334"]
+  ```
+
+Still to come: distributed search ranking (B5) and a batch of gateway v1 follow-ons (connection
+pooling, parallel fan-out). None of this affects Local mode, which stays the default.
 
 ## Development Process
 

@@ -492,7 +492,15 @@ sub-phases B1–B5 and pins the interface-level decisions this section left at d
       `CompileWorker`/`LeaseGuard` (Service A transport+lifecycle). `ekos coordinator serve`/`status`
       + `ekos compile-worker run`. Multi-service harness: lease contention, expired-lease fencing +
       watermark resume, restart durability. Lease→real `build`/`commit` binding is B4. RFC 0113.
-- [ ] **B4** — Service B query workers + Service C `DistributedLedger` gateway (`impl KnowledgeStore`).
+- [x] **B4** (2026-08-30) — `crates/distributed` (`ekos-distributed`): `QueryWorker` (Service B) —
+      materialises a partition on demand (object storage → bounded local cache, or a co-located
+      local dir), opens it read-only, serves every `KnowledgeStore` read for it over NDJSON/TCP;
+      `ekos query-worker serve`. `DistributedLedger` (Service C) — `impl KnowledgeStore`, fans
+      every read across the workers named by the coordinator catalog and merges; `append_*`
+      rejected; `open_store` `[storage.distributed]` branch. Both proven against a real
+      `PartitionedLedger` (query-worker reads == direct reads; gateway == in-process
+      `PartitionedLedger` over 2 workers). v1 follow-ons (connection pool, parallel fan-out,
+      coordinator-index pruning, Local→Distributed registration): RFC 0113. RFC 0113.
 - [ ] **B5** — Distributed search (§7) fan-out + per-partition BM25 merge, cross-shard caveat.
 
 **Both phases:**

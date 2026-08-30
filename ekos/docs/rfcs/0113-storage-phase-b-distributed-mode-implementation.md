@@ -1,8 +1,9 @@
 # RFC 0113 — Storage Phase B: Distributed Mode Implementation
 
-**Status:** Draft — **B1 + B2 + B3 landed 2026-08-29; B4a (Service B query worker) landed
-2026-08-30** (per user direction, building incrementally against this RFC while it's still Draft,
-same as RFC 0111 Phase A). B4b (the `DistributedLedger` gateway) + B5 not started.
+**Status:** Draft — **B1 + B2 + B3 landed 2026-08-29; B4 (B4a Service B query worker + B4b
+`DistributedLedger` gateway) landed 2026-08-30** (per user direction, building incrementally
+against this RFC while it's still Draft, same as RFC 0111 Phase A). B5 (distributed search) not
+started.
 **Author:** EKOS team
 **Created:** 2026-08-29
 **Implements:** RFC 0111 §4, §6, §7 (Distributed mode). RFC 0111 doubles as the Phase A
@@ -330,7 +331,7 @@ Each sub-phase gated by its own review; B(n+1) does not start until B(n)'s accep
 | **B2 ✅ (2026-08-29)** | `crates/segment-backend` extracted (`SegmentBackend` + `LocalFsBackend` + `MemBackend` + `BackendError`, `get`/`get_range` added). `ObjectStoreBackend` behind the `object-store` feature (`object_store` 0.14, dedicated current-thread runtime). Contract test vs `InMemory`; `SegmentStore` round-trip on object storage with the local cache wiped mid-test. `ekos-ledger` lib build never compiles `object_store` (dev-dep only). MinIO integration check deferred (not a blocker). |
 | **B3 ✅ (2026-08-29)** | `crates/cluster` (`ekos-cluster`): `Coordinator` (catalog + leases + fencing tokens + watermarks + entity index, JSON persistence), `serve` (NDJSON-over-TCP), `CoordinatorClient`, `CompileWorker`/`LeaseGuard` (Service A transport+lifecycle), `LeaseTable`. `crates/cli`: `ekos coordinator serve`/`status`, `ekos compile-worker run`. Harness (`crates/cluster/tests/harness.rs`, 4 tests): disjoint-shard concurrent commit; **lease contention** (two workers, one shard, exactly one wins, loser gets an "already leased" error); **expired-lease fencing** (worker stops heartbeating → TTL lapses → next worker takes over with a higher token, resumes from the committed watermark, the stale worker's late `manifest_commit` is rejected, no partial/lost write); coordinator-restart durability (catalog + watermarks survive, leases don't). Plus 3 `LeaseTable` unit tests. Binding a lease to a real shard-scoped `build → commit` run is **B4**. |
 | **B4a ✅ (2026-08-30)** | New crate `ekos-distributed`. `QueryWorker` (Service B): on the first request for a partition it asks the coordinator where the partition lives, materialises it into a bounded local cache (`PartitionCache` — object storage → local files via `ObjectStoreBackend`, or a co-located local dir used in place), opens it as a read-only `FactLedger`, and serves every `KnowledgeStore` read for it (`get_*`, `all_*`, `*_history`, `relationships_for`, `object_at`/`*_at`, `find_objects`, `diff`, counts) over newline-delimited JSON-RPC (`WorkerRequest`/`WorkerResponse`, `spawn_blocking` around every ledger call). `QueryWorkerClient`. `ekos query-worker serve`. `ObjectStoreBackend::from_url` (`s3://`/`az://`/`gs://`/`file://`). Object-storage partitions need a build `--features distributed`; a co-located Local cluster works without it. Test: coordinator + worker over a real `PartitionedLedger` workspace, every read over RPC == a direct read; object-storage partition materialisation via a `file://` backend. |
-| **B4b** | Service C — the `DistributedLedger` gateway (`impl KnowledgeStore`, fan-out + merge across `QueryWorker`s named by the coordinator, writes rejected). `open_store` `[storage.distributed]` branch. Passes the same `KnowledgeStore` behavioural suite `PartitionedLedger` does, over RPC; cache-miss-then-hit; entity-spanning-partitions full-history read fans to the right workers. |
+| **B4b ✅ (2026-08-30)** | `DistributedLedger` (`ekos-distributed`): `impl KnowledgeStore` — every read fans across the query workers named by the coordinator catalog and merges (newest-partition-wins for current-state, concat-oldest-first for history, `PartitionedLedger`'s own merge rules for `diff`); classifies partitions by id prefix (`rel:` / `events/` / `evidence/` / object); `append_*` + `vacuum_into` return `LedgerError::ReadOnly` ("goes through Service A"). Sync↔async bridge: `block_in_place` on the ambient runtime, or a transient current-thread runtime — **never owns a `Runtime`** (a stored one panics when dropped under `#[tokio::main]`, which is how `open_store` is reached). `crates/cli/src/commands/store.rs`: `[storage.distributed]` branch in `open_store`/`open_store_read_only`/`store_display`, ahead of every local backend. `compiler-core`: `StorageDistributedConfig` (strings only). Test: `DistributedLedger` over a 2-worker cluster answers `get_object`/`all_objects`/`object_history`/`relationships_for`/`object_at`/counts identically to the in-process `PartitionedLedger`, newest version wins, cross-partition objects resolve, writes rejected. **v1 limits (follow-ons):** no persistent connection pool (fresh connect per call); sequential fan-out (not parallel); no coordinator-index pruning (fans to every partition of the class); no `ekos` command yet to register an existing Local partitioned workspace's partitions with a coordinator. |
 | **B5** | Distributed search merge test — matching docs split across ≥2 partitions on different workers, merged top-K correctly ranked per-shard, cross-shard BM25 caveat exercised. |
 
 **Whole phase:** no `KnowledgeStore` caller changed; Local mode entirely unaffected (default,
@@ -383,6 +384,13 @@ implementation-level choices don't reintroduce a violation.
       pattern), not gRPC/tonic. Revisit for B4 Service-B segment transfers only if needed.
 - [ ] Service B cache eviction beyond size-bounded LRU (RFC 0111 Open Question — needs real
       query-pattern data; not a B4 blocker).
+- [ ] Gateway v1 → v1.1 (all B4b follow-ons, none blocking): a health-checked persistent
+      connection pool (v1 connects fresh per call); parallel fan-out (v1 is sequential);
+      coordinator-`id → partitions`-index pruning (v1 fans to every partition of the class); an
+      `ekos` command to register an existing Local partitioned workspace's partitions with a
+      coordinator (v1 has none — Service A populates the catalog as it writes).
+- [ ] `DistributedLedger` search (`find_objects`) is a plain per-partition concat today; B5 adds
+      the real per-partition BM25 top-K merge.
 - [ ] Shrinking the ≤8 MB unsealed-segment loss window (RFC 0111 Open Question — periodic partial
       upload vs a lease-handoff-survived local WAL; not a B3 blocker, v1 accepts 8 MB).
 - [ ] Mutual TLS + cert rotation — **deferred past B3**: v1 assumes a trusted cluster network;
@@ -399,7 +407,10 @@ implementation-level choices don't reintroduce a violation.
 | `crates/ledger/src/partitioned/` | `PartitionLocation::ObjectStore`; catalog/index served from the coordinator in Distributed mode |
 | `crates/cluster/` ✅ | `ekos-cluster`: `Coordinator` + `serve` (NDJSON/TCP) + `CoordinatorClient` + `CompileWorker`/`LeaseGuard` + `LeaseTable` + protocol types; harness test |
 | `crates/cli/src/commands/cluster.rs` ✅ | `ekos coordinator serve`/`status`, `ekos compile-worker run` (thin wrappers over `ekos-cluster`) |
-| `crates/cli` `query-worker`/`gateway` | B4 |
-| `crates/runtime` / `crates/cli/src/commands/store.rs` | `DistributedLedger: KnowledgeStore`; `open_store` `[storage.distributed]` branch |
-| `crates/compiler-core/src/config.rs` | `[storage.backend]`, `[storage.distributed]`, `[storage.query-cache]` |
+| `crates/distributed/` ✅ (B4) | `ekos-distributed`: `QueryWorker` + `serve` (Service B, NDJSON/TCP) + `QueryWorkerClient` + `PartitionCache` (object storage → local cache) + `DistributedLedger` (`impl KnowledgeStore`, Service C); `tests/query_worker.rs`, `tests/gateway.rs` |
+| `crates/cli/src/commands/cluster.rs` ✅ (B4a) | `ekos query-worker serve` |
+| `crates/segment-backend/src/object_store_backend.rs` ✅ (B4a) | `ObjectStoreBackend::from_url` + `object_store/fs` |
+| `crates/cli/src/commands/store.rs` ✅ (B4b) | `[storage.distributed]` branch in `open_store`/`open_store_read_only`/`store_display` |
+| `crates/compiler-core/src/config.rs` ✅ (B4b) | `StorageDistributedConfig` (`[storage.distributed]`) — strings only |
+| `crates/cli/Cargo.toml` ✅ (B4a) | `distributed` feature = `ekos-distributed/object-store` (off by default; a stock build never compiles `object_store`) |
 | `ekos/docs/rfcs/0111-…md` | Phase B checklist ticked as B1–B5 land |

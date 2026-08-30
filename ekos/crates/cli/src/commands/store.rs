@@ -17,6 +17,26 @@ use ekos_ledger::{
 };
 use std::path::{Path, PathBuf};
 
+/// True when `[storage.distributed]` points reads at a Distributed-mode cluster (RFC 0113 B4).
+/// Takes precedence over every local backend — the workspace holds no data of its own.
+pub fn uses_distributed(config: &EkosConfig) -> bool {
+    config.storage.distributed.is_enabled()
+}
+
+/// Build the [`DistributedLedger`] gateway from `[storage.distributed]`.
+fn build_distributed(config: &EkosConfig) -> Result<ekos_distributed::DistributedLedger> {
+    let d = &config.storage.distributed;
+    let coordinator = d
+        .coordinator
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("[storage.distributed] coordinator is not set"))?;
+    if d.query_workers.is_empty() {
+        anyhow::bail!("[storage.distributed] needs at least one query-workers entry");
+    }
+    ekos_distributed::DistributedLedger::open(coordinator, d.query_workers.clone())
+        .map_err(|e| anyhow::anyhow!("cannot reach the distributed cluster: {e}"))
+}
+
 /// Where a fact-engine-backed workspace's store lives (migrated or newly created).
 pub fn facts_dir(config: &EkosConfig, cwd: &Path) -> PathBuf {
     config.ledger_dir(cwd).join("facts")
@@ -98,6 +118,9 @@ fn build_partitioned(
 
 /// Open the workspace's knowledge store with backend auto-detection.
 pub fn open_store(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    if uses_distributed(config) {
+        return Ok(Box::new(build_distributed(config)?));
+    }
     if uses_partitioned(config, cwd) {
         return Ok(Box::new(build_partitioned(config, cwd, false)?));
     }
@@ -150,6 +173,9 @@ pub fn open_store(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeSt
 /// `open_store` on a truly fresh workspace at the same moment already had
 /// this exact narrow bootstrap race before this RFC.
 pub fn open_store_read_only(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    if uses_distributed(config) {
+        return Ok(Box::new(build_distributed(config)?));
+    }
     if uses_partitioned(config, cwd) {
         // `PartitionedLedger::new` is safe on a fresh dir (empty catalog → empty reads); the
         // `.read_only()` handle then opens every partition via `FactLedger::open_read_only`.
@@ -183,6 +209,17 @@ pub fn open_store_read_only(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn K
 /// exact three-way logic so this stays accurate even before a fresh workspace's first
 /// `open_store` call has run.
 pub fn store_display(config: &EkosConfig, cwd: &Path) -> String {
+    if uses_distributed(config) {
+        return format!(
+            "distributed cluster @ {}",
+            config
+                .storage
+                .distributed
+                .coordinator
+                .as_deref()
+                .unwrap_or("?")
+        );
+    }
     if uses_partitioned(config, cwd) {
         partitioned_root(config, cwd).display().to_string()
     } else if uses_fact_engine(config, cwd) || !config.ledger_path(cwd).exists() {

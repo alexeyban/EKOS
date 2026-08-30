@@ -17,11 +17,13 @@
 //! `ekos mcp serve` use — no gRPC.
 
 mod cache;
+mod gateway;
 mod protocol;
 mod worker;
 mod worker_client;
 
 pub use cache::{PartitionCache, partition_id};
+pub use gateway::DistributedLedger;
 pub use protocol::{DiffWire, WorkerRequest, WorkerResponse};
 pub use worker::{QueryWorker, serve as serve_worker, spawn_ephemeral_worker};
 pub use worker_client::QueryWorkerClient;

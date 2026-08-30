@@ -2743,8 +2743,23 @@ These items have no single phase — they must be maintained and grown throughou
       lease contention (one winner, loser gets "already leased"), expired-lease fencing (stale
       `manifest_commit` rejected, next worker resumes from the committed watermark, no partial/lost
       write), coordinator-restart durability. mTLS deferred (trusted cluster network for v1).
-      Binding a lease to a real shard-scoped `build → commit` is B4. Next: B4 (Service B query
-      workers + Service C `DistributedLedger` gateway).
+      Binding a lease to a real shard-scoped `build → commit` is B4. **B4 landed 2026-08-30** —
+      `crates/distributed` (`ekos-distributed`): `QueryWorker` (Service B) materialises a partition
+      on demand (object storage → bounded local cache via `ObjectStoreBackend::from_url`, or a
+      co-located local dir used in place), opens it read-only as a `FactLedger`, and serves every
+      `KnowledgeStore` read for it over NDJSON/TCP (`spawn_blocking` around every ledger call);
+      `ekos query-worker serve`. `DistributedLedger` (Service C) — `impl KnowledgeStore`, fans every
+      read across the workers named by the coordinator catalog and merges (newest-partition-wins /
+      concat-oldest-first / `PartitionedLedger`'s own `diff` merge), classifies partitions by id
+      prefix; `append_*`/`vacuum_into` rejected (`LedgerError::ReadOnly`); never owns a tokio
+      `Runtime` (would panic dropped under `#[tokio::main]`). `[storage.distributed]` branch in
+      `open_store`/`open_store_read_only`/`store_display`; `StorageDistributedConfig` in
+      compiler-core. object_store stays behind `ekos-distributed/object-store` (cli `distributed`
+      feature) — stock `cargo build --workspace` still never compiles it. Tests: query-worker reads
+      == direct `PartitionedLedger` reads; gateway over 2 workers == in-process `PartitionedLedger`.
+      v1 follow-ons: persistent connection pool, parallel fan-out, coordinator-index pruning, a
+      command to register an existing Local partitioned workspace with a coordinator. Next: B5
+      (distributed search — per-partition BM25 top-K merge).
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s
