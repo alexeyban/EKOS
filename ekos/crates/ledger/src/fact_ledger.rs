@@ -679,13 +679,29 @@ impl FactLedger {
     /// tuned). Buffered upserts group-commit here — read-your-writes without
     /// per-append commit cost.
     pub fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
+        Ok(self
+            .find_objects_scored(query, 50)?
+            .into_iter()
+            .map(|(id, name, _)| (id, name))
+            .collect())
+    }
+
+    /// Like [`FactLedger::find_objects`], but bounded to `limit` hits and each carries its raw
+    /// BM25 score. The Distributed-mode gateway (RFC 0113 B5) fans this to every shard and
+    /// merge-sorts the per-shard top-K lists; the scores are shard-local, the accepted
+    /// query-then-fetch approximation.
+    pub fn find_objects_scored(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(KirId, String, f32)>, LedgerError> {
         let mut inner = self.inner.lock().unwrap();
         let last_tx = inner.batch_times.last().map(|(t, _)| *t);
         inner.search.commit(last_tx)?;
-        let hits = inner.search.query(query, 50)?;
+        let hits = inner.search.query_scored(query, limit)?;
         Ok(hits
             .into_iter()
-            .map(|(id, name)| (KirId(id), name))
+            .map(|(id, name, score)| (KirId(id), name, score))
             .collect())
     }
 

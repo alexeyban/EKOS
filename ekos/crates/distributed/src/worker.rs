@@ -153,6 +153,9 @@ fn run(ledger: &FactLedger, req: WorkerRequest) -> WorkerResponse {
             WorkerRequest::FindObjects { query, .. } => {
                 WorkerResponse::FindHits(ledger.find_objects(&query)?)
             }
+            WorkerRequest::FindObjectsScored { query, k, .. } => {
+                WorkerResponse::ScoredHits(ledger.find_objects_scored(&query, k)?)
+            }
             WorkerRequest::Diff { from, to, .. } => {
                 WorkerResponse::Diff(ledger.diff(from, to)?.into())
             }

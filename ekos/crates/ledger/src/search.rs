@@ -242,6 +242,22 @@ impl SearchIndex {
     /// Ranked search: terms ANDed across fields with 10/4/1 boosts;
     /// `term*` prefix-matches. Returns `(entity, name)` pairs, best first.
     pub fn query(&self, query: &str, limit: usize) -> Result<Vec<(Uuid, String)>, LedgerError> {
+        Ok(self
+            .query_scored(query, limit)?
+            .into_iter()
+            .map(|(id, name, _)| (id, name))
+            .collect())
+    }
+
+    /// Like [`SearchIndex::query`], but each hit carries its raw tantivy BM25 score. Used by the
+    /// Distributed-mode gateway (RFC 0113 B5) to merge per-shard top-K lists — the scores are
+    /// **shard-local** (per-partition term statistics), the accepted query-then-fetch
+    /// approximation, not a global ranking.
+    pub fn query_scored(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(Uuid, String, f32)>, LedgerError> {
         let terms: Vec<(String, bool)> = query
             .split(|c: char| !(c.is_alphanumeric() || c == '*'))
             .filter(|t| !t.is_empty())
@@ -296,7 +312,7 @@ impl SearchIndex {
             .search(&query, &TopDocs::with_limit(limit))
             .map_err(terr)?;
         let mut out = Vec::with_capacity(top.len());
-        for (_score, addr) in top {
+        for (score, addr) in top {
             let doc: TantivyDocument = searcher.doc(addr).map_err(terr)?;
             let get = |f: Field| {
                 doc.get_first(f)
@@ -305,7 +321,7 @@ impl SearchIndex {
                     .to_string()
             };
             if let Ok(id) = get(self.f_id).parse::<Uuid>() {
-                out.push((id, get(self.f_name)));
+                out.push((id, get(self.f_name), score));
             }
         }
         Ok(out)

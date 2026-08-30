@@ -205,6 +205,19 @@ impl QueryWorkerClient {
         )
     }
 
+    /// This shard's BM25 top-`k` for `query`, each hit with its shard-local score (RFC 0113 B5).
+    pub async fn find_objects_scored(
+        &self,
+        partition: &str,
+        query: &str,
+        k: usize,
+    ) -> Result<Vec<(KirId, String, f32)>, DistributedError> {
+        expect!(
+            self.call(&WorkerRequest::FindObjectsScored { partition: partition.into(), query: query.into(), k }).await?,
+            WorkerResponse::ScoredHits(v) => v
+        )
+    }
+
     pub async fn diff(
         &self,
         partition: &str,

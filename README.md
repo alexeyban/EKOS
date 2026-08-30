@@ -654,8 +654,11 @@ as the fact-engine default.
   query-workers = ["qw1.internal:7334", "qw2.internal:7334"]
   ```
 
-Still to come: distributed search ranking (B5) and a batch of gateway v1 follow-ons (connection
-pooling, parallel fan-out). None of this affects Local mode, which stays the default.
+- **distributed search** — the gateway fans each shard's BM25 top-*k* to a worker and merge-sorts
+  the results (shard-local term statistics, the standard query-then-fetch approximation).
+
+That completes Phase B at its v1 scope. Remaining work is v1 → v1.1 polish (connection pooling,
+parallel fan-out, index pruning). None of this affects Local mode, which stays the default.
 
 ## Development Process
 

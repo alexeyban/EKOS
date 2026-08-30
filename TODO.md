@@ -2758,8 +2758,14 @@ These items have no single phase — they must be maintained and grown throughou
       feature) — stock `cargo build --workspace` still never compiles it. Tests: query-worker reads
       == direct `PartitionedLedger` reads; gateway over 2 workers == in-process `PartitionedLedger`.
       v1 follow-ons: persistent connection pool, parallel fan-out, coordinator-index pruning, a
-      command to register an existing Local partitioned workspace with a coordinator. Next: B5
-      (distributed search — per-partition BM25 top-K merge).
+      command to register an existing Local partitioned workspace with a coordinator. **B5 landed
+      2026-08-30** — `FactLedger::find_objects_scored(query, limit)` exposes the BM25 score
+      (`find_objects` delegates, behaviour unchanged); `DistributedLedger::search(query, k)` fans
+      each object partition's local top-`k` to a worker, merge-sorts by shard-local score, dedups
+      by id, truncates to `k`; the `find_objects` trait method rides on it. Scores are shard-local
+      — the accepted query-then-fetch approximation (RFC 0111 §7), not a corpus-global ranking; the
+      test asserts that caveat explicitly. **RFC 0113 Phase B (B1–B5) is now feature-complete at v1
+      scope**; remaining = the v1→v1.1 polish list above + lease→real `build`/`commit` binding.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

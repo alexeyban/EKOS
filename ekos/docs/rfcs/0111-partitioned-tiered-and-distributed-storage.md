@@ -478,7 +478,9 @@ Two phases, gated by the same review, sequenced within this one RFC rather than 
 
 **Phase B — Distributed mode** (matches RFC 0110's scope; depends on Phase A shipping first). Its
 dated implementation RFC is **RFC 0113** (Draft, 2026-08-29), which sequences §4/§6/§7 into
-sub-phases B1–B5 and pins the interface-level decisions this section left at design altitude:
+sub-phases B1–B5 and pins the interface-level decisions this section left at design altitude.
+**All of B1–B5 landed 2026-08-29/30** — Distributed mode is feature-complete at v1 scope; the
+remaining work is v1 → v1.1 polish (RFC 0113 Open Questions):
 
 - [x] **B1** (2026-08-29) — `SegmentBackend` (§4) + `LocalFsBackend`
       (`crates/ledger/src/backend.rs`); `SegmentStore`'s sealed-object publish/fetch routes through
@@ -501,7 +503,11 @@ sub-phases B1–B5 and pins the interface-level decisions this section left at d
       `PartitionedLedger` (query-worker reads == direct reads; gateway == in-process
       `PartitionedLedger` over 2 workers). v1 follow-ons (connection pool, parallel fan-out,
       coordinator-index pruning, Local→Distributed registration): RFC 0113. RFC 0113.
-- [ ] **B5** — Distributed search (§7) fan-out + per-partition BM25 merge, cross-shard caveat.
+- [x] **B5** (2026-08-30) — `FactLedger::find_objects_scored` (BM25 score exposed);
+      `DistributedLedger::search(query, k)` fans each object partition's local top-`k`, merge-sorts
+      by shard-local score, dedups, truncates; `find_objects` rides on it. Cross-shard IDF is the
+      accepted query-then-fetch approximation (§7 — a global term-statistics pass is out of scope).
+      RFC 0113.
 
 **Both phases:**
 

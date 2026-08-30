@@ -67,6 +67,12 @@ pub enum WorkerRequest {
         partition: String,
         query: String,
     },
+    /// RFC 0113 B5 — this shard's BM25 top-`k` for `query`, each hit with its (shard-local) score.
+    FindObjectsScored {
+        partition: String,
+        query: String,
+        k: usize,
+    },
     Diff {
         partition: String,
         from: DateTime<Utc>,
@@ -101,6 +107,7 @@ impl WorkerRequest {
             | WorkerRequest::AllObjectsAt { partition, .. }
             | WorkerRequest::AllRelationshipsAt { partition, .. }
             | WorkerRequest::FindObjects { partition, .. }
+            | WorkerRequest::FindObjectsScored { partition, .. }
             | WorkerRequest::Diff { partition, .. }
             | WorkerRequest::ObjectCount { partition }
             | WorkerRequest::RelationshipCount { partition }
@@ -120,6 +127,7 @@ pub enum WorkerResponse {
     Objects(Vec<KirObject>),
     Relationships(Vec<KirRelationship>),
     FindHits(Vec<(KirId, String)>),
+    ScoredHits(Vec<(KirId, String, f32)>),
     Diff(DiffWire),
     Count(usize),
     Error { message: String },

@@ -101,6 +101,34 @@ impl DistributedLedger {
         block_on_sync(fut)
     }
 
+    /// RFC 0113 B5 — distributed search. Fans each object partition's BM25 **top-`k`** to a query
+    /// worker, merges the per-shard scored lists, dedups by id (highest shard-local score kept),
+    /// and returns the global top-`k` best-first. Per-partition term statistics — the accepted
+    /// query-then-fetch approximation (RFC 0111 §7), not a corpus-global ranking.
+    pub fn search(&self, query: &str, k: usize) -> Result<Vec<(KirId, String, f32)>, LedgerError> {
+        let query = query.to_string();
+        self.run(async move {
+            let mut best: std::collections::HashMap<KirId, (String, f32)> = Default::default();
+            for pid in self.partitions(PClass::Object).await? {
+                let w = self.any_worker().await?;
+                for (id, name, score) in w.find_objects_scored(&pid, &query, k).await? {
+                    best.entry(id)
+                        .and_modify(|e| {
+                            if score > e.1 {
+                                *e = (name.clone(), score);
+                            }
+                        })
+                        .or_insert((name, score));
+                }
+            }
+            let mut hits: Vec<(KirId, String, f32)> =
+                best.into_iter().map(|(id, (n, s))| (id, n, s)).collect();
+            hits.sort_by(|a, b| b.2.total_cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+            hits.truncate(k);
+            Ok(hits)
+        })
+    }
+
     async fn coordinator(&self) -> Result<CoordinatorClient, DistributedError> {
         Ok(CoordinatorClient::connect(&self.coordinator_addr).await?)
     }
@@ -352,15 +380,11 @@ impl KnowledgeStore for DistributedLedger {
     }
 
     fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
-        let query = query.to_string();
-        self.run(async move {
-            let mut out = Vec::new();
-            for pid in self.partitions(PClass::Object).await? {
-                let w = self.any_worker().await?;
-                out.extend(w.find_objects(&pid, &query).await?);
-            }
-            Ok(out)
-        })
+        Ok(self
+            .search(query, 50)?
+            .into_iter()
+            .map(|(id, name, _)| (id, name))
+            .collect())
     }
 
     fn entry_count(&self) -> Result<usize, LedgerError> {
