@@ -26,7 +26,9 @@ use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use ekos_segment_backend::SegmentBackend;
 use uuid::Uuid;
 
 use crate::fact::{AttrId, Fact, FactOp, FactValue, TxId, decompose, diff, reconstruct};
@@ -228,12 +230,44 @@ impl FactLedger {
         Self::open_with_seal_threshold(root, SEGMENT_SEAL_BYTES)
     }
 
+    /// `open`, but sealed segments are published to / fetched from `backend` (RFC 0113 B1/B4) —
+    /// e.g. an `ObjectStoreBackend` so a partition's bulk (its 8 MB sealed segments) lives in
+    /// object storage. `root` still holds the small local working state: the active/unsealed
+    /// segment, `HEAD`, `manifest.json`, `dict.bin`, and the `search/` index.
+    pub fn open_with_backend(
+        root: &Path,
+        backend: Arc<dyn SegmentBackend>,
+    ) -> Result<Self, LedgerError> {
+        Self::open_writable(root, SEGMENT_SEAL_BYTES, Some(backend))
+    }
+
+    /// [`Self::open_with_backend`] with a custom seal threshold (tests exercise the seal → publish
+    /// path without writing 8 MB).
+    pub fn open_with_backend_and_seal_threshold(
+        root: &Path,
+        backend: Arc<dyn SegmentBackend>,
+        seal_bytes: u64,
+    ) -> Result<Self, LedgerError> {
+        Self::open_writable(root, seal_bytes, Some(backend))
+    }
+
     /// `open` with a custom segment seal threshold (tests exercise the
     /// seal → run-flush path without writing megabytes).
     pub fn open_with_seal_threshold(root: &Path, seal_bytes: u64) -> Result<Self, LedgerError> {
+        Self::open_writable(root, seal_bytes, None)
+    }
+
+    fn open_writable(
+        root: &Path,
+        seal_bytes: u64,
+        backend: Option<Arc<dyn SegmentBackend>>,
+    ) -> Result<Self, LedgerError> {
         std::fs::create_dir_all(root).map_err(LedgerError::Io)?;
         let write_lock = acquire_write_lock(root)?;
-        let store = SegmentStore::open_with_seal_threshold(root, seal_bytes)?;
+        let store = match backend {
+            Some(b) => SegmentStore::open_with_backend(root, b, seal_bytes)?,
+            None => SegmentStore::open_with_seal_threshold(root, seal_bytes)?,
+        };
         let (mut runs, runs_clean) = FactIndexes::open(root.join("indexes"))?;
         let mut runs_marker = std::fs::read_to_string(root.join("indexes/last_tx"))
             .ok()
@@ -322,10 +356,26 @@ impl FactLedger {
     /// (`append_object`, …) fails with [`LedgerError::ReadOnly`] on the
     /// result.
     pub fn open_read_only(root: &Path) -> Result<Self, LedgerError> {
+        Self::open_ro(root, None)
+    }
+
+    /// [`Self::open_read_only`] with sealed segments served from `backend` (RFC 0113 B4) — the read
+    /// path a query worker uses for a partition whose bulk lives in object storage.
+    pub fn open_read_only_with_backend(
+        root: &Path,
+        backend: Arc<dyn SegmentBackend>,
+    ) -> Result<Self, LedgerError> {
+        Self::open_ro(root, Some(backend))
+    }
+
+    fn open_ro(root: &Path, backend: Option<Arc<dyn SegmentBackend>>) -> Result<Self, LedgerError> {
         if !root.exists() {
             return Err(LedgerError::NotFound(root.display().to_string()));
         }
-        let store = SegmentStore::open_with_seal_threshold(root, SEGMENT_SEAL_BYTES)?;
+        let store = match backend {
+            Some(b) => SegmentStore::open_with_backend(root, b, SEGMENT_SEAL_BYTES)?,
+            None => SegmentStore::open_with_seal_threshold(root, SEGMENT_SEAL_BYTES)?,
+        };
         let (runs, runs_clean) = FactIndexes::open(root.join("indexes"))?;
         if !runs_clean {
             return Err(LedgerError::Corrupt(
@@ -1236,6 +1286,38 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("factledger");
         (FactLedger::open(&path).unwrap(), dir)
+    }
+
+    /// RFC 0113 B4 — with a `SegmentBackend`, the sealed segments (a partition's bulk) live on the
+    /// backend, not local disk: wiping the local `segments/` dir loses nothing.
+    #[test]
+    fn sealed_segments_are_served_from_the_backend_not_local_disk() {
+        let root_dir = tempdir().unwrap();
+        let backend_cache = tempdir().unwrap();
+        let root = root_dir.path().join("part");
+        let backend = std::sync::Arc::new(crate::MemBackend::new(backend_cache.path()));
+
+        let a = KirObject::new("orders", ObjectKind::Table);
+        let b = KirObject::new("customers", ObjectKind::Table);
+        {
+            let l = FactLedger::open_with_backend_and_seal_threshold(&root, backend.clone(), 1)
+                .unwrap();
+            l.append_object(&a).unwrap();
+            l.append_object(&b).unwrap();
+        }
+
+        // Sealed segments really were published to the backend...
+        assert!(
+            !backend.list("segments/").unwrap().is_empty(),
+            "seals must publish to the backend"
+        );
+        // ...and the local sealed-segment files are now expendable.
+        std::fs::remove_dir_all(root.join("segments")).unwrap();
+
+        let l = FactLedger::open_read_only_with_backend(&root, backend.clone()).unwrap();
+        assert!(l.get_object(&a.id).unwrap().is_some());
+        assert!(l.get_object(&b.id).unwrap().is_some());
+        assert_eq!(l.object_count().unwrap(), 2);
     }
 
     #[test]

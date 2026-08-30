@@ -385,6 +385,13 @@ pub struct StoragePartitionConfig {
     /// Checked in order; first `scope-glob` match wins over `time_bucket` for that scope.
     #[serde(default)]
     pub time_bucket_overrides: Vec<TimeBucketOverrideConfig>,
+    /// RFC 0113 B4 — object-storage URL each partition's **sealed segments** are published to /
+    /// fetched from (`s3://bucket/prefix`, `az://…`, `file://…`). `None` (default) keeps every
+    /// partition's segments on local disk. The small local working state (active segment, `HEAD`,
+    /// `manifest.json`, `dict.bin`, `search/`) always stays under the partition's local root.
+    /// Needs an `ekos` built with `--features distributed`.
+    #[serde(default)]
+    pub segment_backend_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

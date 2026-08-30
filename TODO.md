@@ -2775,8 +2775,17 @@ These items have no single phase — they must be maintained and grown throughou
       coordinator + `compile_worker_run` over the ecommerce SQL fixture → 6 Table partitions
       registered, watermark advanced, store really holds the 6 tables. **RFC 0113 Phase B (B1–B5 +
       Service A) is feature-complete at v1 scope**; remaining = gateway v1→v1.1 polish (connection
-      pool, parallel fan-out, index pruning) + object-storage partition *writes*
-      (`PartitionedLedger`↔`SegmentBackend`).
+      pool, parallel fan-out, index pruning). **Partition sealed segments through `SegmentBackend`
+      landed 2026-08-30** — `FactLedger::open_with_backend` / `open_read_only_with_backend` +
+      `PartitionedLedger::with_segment_backend(resolver)`; `[storage.partition] segment-backend-url
+      = "s3://…"` builds an `ObjectStoreBackend` per partition (cli `distributed` feature), so a
+      partition's bulk (8 MB sealed segments) lives in object storage while manifest/HEAD/dict/
+      search/active stay on the local root (shared FS or single-writer). `compile-worker` registers
+      `PartitionLocation::ObjectStore` for each partition when the URL is set. Remaining: publish
+      the manifest through the backend so a partition is fully self-describing in object storage.
+      Tests: `FactLedger` wipe-the-local-`segments/`-and-still-read (`MemBackend`, threshold 1);
+      `PartitionedLedger` resolver-invoked-per-partition; `open_store` `segment-backend-url` wiring
+      + bogus-URL rejection.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

@@ -102,18 +102,65 @@ pub(crate) fn build_partitioned(
         anyhow::anyhow!("unknown [storage.partition] time-bucket: {bucket_str:?}")
     })?;
 
-    let ledger = PartitionedLedger::new(
+    let mut ledger = PartitionedLedger::new(
         &root,
         dimension,
         time_bucket,
         default_root_for(root.clone()),
     )
     .map_err(|e| anyhow::anyhow!("cannot open partitioned ledger at {}: {e}", root.display()))?;
+
+    if let Some(url) = p.segment_backend_url.clone() {
+        ledger = with_segment_backend_url(ledger, url)?;
+    }
+
     Ok(if read_only {
         ledger.read_only()
     } else {
         ledger
     })
+}
+
+/// Wire `[storage.partition] segment-backend-url` — each partition's sealed segments publish to /
+/// fetch from `<url>/<partition-id>`, its local root stays the segment cache. Object storage
+/// support is behind `--features distributed`.
+#[cfg(feature = "distributed")]
+fn with_segment_backend_url(ledger: PartitionedLedger, url: String) -> Result<PartitionedLedger> {
+    use std::sync::{Arc, Mutex};
+    // Validate the URL once, up front.
+    ekos_segment_backend::ObjectStoreBackend::from_url(&url, std::env::temp_dir())
+        .map_err(|e| anyhow::anyhow!("[storage.partition] segment-backend-url {url:?}: {e}"))?;
+
+    let cache: Arc<Mutex<std::collections::HashMap<String, Arc<dyn ekos_ledger::SegmentBackend>>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+    Ok(ledger.with_segment_backend(move |key, local_root| {
+        let pid = format!("{}/{}", key.dimension_value, key.time_bucket);
+        let mut map = cache.lock().unwrap();
+        if let Some(b) = map.get(&pid) {
+            return Some(b.clone());
+        }
+        // Prefix the store keys by partition id; download into the partition's own local root.
+        let per_partition_url = format!("{}/{pid}", url.trim_end_matches('/'));
+        match ekos_segment_backend::ObjectStoreBackend::from_url(&per_partition_url, local_root) {
+            Ok(b) => {
+                let b: Arc<dyn ekos_ledger::SegmentBackend> = Arc::new(b);
+                map.insert(pid, b.clone());
+                Some(b)
+            }
+            Err(e) => {
+                tracing::error!(%per_partition_url, %e, "cannot build the partition segment backend");
+                None
+            }
+        }
+    }))
+}
+
+#[cfg(not(feature = "distributed"))]
+fn with_segment_backend_url(_ledger: PartitionedLedger, url: String) -> Result<PartitionedLedger> {
+    anyhow::bail!(
+        "[storage.partition] segment-backend-url = {url:?} needs an `ekos` built with \
+         `--features distributed`"
+    )
 }
 
 /// Open the workspace's knowledge store with backend auto-detection.
@@ -455,6 +502,49 @@ mod tests {
             store_display(&config, dir.path()),
             partitioned_root(&config, dir.path()).display().to_string()
         );
+    }
+
+    /// RFC 0113 B4: `[storage.partition] segment-backend-url` makes `open_store` build an
+    /// `ObjectStoreBackend` per partition (validated up front) without disturbing normal
+    /// read/write; a bogus URL is a clear config error. (That sealed segments really live on the
+    /// backend is proven at the `FactLedger` level —
+    /// `fact_ledger::tests::sealed_segments_are_served_from_the_backend_not_local_disk`.)
+    #[cfg(feature = "distributed")]
+    #[test]
+    fn segment_backend_url_wires_partitions_without_disturbing_reads() {
+        let segstore = tempdir().unwrap();
+
+        let bad = tempdir().unwrap();
+        std::fs::create_dir_all(EkosConfig::default().ledger_dir(bad.path())).unwrap();
+        let bad_cfg: EkosConfig = toml::from_str(
+            "[storage.partition]\ndimension = \"entity-kind\"\nsegment-backend-url = \"http://nope\"\n",
+        )
+        .unwrap();
+        let err = match open_store(&bad_cfg, bad.path()) {
+            Ok(_) => panic!("a bogus segment-backend-url must be rejected"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("segment-backend-url"), "{err}");
+
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(EkosConfig::default().ledger_dir(dir.path())).unwrap();
+        let config: EkosConfig = toml::from_str(&format!(
+            "[storage.partition]\ndimension = \"entity-kind\"\nsegment-backend-url = \"file://{}\"\n",
+            segstore.path().display()
+        ))
+        .unwrap();
+        {
+            let store = open_store(&config, dir.path()).unwrap();
+            store
+                .append_object(&ekos_kir::KirObject::new(
+                    "orders",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+        }
+        let reader = open_store_read_only(&config, dir.path()).unwrap();
+        assert_eq!(reader.object_count().unwrap(), 1);
+        assert_eq!(reader.all_objects().unwrap()[0].name, "orders");
     }
 
     /// An existing fact-engine workspace is **not** switched to partitioned just because the

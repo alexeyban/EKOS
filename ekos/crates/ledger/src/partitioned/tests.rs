@@ -870,3 +870,68 @@ fn partitioned_ledger_is_a_drop_in_knowledge_store() {
         "orders_renamed"
     );
 }
+
+#[test]
+fn with_segment_backend_routes_each_partition_through_its_backend() {
+    use std::sync::{Arc, Mutex};
+
+    let dir = tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let part_root = root.clone();
+
+    // One MemBackend per partition, plus a log of every (partition-id, root) the resolver saw.
+    let backends: Arc<Mutex<std::collections::HashMap<String, Arc<crate::MemBackend>>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let calls: Arc<Mutex<Vec<(String, std::path::PathBuf)>>> = Arc::new(Mutex::new(Vec::new()));
+    let backends_c = backends.clone();
+    let calls_c = calls.clone();
+
+    let ledger = PartitionedLedger::new(
+        root.clone(),
+        PartitionDimension::EntityKind,
+        TimeBucket::Monthly,
+        move |key| part_root.join(&key.dimension_value).join(&key.time_bucket),
+    )
+    .unwrap()
+    .with_segment_backend(move |key, local_root| {
+        let id = format!("{}/{}", key.dimension_value, key.time_bucket);
+        calls_c
+            .lock()
+            .unwrap()
+            .push((id.clone(), local_root.to_path_buf()));
+        let mut map = backends_c.lock().unwrap();
+        let b = map
+            .entry(id)
+            .or_insert_with(|| Arc::new(crate::MemBackend::new(local_root.join(".seg-cache"))))
+            .clone();
+        Some(b as Arc<dyn SegmentBackend>)
+    });
+
+    let orders = KirObject::new("orders", ObjectKind::Table);
+    let main_rs = KirObject::new("main.rs", ObjectKind::File);
+    ledger.append_object(&orders).unwrap();
+    ledger.append_object(&main_rs).unwrap();
+    ledger
+        .append_relationship(&rel(main_rs.id, orders.id, RelationshipKind::DependsOn))
+        .unwrap();
+
+    // The resolver was consulted for the Table, File, and rel: partitions.
+    let seen: std::collections::HashSet<String> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect();
+    let month = Utc::now().format("%Y-%m").to_string();
+    assert!(seen.contains(&format!("Table/{month}")));
+    assert!(seen.contains(&format!("File/{month}")));
+    assert!(seen.iter().any(|id| id.starts_with("rel:DependsOn/")));
+
+    // Reads still work end to end through the backend-wired partitions.
+    assert_eq!(
+        ledger.get_object(&orders.id).unwrap().unwrap().name,
+        "orders"
+    );
+    assert_eq!(ledger.object_count().unwrap(), 2);
+    assert_eq!(ledger.relationships_for(&orders.id).unwrap().len(), 1);
+}

@@ -17,7 +17,7 @@ default = []
 # RFC 0113 B4 — lets `ekos query-worker` / `ekos gateway` serve partitions that live in object
 # storage (S3 / Azure / …). Off by default so a stock build never compiles the `object_store`
 # stack; a co-located Local-mode cluster works without it.
-distributed = ["ekos-distributed/object-store"]
+distributed = ["ekos-distributed/object-store", "ekos-segment-backend/object-store"]
 
 [dependencies]
 ekos-common.workspace = true
@@ -27,6 +27,7 @@ ekos-compiler-core.workspace = true
 ekos-ledger.workspace = true
 ekos-cluster.workspace = true
 ekos-distributed.workspace = true
+ekos-segment-backend.workspace = true
 ekos-runtime.workspace = true
 ekos-simulation.workspace = true
 ekos-observation-sdk.workspace = true

@@ -5,9 +5,13 @@ against this RFC while it's still Draft, same as RFC 0111 Phase A). Phase B is f
 the v1 scope, including **Service A's lease→real-pipeline binding** (2026-08-30): `ekos
 compile-worker run` executes the actual `build → recover → resolve → compile → commit` under a
 heartbeated, fencing-tokened coordinator lease and commits the resulting manifest generation.
-Remaining items are the tracked v1 → v1.1 follow-ons in Open Questions (persistent connection
-pool, parallel fan-out, coordinator-index pruning; partitions on a shared filesystem until
-`PartitionedLedger` writes through `SegmentBackend` directly).
+Each partition's **sealed segments** now route through a `SegmentBackend` too
+(`PartitionedLedger::with_segment_backend`, `[storage.partition] segment-backend-url`), so a
+partition's bulk can live in S3/Azure while its small local metadata (manifest, HEAD, dict,
+search, active segment) stays on shared storage. Remaining items are the tracked v1 → v1.1
+follow-ons in Open Questions (persistent connection pool, parallel fan-out, coordinator-index
+pruning; publishing the manifest through the backend so a partition is fully self-describing in
+object storage).
 **Author:** EKOS team
 **Created:** 2026-08-29
 **Implements:** RFC 0111 §4, §6, §7 (Distributed mode). RFC 0111 doubles as the Phase A
@@ -395,10 +399,15 @@ implementation-level choices don't reintroduce a violation.
 - [x] Registering a Local partitioned workspace's partitions with a coordinator — **resolved**:
       `ekos compile-worker run` does it (`CatalogRegister` per partition + `RecordEntityPartitions`)
       after each compile.
-- [ ] `PartitionedLedger` writing through `SegmentBackend` — until then, a distributed cluster's
-      partition roots must be on a filesystem shared by the compile workers and the query workers
-      (NFS etc.); the coordinator lease is the mutual-exclusion a shared FS lacks. Object-storage
-      partition *writes* (not just reads) are the remaining gap.
+- [x] `PartitionedLedger` writing through `SegmentBackend` — **resolved (partial) 2026-08-30**:
+      `FactLedger::open_with_backend` / `open_read_only_with_backend` +
+      `PartitionedLedger::with_segment_backend(resolver)` route each partition's **sealed segments**
+      (its bulk — 8 MB objects) through a `SegmentBackend`; `[storage.partition]
+      segment-backend-url = "s3://…"` wires an `ObjectStoreBackend` per partition (cli `distributed`
+      feature). **Still local per partition:** the active/unsealed segment, `HEAD`, `manifest.json`,
+      `dict.bin`, `search/` — so a cluster still needs that small metadata dir on shared storage or
+      belonging to the single writer. Publishing the manifest itself through the backend (making a
+      partition fully self-describing in object storage) is the remaining piece.
 - [ ] Interrupting an in-flight compile when the lease is lost mid-run — v1 lets the pipeline
       finish, then the fenced `manifest_commit` fails (`LostLease`); the per-`FactLedger`
       `write.lock` is the real guard against a concurrent second writer.
@@ -424,7 +433,10 @@ implementation-level choices don't reintroduce a violation.
 | `crates/distributed/` ✅ (B4, B5) | `ekos-distributed`: `QueryWorker` + `serve` (Service B, NDJSON/TCP) + `QueryWorkerClient` + `PartitionCache` (object storage → local cache) + `DistributedLedger` (`impl KnowledgeStore` + `search(query, k)`, Service C); `tests/query_worker.rs`, `tests/gateway.rs`, `tests/search.rs` |
 | `crates/ledger/src/{search,fact_ledger}.rs` ✅ (B5) | `SearchIndex::query_scored` / `FactLedger::find_objects_scored` — expose the BM25 score; `find_objects` delegates, behaviour unchanged |
 | `crates/cli/src/commands/cluster.rs` ✅ (B4a, Service A) | `ekos query-worker serve`; `ekos compile-worker run` — the real pipeline under a lease |
-| `crates/cli/src/commands/store.rs` ✅ (Service A) | `build_partitioned` → `pub(crate)` so the compile worker can enumerate `(partition, root)` |
+| `crates/cli/src/commands/store.rs` ✅ (Service A) | `build_partitioned` → `pub(crate)`; `[storage.partition] segment-backend-url` → an `ObjectStoreBackend` per partition (feature-gated) |
+| `crates/ledger/src/{fact_ledger,partitioned}.rs` ✅ (SegmentBackend writes) | `FactLedger::open_with_backend` / `open_read_only_with_backend` / `..._and_seal_threshold`; `PartitionedLedger::with_segment_backend(resolver)` |
+| `crates/compiler-core/src/config.rs` ✅ | `StoragePartitionConfig::segment_backend_url` |
+| `crates/cli/src/commands/cluster.rs` ✅ | `collect_partitions` registers `PartitionLocation::ObjectStore` when `segment-backend-url` is set |
 | `crates/segment-backend/src/object_store_backend.rs` ✅ (B4a) | `ObjectStoreBackend::from_url` + `object_store/fs` |
 | `crates/cli/src/commands/store.rs` ✅ (B4b) | `[storage.distributed]` branch in `open_store`/`open_store_read_only`/`store_display` |
 | `crates/compiler-core/src/config.rs` ✅ (B4b) | `StorageDistributedConfig` (`[storage.distributed]`) — strings only |

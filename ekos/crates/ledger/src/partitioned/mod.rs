@@ -59,8 +59,14 @@
 //!   demotes aged partitions ([`Tier::Cold`]) — evicting the open handle and marking them "eligible
 //!   to relocate to cheaper storage" — and any read promotes one back to hot. The RFC §3
 //!   search-index drop + zstd recompression need `FactLedger` support and land with the
-//!   `KnowledgeStore`/`SegmentBackend` work. The **`SegmentBackend` seam (§4)** itself (object
-//!   storage) is Phase B.
+//!   `KnowledgeStore`/`SegmentBackend` work.
+//! - **Object-storage partitions (RFC 0113 B4).** [`PartitionedLedger::with_segment_backend`]
+//!   routes each partition's **sealed segments** (its bulk) through a [`SegmentBackend`] — e.g. an
+//!   `ObjectStoreBackend` for S3/Azure. The small local working state (active segment, `HEAD`,
+//!   `manifest.json`, `dict.bin`, `search/`) still lives under the partition's local root, so a
+//!   distributed cluster still needs that metadata on storage every writer/reader can reach
+//!   (shared FS) OR belonging to the single writer — publishing the manifest itself through the
+//!   backend is the remaining gap.
 //! - **`Composite` scoped queries** match an exact `"<source>\u{1f}<kind>"` value — prefix scoping
 //!   (all kinds for one source, or vice versa) is a later refinement.
 //!
@@ -78,6 +84,7 @@ use crate::{FactLedger, KnowledgeStore, LedgerDiff, LedgerError};
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
+use ekos_segment_backend::SegmentBackend;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::OpenOptions;
@@ -100,6 +107,12 @@ type LoadedIndex = (IndexMaps, u32, Vec<PathBuf>);
 type RootResolver = Box<dyn Fn(&PartitionKey) -> PathBuf + Send + Sync>;
 /// Resolves a `KirObject`'s originating source/connector for `SourceScope`/`Composite` routing.
 type SourceResolver = Box<dyn Fn(&KirObject) -> Option<String> + Send + Sync>;
+/// Resolves a per-partition [`SegmentBackend`] (RFC 0113 B4) — given the key and its local working
+/// root, return the backend its **sealed segments** should be published to / fetched from
+/// (`None` = local disk only, today's default). The local root still holds the active segment,
+/// `HEAD`, `manifest.json`, `dict.bin`, and `search/`.
+type BackendResolver =
+    Box<dyn Fn(&PartitionKey, &Path) -> Option<Arc<dyn SegmentBackend>> + Send + Sync>;
 
 /// `id → partitions` cache entry. `complete` is true when the set is known to be the full
 /// membership — either loaded from the persisted index on open, or filled in by a one-time catalog
@@ -351,6 +364,7 @@ pub struct PartitionedLedger {
     index_dir: PathBuf,
     root_for: RootResolver,
     source_of: SourceResolver,
+    segment_backend_for: BackendResolver,
     catalog: Mutex<PartitionCatalog>,
     open: Mutex<HashMap<PartitionKey, Arc<FactLedger>>>,
     /// object entity id → object partitions (`IndexKind::Obj`)
@@ -437,6 +451,7 @@ impl PartitionedLedger {
             index_dir,
             root_for: Box::new(root_for),
             source_of: Box::new(|_| None),
+            segment_backend_for: Box::new(|_, _| None),
             catalog: Mutex::new(catalog),
             open: Mutex::new(HashMap::new()),
             obj_sites: Mutex::new(maps.obj),
@@ -469,6 +484,22 @@ impl PartitionedLedger {
         source_of: impl Fn(&KirObject) -> Option<String> + Send + Sync + 'static,
     ) -> Self {
         self.source_of = Box::new(source_of);
+        self
+    }
+
+    /// Route each partition's **sealed segments** through a [`SegmentBackend`] (RFC 0113 B4) — e.g.
+    /// an `ObjectStoreBackend` so a partition's bulk lives in object storage while its small local
+    /// working state (active segment, `HEAD`, `manifest.json`, `dict.bin`, `search/`) stays under
+    /// the resolver's `root`. The closure gets the key and that local root; returning `None` keeps
+    /// the partition on local disk (the default for every partition).
+    pub fn with_segment_backend(
+        mut self,
+        segment_backend_for: impl Fn(&PartitionKey, &Path) -> Option<Arc<dyn SegmentBackend>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.segment_backend_for = Box::new(segment_backend_for);
         self
     }
 
@@ -741,10 +772,12 @@ impl PartitionedLedger {
             }
             root
         };
-        let opened = if self.read_only {
-            FactLedger::open_read_only(&root)
-        } else {
-            FactLedger::open(&root)
+        let backend = (self.segment_backend_for)(key, &root);
+        let opened = match (self.read_only, backend) {
+            (true, Some(b)) => FactLedger::open_read_only_with_backend(&root, b),
+            (true, None) => FactLedger::open_read_only(&root),
+            (false, Some(b)) => FactLedger::open_with_backend(&root, b),
+            (false, None) => FactLedger::open(&root),
         };
         let ledger = Arc::new(opened.map_err(|source| PartitionError::Ledger {
             key: key.clone(),

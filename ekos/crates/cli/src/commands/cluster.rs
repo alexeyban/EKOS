@@ -156,10 +156,8 @@ pub async fn compile_worker_run(
             // Publish what we produced: every partition + the new generation watermark.
             let (partitions, watermark) =
                 collect_partitions(&cfg, &ws).map_err(|e| WorkerError::Work(format!("{e:#}")))?;
-            for (pid, root) in &partitions {
-                client_w
-                    .register_partition(pid, PartitionLocation::Local { root: root.clone() })
-                    .await?;
+            for (pid, location) in &partitions {
+                client_w.register_partition(pid, location.clone()).await?;
             }
             let ids: Vec<String> = partitions.iter().map(|(p, _)| p.clone()).collect();
             client_w.record_entity_partitions(&shard_w, &ids).await?;
@@ -185,20 +183,33 @@ async fn run_pipeline(config: &EkosConfig, cwd: &Path, parallel_recover: bool) -
     Ok(())
 }
 
-/// `(partition-id, root)` for every partition in the freshly-compiled workspace, plus the store's
-/// monotonic entry count as the manifest-generation watermark.
-fn collect_partitions(config: &EkosConfig, cwd: &Path) -> Result<(Vec<(String, String)>, u64)> {
+/// `(partition-id, location)` for every partition in the freshly-compiled workspace, plus the
+/// store's monotonic entry count as the manifest-generation watermark. When
+/// `[storage.partition] segment-backend-url` is set the location is that object store scoped to
+/// the partition id (so a query worker pulls the sealed segments straight from there); otherwise
+/// it's the partition's local root (shared-filesystem deployments).
+fn collect_partitions(
+    config: &EkosConfig,
+    cwd: &Path,
+) -> Result<(Vec<(String, PartitionLocation)>, u64)> {
     let pl = store::build_partitioned(config, cwd, true)?;
+    let seg_url = config.storage.partition.segment_backend_url.clone();
     let partitions = pl
         .catalog_partition_keys()
         .into_iter()
         .filter_map(|k| {
-            pl.partition_root(&k).map(|r| {
-                (
-                    ekos_distributed::partition_id(&k),
-                    r.to_string_lossy().into_owned(),
-                )
-            })
+            let pid = ekos_distributed::partition_id(&k);
+            let root = pl.partition_root(&k)?;
+            let location = match &seg_url {
+                Some(base) => PartitionLocation::ObjectStore {
+                    url: format!("{}/{pid}", base.trim_end_matches('/')),
+                    prefix: String::new(),
+                },
+                None => PartitionLocation::Local {
+                    root: root.to_string_lossy().into_owned(),
+                },
+            };
+            Some((pid, location))
         })
         .collect();
     let watermark = pl.entry_count().map(|n| n as u64).unwrap_or(0);

@@ -913,6 +913,7 @@ dependencies = [
  "ekos-plugin-rust",
  "ekos-recovery",
  "ekos-runtime",
+ "ekos-segment-backend",
  "ekos-semantic",
  "ekos-simulation",
  "serde_json",
