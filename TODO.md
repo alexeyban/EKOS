@@ -2780,12 +2780,15 @@ These items have no single phase — they must be maintained and grown throughou
       `PartitionedLedger::with_segment_backend(resolver)`; `[storage.partition] segment-backend-url
       = "s3://…"` builds an `ObjectStoreBackend` per partition (cli `distributed` feature), so a
       partition's bulk (8 MB sealed segments) lives in object storage while manifest/HEAD/dict/
-      search/active stay on the local root (shared FS or single-writer). `compile-worker` registers
-      `PartitionLocation::ObjectStore` for each partition when the URL is set. Remaining: publish
-      the manifest through the backend so a partition is fully self-describing in object storage.
-      Tests: `FactLedger` wipe-the-local-`segments/`-and-still-read (`MemBackend`, threshold 1);
-      `PartitionedLedger` resolver-invoked-per-partition; `open_store` `segment-backend-url` wiring
-      + bogus-URL rejection.
+      search/active stay on the local root. `compile-worker` registers `PartitionLocation::ObjectStore`
+      for each partition when the URL is set. **Manifest publishing landed 2026-08-30** —
+      `manifest.json` + `dict.bin` now route through the `SegmentBackend` too (new
+      `SegmentBackend::publish` for overwriteable metadata, impls on LocalFs/ObjectStore/Mem);
+      `SegmentStore` loads them via `exists`/`get`. **A partition is now self-describing in object
+      storage** — only `HEAD` + the active segment stay local (writer-only crash-recovery), plus
+      tantivy `search/` (query worker rebuilds/skips — the remaining follow-on). Test: `FactLedger`
+      write, wipe local `manifest.json`/`dict.bin`/`HEAD`/`segments/`, reopen read-only → all
+      objects still read from the backend.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

@@ -76,6 +76,16 @@ impl ObjectStoreBackend {
 }
 
 impl SegmentBackend for ObjectStoreBackend {
+    fn publish(&self, key: &str, bytes: &[u8]) -> Result<(), BackendError> {
+        let path = self.obj_path(key);
+        self.rt
+            .block_on(self.store.put(&path, PutPayload::from(bytes.to_vec())))
+            .map_err(|e| BackendError::store(key, e.to_string()))?;
+        // Drop any stale cached copy so a later `fetch` re-downloads the new content.
+        let _ = std::fs::remove_file(self.cache.join(key));
+        Ok(())
+    }
+
     fn publish_sealed(&self, key: &str, staged: &Path) -> Result<(), BackendError> {
         let bytes = std::fs::read(staged).map_err(|e| BackendError::io(key, e))?;
         let path = self.obj_path(key);

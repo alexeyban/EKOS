@@ -6,12 +6,16 @@
 //! the manifest, and never written again. On-disk layout:
 //!
 //! ```text
-//! <root>/
-//!   manifest.json          the only long-lived mutable file (tmp + atomic rename)
-//!   HEAD                   committed-length watermark for the active segment
+//! <root>/                   (a SegmentBackend; LocalFsBackend = this directory)
+//!   manifest.json          long-lived mutable metadata (published through the backend, RFC 0113 B4)
+//!   dict.bin               batch-body compression dictionary (published through the backend)
+//!   HEAD                   committed-length watermark for the active segment — always local
 //!   segments/seg-000000.facts
 //!   segments/seg-000001.facts
 //! ```
+//!
+//! With an `ObjectStoreBackend`, `manifest.json` / `dict.bin` / `segments/*` live in object
+//! storage and only `HEAD` + the active (unsealed) segment are local to the writer.
 //!
 //! Frame layout (integers little-endian):
 //!
@@ -133,10 +137,11 @@ struct Head {
 /// SQLite ledger today); readers open independently and see committed data.
 pub struct SegmentStore {
     root: PathBuf,
-    /// Where sealed segment objects are published and fetched (RFC 0113 B1). Defaults to
-    /// [`LocalFsBackend`] — today's exact behaviour; a remote backend slots in for RFC 0111's
-    /// Distributed mode. The active segment, `HEAD`, `manifest.json`, and `dict.bin` stay local
-    /// regardless.
+    /// Where sealed segment objects **and** the mutable metadata (`manifest.json`, `dict.bin`) are
+    /// published and fetched (RFC 0113 B1 sealed segments, B4 metadata). Defaults to
+    /// [`LocalFsBackend`] — byte-identical to pre-seam behaviour; an `ObjectStoreBackend` makes a
+    /// partition self-describing in object storage. Only `HEAD` and the active (unsealed) segment
+    /// stay local regardless — writer-only crash-recovery state a reader never needs.
     backend: Arc<dyn SegmentBackend>,
     pub manifest: Manifest,
     head: Head,
@@ -193,9 +198,13 @@ impl SegmentStore {
         let root = root.into();
         std::fs::create_dir_all(root.join("segments"))?;
 
-        let manifest = load_manifest(&root)?;
+        // `manifest.json` and `dict.bin` live with the backend (RFC 0113 B4) — local disk for
+        // `LocalFsBackend`, object storage for `ObjectStoreBackend` — so a reader on another
+        // machine opens a partition from its URL alone. `HEAD` and the active segment stay local
+        // (writer-only crash-recovery state; a reader without `HEAD` is fine).
+        let manifest = load_manifest(backend.as_ref())?;
         let dict = match manifest.dict_version {
-            Some(v) => Some(build_dict(v, &std::fs::read(root.join("dict.bin"))?)),
+            Some(v) => Some(build_dict(v, &backend.get("dict.bin")?)),
             None => None,
         };
         let active_seq = manifest.sealed.last().map(|s| s.seq + 1).unwrap_or(0);
@@ -268,9 +277,9 @@ impl SegmentStore {
                 "dictionary must be installed before any batch is written".into(),
             ));
         }
-        std::fs::write(self.root.join("dict.bin"), &bytes)?;
+        self.backend.publish("dict.bin", &bytes)?;
         self.manifest.dict_version = Some(1);
-        save_manifest(&self.root, &self.manifest)?;
+        save_manifest(self.backend.as_ref(), &self.manifest)?;
         self.dict = Some(build_dict(1, &bytes));
         Ok(())
     }
@@ -355,7 +364,7 @@ impl SegmentStore {
             tx_max,
             batches: batch_count,
         });
-        save_manifest(&self.root, &self.manifest)?;
+        save_manifest(self.backend.as_ref(), &self.manifest)?;
 
         let new_seq = seq + 1;
         self.active = OpenOptions::new()
@@ -507,11 +516,11 @@ impl SegmentStore {
             .collect()
     }
 
-    /// Persist the manifest now (atomic rename). Called by owners whenever
+    /// Persist the manifest now (through the backend). Called by owners whenever
     /// manifest state outside the seal path changes — e.g. the attribute
     /// registry grew during an append.
     pub fn persist_manifest(&self) -> Result<(), SegmentError> {
-        save_manifest(&self.root, &self.manifest)
+        save_manifest(self.backend.as_ref(), &self.manifest)
     }
 
     /// The store's root directory.
@@ -673,21 +682,21 @@ fn segment_path(root: &Path, seq: u32) -> PathBuf {
     root.join("segments").join(format!("seg-{seq:06}.facts"))
 }
 
-fn load_manifest(root: &Path) -> Result<Manifest, SegmentError> {
-    let path = root.join("manifest.json");
-    if !path.exists() {
+fn load_manifest(backend: &dyn SegmentBackend) -> Result<Manifest, SegmentError> {
+    if !backend.exists("manifest.json")? {
         return Ok(Manifest {
             format_version: 1,
             ..Default::default()
         });
     }
-    let mut manifest: Manifest = serde_json::from_slice(&std::fs::read(&path)?)?;
+    let mut manifest: Manifest = serde_json::from_slice(&backend.get("manifest.json")?)?;
     manifest.attributes.reindex();
     Ok(manifest)
 }
 
-fn save_manifest(root: &Path, manifest: &Manifest) -> Result<(), SegmentError> {
-    atomic_write(root, "manifest.json", &serde_json::to_vec(manifest)?)
+fn save_manifest(backend: &dyn SegmentBackend, manifest: &Manifest) -> Result<(), SegmentError> {
+    backend.publish("manifest.json", &serde_json::to_vec(manifest)?)?;
+    Ok(())
 }
 
 fn write_head(root: &Path, head: Head) -> Result<(), SegmentError> {
@@ -752,6 +761,10 @@ mod tests {
         }
     }
     impl SegmentBackend for CountingBackend {
+        fn publish(&self, key: &str, bytes: &[u8]) -> Result<(), BackendError> {
+            self.published.lock().unwrap().push(key.to_string());
+            self.inner.publish(key, bytes)
+        }
         fn publish_sealed(&self, key: &str, staged: &Path) -> Result<(), BackendError> {
             self.published.lock().unwrap().push(key.to_string());
             self.inner.publish_sealed(key, staged)
@@ -791,11 +804,18 @@ mod tests {
         for i in 0..3 {
             store.append(sample_ops(&mut reg, i), i as i64).unwrap();
         }
-        // three batches, seal threshold 1 → three sealed segments, each published once
+        // three batches, seal threshold 1 → three sealed segments published, plus a manifest
+        // publish after each seal (RFC 0113 B4 — the manifest lives with the backend too).
+        let published = backend.published.lock().unwrap().clone();
         assert_eq!(
-            *backend.published.lock().unwrap(),
+            published
+                .iter()
+                .filter(|k| k.starts_with("segments/"))
+                .cloned()
+                .collect::<Vec<_>>(),
             vec![seg_key(0), seg_key(1), seg_key(2)]
         );
+        assert!(published.iter().any(|k| k == "manifest.json"));
 
         // a replay reads every sealed segment through `fetch`
         backend.fetched.lock().unwrap().clear();
@@ -1057,7 +1077,7 @@ mod tests {
         let mut store = SegmentStore::open(dir.path()).unwrap();
         let a = store.manifest.attributes.intern("name");
         let b = store.manifest.attributes.intern("properties.path");
-        save_manifest(dir.path(), &store.manifest).unwrap();
+        store.persist_manifest().unwrap();
         store.append(vec![], 0).unwrap(); // force a HEAD write alongside
 
         let store = SegmentStore::open(dir.path()).unwrap();

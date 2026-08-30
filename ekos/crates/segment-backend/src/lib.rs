@@ -6,10 +6,14 @@
 //! ([`ObjectStoreBackend`], `object-store` feature, RFC 0111 Distributed mode). Sealed objects are
 //! write-once / read-many — no method here ever does a read-modify-write.
 //!
-//! What does **not** go through this seam (stays local on the writer): the active/unsealed
-//! segment, `HEAD`, `manifest.json`, `dict.bin`, and tantivy's `search/` directory.
+//! Sealed segments go through [`SegmentBackend::publish_sealed`] / [`SegmentBackend::fetch`]
+//! (RFC 0113 B1); the small mutable metadata (`manifest.json`, `dict.bin`) through
+//! [`SegmentBackend::publish`] / [`SegmentBackend::get`] (RFC 0113 B4), so an `ObjectStoreBackend`
+//! partition is self-describing. What stays local on the writer regardless: `HEAD` (active-segment
+//! watermark), the active/unsealed segment itself, and tantivy's `search/` directory.
 
 use std::io;
+use std::io::Write;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -63,6 +67,26 @@ pub trait SegmentBackend: Send + Sync {
     /// dropped.
     fn publish_sealed(&self, key: &str, staged: &Path) -> Result<(), BackendError>;
 
+    /// Publish (or **overwrite**) a small mutable metadata object — `manifest.json`, `dict.bin`
+    /// (RFC 0113 B4, making a partition self-describing in object storage). Unlike
+    /// [`Self::publish_sealed`], the key here is expected to be rewritten. `bytes` is the full
+    /// content. Default: write `bytes` to a temp key path and treat it as a sealed publish —
+    /// backends with a real overwrite (`ObjectStoreBackend` PUT, `LocalFsBackend` atomic rename)
+    /// override this.
+    fn publish(&self, key: &str, bytes: &[u8]) -> Result<(), BackendError> {
+        // A conservative default for a backend that only knows publish_sealed: stage locally then
+        // hand off. Impls that can overwrite in place do so directly.
+        let tmp = std::env::temp_dir().join(format!(
+            "ekos-seg-{}-{}",
+            std::process::id(),
+            key.replace('/', "_")
+        ));
+        std::fs::write(&tmp, bytes).map_err(|e| BackendError::io(key, e))?;
+        let r = self.publish_sealed(key, &tmp);
+        let _ = std::fs::remove_file(&tmp);
+        r
+    }
+
     /// A readable **local path** for a sealed object — fetched into a bounded local cache first if
     /// the backend is remote. `LocalFsBackend` returns the file in place. Callers `mmap` the
     /// result, so this returns a path, not bytes.
@@ -104,6 +128,26 @@ impl LocalFsBackend {
 }
 
 impl SegmentBackend for LocalFsBackend {
+    fn publish(&self, key: &str, bytes: &[u8]) -> Result<(), BackendError> {
+        let dest = self.path(key);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| BackendError::io(key, e))?;
+        }
+        let tmp = dest.with_extension("tmp");
+        {
+            let mut f = std::fs::File::create(&tmp).map_err(|e| BackendError::io(key, e))?;
+            f.write_all(bytes).map_err(|e| BackendError::io(key, e))?;
+            f.sync_all().map_err(|e| BackendError::io(key, e))?;
+        }
+        std::fs::rename(&tmp, &dest).map_err(|e| BackendError::io(key, e))?;
+        if let Some(parent) = dest.parent()
+            && let Ok(dir) = std::fs::File::open(parent)
+        {
+            let _ = dir.sync_all();
+        }
+        Ok(())
+    }
+
     fn publish_sealed(&self, key: &str, staged: &Path) -> Result<(), BackendError> {
         // The staged file already lives at `self.path(key)` (it was the active segment). Just make
         // the seal durable: fsync the file, then its parent directory.
@@ -193,6 +237,16 @@ impl MemBackend {
 }
 
 impl SegmentBackend for MemBackend {
+    fn publish(&self, key: &str, bytes: &[u8]) -> Result<(), BackendError> {
+        self.objects
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), bytes.to_vec());
+        // Keep any materialised cache copy consistent.
+        let _ = std::fs::remove_file(self.cache.join(key));
+        Ok(())
+    }
+
     fn publish_sealed(&self, key: &str, staged: &Path) -> Result<(), BackendError> {
         let bytes = std::fs::read(staged).map_err(|e| BackendError::io(key, e))?;
         self.objects.lock().unwrap().insert(key.to_string(), bytes);

@@ -1306,18 +1306,36 @@ mod tests {
             l.append_object(&b).unwrap();
         }
 
-        // Sealed segments really were published to the backend...
+        // Sealed segments AND the manifest were published to the backend — not local disk.
         assert!(
             !backend.list("segments/").unwrap().is_empty(),
             "seals must publish to the backend"
         );
-        // ...and the local sealed-segment files are now expendable.
+        assert!(
+            backend.exists("manifest.json").unwrap(),
+            "the manifest lives with the backend (RFC 0113 B4)"
+        );
+        assert!(
+            !root.join("manifest.json").exists(),
+            "the manifest is not written to local disk when a backend is wired"
+        );
+        // The local sealed-segment files are now expendable.
         std::fs::remove_dir_all(root.join("segments")).unwrap();
 
         let l = FactLedger::open_read_only_with_backend(&root, backend.clone()).unwrap();
         assert!(l.get_object(&a.id).unwrap().is_some());
         assert!(l.get_object(&b.id).unwrap().is_some());
         assert_eq!(l.object_count().unwrap(), 2);
+
+        // Even the local `manifest.json` / `dict.bin` / `HEAD` can go — the segment store
+        // reconstructs from the backend (`search/` still has to be local, a separate follow-on).
+        for f in ["manifest.json", "dict.bin", "HEAD"] {
+            let _ = std::fs::remove_file(root.join(f));
+        }
+        std::fs::remove_dir_all(root.join("segments")).ok();
+        let l = FactLedger::open_read_only_with_backend(&root, backend).unwrap();
+        assert_eq!(l.object_count().unwrap(), 2);
+        assert_eq!(l.get_object(&a.id).unwrap().unwrap().name, "orders");
     }
 
     #[test]

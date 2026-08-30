@@ -498,11 +498,12 @@ remaining work is v1 → v1.1 polish (RFC 0113 Open Questions):
       `build → recover → resolve → compile → commit` under a heartbeated, fencing-tokened lease
       (on a blocking thread with its own runtime, so heartbeats keep flowing), then registers every
       partition it wrote and commits the store's entry count as the generation watermark. RFC 0113.
-- [x] **Partition sealed segments through `SegmentBackend`** (2026-08-30) —
+- [x] **Partition self-describing in object storage** (2026-08-30) —
       `FactLedger::open_with_backend` + `PartitionedLedger::with_segment_backend(resolver)`;
       `[storage.partition] segment-backend-url = "s3://…"` routes each partition's sealed segments
-      (its bulk) to object storage while manifest/HEAD/dict/search/active stay on the partition's
-      local root (shared FS or single-writer). Manifest-through-the-backend is the remaining piece.
+      **and** `manifest.json` / `dict.bin` through the `SegmentBackend` (new
+      `SegmentBackend::publish`). Only `HEAD` + the active/unsealed segment stay local (writer-only
+      crash-recovery state) plus tantivy's `search/` (query worker rebuilds/skips — a follow-on).
       RFC 0113.
 - [x] **B4** (2026-08-30) — `crates/distributed` (`ekos-distributed`): `QueryWorker` (Service B) —
       materialises a partition on demand (object storage → bounded local cache, or a co-located
