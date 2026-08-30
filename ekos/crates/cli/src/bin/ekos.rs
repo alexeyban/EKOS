@@ -126,6 +126,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: CompileWorkerCommands,
     },
+    /// Distributed-mode query worker — Service B (RFC 0113 B4)
+    QueryWorker {
+        #[command(subcommand)]
+        subcommand: QueryWorkerCommands,
+    },
     /// Marketing agent: devlog -> tweet draft -> approval -> X publish (RFC 0030)
     Marketing {
         #[command(subcommand)]
@@ -222,6 +227,20 @@ enum CompileWorkerCommands {
         /// Watermark (highest committed tx / manifest generation) to record
         #[arg(long, default_value_t = 1)]
         watermark: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum QueryWorkerCommands {
+    /// Serve `KnowledgeStore` reads for coordinator-assigned partitions over JSON-RPC
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:7333")]
+        coordinator: String,
+        #[arg(long, default_value = "127.0.0.1:7334")]
+        listen: String,
+        /// Local directory partitions are materialised into (object storage → local cache)
+        #[arg(long, default_value = ".ekos/query-cache")]
+        cache: PathBuf,
     },
 }
 
@@ -514,6 +533,13 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+        },
+        Commands::QueryWorker { subcommand } => match subcommand {
+            QueryWorkerCommands::Serve {
+                coordinator,
+                listen,
+                cache,
+            } => ekos::commands::cluster::serve_query_worker(&coordinator, &listen, &cache).await,
         },
         Commands::Marketing { subcommand } => match subcommand {
             MarketingCommands::Publish {

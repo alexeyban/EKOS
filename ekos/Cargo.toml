@@ -12,6 +12,7 @@ members = [
     "crates/segment-backend",
     "crates/cluster",
     "crates/ledger",
+    "crates/distributed",
     "crates/runtime",
     "crates/simulation",
     "crates/identity",
@@ -64,6 +65,7 @@ ekos-compiler-core = { path = "crates/compiler-core" }
 ekos-segment-backend = { path = "crates/segment-backend" }
 ekos-cluster   = { path = "crates/cluster" }
 ekos-ledger    = { path = "crates/ledger" }
+ekos-distributed = { path = "crates/distributed" }
 ekos-runtime   = { path = "crates/runtime" }
 ekos-simulation = { path = "crates/simulation" }
 ekos-identity  = { path = "crates/identity" }

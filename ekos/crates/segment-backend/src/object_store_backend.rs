@@ -46,6 +46,17 @@ impl ObjectStoreBackend {
         })
     }
 
+    /// Build a backend from a URL — `memory://`, `file:///abs/path`, `s3://bucket/prefix`,
+    /// `az://container/prefix`, `gs://bucket/prefix` (whatever `object_store::parse_url` supports).
+    /// Credentials come from the standard provider env vars / instance metadata, never a URL.
+    /// `cache` is the local directory [`SegmentBackend::fetch`] downloads into.
+    pub fn from_url(url: &str, cache: impl Into<PathBuf>) -> Result<Self, BackendError> {
+        let parsed = url::Url::parse(url).map_err(|e| BackendError::store(url, e.to_string()))?;
+        let (store, path) = object_store::parse_url(&parsed)
+            .map_err(|e| BackendError::store(url, e.to_string()))?;
+        Self::new(Arc::from(store), path.as_ref().to_string(), cache)
+    }
+
     fn obj_path(&self, key: &str) -> ObjPath {
         if self.prefix.is_empty() {
             ObjPath::from(key)

@@ -1427,6 +1427,19 @@ impl PartitionedLedger {
             .map(|e| e.tier)
     }
 
+    /// The on-disk root of a catalogued partition, or `None` if the key isn't in the catalog.
+    /// Used to enumerate `(partition, location)` pairs when registering an existing Local-mode
+    /// workspace's partitions with a Distributed-mode coordinator (RFC 0113 B4).
+    pub fn partition_root(&self, key: &PartitionKey) -> Option<PathBuf> {
+        self.catalog
+            .lock()
+            .unwrap()
+            .partitions
+            .iter()
+            .find(|e| &e.key == key)
+            .map(|e| e.root.clone())
+    }
+
     /// Every partition currently recorded as [`Tier::Cold`], sorted.
     pub fn cold_partition_keys(&self) -> Vec<PartitionKey> {
         let mut keys: Vec<PartitionKey> = self

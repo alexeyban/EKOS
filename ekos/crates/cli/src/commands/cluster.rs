@@ -118,3 +118,23 @@ pub async fn worker_run(
     println!("{id}: released {partition}");
     Ok(())
 }
+
+/// `ekos query-worker serve --coordinator <addr> --listen <addr> [--cache <dir>]` — RFC 0113 B4
+/// Service B. Materialises partitions on demand and serves `KnowledgeStore` reads for them over
+/// newline-delimited JSON-RPC. Object-storage partitions need a build with `--features distributed`.
+pub async fn serve_query_worker(
+    coordinator: &str,
+    listen: &str,
+    cache: &std::path::Path,
+) -> Result<()> {
+    std::fs::create_dir_all(cache)
+        .with_context(|| format!("creating query-worker cache dir {cache:?}"))?;
+    let (bound, handle) =
+        ekos_distributed::spawn_ephemeral_worker(listen, coordinator, cache.to_path_buf())
+            .await
+            .with_context(|| format!("starting query worker on {listen}"))?;
+    tracing::info!(%bound, %coordinator, cache = %cache.display(), "query worker serving");
+    println!("query worker listening on {bound} (coordinator {coordinator})");
+    handle.await.ok();
+    Ok(())
+}

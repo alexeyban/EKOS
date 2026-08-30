@@ -8,7 +8,7 @@ edition.workspace = true
 default = []
 # Pulls the `object_store` crate + a tokio runtime for `ObjectStoreBackend` (RFC 0111 Distributed
 # mode). Off by default so a Local-mode build never compiles it.
-object-store = ["dep:object_store", "dep:tokio", "dep:futures"]
+object-store = ["dep:object_store", "dep:tokio", "dep:futures", "dep:url", "object_store/fs"]
 # Cloud providers — each implies `object-store`.
 aws = ["object-store", "object_store/aws"]
 azure = ["object-store", "object_store/azure"]
@@ -19,6 +19,7 @@ tracing.workspace = true
 object_store = { version = "0.14", default-features = false, optional = true }
 tokio = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
+url = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

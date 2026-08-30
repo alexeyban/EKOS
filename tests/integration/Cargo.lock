@@ -756,6 +756,7 @@ dependencies = [
  "ekos-common",
  "ekos-compiler-core",
  "ekos-dbt-gen",
+ "ekos-distributed",
  "ekos-docs-gen",
  "ekos-ekl",
  "ekos-identity",
@@ -886,6 +887,22 @@ version = "0.1.0"
 dependencies = [
  "ekos-kir",
  "serde_json",
+]
+
+[[package]]
+name = "ekos-distributed"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ekos-cluster",
+ "ekos-kir",
+ "ekos-ledger",
+ "ekos-segment-backend",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

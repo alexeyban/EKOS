@@ -1,0 +1,31 @@
+[package]
+name = "ekos-distributed"
+description = "RFC 0113 B4 — Distributed-mode read path: Service B query workers + the DistributedLedger gateway (impl KnowledgeStore)"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+# Lets a partition live in object storage (`PartitionLocation::ObjectStore`). Off by default so a
+# Local-mode / co-located build never compiles `object_store` (RFC 0113 B2 invariant). The CLI's
+# own `distributed` feature turns this on.
+object-store = ["ekos-segment-backend/object-store"]
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-ledger.workspace = true
+ekos-cluster.workspace = true
+ekos-segment-backend.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+# Exercise the object-storage partition path in `cargo test`, while `cargo build --workspace`
+# (which never turns this on) stays free of `object_store`.
+ekos-distributed = { path = ".", features = ["object-store"] }
+ekos-segment-backend = { workspace = true, features = ["object-store"] }

@@ -891,6 +891,7 @@ dependencies = [
  "ekos-common",
  "ekos-compiler-core",
  "ekos-dbt-gen",
+ "ekos-distributed",
  "ekos-docs-gen",
  "ekos-ekl",
  "ekos-identity",
@@ -1058,6 +1059,24 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
+]
+
+[[package]]
+name = "ekos-distributed"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ekos-cluster",
+ "ekos-distributed",
+ "ekos-kir",
+ "ekos-ledger",
+ "ekos-segment-backend",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1590,6 +1609,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -2926,6 +2946,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3069,6 +3101,7 @@ dependencies = [
  "hyper",
  "itertools 0.15.0",
  "md-5 0.11.0",
+ "nix",
  "parking_lot",
  "percent-encoding",
  "quick-xml",
@@ -3082,8 +3115,10 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "walkdir",
  "wasm-bindgen-futures",
  "web-time",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
