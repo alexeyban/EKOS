@@ -9,6 +9,7 @@ ekos = { path = "../../ekos/crates/cli" }
 ekos-compiler-core = { path = "../../ekos/crates/compiler-core" }
 ekos-ledger = { path = "../../ekos/crates/ledger" }
 ekos-runtime = { path = "../../ekos/crates/runtime" }
+ekos-cluster = { path = "../../ekos/crates/cluster" }
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 anyhow = "1"

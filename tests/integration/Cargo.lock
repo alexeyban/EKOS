@@ -941,6 +941,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ekos",
+ "ekos-cluster",
  "ekos-compiler-core",
  "ekos-ledger",
  "ekos-runtime",

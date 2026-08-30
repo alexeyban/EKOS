@@ -641,8 +641,10 @@ as the fact-engine default.
 - a `SegmentBackend` seam — `LocalFsBackend` (default) or `ObjectStoreBackend` (S3 / Azure /
   in-memory, behind a feature flag);
 - a **coordinator** (`ekos coordinator serve`) that hands out fencing-tokened write leases and
-  tracks per-partition commit watermarks over newline-delimited JSON-RPC, with
-  `ekos compile-worker run` as the single-writer worker's smoke path;
+  tracks per-partition commit watermarks over newline-delimited JSON-RPC;
+- a **compile worker** (`ekos compile-worker run`) that runs the real
+  `build → recover → resolve → compile → commit` pipeline under a coordinator lease, then
+  registers the partitions it wrote and commits the new generation;
 - **query workers** (`ekos query-worker serve`) that pull a partition into a local cache and serve
   reads for it, and a **`DistributedLedger` gateway** that implements the same `KnowledgeStore`
   trait every command already uses — fanning reads across the workers and merging — so pointing a

@@ -157,6 +157,48 @@ async fn odoo_git_fixture_pipeline_end_to_end() -> Result<()> {
     Ok(())
 }
 
+/// RFC 0113 — a `compile-worker` (Service A) runs the real pipeline under a coordinator
+/// write-lease against a partitioned workspace, then registers its partitions and commits the
+/// manifest generation.
+#[tokio::test(flavor = "multi_thread")]
+async fn compile_worker_runs_the_real_pipeline_under_a_lease() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir_all(dir.path().join("schemas"))?;
+    std::fs::copy(
+        fixtures_dir().join("ecommerce.sql"),
+        dir.path().join("schemas/ecommerce.sql"),
+    )?;
+    std::fs::write(
+        dir.path().join("ekos.toml"),
+        "[storage.partition]\ndimension = \"entity-kind\"\ntime-bucket = \"monthly\"\n",
+    )?;
+
+    let (coord_addr, _coord) = ekos_cluster::spawn_ephemeral("127.0.0.1:0", None).await.unwrap();
+    let coord_s = coord_addr.to_string();
+
+    ekos::commands::cluster::compile_worker_run(&coord_s, "main", dir.path(), false).await?;
+
+    // The coordinator now knows this shard's partitions and a non-zero generation watermark.
+    let client = ekos_cluster::CoordinatorClient::connect(&coord_s).await.unwrap();
+    let catalog = client.catalog(None).await.unwrap();
+    assert!(
+        catalog.iter().any(|m| m.id.starts_with("Table/")),
+        "a Table/<bucket> partition must be registered: {catalog:?}"
+    );
+    assert!(
+        client.watermark(&catalog[0].id).await.unwrap() > 0
+            || client.partitions_for_entity("main").await.unwrap().len() == catalog.len()
+    );
+
+    // And the workspace really was compiled — the partitioned store has the ecommerce tables.
+    let config = EkosConfig::from_file_or_default(&dir.path().join("ekos.toml"));
+    let store = ekos::commands::store::open_store(&config, dir.path())?;
+    let runtime = Runtime::over(&*store);
+    assert_eq!(table_count(&runtime)?, 6, "ecommerce schema has 6 tables");
+
+    Ok(())
+}
+
 /// Recursively copy a fixture directory into a tempdir workspace.
 fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;

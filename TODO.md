@@ -2764,8 +2764,19 @@ These items have no single phase — they must be maintained and grown throughou
       each object partition's local top-`k` to a worker, merge-sorts by shard-local score, dedups
       by id, truncates to `k`; the `find_objects` trait method rides on it. Scores are shard-local
       — the accepted query-then-fetch approximation (RFC 0111 §7), not a corpus-global ranking; the
-      test asserts that caveat explicitly. **RFC 0113 Phase B (B1–B5) is now feature-complete at v1
-      scope**; remaining = the v1→v1.1 polish list above + lease→real `build`/`commit` binding.
+      test asserts that caveat explicitly. **Service A real-pipeline binding landed 2026-08-30** —
+      `ekos compile-worker run --coordinator <addr> --shard <name> --workspace <dir>` acquires the
+      shard lease (heartbeated), runs the real `build → recover → resolve → compile → commit` on a
+      blocking thread with its own runtime (executor stays free to heartbeat through a multi-minute
+      compile), then registers every partition it wrote (`CatalogRegister` + `RecordEntityPartitions`)
+      and `manifest_commit`s the store's monotonic entry count as the generation watermark (fenced).
+      Requires a Local `[storage.partition]` workspace (not `[storage.distributed]`); partition roots
+      must be on storage the query workers can also reach (shared FS for now). Integration test:
+      coordinator + `compile_worker_run` over the ecommerce SQL fixture → 6 Table partitions
+      registered, watermark advanced, store really holds the 6 tables. **RFC 0113 Phase B (B1–B5 +
+      Service A) is feature-complete at v1 scope**; remaining = gateway v1→v1.1 polish (connection
+      pool, parallel fan-out, index pruning) + object-storage partition *writes*
+      (`PartitionedLedger`↔`SegmentBackend`).
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

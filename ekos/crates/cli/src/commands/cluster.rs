@@ -5,11 +5,13 @@
 //! no partition data — object storage (RFC 0113 B2) does — and persists its own small state to a
 //! single JSON file.
 //!
-//! `compile-worker` here is the transport/lifecycle half of Service A: it can acquire a lease,
-//! heartbeat it, commit a watermark, and release — the smoke path for a live coordinator. Binding
-//! a lease to an actual shard-scoped `build → commit` run is RFC 0113 B4 (`DistributedLedger`),
-//! not yet wired.
+//! `compile-worker run` is Service A: under a coordinator write-lease (heartbeated,
+//! fencing-tokened) it runs the **real** `build → recover → resolve → compile → commit` pipeline
+//! against the local partitioned workspace, then registers every partition it wrote with the
+//! coordinator and commits the new manifest generation — fenced, so a stale ex-lease-holder's
+//! late commit is rejected and the next worker resumes from the recorded watermark.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -17,8 +19,11 @@ use chrono::Duration;
 use ekos_cluster::{
     CompileWorker, Coordinator, CoordinatorClient, PartitionLocation, WorkerError, serve,
 };
+use ekos_compiler_core::EkosConfig;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+
+use crate::commands::store;
 
 /// `ekos coordinator serve --listen <addr> [--state <path>] [--ttl-seconds N]`.
 pub async fn serve_coordinator(
@@ -76,47 +81,128 @@ pub async fn status(coordinator: &str) -> Result<()> {
     Ok(())
 }
 
-/// `ekos compile-worker run --coordinator <addr> --partition <id> --root <dir> [--hold-seconds N]
-/// [--watermark N]` — acquire the shard lease, hold it (heartbeating) for `hold_seconds`, commit
-/// `watermark`, release. The smoke path against a live coordinator; real pass execution is B4.
-pub async fn worker_run(
+/// `ekos compile-worker run --coordinator <addr> --shard <name> [--workspace <dir>] [--parallel]`
+/// — Service A. Acquires the `shard` write-lease (heartbeated), runs the real
+/// `build → recover → resolve → compile → commit` pipeline against the local partitioned
+/// workspace, registers every partition it wrote with the coordinator, and commits the new
+/// manifest generation (the store's monotonic entry count) with its fencing token. If the lease
+/// is lost mid-run, the fenced commit fails and the run reports `LostLease` — the pipeline's own
+/// per-`FactLedger` `write.lock` (RFC 0104) is the second safety net against a concurrent writer.
+///
+/// The workspace must be a **Local** partitioned workspace (`[storage.partition]`), not
+/// `[storage.distributed]` (that config is the read-only gateway). Its partition roots must live
+/// on storage the query workers can also reach (a shared filesystem for v1, until
+/// `PartitionedLedger` writes through `SegmentBackend` directly).
+pub async fn compile_worker_run(
     coordinator: &str,
-    partition: &str,
-    root: &str,
-    hold_seconds: u64,
-    watermark: u64,
+    shard: &str,
+    workspace: &Path,
+    parallel_recover: bool,
 ) -> Result<()> {
+    let config_path = workspace.join("ekos.toml");
+    let config = EkosConfig::from_file_or_default(&config_path);
+    if config.storage.distributed.is_enabled() {
+        anyhow::bail!(
+            "this workspace has [storage.distributed] set — that is the read-only gateway config. \
+             A compile worker writes locally; point --workspace at a Local partitioned workspace \
+             whose partition roots the query workers can also reach."
+        );
+    }
+    if !store::uses_partitioned(&config, workspace) {
+        anyhow::bail!(
+            "compile-worker needs a partitioned workspace ([storage.partition] with a \
+             partitioned/ store); {} is not one",
+            workspace.display()
+        );
+    }
+
     let client = Arc::new(
         CoordinatorClient::connect(coordinator)
             .await
             .with_context(|| format!("connecting to coordinator at {coordinator}"))?,
     );
-    client
-        .register_partition(
-            partition,
-            PartitionLocation::Local {
-                root: root.to_string(),
-            },
-        )
-        .await?;
+    let id = format!("compile-worker-{}", std::process::id());
+    let worker = CompileWorker::new(client.clone(), id.clone());
 
-    let id = format!("worker-{}", std::process::id());
-    let worker = CompileWorker::new(client.clone(), id.clone())
-        .with_heartbeat(std::time::Duration::from_secs(hold_seconds.max(3) / 3));
+    println!("{id}: acquiring lease on shard '{shard}'");
+    let ws = workspace.to_path_buf();
+    let cfg = config.clone();
+    let client_w = client.clone();
+    let shard_w = shard.to_string();
 
-    println!("{id}: acquiring lease on {partition}");
     worker
-        .run_shard(partition, |guard| async move {
-            println!("  lease held, token {}", guard.token());
-            tokio::time::sleep(std::time::Duration::from_secs(hold_seconds)).await;
+        .run_shard(shard, move |guard| async move {
+            println!(
+                "  lease held (token {}); running build → recover → resolve → compile → commit",
+                guard.token()
+            );
+
+            // The whole pipeline runs on a blocking thread with its own runtime, so the worker's
+            // executor stays free to heartbeat the lease through a multi-minute compile.
+            let ws2 = ws.clone();
+            let cfg2 = cfg.clone();
+            tokio::task::spawn_blocking(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| e.to_string())?
+                    .block_on(run_pipeline(&cfg2, &ws2, parallel_recover))
+                    .map_err(|e| format!("{e:#}"))
+            })
+            .await
+            .map_err(|e| WorkerError::Work(format!("pipeline task panicked: {e}")))?
+            .map_err(WorkerError::Work)?;
+
+            // Publish what we produced: every partition + the new generation watermark.
+            let (partitions, watermark) =
+                collect_partitions(&cfg, &ws).map_err(|e| WorkerError::Work(format!("{e:#}")))?;
+            for (pid, root) in &partitions {
+                client_w
+                    .register_partition(pid, PartitionLocation::Local { root: root.clone() })
+                    .await?;
+            }
+            let ids: Vec<String> = partitions.iter().map(|(p, _)| p.clone()).collect();
+            client_w.record_entity_partitions(&shard_w, &ids).await?;
             guard.commit(watermark).await?;
-            println!("  committed watermark {watermark}");
+            println!(
+                "  generation {watermark} committed; {} partitions registered",
+                partitions.len()
+            );
             Ok::<(), WorkerError>(())
         })
         .await
-        .with_context(|| format!("running shard {partition}"))?;
-    println!("{id}: released {partition}");
+        .with_context(|| format!("compiling shard '{shard}'"))?;
+    println!("{id}: released shard '{shard}'");
     Ok(())
+}
+
+async fn run_pipeline(config: &EkosConfig, cwd: &Path, parallel_recover: bool) -> Result<()> {
+    crate::commands::build::run(config, cwd).await?;
+    crate::commands::recover::run(config, cwd, parallel_recover).await?;
+    crate::commands::resolve::run(config, cwd, false)?;
+    crate::commands::compile::run(config, cwd).await?;
+    crate::commands::commit::run(config, cwd, true).await?;
+    Ok(())
+}
+
+/// `(partition-id, root)` for every partition in the freshly-compiled workspace, plus the store's
+/// monotonic entry count as the manifest-generation watermark.
+fn collect_partitions(config: &EkosConfig, cwd: &Path) -> Result<(Vec<(String, String)>, u64)> {
+    let pl = store::build_partitioned(config, cwd, true)?;
+    let partitions = pl
+        .catalog_partition_keys()
+        .into_iter()
+        .filter_map(|k| {
+            pl.partition_root(&k).map(|r| {
+                (
+                    ekos_distributed::partition_id(&k),
+                    r.to_string_lossy().into_owned(),
+                )
+            })
+        })
+        .collect();
+    let watermark = pl.entry_count().map(|n| n as u64).unwrap_or(0);
+    Ok((partitions, watermark))
 }
 
 /// `ekos query-worker serve --coordinator <addr> --listen <addr> [--cache <dir>]` — RFC 0113 B4

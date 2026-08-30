@@ -81,7 +81,7 @@ fn default_root_for(root: PathBuf) -> impl Fn(&PartitionKey) -> PathBuf + Send +
 /// Build a [`PartitionedLedger`] from `[storage.partition]` config. `compiler-core` holds the
 /// dimension/bucket as strings (it can't depend on `ekos-ledger`); the string→enum translation is
 /// this layer's job (the split CLAUDE.md documents for `ArchitectureConfidence`).
-fn build_partitioned(
+pub(crate) fn build_partitioned(
     config: &EkosConfig,
     cwd: &Path,
     read_only: bool,

@@ -210,23 +210,23 @@ enum CoordinatorCommands {
 
 #[derive(Subcommand)]
 enum CompileWorkerCommands {
-    /// Acquire a shard lease, hold it (heartbeating), commit a watermark, release.
-    /// Smoke path against a live coordinator; shard-scoped pass execution is RFC 0113 B4.
+    /// Under a coordinator write-lease, run the real build→recover→resolve→compile→commit
+    /// pipeline against a local partitioned workspace, register its partitions, and commit the
+    /// new manifest generation (fenced). RFC 0113 Service A.
     Run {
         #[arg(long, default_value = "127.0.0.1:7333")]
         coordinator: String,
-        /// Opaque partition id, e.g. "kind=table/2026-08"
-        #[arg(long)]
-        partition: String,
-        /// Local root recorded for this partition in the catalog
+        /// Lease name for this compile run (one writer per shard). With entity-kind partitioning
+        /// there is effectively one shard for the workspace, e.g. "main".
+        #[arg(long, default_value = "main")]
+        shard: String,
+        /// Workspace directory (must hold an ekos.toml with [storage.partition], not
+        /// [storage.distributed])
         #[arg(long, default_value = ".")]
-        root: String,
-        /// Seconds to hold the lease before committing
-        #[arg(long, default_value_t = 5)]
-        hold_seconds: u64,
-        /// Watermark (highest committed tx / manifest generation) to record
-        #[arg(long, default_value_t = 1)]
-        watermark: u64,
+        workspace: PathBuf,
+        /// Recover connectors in parallel
+        #[arg(long)]
+        parallel: bool,
     },
 }
 
@@ -519,17 +519,15 @@ async fn main() -> Result<()> {
         Commands::CompileWorker { subcommand } => match subcommand {
             CompileWorkerCommands::Run {
                 coordinator,
-                partition,
-                root,
-                hold_seconds,
-                watermark,
+                shard,
+                workspace,
+                parallel,
             } => {
-                ekos::commands::cluster::worker_run(
+                ekos::commands::cluster::compile_worker_run(
                     &coordinator,
-                    &partition,
-                    &root,
-                    hold_seconds,
-                    watermark,
+                    &shard,
+                    &workspace,
+                    parallel,
                 )
                 .await
             }

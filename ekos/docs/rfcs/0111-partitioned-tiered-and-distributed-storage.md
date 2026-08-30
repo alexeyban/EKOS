@@ -493,7 +493,13 @@ remaining work is v1 → v1.1 polish (RFC 0113 Open Questions):
       JSON-RPC over TCP, the `ekos mcp serve` pattern — not tonic) + `CoordinatorClient` +
       `CompileWorker`/`LeaseGuard` (Service A transport+lifecycle). `ekos coordinator serve`/`status`
       + `ekos compile-worker run`. Multi-service harness: lease contention, expired-lease fencing +
-      watermark resume, restart durability. Lease→real `build`/`commit` binding is B4. RFC 0113.
+      watermark resume, restart durability. RFC 0113.
+- [x] **Service A real pipeline** (2026-08-30) — `ekos compile-worker run` executes the real
+      `build → recover → resolve → compile → commit` under a heartbeated, fencing-tokened lease
+      (on a blocking thread with its own runtime, so heartbeats keep flowing), then registers every
+      partition it wrote and commits the store's entry count as the generation watermark. Requires
+      a Local `[storage.partition]` workspace; partition roots on shared storage for now (object-
+      storage partition *writes* still need `PartitionedLedger`↔`SegmentBackend`). RFC 0113.
 - [x] **B4** (2026-08-30) — `crates/distributed` (`ekos-distributed`): `QueryWorker` (Service B) —
       materialises a partition on demand (object storage → bounded local cache, or a co-located
       local dir), opens it read-only, serves every `KnowledgeStore` read for it over NDJSON/TCP;
