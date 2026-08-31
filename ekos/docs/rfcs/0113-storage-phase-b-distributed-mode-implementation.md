@@ -5,12 +5,14 @@ against this RFC while it's still Draft, same as RFC 0111 Phase A). Phase B is f
 the v1 scope, including **Service A's lease→real-pipeline binding** (2026-08-30): `ekos
 compile-worker run` executes the actual `build → recover → resolve → compile → commit` under a
 heartbeated, fencing-tokened coordinator lease and commits the resulting manifest generation.
-A partition is now **self-describing in object storage** — sealed segments, `manifest.json`, and
-`dict.bin` all route through the `SegmentBackend` (`PartitionedLedger::with_segment_backend`,
-`[storage.partition] segment-backend-url`); only `HEAD` and the active/unsealed segment stay
-local to the writer, plus tantivy's `search/` dir. Remaining items are the tracked v1 → v1.1
+A partition is now **self-describing in object storage** — sealed segments, `manifest.json`,
+`dict.bin`, and tantivy's `search/` dir all route through the `SegmentBackend`
+(`PartitionedLedger::with_segment_backend`, `[storage.partition] segment-backend-url`); only
+`HEAD` and the active/unsealed segment stay local to the writer (writer-only crash-recovery
+state a reader never needs). `ekos compile-worker run` publishes `search/` after every compile
+(`PartitionedLedger::publish_search_indexes`). Remaining items are the tracked v1 → v1.1
 follow-ons in Open Questions (persistent connection pool, parallel fan-out, coordinator-index
-pruning; publishing/rebuilding `search/` for a query worker).
+pruning).
 **Author:** EKOS team
 **Created:** 2026-08-29
 **Implements:** RFC 0111 §4, §6, §7 (Distributed mode). RFC 0111 doubles as the Phase A
@@ -406,8 +408,14 @@ implementation-level choices don't reintroduce a violation.
       `[storage.partition] segment-backend-url = "s3://…"` wires an `ObjectStoreBackend` per
       partition (cli `distributed` feature). A partition is now **self-describing in object
       storage**. **Still local per partition:** `HEAD` (active-segment watermark) + the
-      active/unsealed segment (writer-only crash-recovery state a reader never needs) + tantivy's
-      `search/` dir (the query worker rebuilds or skips search — a separate follow-on).
+      active/unsealed segment (writer-only crash-recovery state a reader never needs).
+      **Search resolved 2026-08-31**: `SegmentStore::publish_aux`/`fetch_aux` push/pull a flat
+      directory's files through the backend under the same `<rel>/…` keys; `FactLedger` calls
+      `fetch_aux("search")` on `open_read_only_with_backend` when no local `search/` exists (an
+      unsynced partition degrades to zero search hits — every other read is unaffected — rather
+      than erroring), and exposes `sync_search_to_backend()` for a writer to call post-commit;
+      `PartitionedLedger::publish_search_indexes()` does it for every catalogued partition;
+      `ekos compile-worker run` calls it after each compile, before registering partitions.
 - [ ] Interrupting an in-flight compile when the lease is lost mid-run — v1 lets the pipeline
       finish, then the fenced `manifest_commit` fails (`LostLease`); the per-`FactLedger`
       `write.lock` is the real guard against a concurrent second writer.
@@ -441,6 +449,10 @@ implementation-level choices don't reintroduce a violation.
 | `crates/cli/src/commands/cluster.rs` ✅ | `collect_partitions` registers `PartitionLocation::ObjectStore` when `segment-backend-url` is set |
 | `crates/segment-backend/src/object_store_backend.rs` ✅ (B4a) | `ObjectStoreBackend::from_url` + `object_store/fs` |
 | `crates/cli/src/commands/store.rs` ✅ (B4b) | `[storage.distributed]` branch in `open_store`/`open_store_read_only`/`store_display` |
+| `crates/ledger/src/segment/mod.rs` ✅ (search publishing) | `SegmentStore::publish_aux(rel)` / `fetch_aux(rel)` — generic flat-dir push/pull through `SegmentBackend`, used for `search/` |
+| `crates/ledger/src/fact_ledger.rs` ✅ (search publishing) | `open_read_only_with_backend` fetches `search/` from the backend when absent locally; `sync_search_to_backend()` publishes it |
+| `crates/ledger/src/partitioned/mod.rs` ✅ (search publishing) | `PartitionedLedger::publish_search_indexes()` — syncs every catalogued partition's search index |
+| `crates/cli/src/commands/cluster.rs` ✅ (search publishing) | `compile_worker_run` calls `publish_search_indexes()` after each compile, before registering partitions |
 | `crates/compiler-core/src/config.rs` ✅ (B4b) | `StorageDistributedConfig` (`[storage.distributed]`) — strings only |
 | `crates/cli/Cargo.toml` ✅ (B4a) | `distributed` feature = `ekos-distributed/object-store` (off by default; a stock build never compiles `object_store`) |
 | `ekos/docs/rfcs/0111-…md` | Phase B checklist ticked as B1–B5 land |

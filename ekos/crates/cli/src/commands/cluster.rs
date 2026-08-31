@@ -153,6 +153,21 @@ pub async fn compile_worker_run(
             .map_err(|e| WorkerError::Work(format!("pipeline task panicked: {e}")))?
             .map_err(WorkerError::Work)?;
 
+            // Push each partition's search index to its backend (no-op for a local backend) so a
+            // query worker can serve `find_objects` for object-storage partitions.
+            {
+                let cfg3 = cfg.clone();
+                let ws3 = ws.clone();
+                tokio::task::spawn_blocking(move || {
+                    store::build_partitioned(&cfg3, &ws3, true)
+                        .and_then(|pl| Ok(pl.publish_search_indexes()?))
+                        .map_err(|e| format!("{e:#}"))
+                })
+                .await
+                .map_err(|e| WorkerError::Work(format!("search-publish task panicked: {e}")))?
+                .map_err(WorkerError::Work)?;
+            }
+
             // Publish what we produced: every partition + the new generation watermark.
             let (partitions, watermark) =
                 collect_partitions(&cfg, &ws).map_err(|e| WorkerError::Work(format!("{e:#}")))?;

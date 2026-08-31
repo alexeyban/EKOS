@@ -2785,10 +2785,21 @@ These items have no single phase — they must be maintained and grown throughou
       `manifest.json` + `dict.bin` now route through the `SegmentBackend` too (new
       `SegmentBackend::publish` for overwriteable metadata, impls on LocalFs/ObjectStore/Mem);
       `SegmentStore` loads them via `exists`/`get`. **A partition is now self-describing in object
-      storage** — only `HEAD` + the active segment stay local (writer-only crash-recovery), plus
-      tantivy `search/` (query worker rebuilds/skips — the remaining follow-on). Test: `FactLedger`
-      write, wipe local `manifest.json`/`dict.bin`/`HEAD`/`segments/`, reopen read-only → all
-      objects still read from the backend.
+      storage** — only `HEAD` + the active segment stay local (writer-only crash-recovery). Test:
+      `FactLedger` write, wipe local `manifest.json`/`dict.bin`/`HEAD`/`segments/`, reopen
+      read-only → all objects still read from the backend. **`search/` publishing landed
+      2026-08-31** — `SegmentStore::publish_aux(rel)`/`fetch_aux(rel)` generically push/pull a flat
+      directory's files through the `SegmentBackend` under the same `<rel>/…` keys;
+      `FactLedger::open_read_only_with_backend` calls `fetch_aux("search")` when no local `search/`
+      exists (an unsynced partition degrades to zero search hits rather than erroring — every other
+      read still works); `FactLedger::sync_search_to_backend()` publishes it, and
+      `PartitionedLedger::publish_search_indexes()` does so for every catalogued partition;
+      `ekos compile-worker run` calls it after each compile, before registering partitions with the
+      coordinator. Test: writer publishes a search index through a `MemBackend`, a brand-new reader
+      root with nothing local resolves `find_objects` from the backend-fetched index; a second
+      reader with no published index still reads objects but gets zero search hits. **RFC 0113
+      Phase B is now fully closed at v1 scope** — every open item but the tracked v1 → v1.1 gateway
+      polish (connection pool, parallel fan-out, index pruning) is resolved.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

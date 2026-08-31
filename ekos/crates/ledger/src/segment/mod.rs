@@ -523,6 +523,48 @@ impl SegmentStore {
         save_manifest(self.backend.as_ref(), &self.manifest)
     }
 
+    /// Publish every (flat) file under `<root>/<rel>/` to the backend under the same `<rel>/…`
+    /// keys (RFC 0113 B4) — for a directory the `SegmentStore` doesn't otherwise manage but that a
+    /// remote reader needs, i.e. tantivy's `search/`. A no-op if the directory is absent. Skips
+    /// lock files. `<rel>` must be a single path component.
+    pub fn publish_aux(&self, rel: &str) -> Result<(), SegmentError> {
+        let dir = self.root.join(rel);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Ok(());
+        };
+        for entry in entries {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !entry.file_type()?.is_file() || name.ends_with(".lock") {
+                continue;
+            }
+            let bytes = std::fs::read(entry.path())?;
+            self.backend.publish(&format!("{rel}/{name}"), &bytes)?;
+        }
+        Ok(())
+    }
+
+    /// The inverse of [`Self::publish_aux`]: download every `<rel>/…` object from the backend into
+    /// `<root>/<rel>/`. A no-op (returning `false`) if the backend has nothing under that prefix.
+    /// Returns `true` if at least one file was materialised.
+    pub fn fetch_aux(&self, rel: &str) -> Result<bool, SegmentError> {
+        let keys = self.backend.list(&format!("{rel}/"))?;
+        if keys.is_empty() {
+            return Ok(false);
+        }
+        let dir = self.root.join(rel);
+        std::fs::create_dir_all(&dir)?;
+        for key in keys {
+            let bytes = self.backend.get(&key)?;
+            let name = key.rsplit('/').next().unwrap_or(&key);
+            let tmp = dir.join(format!("{name}.tmp"));
+            std::fs::write(&tmp, &bytes)?;
+            std::fs::rename(&tmp, dir.join(name))?;
+        }
+        Ok(true)
+    }
+
     /// The store's root directory.
     pub fn root(&self) -> &Path {
         &self.root

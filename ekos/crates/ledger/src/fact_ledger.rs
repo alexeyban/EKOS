@@ -372,6 +372,7 @@ impl FactLedger {
         if !root.exists() {
             return Err(LedgerError::NotFound(root.display().to_string()));
         }
+        let has_backend = backend.is_some();
         let store = match backend {
             Some(b) => SegmentStore::open_with_backend(root, b, SEGMENT_SEAL_BYTES)?,
             None => SegmentStore::open_with_seal_threshold(root, SEGMENT_SEAL_BYTES)?,
@@ -388,7 +389,18 @@ impl FactLedger {
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
             .map(TxId);
-        let (search, _search_marker) = SearchIndex::open_read_only(&root.join("search"))?;
+        // RFC 0113 B4: for a backend-served partition the `search/` dir may not be local — pull it
+        // from the backend if the writer published it (`sync_search_to_backend`), else open an
+        // empty index so every non-search read still works (`find_objects` degrades to no hits for
+        // this partition until the index is synced — RFC 0111 §7's accepted approximation).
+        let search_dir = root.join("search");
+        if has_backend && !search_dir.exists() {
+            let fetched = store.fetch_aux("search")?;
+            if !fetched {
+                std::fs::create_dir_all(&search_dir).map_err(LedgerError::Io)?;
+            }
+        }
+        let (search, _search_marker) = SearchIndex::open_read_only(&search_dir)?;
 
         let inner = Inner {
             batch_times: store.batch_headers()?,
@@ -693,6 +705,18 @@ impl FactLedger {
             }
         }
         Ok(out)
+    }
+
+    /// Publish this ledger's committed `search/` index through the segment backend (RFC 0113 B4),
+    /// so a remote query worker can serve `find_objects` for a partition whose data lives in
+    /// object storage. A no-op for `LocalFsBackend` (the files already are the durable copy).
+    /// Call after `commit` / pipeline completion, not per append.
+    pub fn sync_search_to_backend(&self) -> Result<(), LedgerError> {
+        let mut inner = self.inner.lock().unwrap();
+        let last_tx = inner.batch_times.last().map(|(t, _)| *t);
+        inner.search.commit(last_tx)?;
+        inner.store.publish_aux("search")?;
+        Ok(())
     }
 
     /// Every historical version of the object at `id`, oldest to newest
@@ -1328,7 +1352,7 @@ mod tests {
         assert_eq!(l.object_count().unwrap(), 2);
 
         // Even the local `manifest.json` / `dict.bin` / `HEAD` can go — the segment store
-        // reconstructs from the backend (`search/` still has to be local, a separate follow-on).
+        // reconstructs from the backend.
         for f in ["manifest.json", "dict.bin", "HEAD"] {
             let _ = std::fs::remove_file(root.join(f));
         }
@@ -1336,6 +1360,68 @@ mod tests {
         let l = FactLedger::open_read_only_with_backend(&root, backend).unwrap();
         assert_eq!(l.object_count().unwrap(), 2);
         assert_eq!(l.get_object(&a.id).unwrap().unwrap().name, "orders");
+    }
+
+    /// RFC 0113 B4 — `sync_search_to_backend` publishes the `search/` index so a query worker on a
+    /// **fresh empty root** (no local `search/`) can still serve `find_objects` for the partition.
+    #[test]
+    fn search_index_travels_through_the_backend() {
+        let backend_cache = tempdir().unwrap();
+        let writer_root = tempdir().unwrap();
+        let backend = std::sync::Arc::new(crate::MemBackend::new(backend_cache.path()));
+
+        let orders = KirObject::new("orders", ObjectKind::Table)
+            .with_property("excerpt", serde_json::json!("axolotl inventory ledger"));
+        {
+            let l = FactLedger::open_with_backend_and_seal_threshold(
+                writer_root.path(),
+                backend.clone(),
+                1,
+            )
+            .unwrap();
+            l.append_object(&orders).unwrap();
+            l.append_object(&KirObject::new("customers", ObjectKind::Table))
+                .unwrap();
+            assert_eq!(l.find_objects("axolotl").unwrap().len(), 1);
+            l.sync_search_to_backend().unwrap();
+        }
+        assert!(
+            !backend.list("search/").unwrap().is_empty(),
+            "the search index must be published"
+        );
+
+        // A brand-new reader root with nothing local — only the backend.
+        let reader_root = tempdir().unwrap();
+        std::fs::create_dir_all(reader_root.path().join("indexes")).unwrap();
+        let r =
+            FactLedger::open_read_only_with_backend(reader_root.path(), backend.clone()).unwrap();
+        assert_eq!(r.object_count().unwrap(), 2);
+        assert_eq!(
+            r.find_objects("axolotl").unwrap(),
+            vec![(orders.id, "orders".to_string())],
+            "search served from the backend-fetched index"
+        );
+
+        // Without a published index, a fresh reader degrades to no search hits but still reads.
+        let bare_cache = tempdir().unwrap();
+        let bare_writer = tempdir().unwrap();
+        let bare_backend = std::sync::Arc::new(crate::MemBackend::new(bare_cache.path()));
+        {
+            let l = FactLedger::open_with_backend_and_seal_threshold(
+                bare_writer.path(),
+                bare_backend.clone(),
+                1,
+            )
+            .unwrap();
+            l.append_object(&KirObject::new("widgets", ObjectKind::Table))
+                .unwrap();
+            // no sync_search_to_backend
+        }
+        let bare_root = tempdir().unwrap();
+        std::fs::create_dir_all(bare_root.path().join("indexes")).unwrap();
+        let br = FactLedger::open_read_only_with_backend(bare_root.path(), bare_backend).unwrap();
+        assert_eq!(br.object_count().unwrap(), 1);
+        assert!(br.find_objects("widgets").unwrap().is_empty());
     }
 
     #[test]

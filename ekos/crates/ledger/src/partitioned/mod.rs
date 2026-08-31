@@ -1460,6 +1460,25 @@ impl PartitionedLedger {
             .map(|e| e.tier)
     }
 
+    /// Publish every catalogued partition's `search/` index through its [`SegmentBackend`] (RFC
+    /// 0113 B4) so remote query workers can serve `find_objects` for object-storage partitions.
+    /// A no-op per partition when no backend is wired (`LocalFsBackend`). Returns the count.
+    /// Meant to run once after a compile, not per write.
+    pub fn publish_search_indexes(&self) -> Result<usize, PartitionError> {
+        let mut n = 0;
+        for key in self.catalog_partition_keys() {
+            let ledger = self.partition(&key, false)?;
+            ledger
+                .sync_search_to_backend()
+                .map_err(|source| PartitionError::Ledger {
+                    key: key.clone(),
+                    source,
+                })?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// The on-disk root of a catalogued partition, or `None` if the key isn't in the catalog.
     /// Used to enumerate `(partition, location)` pairs when registering an existing Local-mode
     /// workspace's partitions with a Distributed-mode coordinator (RFC 0113 B4).

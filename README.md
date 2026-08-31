@@ -646,8 +646,8 @@ as the fact-engine default.
   `build → recover → resolve → compile → commit` pipeline under a coordinator lease, then
   registers the partitions it wrote and commits the new generation;
 - **self-describing object-storage partitions** — `[storage.partition] segment-backend-url =
-  "s3://…"` routes each partition's sealed segments, `manifest.json` and `dict.bin` to S3/Azure;
-  only the active segment and a small `HEAD` watermark stay local to the writer;
+  "s3://…"` routes each partition's sealed segments, `manifest.json`, `dict.bin`, and search index
+  to S3/Azure; only the active segment and a small `HEAD` watermark stay local to the writer;
 - **query workers** (`ekos query-worker serve`) that pull a partition into a local cache and serve
   reads for it, and a **`DistributedLedger` gateway** that implements the same `KnowledgeStore`
   trait every command already uses — fanning reads across the workers and merging — so pointing a
