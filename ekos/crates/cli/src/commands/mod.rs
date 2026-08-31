@@ -20,6 +20,7 @@ pub mod ledger;
 pub mod marketing;
 pub mod mcp;
 pub mod query;
+pub mod query_log;
 pub mod recover;
 pub mod replay;
 pub mod resolve;

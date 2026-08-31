@@ -2710,7 +2710,31 @@ These items have no single phase — they must be maintained and grown throughou
       invariant question above) or Phase 5 (starting with the query-log scoping pass) whenever this
       work picks back up.
     - *Phase 5:* materialized views alongside the EAV fact engine — least-scoped so far, needs a
-      pass over real EKL/MCP query logs to find what's actually worth materializing.
+      pass over real EKL/MCP query logs to find what's actually worth materializing. **Groundwork
+      landed 2026-08-31 (RFC 0114)**: that prerequisite didn't exist — the only real query log
+      anywhere was RFC 0056's ClickHouse audit trail, scoped to that one live-external-system tool;
+      `ekos_ekl` and the other 13 read-only MCP tools had zero persisted call history. New
+      `crates/cli/src/commands/query_log.rs` appends one JSON line per call to
+      `<workspace>/.ekos/query-log.jsonl` — deliberately **not** RFC 0056's ledger-based
+      Evidence/Event pattern (usage telemetry isn't evidence, and a writable `FactLedger` open per
+      call would reintroduce the exact lock-contention/latency regression RFC 0097 fixed for the
+      13 tools that go through `StoreCache`'s read-only cache). A static, pre-execution heuristic
+      (`classify_ekl`/`classify_tool`) flags each call `Cheap`/`Expensive` from its own arguments
+      (EKL predicates/LIMIT, `depth`/`max_hops`, diff window size) purely to gate an opportunistic
+      **result cache** added to `StoreCache` — an `Expensive` call with identical arguments is
+      served from cache while the store's fingerprint hasn't changed, `ekos_clickhouse_query`
+      excluded (a live external system the fingerprint knows nothing about). The heuristic doesn't
+      have to be accurate for the log to be useful: every call's real measured `duration_ms` is
+      recorded regardless of its guessed class — that measured number, not `cost_class`, is what
+      the real Phase 5 scoping pass will eventually use. Found and fixed a real bug while wiring
+      cache invalidation: the first version only cleared the cache inside `StoreCache::get`, which
+      a cache-hit call never reaches — a `refresh()` fingerprint check now runs unconditionally
+      before every cache lookup. Test `expensive_tool_call_is_served_from_a_poisoned_cache_when_present`
+      deliberately poisons the cache to prove it's actually consulted (not silently bypassed), the
+      same technique the RFC 0113 gateway-pruning test used. Live-verified through the real
+      `ekos mcp serve`/`ekos ekl` binaries against a real workspace. Phase 5's actual
+      materialized-view design still waits for real accumulated log data — this only makes that
+      data start existing.
     - *Phase 6:* horizontal distribution — RFC 0034 (single-machine partitioning) and RFC 0110
       (horizontal distribution) were **merged 2026-08-27 into RFC 0111** (Under Review), one
       conformed design, per explicit user direction — both source RFCs are now Withdrawn, kept on

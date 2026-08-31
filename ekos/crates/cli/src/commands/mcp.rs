@@ -10,6 +10,7 @@
 //! The ledger is opened per `tools/call`, so the server starts before a first
 //! `ekos build` and returns a readable tool error until a ledger exists.
 
+use super::query_log;
 use super::store::{facts_dir, open_store, open_store_read_only, uses_fact_engine};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -48,6 +49,11 @@ use std::time::SystemTime;
 pub struct StoreCache {
     store: Option<Box<dyn KnowledgeStore>>,
     fingerprint: Option<SystemTime>,
+    /// RFC 0114 — process-local cache of `Expensive`-classified tool results, keyed by
+    /// `(tool, canonicalized-args-json)`. Cleared whenever `store` is reopened (the same
+    /// fingerprint check below), so a cached answer can never outlive the workspace state it was
+    /// computed against.
+    result_cache: std::collections::HashMap<(String, String), Value>,
 }
 
 impl StoreCache {
@@ -55,6 +61,7 @@ impl StoreCache {
         Self {
             store: None,
             fingerprint: None,
+            result_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -63,13 +70,37 @@ impl StoreCache {
     /// the very first call, and after any previous open attempt failed —
     /// `self.store` stays `None` until one succeeds).
     fn get(&mut self, config: &EkosConfig, workspace: &Path) -> Result<&dyn KnowledgeStore> {
+        self.refresh(config, workspace)?;
+        Ok(self.store.as_deref().expect("just set above"))
+    }
+
+    /// Reopens the store (and clears the RFC 0114 result cache) if the on-disk fingerprint has
+    /// moved since the last successful open — the same check `get` does, factored out so
+    /// `tools_call` can force it *before* consulting the result cache even on a call that turns
+    /// out to be a cache hit and so never calls `get` this round. Without this, a cache entry
+    /// would only ever get invalidated by a call that happened to miss — an entry that keeps
+    /// hitting would never notice the underlying store had changed underneath it.
+    fn refresh(&mut self, config: &EkosConfig, workspace: &Path) -> Result<()> {
         let root = store_root(config, workspace);
         let current = store_fingerprint(&root);
         if self.store.is_none() || current != self.fingerprint {
             self.store = Some(open_store_read_only(config, workspace)?);
             self.fingerprint = store_fingerprint(&root);
+            self.result_cache.clear();
         }
-        Ok(self.store.as_deref().expect("just set above"))
+        Ok(())
+    }
+
+    /// RFC 0114: a previously-cached result for this exact `(tool, args)` pair, if the store
+    /// hasn't changed underneath it since.
+    fn cached_result(&self, tool: &str, args_key: &str) -> Option<&Value> {
+        self.result_cache
+            .get(&(tool.to_string(), args_key.to_string()))
+    }
+
+    fn cache_result(&mut self, tool: &str, args_key: &str, result: Value) {
+        self.result_cache
+            .insert((tool.to_string(), args_key.to_string()), result);
     }
 }
 
@@ -380,9 +411,86 @@ fn base_tool_definitions() -> Vec<Value> {
     tools.as_array().cloned().unwrap_or_default()
 }
 
+/// Whether `tools_call` should consult/populate the result cache for this call. `ekos_clickhouse_query`
+/// is excluded even when classified `Expensive`: the store's on-disk fingerprint — the cache's
+/// only invalidation signal — knows nothing about whether the *live* ClickHouse database has
+/// changed since an identical question was last asked, so a cached answer there could go silently
+/// stale.
+fn is_cacheable(name: &str, cost_class: query_log::CostClass) -> bool {
+    cost_class == query_log::CostClass::Expensive && name != "ekos_clickhouse_query"
+}
+
+fn tool_ok(result: &Value) -> Value {
+    let text = serde_json::to_string_pretty(result)
+        .unwrap_or_else(|e| format!("serialization error: {e}"));
+    json!({ "content": [{ "type": "text", "text": text }], "isError": false })
+}
+
+fn tool_err(e: &anyhow::Error) -> Value {
+    json!({ "content": [{ "type": "text", "text": e.to_string() }], "isError": true })
+}
+
+/// Best-effort field-name heuristic for a tool result's "how many things came back" — used only
+/// for the RFC 0114 usage log, never for correctness. Not every tool's shape is covered; `None`
+/// just means the log entry omits `result_count`.
+fn estimate_result_count(result: &Value) -> Option<usize> {
+    for key in [
+        "count",
+        "changed_total",
+        "step_count",
+        "drift_count",
+        "crates_total",
+    ] {
+        if let Some(n) = result.get(key).and_then(Value::as_u64) {
+            return Some(n as usize);
+        }
+    }
+    for key in ["matches", "rows", "hops", "findings"] {
+        if let Some(arr) = result.get(key).and_then(Value::as_array) {
+            return Some(arr.len());
+        }
+    }
+    if let (Some(d), Some(p)) = (
+        result.get("dependents_count").and_then(Value::as_u64),
+        result.get("dependencies_count").and_then(Value::as_u64),
+    ) {
+        return Some((d + p) as usize);
+    }
+    None
+}
+
+/// RFC 0114: appends one usage-log entry. Best-effort — a logging failure must never fail the
+/// query it's describing, so any `io::Error` here is silently dropped.
+#[allow(clippy::too_many_arguments)]
+fn log_call(
+    config: &EkosConfig,
+    workspace: &Path,
+    tool: &str,
+    cost_class: query_log::CostClass,
+    reason: &str,
+    cache_hit: bool,
+    duration_ms: u128,
+    result: &Value,
+) {
+    let mut entry = query_log::LogEntry::new(tool, cost_class, reason);
+    entry.cache_hit = cache_hit;
+    entry.duration_ms = duration_ms;
+    entry.result_count = estimate_result_count(result);
+    let _ = query_log::record(&config.ekos_dir(workspace), &entry);
+}
+
 /// Execute a tools/call request. Tool failures (bad query, unknown id,
 /// missing ledger) are reported as `isError: true` results — readable by the
 /// agent — never as protocol errors.
+///
+/// RFC 0114: every read tool (everything except the two write-capable ones, which already record
+/// their own ledger Event) is classified `Cheap`/`Expensive` by a static heuristic *before*
+/// running — see `query_log::classify_tool`/`classify_ekl`. An `Expensive` call (other than
+/// `ekos_clickhouse_query`, which reads a live external system the workspace fingerprint knows
+/// nothing about) is served from `cache`'s process-local result cache on a repeat with identical
+/// arguments while the store hasn't changed; every call, cached or not, gets one usage-log entry
+/// with its *real measured* duration — the heuristic only gates caching, it is never the source of
+/// truth a later materialized-view scoping pass would use.
 fn tools_call(
     config: &EkosConfig,
     workspace: &Path,
@@ -398,15 +506,66 @@ fn tools_call(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
+    // The write-capable tools already record their own ledger Event and bypass `StoreCache`
+    // entirely — no usage-log entry (this log is scoped to reads, for materialized-view
+    // candidate-scoping) and no result cache (a write's result isn't a re-servable read).
+    if name == "ekos_identity_review" || name == "ekos_architecture_review" {
+        return match call_tool(config, workspace, name, &arguments, cache) {
+            Ok(result) => tool_ok(&result),
+            Err(e) => tool_err(&e),
+        };
+    }
+
+    let (cost_class, reason) = if name == "ekos_ekl" {
+        match arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .and_then(|q| ekl_parse(q).ok())
+        {
+            Some(ast) => query_log::classify_ekl(&ast),
+            None => (query_log::CostClass::Cheap, "unparsed".to_string()),
+        }
+    } else {
+        query_log::classify_tool(name, &arguments)
+    };
+    let cacheable = is_cacheable(name, cost_class);
+    let args_key = serde_json::to_string(&arguments).unwrap_or_default();
+
+    // Refresh (and, if the fingerprint moved, clear the result cache) *before* consulting it —
+    // otherwise a (tool, args) pair that keeps hitting would never notice the underlying store
+    // changed, since nothing else would trigger the fingerprint check on a hit-only path.
+    if let Err(e) = cache.refresh(config, workspace) {
+        return tool_err(&e);
+    }
+
+    if cacheable && let Some(cached) = cache.cached_result(name, &args_key) {
+        let result = cached.clone();
+        log_call(
+            config, workspace, name, cost_class, &reason, true, 0, &result,
+        );
+        return tool_ok(&result);
+    }
+
+    let start = std::time::Instant::now();
     match call_tool(config, workspace, name, &arguments, cache) {
         Ok(result) => {
-            let text = serde_json::to_string_pretty(&result)
-                .unwrap_or_else(|e| format!("serialization error: {e}"));
-            json!({ "content": [{ "type": "text", "text": text }], "isError": false })
+            let duration_ms = start.elapsed().as_millis();
+            if cacheable {
+                cache.cache_result(name, &args_key, result.clone());
+            }
+            log_call(
+                config,
+                workspace,
+                name,
+                cost_class,
+                &reason,
+                false,
+                duration_ms,
+                &result,
+            );
+            tool_ok(&result)
         }
-        Err(e) => {
-            json!({ "content": [{ "type": "text", "text": e.to_string() }], "isError": true })
-        }
+        Err(e) => tool_err(&e),
     }
 }
 
@@ -1571,6 +1730,123 @@ mod tests {
         assert_eq!(body["crates_total"], 1);
         assert_eq!(body["crates_classified"], 1);
         assert_eq!(body["score"], 1.0);
+    }
+
+    // ── RFC 0114: usage log + heuristic result cache ──────────────────────
+
+    #[test]
+    fn is_cacheable_excludes_clickhouse_even_when_classified_expensive() {
+        assert!(!is_cacheable(
+            "ekos_clickhouse_query",
+            query_log::CostClass::Expensive
+        ));
+        assert!(is_cacheable(
+            "ekos_architecture_evaluate",
+            query_log::CostClass::Expensive
+        ));
+        assert!(!is_cacheable("ekos_search", query_log::CostClass::Cheap));
+    }
+
+    #[test]
+    fn expensive_tool_call_is_served_from_a_poisoned_cache_when_present() {
+        // Proves the cache is actually consulted, not just correctness-preserving: a test that
+        // only checked the *right* answer still came back would pass even if caching were
+        // silently disabled. Deliberately poisoning the cache with a wrong value and getting it
+        // back is the only way to show the cache path is real — same technique as RFC 0113's
+        // gateway pruning test.
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let krate = KirObject::new("ekos-cli", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!("crates/cli"));
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger.append_object(&krate).unwrap();
+        }
+
+        let mut cache = StoreCache::new();
+        let line = req(
+            30,
+            "tools/call",
+            json!({ "name": "ekos_architecture_evaluate", "arguments": {} }),
+        );
+
+        // First call: real answer, and it must have populated the cache (this tool is always
+        // classified `Expensive`).
+        let resp = parse(&handle_message(&config, dir, &line, &mut cache).unwrap());
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["crates_total"], 1, "sanity: the real first answer");
+
+        // Poison the cache directly with an impossible value.
+        cache.cache_result(
+            "ekos_architecture_evaluate",
+            "{}",
+            json!({ "crates_total": 999, "poisoned": true }),
+        );
+
+        // Same request, same (unwritten-to) store: must come back poisoned, proving the cache —
+        // not a fresh recomputation — answered it.
+        let resp2 = parse(&handle_message(&config, dir, &line, &mut cache).unwrap());
+        let body2: Value =
+            serde_json::from_str(resp2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body2["crates_total"], 999, "must be served from the cache");
+        assert_eq!(body2["poisoned"], true);
+
+        // A real write changes the on-disk fingerprint, which must invalidate the cache — the
+        // next call recomputes for real instead of staying poisoned forever.
+        let krate2 = KirObject::new("ekos-runtime", ObjectKind::Custom("Crate".to_string()))
+            .with_property("path", serde_json::json!("crates/runtime"));
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger.append_object(&krate2).unwrap();
+        }
+        let resp3 = parse(&handle_message(&config, dir, &line, &mut cache).unwrap());
+        let body3: Value =
+            serde_json::from_str(resp3["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            body3["crates_total"], 2,
+            "a real write must invalidate the poisoned cache entry"
+        );
+        assert!(body3.get("poisoned").is_none());
+    }
+
+    #[test]
+    fn usage_log_records_one_entry_per_call_with_a_real_measured_duration() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger
+                .append_object(&ekos_kir::KirObject::new(
+                    "orders",
+                    ekos_kir::ObjectKind::Table,
+                ))
+                .unwrap();
+        }
+
+        let mut cache = StoreCache::new();
+        let line = req(
+            31,
+            "tools/call",
+            json!({ "name": "ekos_search", "arguments": { "query": "orders" } }),
+        );
+        parse(&handle_message(&config, dir, &line, &mut cache).unwrap());
+
+        let log_path = config.ekos_dir(dir).join("query-log.jsonl");
+        let contents = std::fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let entry: Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(entry["tool"], "ekos_search");
+        assert_eq!(entry["cost_class"], "cheap");
+        assert_eq!(entry["cache_hit"], false);
+        assert!(entry["duration_ms"].is_number());
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use super::query_log;
 use super::store::open_store;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
@@ -20,6 +21,10 @@ pub fn run(config: &EkosConfig, cwd: &Path, query: &str, json: bool) -> Result<(
     let runtime = Runtime::over(&*ledger);
     let interpreter = EklInterpreter::new(&runtime);
 
+    // RFC 0114: one usage-log entry per successful query, groundwork for a real materialized-view
+    // scoping pass (RFC 0080 Phase 5) — a one-shot CLI invocation has no server session to cache
+    // results across, so this only logs, it never caches.
+    let start = std::time::Instant::now();
     let result = match interpreter.execute(&ast) {
         Ok(r) => r,
         Err(e) => {
@@ -27,6 +32,11 @@ pub fn run(config: &EkosConfig, cwd: &Path, query: &str, json: bool) -> Result<(
             std::process::exit(1);
         }
     };
+    let (cost_class, reason) = query_log::classify_ekl(&ast);
+    let mut entry = query_log::LogEntry::new("ekos_ekl", cost_class, reason);
+    entry.duration_ms = start.elapsed().as_millis();
+    entry.result_count = Some(result.rows.len());
+    let _ = query_log::record(&config.ekos_dir(cwd), &entry);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&result.rows)?);

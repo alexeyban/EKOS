@@ -417,9 +417,13 @@ RFC 0065/0068 §55/RFC 0107-0108), and `ekos_identity_review`/`ekos_architecture
 reject a cross-system identity match, or an LLM-classified crate role claim — RFC 0029/RFC 0109,
 the two write-capable tools; every other tool reads only the local ledger). Long-lived server
 sessions reuse one cached, read-only ledger handle across calls without ever blocking a concurrent
-`ekos build`/`commit` in another process (RFC 0097). A gated `ekos_clickhouse_query` tool (RFC
-0056) is also available, off by default — see the ClickHouse connector section below. Connect
-Claude Code with:
+`ekos build`/`commit` in another process (RFC 0097). Every read tool (and `ekos ekl` run from the
+CLI) appends one line to `.ekos/query-log.jsonl` — a real usage log the previous designs had no
+equivalent of, groundwork for a future materialized-views pass (RFC 0114); a static heuristic
+classifies each call cheap/expensive from its own arguments and opportunistically caches an
+expensive one's result for an identical repeat while the workspace hasn't changed underneath it. A
+gated `ekos_clickhouse_query` tool (RFC 0056) is also available, off by default — see the
+ClickHouse connector section below. Connect Claude Code with:
 
 ```bash
 claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace

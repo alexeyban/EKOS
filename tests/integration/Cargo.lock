@@ -781,6 +781,7 @@ dependencies = [
  "ekos-segment-backend",
  "ekos-semantic",
  "ekos-simulation",
+ "serde",
  "serde_json",
  "serde_yaml",
  "tokio",
