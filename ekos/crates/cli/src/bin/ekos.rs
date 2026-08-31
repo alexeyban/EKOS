@@ -55,6 +55,12 @@ enum Commands {
     Clean,
     /// Check the environment and configuration
     Doctor,
+    /// Show ledger entry count and object count (top-level alias for `ekos ledger status`)
+    Status {
+        /// Also report per-component storage sizes (RFC 0015)
+        #[arg(long)]
+        storage: bool,
+    },
     /// Query the knowledge ledger
     Query {
         #[command(subcommand)]
@@ -336,11 +342,15 @@ enum ArtifactCommands {
 
 #[derive(Subcommand)]
 enum McpCommands {
-    /// Serve MCP over stdio (newline-delimited JSON-RPC 2.0)
+    /// Serve MCP over stdio (newline-delimited JSON-RPC 2.0), or optionally also over TCP
     Serve {
         /// Workspace directory containing .ekos/ (default: current directory)
         #[arg(long, value_name = "DIR")]
         workspace: Option<PathBuf>,
+        /// Also/instead serve over TCP at this address (RFC 0115), e.g. 127.0.0.1:7331 —
+        /// unauthenticated, bind a trusted network/loopback only
+        #[arg(long, value_name = "ADDR")]
+        tcp: Option<String>,
     },
 }
 
@@ -463,6 +473,7 @@ async fn main() -> Result<()> {
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor => ekos::commands::doctor::run(&config, &cwd, &config_path),
+        Commands::Status { storage } => ekos::commands::ledger::status(&config, &cwd, storage),
         Commands::Query { subcommand } => match subcommand {
             QueryCommands::Object { id, format } => {
                 ekos::commands::query::object(&config, &cwd, &id, &format)
@@ -495,9 +506,9 @@ async fn main() -> Result<()> {
             BranchCommands::Delete { name } => ekos::commands::branch::delete(&config, &cwd, &name),
         },
         Commands::Mcp { subcommand } => match subcommand {
-            McpCommands::Serve { workspace } => {
+            McpCommands::Serve { workspace, tcp } => {
                 let workspace = workspace.or(env_workspace).unwrap_or_else(|| cwd.clone());
-                ekos::commands::mcp::run(&config, &workspace)
+                ekos::commands::mcp::run(&config, &workspace, tcp.as_deref())
             }
         },
         Commands::Artifact { subcommand } => match subcommand {

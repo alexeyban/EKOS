@@ -1,18 +1,24 @@
-//! MCP (Model Context Protocol) server over stdio — RFC 0013.
+//! MCP (Model Context Protocol) server over stdio or TCP — RFC 0013 / RFC 0115.
 //!
-//! Speaks newline-delimited JSON-RPC 2.0 on stdin/stdout and exposes the
-//! read-only Runtime as MCP tools (`ekos_search`, `ekos_ekl`,
-//! `ekos_neighborhood`, `ekos_state`, `ekos_dependents`, `ekos_impact`,
-//! `ekos_diff`, `ekos_status`, `ekos_transformation_explain`,
-//! `ekos_transformation_diff` — RFC 0028). Stdout carries protocol frames
-//! only; logging must go to stderr (see `init_logging_stderr`).
+//! Speaks newline-delimited JSON-RPC 2.0 and exposes the read-only Runtime as MCP tools
+//! (`ekos_search`, `ekos_ekl`, `ekos_neighborhood`, `ekos_state`, `ekos_dependents`, `ekos_impact`,
+//! `ekos_diff`, `ekos_status`, `ekos_transformation_explain`, `ekos_transformation_diff` — RFC
+//! 0028). Two transports, one dispatch core:
+//!
+//! - **stdio** (default, unchanged since RFC 0013) — one client, spawned by an agent host that
+//!   owns the process's stdin/stdout itself (`claude mcp add ekos -- ekos mcp serve`). Stdout
+//!   carries protocol frames only; logging must go to stderr (see `init_logging_stderr`).
+//! - **TCP** (`--tcp <addr>`, RFC 0115) — a long-lived server multiple MCP-speaking tools can
+//!   connect to at once (Claude Code, PyCharm's AI chat, anything else), sharing one cached
+//!   read-only ledger handle instead of each cold-opening their own. Explicitly unauthenticated —
+//!   see the RFC's Security posture section; bind to a trusted network or `127.0.0.1` only.
 //!
 //! The ledger is opened per `tools/call`, so the server starts before a first
 //! `ekos build` and returns a readable tool error until a ledger exists.
 
 use super::query_log;
 use super::store::{facts_dir, open_store, open_store_read_only, uses_fact_engine};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
@@ -136,22 +142,95 @@ fn store_fingerprint(root: &Path) -> Option<SystemTime> {
         .max()
 }
 
-/// Blocking serve loop: one JSON-RPC message per line on stdin, one response
-/// per line on stdout. Exits cleanly on EOF (client disconnect).
-pub fn run(config: &EkosConfig, workspace: &Path) -> Result<()> {
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let mut cache = StoreCache::new();
-    for line in stdin.lock().lines() {
+/// Entry point for `ekos mcp serve`. `tcp`, when given, runs the RFC 0115 TCP transport at that
+/// address instead; `None` keeps the original RFC 0013 stdio-only behavior completely unchanged.
+pub fn run(config: &EkosConfig, workspace: &Path, tcp: Option<&str>) -> Result<()> {
+    match tcp {
+        Some(addr) => serve_tcp(config, workspace, addr),
+        None => {
+            let stdin = std::io::stdin();
+            let stdout = std::io::stdout();
+            let mut cache = StoreCache::new();
+            serve_messages(config, workspace, &mut cache, stdin.lock(), stdout.lock())
+        }
+    }
+}
+
+/// The shared dispatch loop (RFC 0115): reads one JSON-RPC message per line from `reader`, writes
+/// zero-or-one response lines to `writer`. Identical for stdio and TCP — the protocol has no idea
+/// which transport it's running over, or whether `cache` is this call's only user (stdio) or one
+/// of several independent per-connection caches (TCP — see `serve_tcp`).
+fn serve_messages(
+    config: &EkosConfig,
+    workspace: &Path,
+    cache: &mut StoreCache,
+    reader: impl BufRead,
+    mut writer: impl Write,
+) -> Result<()> {
+    for line in reader.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handle_message(config, workspace, &line, &mut cache) {
-            let mut out = stdout.lock();
-            writeln!(out, "{response}")?;
-            out.flush()?;
+        if let Some(response) = handle_message(config, workspace, &line, cache) {
+            writeln!(writer, "{response}")?;
+            writer.flush()?;
         }
+    }
+    Ok(())
+}
+
+/// RFC 0115: accepts TCP connections forever, one `std::thread::spawn`'d OS thread — and one
+/// independent `StoreCache` — per connection. Matches `handle_message`'s own fully synchronous,
+/// blocking design (blocking ledger reads, `std::thread::sleep` in `acquire_write_lock`'s retry)
+/// rather than mixing that into an async runtime task, which would starve other work on that
+/// executor thread instead. Each connection's cache is its own, not shared: `KnowledgeStore`
+/// doesn't declare `Send`, and every real implementor would need auditing before adding that bound
+/// could be done with confidence rather than papering over a real concurrency hazard — not
+/// something to bolt on as a side effect of a transport RFC. N concurrent clients means N
+/// independent cache opens, a real but accepted v1 cost (opening a read-only fact-engine handle is
+/// fast, RFC 0097), not a correctness compromise; sharing one cache safely is a real, separately
+/// scoped follow-on.
+///
+/// **No authentication of any kind** — anyone who can reach `addr` gets the same read surface
+/// stdio gives a spawning parent process, plus the two write-capable tools. Bind `127.0.0.1` or a
+/// trusted network only; see the RFC's Security posture section.
+fn serve_tcp(config: &EkosConfig, workspace: &Path, addr: &str) -> Result<()> {
+    let listener = std::net::TcpListener::bind(addr)
+        .with_context(|| format!("binding MCP TCP listener on {addr}"))?;
+    let bound = listener.local_addr()?;
+    tracing::info!(
+        %bound,
+        "MCP TCP server listening — RFC 0115, no authentication, trusted network only"
+    );
+    eprintln!(
+        "ekos mcp serve: listening on {bound} (TCP, unauthenticated — trusted network/localhost only)"
+    );
+
+    for stream in listener.incoming() {
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(%e, "mcp tcp: accept failed");
+                continue;
+            }
+        };
+        let peer = stream.peer_addr().ok();
+        let config = config.clone();
+        let workspace = workspace.to_path_buf();
+        std::thread::spawn(move || {
+            let reader = match stream.try_clone() {
+                Ok(s) => std::io::BufReader::new(s),
+                Err(e) => {
+                    tracing::warn!(%e, ?peer, "mcp tcp: cannot clone stream for reading");
+                    return;
+                }
+            };
+            let mut cache = StoreCache::new();
+            if let Err(e) = serve_messages(&config, &workspace, &mut cache, reader, &stream) {
+                tracing::debug!(%e, ?peer, "mcp tcp: connection ended");
+            }
+        });
     }
     Ok(())
 }
@@ -2514,5 +2593,101 @@ mod tests {
                 .unwrap()
                 .contains("not found")
         );
+    }
+
+    /// RFC 0115: `serve_messages` is the shared dispatch loop stdio and TCP both go through —
+    /// exercise it directly against in-memory buffers (no real socket needed) and confirm it
+    /// behaves exactly like calling `handle_message` line-by-line: one response line per request,
+    /// nothing written for a notification.
+    #[test]
+    fn serve_messages_dispatches_one_response_line_per_request() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cache = StoreCache::new();
+
+        let input = format!(
+            "{}\n{}\n{}\n",
+            req(1, "initialize", json!({ "protocolVersion": "2025-03-26" })),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            req(2, "tools/list", json!({})),
+        );
+        let mut output = Vec::new();
+        serve_messages(
+            &config,
+            tmp.path(),
+            &mut cache,
+            input.as_bytes(),
+            &mut output,
+        )
+        .unwrap();
+
+        let lines: Vec<&str> = std::str::from_utf8(&output)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .collect();
+        assert_eq!(lines.len(), 2, "the notification must not produce a line");
+        assert_eq!(parse(lines[0])["id"], 1);
+        assert_eq!(parse(lines[0])["result"]["serverInfo"]["name"], "ekos");
+        assert_eq!(parse(lines[1])["id"], 2);
+        assert!(parse(lines[1])["result"]["tools"].is_array());
+    }
+
+    /// RFC 0115: two real concurrent TCP clients against one `serve_tcp` listener each get their
+    /// own correct, uninterleaved responses — proving connections are genuinely isolated (each its
+    /// own thread, its own `StoreCache`) rather than serializing or corrupting each other's output.
+    #[test]
+    fn tcp_transport_serves_two_concurrent_clients_independently() {
+        use std::io::{BufRead as _, BufReader};
+        use std::net::TcpStream;
+
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().to_path_buf();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let stream = match stream {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let config = config.clone();
+                let workspace = workspace.clone();
+                std::thread::spawn(move || {
+                    let reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut cache = StoreCache::new();
+                    let _ = serve_messages(&config, &workspace, &mut cache, reader, &stream);
+                });
+            }
+        });
+
+        let mut client_a = TcpStream::connect(addr).unwrap();
+        let mut client_b = TcpStream::connect(addr).unwrap();
+        writeln!(client_a, "{}", req(10, "tools/list", json!({}))).unwrap();
+        writeln!(client_b, "{}", req(20, "tools/list", json!({}))).unwrap();
+
+        let mut line_a = String::new();
+        BufReader::new(&mut client_a)
+            .read_line(&mut line_a)
+            .unwrap();
+        let mut line_b = String::new();
+        BufReader::new(&mut client_b)
+            .read_line(&mut line_b)
+            .unwrap();
+
+        let resp_a = parse(&line_a);
+        let resp_b = parse(&line_b);
+        assert_eq!(
+            resp_a["id"], 10,
+            "client A must get its own response, not client B's"
+        );
+        assert_eq!(
+            resp_b["id"], 20,
+            "client B must get its own response, not client A's"
+        );
+        assert!(resp_a["result"]["tools"].is_array());
+        assert!(resp_b["result"]["tools"].is_array());
     }
 }

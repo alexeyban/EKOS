@@ -1478,8 +1478,9 @@ with real or vendor-supplied sandbox credentials.
 
 - [ ] **Additional connectors on demand**
   - *What:* Placeholder for connectors requested after Phase 14 ships (Jira, Confluence full
-    connector, ServiceNow, dbt, etc.). Each follows the same pattern: RFC → SDK impl →
-    integration test → docs.
+    connector, ServiceNow, etc.). Each follows the same pattern: RFC → SDK impl →
+    integration test → docs. dbt's own project metadata (not a live-connector shape — see RFC
+    0117 below) is already covered.
   - *Output:* Tracked as individual issues/tickets; this item is the backlog bucket.
   - *Test/Validate:* Each connector added here must ship with a passing integration test before merge.
 
@@ -2950,8 +2951,49 @@ are excluded — see the full exclusion list in the planning history if needed.
   be the one extension that actually breaks EKL's flat-clause-type design, deferred as its own
   future RFC.
 
-- [ ] **MCP / connector infrastructure**: MCP HTTP/SSE transport + auth + multi-workspace routing,
-  and MCP resources/prompts capabilities beyond tools-only (RFC 0013); generic
+- [x] **MCP TCP transport** — RFC 0115 (2026-08-31). `ekos mcp serve --tcp <addr>` accepts NDJSON
+  JSON-RPC 2.0 connections over plain TCP (the same pattern as `coordinator serve`/`query-worker
+  serve`, RFC 0113 B3/B4) alongside the original RFC 0013 stdio transport, which is unchanged and
+  stays the default. Lets more than one MCP-speaking tool (PyCharm's AI chat, another agent host, a
+  second Claude Code session) connect to one already-running server instead of each needing its own
+  spawned `ekos mcp serve` process. `handle_message`'s dispatch core was already transport-agnostic;
+  a new shared `serve_messages` loop and `serve_tcp` (one `std::thread::spawn`'d OS thread per
+  connection, matching `handle_message`'s own blocking design) are the only new code. Each
+  connection gets its **own** `StoreCache` rather than one shared across connections — sharing was
+  the original plan but requires `KnowledgeStore: Send`, which the trait doesn't declare and no
+  implementor (`Ledger`, `FactLedger`, `PartitionedLedger`, `DistributedLedger`) has been audited
+  for; not worth doing as a side effect of a transport RFC. No authentication/TLS — opt-in only,
+  loopback/trusted-network use only, same v1 posture RFC 0113's own TCP servers already have.
+
+- [x] **Top-level `ekos status` CLI alias** — RFC 0116 (2026-08-31). `ekos status [--storage]`
+  dispatches to the exact same `ledger::status` function `ekos ledger status` already calls — added
+  after a real VS Code AI chat, connected over the new MCP TCP transport, recommended running
+  `ekos status` (guessing from the `ekos_status` MCP tool name) and hit "unrecognized subcommand."
+  `ekos ledger status` is unchanged and stays supported; no relationship-count parity with the MCP
+  tool attempted (explicitly declined scope).
+
+- [x] **dbt project metadata analyzer** — RFC 0117 (2026-08-31). `ekos recover` now extracts real
+  `Table` objects from a dbt project's own checked-in files — `models/**/*.sql` (one model per
+  file, regardless of YAML documentation) and `sources[].tables[]` YAML entries (no `.sql` file
+  backs a source) — with `ref()`/`source()` macro calls becoming real `DependsOn` edges. Static
+  only: no live warehouse connection, no `manifest.json`/`catalog.json` (both confirmed gitignored
+  `dbt/target/` build artifacts on a real project) — dbt itself can point at any database, so the
+  only stable, version-controlled source of truth is dbt's own project files. `ObjectKind::Table`
+  used deliberately, not a new `Custom(_)` kind, so `DefaultResolver`'s real column-Jaccard scoring
+  can fuse a dbt-derived table with an independently-discovered DDL table of the same name — the
+  same identity-resolution pattern the SQLAlchemy-ORM-to-`Table` precedent (RFC 0091) already
+  established. Live-verified end to end against a real Databricks/dbt project (medallion
+  bronze/silver/gold/semantic layers): real `Table` objects for `silver_customer`/`bronze_actor`/
+  etc., real `DependsOn` edges matching every `ref()`/`source()` call in the actual SQL (including
+  one on line 48 of a 90-line model, not just the obvious top-of-file ones), and RFC 0094's
+  `concentration_risks` pass immediately picked up `silver_customer` as a real risk once its
+  dependents existed. Column lists from `schema.yml` are honestly partial (only documented/tested
+  columns), never fabricated; unresolvable `ref()`s (cross-package, into gitignored
+  `dbt_packages/`) are skipped, not guessed at.
+
+- [ ] **MCP / connector infrastructure**: MCP auth + multi-workspace routing, and MCP resources/prompts
+  capabilities beyond tools-only (RFC 0013); an HTTP/SSE transport as a *second* transport option
+  alongside RFC 0115's plain-TCP one, if a browser-based client ever needs it; generic
   `ScanContext`/`ekos.toml [connectors.X]` config plumbing — confirmed missing for every
   connector, not just crypto (RFC 0017); dynamic/runtime plugin loading (`.so`/WASM) — RFC 0031
   itself calls this "a known limitation, not solved here" (RFC 0006, RFC 0031).

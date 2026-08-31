@@ -8,13 +8,13 @@ use ekos_compiler_core::{
 use ekos_recovery::{
     ArchitectureReasoningPass, ArchitectureReasoningStats, CicdAnalyzerPass,
     ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
-    DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass, DocumentSemanticsStats,
-    ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass, JavaScriptAnalyzerPass,
-    JavaScriptStats, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, OpenAiProvider,
-    PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass, PythonStats,
-    RustAnalyzerPass, RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
-    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
-    llm::LlmProvider, resolve_dialect_name,
+    DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
+    DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
+    JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
+    OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass,
+    PythonStats, RustAnalyzerPass, RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass,
+    SqlTransformStats, anthropic::AnthropicProvider, build_dialect_registry,
+    cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -616,9 +616,107 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(cicd_pass));
     }
 
+    // ── dbt project(s) (RFC 0117) ───────────────────────────────────────────
+    // Static extraction only: no live warehouse connection, no `manifest.json`/`catalog.json`
+    // (both live under `dbt/target/`, confirmed gitignored on a real inspected project) — dbt
+    // itself can point at any database, so the only stable, version-controlled source of truth is
+    // dbt's own checked-in project files (model `.sql` bodies + `schema.yml`/`sources.yml`-shaped
+    // YAML under `models/`). Gated on finding a `dbt_project.yml` marker, the same
+    // "walk `observe_paths` for a marker file directly" pattern `crate_topology_analyzer`
+    // (`Cargo.toml`) and `cicd_analyzer` (`.github/workflows/*.yml`) already use — one
+    // `DbtAnalyzerPass` per discovered project, so a monorepo with more than one dbt project
+    // never mixes their model namespaces.
+    for base in &observe_paths {
+        let project = ekos_common::project::project_key_for_base(base, cwd);
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_str().unwrap_or("");
+                    return !ignore.iter().any(|p| name == p.as_str());
+                }
+                true
+            })
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "dbt_project.yml" {
+                continue;
+            }
+            let Some(dbt_dir) = entry.path().parent().map(Path::to_path_buf) else {
+                continue;
+            };
+            let dbt_dir_rel = dbt_dir.strip_prefix(base).unwrap_or(&dbt_dir);
+            let dbt_root = ekos_common::project::project_qualify(
+                &dbt_dir_rel.to_string_lossy().replace('\\', "/"),
+                if project.is_empty() {
+                    None
+                } else {
+                    Some(project.as_str())
+                },
+            );
+
+            let mut dbt_yml_files: Vec<(String, String)> = Vec::new();
+            let mut dbt_sql_files: Vec<(String, String)> = Vec::new();
+            for m_entry in WalkDir::new(dbt_dir.join("models"))
+                .follow_links(false)
+                .into_iter()
+                .filter_entry(|e| {
+                    if e.file_type().is_dir() {
+                        let name = e.file_name().to_str().unwrap_or("");
+                        return !ignore.iter().any(|p| name == p.as_str());
+                    }
+                    true
+                })
+            {
+                let Ok(m_entry) = m_entry else { continue };
+                if !m_entry.file_type().is_file() {
+                    continue;
+                }
+                let path = m_entry.path();
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase);
+                let is_sql = ext.as_deref() == Some("sql");
+                let is_yaml = matches!(ext.as_deref(), Some("yml") | Some("yaml"));
+                if !is_sql && !is_yaml {
+                    continue;
+                }
+                let rel = path.strip_prefix(&dbt_dir).unwrap_or(path);
+                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                if ekos_common::redaction::is_excluded_path(&rel_str, &redaction_config) {
+                    tracing::debug!(path = %rel_str, "skipping: matched security exclusion pattern");
+                    continue;
+                }
+                let content = match std::fs::read_to_string(path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("cannot read {}: {e}", path.display());
+                        continue;
+                    }
+                };
+                let content = ekos_common::redaction::redact(&content, &redaction_config);
+                if is_sql {
+                    dbt_sql_files.push((rel_str, content));
+                } else {
+                    dbt_yml_files.push((rel_str, content));
+                }
+            }
+
+            if !dbt_sql_files.is_empty() || !dbt_yml_files.is_empty() {
+                pass_manager.register(Box::new(DbtAnalyzerPass::new(
+                    dbt_root,
+                    dbt_yml_files,
+                    dbt_sql_files,
+                )));
+            }
+        }
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, or CI/CD workflows found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, CI/CD workflows, or dbt projects found)."
         );
         return Ok(());
     }

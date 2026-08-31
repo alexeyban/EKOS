@@ -696,6 +696,7 @@ dependencies = [
  "oxc_parser",
  "oxc_span",
  "proc-macro2",
+ "regex",
  "reqwest",
  "roxmltree",
  "rustpython-ast",

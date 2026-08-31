@@ -200,6 +200,20 @@ reading required. `Unmapped` is deliberate, not a gap swept under the rug: anyth
 parsed is still recorded as evidenced fact ("something is here, not yet understood"), never
 silently dropped.
 
+### dbt metadata extraction (RFC 0117)
+
+dbt can point at any warehouse, so `ekos recover` extracts real `Table` objects from a dbt
+project's own checked-in metadata rather than a live database connection — never `manifest.json`/
+`catalog.json` either, since both are `dbt/target/` build artifacts, gitignored in every real
+project inspected while designing this. One `Table` per `models/**/*.sql` file (a model exists the
+moment its `.sql` file does, regardless of whether any YAML documents it) and one per declared
+`sources[].tables[]` entry (no `.sql` file backs a source — it's a pre-existing table dbt only
+references). `ref()`/`source()` macro calls in each model's raw SQL become real `DependsOn`
+relationships, resolved against the models/sources found in that same dbt project; an unresolvable
+reference (e.g. into an installed, gitignored `dbt_packages/`) is honestly skipped, never
+fabricated. Declared `schema.yml` columns are merged in as-is — explicitly partial, since dbt
+projects typically only document tested/described columns, not every column a model produces.
+
 The same real-world entity observed under different names across systems (Informix `cust_mstr`,
 Postgres `customers`, Databricks `gold.dim_customer`) can be linked too: `ekos identity scan`
 scores candidate cross-system matches (column overlap, naming-pattern similarity, type
@@ -432,6 +446,59 @@ claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /p
 The server also honors `EKOS_WORKSPACE` and `EKOS_CONFIG` environment variables, so a
 registration can be path-free: `claude mcp add ekos --env EKOS_WORKSPACE=/path/to/workspace -- ekos mcp serve`.
 
+#### TCP transport — one server, multiple clients (RFC 0115)
+
+Stdio mode spawns a fresh `ekos mcp serve` process (and a fresh cached ledger handle) per client,
+which is fine for one tool but wasteful the moment a second one wants to talk to the same
+workspace — a second Claude Code session, PyCharm's AI chat, or any other MCP-speaking tool.
+`--tcp <addr>` starts a second, additive transport on the same command: a plain NDJSON-over-TCP
+socket that any number of clients can connect to concurrently, each getting its own
+`std::thread::spawn`'d connection and its own independent cached ledger handle (not shared across
+connections — RFC 0115's Concurrency model section explains why). Stdio stays the default and is
+completely unaffected when `--tcp` is omitted; passing it just adds the second transport alongside.
+
+**Local — multiple tools on the same machine.** Bind loopback and point every local tool at it:
+
+```bash
+ekos mcp serve --workspace /path/to/workspace --tcp 127.0.0.1:7331
+```
+
+Any MCP client on that machine that supports connecting to a raw TCP socket (rather than spawning
+its own subprocess) points at `127.0.0.1:7331` instead of a spawn command. Verify the server is
+actually answering before wiring up a client:
+
+```bash
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}\n' \
+  | nc 127.0.0.1 7331
+```
+
+A one-line JSON-RPC response (`"serverInfo":{"name":"ekos", ...}`) confirms the server is up and
+speaking the protocol correctly.
+
+**Remote — a client on a different machine.** There is **no authentication or TLS** on this
+transport (RFC 0115's explicit v1 scope) — binding an externally-reachable address exposes the same
+read surface stdio gives a spawning parent process, plus the two write-capable tools, to anyone who
+can reach it. Two safe ways to do this:
+
+- **Trusted private network only**, if the workspace machine and every client already sit on one
+  (e.g. a home LAN, a VPN, a locked-down VPC): bind the interface facing that network instead of
+  loopback, e.g. `ekos mcp serve --workspace /path/to/workspace --tcp 0.0.0.0:7331`, and firewall
+  the port to that network explicitly — never expose it to the open internet.
+- **SSH tunnel (recommended for anything crossing an untrusted network)**, keeping the server itself
+  bound to loopback on its own machine:
+  ```bash
+  # on the workspace machine
+  ekos mcp serve --workspace /path/to/workspace --tcp 127.0.0.1:7331
+
+  # on the client machine
+  ssh -N -L 7331:127.0.0.1:7331 user@workspace-host
+  ```
+  The client then connects to its own `127.0.0.1:7331`, tunneled over SSH's encrypted, authenticated
+  channel — the EKOS server itself never has to bind or trust anything beyond loopback.
+
+Both `EKOS_WORKSPACE`/`EKOS_CONFIG` env vars and `--config` still apply the same way they do for
+stdio mode; `--tcp` only changes how clients connect, not which workspace is served.
+
 ### Marketing agent (RFC 0030)
 
 `ekos marketing publish [devlog]` turns a `devlog_N.md` into a human-approved X (Twitter) release
@@ -591,10 +658,13 @@ Workspaces created before RFC 0015 can be shrunk in place (both commands verify 
 touching anything and leave backups):
 
 ```bash
-ekos ledger status --storage   # per-component size report
+ekos ledger status --storage   # per-component size report (or the shorter `ekos status --storage`)
 ekos ledger migrate            # ledger v1 → v2: dictionary-zstd payloads (~2.5x smaller)
 ekos artifact repack           # loose JSON files → packed segments (~7x smaller on disk)
 ```
+
+`ekos status [--storage]` (RFC 0116) is a top-level alias for `ekos ledger status` — same output,
+shorter to type; both forms stay supported.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 
