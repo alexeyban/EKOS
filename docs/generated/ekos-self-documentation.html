@@ -4,17 +4,48 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EKOS, Documented by Itself — EKOS</title>
-<meta name="description" content="ekos docs generate --layout curated and --layout solution-architect, run against EKOS's own real ~50-crate workspace — architecture summary, risk concentration, undocumented-code counts, and a first-day onboarding path, all compiled, none hand-written.">
+<meta name="description" content="The complete, human-readable EKOS capability reference: the compile pipeline, every connector, knowledge recovery and identity resolution, the storage/ledger stack (SQLite → fact engine → partitioned → distributed), documentation generation, architecture reasoning, MCP/AI agent access, EKL, the marketing agent, World Engine simulation, and the ClickHouse connector — kept current after every devlog.">
 <link rel="stylesheet" href="../assets/theme.css">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <style>
-  .wrap{ max-width:64rem; margin:0 auto; padding:5rem 6vw 7rem; }
+  .wrap{ max-width:68rem; margin:0 auto; padding:5rem 6vw 7rem; }
   .kicker{ display:flex; align-items:center; gap:0.7rem; font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.78rem; color:var(--ink-soft); margin-bottom:1.2rem; }
   .kicker .dot{ width:7px;height:7px;border-radius:50%; background:var(--accent-b); box-shadow:0 0 0 3px var(--glow-b); }
-  h1{ font-size:clamp(2rem,4.4vw,3.1rem); max-width:22ch; }
+  h1{ font-size:clamp(2rem,4.4vw,3.1rem); max-width:26ch; }
   .sub{ margin-top:1rem; }
-  section.block{ margin-top:4.4rem; }
-  section.block h2{ font-size:clamp(1.5rem,2.6vw,1.9rem); }
+
+  /* on-this-page nav */
+  .toc{ display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:2.4rem; padding-top:1.8rem; border-top:1px solid var(--rule); }
+  .toc a{
+    font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.76rem; text-decoration:none;
+    color:var(--ink-soft); border:1px solid var(--rule); border-radius:6px; padding:0.4rem 0.7rem;
+    background:var(--ground-raised); transition:border-color 0.15s ease, color 0.15s ease;
+  }
+  .toc a:hover{ border-color:var(--accent-a); color:var(--ink); }
+
+  section.cap{ margin-top:5rem; scroll-margin-top:2rem; padding-top:0.2rem; border-top:1px solid var(--rule); }
+  section.cap:first-of-type{ border-top:none; }
+  .cap-num{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem; color:var(--ink-soft); letter-spacing:0.06em; }
+  section.cap h2{ font-size:clamp(1.5rem,2.8vw,2.1rem); margin-top:0.5rem; max-width:30ch; }
+  section.cap > p.lede{ font-size:1rem; margin-top:1.1rem; max-width:56rem; }
+  .status-row{ display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:1rem; }
+
+  .feat-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:1.4rem; margin-top:1.8rem; }
+  .feat{ border:1px solid var(--rule); background:var(--ground-raised); border-radius:10px; padding:1.3rem 1.4rem; }
+  .feat h3{ font-size:1.02rem; }
+  .feat p{ margin:0.6rem 0 0; color:var(--ink-soft); font-size:0.88rem; line-height:1.55; }
+  .feat .rfc{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.68rem; color:var(--accent-a); margin-top:0.7rem; display:block; }
+
+  .tool-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(15.5rem,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden; margin-top:1.8rem; }
+  .tool-grid > div{ background:var(--ground); padding:0.9rem 1.05rem; }
+  .tool-grid .tn{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-weight:600; font-size:0.86rem; color:var(--accent-a); }
+  .tool-grid .td{ font-size:0.8rem; color:var(--ink-soft); margin-top:0.35rem; line-height:1.45; }
+  .tool-grid .td.write{ color:var(--bad); }
+
+  .stage-flow{ display:flex; flex-wrap:wrap; gap:0; margin-top:1.8rem; font-family: ui-monospace,"SF Mono",Consolas,monospace; }
+  .stage-flow .sf-node{ border:1px solid var(--rule); background:var(--ground-raised); padding:0.8rem 1.1rem; border-radius:8px; }
+  .stage-flow .sf-arrow{ display:flex; align-items:center; padding:0 0.5rem; color:var(--rule); }
+
   .kind-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden; margin-top:1.8rem; }
   .kind-grid > div{ background:var(--ground); padding:0.9rem 1rem; }
   .kind-grid .kv{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-weight:700; font-size:1.3rem; }
@@ -31,31 +62,213 @@
   .finding.mid{ border-left-color:var(--accent-a); }
   .finding .ft{ font-weight:600; font-size:0.98rem; }
   .finding .fb{ color:var(--ink-soft); font-size:0.9rem; margin-top:0.3rem; max-width:56ch; line-height:1.55; }
-  .path-table{ margin-top:1.6rem; }
   .quote{ border-left:2px solid var(--accent-b); padding-left:1.2rem; color:var(--ink-soft); font-size:0.95rem; margin-top:1.4rem; max-width:52ch; }
-  .backlinks{ display:flex; flex-wrap:wrap; gap:0.7rem; margin-top:1.6rem; }
+  .backlinks{ display:flex; flex-wrap:wrap; gap:0.7rem; margin-top:2rem; }
+  .stale-note{ margin-top:3.5rem; padding:1.1rem 1.3rem; border:1px dashed var(--rule); border-radius:10px; font-size:0.82rem; color:var(--ink-soft); }
 </style>
 </head>
 <body>
 
 <div class="wrap">
 
-  <div class="kicker"><span class="dot"></span> Generated, not hand-written &middot; ekos docs generate</div>
+  <div class="kicker"><span class="dot"></span> The complete capability reference · kept current after every devlog</div>
   <h1>EKOS, documented by the thing it documents</h1>
-  <p class="lede sub">Every number on this page comes from <code class="mono">ekos docs generate --layout curated</code>
-  and <code class="mono">--layout solution-architect</code>, run against EKOS's own real, currently-committed
-  ledger — the same commands and the same output shape any other project gets. Nothing below was written by hand;
-  where EKOS doesn't have a real answer yet (a project's stated purpose, its architecture style), the page says so
+  <p class="lede sub">Every capability below is real and shipped — grounded in the same RFCs and
+  source that implement it, cross-checked against <code class="mono">README.md</code> and
+  <code class="mono">CLAUDE.md</code>. Sections marked <strong>live, generated</strong> are also
+  rendered straight from <code class="mono">ekos docs generate</code>'s own output against this
+  repository's real, currently-committed ledger — nothing hand-typed there. Where EKOS doesn't have
+  a real answer to something yet, this page says so, the same way EKOS's own generated docs do,
   instead of guessing.</p>
 
-  <div class="hero-diagram" style="margin-top:2.2rem;">
-    <span class="chip mono">ekos build → recover → resolve → compile → commit</span><span class="sep">→</span>
-    <span class="chip hot mono">ekos docs generate --layout curated</span>
-  </div>
+  <nav class="toc" aria-label="On this page">
+    <a href="#pipeline">The pipeline</a>
+    <a href="#connectors">Connectors</a>
+    <a href="#recovery">Knowledge recovery</a>
+    <a href="#identity">Identity resolution</a>
+    <a href="#storage">Storage &amp; the ledger</a>
+    <a href="#docsgen">Documentation generation</a>
+    <a href="#architecture">Architecture reasoning</a>
+    <a href="#llmdesc">LLM-backed descriptions</a>
+    <a href="#rollups">Hierarchical rollups</a>
+    <a href="#mcp">AI agent access (MCP)</a>
+    <a href="#ekl">Query language (EKL)</a>
+    <a href="#marketing">Marketing agent</a>
+    <a href="#worldengine">World Engine simulation</a>
+    <a href="#clickhouse">ClickHouse connector</a>
+    <a href="#evidence">Live evidence from this repo</a>
+  </nav>
 
-  <section class="block">
-    <div class="eyebrow">Architecture summary</div>
-    <h2>16 real kinds, 5,533 compiled objects, 46 crates</h2>
+  <!-- ═══════════════════════════════════════════════ PIPELINE ═══ -->
+  <section class="cap" id="pipeline">
+    <div class="cap-num">01</div>
+    <h2>The compile pipeline</h2>
+    <p class="lede">EKOS is a <strong>compiler for enterprise knowledge</strong>, not a database or
+    document store. Five verbs, always run in this order, each one a real compiler stage that reads
+    the previous stage's artifacts and writes its own:</p>
+    <div class="stage-flow">
+      <div class="sf-node">ekos build</div><div class="sf-arrow">→</div>
+      <div class="sf-node">ekos recover</div><div class="sf-arrow">→</div>
+      <div class="sf-node">ekos resolve</div><div class="sf-arrow">→</div>
+      <div class="sf-node">ekos compile</div><div class="sf-arrow">→</div>
+      <div class="sf-node">ekos commit</div>
+    </div>
+    <div class="feat-grid">
+      <div class="feat"><h3>build</h3><p>Runs every configured connector's <code class="mono">Observer</code>, writes raw, content-addressable <code class="mono">ObservationArtifact</code>s. No interpretation — facts only. Secrets/PII are redacted at this boundary, unconditionally (RFC 0043).</p></div>
+      <div class="feat"><h3>recover</h3><p>Knowledge-recovery passes turn raw artifacts into typed KIR (Knowledge Intermediate Representation) — one analyzer per source kind (SQL, Pentaho, Python, Rust, git, GitHub, Confluence, documents, ClickHouse, crypto, crate/CI topology).</p></div>
+      <div class="feat"><h3>resolve</h3><p>Identity resolution merges same-source-kind duplicates when the match is an exact normalized name; anything fuzzy becomes a reviewable <code class="mono">unconfirmed</code> relationship instead of a silent, irreversible merge.</p></div>
+      <div class="feat"><h3>compile</h3><p>KIR + resolved identities → the Canonical Knowledge Model (CKM) — language/storage/AI-provider independent, the shared shape every backend and query surface reads.</p></div>
+      <div class="feat"><h3>commit</h3><p>Writes the CKM into the append-only Semantic Knowledge Ledger. Nothing is ever modified in place; every conclusion carries the evidence it was derived from.</p></div>
+    </div>
+    <p class="lede" style="font-size:0.92rem; margin-top:1.8rem;"><strong>Key invariants, enforced by review, not just convention:</strong> the Observation Layer never interprets meaning; the ledger is append-only; the Runtime is read-only; every semantic conclusion traces to Evidence; every compiler pass is deterministic and side-effect-free; every artifact is content-addressable; secrets/PII are never observed or stored.</p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ CONNECTORS ═══ -->
+  <section class="cap" id="connectors">
+    <div class="cap-num">02</div>
+    <h2>Connectors</h2>
+    <p class="lede">Each connector implements the same <code class="mono">Observer</code> trait — pull raw facts, no interpretation. Real and tested unless noted.</p>
+    <div class="feat-grid">
+      <div class="feat"><h3>File</h3><p>Any local filesystem tree, respecting <code class="mono">[observe] ignore-patterns</code>.</p></div>
+      <div class="feat"><h3>Git</h3><p>Full commit/contributor history as real <code class="mono">KirEvent</code>s.</p></div>
+      <div class="feat"><h3>GitHub</h3><p>Issues and PRs, live-verified against a real repo — 1,600 real items in one run.<span class="rfc">RFC 0020 / RFC 0062</span></p></div>
+      <div class="feat"><h3>Confluence</h3><p>Space/page content via the REST API.</p></div>
+      <div class="feat"><h3>Local documents</h3><p>PDF/DOCX/text/Markdown/HTML/email — text, tables, and image OCR.</p></div>
+      <div class="feat"><h3>Pentaho Kettle</h3><p><code class="mono">.ktr</code>/<code class="mono">.kjb</code> jobs compiled into the shared Transformation IR.<span class="rfc">RFC 0027</span></p></div>
+      <div class="feat"><h3>Python / PySpark</h3><p>Real AST parsing; DataFrame chains recovered into the Transformation IR; SQLAlchemy ORM models and class inheritance.<span class="rfc">RFC 0038 / 0040 / 0091 / 0092</span></p></div>
+      <div class="feat"><h3>Rust</h3><p>Real AST parsing and a real function-call graph (<code class="mono">Calls</code> edges).<span class="rfc">RFC 0041</span></p></div>
+      <div class="feat"><h3>JavaScript / TypeScript</h3><p><code class="mono">.js</code>/<code class="mono">.jsx</code>/<code class="mono">.ts</code>/<code class="mono">.tsx</code>/<code class="mono">.mjs</code>/<code class="mono">.cjs</code> source, structurally parsed.<span class="rfc">RFC 0085</span></p></div>
+      <div class="feat"><h3>Elixir</h3><p><code class="mono">.ex</code>/<code class="mono">.exs</code> modules and functions.<span class="rfc">RFC 0081</span></p></div>
+      <div class="feat"><h3>ClickHouse</h3><p>Live HTTP schema metadata plus an opt-in live NL-to-SQL query engine — see §14.<span class="rfc">RFC 0056</span></p></div>
+      <div class="feat"><h3>Crypto / DeFi export</h3><p>DeFi Sentinel Parquet exports.<span class="rfc">RFC 0017</span></p></div>
+      <div class="feat"><h3>Scaffolded (proof-of-concept only)</h3><p>Salesforce, SAP, Oracle, Microsoft Fabric, Snowflake — real API shapes, mock-tested, none yet exercised against a live account. PostgreSQL, SQL Server, and Jira remain planned.</p></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ RECOVERY ═══ -->
+  <section class="cap" id="recovery">
+    <div class="cap-num">03</div>
+    <h2>Knowledge recovery</h2>
+    <p class="lede">A Pentaho step, a SQL <code class="mono">SELECT</code>, a <code class="mono">VIEW</code>, and a stored procedure are all the same underlying concept — sources flowing through filter/join/aggregate/calculate operations to a sink. <code class="mono">ekos recover</code> compiles all of them into one shared <strong>Transformation IR</strong> (<code class="mono">Source</code>/<code class="mono">Filter</code>/<code class="mono">Join</code>/<code class="mono">Aggregate</code>/<code class="mono">Calculate</code>/<code class="mono">Sink</code>/<code class="mono">Unmapped</code>), so legacy ETL logic can be diffed against a newly drafted pipeline without hand-reading XML. <code class="mono">Unmapped</code> is deliberate: anything unparseable is still recorded as evidenced fact, never silently dropped.<span class="rfc">RFC 0027 / 0028 / 0029</span></p>
+    <p class="lede" style="margin-top:1.4rem;">Beyond raw SQL DDL, the Python analyzer recognizes real SQLAlchemy declarative models (<code class="mono">__tablename__</code> present) and compiles them into the same <code class="mono">Table</code> shape a <code class="mono">CREATE TABLE</code> produces — real columns, best-effort types, same-file <code class="mono">ForeignKey</code> resolution — plus real class inheritance as <code class="mono">Extends</code> edges.<span class="rfc">RFC 0091 / 0092</span></p>
+    <p class="lede" style="margin-top:1.4rem;">An opt-in <strong>document semantic memory</strong> pass reads local documents through an LLM to extract real <code class="mono">Concept</code> objects and their relationships, so the same idea mentioned across different documents becomes one findable, linkable thing — queryable through the exact same MCP tools as everything else, no new surface.<span class="rfc">RFC 0025 / 0026</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ IDENTITY ═══ -->
+  <section class="cap" id="identity">
+    <div class="cap-num">04</div>
+    <h2>Identity resolution</h2>
+    <p class="lede">The same real-world entity observed under different names across systems — Informix <code class="mono">cust_mstr</code>, Postgres <code class="mono">customers</code>, Databricks <code class="mono">gold.dim_customer</code> — can be linked. <code class="mono">ekos identity scan</code> scores candidate cross-system matches (column overlap, naming-pattern similarity, type compatibility) and writes them as <code class="mono">unconfirmed</code> relationships for human review via <code class="mono">ekos_identity_review</code> — never a silent auto-merge.<span class="rfc">RFC 0029 / 0063</span></p>
+    <p class="lede" style="margin-top:1.4rem;">Same-source duplicates (two <code class="mono">Table</code> objects both literally named <code class="mono">customers</code>) auto-merge only on an exact normalized-name match during <code class="mono">resolve</code>/<code class="mono">compile</code>; anything fuzzy goes through that same review flow instead — no confidence threshold on the underlying scoring formula reliably separates correct fuzzy merges from incorrect ones, so an irreversible auto-merge was judged unsafe as a default.</p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ STORAGE ═══ -->
+  <section class="cap" id="storage">
+    <div class="cap-num">05</div>
+    <h2>Storage &amp; the ledger</h2>
+    <p class="lede">Four backends, each a drop-in <code class="mono">KnowledgeStore</code> — every command, the MCP server, and <code class="mono">docs generate</code> work unchanged regardless of which one a workspace uses.</p>
+    <div class="feat-grid">
+      <div class="feat"><h3>SQLite (legacy)</h3><p>The original backend. Any pre-existing SQLite workspace keeps serving from SQLite forever unless explicitly migrated — never switched implicitly.</p></div>
+      <div class="feat"><h3>Fact-segment engine — default for new workspaces</h3><p>EAV facts, immutable signature-verified segments, tantivy full-text search, mmap'd reads. A real cross-process write lock (<code class="mono">fs4</code>), self-healing search index, <code class="mono">ledger repair</code>, and version-chain checkpoints for fast point-in-time reads.<span class="rfc">RFC 0016 / 0103–0106</span></p></div>
+      <div class="feat"><h3>Partitioned storage — opt-in</h3><p>Splits data across many independent fact-segment ledgers keyed by kind + time bucket, with a persisted catalog and run-file index so a reopened store resolves any object/relationship with zero partition scan; aged partitions tier to cold.<span class="rfc">RFC 0111 Phase A</span></p></div>
+      <div class="feat"><h3>Distributed (multi-machine) — opt-in</h3><p>A coordinator hands out fencing-tokened write leases; compile workers run the real pipeline under lease; self-describing object-storage partitions (S3/Azure); query workers + a pooled, concurrent, pruned <code class="mono">DistributedLedger</code> gateway fan reads across the cluster and merge them — including distributed BM25 search. Feature-complete at v1 scope.<span class="rfc">RFC 0113 Phase B</span></p></div>
+    </div>
+    <p class="lede" style="font-size:0.92rem; margin-top:1.6rem;"><code class="mono">ekos ledger status --storage</code>, <code class="mono">ekos ledger migrate</code>, and <code class="mono">ekos artifact repack</code> shrink an existing workspace in place (both verify before touching anything and leave backups).</p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ DOCS GEN ═══ -->
+  <section class="cap" id="docsgen">
+    <div class="cap-num">06</div>
+    <h2>Documentation generation</h2>
+    <p class="lede">Renders the compiled ledger straight into Markdown/HTML — zero LLM calls, every claim traceable to real compiled evidence, unless <code class="mono">--prose</code> is explicitly added.<span class="rfc">RFC 0035 / 0037 / 0042 / 0090 / 0094 / 0095</span></p>
+    <div class="feat-grid">
+      <div class="feat"><h3><code class="mono">--layout objects</code> (default)</h3><p>One page per significant compiled object, plus an index and an entity-relationship diagram.</p></div>
+      <div class="feat"><h3><code class="mono">--layout curated</code></h3><p><code class="mono">README.md</code>/<code class="mono">Architecture.md</code>/<code class="mono">API.md</code>/<code class="mono">SequenceDiagrams.md</code> — the shape a developer actually expects, with a real parsed crate/workspace dependency graph, CI/CD pipelines, an Architecture Confidence score, and Concentration-Risk findings.</p></div>
+      <div class="feat"><h3><code class="mono">--layout solution-architect</code></h3><p><code class="mono">DependencyRiskReport.md</code>/<code class="mono">OnboardingGuide.md</code>/<code class="mono">FindingsMemo.md</code> — a team-handoff bundle: declared-version risk, a first-day repository map, and an actionable findings list.</p></div>
+    </div>
+    <p class="lede" style="margin-top:1.6rem;"><code class="mono">--prose</code> (opt-in) layers an LLM-written overview onto each object page or the findings memo's executive summary, reusing <code class="mono">ekos ask</code>'s exact grounding+citation pipeline, with a token-cost estimate shown before any call — currently wired for <code class="mono">--layout objects</code> and <code class="mono">--layout solution-architect</code> only; combined with <code class="mono">--layout curated</code> it fails with a clear error rather than silently doing nothing (a real bug found and fixed live during this project's own self-hosted benchmark — see §15).</p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ ARCH REASONING ═══ -->
+  <section class="cap" id="architecture">
+    <div class="cap-num">07</div>
+    <h2>Architecture reasoning &amp; investigation loop</h2>
+    <p class="lede" style="max-width:56rem;"><code class="mono">ekos architecture investigate</code> runs an agentic loop: broad collection, deterministic crate-topology extraction, one batched LLM call classifying each crate's architectural role, a deterministic evaluator scoring completeness and evidence coverage (no LLM), and a targeted second pass for any crate still unclassified — stopping early once a quality threshold is met, always ending with a curated-docs run.<span class="rfc">RFC 0065 / 0066 / 0067</span></p>
+    <p class="lede" style="margin-top:1.2rem;">Because an LLM-classified role is a judgment call, not a deterministic fact, two follow-ons treat it accordingly: <code class="mono">ekos architecture diff --since &lt;t&gt;</code> does a real id-set comparison between two points in time (not a fuzzy match), and <code class="mono">ekos architecture review</code> lets a human confirm or reject a pending classification — both also exposed over MCP.<span class="rfc">RFC 0107 / 0108 / 0109</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ LLM DESC ═══ -->
+  <section class="cap" id="llmdesc">
+    <div class="cap-num">08</div>
+    <h2>LLM-backed compile-time descriptions</h2>
+    <p class="lede" style="max-width:56rem;">Unlike <code class="mono">--prose</code> above (render-time, re-spent every call), <code class="mono">[llm-description]</code> runs at <code class="mono">commit</code> time and persists real, evidence-grounded <code class="mono">ai_overview</code>/<code class="mono">ai_usage</code> properties straight into the ledger — queryable through EKL/<code class="mono">ekos ask</code>/MCP like any other compiled fact, not just rendered once. An <code class="mono">ai_comment_check</code> property flags a real discrepancy between an existing doc comment and what the code actually does (<code class="mono">consistent</code>/<code class="mono">stale</code>/<code class="mono">incomplete</code>) — never silently trusted or overwritten. Opt-in and cost-gated: a real call-count estimate is shown, and confirmation is required before any spend.<span class="rfc">RFC 0088</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ ROLLUPS ═══ -->
+  <section class="cap" id="rollups">
+    <div class="cap-num">09</div>
+    <h2>Hierarchical rollups</h2>
+    <p class="lede" style="max-width:56rem;">Every other context-saving mechanism in EKOS is <em>retrieval</em>-limiting — fewer raw facts, never a synthesized higher-level one. <code class="mono">ekos commit</code> also synthesizes deterministic, zero-LLM <code class="mono">Rollup</code> objects — one per directory subtree (crate-level by default) or per project in a multi-project estate — each carrying real member counts, a kind breakdown, and boundary-relationship counts, linked to every member via the same <code class="mono">Contains</code> relationship everything else uses. An agent asking about a whole subsystem gets one condensed, evidence-linked object instead of personally synthesizing meaning from dozens of raw facts.<span class="rfc">RFC 0044</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ MCP ═══ -->
+  <section class="cap" id="mcp">
+    <div class="cap-num">10</div>
+    <h2>AI agent access (MCP)</h2>
+    <p class="lede">The single read-only surface every AI agent — Claude Code among them — is meant to use instead of touching raw enterprise systems directly. <code class="mono">ekos mcp serve --workspace &lt;dir&gt;</code> exposes the Runtime over stdio (RFC 0013), with a per-server-session cached read-only ledger handle that never blocks a concurrent writer.<span class="rfc">RFC 0097</span></p>
+    <div class="tool-grid">
+      <div><div class="tn">ekos_search</div><div class="td">Full-text keyword search over compiled objects.</div></div>
+      <div><div class="tn">ekos_ekl</div><div class="td">Run an Enterprise Knowledge Language query — see §11.</div></div>
+      <div><div class="tn">ekos_neighborhood</div><div class="td">BFS graph traversal from an object.</div></div>
+      <div><div class="tn">ekos_state</div><div class="td">Reconstruct an object's full state — object, relationships, evidence.</div></div>
+      <div><div class="tn">ekos_dependents</div><div class="td">Single-hop impact analysis.</div></div>
+      <div><div class="tn">ekos_impact</div><div class="td">Directed, kind-filtered, multi-hop impact tracing.</div></div>
+      <div><div class="tn">ekos_diff</div><div class="td">Raw ledger-entry changes since a timestamp.</div></div>
+      <div><div class="tn">ekos_status</div><div class="td">Ledger health: entries, object/relationship counts, path.</div></div>
+      <div><div class="tn">ekos_transformation_explain / _diff</div><div class="td">Explain or diff a Transformation IR pipeline.</div></div>
+      <div><div class="tn">ekos_architecture_evaluate / _drift / _diff</div><div class="td">Completeness/evidence-coverage score, documentation drift, and a real architecture-level diff over time.</div></div>
+      <div><div class="tn td write">ekos_identity_review</div><div class="td write">Write-capable: confirm/reject a cross-system identity match.</div></div>
+      <div><div class="tn td write">ekos_architecture_review</div><div class="td write">Write-capable: confirm/reject an LLM-classified crate role claim.</div></div>
+      <div><div class="tn">ekos_clickhouse_query</div><div class="td">Gated, off by default — live NL-to-SQL. See §14.</div></div>
+    </div>
+    <p class="lede" style="font-size:0.9rem; margin-top:1.6rem;">Every read tool (and <code class="mono">ekos ekl</code> run from the CLI) appends one line to <code class="mono">.ekos/query-log.jsonl</code>; a static heuristic classifies each call cheap/expensive from its own arguments and opportunistically caches an expensive one's result for an identical repeat while the workspace hasn't changed underneath it.<span class="rfc">RFC 0114</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ EKL ═══ -->
+  <section class="cap" id="ekl">
+    <div class="cap-num">11</div>
+    <h2>Enterprise Knowledge Language (EKL)</h2>
+    <p class="lede" style="max-width:56rem;">A small purpose-built query language over the compiled ledger — <code class="mono">ekos ekl "FIND Object WHERE kind = 'Table' AND name CONTAINS 'order' ORDER BY name LIMIT 10"</code> — with point-in-time <code class="mono">AS OF &lt;timestamp&gt;</code> queries and <code class="mono">COUNT</code>/<code class="mono">GROUP BY</code> aggregation. Every result row carries the evidence it was derived from, the same as any other read path.<span class="rfc">RFC 0010 / 0096</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ MARKETING ═══ -->
+  <section class="cap" id="marketing">
+    <div class="cap-num">12</div>
+    <h2>Marketing agent</h2>
+    <p class="lede" style="max-width:56rem;"><code class="mono">ekos marketing publish [devlog]</code> turns a <code class="mono">devlog_N.md</code> into a human-approved X (Twitter) release announcement: classifies the devlog's importance, drafts a tweet through the same <code class="mono">LlmProvider</code> used elsewhere, validates it, asks for Y/N/E approval, and publishes via a real OAuth 1.0a-signed API call — with a posted-history file preventing the same devlog from ever being posted twice. Off by default; requires explicit Twitter credentials and an explicit opt-in flag.<span class="rfc">RFC 0030</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ WORLD ENGINE ═══ -->
+  <section class="cap" id="worldengine">
+    <div class="cap-num">13</div>
+    <h2>World Engine simulation <span style="font-size:0.6em; color:var(--ink-soft); font-weight:500;">(experimental, opt-in)</span></h2>
+    <p class="lede" style="max-width:56rem;">Auxiliary tooling built on the same ledger, kept deliberately separate from the compiler pipeline above: multi-agent scenarios with beliefs and goals, deterministic round-based decision-making with seed-reproducible conflict resolution, a <code class="mono">VirtualForum</code> (channels, replies, likes, follows, shares), a durable replayable event log, and real document ingestion into a scenario's starting world. <code class="mono">ekos simulate scenario.yaml</code> runs it; <code class="mono">ekos replay scenario.yaml</code> reads it back, read-only. Writes to a dedicated per-scenario ledger by default — never the real workspace ledger, since the ledger has no delete/tombstone mechanism and simulated agents/events are fictional.<span class="rfc">RFC 0047–0055</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ CLICKHOUSE ═══ -->
+  <section class="cap" id="clickhouse">
+    <div class="cap-num">14</div>
+    <h2>ClickHouse connector</h2>
+    <p class="lede" style="max-width:56rem;">Two independent pieces. <strong>Compiled metadata</strong>: <code class="mono">ekos build</code>/<code class="mono">recover</code> observe a configured ClickHouse database's live schema over its stock HTTP interface and compile every table into a real, searchable, cross-system identity-resolvable <code class="mono">Table</code> object. <strong>Live NL-to-SQL</strong> (<code class="mono">ekos clickhouse ask "…"</code>): the one path in EKOS that intentionally crosses the "AI never touches raw systems directly" invariant — an LLM builds a ClickHouse <code class="mono">SELECT</code>, it's parsed and hard-rejected unless it's exactly one read-only statement, then run live, redacted, and returned, with every call recorded as an Evidence/Event pair for audit. The matching <code class="mono">ekos_clickhouse_query</code> MCP tool is off by default, gated behind an explicit <code class="mono">ekos.toml</code> opt-in.<span class="rfc">RFC 0056</span></p>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════ EVIDENCE ═══ -->
+  <section class="cap" id="evidence">
+    <div class="cap-num">15</div>
+    <h2>Live, generated evidence: this repo, compiled by itself</h2>
+    <p class="lede">Everything below this line is rendered straight from <code class="mono">ekos docs generate --layout curated</code> and <code class="mono">--layout solution-architect</code>'s own output, run against EKOS's real, currently-committed ledger — the same commands and output shape any other project gets. Nothing here is hand-typed.</p>
+
+    <h3 style="margin-top:2.4rem; font-size:1.15rem;">Architecture summary</h3>
     <div class="kind-grid">
       <div><div class="kv">1,829</div><div class="kk">RustSymbol</div></div>
       <div><div class="kv">691</div><div class="kk">File</div></div>
@@ -70,7 +283,6 @@
       <div><div class="kv">2</div><div class="kk">Issue</div></div>
       <div><div class="kv">1</div><div class="kk">PullRequest</div></div>
     </div>
-
     <div class="conf-badge">
       <span class="n">40%</span>
       <span class="d">architecture confidence — completeness: 0% of 46 crates classified, evidence coverage: 100% of 472 claim/gap objects (RFC 0065 Phase 3)</span>
@@ -78,12 +290,9 @@
     <p class="quote">"Purpose: not yet computed — no real EKOS source for a project's stated purpose today."<br>
     "Architecture style: not yet computed — requires reasoning EKOS doesn't perform yet."<br>
     <span style="font-size:0.82rem;">— verbatim from the generated page. An honest placeholder, not a fabricated 100%.</span></p>
-  </section>
 
-  <section class="block">
-    <div class="eyebrow">Concentration risk</div>
-    <h2>What the whole workspace leans on hardest</h2>
-    <p class="lede" style="font-size:1rem; margin-top:0.8rem;">Real compiled dependency fan-in, not a guess — the top of a 133-entry <code class="mono">Risk</code> list, every one backed by real edges.</p>
+    <h3 style="margin-top:3rem; font-size:1.15rem;">Concentration risk</h3>
+    <p class="lede" style="font-size:1rem; margin-top:0.8rem;">Real compiled dependency fan-in, not a guess — the top of a 133-entry <code class="mono">Risk</code> list.</p>
     <ul class="top-list">
       <li><span>ekos_kir::KirId</span><span class="n">55 dependents</span></li>
       <li><span>std::path::Path</span><span class="n">54 dependents</span></li>
@@ -99,32 +308,26 @@
       <li><span>tracing</span><span class="n">26 dependents</span></li>
       <li><span>async-trait</span><span class="n">24 dependents</span></li>
     </ul>
-  </section>
 
-  <section class="block">
-    <div class="eyebrow">Solution-architect layout · real findings</div>
-    <h2>Where the documentation debt actually is</h2>
+    <h3 style="margin-top:3rem; font-size:1.15rem;">Solution-architect layout · real findings</h3>
     <div class="findings">
       <div class="finding">
         <div class="ft">44 crates with no declared version</div>
-        <div class="fb">Every internal crate in the workspace uses <code class="mono">version.workspace = true</code> rather than a literal per-crate version string — the analyzer reads the literal field, so it (correctly) reports "not declared" rather than resolving the workspace-inherited value. A real analyzer limitation, not a real versioning problem.</div>
+        <div class="fb">Every internal crate uses <code class="mono">version.workspace = true</code> rather than a literal per-crate version string — the analyzer reads the literal field, so it correctly reports "not declared" rather than resolving the workspace-inherited value. A real analyzer limitation, not a real versioning problem.</div>
       </div>
       <div class="finding mid">
         <div class="ft">625 / 625 RustModule objects have no captured doc comment</div>
-        <div class="fb">Every module-level item in the workspace, undocumented at the module level (function/struct-level docs are a separate, better-covered count below). RFC 0087's doc-comment capture has nothing to show for any of them.</div>
+        <div class="fb">Every module-level item in the workspace, undocumented at the module level (function/struct-level docs are separately, better covered below).</div>
       </div>
       <div class="finding mid">
         <div class="ft">982 / 1,829 RustSymbol objects have no captured doc comment</div>
-        <div class="fb">54% of real compiled Rust symbols carry no doc comment — undocumented code that's harder to safely change, and (per RFC 0088) has no real text for an AI-Assisted Overview to ground on if one were ever requested for these.</div>
+        <div class="fb">54% of real compiled Rust symbols carry no doc comment — harder to safely change, and no real text for an AI-Assisted Overview to ground on if one were requested.</div>
       </div>
     </div>
-  </section>
 
-  <section class="block">
-    <div class="eyebrow">Onboarding guide · excerpt</div>
-    <h2>A first-day map, compiled, not curated</h2>
-    <p class="lede" style="font-size:1rem; margin-top:0.8rem;"><code class="mono">--layout solution-architect</code> also writes a real repository-layout table — every crate's real path, from the actual <code class="mono">Cargo.toml</code> graph, not a hand-maintained architecture doc that drifts:</p>
-    <div class="codeblock path-table">
+    <h3 style="margin-top:3rem; font-size:1.15rem;">Onboarding guide · excerpt</h3>
+    <p class="lede" style="font-size:1rem; margin-top:0.8rem;">A real repository-layout table from the actual <code class="mono">Cargo.toml</code> graph, not a hand-maintained architecture doc that drifts:</p>
+    <div class="codeblock" style="margin-top:1.6rem;">
 <span class="c">| Path                                | Crate                    |</span>
 | <span class="k">benchmark</span>                           | <span class="s">ekos-benchmark</span>           |
 | <span class="k">ekos/crates/cli</span>                     | <span class="s">ekos</span>                     |
@@ -138,7 +341,13 @@
   <div class="backlinks">
     <a class="btn primary" href="../presentations/self-hosted-benchmark.html">See the full self-hosted benchmark →</a>
     <a class="btn" href="https://github.com/alexeyban/EKOS">View source on GitHub</a>
+    <a class="btn" href="https://github.com/alexeyban/EKOS/blob/main/README.md">Read README.md</a>
   </div>
+
+  <div class="stale-note">This page is a living document — updated after every devlog that ships a
+  new or changed capability (see <code class="mono">CLAUDE.md</code>'s Devlog Rule). The §15
+  numbers reflect this repository's state as of the last regeneration; everything above §15
+  describes the platform's stable, shipped capability surface and changes far less often.</div>
 
 </div>
 </body>

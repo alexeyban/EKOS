@@ -246,4 +246,14 @@ Increment from the highest existing `devlogs/devlog_N.md`: `devlog_43.md` → `d
 
 1. Also update `TODO.md` to tick off completed items for the day's work
 2. Update `README.md` if any user-facing behaviour changed
-3. Commit everything in one PR: `chore: devlog_N, README + TODO update for <topic>`
+3. **Update `docs/generated/ekos-self-documentation.html`** — the human-readable, comprehensive
+   capabilities reference published at
+   [alexeyban.github.io/EKOS/generated/ekos-self-documentation.html](https://alexeyban.github.io/EKOS/generated/ekos-self-documentation.html).
+   If the devlog shipped a new capability, a new CLI command/flag, a new MCP tool, or changed how
+   an existing one behaves, add or update that capability's own section there — this page is meant
+   to stay a complete, current, human-readable description of the whole project and every aspect of
+   it, not a point-in-time snapshot. A devlog that's purely an internal fix/refactor with no
+   user-visible capability change doesn't need an update here (same bar as the README update in
+   step 2). Pushing this file (it lives under `docs/`) redeploys the live page automatically via
+   `.github/workflows/pages.yml`.
+4. Commit everything in one PR: `chore: devlog_N, README + TODO + capabilities doc update for <topic>`
