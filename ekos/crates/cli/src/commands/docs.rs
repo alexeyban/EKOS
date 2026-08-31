@@ -102,6 +102,21 @@ pub async fn generate(
                  open question in RFC 0037, not yet implemented)"
             );
         }
+        // Real bug, found live running `docs generate --layout curated --prose --yes` against a
+        // real workspace: `generate_curated` takes no `prose`/`yes` parameters at all, so the flag
+        // was silently accepted and silently did nothing — identical output with or without it, no
+        // warning, no error. `select_llm_provider_for_prose`'s own doc comment states the intended
+        // contract for this whole `--prose` feature: "a user who asked for it wants real output or
+        // an honest failure, not silent placeholder prose." Curated `--prose` support (per-page
+        // project-wide overviews, a different grounding shape than the per-object prose `--layout
+        // objects`/`--layout solution-architect` already have) isn't built yet — reject clearly
+        // instead of pretending to honor the flag.
+        if prose {
+            anyhow::bail!(
+                "--prose is not yet supported for --layout curated — use --layout objects or \
+                 --layout solution-architect, both of which do support it"
+            );
+        }
         return generate_curated(config, cwd, output);
     }
     if layout == Layout::SolutionArchitect {
@@ -1112,6 +1127,47 @@ mod tests {
 
         let readme = std::fs::read_to_string(output.join("README.md")).unwrap();
         assert!(readme.contains("**Table**: 1"));
+    }
+
+    /// Real bug, found live running `docs generate --layout curated --prose --yes` against a real
+    /// workspace: `generate_curated` takes no `prose`/`yes` parameters, so `--prose` was silently
+    /// accepted and silently did nothing — the output was byte-identical to a run without it, no
+    /// warning printed. `--prose` must fail clearly for curated instead, matching
+    /// `select_llm_provider_for_prose`'s own stated contract ("a user who asked for it wants real
+    /// output or an honest failure, not silent placeholder prose") — the same principle the
+    /// existing `generate_with_prose_errors_clearly_instead_of_silently_degrading` test already
+    /// pins for `--layout objects`.
+    #[tokio::test]
+    async fn generate_curated_with_prose_errors_clearly_instead_of_silently_ignoring_the_flag() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+        ledger
+            .append_object(&KirObject::new("customers", ObjectKind::Table))
+            .unwrap();
+
+        let output = dir.path().join("out");
+        let err = generate(
+            &config,
+            dir.path(),
+            &output,
+            Format::Markdown,
+            Layout::Curated,
+            true, // --prose
+            true, // --yes
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("not yet supported for --layout curated"),
+            "expected a clear rejection, got: {err}"
+        );
+        assert!(
+            !output.exists() || std::fs::read_dir(&output).unwrap().next().is_none(),
+            "must fail before writing any half-done output"
+        );
     }
 
     #[tokio::test]

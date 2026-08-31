@@ -3671,7 +3671,26 @@ are excluded — see the full exclusion list in the planning history if needed.
     `marketing.rs`'s equivalent have the exact same `from_env` (not `from_env_with_model`) bug;
     `recover.rs` already has the correct fix. `--prose` and `ekos marketing publish` against a
     configured non-default Ollama model silently use the wrong model today. Out of RFC 0088's own
-    scope to fix; tracked here so it isn't rediscovered from scratch.
+    scope to fix; tracked here so it isn't rediscovered from scratch. **Live-reproduced 2026-08-31**
+    demoing real `docs generate --layout solution-architect --prose --yes` against this repo's own
+    ledger: with `[llm] model = "llama3:latest"` configured but no locally-pulled
+    `llama3.1:8b` (the hardcoded default this bug falls back to), the findings-memo prose call
+    failed with a real `api error 404: model 'llama3.1:8b' not found` — handled gracefully (a
+    printed warning, deterministic findings kept, not a crash), but confirms the gap is real, not
+    theoretical. Setting `OLLAMA_MODEL=llama3:latest` (the env-var override `from_env` does check)
+    worked around it for the demo and produced real grounded prose.
+  - [x] **A different, adjacent bug found and fixed the same day**: `ekos docs generate --layout
+    curated --prose` silently ignored `--prose` entirely — `generate_curated` takes no
+    `prose`/`yes` parameters at all, so the flag was accepted but did nothing: byte-identical
+    output with or without it, no warning, no error. Only `--layout objects` and `--layout
+    solution-architect` ever actually wired `--prose` through. Fixed by rejecting `--prose` for
+    `--layout curated` with a clear error (`--prose is not yet supported for --layout curated —
+    use --layout objects or --layout solution-architect`) instead of pretending to honor it —
+    matching `select_llm_provider_for_prose`'s own stated contract ("a user who asked for it wants
+    real output or an honest failure, not silent placeholder prose"). Building real per-page
+    prose for curated (project-wide overviews, a different grounding shape than the existing
+    per-object case) is a separate, unscoped feature, not attempted here. New test
+    `generate_curated_with_prose_errors_clearly_instead_of_silently_ignoring_the_flag`.
 
 - **Real gap found live 2026-08-23 testing RFC 0088 against a real, deliberately small subsystem
   scope (`lib/plausible/auth`, 15 files) — fixed at its actual source, not worked around a second
