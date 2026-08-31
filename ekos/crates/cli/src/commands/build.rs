@@ -327,8 +327,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
                 for artifact in &package.artifacts {
                     let rel_str = &artifact.content.target;
                     // Project-qualify the id hash input only (never `rel_str` itself — that stays
-                    // the plain within-project path for `content.target`/display/`abs_path`
-                    // below); see the `project_key` comment above the outer loop.
+                    // the plain within-project path for `content.target`/display/evidence below);
+                    // see the `project_key` comment above the outer loop.
                     let id_key = if project_key.is_empty() {
                         rel_str.clone()
                     } else {
@@ -341,10 +341,18 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
                     ));
 
                     let size = artifact.content.data["size_bytes"].as_u64().unwrap_or(0);
-                    let abs_path = base.join(rel_str);
 
+                    // Real bug, found live rehearsing the RFC 0045 demo end-to-end: this used to
+                    // build `SourceLocation::file` from `base.join(rel_str)` — an *absolute*
+                    // filesystem path — which then surfaced verbatim in every `ekos ask` citation
+                    // for a plain source file (nothing not also processed by `local_docs_analyzer`,
+                    // which already used the correct relative `data.path`, masked this for
+                    // Markdown/PDF/etc.). A citation showing `/tmp/scratch-.../src/error.rs`
+                    // instead of `src/error.rs` leaks the local filesystem layout and looks
+                    // unpolished for no reason — every other evidence-producing analyzer already
+                    // used the plain within-project path.
                     let mut ev = KirEvidence::new(
-                        SourceLocation::file(abs_path.to_string_lossy().as_ref()),
+                        SourceLocation::file(rel_str.as_str()),
                         format!("file: {rel_str} ({size} bytes)"),
                     );
                     ev.id = ev_id;
@@ -496,6 +504,50 @@ mod tests {
             file_object_count(&config, dir.path()) > 0,
             "File objects must be reproduced after a ledger clear, even though the fingerprint \
              cache matches the unchanged source content"
+        );
+    }
+
+    /// Real bug, found live rehearsing the RFC 0045 demo end-to-end: a `File` object's own
+    /// `SourceLocation` evidence used to be built from the *absolute* filesystem path
+    /// (`base.join(rel_str)`), which then rendered verbatim in `ekos ask` citations for any file
+    /// not also reprocessed by `local_docs_analyzer` (Markdown/PDF/etc., which already used the
+    /// correct relative `data.path` — masking the bug for those files while leaving it visible for
+    /// every plain source file). This builds a workspace in a deeply-nested absolute tempdir path
+    /// (the real repro shape — a workspace that isn't the process's own repo root) and asserts the
+    /// evidence location is the plain within-project relative path, never the workspace's absolute
+    /// root.
+    #[tokio::test]
+    async fn file_object_evidence_location_is_relative_not_absolute() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/error.rs"), b"pub struct MyError;").unwrap();
+        let config = EkosConfig::default();
+
+        run(&config, dir.path()).await.unwrap();
+
+        let store = open_store(&config, dir.path()).unwrap();
+        let file_obj = store
+            .all_objects()
+            .unwrap()
+            .into_iter()
+            .find(|o| o.kind == ObjectKind::File && o.name == "src/error.rs")
+            .expect("the observed file must produce a File object");
+        let ev_id = file_obj.evidence[0];
+        let evidence = store.get_evidence(&ev_id).unwrap().unwrap();
+
+        assert_eq!(evidence.location.path, "src/error.rs");
+        assert!(
+            !evidence.location.path.starts_with('/'),
+            "evidence location must never be an absolute path: {}",
+            evidence.location.path
+        );
+        assert!(
+            !evidence
+                .location
+                .path
+                .contains(&dir.path().to_string_lossy().to_string()),
+            "evidence location must not leak the workspace's absolute filesystem path: {}",
+            evidence.location.path
         );
     }
 

@@ -2549,23 +2549,31 @@ These items have no single phase — they must be maintained and grown throughou
   - *Status:* Done — unit-tested (hub-object repro, truncation + budget-respected cases), full
     workspace gate green.
 
-- [ ] **Evidence citations show absolute filesystem paths, not repo-relative ones**
+- [x] **Evidence citations show absolute filesystem paths, not repo-relative ones** — root-caused
+  and fixed 2026-08-31.
   - *What:* Found rehearsing the RFC 0045 demo end-to-end (Playwright screenshots, real `/ask`
     calls): EKOS-self's citations render clean (`TODO.md`), but `fd`'s render as the full
     workspace path (e.g. `/tmp/claude-.../scratchpad/demo-repo-spike/fd/./src/error.rs` instead of
-    `src/error.rs`). Both repos went through the identical bake pipeline; the only difference is
-    `fd`'s workspace lived under a long `/tmp` scratch path while EKOS-self's is the repo root
-    itself — suggests `KirEvidence`/`SourceLocation.path` is (at least sometimes) populated from an
-    absolute path rather than the plain within-project relative path RFC 0044's devlog describes
-    elsewhere (`content.target`/`abs_path` vs. the display `"path"` property). Not yet root-caused
-    to a specific file/line — only confirmed as a real, visible, reproducible symptom.
-  - *Output:* Not yet started. A real demo-polish issue: showing a peer a citation with an internal
-    `/tmp/...` path instead of a clean repo-relative one undercuts the "polished product"
-    impression, independent of whether the underlying answer is correct.
-  - *Test/Validate (remaining):* Root-cause which evidence-construction path uses an absolute vs.
-    relative path (likely `plugins/*` observers or a recovery analyzer's `SourceLocation::file(...)`
-    call site), fix it there, and confirm citations render repo-relative for a workspace at an
-    arbitrary (not repo-root) path — `fd`'s baked ledger is a ready-made repro case.
+    `src/error.rs`).
+  - *Root cause:* `crates/cli/src/commands/build.rs`'s `File`-object evidence construction built
+    `SourceLocation::file` from `base.join(rel_str)` — an absolute path — instead of the plain
+    relative `rel_str` every other evidence-producing analyzer (`local_docs_analyzer.rs` included)
+    already used. `local_docs_analyzer` reprocesses Markdown/PDF/etc. with its own, correctly
+    relative evidence, which is why EKOS-self's citations (mostly `.md` files) looked clean while
+    `fd`'s (a Rust codebase — no equivalent reprocessing pass for `.rs` source) exposed the bug:
+    the *only* evidence a plain source file had was the base observer's absolute-path one.
+    Live-reproduced exactly, down to the reported `/./` (a tiny scratch workspace nested under
+    `/tmp`, real `ekos_state` MCP call showed `"path": ".../tinyproj/./src/error.rs"`), then fixed
+    and re-verified the same way (`"path": "src/error.rs"`). New regression test
+    `file_object_evidence_location_is_relative_not_absolute` builds in a deeply-nested tempdir (the
+    real repro shape) and asserts the evidence path is relative and doesn't contain the workspace's
+    absolute root.
+  - *Output:* Fixed. A citation for any plain source file (not just Markdown/PDF/etc.) now renders
+    the clean repo-relative path. The bug applied equally to every workspace, including EKOS-self —
+    it just went unnoticed there because the citations that particular rehearsal happened to show
+    were for Markdown files, always covered by `local_docs_analyzer`'s separate, always-correct
+    evidence. No other call site changed — the fix is one field at the single place the absolute
+    path was actually constructed.
 
 - [x] **Identity-resolution over-merge — real hits found against `ripgrep`/`bat`** — the
   `Technology`/`Crate` half fixed at its real source, RFC 0078 / `devlog_81`; the `RustSymbol`/
