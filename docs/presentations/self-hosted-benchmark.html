@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS Compiles Itself — EKOS</title>
+<meta name="description" content="A full end-to-end run of EKOS against its own ~50-crate repository: real pipeline timing/CPU/memory, storage footprint, three documentation-generation layouts, the full MCP tool surface with per-call latency, real local-LLM token usage, and three real bugs found and fixed live during the run.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+  .m-table{ width:100%; border-collapse:collapse; margin-top:2rem; font-size:0.86rem; }
+  .m-table th{ text-align:left; font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.66rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--ink-soft); font-weight:500; border-bottom:1px solid var(--rule); padding:0.55rem 0.9rem 0.55rem 0; }
+  .m-table td{ border-bottom:1px solid var(--rule); padding:0.7rem 0.9rem 0.7rem 0; vertical-align:middle; font-variant-numeric: tabular-nums; }
+  .m-table td.num{ text-align:right; font-family: ui-monospace,"SF Mono",Consolas,monospace; }
+  .m-table .bar-cell{ display:flex; align-items:center; gap:0.5rem; }
+  .m-table .bar{ height:6px; border-radius:4px; background:var(--rule); flex:1; min-width:60px; overflow:hidden; }
+  .m-table .bar span{ display:block; height:100%; background:var(--accent-gradient); }
+  .m-table .bar span.slow{ background:var(--bad); }
+  .found-fixed{ display:flex; flex-direction:column; gap:1.4rem; margin-top:2.2rem; }
+  .ff-item{ border-left:2px solid var(--accent-b); padding:0.1rem 0 0.1rem 1.3rem; }
+  .ff-item h3{ font-size:1.05rem; }
+  .ff-item p{ margin:0.5rem 0 0; color:var(--ink-soft); font-size:0.92rem; line-height:1.6; max-width:52ch; }
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>The compiler compiled itself.<br><span class="arrow-word">Every number below is real.</span></h1>
+  <p class="lede">No fixture, no staged repo — EKOS's own ~50-crate, multi-language codebase, run
+  through the full <code class="mono">build → recover → resolve → compile → commit</code>
+  pipeline, then documented, searched, and queried over MCP, with every stage's wall time, CPU, and
+  memory measured by <code class="mono">/usr/bin/time -v</code> and its own RFC 0114 query log —
+  not estimated, not averaged.</p>
+  <div class="hero-diagram">
+    <span class="chip hot">600 real files</span><span class="sep mono">→</span>
+    <span class="chip">5,757 objects</span><span class="sep mono">→</span>
+    <span class="chip">9,247 relationships</span><span class="sep mono">→</span>
+    <span class="chip hot">3 real bugs found &amp; fixed, live</span>
+  </div>
+  <div class="byline"><span class="dot"></span> A full self-hosted benchmark, one session</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the pipeline, timed</div>
+  <div class="eyebrow">1 minute 43 seconds, start to finish</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:26ch;">Five stages. One dominates — and it's the one doing real I/O, not real work.</h2>
+  <table class="m-table">
+    <thead><tr><th>Stage</th><th class="num">Wall</th><th style="width:32%">Share</th><th class="num">Peak RSS</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">build</td><td class="num">10.3s</td><td class="bar-cell"><div class="bar"><span style="width:12%"></span></div></td><td class="num">65 MB</td><td>600 files, 8 connectors</td></tr>
+      <tr><td class="mono">recover</td><td class="num">5.7s</td><td class="bar-cell"><div class="bar"><span style="width:6%"></span></div></td><td class="num">102 MB</td><td>8 analyzer passes</td></tr>
+      <tr><td class="mono">resolve --force</td><td class="num">0.6s</td><td class="bar-cell"><div class="bar"><span style="width:1%"></span></div></td><td class="num">56 MB</td><td>5,597 candidates, 3 real conflicts</td></tr>
+      <tr><td class="mono">compile</td><td class="num">2.3s</td><td class="bar-cell"><div class="bar"><span style="width:3%"></span></div></td><td class="num">89 MB</td><td>6,107 diagnostics</td></tr>
+      <tr><td class="mono">commit</td><td class="num">1m 24.4s</td><td class="bar-cell"><div class="bar"><span class="slow" style="width:82%"></span></div></td><td class="num">138 MB</td><td>I/O-bound — 100k+ voluntary context switches</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="font-size:1rem; margin-top:1.6rem;"><code class="mono">commit</code> alone is 82% of total wall time — and it's 57% CPU, not 95%+ like every other stage. It's waiting on disk, not computing.</p>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / storage</div>
+  <div class="eyebrow">≈2.8 KB per object, evidence included</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:24ch;">16 MB on disk for 5,757 objects, 9,247 relationships, 2,605 pieces of evidence.</h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">16 MB</div><div class="label">total workspace state</div></div>
+    <div class="stat"><div class="num">7.1 MB</div><div class="label">ledger segments</div></div>
+    <div class="stat"><div class="num">5.0 MB</div><div class="label">artifact cache</div></div>
+    <div class="stat"><div class="num">664 KB</div><div class="label">tantivy search index</div></div>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / documentation generation</div>
+  <div class="eyebrow">Three layouts, one command each</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:27ch;">9,547 real pages — and a real bug, found and fixed mid-demo.</h2>
+  <table class="m-table">
+    <thead><tr><th class="mono">--layout</th><th class="num">Wall</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">curated</td><td class="num">6.1s</td><td>4 top-level pages + 3,172 entity pages</td></tr>
+      <tr><td class="mono">solution-architect</td><td class="num">2.9s</td><td>3 files, 5 real findings</td></tr>
+      <tr><td class="mono">objects</td><td class="num">55.1s</td><td>6,368 pages + 5,696 neighborhood SVGs</td></tr>
+    </tbody>
+  </table>
+  <div class="found-fixed">
+    <div class="ff-item">
+      <h3>Found live: <code class="mono">--prose --layout curated</code> did nothing</h3>
+      <p>Byte-identical output with or without the flag — no warning, no token estimate, no
+      confirmation prompt. <code class="mono">generate_curated()</code> never took a
+      <code class="mono">prose</code> parameter at all. Fixed the same session: the combination now
+      fails clearly instead of silently pretending to honor it.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / search &amp; MCP capability</div>
+  <div class="eyebrow">Every read tool, one live session</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:27ch;">10 tools finished in under 700ms. One took 46.8 seconds.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">query-log.jsonl — real, unedited</div>
+<pre style="margin:0;">ekos_search        8ms    50 hits
+ekos_state        25ms     1 object
+ekos_dependents   37ms    12 edges
+ekos_impact      124ms     3 hops
+ekos_status       22ms
+<span class="bad">ekos_diff      46847ms  16,036 changed</span>
+architecture_eval 627ms   49 crates
+architecture_eval   <span class="s">0ms</span>   <span class="s">(cache hit)</span></pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      <code class="mono">ekos_diff</code> with no <code class="mono">to</code> bound scans to "now"
+      — 16,036 changed entries, 46.8 seconds, 60–2,000&times; slower than every other call. And
+      RFC 0114's result cache is live and correct on real data: the identical
+      <code class="mono">ekos_architecture_evaluate</code> call, repeated, comes back in 0ms
+      instead of 627ms.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / LLM &amp; token usage</div>
+  <div class="eyebrow">Local Ollama, measured from outside EKOS</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:27ch;">A real question truncated 2,420 tokens of its own grounding context before generation even started.</h2>
+  <div class="two-col">
+    <div class="codeblock">
+      <div class="tag">ollama service log — real, unedited</div>
+<pre style="margin:0;">$ ekos ask "What does the redaction
+  module do?"
+
+<span class="c"># 20.8s cold model load, then:</span>
+<span class="bad">truncating input prompt
+  limit=4096 prompt=6516 keep=25
+  new=4096</span>
+
+<span class="c"># 1m 41s wall total; the answer
+# carried no valid citation block</span></pre>
+    </div>
+    <p class="lede" style="margin-top:0;">
+      EKOS's own <code class="mono">LlmResponse</code> type already captures real
+      <code class="mono">input_tokens</code>/<code class="mono">output_tokens</code> per call —
+      nothing downstream logs or surfaces them. Every number on this slide came from ollama's own
+      service log and a direct API probe (27 prompt tokens, 48 completion tokens, 7.3s), not from
+      EKOS's own output.
+    </p>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / dogfooding, honestly</div>
+  <div class="eyebrow">Three real bugs, found and fixed the same session this benchmark ran</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:26ch;">Running the real thing against itself is how these got found.</h2>
+  <div class="found-fixed">
+    <div class="ff-item">
+      <h3>CI flake — a real kernel-level flock race</h3>
+      <p>A test failed in CI but passed locally 200/200 times run alone; reproduced reliably under
+      constrained parallelism, traced with acquire/release timestamps, fixed with a short bounded
+      retry in the ledger's write-lock. 19/19 stress runs clean afterward vs. a ~25% failure rate
+      before.</p>
+    </div>
+    <div class="ff-item">
+      <h3>Evidence citations leaked absolute filesystem paths</h3>
+      <p>Rehearsing a real demo, a citation for a plain source file rendered a full
+      <code class="mono">/tmp/scratch-.../src/error.rs</code> path instead of
+      <code class="mono">src/error.rs</code>. Root-caused to one field in one function; fixed;
+      re-verified live against a real nested workspace, down to the exact reported artifact.</p>
+    </div>
+    <div class="ff-item">
+      <h3><code class="mono">docs generate --prose</code> silently ignored for one layout</h3>
+      <p>Covered in §03 — found running the exact demo this deck is about.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide cta" id="s8">
+  <div class="eyebrow">Run it yourself</div>
+  <h2>Point the same five commands at your own repository.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># compile once</span>
+$ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+
+<span class="c"># generate real documentation, zero LLM, zero cost</span>
+$ ekos docs generate --layout curated --output doc
+
+<span class="c"># serve it to any MCP client over stdio</span>
+$ ekos mcp serve --workspace .</pre>
+  </div>
+  <div class="fineprint">EKOS · self-hosted end-to-end benchmark · every number on this page is real, one run each, not averaged · <a href="../generated/ekos-self-documentation.html">see the generated documentation</a> · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

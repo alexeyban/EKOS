@@ -153,7 +153,7 @@ ul.checklist .check{
 /* ---------- live demos (big cards) ---------- */
 .demo-grid{
   display:grid;
-  grid-template-columns:repeat(3,1fr);
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
   gap:1.6rem;
   margin-top:2.8rem;
 }
@@ -397,6 +397,13 @@ footer a:hover{ color:var(--accent-a); }
       <p>Issues, PRs, files, and their real relationships compiled into an append-only, evidence-backed ledger any MCP-speaking agent can query.</p>
       <a class="btn primary" href="presentations/github-repo-to-mcp-server.html">Open Demo →</a>
     </div>
+    <div class="demo-card">
+      <div class="tag">Self-hosted · every RFC above at once</div>
+      <h3>EKOS Compiles Itself</h3>
+      <p>The full pipeline, storage, documentation generation, search/MCP, and local-LLM token usage — run against EKOS's own ~50-crate repository, every number measured, not estimated. Includes 3 real bugs found and fixed live during the run.</p>
+      <a class="btn primary" href="presentations/self-hosted-benchmark.html">Open Demo →</a>
+      <a class="btn" style="margin-top:0.6rem;" href="generated/ekos-self-documentation.html">Browse the generated documentation →</a>
+    </div>
   </div>
 </section>
 
@@ -478,6 +485,16 @@ footer a:hover{ color:var(--accent-a); }
   <div class="eyebrow">Go deeper</div>
   <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem);">Presentations</h2>
   <ul class="deck-list">
+    <li>
+      <a class="deck" href="presentations/self-hosted-benchmark.html">EKOS Compiles Itself</a>
+      <p class="desc">The full pipeline, storage footprint, three documentation-generation
+      layouts, the whole MCP tool surface, and real local-LLM token usage — every number measured
+      against EKOS's own real ~50-crate repository, not estimated. Includes 3 real bugs found and
+      fixed live during the run. See also the
+      <a href="generated/ekos-self-documentation.html" style="color:var(--accent-a);">generated
+      documentation</a> this run produced.</p>
+      <div class="rfc-tag">New · self-hosted</div>
+    </li>
     <li>
       <a class="deck" href="presentations/ai-native-knowledge-compiler-pitch.html">The AI-Native Enterprise Knowledge Compiler</a>
       <p class="desc">The startup pitch: why enterprise AI needs a compiler, not another RAG

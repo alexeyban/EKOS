@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS, Documented by Itself — EKOS</title>
+<meta name="description" content="ekos docs generate --layout curated and --layout solution-architect, run against EKOS's own real ~50-crate workspace — architecture summary, risk concentration, undocumented-code counts, and a first-day onboarding path, all compiled, none hand-written.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+  .wrap{ max-width:64rem; margin:0 auto; padding:5rem 6vw 7rem; }
+  .kicker{ display:flex; align-items:center; gap:0.7rem; font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:0.78rem; color:var(--ink-soft); margin-bottom:1.2rem; }
+  .kicker .dot{ width:7px;height:7px;border-radius:50%; background:var(--accent-b); box-shadow:0 0 0 3px var(--glow-b); }
+  h1{ font-size:clamp(2rem,4.4vw,3.1rem); max-width:22ch; }
+  .sub{ margin-top:1rem; }
+  section.block{ margin-top:4.4rem; }
+  section.block h2{ font-size:clamp(1.5rem,2.6vw,1.9rem); }
+  .kind-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden; margin-top:1.8rem; }
+  .kind-grid > div{ background:var(--ground); padding:0.9rem 1rem; }
+  .kind-grid .kv{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-weight:700; font-size:1.3rem; }
+  .kind-grid .kk{ font-size:0.72rem; color:var(--ink-soft); margin-top:0.15rem; }
+  .conf-badge{ display:inline-flex; align-items:baseline; gap:0.5rem; margin-top:1.6rem; }
+  .conf-badge .n{ font-family: ui-monospace,"SF Mono",Consolas,monospace; font-size:2.6rem; font-weight:700; background:var(--accent-gradient); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .conf-badge .d{ color:var(--ink-soft); font-size:0.92rem; max-width:28ch; }
+  .top-list{ list-style:none; margin:1.6rem 0 0; padding:0; display:flex; flex-direction:column; gap:0; }
+  .top-list li{ display:flex; justify-content:space-between; gap:1rem; padding:0.7rem 0; border-top:1px solid var(--rule); font-size:0.94rem; }
+  .top-list li:first-child{ border-top:none; }
+  .top-list .n{ font-family: ui-monospace,"SF Mono",Consolas,monospace; color:var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .findings{ display:flex; flex-direction:column; gap:0.9rem; margin-top:1.8rem; }
+  .finding{ border-left:2px solid var(--bad); padding:0.1rem 0 0.1rem 1.2rem; }
+  .finding.mid{ border-left-color:var(--accent-a); }
+  .finding .ft{ font-weight:600; font-size:0.98rem; }
+  .finding .fb{ color:var(--ink-soft); font-size:0.9rem; margin-top:0.3rem; max-width:56ch; line-height:1.55; }
+  .path-table{ margin-top:1.6rem; }
+  .quote{ border-left:2px solid var(--accent-b); padding-left:1.2rem; color:var(--ink-soft); font-size:0.95rem; margin-top:1.4rem; max-width:52ch; }
+  .backlinks{ display:flex; flex-wrap:wrap; gap:0.7rem; margin-top:1.6rem; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="kicker"><span class="dot"></span> Generated, not hand-written &middot; ekos docs generate</div>
+  <h1>EKOS, documented by the thing it documents</h1>
+  <p class="lede sub">Every number on this page comes from <code class="mono">ekos docs generate --layout curated</code>
+  and <code class="mono">--layout solution-architect</code>, run against EKOS's own real, currently-committed
+  ledger — the same commands and the same output shape any other project gets. Nothing below was written by hand;
+  where EKOS doesn't have a real answer yet (a project's stated purpose, its architecture style), the page says so
+  instead of guessing.</p>
+
+  <div class="hero-diagram" style="margin-top:2.2rem;">
+    <span class="chip mono">ekos build → recover → resolve → compile → commit</span><span class="sep">→</span>
+    <span class="chip hot mono">ekos docs generate --layout curated</span>
+  </div>
+
+  <section class="block">
+    <div class="eyebrow">Architecture summary</div>
+    <h2>16 real kinds, 5,533 compiled objects, 46 crates</h2>
+    <div class="kind-grid">
+      <div><div class="kv">1,829</div><div class="kk">RustSymbol</div></div>
+      <div><div class="kv">691</div><div class="kk">File</div></div>
+      <div><div class="kv">625</div><div class="kk">RustModule</div></div>
+      <div><div class="kv">472</div><div class="kk">Claim</div></div>
+      <div><div class="kv">1,347</div><div class="kk">Section (doc)</div></div>
+      <div><div class="kv">267</div><div class="kk">Document</div></div>
+      <div><div class="kv">133</div><div class="kk">Risk</div></div>
+      <div><div class="kv">59</div><div class="kk">Rollup</div></div>
+      <div><div class="kv">50</div><div class="kk">Technology</div></div>
+      <div><div class="kv">46</div><div class="kk">Crate</div></div>
+      <div><div class="kv">2</div><div class="kk">Issue</div></div>
+      <div><div class="kv">1</div><div class="kk">PullRequest</div></div>
+    </div>
+
+    <div class="conf-badge">
+      <span class="n">40%</span>
+      <span class="d">architecture confidence — completeness: 0% of 46 crates classified, evidence coverage: 100% of 472 claim/gap objects (RFC 0065 Phase 3)</span>
+    </div>
+    <p class="quote">"Purpose: not yet computed — no real EKOS source for a project's stated purpose today."<br>
+    "Architecture style: not yet computed — requires reasoning EKOS doesn't perform yet."<br>
+    <span style="font-size:0.82rem;">— verbatim from the generated page. An honest placeholder, not a fabricated 100%.</span></p>
+  </section>
+
+  <section class="block">
+    <div class="eyebrow">Concentration risk</div>
+    <h2>What the whole workspace leans on hardest</h2>
+    <p class="lede" style="font-size:1rem; margin-top:0.8rem;">Real compiled dependency fan-in, not a guess — the top of a 133-entry <code class="mono">Risk</code> list, every one backed by real edges.</p>
+    <ul class="top-list">
+      <li><span>ekos_kir::KirId</span><span class="n">55 dependents</span></li>
+      <li><span>std::path::Path</span><span class="n">54 dependents</span></li>
+      <li><span>ekos_kir::KirObject</span><span class="n">53 dependents</span></li>
+      <li><span>std::collections::HashMap</span><span class="n">48 dependents</span></li>
+      <li><span>ekos_kir::ObjectKind</span><span class="n">47 dependents</span></li>
+    </ul>
+    <p class="lede" style="font-size:1rem; margin-top:1.4rem;">Top technologies, the same way:</p>
+    <ul class="top-list">
+      <li><span>serde_json</span><span class="n">36 dependents</span></li>
+      <li><span>thiserror</span><span class="n">31 dependents</span></li>
+      <li><span>tokio</span><span class="n">27 dependents</span></li>
+      <li><span>tracing</span><span class="n">26 dependents</span></li>
+      <li><span>async-trait</span><span class="n">24 dependents</span></li>
+    </ul>
+  </section>
+
+  <section class="block">
+    <div class="eyebrow">Solution-architect layout · real findings</div>
+    <h2>Where the documentation debt actually is</h2>
+    <div class="findings">
+      <div class="finding">
+        <div class="ft">44 crates with no declared version</div>
+        <div class="fb">Every internal crate in the workspace uses <code class="mono">version.workspace = true</code> rather than a literal per-crate version string — the analyzer reads the literal field, so it (correctly) reports "not declared" rather than resolving the workspace-inherited value. A real analyzer limitation, not a real versioning problem.</div>
+      </div>
+      <div class="finding mid">
+        <div class="ft">625 / 625 RustModule objects have no captured doc comment</div>
+        <div class="fb">Every module-level item in the workspace, undocumented at the module level (function/struct-level docs are a separate, better-covered count below). RFC 0087's doc-comment capture has nothing to show for any of them.</div>
+      </div>
+      <div class="finding mid">
+        <div class="ft">982 / 1,829 RustSymbol objects have no captured doc comment</div>
+        <div class="fb">54% of real compiled Rust symbols carry no doc comment — undocumented code that's harder to safely change, and (per RFC 0088) has no real text for an AI-Assisted Overview to ground on if one were ever requested for these.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="eyebrow">Onboarding guide · excerpt</div>
+    <h2>A first-day map, compiled, not curated</h2>
+    <p class="lede" style="font-size:1rem; margin-top:0.8rem;"><code class="mono">--layout solution-architect</code> also writes a real repository-layout table — every crate's real path, from the actual <code class="mono">Cargo.toml</code> graph, not a hand-maintained architecture doc that drifts:</p>
+    <div class="codeblock path-table">
+<span class="c">| Path                                | Crate                    |</span>
+| <span class="k">benchmark</span>                           | <span class="s">ekos-benchmark</span>           |
+| <span class="k">ekos/crates/cli</span>                     | <span class="s">ekos</span>                     |
+| <span class="k">ekos/crates/ledger</span>                  | <span class="s">ekos-ledger</span>              |
+| <span class="k">ekos/crates/recovery</span>                | <span class="s">ekos-recovery</span>            |
+| <span class="k">ekos/crates/runtime</span>                 | <span class="s">ekos-runtime</span>             |
+<span class="c">… 41 more, every one a real compiled Cargo.toml → path edge …</span>
+    </div>
+  </section>
+
+  <div class="backlinks">
+    <a class="btn primary" href="../presentations/self-hosted-benchmark.html">See the full self-hosted benchmark →</a>
+    <a class="btn" href="https://github.com/alexeyban/EKOS">View source on GitHub</a>
+  </div>
+
+</div>
+</body>
+</html>

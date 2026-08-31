@@ -3,6 +3,8 @@
 /tests/integration/target/
 .ekos/
 /doc/
+/doc-sa/
+/doc-objects/
 *.db
 *.db-shm
 *.db-wal
