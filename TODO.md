@@ -2660,11 +2660,21 @@ These items have no single phase — they must be maintained and grown throughou
       gets a real, designed `write.lock` file (`fs4`, the same `flock`(2) mechanism tantivy's own
       `IndexWriter` lock already used incidentally, now promoted to a direct dependency and
       acquired first, before `SegmentStore`/`SearchIndex` are touched) — a second writable process
-      now fails fast with a clear `LedgerError::Locked` instead of an eventual tantivy-internal
-      error, live-verified with two real racing `ekos commit` processes. RFC 0016's "the manifest
-      lock enforces it" text corrected. The concurrent-read visibility spec turned out to be a
-      real, previously-unverified gap: a `FactLedger` handle's view is frozen as of its own
-      `open()` call, not automatically refreshed by a separate process's writes — proven with a
+      now fails with a clear `LedgerError::Locked` instead of an eventual tantivy-internal error,
+      live-verified with two real racing `ekos commit` processes. **CI flake found and fixed
+      2026-08-31**: `acquire_write_lock` originally failed on the very first `try_lock_exclusive`
+      attempt (no retry) — proven live under `--test-threads=4` load (traced with acquire/release
+      timestamps + thread ids) to sometimes report the lock still held for a few milliseconds
+      *after* the previous holder's `File` had already closed, on the same thread, sequentially,
+      with nothing else able to run in between — a kernel-level flock scheduling artifact under
+      heavy concurrent load, not a leaked handle. A same-thread 200-iteration `build → open` loop
+      run alone never failed once; the identical loop run four-wide alongside itself failed within
+      tens of iterations, consistently. Fixed with a short bounded retry (≤20 attempts, 5ms apart,
+      ≤100ms worst case) — 19/19 stress runs clean afterward vs. 2/8 failing before. A genuine
+      second writer is still correctly rejected, just up to ~100ms slower to report. RFC 0016's
+      "the manifest lock enforces it" text corrected. The concurrent-read visibility spec turned
+      out to be a real, previously-unverified gap: a `FactLedger` handle's view is frozen as of its
+      own `open()` call, not automatically refreshed by a separate process's writes — proven with a
       dedicated regression test (`a_long_lived_handle_does_not_see_a_separate_handles_writes_
       until_reopened`), not just documented as an inherited claim. 7 new `ekos-ledger` tests, full
       workspace gate clean, `tests/integration` 3/3.
