@@ -128,7 +128,6 @@ pub async fn compile_worker_run(
     let ws = workspace.to_path_buf();
     let cfg = config.clone();
     let client_w = client.clone();
-    let shard_w = shard.to_string();
 
     worker
         .run_shard(shard, move |guard| async move {
@@ -153,29 +152,33 @@ pub async fn compile_worker_run(
             .map_err(|e| WorkerError::Work(format!("pipeline task panicked: {e}")))?
             .map_err(WorkerError::Work)?;
 
-            // Push each partition's search index to its backend (no-op for a local backend) so a
-            // query worker can serve `find_objects` for object-storage partitions.
-            {
-                let cfg3 = cfg.clone();
-                let ws3 = ws.clone();
-                tokio::task::spawn_blocking(move || {
-                    store::build_partitioned(&cfg3, &ws3, true)
-                        .and_then(|pl| Ok(pl.publish_search_indexes()?))
-                        .map_err(|e| format!("{e:#}"))
-                })
-                .await
-                .map_err(|e| WorkerError::Work(format!("search-publish task panicked: {e}")))?
-                .map_err(WorkerError::Work)?;
-            }
+            // Publish each partition's search index to its backend (no-op for a local backend),
+            // collect what we produced (partitions + the new watermark), and collect every
+            // object/relationship id's home partition for the coordinator's pruning index — one
+            // `PartitionedLedger` open for all three (RFC 0113 v1.1).
+            let cfg3 = cfg.clone();
+            let ws3 = ws.clone();
+            let (partitions, watermark, entity_ids) = tokio::task::spawn_blocking(move || {
+                finalize_partitions(&cfg3, &ws3).map_err(|e| format!("{e:#}"))
+            })
+            .await
+            .map_err(|e| WorkerError::Work(format!("finalize-partitions task panicked: {e}")))?
+            .map_err(WorkerError::Work)?;
 
-            // Publish what we produced: every partition + the new generation watermark.
-            let (partitions, watermark) =
-                collect_partitions(&cfg, &ws).map_err(|e| WorkerError::Work(format!("{e:#}")))?;
             for (pid, location) in &partitions {
                 client_w.register_partition(pid, location.clone()).await?;
             }
-            let ids: Vec<String> = partitions.iter().map(|(p, _)| p.clone()).collect();
-            client_w.record_entity_partitions(&shard_w, &ids).await?;
+            // An id can (rarely) span more than one partition across recompiles, so group before
+            // recording — one `RecordEntityPartitions` call per distinct id, not per (id, partition)
+            // pair.
+            let mut by_entity: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+            for (id, pid) in entity_ids {
+                by_entity.entry(id).or_default().push(pid);
+            }
+            for (id, pids) in &by_entity {
+                client_w.record_entity_partitions(id, pids).await?;
+            }
             guard.commit(watermark).await?;
             println!(
                 "  generation {watermark} committed; {} partitions registered",
@@ -198,23 +201,31 @@ async fn run_pipeline(config: &EkosConfig, cwd: &Path, parallel_recover: bool) -
     Ok(())
 }
 
-/// `(partition-id, location)` for every partition in the freshly-compiled workspace, plus the
-/// store's monotonic entry count as the manifest-generation watermark. When
-/// `[storage.partition] segment-backend-url` is set the location is that object store scoped to
-/// the partition id (so a query worker pulls the sealed segments straight from there); otherwise
-/// it's the partition's local root (shared-filesystem deployments).
-fn collect_partitions(
-    config: &EkosConfig,
-    cwd: &Path,
-) -> Result<(Vec<(String, PartitionLocation)>, u64)> {
+/// `(partition-id, location)` pairs, the manifest-generation watermark, and `(id, home-partition)`
+/// pairs for the coordinator's `entity_id → partitions` pruning index — [`finalize_partitions`]'s
+/// result.
+type FinalizedPartitions = (Vec<(String, PartitionLocation)>, u64, Vec<(String, String)>);
+
+/// Runs after a compile: publish each partition's search index to its backend (a no-op for a
+/// local backend), collect `(partition-id, location)` for every partition plus the store's
+/// monotonic entry count as the manifest-generation watermark, and collect every object/
+/// relationship id's home partition for the coordinator's `entity_id → partitions` pruning index
+/// (RFC 0113 v1.1 — `DistributedLedger` uses it to prune id-scoped reads to the few partitions
+/// that actually hold an id). One `PartitionedLedger` open for all three, rather than re-opening
+/// the freshly-compiled workspace per concern. When `[storage.partition] segment-backend-url` is
+/// set a partition's location is that object store scoped to the partition id (so a query worker
+/// pulls the sealed segments straight from there); otherwise it's the partition's local root
+/// (shared-filesystem deployments).
+fn finalize_partitions(config: &EkosConfig, cwd: &Path) -> Result<FinalizedPartitions> {
     let pl = store::build_partitioned(config, cwd, true)?;
+    pl.publish_search_indexes()?;
+
     let seg_url = config.storage.partition.segment_backend_url.clone();
-    let partitions = pl
-        .catalog_partition_keys()
-        .into_iter()
-        .filter_map(|k| {
-            let pid = ekos_distributed::partition_id(&k);
-            let root = pl.partition_root(&k)?;
+    let mut partitions = Vec::new();
+    let mut entity_ids = Vec::new();
+    for key in pl.catalog_partition_keys() {
+        let pid = ekos_distributed::partition_id(&key);
+        if let Some(root) = pl.partition_root(&key) {
             let location = match &seg_url {
                 Some(base) => PartitionLocation::ObjectStore {
                     url: format!("{}/{pid}", base.trim_end_matches('/')),
@@ -224,11 +235,14 @@ fn collect_partitions(
                     root: root.to_string_lossy().into_owned(),
                 },
             };
-            Some((pid, location))
-        })
-        .collect();
+            partitions.push((pid.clone(), location));
+        }
+        for id in pl.partition_entity_ids(&key)? {
+            entity_ids.push((id.to_string(), pid.clone()));
+        }
+    }
     let watermark = pl.entry_count().map(|n| n as u64).unwrap_or(0);
-    Ok((partitions, watermark))
+    Ok((partitions, watermark, entity_ids))
 }
 
 /// `ekos query-worker serve --coordinator <addr> --listen <addr> [--cache <dir>]` — RFC 0113 B4

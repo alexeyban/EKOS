@@ -7,22 +7,28 @@
 //! (`ekos compile-worker`), and the gateway is read-only, matching the Runtime-is-read-only
 //! invariant.
 //!
-//! v1 keeps no persistent connection pool: each call opens fresh coordinator + worker
-//! connections (localhost / cluster-internal TCP, a few ms) and fans out **sequentially**. A
-//! health-checked pool + parallel fan-out is a follow-on, tracked in RFC 0113.
-//!
-//! v1 also does not use the coordinator's `id → partitions` index to prune: an entity-scoped read
-//! fans to *every* partition of the right class (object / relationship / event / evidence). This
-//! is correct, just not minimal; pruning lands once Service A populates that index on write.
+//! v1.1: a small connection pool (one cached connection per coordinator/worker address, dropped
+//! and reconnected on an I/O error) replaces v1's fresh-connect-per-call; multi-partition fan-out
+//! (`all_objects`, `diff`, `search`, id-scoped lookups, …) dispatches to every partition
+//! **concurrently** instead of sequentially; and id-scoped reads (`get_object`, `object_history`,
+//! …) prune to the partitions the coordinator's `entity_id → partitions` index names for that id,
+//! set by `ekos compile-worker` after each compile, falling back to a full class scan when the
+//! index has nothing for an id (unindexed classes — events/evidence — or a not-yet-recompiled
+//! workspace). Broad reads with no id to prune by (`all_objects`, `relationships_for`, `diff`, …)
+//! still fan to every partition of the right class — that's inherent to what they're asking for,
+//! not a pruning gap.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use chrono::{DateTime, Utc};
-use ekos_cluster::CoordinatorClient;
+use ekos_cluster::{ClusterError, CoordinatorClient};
 use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use ekos_ledger::{KnowledgeStore, LedgerDiff, LedgerError};
+use futures::future::{join_all, try_join_all};
 use tokio::runtime::Handle;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::DistributedError;
 use crate::worker_client::QueryWorkerClient;
@@ -55,10 +61,40 @@ fn bucket(partition_id: &str) -> &str {
         .map_or(partition_id, |(_, b)| b)
 }
 
+/// Sort partition ids newest-bucket-first — the order every id-scoped "first match wins" read
+/// (`get_object`, `object_at`, …) depends on.
+fn sort_newest_first(ids: &mut [String]) {
+    ids.sort_by(|a, b| bucket(b).cmp(bucket(a)).then_with(|| b.cmp(a)));
+}
+
+/// A connection that's reconnected on demand rather than held forever — cheap for a
+/// cluster-internal TCP connection, and simpler than a real health-checked pool for v1.1.
+struct ConnSlot<C>(AsyncMutex<Option<Arc<C>>>);
+
+impl<C> ConnSlot<C> {
+    fn empty() -> Self {
+        Self(AsyncMutex::new(None))
+    }
+
+    async fn get(&self) -> Option<Arc<C>> {
+        self.0.lock().await.clone()
+    }
+
+    async fn set(&self, c: Arc<C>) {
+        *self.0.lock().await = Some(c);
+    }
+
+    async fn clear(&self) {
+        *self.0.lock().await = None;
+    }
+}
+
 pub struct DistributedLedger {
     coordinator_addr: String,
     worker_addrs: Vec<String>,
     next_worker: AtomicUsize,
+    coordinator_conn: ConnSlot<CoordinatorClient>,
+    worker_conns: Vec<ConnSlot<QueryWorkerClient>>,
 }
 
 /// Drive `fut` to completion from a **sync** context: reuse the ambient multi-threaded runtime via
@@ -77,6 +113,14 @@ fn block_on_sync<F: Future>(fut: F) -> F::Output {
     }
 }
 
+fn is_conn_error(e: &ClusterError) -> bool {
+    matches!(e, ClusterError::Io(_) | ClusterError::Closed)
+}
+
+fn is_worker_conn_error(e: &DistributedError) -> bool {
+    matches!(e, DistributedError::Io(_) | DistributedError::Closed)
+}
+
 impl DistributedLedger {
     /// `worker_addrs` must be non-empty. Fails fast if the coordinator is unreachable.
     pub fn open(
@@ -90,15 +134,179 @@ impl DistributedLedger {
         }
         let coordinator_addr = coordinator_addr.into();
         block_on_sync(CoordinatorClient::connect(&coordinator_addr))?;
+        let worker_conns = worker_addrs.iter().map(|_| ConnSlot::empty()).collect();
         Ok(Self {
             coordinator_addr,
             worker_addrs,
             next_worker: AtomicUsize::new(0),
+            coordinator_conn: ConnSlot::empty(),
+            worker_conns,
         })
     }
 
     fn block_on<F: Future>(&self, fut: F) -> F::Output {
         block_on_sync(fut)
+    }
+
+    // ── connection pool ────────────────────────────────────────────────────
+
+    async fn reconnect_coordinator(&self) -> Result<Arc<CoordinatorClient>, DistributedError> {
+        let c = Arc::new(CoordinatorClient::connect(&self.coordinator_addr).await?);
+        self.coordinator_conn.set(Arc::clone(&c)).await;
+        Ok(c)
+    }
+
+    async fn coordinator(&self) -> Result<Arc<CoordinatorClient>, DistributedError> {
+        match self.coordinator_conn.get().await {
+            Some(c) => Ok(c),
+            None => self.reconnect_coordinator().await,
+        }
+    }
+
+    /// Run `f` against the pooled coordinator connection, reconnecting and retrying once if the
+    /// pooled connection turned out to be dead (the peer closed it, a prior call's I/O failed).
+    async fn call_coordinator<T, F, Fut>(&self, f: F) -> Result<T, DistributedError>
+    where
+        F: Fn(Arc<CoordinatorClient>) -> Fut,
+        Fut: Future<Output = Result<T, ClusterError>>,
+    {
+        let c = self.coordinator().await?;
+        match f(c).await {
+            Err(e) if is_conn_error(&e) => {
+                self.coordinator_conn.clear().await;
+                let c = self.reconnect_coordinator().await?;
+                Ok(f(c).await?)
+            }
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn next_index(&self) -> usize {
+        self.next_worker.fetch_add(1, Ordering::Relaxed) % self.worker_addrs.len()
+    }
+
+    async fn reconnect_worker(
+        &self,
+        idx: usize,
+    ) -> Result<Arc<QueryWorkerClient>, DistributedError> {
+        let c = Arc::new(QueryWorkerClient::connect(&self.worker_addrs[idx]).await?);
+        self.worker_conns[idx].set(Arc::clone(&c)).await;
+        Ok(c)
+    }
+
+    async fn worker(&self, idx: usize) -> Result<Arc<QueryWorkerClient>, DistributedError> {
+        match self.worker_conns[idx].get().await {
+            Some(c) => Ok(c),
+            None => self.reconnect_worker(idx).await,
+        }
+    }
+
+    /// Run `f` against the pooled connection for worker `idx`, reconnecting and retrying once on a
+    /// dead pooled connection — the same one-retry contract as [`Self::call_coordinator`].
+    async fn call_worker<T, F, Fut>(&self, idx: usize, f: F) -> Result<T, DistributedError>
+    where
+        F: Fn(Arc<QueryWorkerClient>) -> Fut,
+        Fut: Future<Output = Result<T, DistributedError>>,
+    {
+        let w = self.worker(idx).await?;
+        match f(w).await {
+            Err(e) if is_worker_conn_error(&e) => {
+                let w = self.reconnect_worker(idx).await?;
+                f(w).await
+            }
+            other => other,
+        }
+    }
+
+    // ── partition discovery / pruning ──────────────────────────────────────
+
+    /// Catalogued partition ids of one class, newest bucket first.
+    async fn partitions(&self, class: PClass) -> Result<Vec<String>, DistributedError> {
+        let mut ids: Vec<String> = self
+            .call_coordinator(|c| async move { c.catalog(None).await })
+            .await?
+            .into_iter()
+            .map(|m| m.id)
+            .filter(|id| classify(id) == class)
+            .collect();
+        sort_newest_first(&mut ids);
+        Ok(ids)
+    }
+
+    /// Partitions worth asking for `id`: the coordinator's `entity_id → partitions` index (RFC
+    /// 0113 v1.1, populated by `ekos compile-worker` for objects/relationships) narrowed to
+    /// `class`, or — if the index has nothing (an unindexed class, or a workspace compiled before
+    /// this landed) — every partition of `class`, same as v1.
+    async fn candidate_partitions(
+        &self,
+        class: PClass,
+        id: KirId,
+    ) -> Result<Vec<String>, DistributedError> {
+        let entity = id.to_string();
+        let indexed = self
+            .call_coordinator(move |c| {
+                let entity = entity.clone();
+                async move { c.partitions_for_entity(&entity).await }
+            })
+            .await?;
+        let mut indexed: Vec<String> = indexed
+            .into_iter()
+            .filter(|p| classify(p) == class)
+            .collect();
+        if indexed.is_empty() {
+            return self.partitions(class).await;
+        }
+        sort_newest_first(&mut indexed);
+        Ok(indexed)
+    }
+
+    // ── concurrent fan-out ──────────────────────────────────────────────────
+
+    /// Dispatch `call` to every partition in `pids` concurrently (round-robin across workers),
+    /// returning their results in the same order as `pids`. Any single failure fails the whole
+    /// fan-out, same as the sequential loop it replaces.
+    async fn fan_out<T, F, Fut>(&self, pids: &[String], call: F) -> Result<Vec<T>, DistributedError>
+    where
+        F: Fn(Arc<QueryWorkerClient>, String) -> Fut,
+        Fut: Future<Output = Result<T, DistributedError>>,
+    {
+        let call = &call;
+        let futs = pids.iter().map(|pid| {
+            let idx = self.next_index();
+            let pid = pid.clone();
+            async move { self.call_worker(idx, |w| call(w, pid.clone())).await }
+        });
+        try_join_all(futs).await
+    }
+
+    /// Fan `call` (an id-scoped `Option<T>` lookup) to every candidate partition for `id`
+    /// concurrently, then return the first `Some` in `candidate_partitions`' priority order
+    /// (newest-first for objects; whatever order the index/class-scan produced otherwise) — same
+    /// "first match wins" semantics as the old sequential loop, just not serialised over the wire.
+    async fn first_present<T, F, Fut>(
+        &self,
+        class: PClass,
+        id: KirId,
+        call: F,
+    ) -> Result<Option<T>, DistributedError>
+    where
+        F: Fn(Arc<QueryWorkerClient>, String) -> Fut,
+        Fut: Future<Output = Result<Option<T>, DistributedError>>,
+    {
+        let pids = self.candidate_partitions(class, id).await?;
+        let call = &call;
+        let futs = pids.iter().map(|pid| {
+            let idx = self.next_index();
+            let pid = pid.clone();
+            async move { self.call_worker(idx, |w| call(w, pid.clone())).await }
+        });
+        for res in join_all(futs).await {
+            if let Some(v) = res? {
+                return Ok(Some(v));
+            }
+        }
+        Ok(None)
     }
 
     /// RFC 0113 B5 — distributed search. Fans each object partition's BM25 **top-`k`** to a query
@@ -108,10 +316,16 @@ impl DistributedLedger {
     pub fn search(&self, query: &str, k: usize) -> Result<Vec<(KirId, String, f32)>, LedgerError> {
         let query = query.to_string();
         self.run(async move {
+            let pids = self.partitions(PClass::Object).await?;
+            let per_partition = self
+                .fan_out(&pids, |w, pid| {
+                    let query = query.clone();
+                    async move { w.find_objects_scored(&pid, &query, k).await }
+                })
+                .await?;
             let mut best: std::collections::HashMap<KirId, (String, f32)> = Default::default();
-            for pid in self.partitions(PClass::Object).await? {
-                let w = self.any_worker().await?;
-                for (id, name, score) in w.find_objects_scored(&pid, &query, k).await? {
+            for hits in per_partition {
+                for (id, name, score) in hits {
                     best.entry(id)
                         .and_modify(|e| {
                             if score > e.1 {
@@ -127,30 +341,6 @@ impl DistributedLedger {
             hits.truncate(k);
             Ok(hits)
         })
-    }
-
-    async fn coordinator(&self) -> Result<CoordinatorClient, DistributedError> {
-        Ok(CoordinatorClient::connect(&self.coordinator_addr).await?)
-    }
-
-    async fn any_worker(&self) -> Result<QueryWorkerClient, DistributedError> {
-        let i = self.next_worker.fetch_add(1, Ordering::Relaxed) % self.worker_addrs.len();
-        QueryWorkerClient::connect(&self.worker_addrs[i]).await
-    }
-
-    /// Catalogued partition ids of one class, newest bucket first.
-    async fn partitions(&self, class: PClass) -> Result<Vec<String>, DistributedError> {
-        let mut ids: Vec<String> = self
-            .coordinator()
-            .await?
-            .catalog(None)
-            .await?
-            .into_iter()
-            .map(|m| m.id)
-            .filter(|id| classify(id) == class)
-            .collect();
-        ids.sort_by(|a, b| bucket(b).cmp(bucket(a)).then_with(|| b.cmp(a)));
-        Ok(ids)
     }
 
     fn run<T>(
@@ -190,54 +380,38 @@ impl KnowledgeStore for DistributedLedger {
 
     fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError> {
         let id = *id;
-        self.run(async move {
-            for pid in self.partitions(PClass::Object).await? {
-                let w = self.any_worker().await?;
-                if let Some(o) = w.get_object(&pid, id).await? {
-                    return Ok(Some(o));
-                }
-            }
-            Ok(None)
-        })
+        self.run(
+            self.first_present(PClass::Object, id, move |w, pid| async move {
+                w.get_object(&pid, id).await
+            }),
+        )
     }
 
     fn get_relationship(&self, id: &KirId) -> Result<Option<KirRelationship>, LedgerError> {
         let id = *id;
-        self.run(async move {
-            for pid in self.partitions(PClass::Rel).await? {
-                let w = self.any_worker().await?;
-                if let Some(r) = w.get_relationship(&pid, id).await? {
-                    return Ok(Some(r));
-                }
-            }
-            Ok(None)
-        })
+        self.run(
+            self.first_present(PClass::Rel, id, move |w, pid| async move {
+                w.get_relationship(&pid, id).await
+            }),
+        )
     }
 
     fn get_event(&self, id: &KirId) -> Result<Option<KirEvent>, LedgerError> {
         let id = *id;
-        self.run(async move {
-            for pid in self.partitions(PClass::Event).await? {
-                let w = self.any_worker().await?;
-                if let Some(e) = w.get_event(&pid, id).await? {
-                    return Ok(Some(e));
-                }
-            }
-            Ok(None)
-        })
+        self.run(
+            self.first_present(PClass::Event, id, move |w, pid| async move {
+                w.get_event(&pid, id).await
+            }),
+        )
     }
 
     fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, LedgerError> {
         let id = *id;
-        self.run(async move {
-            for pid in self.partitions(PClass::Evidence).await? {
-                let w = self.any_worker().await?;
-                if let Some(e) = w.get_evidence(&pid, id).await? {
-                    return Ok(Some(e));
-                }
-            }
-            Ok(None)
-        })
+        self.run(
+            self.first_present(PClass::Evidence, id, move |w, pid| async move {
+                w.get_evidence(&pid, id).await
+            }),
+        )
     }
 
     fn all_objects(&self) -> Result<Vec<KirObject>, LedgerError> {
@@ -246,9 +420,11 @@ impl KnowledgeStore for DistributedLedger {
             // oldest bucket first, so a newer partition's version overwrites
             let mut pids = self.partitions(PClass::Object).await?;
             pids.reverse();
-            for pid in pids {
-                let w = self.any_worker().await?;
-                for o in w.all_objects(&pid).await? {
+            let per_partition = self
+                .fan_out(&pids, |w, pid| async move { w.all_objects(&pid).await })
+                .await?;
+            for objs in per_partition {
+                for o in objs {
                     by_id.insert(o.id, o);
                 }
             }
@@ -261,9 +437,14 @@ impl KnowledgeStore for DistributedLedger {
             let mut by_id: std::collections::HashMap<KirId, KirRelationship> = Default::default();
             let mut pids = self.partitions(PClass::Rel).await?;
             pids.reverse();
-            for pid in pids {
-                let w = self.any_worker().await?;
-                for r in w.all_relationships(&pid).await? {
+            let per_partition = self
+                .fan_out(
+                    &pids,
+                    |w, pid| async move { w.all_relationships(&pid).await },
+                )
+                .await?;
+            for rels in per_partition {
+                for r in rels {
                     by_id.insert(r.id, r);
                 }
             }
@@ -275,11 +456,18 @@ impl KnowledgeStore for DistributedLedger {
         let id = *id;
         self.run(async move {
             let mut by_id: std::collections::HashMap<KirId, KirRelationship> = Default::default();
+            // No endpoint index exists (RFC 0113 v1.1 only indexes an entity's own id) — a
+            // relationship referencing `id` as an endpoint can live in any rel-kind partition, so
+            // this always fans to every one, just concurrently now instead of sequentially.
             let mut pids = self.partitions(PClass::Rel).await?;
             pids.reverse();
-            for pid in pids {
-                let w = self.any_worker().await?;
-                for r in w.relationships_for(&pid, id).await? {
+            let per_partition = self
+                .fan_out(&pids, move |w, pid| async move {
+                    w.relationships_for(&pid, id).await
+                })
+                .await?;
+            for rels in per_partition {
+                for r in rels {
                     by_id.insert(r.id, r);
                 }
             }
@@ -289,16 +477,11 @@ impl KnowledgeStore for DistributedLedger {
 
     fn object_at(&self, id: &KirId, at: DateTime<Utc>) -> Result<Option<KirObject>, LedgerError> {
         let id = *id;
-        self.run(async move {
-            // newest partition first; first version at-or-before `at` wins
-            for pid in self.partitions(PClass::Object).await? {
-                let w = self.any_worker().await?;
-                if let Some(o) = w.object_at(&pid, id, at).await? {
-                    return Ok(Some(o));
-                }
-            }
-            Ok(None)
-        })
+        self.run(
+            self.first_present(PClass::Object, id, move |w, pid| async move {
+                w.object_at(&pid, id, at).await
+            }),
+        )
     }
 
     fn relationships_at(
@@ -311,9 +494,13 @@ impl KnowledgeStore for DistributedLedger {
             let mut by_id: std::collections::HashMap<KirId, KirRelationship> = Default::default();
             let mut pids = self.partitions(PClass::Rel).await?;
             pids.reverse();
-            for pid in pids {
-                let w = self.any_worker().await?;
-                for r in w.relationships_at(&pid, id, at).await? {
+            let per_partition = self
+                .fan_out(&pids, move |w, pid| async move {
+                    w.relationships_at(&pid, id, at).await
+                })
+                .await?;
+            for rels in per_partition {
+                for r in rels {
                     by_id.insert(r.id, r);
                 }
             }
@@ -326,9 +513,13 @@ impl KnowledgeStore for DistributedLedger {
             let mut by_id: std::collections::HashMap<KirId, KirObject> = Default::default();
             let mut pids = self.partitions(PClass::Object).await?;
             pids.reverse();
-            for pid in pids {
-                let w = self.any_worker().await?;
-                for o in w.all_objects_at(&pid, at).await? {
+            let per_partition = self
+                .fan_out(&pids, move |w, pid| async move {
+                    w.all_objects_at(&pid, at).await
+                })
+                .await?;
+            for objs in per_partition {
+                for o in objs {
                     by_id.insert(o.id, o);
                 }
             }
@@ -341,9 +532,13 @@ impl KnowledgeStore for DistributedLedger {
             let mut by_id: std::collections::HashMap<KirId, KirRelationship> = Default::default();
             let mut pids = self.partitions(PClass::Rel).await?;
             pids.reverse();
-            for pid in pids {
-                let w = self.any_worker().await?;
-                for r in w.all_relationships_at(&pid, at).await? {
+            let per_partition = self
+                .fan_out(&pids, move |w, pid| async move {
+                    w.all_relationships_at(&pid, at).await
+                })
+                .await?;
+            for rels in per_partition {
+                for r in rels {
                     by_id.insert(r.id, r);
                 }
             }
@@ -354,28 +549,28 @@ impl KnowledgeStore for DistributedLedger {
     fn object_history(&self, id: &KirId) -> Result<Vec<KirObject>, LedgerError> {
         let id = *id;
         self.run(async move {
-            let mut out = Vec::new();
-            let mut pids = self.partitions(PClass::Object).await?;
+            let mut pids = self.candidate_partitions(PClass::Object, id).await?;
             pids.reverse(); // oldest bucket first
-            for pid in pids {
-                let w = self.any_worker().await?;
-                out.extend(w.object_history(&pid, id).await?);
-            }
-            Ok(out)
+            let per_partition = self
+                .fan_out(&pids, move |w, pid| async move {
+                    w.object_history(&pid, id).await
+                })
+                .await?;
+            Ok(per_partition.into_iter().flatten().collect())
         })
     }
 
     fn relationship_history(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError> {
         let id = *id;
         self.run(async move {
-            let mut out = Vec::new();
-            let mut pids = self.partitions(PClass::Rel).await?;
+            let mut pids = self.candidate_partitions(PClass::Rel, id).await?;
             pids.reverse();
-            for pid in pids {
-                let w = self.any_worker().await?;
-                out.extend(w.relationship_history(&pid, id).await?);
-            }
-            Ok(out)
+            let per_partition = self
+                .fan_out(&pids, move |w, pid| async move {
+                    w.relationship_history(&pid, id).await
+                })
+                .await?;
+            Ok(per_partition.into_iter().flatten().collect())
         })
     }
 
@@ -389,35 +584,37 @@ impl KnowledgeStore for DistributedLedger {
 
     fn entry_count(&self) -> Result<usize, LedgerError> {
         self.run(async move {
-            let mut n = 0;
-            let cat = self.coordinator().await?.catalog(None).await?;
-            for m in cat {
-                let w = self.any_worker().await?;
-                n += w.entry_count(&m.id).await?;
-            }
-            Ok(n)
+            let cat = self
+                .call_coordinator(|c| async move { c.catalog(None).await })
+                .await?;
+            let pids: Vec<String> = cat.into_iter().map(|m| m.id).collect();
+            let counts = self
+                .fan_out(&pids, |w, pid| async move { w.entry_count(&pid).await })
+                .await?;
+            Ok(counts.into_iter().sum())
         })
     }
 
     fn object_count(&self) -> Result<usize, LedgerError> {
         self.run(async move {
-            let mut n = 0;
-            for pid in self.partitions(PClass::Object).await? {
-                let w = self.any_worker().await?;
-                n += w.object_count(&pid).await?;
-            }
-            Ok(n)
+            let pids = self.partitions(PClass::Object).await?;
+            let counts = self
+                .fan_out(&pids, |w, pid| async move { w.object_count(&pid).await })
+                .await?;
+            Ok(counts.into_iter().sum())
         })
     }
 
     fn relationship_count(&self) -> Result<usize, LedgerError> {
         self.run(async move {
-            let mut n = 0;
-            for pid in self.partitions(PClass::Rel).await? {
-                let w = self.any_worker().await?;
-                n += w.relationship_count(&pid).await?;
-            }
-            Ok(n)
+            let pids = self.partitions(PClass::Rel).await?;
+            let counts = self
+                .fan_out(
+                    &pids,
+                    |w, pid| async move { w.relationship_count(&pid).await },
+                )
+                .await?;
+            Ok(counts.into_iter().sum())
         })
     }
 
@@ -427,15 +624,23 @@ impl KnowledgeStore for DistributedLedger {
 
     fn diff(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError> {
         self.run(async move {
+            let cat = self
+                .call_coordinator(|c| async move { c.catalog(None).await })
+                .await?;
+            let pids: Vec<String> = cat.into_iter().map(|m| m.id).collect();
+            let diffs = self
+                .fan_out(
+                    &pids,
+                    move |w, pid| async move { w.diff(&pid, from, to).await },
+                )
+                .await?;
             let mut merged = LedgerDiff {
                 added: Vec::new(),
                 touched: Vec::new(),
                 unchanged: 0,
             };
             let mut touched: std::collections::BTreeSet<String> = Default::default();
-            for m in self.coordinator().await?.catalog(None).await? {
-                let w = self.any_worker().await?;
-                let d = w.diff(&m.id, from, to).await?;
+            for d in diffs {
                 merged.added.extend(d.added);
                 touched.extend(d.touched);
                 merged.unchanged += d.unchanged;

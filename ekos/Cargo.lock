@@ -1072,6 +1072,7 @@ dependencies = [
  "ekos-kir",
  "ekos-ledger",
  "ekos-segment-backend",
+ "futures",
  "serde",
  "serde_json",
  "tempfile",

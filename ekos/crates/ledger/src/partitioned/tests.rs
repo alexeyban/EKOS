@@ -57,6 +57,58 @@ fn different_entity_kinds_route_to_different_partitions() {
     );
 }
 
+/// RFC 0113 v1.1 — `partition_entity_ids` is Service A's source for populating the coordinator's
+/// `entity_id → partitions` pruning index after a compile: every object/relationship id in a given
+/// catalogued partition, scoped to exactly that partition (not the whole ledger).
+#[test]
+fn partition_entity_ids_lists_exactly_that_partitions_objects_and_relationships() {
+    let dir = tempdir().unwrap();
+    let ledger = ledger_with_root(dir.path());
+
+    let orders = KirObject::new("orders", ObjectKind::Table);
+    let customers = KirObject::new("customers", ObjectKind::Table);
+    let main_rs = KirObject::new("main.rs", ObjectKind::File);
+    ledger.append_object(&orders).unwrap();
+    ledger.append_object(&customers).unwrap();
+    ledger.append_object(&main_rs).unwrap();
+    let dep = rel(customers.id, orders.id, RelationshipKind::DependsOn);
+    ledger.append_relationship(&dep).unwrap();
+
+    let keys = ledger.catalog_partition_keys();
+    let table_key = keys
+        .iter()
+        .find(|k| k.dimension_value == "Table")
+        .unwrap()
+        .clone();
+    let file_key = keys
+        .iter()
+        .find(|k| k.dimension_value == "File")
+        .unwrap()
+        .clone();
+    let rel_key = keys
+        .iter()
+        .find(|k| k.dimension_value.starts_with("rel:"))
+        .unwrap()
+        .clone();
+
+    let mut table_ids: Vec<String> = ledger
+        .partition_entity_ids(&table_key)
+        .unwrap()
+        .iter()
+        .map(KirId::to_string)
+        .collect();
+    table_ids.sort();
+    let mut want_table = vec![orders.id.to_string(), customers.id.to_string()];
+    want_table.sort();
+    assert_eq!(table_ids, want_table, "orders/customers, not main.rs");
+
+    assert_eq!(
+        ledger.partition_entity_ids(&file_key).unwrap(),
+        vec![main_rs.id]
+    );
+    assert_eq!(ledger.partition_entity_ids(&rel_key).unwrap(), vec![dep.id]);
+}
+
 #[test]
 fn point_read_routes_to_a_single_partition_no_fan_out() {
     let dir = tempdir().unwrap();

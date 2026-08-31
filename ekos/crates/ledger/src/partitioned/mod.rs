@@ -1479,6 +1479,33 @@ impl PartitionedLedger {
         Ok(n)
     }
 
+    /// Every object/relationship id currently held by the catalogued partition `key` (RFC 0113
+    /// v1.1 — lets Service A populate the coordinator's `entity_id → partitions` pruning index
+    /// after a compile, so `DistributedLedger`'s id-scoped reads can fan to the few partitions
+    /// that actually hold an id instead of every partition of its class). Events/evidence aren't
+    /// included — `KnowledgeStore` has no `all_events`/`all_evidence` to enumerate their ids from.
+    pub fn partition_entity_ids(&self, key: &PartitionKey) -> Result<Vec<KirId>, PartitionError> {
+        let ledger = self.partition(key, false)?;
+        let to_err = |source| PartitionError::Ledger {
+            key: key.clone(),
+            source,
+        };
+        let mut ids: Vec<KirId> = ledger
+            .all_objects()
+            .map_err(to_err)?
+            .into_iter()
+            .map(|o| o.id)
+            .collect();
+        ids.extend(
+            ledger
+                .all_relationships()
+                .map_err(to_err)?
+                .into_iter()
+                .map(|r| r.id),
+        );
+        Ok(ids)
+    }
+
     /// The on-disk root of a catalogued partition, or `None` if the key isn't in the catalog.
     /// Used to enumerate `(partition, location)` pairs when registering an existing Local-mode
     /// workspace's partitions with a Distributed-mode coordinator (RFC 0113 B4).

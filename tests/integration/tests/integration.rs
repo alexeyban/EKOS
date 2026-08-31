@@ -185,16 +185,35 @@ async fn compile_worker_runs_the_real_pipeline_under_a_lease() -> Result<()> {
         catalog.iter().any(|m| m.id.starts_with("Table/")),
         "a Table/<bucket> partition must be registered: {catalog:?}"
     );
-    assert!(
-        client.watermark(&catalog[0].id).await.unwrap() > 0
-            || client.partitions_for_entity("main").await.unwrap().len() == catalog.len()
-    );
+    // The watermark is tracked per lease/shard name ("main", the scheduling unit `run_shard` was
+    // called with), not per physical storage partition id — a pre-existing mismatch this
+    // assertion used to paper over with an `||` against the (buggy) shard-name entity-index entry
+    // removed below.
+    assert!(client.watermark("main").await.unwrap() > 0);
 
     // And the workspace really was compiled — the partitioned store has the ecommerce tables.
     let config = EkosConfig::from_file_or_default(&dir.path().join("ekos.toml"));
     let store = ekos::commands::store::open_store(&config, dir.path())?;
     let runtime = Runtime::over(&*store);
     assert_eq!(table_count(&runtime)?, 6, "ecommerce schema has 6 tables");
+
+    // RFC 0113 v1.1: compile-worker must populate the coordinator's `entity_id → partitions`
+    // pruning index with each object's own real id (not a shard-name placeholder) — this is what
+    // lets `DistributedLedger`'s id-scoped reads prune to the few partitions that actually hold an
+    // id instead of fanning to every partition of the class.
+    let some_table = runtime
+        .list_objects()?
+        .into_iter()
+        .find(|o| o.kind.to_string() == "Table")
+        .expect("at least one Table object");
+    let indexed = client
+        .partitions_for_entity(&some_table.id.to_string())
+        .await
+        .unwrap();
+    assert!(
+        indexed.iter().any(|p| p.starts_with("Table/")),
+        "the object's own id must be indexed against its real Table/<bucket> partition: {indexed:?}"
+    );
 
     Ok(())
 }

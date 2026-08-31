@@ -129,3 +129,83 @@ async fn gateway_matches_partitioned_ledger_over_two_workers() {
 
     let _ = Arc::new(()); // keep imports tidy
 }
+
+/// RFC 0113 v1.1 — when the coordinator's `entity_id → partitions` index has an entry for an id,
+/// the gateway must actually use it to prune, not just fall back to a full class scan. Proven by
+/// deliberately mis-registering `orders`' id against a partition that does *not* hold it: if the
+/// gateway silently fell back to scanning every object partition (as v1 always did), `get_object`
+/// would still find `orders` in its real partition and this test would wrongly pass. It must
+/// instead trust the (wrong) index and return `None`. A correctly-indexed id is checked in the
+/// same test to confirm pruning doesn't break the common case.
+#[tokio::test(flavor = "multi_thread")]
+async fn gateway_uses_the_entity_index_to_prune_when_present() {
+    let dir = tempdir().unwrap();
+    let c1 = tempdir().unwrap();
+    let c2 = tempdir().unwrap();
+    let (ledger, orders, _customers, main_rs) = build_workspace(dir.path());
+
+    let (coord_addr, _c) = spawn_ephemeral("127.0.0.1:0", None).await.unwrap();
+    let coord = CoordinatorClient::connect(coord_addr).await.unwrap();
+    let mut table_pid = None;
+    let mut file_pid = None;
+    for key in ledger.catalog_partition_keys() {
+        let root = ledger.partition_root(&key).unwrap();
+        let pid = partition_id(&key);
+        coord
+            .register_partition(
+                &pid,
+                PartitionLocation::Local {
+                    root: root.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+        match key.dimension_value.as_str() {
+            "Table" => table_pid = Some(pid),
+            "File" => file_pid = Some(pid),
+            _ => {}
+        }
+    }
+    let table_pid = table_pid.expect("orders/customers partition");
+    let file_pid = file_pid.expect("main.rs partition");
+
+    // Wrong on purpose: orders actually lives in `table_pid`, not `file_pid`.
+    coord
+        .record_entity_partitions(&orders.id.to_string(), &[file_pid.clone()])
+        .await
+        .unwrap();
+    // Correct: main.rs really does live in `file_pid`.
+    coord
+        .record_entity_partitions(&main_rs.id.to_string(), &[file_pid.clone()])
+        .await
+        .unwrap();
+
+    let (w1, _h1) = spawn_ephemeral_worker("127.0.0.1:0", &coord_addr.to_string(), c1.path())
+        .await
+        .unwrap();
+    let (w2, _h2) = spawn_ephemeral_worker("127.0.0.1:0", &coord_addr.to_string(), c2.path())
+        .await
+        .unwrap();
+
+    let coord_s = coord_addr.to_string();
+    let workers = vec![w1.to_string(), w2.to_string()];
+    let orders_id = orders.id;
+    let main_rs_id = main_rs.id;
+
+    let handle = std::thread::spawn(move || {
+        let g = DistributedLedger::open(coord_s, workers).unwrap();
+
+        assert!(
+            g.get_object(&orders_id).unwrap().is_none(),
+            "a mis-registered index entry must be trusted, not silently bypassed by a full scan"
+        );
+        assert_eq!(
+            g.get_object(&main_rs_id).unwrap().unwrap().name,
+            "main.rs",
+            "a correctly-registered index entry must still resolve"
+        );
+    });
+    handle.join().unwrap();
+
+    let _ = table_pid; // only needed to prove it exists; the gateway never sees it for `orders`
+}

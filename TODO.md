@@ -2797,9 +2797,28 @@ These items have no single phase — they must be maintained and grown throughou
       `ekos compile-worker run` calls it after each compile, before registering partitions with the
       coordinator. Test: writer publishes a search index through a `MemBackend`, a brand-new reader
       root with nothing local resolves `find_objects` from the backend-fetched index; a second
-      reader with no published index still reads objects but gets zero search hits. **RFC 0113
-      Phase B is now fully closed at v1 scope** — every open item but the tracked v1 → v1.1 gateway
-      polish (connection pool, parallel fan-out, index pruning) is resolved.
+      reader with no published index still reads objects but gets zero search hits. **Gateway
+      v1 → v1.1 landed 2026-08-31** — `DistributedLedger` now pools one connection per coordinator/
+      worker address (`ConnSlot`, reconnect-and-retry-once on an I/O error) instead of connecting
+      fresh per call; every multi-partition fan-out dispatches concurrently
+      (`futures::future::join_all`/`try_join_all` via new `fan_out`/`first_present` helpers)
+      instead of sequentially, preserving each method's original merge order; id-scoped reads
+      (`get_object`, `object_history`, …) prune to the partitions the coordinator's real
+      `entity_id → partitions` index names for an id, falling back to a full class scan only when
+      the index has nothing (events/evidence, or a not-yet-recompiled workspace). New
+      `PartitionedLedger::partition_entity_ids(key)` lets `ekos compile-worker run` populate that
+      index from each partition's actual object/relationship ids — replacing a pre-existing bug
+      where it had instead recorded the *shard name* mapped to every partition it produced, a
+      placeholder with zero pruning value. A dedicated test
+      (`gateway_uses_the_entity_index_to_prune_when_present`) proves pruning is real, not a
+      silent fallback, by mis-registering an id against the wrong partition and asserting the
+      lookup misses. Fixing the placeholder also surfaced a second, unrelated latent bug caught by
+      the existing integration test: its watermark assertion checked
+      `watermark(catalog[0].id)` (a physical partition id) when watermarks are actually tracked
+      per lease/shard name — always `0` under a partition id, and only ever true by coincidence via
+      the `||` against the placeholder entity-index check now removed; both the assertion and the
+      underlying index are fixed. **RFC 0113 Phase B is now fully closed at v1 scope** — no
+      tracked follow-ons remain.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

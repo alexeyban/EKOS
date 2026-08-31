@@ -10,9 +10,14 @@ A partition is now **self-describing in object storage** — sealed segments, `m
 (`PartitionedLedger::with_segment_backend`, `[storage.partition] segment-backend-url`); only
 `HEAD` and the active/unsealed segment stay local to the writer (writer-only crash-recovery
 state a reader never needs). `ekos compile-worker run` publishes `search/` after every compile
-(`PartitionedLedger::publish_search_indexes`). Remaining items are the tracked v1 → v1.1
-follow-ons in Open Questions (persistent connection pool, parallel fan-out, coordinator-index
-pruning).
+(`PartitionedLedger::publish_search_indexes`). **Gateway v1.1 landed 2026-08-31**: `DistributedLedger`
+now pools one connection per coordinator/worker address (reconnected on an I/O error, not
+reconnected per call), dispatches every multi-partition fan-out concurrently instead of
+sequentially, and prunes id-scoped reads (`get_object`, `object_history`, …) to the partitions the
+coordinator's real `entity_id → partitions` index names for that id — populated by
+`ekos compile-worker run` from each partition's actual object/relationship ids, replacing the
+placeholder shard-name entry the index previously held (which had no pruning value). Phase B is
+now fully closed at v1 scope — no tracked follow-ons remain.
 **Author:** EKOS team
 **Created:** 2026-08-29
 **Implements:** RFC 0111 §4, §6, §7 (Distributed mode). RFC 0111 doubles as the Phase A
@@ -394,9 +399,28 @@ implementation-level choices don't reintroduce a violation.
       pattern), not gRPC/tonic. Revisit for B4 Service-B segment transfers only if needed.
 - [ ] Service B cache eviction beyond size-bounded LRU (RFC 0111 Open Question — needs real
       query-pattern data; not a B4 blocker).
-- [ ] Gateway v1 → v1.1 (all B4b follow-ons, none blocking): a health-checked persistent
-      connection pool (v1 connects fresh per call); parallel fan-out (v1 is sequential);
-      coordinator-`id → partitions`-index pruning (v1 fans to every partition of the class).
+- [x] Gateway v1 → v1.1 — **resolved 2026-08-31**: a pooled connection per coordinator/worker
+      address (`ConnSlot`, reconnect-and-retry-once on an I/O error, replacing v1's connect-fresh-
+      per-call); every multi-partition fan-out (`fan_out`/`first_present`) dispatches concurrently
+      via `futures::future::join_all`/`try_join_all` instead of a sequential loop, while preserving
+      each method's original merge order (newest-partition-wins, oldest-first concat, "first
+      candidate wins" for id-scoped lookups); id-scoped reads now prune via
+      `candidate_partitions`, which consults the coordinator's `entity_id → partitions` index
+      (populated by `ekos compile-worker run` from each partition's real object/relationship ids,
+      via new `PartitionedLedger::partition_entity_ids`) and falls back to a full class scan only
+      when the index has nothing for that id (events/evidence — unindexed, no `all_events`/
+      `all_evidence` to enumerate ids from — and any not-yet-recompiled workspace). Broad reads
+      with no id to prune by (`all_objects`, `relationships_for`, `diff`, …) still fan to every
+      partition of the class — inherent to the query, not a pruning gap. Found and fixed in the
+      same pass: the compile-worker's prior `record_entity_partitions` call recorded the *shard
+      name* mapped to every partition it produced, not any real object/relationship id — a
+      placeholder with no pruning value that a dedicated test now proves the gateway does not
+      silently fall back past (`gateway_uses_the_entity_index_to_prune_when_present`, which
+      mis-registers an id against the wrong partition and asserts the lookup misses). Test
+      (`tests/integration.rs`) also caught a pre-existing latent bug the old placeholder was
+      masking: the watermark assertion checked `watermark(catalog[0].id)` (a physical partition
+      id), but watermarks are tracked per lease/shard name — always `0` under a partition id, true
+      by coincidence only via the `||` against the placeholder entity-index check being removed.
 - [x] Registering a Local partitioned workspace's partitions with a coordinator — **resolved**:
       `ekos compile-worker run` does it (`CatalogRegister` per partition + `RecordEntityPartitions`)
       after each compile.
@@ -453,6 +477,10 @@ implementation-level choices don't reintroduce a violation.
 | `crates/ledger/src/fact_ledger.rs` ✅ (search publishing) | `open_read_only_with_backend` fetches `search/` from the backend when absent locally; `sync_search_to_backend()` publishes it |
 | `crates/ledger/src/partitioned/mod.rs` ✅ (search publishing) | `PartitionedLedger::publish_search_indexes()` — syncs every catalogued partition's search index |
 | `crates/cli/src/commands/cluster.rs` ✅ (search publishing) | `compile_worker_run` calls `publish_search_indexes()` after each compile, before registering partitions |
+| `crates/distributed/src/gateway.rs` ✅ (gateway v1.1) | `ConnSlot` pooled coordinator/worker connections with reconnect-and-retry; `fan_out`/`first_present` concurrent dispatch; `candidate_partitions` id-index pruning with class-scan fallback |
+| `crates/distributed/Cargo.toml` ✅ (gateway v1.1) | `futures.workspace = true` (`join_all`/`try_join_all`) |
+| `crates/ledger/src/partitioned/mod.rs` ✅ (gateway v1.1) | `PartitionedLedger::partition_entity_ids(key)` — every object/relationship id a catalogued partition holds |
+| `crates/cli/src/commands/cluster.rs` ✅ (gateway v1.1) | `finalize_partitions` (renamed from `collect_partitions`) also collects `(id, partition)` pairs and calls `record_entity_partitions` per real id, replacing the old shard-name placeholder |
 | `crates/compiler-core/src/config.rs` ✅ (B4b) | `StorageDistributedConfig` (`[storage.distributed]`) — strings only |
 | `crates/cli/Cargo.toml` ✅ (B4a) | `distributed` feature = `ekos-distributed/object-store` (off by default; a stock build never compiles `object_store`) |
 | `ekos/docs/rfcs/0111-…md` | Phase B checklist ticked as B1–B5 land |
