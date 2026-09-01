@@ -3,6 +3,7 @@ use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::KirId;
 use ekos_ledger::KnowledgeStore;
+use ekos_runtime::reason::{plan_question, render_plan};
 use ekos_runtime::{RetrievalRequest, Runtime};
 use std::{path::Path, str::FromStr};
 
@@ -56,9 +57,16 @@ pub fn object(config: &EkosConfig, cwd: &Path, id_str: &str, format: &str) -> Re
     Ok(())
 }
 
-pub fn find(config: &EkosConfig, cwd: &Path, query: &str) -> Result<()> {
+pub fn find(config: &EkosConfig, cwd: &Path, query: &str, explain: bool) -> Result<()> {
     let ledger = open_ledger(config, cwd)?;
     let rt = Runtime::over(&*ledger);
+
+    if explain {
+        // RFC 0124: show how the REASON planner classifies and routes this text.
+        let plan = plan_question(query, &rt)?;
+        println!("{}\n", render_plan(&plan));
+    }
+
     // RFC 0119: route through the retrieval seam. Phase 0 = BM25, byte-identical to `find_objects`.
     let results = rt.retrieve(&RetrievalRequest::lexical(query))?;
 

@@ -209,20 +209,33 @@ impl<'a> AiRuntime<'a> {
 
     /// The REASON pipeline: compile `question` → execute → assemble an [`EvidenceSet`] → the LLM
     /// *explains* the structured evidence and cites the claims it used. Distinct from [`Self::ask`],
-    /// which dumps whole-object JSON; `ekos ask` is wired onto this in RFC 0124.
+    /// which dumps whole-object JSON. `ekos ask` (RFC 0124) routes here by default.
     pub async fn reason(&self, question: &str) -> Result<AiAnswer, AiError> {
+        self.reason_with_history(question, &[]).await
+    }
+
+    /// [`Self::reason`] with `history` (RFC 0099) threaded into the LLM request as prior
+    /// `user`/`assistant` turns, between the system prompt and this turn's evidence block. As with
+    /// [`Self::ask_with_history`], evidence assembly is **not** history-aware — each turn plans off
+    /// its own `question` text alone.
+    pub async fn reason_with_history(
+        &self,
+        question: &str,
+        history: &[ConversationTurn],
+    ) -> Result<AiAnswer, AiError> {
         let evidence = self.gather_evidence(question)?;
         let mut diagnostics = evidence.diagnostics.clone();
         let known_evidence: HashSet<KirId> = evidence.source_ids().into_iter().collect();
 
         let context = render_evidence(&evidence);
         let user = format!("Question: {question}\n\nStructured evidence:\n{context}");
+        let history_messages = history_messages(history);
         let req = LlmRequest {
             system: REASON_SYSTEM_PROMPT,
             user: &user,
             prompt_version: REASON_PROMPT_VERSION,
             max_tokens: self.config.max_tokens,
-            history: &[],
+            history: &history_messages,
         };
         let resp = self.llm.complete(&req).await?;
 
@@ -943,5 +956,49 @@ mod tests {
         assert!(answer.answer.contains("Orders is a table"));
         assert_eq!(answer.evidence_refs, vec![ev_id]);
         assert!(answer.diagnostics.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reason_with_history_threads_prior_turns_into_the_llm_request() {
+        let (ledger, _dir) = temp_ledger();
+        seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+
+        let mock = Arc::new(RecordingMock {
+            seen_history: std::sync::Mutex::new(Vec::new()),
+        });
+        let ai = AiRuntime::new(&runtime, mock.clone(), AiRuntimeConfig::default());
+
+        let history = [ConversationTurn {
+            question: "what tables exist?".to_string(),
+            answer: "orders and customers.".to_string(),
+        }];
+        ai.reason_with_history("what depends on orders", &history)
+            .await
+            .unwrap();
+
+        let seen = mock.seen_history.lock().unwrap();
+        assert_eq!(
+            *seen,
+            vec![
+                ("user".to_string(), "what tables exist?".to_string()),
+                ("assistant".to_string(), "orders and customers.".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn reason_without_history_sends_an_empty_history() {
+        let (ledger, _dir) = temp_ledger();
+        seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+
+        let mock = Arc::new(RecordingMock {
+            seen_history: std::sync::Mutex::new(Vec::new()),
+        });
+        let ai = AiRuntime::new(&runtime, mock.clone(), AiRuntimeConfig::default());
+
+        ai.reason("orders").await.unwrap();
+        assert!(mock.seen_history.lock().unwrap().is_empty());
     }
 }

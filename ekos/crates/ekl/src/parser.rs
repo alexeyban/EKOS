@@ -49,6 +49,10 @@ pub struct EklAst {
     pub entity: Entity,
     pub predicates: Vec<Predicate>,
     pub from: Option<String>,
+    /// RFC 0124: `SEMANTIC 'text'` — the candidate set is the ranked retrieval hits for `text`
+    /// (RFC 0119 seam) instead of a full `list_objects()` scan. `Object` only; mutually exclusive
+    /// with `FROM` / `AS OF` / `COUNT` (all rejected at parse time).
+    pub semantic: Option<String>,
     /// RFC 0018: relationship kind name to walk from `from` (e.g. `DependsOn`).
     /// Requires `from`; when present, expansion delegates to `trace_impact`
     /// instead of the undirected `load_neighborhood`.
@@ -294,6 +298,7 @@ impl Parser {
 
         let mut predicates = Vec::new();
         let mut from = None;
+        let mut semantic = None;
         let mut via = None;
         let mut depth = None;
         let mut returns = Vec::new();
@@ -317,6 +322,15 @@ impl Parser {
             if self.peek_keyword("FROM") {
                 self.advance();
                 from = Some(self.expect_string()?);
+            } else if self.peek_keyword("SEMANTIC") {
+                self.advance();
+                semantic = Some(self.expect_string()?);
+                // an inline `LIMIT k` right after the string is a convenience; the trailing
+                // LIMIT clause still works and folds into the same field.
+                if self.peek_keyword("LIMIT") {
+                    self.advance();
+                    limit = Some(self.expect_num()? as u64);
+                }
             } else if self.peek_keyword("VIA") {
                 self.advance();
                 via = Some(self.expect_ident()?);
@@ -387,6 +401,26 @@ impl Parser {
             });
         }
 
+        if semantic.is_some() {
+            let bad = if from.is_some() {
+                Some("FROM (SEMANTIC is a search anchor, FROM is a graph anchor)")
+            } else if as_of.is_some() {
+                Some("AS OF (retrieval has no point-in-time form)")
+            } else if count {
+                Some("COUNT (rank a set, not a scalar — use a plain FIND to count)")
+            } else if entity != Entity::Object {
+                Some("FIND Relationship (SEMANTIC retrieves objects)")
+            } else {
+                None
+            };
+            if let Some(what) = bad {
+                return Err(ParseError {
+                    message: format!("SEMANTIC is not compatible with {what}"),
+                    position: self.peek_pos(),
+                });
+            }
+        }
+
         if group_by.is_some() && !count {
             let pos = self.peek_pos();
             return Err(ParseError {
@@ -407,6 +441,7 @@ impl Parser {
             entity,
             predicates,
             from,
+            semantic,
             via,
             depth,
             returns,
@@ -590,6 +625,37 @@ mod tests {
     #[test]
     fn rejects_via_without_from() {
         assert!(ekl_parse("FIND Object VIA DependsOn").is_err());
+    }
+
+    // ── RFC 0124: SEMANTIC ───────────────────────────────────────────────
+
+    #[test]
+    fn parses_semantic_clause() {
+        let ast = ekl_parse("FIND Object SEMANTIC 'authentication and sessions'").unwrap();
+        assert_eq!(ast.semantic.as_deref(), Some("authentication and sessions"));
+        assert_eq!(ast.limit, None);
+    }
+
+    #[test]
+    fn parses_semantic_with_where_and_inline_limit() {
+        // WHERE precedes the clause list, as for every other EKL query.
+        let ast = ekl_parse("FIND Object WHERE kind = 'Symbol' SEMANTIC 'welcome email' LIMIT 5")
+            .unwrap();
+        assert_eq!(ast.semantic.as_deref(), Some("welcome email"));
+        assert_eq!(ast.limit, Some(5));
+        assert_eq!(ast.predicates.len(), 1);
+    }
+
+    #[test]
+    fn rejects_semantic_combined_with_from_asof_count_and_relationship() {
+        for bad in [
+            "FIND Object SEMANTIC 'x' FROM 'orders'",
+            "FIND Object SEMANTIC 'x' AS OF '2026-01-01T00:00:00Z'",
+            "FIND Object SEMANTIC 'x' COUNT",
+            "FIND Relationship SEMANTIC 'x'",
+        ] {
+            assert!(ekl_parse(bad).is_err(), "expected {bad:?} to be rejected");
+        }
     }
 
     #[test]

@@ -1334,6 +1334,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "ekos-compiler-core",
+ "ekos-identity",
  "ekos-kir",
  "ekos-ledger",
  "ekos-recovery",

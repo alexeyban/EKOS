@@ -10,6 +10,7 @@ use crate::ai::{QUESTION_STOPWORDS, extract_search_terms};
 use crate::{RetrievalRequest, Runtime, RuntimeError};
 use ekos_identity::similarity::{jaro_winkler, normalize};
 use ekos_kir::{KirId, ObjectKind};
+use serde::Serialize;
 
 /// A resolved-name confidence at or above this counts as "the query names this entity".
 pub const RESOLVE_THRESHOLD: f32 = 0.82;
@@ -17,7 +18,7 @@ pub const RESOLVE_THRESHOLD: f32 = 0.82;
 const RESOLVE_CANDIDATES: usize = 8;
 
 /// The shape of answer a question wants — the Query Planner's routing key (RFC 0123).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum QueryType {
     /// A bare id or a single exact entity name — fetch its state, don't search.
     Lookup,
@@ -32,7 +33,7 @@ pub enum QueryType {
 }
 
 /// A named graph operation a `Structural` query resolves to (RFC 0122 exposes these as a surface).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum StructuralOp {
     Dependents,
     Dependencies,

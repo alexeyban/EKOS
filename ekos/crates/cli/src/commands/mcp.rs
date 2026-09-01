@@ -1,9 +1,10 @@
 //! MCP (Model Context Protocol) server over stdio or TCP — RFC 0013 / RFC 0115.
 //!
 //! Speaks newline-delimited JSON-RPC 2.0 and exposes the read-only Runtime as MCP tools
-//! (`ekos_search`, `ekos_ekl`, `ekos_neighborhood`, `ekos_state`, `ekos_dependents`, `ekos_impact`,
-//! `ekos_diff`, `ekos_status`, `ekos_transformation_explain`, `ekos_transformation_diff` — RFC
-//! 0028). Two transports, one dispatch core:
+//! (`ekos_search`, `ekos_query`/`ekos_retrieve` — RFC 0124, `ekos_ekl`, `ekos_neighborhood`,
+//! `ekos_state`, `ekos_dependents`, `ekos_impact`, `ekos_diff`, `ekos_status`,
+//! `ekos_transformation_explain`, `ekos_transformation_diff` — RFC 0028). Two transports, one
+//! dispatch core:
 //!
 //! - **stdio** (default, unchanged since RFC 0013) — one client, spawned by an agent host that
 //!   owns the process's stdin/stdout itself (`claude mcp add ekos -- ekos mcp serve`). Stdout
@@ -24,6 +25,8 @@ use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
 use ekos_ledger::KnowledgeStore;
+use ekos_runtime::reason::{execute, plan_question};
+use ekos_runtime::retrieval::understand;
 use ekos_runtime::{ImpactDirection, RetrievalRequest, Runtime};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
@@ -333,14 +336,37 @@ fn base_tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Search text; a trailing * enables prefix search (e.g. 'order*')" }
+                    "query": { "type": "string", "description": "Search text; a trailing * enables prefix search (e.g. 'order*')" },
+                    "limit": { "type": "integer", "description": "Max results (default 20, max 100)" }
                 },
                 "required": ["query"]
             }
         },
         {
+            "name": "ekos_query",
+            "description": "Structured answer from compiled knowledge — fact lookup and named graph traversal, no LLM. Give a natural-language question ('what does authenticate return', 'what depends on the orders table'); returns a typed list of atomic claims, each with its source location and the analyzer that produced it. Use this instead of ekos_search+ekos_state when the question is about one entity's facts or its dependency graph.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "question": { "type": "string", "description": "Natural-language question about an entity's facts or dependency graph" }
+                },
+                "required": ["question"]
+            }
+        },
+        {
+            "name": "ekos_retrieve",
+            "description": "Debug/inspect how EKOS would answer a question: returns the compiled QueryPlan (how the question was classified and routed), the EvidenceSet it produces, and the query understanding (resolved entities + keywords). No LLM, no synthesis — this is 'show your work' for ekos_query / ekos ask.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "question": { "type": "string", "description": "Natural-language question to compile and inspect" }
+                },
+                "required": ["question"]
+            }
+        },
+        {
             "name": "ekos_ekl",
-            "description": "Run an Enterprise Knowledge Language query against the ledger, e.g. FIND Object WHERE kind = 'Table' AND name CONTAINS 'order' ORDER BY name LIMIT 10. Entities: Object, Relationship. Results carry evidence.",
+            "description": "Run an Enterprise Knowledge Language query against the ledger, e.g. FIND Object WHERE kind = 'Table' AND name CONTAINS 'order' ORDER BY name LIMIT 10. FIND Object SEMANTIC 'text' [LIMIT k] starts from a ranked semantic candidate set. Entities: Object, Relationship. Results carry evidence.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -676,12 +702,47 @@ fn call_tool(
         "ekos_search" => {
             let query = required_str(args, "query")?;
             // RFC 0119: route through the retrieval seam. Phase 0 = BM25, byte-identical.
-            let hits = runtime.retrieve(&RetrievalRequest::lexical(query))?.hits;
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .map(|n| n.clamp(1, 100) as usize)
+                .unwrap_or(20);
+            let mut req = RetrievalRequest::lexical(query);
+            req.limit = limit;
+            let hits = runtime.retrieve(&req)?.hits;
             Ok(json!({
                 "matches": hits
                     .iter()
+                    .take(limit)
                     .map(|hit| json!({ "id": hit.id.to_string(), "name": hit.name }))
                     .collect::<Vec<_>>()
+            }))
+        }
+        // RFC 0124: the QUERY surface + REASON planner as read-only, no-LLM tools.
+        "ekos_query" => {
+            let question = required_str(args, "question")?;
+            let plan = plan_question(question, &runtime)?;
+            let evidence = execute(&plan, &runtime)?;
+            Ok(serde_json::to_value(&evidence)?)
+        }
+        "ekos_retrieve" => {
+            let question = required_str(args, "question")?;
+            let understanding = understand(question, &runtime)?;
+            let plan = plan_question(question, &runtime)?;
+            let evidence = execute(&plan, &runtime)?;
+            Ok(json!({
+                "plan": serde_json::to_value(&plan)?,
+                "evidence": serde_json::to_value(&evidence)?,
+                "understanding": {
+                    "query_type": format!("{:?}", understanding.query_type),
+                    "keywords": understanding.keywords,
+                    "resolved_entities": understanding.resolved_entities.iter().map(|e| json!({
+                        "mention": e.mention,
+                        "id": e.id.to_string(),
+                        "name": e.name,
+                        "confidence": e.confidence,
+                    })).collect::<Vec<_>>(),
+                },
             }))
         }
         "ekos_ekl" => {
@@ -1517,6 +1578,8 @@ mod tests {
             names,
             [
                 "ekos_search",
+                "ekos_query",
+                "ekos_retrieve",
                 "ekos_ekl",
                 "ekos_neighborhood",
                 "ekos_state",
@@ -1686,6 +1749,87 @@ mod tests {
         assert_eq!(body["count"], 1);
         assert_eq!(body["hops"][0]["id"], items_id.to_string());
         assert_eq!(body["hops"][0]["hop"], 1);
+    }
+
+    // ── RFC 0124: ekos_query / ekos_retrieve / ekos_search limit ──────────
+
+    #[test]
+    fn ekos_query_returns_a_typed_evidence_set_for_a_structural_question() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let (_orders_id, items_id) = seeded_ledger(&config, tmp.path());
+
+        let line = req(
+            20,
+            "tools/call",
+            json!({ "name": "ekos_query",
+                    "arguments": { "question": "what depends on the orders table" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let claims: Vec<&str> = body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["claim"].as_str().unwrap())
+            .collect();
+        assert!(
+            claims
+                .iter()
+                .any(|c| c.starts_with("order_items — dependents of orders")),
+            "expected the FK-dependent table in the evidence set, got: {claims:?}"
+        );
+        let _ = items_id;
+    }
+
+    #[test]
+    fn ekos_retrieve_shows_plan_and_understanding() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        seeded_ledger(&config, tmp.path());
+
+        let line = req(
+            21,
+            "tools/call",
+            json!({ "name": "ekos_retrieve",
+                    "arguments": { "question": "what depends on the orders table" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["understanding"]["query_type"], "Structural");
+        assert!(body["plan"]["root"].is_object());
+        assert!(body["evidence"]["items"].is_array());
+        assert!(
+            body["understanding"]["resolved_entities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["name"] == "orders")
+        );
+    }
+
+    #[test]
+    fn ekos_search_honours_limit() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        seeded_ledger(&config, tmp.path()); // "orders" + "order_items" both match "order"
+
+        let line = req(
+            22,
+            "tools/call",
+            json!({ "name": "ekos_search", "arguments": { "query": "order", "limit": 1 } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["matches"].as_array().unwrap().len(), 1);
     }
 
     #[test]

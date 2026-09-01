@@ -82,6 +82,15 @@ enum Commands {
         /// back to it. Letters, digits, '_', and '-' only.
         #[arg(long)]
         session: Option<String>,
+        /// Use the pre-RFC-0123 retrieval path (BM25 → whole-object JSON → LLM)
+        /// instead of the REASON planner + typed evidence set. Implied by
+        /// --stream.
+        #[arg(long)]
+        classic: bool,
+        /// Print the compiled query plan and the typed evidence set alongside
+        /// the answer (RFC 0124). Not compatible with --classic.
+        #[arg(long)]
+        explain: bool,
     },
     /// Live NL-to-SQL query engine over a compiled ClickHouse schema (RFC 0056)
     #[command(name = "clickhouse")]
@@ -419,7 +428,13 @@ enum QueryCommands {
         format: String,
     },
     /// Full-text search over object names
-    Find { query: String },
+    Find {
+        query: String,
+        /// Print the compiled query plan (RFC 0124) — how the text is classified
+        /// and routed — before the results.
+        #[arg(long)]
+        explain: bool,
+    },
     /// BFS neighbourhood graph up to --depth hops
     Neighbourhood {
         id: String,
@@ -483,7 +498,9 @@ async fn main() -> Result<()> {
             QueryCommands::Object { id, format } => {
                 ekos::commands::query::object(&config, &cwd, &id, &format)
             }
-            QueryCommands::Find { query } => ekos::commands::query::find(&config, &cwd, &query),
+            QueryCommands::Find { query, explain } => {
+                ekos::commands::query::find(&config, &cwd, &query, explain)
+            }
             QueryCommands::Neighbourhood { id, depth } => {
                 ekos::commands::query::neighbourhood(&config, &cwd, &id, depth)
             }
@@ -493,9 +510,22 @@ async fn main() -> Result<()> {
             json,
             stream,
             session,
+            classic,
+            explain,
         } => {
-            ekos::commands::ask::run(&config, &cwd, &question, json, stream, session.as_deref())
-                .await
+            ekos::commands::ask::run(
+                &config,
+                &cwd,
+                &question,
+                ekos::commands::ask::AskOpts {
+                    json,
+                    stream,
+                    session: session.as_deref(),
+                    classic,
+                    explain,
+                },
+            )
+            .await
         }
         Commands::ClickHouse { subcommand } => match subcommand {
             ClickHouseCommands::Ask { question, json } => {

@@ -3,23 +3,48 @@ use super::store::open_store;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_runtime::ai::ConversationTurn;
+use ekos_runtime::reason::{render_evidence, render_plan};
 use ekos_runtime::{AiRuntime, AiRuntimeConfig, Runtime};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run(
-    config: &EkosConfig,
-    cwd: &Path,
-    question: &str,
-    json: bool,
-    stream: bool,
-    session: Option<&str>,
-) -> Result<()> {
+/// Flags for [`run`]. `ekos ask` routes through the REASON planner (RFC 0123/0124) by default;
+/// `classic` selects the pre-0123 `gather_context` path, and `stream` implies it.
+pub struct AskOpts<'a> {
+    pub json: bool,
+    pub stream: bool,
+    pub session: Option<&'a str>,
+    pub classic: bool,
+    pub explain: bool,
+}
+
+pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<'_>) -> Result<()> {
+    let AskOpts {
+        json,
+        stream,
+        session,
+        mut classic,
+        explain,
+    } = opts;
+
     if json && stream {
         anyhow::bail!(
             "--stream is not compatible with --json — --json needs the complete structured result, not a partial one"
         );
+    }
+    if explain && classic {
+        anyhow::bail!(
+            "--explain is not compatible with --classic — the classic path has no compiled plan to show"
+        );
+    }
+    if stream && !classic {
+        if explain {
+            anyhow::bail!("--stream is not compatible with --explain");
+        }
+        eprintln!(
+            "note: --stream uses the classic retrieval path (REASON streaming is not supported)"
+        );
+        classic = true;
     }
 
     let session_path = session
@@ -38,7 +63,14 @@ pub async fn run(
     let runtime = Runtime::over(&*ledger);
     let ai = AiRuntime::new(&runtime, llm, ai_config);
 
-    let answer = if stream {
+    // `--explain` (REASON only): assemble the plan + evidence once, for the text block and --json.
+    let explain_data = if explain {
+        Some((ai.plan(question)?, ai.gather_evidence(question)?))
+    } else {
+        None
+    };
+
+    let answer = if classic && stream {
         // Prints prose chunks live as they arrive. Known, accepted v1
         // limitation (RFC 0098): the trailing `{"cited_evidence": [...]}`
         // block the LLM emits as part of the same stream is printed raw
@@ -57,9 +89,21 @@ pub async fn run(
             .await?;
         println!();
         answer
-    } else {
+    } else if classic {
         ai.ask_with_history(question, &history).await?
+    } else {
+        ai.reason_with_history(question, &history).await?
     };
+
+    if let Some((plan, evidence)) = &explain_data
+        && !json
+    {
+        println!(
+            "── plan ──\n{}\n── evidence ──\n{}",
+            render_plan(plan),
+            render_evidence(evidence)
+        );
+    }
 
     if let Some(path) = &session_path {
         let mut history = history;
@@ -71,7 +115,12 @@ pub async fn run(
     }
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&answer)?);
+        let mut out = serde_json::to_value(&answer)?;
+        if let Some((plan, evidence)) = &explain_data {
+            out["plan"] = serde_json::to_value(plan)?;
+            out["evidence"] = serde_json::to_value(evidence)?;
+        }
+        println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
     }
 
@@ -196,12 +245,48 @@ mod tests {
         // --stream/--json check didn't run before opening the store, this
         // would fail with a *different*, misleading "no ledger" error
         // instead of the real, actionable one.
-        let err = run(&config, dir.path(), "anything", true, true, None)
-            .await
-            .unwrap_err();
+        let err = run(
+            &config,
+            dir.path(),
+            "anything",
+            AskOpts {
+                json: true,
+                stream: true,
+                session: None,
+                classic: false,
+                explain: false,
+            },
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string()
                 .contains("--stream is not compatible with --json"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn explain_with_classic_is_rejected_before_touching_the_ledger() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let err = run(
+            &config,
+            dir.path(),
+            "anything",
+            AskOpts {
+                json: false,
+                stream: false,
+                session: None,
+                classic: true,
+                explain: true,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--explain is not compatible with --classic"),
             "got: {err}"
         );
     }

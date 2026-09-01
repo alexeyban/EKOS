@@ -111,6 +111,23 @@ impl<'a> EklInterpreter<'a> {
                     .collect(),
             });
         }
+        // RFC 0124: `SEMANTIC 'text'` — candidates are the ranked retrieval hits, hydrated to
+        // full object rows so WHERE / RETURN / ORDER BY / LIMIT apply unchanged. Retrieval order
+        // is preserved when there is no ORDER BY. `Object` only + no FROM (enforced at parse).
+        if let Some(text) = &ast.semantic {
+            let k = ast.limit.map(|n| n as usize).unwrap_or(50);
+            let mut req = RetrievalRequest::lexical(text.as_str());
+            req.limit = k;
+            let hits = self.runtime.retrieve(&req)?;
+            let mut rows = Vec::new();
+            for hit in hits.hits {
+                if let Some(obj) = self.runtime.load_object(&hit.id)? {
+                    rows.push(object_row(&obj));
+                }
+            }
+            return Ok(rows);
+        }
+
         match (&ast.entity, &ast.from) {
             (Entity::Object, None) => Ok(self
                 .runtime
@@ -427,6 +444,26 @@ mod tests {
         let rt = Runtime::new(&ledger);
         let result = run(&rt, "FIND Object WHERE name CONTAINS 'order'");
         assert_eq!(result.rows.len(), 2);
+    }
+
+    // ── RFC 0124: SEMANTIC candidate set ─────────────────────────────────
+
+    #[test]
+    fn semantic_clause_seeds_candidates_from_retrieval() {
+        let (ledger, _dir) = fixture();
+        let rt = Runtime::new(&ledger);
+        // 'orders' matches the two order* tables; WHERE narrows to the exact name.
+        let result = run(&rt, "FIND Object WHERE name = 'orders' SEMANTIC 'orders'");
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0]["name"], Value::String("orders".into()));
+    }
+
+    #[test]
+    fn semantic_clause_with_no_match_is_empty_not_an_error() {
+        let (ledger, _dir) = fixture();
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Object SEMANTIC 'totally_unrelated_xyzzy'");
+        assert!(result.rows.is_empty());
     }
 
     #[test]

@@ -176,7 +176,7 @@ async fn compile_worker_runs_the_real_pipeline_under_a_lease() -> Result<()> {
     let (coord_addr, _coord) = ekos_cluster::spawn_ephemeral("127.0.0.1:0", None).await.unwrap();
     let coord_s = coord_addr.to_string();
 
-    ekos::commands::cluster::compile_worker_run(&coord_s, "main", dir.path(), false).await?;
+    ekos::commands::cluster::compile_worker_run(&coord_s, "main", dir.path(), false, false).await?;
 
     // The coordinator now knows this shard's partitions and a non-zero generation watermark.
     let client = ekos_cluster::CoordinatorClient::connect(&coord_s).await.unwrap();

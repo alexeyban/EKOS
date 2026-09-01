@@ -25,14 +25,14 @@ const ALL_FACTS: &str = "*";
 
 /// A reference to an entity in a [`PlanNode`] — either already bound by the planner (RFC 0121
 /// resolution) or a mention bound at execution time by an earlier `Resolve` step.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum EntityRef {
     Resolved(KirId),
     Mention(String),
 }
 
 /// One node of a compiled query plan.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum PlanNode {
     /// Bind `mention` → a `KirId` (best retrieval hit) into the execution environment.
     Resolve { mention: String },
@@ -51,7 +51,7 @@ pub enum PlanNode {
 }
 
 /// A compiled question.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct QueryPlan {
     pub raw: String,
     pub query_type: QueryType,
@@ -508,6 +508,45 @@ pub fn render_evidence(set: &EvidenceSet) -> String {
         };
         out.push_str(&format!("{}. {}{loc}{src}\n", i + 1, item.claim));
     }
+    out
+}
+
+/// Render a [`QueryPlan`] as an indented human-readable tree — the `--explain` output shared by
+/// `ekos ask --explain` and `ekos query find --explain`.
+pub fn render_plan(plan: &QueryPlan) -> String {
+    fn ref_str(r: &EntityRef) -> String {
+        match r {
+            EntityRef::Resolved(id) => format!("#{id}"),
+            EntityRef::Mention(m) => format!("?{m:?}"),
+        }
+    }
+    fn node(out: &mut String, n: &PlanNode, indent: usize) {
+        let pad = "  ".repeat(indent);
+        match n {
+            PlanNode::Resolve { mention } => out.push_str(&format!("{pad}Resolve {mention:?}\n")),
+            PlanNode::Search { query, limit } => {
+                out.push_str(&format!("{pad}Search {query:?} (limit {limit})\n"))
+            }
+            PlanNode::Fact { entity, attr } => {
+                out.push_str(&format!("{pad}Fact {}.{attr}\n", ref_str(entity)))
+            }
+            PlanNode::Graph { op, seed, hops } => out.push_str(&format!(
+                "{pad}Graph {op:?} from {} ({hops} hops)\n",
+                ref_str(seed)
+            )),
+            PlanNode::Compose { steps } => {
+                out.push_str(&format!("{pad}Compose\n"));
+                for s in steps {
+                    node(out, s, indent + 1);
+                }
+            }
+        }
+    }
+    let mut out = format!(
+        "query type: {:?}\nrouting confidence: {:.2}\nplan:\n",
+        plan.query_type, plan.confidence
+    );
+    node(&mut out, &plan.root, 1);
     out
 }
 
