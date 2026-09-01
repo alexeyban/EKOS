@@ -219,7 +219,9 @@
     <p class="lede">The single read-only surface every AI agent — Claude Code among them — is meant to use instead of touching raw enterprise systems directly. <code class="mono">ekos mcp serve --workspace &lt;dir&gt;</code> exposes the Runtime over stdio (RFC 0013), with a per-server-session cached read-only ledger handle that never blocks a concurrent writer.<span class="rfc">RFC 0097</span></p>
     <p class="lede" style="font-size:0.9rem; margin-top:1rem;"><code class="mono">--tcp 127.0.0.1:7331</code> additionally serves the same protocol over plain NDJSON-over-TCP, so more than one MCP-speaking tool (PyCharm's AI chat, another agent host, a second Claude Code session) can connect to one already-running server instead of each spawning its own process. One OS thread per connection, each with its own independent cache — not shared across connections, so N concurrent clients means N independent ledger opens, not one reused handle. Stdio stays the default and is unaffected when <code class="mono">--tcp</code> is omitted. No authentication or TLS — loopback or a trusted network only.<span class="rfc">RFC 0115</span></p>
     <div class="tool-grid">
-      <div><div class="tn">ekos_search</div><div class="td">Full-text keyword search over compiled objects.</div></div>
+      <div><div class="tn">ekos_search</div><div class="td">Full-text keyword search over compiled objects (<code class="mono">limit</code> param, RFC 0124).</div></div>
+      <div><div class="tn">ekos_query</div><div class="td">Compiled fact + graph answer to a natural-language question — a typed list of source-cited claims, no LLM (RFC 0124).</div></div>
+      <div><div class="tn">ekos_retrieve</div><div class="td">"Show your work": the compiled query plan, the evidence set, and the query understanding — no LLM (RFC 0124).</div></div>
       <div><div class="tn">ekos_ekl</div><div class="td">Run an Enterprise Knowledge Language query — see §11.</div></div>
       <div><div class="tn">ekos_neighborhood</div><div class="td">BFS graph traversal from an object.</div></div>
       <div><div class="tn">ekos_state</div><div class="td">Reconstruct an object's full state — object, relationships, evidence.</div></div>
@@ -234,13 +236,14 @@
       <div><div class="tn">ekos_clickhouse_query</div><div class="td">Gated, off by default — live NL-to-SQL. See §14.</div></div>
     </div>
     <p class="lede" style="font-size:0.9rem; margin-top:1.6rem;">Every read tool (and <code class="mono">ekos ekl</code> run from the CLI) appends one line to <code class="mono">.ekos/query-log.jsonl</code>; a static heuristic classifies each call cheap/expensive from its own arguments and opportunistically caches an expensive one's result for an identical repeat while the workspace hasn't changed underneath it.<span class="rfc">RFC 0114</span></p>
+    <p class="lede" style="font-size:0.9rem; margin-top:1rem;"><code class="mono">ekos ask "&lt;question&gt;"</code> is the LLM-backed CLI counterpart. It now <em>compiles</em> the question — a rules planner routes it to fact lookups and graph traversals, executes them into a flat set of atomic, source-cited claims, and the model's job shrinks to "explain this evidence, cite each item." <code class="mono">--explain</code> prints the plan and the evidence set alongside the answer; <code class="mono">--classic</code> (implied by <code class="mono">--stream</code>) selects the older retrieve-and-dump-JSON path.<span class="rfc">RFC 0118 / 0123 / 0124</span></p>
   </section>
 
   <!-- ═══════════════════════════════════════════════ EKL ═══ -->
   <section class="cap" id="ekl">
     <div class="cap-num">11</div>
     <h2>Enterprise Knowledge Language (EKL)</h2>
-    <p class="lede" style="max-width:56rem;">A small purpose-built query language over the compiled ledger — <code class="mono">ekos ekl "FIND Object WHERE kind = 'Table' AND name CONTAINS 'order' ORDER BY name LIMIT 10"</code> — with point-in-time <code class="mono">AS OF &lt;timestamp&gt;</code> queries and <code class="mono">COUNT</code>/<code class="mono">GROUP BY</code> aggregation. Every result row carries the evidence it was derived from, the same as any other read path.<span class="rfc">RFC 0010 / 0096</span></p>
+    <p class="lede" style="max-width:56rem;">A small purpose-built query language over the compiled ledger — <code class="mono">ekos ekl "FIND Object WHERE kind = 'Table' AND name CONTAINS 'order' ORDER BY name LIMIT 10"</code> — with point-in-time <code class="mono">AS OF &lt;timestamp&gt;</code> queries, <code class="mono">COUNT</code>/<code class="mono">GROUP BY</code> aggregation, and <code class="mono">SEMANTIC 'text' [LIMIT k]</code> — start from a ranked retrieval candidate set instead of a full scan, then filter/project/order it like any other <code class="mono">FIND Object</code> (mutually exclusive with <code class="mono">FROM</code> / <code class="mono">AS OF</code> / <code class="mono">COUNT</code>). Every result row carries the evidence it was derived from, the same as any other read path.<span class="rfc">RFC 0010 / 0096 / 0124</span></p>
   </section>
 
   <!-- ═══════════════════════════════════════════════ MARKETING ═══ -->

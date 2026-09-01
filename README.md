@@ -418,8 +418,11 @@ correct), but live-question answer quality is unverified pending a real API key 
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
-server over stdio (RFC 0013) — tools: `ekos_search`, `ekos_ekl` (EKL supports point-in-time `AS
-OF <timestamp>` queries and `COUNT`/`GROUP BY` aggregation — RFC 0096), `ekos_neighborhood`,
+server over stdio (RFC 0013) — tools: `ekos_search` (`limit` param — RFC 0124), `ekos_query` /
+`ekos_retrieve` (compiled fact + graph answers and the inspectable query plan / evidence set, no
+LLM — RFC 0124), `ekos_ekl` (EKL supports point-in-time `AS OF <timestamp>` queries,
+`COUNT`/`GROUP BY` aggregation — RFC 0096, and `SEMANTIC 'text'` retrieval candidate sets — RFC
+0124), `ekos_neighborhood`,
 `ekos_state`, `ekos_dependents` (single-hop impact analysis), `ekos_impact` (directed,
 kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_diff` (raw ledger-entry changes since
 T), `ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR

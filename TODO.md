@@ -4273,6 +4273,14 @@ are excluded — see the full exclusion list in the planning history if needed.
         `Runtime::dependencies`/`dependents`/`callers`/`related` + `graph_op(StructuralOp, …)`
         dispatch over `trace_impact`/`load_neighborhood`. Fact schema in analyzers +
         `FactIndexes` fast-path deferred (advisory). No CLI/EKL/MCP surface yet (that's 0124).
+      - [x] **0124 (Phase 5), `devlog_146`** — the surface. `ekos ask` compiles the question
+        through the REASON planner by default (`--classic` = the old `gather_context` path, implied
+        by `--stream`; `--explain` prints the plan + evidence set). MCP `ekos_query` (compiled
+        fact/graph answer, no LLM) + `ekos_retrieve` (plan + evidence + understanding, no LLM);
+        `ekos_search` gains `limit`. EKL `SEMANTIC 'text' [LIMIT k]` — retrieval as a candidate
+        set (rejects `FROM`/`AS OF`/`COUNT`/`Relationship` at parse time). `ekos query find
+        --explain`. `AiRuntime::reason_with_history`. Also fixed a pre-existing `tests/integration`
+        build break from commit 2896481 (`compile_worker_run` 5th arg).
       - [x] **0123 (Phase 4), `devlog_145`** — `runtime::reason`: the Query Plan IR (`PlanNode`
         Resolve/Search/Fact/Graph/Compose, `QueryPlan`), the offline rules planner (`plan` —
         fact-attribute questions route ahead of the RFC 0121 intent class; `PlannerTier`/`plan_with`
