@@ -380,6 +380,35 @@ Opt-in and cost-gated like `[architecture-reasoning]` — a real, potentially la
 LLM calls at the default `scope = "modules"` against a real mid-size codebase, ~5x that at
 `scope = "all"`), never defaulting to the more expensive tier just because it was turned on.
 
+### Semantic (vector) search (RFC 0125, opt-in)
+
+A question phrased with none of the target object's words ("the thing that sends welcome emails" →
+a function called `dispatch_signup_notification`) has no lexical hook. `[embeddings]` in
+`ekos.toml` adds a vector retrieval arm: `ekos commit` embeds every compiled object (its name,
+kind, and `ai_overview` prose if present) into a derived `<ledger-dir>/vectors/` index, and
+retrieval fuses cosine-nearest hits with the BM25 + exact-name arms (Reciprocal Rank Fusion, the
+same fuser as RFC 0120).
+
+```toml
+[embeddings]
+enabled = true
+provider = "ollama"          # "ollama" | "openai" | "mock"; falls back to [llm] provider
+model = "nomic-embed-text"   # optional override
+api-key-env = "OPENAI_API_KEY"
+cache = true                 # content-addressed .ekos/embed-cache/, on by default
+```
+
+```bash
+ekos query find "sends welcome emails" --mode vector   # semantic only
+ekos query find "welcome email" --mode hybrid          # semantic + BM25, fused
+```
+
+Opt-in and off by default — with no `[embeddings]` table nothing is embedded and retrieval is the
+pure BM25 + exact-name path. Embeddings are cheap and disk-cached, so unlike `[llm-description]`
+there is no spend prompt. Single-node only this phase (a no-op on a SQLite or partitioned
+workspace); a vector/hybrid search with no index built yet degrades to lexical with a visible
+note. The MCP `ekos_search` tool takes the same `mode` and reports `arms_run`.
+
 ### Hierarchical rollups (RFC 0044)
 
 Every other context-saving mechanism in EKOS (capped search results, hop-bounded graph walks) is
@@ -418,7 +447,9 @@ correct), but live-question answer quality is unverified pending a real API key 
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
-server over stdio (RFC 0013) — tools: `ekos_search` (`limit` param — RFC 0124), `ekos_query` /
+server over stdio (RFC 0013) — tools: `ekos_search` (`limit` param — RFC 0124; `mode`
+`lexical`/`vector`/`hybrid` for semantic matching, plus `arms_run` in the response — RFC 0125),
+`ekos_query` /
 `ekos_retrieve` (compiled fact + graph answers and the inspectable query plan / evidence set, no
 LLM — RFC 0124), `ekos_ekl` (EKL supports point-in-time `AS OF <timestamp>` queries,
 `COUNT`/`GROUP BY` aggregation — RFC 0096, and `SEMANTIC 'text'` retrieval candidate sets — RFC

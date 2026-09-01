@@ -4273,6 +4273,23 @@ are excluded — see the full exclusion list in the planning history if needed.
         `Runtime::dependencies`/`dependents`/`callers`/`related` + `graph_op(StructuralOp, …)`
         dispatch over `trace_impact`/`load_neighborhood`. Fact schema in analyzers +
         `FactIndexes` fast-path deferred (advisory). No CLI/EKL/MCP surface yet (that's 0124).
+      - [x] **0125 (Phase 6), `devlog_147`** — the vector/semantic arm. `EmbeddingProvider` trait
+        in `recovery` (`Mock` deterministic-offline / `Ollama` / `OpenAI` / `Cached` disk-cache),
+        `build_embedding_provider` mirroring `build_llm_provider`. `ledger::vector::VectorIndex` —
+        a `SearchIndex` sibling at `<ledger-dir>/vectors/` (`meta.json`/`ids.bin`/`vectors.f32`/
+        `tombstones.bin`/`last_tx`, L2-normalized-at-write brute-force cosine, `f32::from_le_bytes`
+        over the bytes — no `bytemuck`/ANN dep), append-on-upsert + `compact()` past 0.3 tombstones,
+        `dim`/`model` mismatch self-wipes (RFC 0103). Opt-in `[embeddings]` config (`enabled=false`
+        default, same shape as `[llm-description]`); post-`commit` `embed_objects` pass runs last
+        (after `run_llm_description`, so it can embed the `ai_overview` prose), incremental by object
+        id, single-node only (no-op on SQLite / partitioned). Vector arm in `FactLedger::retrieve` —
+        fires only when `req.query_embedding.is_some()` **and** an on-disk index's `dim` matches;
+        absent/mismatched → silently skipped, `arms_run.vector=false` (RFC 0119 contract). Surface:
+        `ekos query find --mode <lexical|vector|hybrid>`, MCP `ekos_search {mode}` (+ `arms_run` in
+        the response), query embedded once in the CLI via `embed_query_blocking`. Distributed:
+        `publish_aux("vectors")`/`fetch_aux("vectors")` reuse the `"search"` aux channel — the
+        distributed `VectorSearch` RPC and `ekos ask`/EKL `SEMANTIC` vector wiring are deferred
+        (RFC 0125b / fast-follow).
       - [x] **0124 (Phase 5), `devlog_146`** — the surface. `ekos ask` compiles the question
         through the REASON planner by default (`--classic` = the old `gather_context` path, implied
         by `--stream`; `--explain` prints the plan + evidence set). MCP `ekos_query` (compiled
