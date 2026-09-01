@@ -4273,6 +4273,14 @@ are excluded — see the full exclusion list in the planning history if needed.
         `Runtime::dependencies`/`dependents`/`callers`/`related` + `graph_op(StructuralOp, …)`
         dispatch over `trace_impact`/`load_neighborhood`. Fact schema in analyzers +
         `FactIndexes` fast-path deferred (advisory). No CLI/EKL/MCP surface yet (that's 0124).
+      - [x] **0123 (Phase 4), `devlog_145`** — `runtime::reason`: the Query Plan IR (`PlanNode`
+        Resolve/Search/Fact/Graph/Compose, `QueryPlan`), the offline rules planner (`plan` —
+        fact-attribute questions route ahead of the RFC 0121 intent class; `PlannerTier`/`plan_with`
+        stub seam for the future LLM tier), the executor (`execute` → typed `EvidenceSet` of atomic
+        source-traceable `EvidenceItem`s, item cap 60, `RSN001`–`RSN005` diagnostics), and
+        `AiRuntime::{plan, gather_evidence, reason}`. `ask`/`ask_stream`/MCP/EKL unchanged — cutover
+        is 0124. Whole RFC 0118 series (0119–0123) fast-forwarded onto `main` this session
+        (`30b37cb..c79b189`).
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
