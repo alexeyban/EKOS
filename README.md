@@ -93,16 +93,19 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 **Language:** Rust (2024 edition), Cargo workspace.
 
 **Crates (`ekos/crates/`):** `compiler-core`, `compiler-sdk`, `observation-sdk`, `artifact`, `kir`,
-`scheduler`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`, `marketing`, `docs-gen`,
-`dbt-gen`, `common`, `cli`, `demo-server`, `simulation` (RFC 0047-0055's opt-in World Engine — see
-below), and `clickhouse-query` (RFC 0056's opt-in live NL-to-SQL query engine — see below).
+`scheduler`, `sql-dialect-sdk`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`,
+`marketing`, `docs-gen`, `dbt-gen`, `common`, `cli`, `demo-server`, `segment-backend` / `cluster` /
+`distributed` (RFC 0111/0113's partitioned + horizontally-distributed storage — see below),
+`simulation` (RFC 0047-0055's opt-in World Engine — see below), and `clickhouse-query` (RFC 0056's
+opt-in live NL-to-SQL query engine — see below).
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs (live-verified against a real
 repo, 1,600 real issues/PRs — RFC 0062), Confluence, local documents
 (PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), Pentaho Kettle (`.ktr`/`.kjb` —
 RFC 0027), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
 Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
-RFC 0041), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
+RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
+ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
 0056), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). PostgreSQL, SQL Server, and Jira remain planned.
@@ -751,7 +754,10 @@ drop-in for the single-ledger backend — every command, the MCP server, and `do
 unchanged. Existing SQLite or fact-engine workspaces are **never** switched implicitly, same rule
 as the fact-engine default.
 
-**Multi-machine distribution (Phase B, RFC 0113)** is being built incrementally. Landed so far:
+**Multi-machine distribution (Phase B, RFC 0113)** is feature-complete at v1 (2026-08-30) and
+validated end-to-end: two autonomous fault-injection soak runs — the second against a real S3
+endpoint (MinIO) and a 95-partition workspace — found and fixed 8 defects, each with a regression
+test (`devlog_144`). What it provides:
 
 - a `SegmentBackend` seam — `LocalFsBackend` (default) or `ObjectStoreBackend` (S3 / Azure /
   in-memory, behind a feature flag);

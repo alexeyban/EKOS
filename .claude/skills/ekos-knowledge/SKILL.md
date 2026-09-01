@@ -2,8 +2,8 @@
 name: ekos-knowledge
 description: >-
   Query the EKOS enterprise knowledge ledger through the ekos MCP tools
-  (ekos_search, ekos_ekl, ekos_neighborhood, ekos_state, ekos_dependents,
-  ekos_diff, ekos_status). Use this whenever the user asks what exists across
+  (ekos_search, ekos_query, ekos_ekl, ekos_neighborhood, ekos_state,
+  ekos_dependents, ekos_diff, ekos_status). Use this whenever the user asks what exists across
   their projects, about database tables/schemas, what depends on something,
   what would break if something changed, what changed recently in the
   workspace, who contributes to what, or any question spanning multiple
@@ -24,8 +24,9 @@ about *what exists* rather than *what a specific line of code does*.
 
 | You need | Tool | Notes |
 |---|---|---|
-| An entry point from free text | `ekos_search` | FTS over names, kinds, and content excerpts, relevance-ranked; use 2–3 keywords (ANDed), trailing `*` = prefix |
-| A precise, filterable listing | `ekos_ekl` | EKL query language — see cheat sheet below |
+| An entry point from free text | `ekos_search` | BM25 over names, kinds, content excerpts + `ai_overview` prose, RRF-fused with an exact-name arm; 2–3 keywords, trailing `*` = prefix. `mode: "hybrid"` adds semantic (vector) matching when the workspace has `[embeddings]` built |
+| A direct NL question with a compiled answer | `ekos_query` | Plans the question → fact lookups + graph traversals → a typed list of source-cited claims, no LLM. `ekos_retrieve` shows the plan + evidence + how the question was understood |
+| A precise, filterable listing | `ekos_ekl` | EKL query language — see cheat sheet below; also `SEMANTIC 'text'`, `COUNT`/`GROUP BY`, `AS OF <ts>` |
 | What's connected to an object | `ekos_neighborhood` | BFS `depth` hops from an id |
 | Impact: "what breaks if X changes?" | `ekos_dependents` | Incoming edges = `dependents`, outgoing = `dependencies` |
 | Full detail + proof for one object | `ekos_state` | Object + relationships + **evidence**; `at` (RFC 3339) reconstructs the past |

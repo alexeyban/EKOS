@@ -1,6 +1,9 @@
 # EKOS — Gaps, Trade-offs, and Not-in-Scope Items vs. RFCs
 
-**As of:** 2026-08-27 (devlogs 1–127, RFCs 0001–0109)
+**As of:** 2026-08-27 (devlogs 1–127, RFCs 0001–0109). **Not re-synthesized since** — treat the
+body below as a 2026-08-27 snapshot. Deltas known as of 2026-09-01 (devlogs 128–148, RFCs
+0110–0126) are folded in as dated **UPDATE** notes at the top of each affected section; `TODO.md`
+remains the always-current backlog.
 **Author's method:** This is a synthesis, not a fresh re-derivation. EKOS already tracks this
 continuously in `TODO.md`'s `## Ongoing / Cross-cutting` section — a 2026-08-21 full read-through
 of every RFC's own Non-Goals section (58 of 95 RFCs carry one) promoted ~40 genuine deferred items
@@ -32,6 +35,18 @@ disagrees with the real state of the code, found while compiling this report.
 ---
 
 ## 1. Runtime / Retrieval
+
+**UPDATE (2026-09-01):** the deferred "full ANN/vector-embedding implementation" below is now
+built. RFC 0118 (umbrella) reframed retrieval as a compiled-knowledge query engine and shipped it
+in eight phases, `devlog_143`–`devlog_148`: RFC 0119 the `KnowledgeStore::retrieve` seam · 0120
+RRF fusion + `ExactName` · 0121 query understanding (`understand` → `QueryType`) · 0122 the QUERY
+surface (`fact`/`facts_of` + named graph ops) · 0123 REASON (`QueryPlan` IR + rules planner +
+typed `EvidenceSet`) · 0124 the surface (`ekos ask` compiled by default, MCP `ekos_query`/
+`ekos_retrieve`, EKL `SEMANTIC`) · 0125 the vector arm (`EmbeddingProvider` + `VectorIndex`,
+opt-in `[embeddings]`) · 0126 the CI-gated eval harness (`ekos_runtime::retrieval_eval`) +
+per-arm timings. Still deferred: the `contextual_score` identity signal and the distributed
+`VectorSearch` RPC (RFC 0125b). The EKL Object+Relationship join and async `KnowledgeStore` items
+below remain open by the same deliberate choice.
 
 **Closed (2026-08-26) — was the longest-standing gap in this document, restated across four RFCs
 without closure until this session's six-RFC sequence** (`TODO.md`'s `## Ongoing / Cross-cutting`
@@ -347,8 +362,17 @@ Distinct from RFC 0068's build-out above — this is the smaller MVP reasoning l
 
 ## 11. Storage / Ledger (RFC 0080 — Storage Architecture Plan)
 
-Real, live evidence-driven, six-phase plan. **Phases 1–3 of 6 shipped this session (2026-08-26);
-paused after Phase 3 by explicit user decision, not for lack of scoped work:**
+**UPDATE (2026-09-01):** the horizontal-distribution phases are also done now. RFC 0111 Phase A
+(single-machine partitioned storage — `ledger/src/partitioned/`) and RFC 0113 Phase B (distributed
+— the `cluster` coordinator + `compile-worker` lease/heartbeat protocol, the `distributed`
+query-worker RPC layer + `DistributedLedger` gateway with per-shard IDF merge → RRF) shipped
+`devlog_130`–`devlog_144`, feature-complete at v1 on 2026-08-30. The object-store read path
+(`segment-backend`) is real and verified live against MinIO + a 95-partition Elixir workspace;
+two end-to-end soak runs found and fixed 8 bugs (`devlog_144`, branch merged). RFC 0125 adds the
+vector index to the same `publish_aux`/`fetch_aux` object-store channel.
+
+Real, live evidence-driven, six-phase plan. **Phases 1–3 of 6 shipped 2026-08-26; Phases 4–6
+(horizontal distribution) shipped 2026-08-27 – 08-30 — see the UPDATE above:**
 
 1. **Concurrency — shipped, RFC 0104.** Both real gaps closed: SQLite `Ledger::append`/
    `append_object`/`append_relationship` now run inside real `BEGIN IMMEDIATE`/`COMMIT`

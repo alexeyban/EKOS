@@ -5,10 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Status
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
-Read `devlogs/devlog_*.md` (numbered chronologically, `devlog_65.md` is latest) before starting
-non-trivial work: they are the project's long-term memory and record what shipped, why, and what
-was learned. `TODO.md` tracks the phase-by-phase roadmap; RFCs are split across two locations for
-historical reasons, not a meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
+Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
+`devlog_148.md` as of this writing) before starting non-trivial work: they are the project's
+long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
+phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
+meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
 `ekos/docs/rfcs/` has `0025`+. **Check both directories for the highest existing number before
 picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
 sessions that only checked one location.
@@ -41,7 +42,9 @@ cargo run -p ekos -- init
 cargo run -p ekos -- build && cargo run -p ekos -- recover && cargo run -p ekos -- resolve \
   && cargo run -p ekos -- compile && cargo run -p ekos -- commit   # full pipeline, in order
 cargo run -p ekos -- doctor
-cargo run -p ekos -- ask "<question>"
+cargo run -p ekos -- ask "<question>"        # compiled REASON answer (--classic / --explain)
+cargo run -p ekos -- query find "<text>" --mode hybrid   # SEARCH: BM25 + vector, RRF-fused (RFC 0118/0125)
+cargo run -p ekos -- ekl "FIND Table WHERE ..."          # Enterprise Knowledge Language
 cargo run -p ekos -- identity scan          # cross-system candidate matches (RFC 0029)
 cargo run -p ekos -- marketing publish      # devlog -> tweet -> approval -> X (RFC 0030)
 cargo run -p ekos -- mcp serve --workspace <dir>
@@ -79,12 +82,13 @@ verb is a compiler stage, run in that order, writing artifacts the next stage co
 | `observation-sdk` | `Observer` trait — the contract every connector implements, returning an `ObservationPackage` of content-addressable `ObservationArtifact`s |
 | `artifact` | Artifact types + `ArtifactStore` (loose JSON, or packed segments post RFC 0015) |
 | `kir` | Knowledge Intermediate Representation — the typed output of knowledge-recovery passes, input to the semantic compiler |
-| `recovery` | Knowledge-recovery passes: one analyzer per source kind (`sql_analyzer` — DDL, `sql_transform_analyzer` — SELECT/VIEW/procedures into the Transformation IR, `pentaho_analyzer`, `git_analyzer`, `github_analyzer`, `confluence_analyzer`, `local_docs_analyzer`, `document_semantics_analyzer`, `crypto_analyzer`, `dependency_analyzer`, `python_analyzer` — RFC 0038/0040, real AST + `Calls`-adjacent structural recovery: SQLAlchemy ORM models promoted to real `Table` objects (`__tablename__` present, same-file-only `ForeignKey` resolution, RFC 0091) and real class inheritance as `RelationshipKind::Extends` edges (same-file-only base resolution, RFC 0092), `rust_analyzer` — real AST + `Calls` graph, RFC 0041, `crate_topology_analyzer`/`cicd_analyzer` — `Cargo.toml`/GitHub Actions structural parsing, RFC 0042, `dbt_analyzer` — static extraction of `Table` objects from a dbt project's own checked-in `.sql` model files (Jinja `ref()`/`source()` macro calls) plus `schema.yml`/`sources.yml`-shaped YAML, never `manifest.json`/live warehouse introspection, RFC 0117), `architecture_evaluator.rs` (`evaluate_architecture`, RFC 0065 Phase 3 — deterministic completeness/evidence-coverage scoring, no LLM; consumed by both `ekos architecture investigate` and `docs generate`'s Executive Summary, RFC 0095), plus LLM provider glue (`anthropic.rs`, `ollama.rs`, `llm.rs`) and `llm_description.rs` (RFC 0088 — a post-`commit` step, not a `CompilerPass`, that persists real evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` properties onto `Module`/`Rollup`/`Symbol` objects directly through `&dyn KnowledgeStore`; runs after `commit_rollups`/`commit_data_lineage`, opt-in via `[llm-description]`) |
+| `recovery` | Knowledge-recovery passes: one analyzer per source kind (`sql_analyzer` — DDL, `sql_transform_analyzer` — SELECT/VIEW/procedures into the Transformation IR, `pentaho_analyzer`, `git_analyzer`, `github_analyzer`, `confluence_analyzer`, `local_docs_analyzer`, `document_semantics_analyzer`, `crypto_analyzer`, `dependency_analyzer`, `python_analyzer` — RFC 0038/0040, real AST + `Calls`-adjacent structural recovery: SQLAlchemy ORM models promoted to real `Table` objects (`__tablename__` present, same-file-only `ForeignKey` resolution, RFC 0091) and real class inheritance as `RelationshipKind::Extends` edges (same-file-only base resolution, RFC 0092), `rust_analyzer` — real AST + `Calls` graph, RFC 0041, `crate_topology_analyzer`/`cicd_analyzer` — `Cargo.toml`/GitHub Actions structural parsing, RFC 0042, `dbt_analyzer` — static extraction of `Table` objects from a dbt project's own checked-in `.sql` model files (Jinja `ref()`/`source()` macro calls) plus `schema.yml`/`sources.yml`-shaped YAML, never `manifest.json`/live warehouse introspection, RFC 0117), `elixir_analyzer`/`javascript_analyzer` (real AST + module/symbol/`Calls` recovery), `architecture_evaluator.rs` (`evaluate_architecture`, RFC 0065 Phase 3 — deterministic completeness/evidence-coverage scoring, no LLM; consumed by both `ekos architecture investigate` and `docs generate`'s Executive Summary, RFC 0095), `architecture_reasoning.rs` (RFC 0065 Phase 2 — LLM crate-role classification), plus LLM provider glue (`anthropic.rs`, `ollama.rs`, `llm.rs`), `embed.rs` (RFC 0125 — `EmbeddingProvider` trait + Mock/Ollama/OpenAI/Cached impls + the opt-in post-`commit` `embed_objects` vector pass) and `llm_description.rs` (RFC 0088 — a post-`commit` step, not a `CompilerPass`, that persists real evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` properties onto `Module`/`Rollup`/`Symbol` objects directly through `&dyn KnowledgeStore`; runs after `commit_rollups`/`commit_data_lineage`, opt-in via `[llm-description]`) |
 | `identity` | Identity Resolution — `DefaultResolver` merges same-source-kind duplicates before the CKM exists (RFC 0007), but only when a group's normalized names match *exactly*; fuzzy matches (no confidence threshold reliably separates real correct fuzzy merges from real incorrect ones — RFC 0060) instead become reviewable `unconfirmed` `SameAs` relationships, same as `cross_system.rs`'s cross-system candidates (RFC 0029/0063), never a silent irreversible merge. `cross_system.rs` separately scores cross-system candidate matches (RFC 0029), written as reviewable `unconfirmed` relationships, never auto-merged. **New `ObjectKind::Custom(_)` variants that are self-identified by a structural key (file path, manifest dir, source+index) must be added to `DefaultResolver`'s blanket kind-exclusion list** — `Section`/`TransformNode`/`RustSymbol`/`RustModule`/`PythonSymbol`/`PythonModule`/`Crate`/`ElixirModule`/`ElixirSymbol`/`JsModule`/`JsSymbol`/`Document` have all hit the same over-merge failure (name-prefix or exact-name similarity + the same-kind structural-score fallback of 1.0); several were missed at their own RFCs' launch and only found live weeks later by reading a real generated entity/document page, not by inspection — check this list explicitly whenever a new analyzer ships a new `Custom(_)` kind, don't rely on rediscovering the failure. Separately, `is_expected_technology_jsmodule_pair` (RFC 0093) narrows — never widens — the cross-kind *conflict* detector (not the merge path above) for the one specific, mechanically-expected co-existence a `Technology` (declared dependency) and a bare-specifier `JsModule` (real import) sharing a name represents; a relative-specifier `JsModule` still conflicts. |
 | `semantic` | Semantic compiler: KIR + resolved identities → CKM; `transform_ir.rs` is the shared Transformation IR (RFC 0027) every legacy-format parser (Pentaho, SQL) compiles into. `concentration_risks` (RFC 0094) derives real, persisted `Custom("Risk")` objects — `risk_type: "observed"` only, no LLM/inferred severity — for any object with 3+ real compiled `DependsOn` dependents, computed inside `SemanticCompilerPass::run()` (needs the whole-graph `DependsOn` view only available post-resolution, but — unlike RFC 0044's rollups — no `File`-object dependency to defer to `ekos commit` for) |
-| `ledger` | Append-only Semantic Knowledge Ledger — `fact.rs`/`fact_ledger.rs` (facts), `index.rs`, `search.rs`. RFC 0016's fact-segment engine (tantivy + mmap) is the default for **new** workspaces as of 2026-08-21 (`crates/cli/src/commands/store.rs::open_store`, real month-long soak evidence in the RFC's own dated section); any **pre-existing** SQLite-backed workspace keeps serving from SQLite unaffected unless explicitly migrated via `ekos ledger migrate --v3` |
-| `runtime` | Read-only state reconstruction and context projection; `ai.rs` is the surface AI agents query |
-| `ekl` | Enterprise Knowledge Language — `parser.rs` + `interpreter.rs` for the `ekos ekl` query command |
+| `ledger` | Append-only Semantic Knowledge Ledger — `fact.rs`/`fact_ledger.rs` (facts), `index.rs`, `search.rs`, `vector.rs` (RFC 0125 brute-force cosine vector index, opt-in), `retrieval.rs` (RFC 0119 the `retrieve` seam + `rrf_fuse`), `partitioned/` (RFC 0111 single-machine partitioning). RFC 0016's fact-segment engine (tantivy + mmap) is the default for **new** workspaces as of 2026-08-21 (`crates/cli/src/commands/store.rs::open_store`, real month-long soak evidence in the RFC's own dated section); any **pre-existing** SQLite-backed workspace keeps serving from SQLite unaffected unless explicitly migrated via `ekos ledger migrate --v3` |
+| `segment-backend`, `cluster`, `distributed` | RFC 0111 Phase A (partitioned storage) + RFC 0113 Phase B (distributed, v1 feature-complete 2026-08-30). `segment-backend` is the storage-backend seam (`SegmentBackend` trait: local FS or object store); `cluster` is the coordinator + `compile-worker` lease/heartbeat protocol; `distributed` is the query-worker RPC layer + `DistributedLedger` gateway (per-shard IDF merge → RRF). Object-store read path verified live against MinIO + a 95-partition Elixir workspace (`devlog_144`). |
+| `runtime` | Read-only state reconstruction and context projection. `ai.rs` is the `ekos ask` grounding+citation pipeline; `retrieval.rs` is RFC 0121 query understanding (`understand` → `QueryType`); `reason.rs` is RFC 0123's Query Plan IR + rules planner + typed `EvidenceSet`; `retrieval_eval.rs` is RFC 0126's CI-gated retrieval quality harness. |
+| `ekl` | Enterprise Knowledge Language — `parser.rs` + `interpreter.rs` for the `ekos ekl` query command. Supports `AS OF <ts>` / `COUNT` / `GROUP BY` (RFC 0096) and `SEMANTIC 'text' [LIMIT k]` retrieval candidate sets (RFC 0124). |
 | `docs-gen` | Deterministic Markdown/HTML rendering from the compiled ledger (RFC 0035) — `render_object_page` (`--layout objects`, one page per significant object) and `render_readme`/`render_architecture`/`render_api`/`render_sequence_diagrams` (`--layout curated`, RFC 0037/0042) — zero LLM calls; `render_dependency_risk_report`/`render_onboarding_guide`/`render_findings_memo` (`--layout solution-architect`, RFC 0090) for a team-handoff bundle; `--prose` (opt-in) is the one path that layers an LLM overview on top, via `ekos ask`'s own grounding+citation pipeline. `render_architecture_summary`'s Executive Summary renders real `Custom("Risk")` objects (RFC 0094) and an `ArchitectureConfidence` score (RFC 0095, a small local struct mirroring `ekos_recovery::EvaluationReport` rather than a real cross-crate dependency — `cli` does the translation) when the caller has real signal, an honest placeholder otherwise — never a fabricated 100%. |
 | `dbt-gen` | Renders the Transformation IR (RFC 0027) into executable dbt SQL models with `ref()` semantics |
 | `marketing` | Devlog → tweet → human approval → X publish (RFC 0030) — auxiliary tooling outside the compiler pipeline, not a `CompilerPass`/`Observer` |
@@ -99,7 +103,10 @@ Each plugin implements `Observer` from `observation-sdk` and is registered indep
 `ekos/Cargo.toml`'s workspace members. Real/tested: `file`, `git`, `github`, `confluence`,
 `localdocs` (PDF/DOCX/text/Markdown/HTML/email), `pentaho` (`.ktr`/`.kjb`, RFC 0027), `crypto`,
 `python` (real AST + PySpark DataFrame chains into the Transformation IR, RFC 0038/0040), `rust`
-(real AST + the first real `Calls` function-call graph, RFC 0041).
+(real AST + the first real `Calls` function-call graph, RFC 0041), `elixir`/`javascript` (real
+AST + `Calls` recovery), `clickhouse` (real HTTP client, schema metadata + the opt-in live
+NL-to-SQL query engine, RFC 0056). `sql-dialect-{postgres,mysql,mssql,snowflake,databricks,clickhouse}`
+implement the `SqlDialectParser` trait (RFC 0031).
 Scaffolded proof-of-concept only (mock API shapes, not exercised against live accounts):
 `salesforce`, `sap`, `oracle`, `fabric`, `snowflake`.
 
@@ -129,15 +136,20 @@ crate-map entry.
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the Runtime read-only over stdio via newline-delimited
-JSON-RPC 2.0. Tools: `ekos_search`, `ekos_ekl`, `ekos_neighborhood`, `ekos_state`,
-`ekos_dependents`, `ekos_impact` (multi-hop, RFC 0018), `ekos_diff`, `ekos_status`,
-`ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR, RFC 0028), and
-`ekos_identity_review` (confirm/reject a candidate identity match — cross-system, RFC 0029, or
-same-source fuzzy, RFC 0063; the tool doesn't distinguish origin, only `Custom("SameAs")` kind —
-the one write-capable tool; every other tool is read-only, going through `Runtime` only). This repo's
-own `.claude/skills/ekos-knowledge` and `.claude/skills/memory` skills consume this server — an
-older scripted walkthrough of the whole pipeline is archived under `archive/demo/` for historical
-reference (no longer actively maintained against current CLI behavior).
+JSON-RPC 2.0 (also `--tcp <addr>` for multiple clients on one server, RFC 0115). Tools:
+`ekos_search` (`mode` `lexical`/`vector`/`hybrid`, RFC 0124/0125), `ekos_query` / `ekos_retrieve`
+(compiled fact+graph answer and the inspectable query plan / evidence set, no LLM — RFC 0124),
+`ekos_ekl`, `ekos_neighborhood`, `ekos_state`, `ekos_dependents`, `ekos_impact` (multi-hop,
+RFC 0018), `ekos_diff`, `ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff`
+(Transformation IR, RFC 0028), `ekos_architecture_evaluate`/`ekos_architecture_drift`/`ekos_architecture_diff`
+(RFC 0065/0107-0109), the gated `ekos_clickhouse_query` (live NL-to-SQL, off by default, RFC 0056),
+and the two write-capable review tools `ekos_identity_review` (confirm/reject a candidate identity
+match — cross-system, RFC 0029, or same-source fuzzy, RFC 0063; the tool doesn't distinguish
+origin, only `Custom("SameAs")` kind) and `ekos_architecture_review` (confirm/reject an
+LLM-classified crate role, RFC 0109). Every other tool is read-only, going through `Runtime`
+only. This repo's own `.claude/skills/ekos-knowledge` and `.claude/skills/memory` skills consume
+this server — an older scripted walkthrough of the whole pipeline is archived under `archive/demo/`
+for historical reference (no longer actively maintained against current CLI behavior).
 
 ### LLM-backed passes
 
