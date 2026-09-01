@@ -4273,6 +4273,16 @@ are excluded — see the full exclusion list in the planning history if needed.
         `Runtime::dependencies`/`dependents`/`callers`/`related` + `graph_op(StructuralOp, …)`
         dispatch over `trace_impact`/`load_neighborhood`. Fact schema in analyzers +
         `FactIndexes` fast-path deferred (advisory). No CLI/EKL/MCP surface yet (that's 0124).
+      - [x] **Full-stack test run + fixes, `devlog_149`** — an autonomous end-to-end run
+        (`EKOS_FULL_TEST_PLAN_v2.md`, artifacts `test-runs/run-20260901T160842Z/`) of RFC
+        0111/0113 + 0118/0119–0126 + 0013/0115 against a *partitioned* workspace. No BLOCKER; 8
+        findings, 3 MEDIUM fixed the same session: **F3** `PartitionedLedger::retrieve` lost
+        cross-partition `ExactName` promotion (added the cross-partition arm, matching the gateway);
+        **F5** `ekos mcp serve --workspace <dir>` didn't load `<dir>/ekos.toml` (`resolve_config_path`
+        helper); **F6** `ekos status`/`ekos ledger status` said "not initialised" on any partitioned
+        workspace (added a partitioned/distributed branch). Still open: F2 (`ekos diff` empty for
+        very-old `--from`), F4 (`arm_timings` empty on partitioned stores), F7 (inflected
+        entity-mention resolution).
       - [x] **0126 (Phase 7), `devlog_148`** — the retrieval eval harness + per-arm telemetry.
         `ekos_runtime::retrieval_eval`: a checked-in graded query set (`reference_queries()`, ~30
         queries × 5 `QueryType`s), a hand-built reference estate (`seed_reference_estate` —

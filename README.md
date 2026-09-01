@@ -750,9 +750,12 @@ time-bucket = "monthly"     # "daily" | "weekly" | "monthly"
 Data then splits across many independent fact-segment ledgers keyed by kind + time bucket, with a
 persisted catalog and a run-file index so a reopened store resolves any object/relationship with no
 partition scan; aged partitions tier to cold (handle evicted, promoted back on read). It is a
-drop-in for the single-ledger backend — every command, the MCP server, and `docs generate` work
-unchanged. Existing SQLite or fact-engine workspaces are **never** switched implicitly, same rule
-as the fact-engine default.
+drop-in for the single-ledger backend — every command (`ekos status`/`ekos ledger status` report
+it as `(partitioned, RFC 0111)` with real counts), the MCP server, and `docs generate` work
+unchanged. Retrieval fuses each partition's ranked hits **plus a cross-partition exact-name arm**
+(RFC 0120), so an exact-name query still promotes the named object even when a strong lexical hit
+lives in another partition. Existing SQLite or fact-engine workspaces are **never** switched
+implicitly, same rule as the fact-engine default.
 
 **Multi-machine distribution (Phase B, RFC 0113)** is feature-complete at v1 (2026-08-30) and
 validated end-to-end: two autonomous fault-injection soak runs — the second against a real S3
