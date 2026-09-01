@@ -1,0 +1,1377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distributed Storage Under Fire — EKOS</title>
+<meta name="description" content="Two autonomous end-to-end test runs of EKOS's RFC 0111/0113 distributed storage and query engine — every feature exercised, every metric, and the eight defects found and fixed with regression tests.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+  /* ============================================================
+     Distributed Storage Under Fire — EKOS RFC 0111/0113 test campaign
+     Palette: "cobalt & slate" — one bold accent, slate neutrals biased
+     toward it, semantic colors reserved strictly for PASS / FAIL / CAVEAT.
+     ============================================================ */
+  :root {
+    --paper:        #f3f5f9;
+    --surface:      #ffffff;
+    --surface-2:    #eceff5;
+    --surface-3:    #e3e8f1;
+    --ink:          #141922;
+    --text:         #1e2734;
+    --muted:        #57616f;
+    --faint:        #8892a1;
+    --line:         #dbe0ea;
+    --line-strong:  #c1c9d7;
+    --accent:       #2f57d8;
+    --accent-2:     #5a76c9;
+    --accent-soft:  #e5ebfb;
+    --pass:         #0f7a44;
+    --pass-soft:    #e2f2e9;
+    --fail:         #c0392b;
+    --fail-soft:    #f8e6e3;
+    --warn:         #a96b12;
+    --warn-soft:    #f6ecda;
+    --shadow:       0 1px 2px rgba(20,25,34,.06), 0 8px 24px -12px rgba(20,25,34,.14);
+    --maxw:         1180px;
+
+    /* chart tokens (dataviz reference palette, light) */
+    --viz-surface:   #ffffff;
+    --viz-grid:      #e6eaf2;
+    --viz-axis:      #b6bfce;
+    --viz-s1:        #2a78d6;
+    --viz-s2:        #eb6834;
+    --viz-ink:       #1e2734;
+    --viz-mut:       #57616f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:        #0d1118;
+      --surface:      #151b24;
+      --surface-2:    #1a212c;
+      --surface-3:    #212a37;
+      --ink:          #e9edf4;
+      --text:         #d2dae4;
+      --muted:        #97a3b4;
+      --faint:        #6c7887;
+      --line:         #262f3c;
+      --line-strong:  #364252;
+      --accent:       #7b9bf6;
+      --accent-2:     #6f86d6;
+      --accent-soft:  #1b2749;
+      --pass:         #3cbd7d;
+      --pass-soft:    #123324;
+      --fail:         #ef6f65;
+      --fail-soft:    #3a1f1c;
+      --warn:         #d9a04a;
+      --warn-soft:    #34290f;
+      --shadow:       0 1px 2px rgba(0,0,0,.4), 0 12px 32px -14px rgba(0,0,0,.6);
+
+      --viz-surface:   #151b24;
+      --viz-grid:      #26303d;
+      --viz-axis:      #3b4757;
+      --viz-s1:        #3987e5;
+      --viz-s2:        #d95926;
+      --viz-ink:       #e9edf4;
+      --viz-mut:       #97a3b4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:        #0d1118;
+    --surface:      #151b24;
+    --surface-2:    #1a212c;
+    --surface-3:    #212a37;
+    --ink:          #e9edf4;
+    --text:         #d2dae4;
+    --muted:        #97a3b4;
+    --faint:        #6c7887;
+    --line:         #262f3c;
+    --line-strong:  #364252;
+    --accent:       #7b9bf6;
+    --accent-2:     #6f86d6;
+    --accent-soft:  #1b2749;
+    --pass:         #3cbd7d;
+    --pass-soft:    #123324;
+    --fail:         #ef6f65;
+    --fail-soft:    #3a1f1c;
+    --warn:         #d9a04a;
+    --warn-soft:    #34290f;
+    --shadow:       0 1px 2px rgba(0,0,0,.4), 0 12px 32px -14px rgba(0,0,0,.6);
+
+    --viz-surface:   #151b24;
+    --viz-grid:      #26303d;
+    --viz-axis:      #3b4757;
+    --viz-s1:        #3987e5;
+    --viz-s2:        #d95926;
+    --viz-ink:       #e9edf4;
+    --viz-mut:       #97a3b4;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { animation: none !important; transition: none !important; } }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--text);
+    font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 28px; }
+  @media (max-width: 640px) { .wrap { padding: 0 18px; } }
+
+  h1, h2, h3, h4 { font-family: "Archivo", "Helvetica Neue", Arial, sans-serif; color: var(--ink); text-wrap: balance; margin: 0; letter-spacing: -0.02em; font-weight: 700; }
+  p { margin: 0 0 1em; max-width: 68ch; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  a:hover { border-bottom-color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.86em; }
+  code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0.06em 0.36em; color: var(--text); }
+  .lede code { font-size: 0.8em; }
+
+  /* ---- progress + rail ---- */
+  #progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--accent); width: 0%; z-index: 60; transition: width .12s linear; }
+  nav.rail { position: fixed; right: 22px; top: 50%; transform: translateY(-50%); z-index: 55; display: flex; flex-direction: column; gap: 9px; }
+  nav.rail a { position: relative; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--line-strong); background: transparent; display: block; }
+  nav.rail a[aria-current="true"] { background: var(--accent); border-color: var(--accent); }
+  nav.rail a span { position: absolute; right: 20px; top: 50%; white-space: nowrap; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); padding: 2px 8px; border-radius: 4px; opacity: 0; pointer-events: none; transform: translateY(-50%); transition: opacity .12s; }
+  nav.rail a:hover span { opacity: 1; }
+  @media (max-width: 1180px) { nav.rail { display: none; } }
+
+  /* ---- masthead ---- */
+  header.mast { border-bottom: 2px solid var(--ink); padding: 74px 0 46px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .kicker .dot { width: 4px; height: 4px; background: var(--faint); border-radius: 50%; }
+  header.mast h1 { font-size: clamp(2.6rem, 7vw, 5.1rem); line-height: 0.98; font-weight: 800; }
+  header.mast .sub { font-size: clamp(1.05rem, 2.2vw, 1.4rem); color: var(--muted); max-width: 44ch; margin-top: 24px; line-height: 1.45; }
+  header.mast .sub b { color: var(--text); font-weight: 600; }
+
+  .statstrip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; margin-top: 48px; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .statstrip .cell { padding: 20px 18px; border-right: 1px solid var(--line); }
+  .statstrip .cell:last-child { border-right: 0; }
+  .statstrip .n { font-family: "Archivo", sans-serif; font-weight: 800; font-size: clamp(1.6rem, 4vw, 2.4rem); color: var(--ink); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .statstrip .l { font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-top: 8px; }
+  @media (max-width: 860px) { .statstrip { grid-template-columns: repeat(2, 1fr); } .statstrip .cell:nth-child(2n){border-right:0;} .statstrip .cell { border-bottom: 1px solid var(--line); } }
+
+  /* ---- section scaffold ---- */
+  section { padding: 76px 0; border-bottom: 1px solid var(--line); }
+  section.act { padding-top: 0; }
+  .acthead { border-top: 2px solid var(--ink); padding: 34px 0 40px; display: grid; grid-template-columns: 128px 1fr; gap: 28px; align-items: start; margin-bottom: 8px; }
+  .acthead .num { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 5.4rem; line-height: 0.8; color: transparent; -webkit-text-stroke: 1.6px var(--line-strong); letter-spacing: -0.04em; }
+  .acthead h2 { font-size: clamp(1.7rem, 4vw, 2.6rem); font-weight: 800; }
+  .acthead .thesis { color: var(--muted); font-size: 1.05rem; margin-top: 12px; max-width: 60ch; }
+  .acthead .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+  @media (max-width: 640px) { .acthead { grid-template-columns: 1fr; gap: 8px; } .acthead .num { font-size: 3.4rem; } }
+
+  .h-plain { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
+  h2.big { font-size: clamp(1.8rem, 4.4vw, 2.8rem); font-weight: 800; margin-bottom: 8px; }
+  h3.mid { font-size: 1.24rem; font-weight: 700; margin: 34px 0 14px; }
+  .lede { font-size: 1.12rem; color: var(--muted); max-width: 64ch; }
+
+  /* ---- chips ---- */
+  .chip { display: inline-flex; align-items: center; gap: 7px; font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+  .chip.pass { color: var(--pass); background: var(--pass-soft); border-color: color-mix(in srgb, var(--pass) 40%, transparent); }
+  .chip.fail { color: var(--fail); background: var(--fail-soft); border-color: color-mix(in srgb, var(--fail) 40%, transparent); }
+  .chip.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .chip.neutral { color: var(--muted); background: var(--surface-2); border-color: var(--line-strong); }
+  .chip .ic { width: 12px; height: 12px; }
+
+  /* ---- instrument panels & grids ---- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 820px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: 22px 22px 20px; box-shadow: var(--shadow); }
+  .panel > .plabel { font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin-bottom: 14px; display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+
+  .readout { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: baseline; padding: 9px 0; border-bottom: 1px dotted var(--line-strong); }
+  .readout:last-child { border-bottom: 0; }
+  .readout .k { color: var(--muted); font-size: 0.92rem; }
+  .readout .v { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
+  .readout .v.em { color: var(--accent); }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 820px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 9px; padding: 16px 15px; }
+  .tile .n { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 1.9rem; letter-spacing: -0.03em; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .tile .n small { font-size: 0.9rem; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  .tile .l { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 6px; }
+  .tile.accent .n { color: var(--accent); }
+  .tile.pass  { border-color: color-mix(in srgb, var(--pass) 45%, transparent); }
+  .tile.fail  { border-color: color-mix(in srgb, var(--fail) 45%, transparent); }
+
+  /* ---- tables ---- */
+  .tbl-scroll { overflow-x: auto; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); background: var(--surface-2); border-bottom: 1px solid var(--line-strong); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--surface-2); }
+  td.num, th.num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  td .mono { color: var(--text); }
+  .delta-pos { color: var(--fail); }
+  .delta-neg { color: var(--pass); }
+  caption { caption-side: bottom; text-align: left; padding: 10px 14px; font-size: 0.82rem; color: var(--faint); }
+
+  /* ---- before/after seam ---- */
+  .ba { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line-strong); border-radius: 10px; overflow: hidden; background: var(--surface); }
+  .ba > div { padding: 22px; }
+  .ba > div:first-child { border-right: 2px solid var(--ink); }
+  .ba .tag { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; margin-bottom: 12px; display: inline-block; }
+  .ba .before .tag { color: var(--fail); }
+  .ba .after .tag { color: var(--pass); }
+  @media (max-width: 720px) { .ba { grid-template-columns: 1fr; } .ba > div:first-child { border-right: 0; border-bottom: 2px solid var(--ink); } }
+
+  /* ---- log / code blocks ---- */
+  pre.log { background: #10151d; color: #d7dee9; border-radius: 9px; padding: 16px 18px; overflow-x: auto; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; line-height: 1.7; border: 1px solid var(--line-strong); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) pre.log { background: #05080d; } }
+  :root[data-theme="dark"] pre.log { background: #05080d; }
+  pre.log .c-pass { color: #6fe3a6; }
+  pre.log .c-fail { color: #ff8b80; }
+  pre.log .c-warn { color: #f2c17a; }
+  pre.log .c-dim { color: #7b8797; }
+  pre.log .c-key { color: #8fb4ff; }
+
+  /* ---- callout ---- */
+  .callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 16px 20px; border-radius: 0 8px 8px 0; margin: 22px 0; }
+  .callout.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+  .callout .t { font-weight: 600; color: var(--ink); font-family: "Archivo", sans-serif; margin-bottom: 4px; }
+  .callout p { margin: 0; color: var(--text); font-size: 0.96rem; }
+
+  /* ---- architecture diagram ---- */
+  .diagram { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); padding: 8px; box-shadow: var(--shadow); overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; min-width: 720px; }
+  .dg-box { fill: var(--surface-2); stroke: var(--line-strong); }
+  .dg-box.svc { fill: var(--accent-soft); stroke: var(--accent); }
+  .dg-box.store { fill: var(--surface-3); stroke: var(--line-strong); }
+  .dg-t { fill: var(--ink); font-family: "Archivo", sans-serif; font-weight: 700; font-size: 13px; }
+  .dg-s { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 10px; }
+  .dg-l { stroke: var(--accent-2); stroke-width: 1.6; fill: none; marker-end: url(#arw); }
+  .dg-l.faint { stroke: var(--line-strong); stroke-dasharray: 4 3; marker-end: url(#arwf); }
+  .dg-cap { fill: var(--faint); font-family: "IBM Plex Mono", monospace; font-size: 9.5px; }
+
+  /* ---- fencing timeline ---- */
+  .timeline { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); padding: 8px; box-shadow: var(--shadow); overflow-x: auto; }
+  .timeline svg { display: block; width: 100%; height: auto; min-width: 640px; }
+  .tl-track { stroke: var(--line); stroke-width: 1; }
+  .tl-a { fill: var(--accent); }
+  .tl-b { fill: var(--fail); }
+  .tl-c { fill: var(--pass); }
+  .tl-t { fill: var(--ink); font-family: "IBM Plex Sans", sans-serif; font-size: 12px; font-weight: 500; }
+  .tl-s { fill: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 10px; }
+  .tl-kill { stroke: var(--fail); stroke-width: 1.5; stroke-dasharray: 3 2; }
+
+  /* ---- charts ---- */
+  .viz { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--viz-surface); padding: 20px 20px 14px; box-shadow: var(--shadow); }
+  .viz .vhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
+  .viz .vtitle { font-family: "Archivo", sans-serif; font-weight: 700; font-size: 1.02rem; color: var(--viz-ink); }
+  .viz .vsub { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--viz-mut); }
+  .viz .legend { display: flex; gap: 16px; margin: 6px 0 2px; font-size: 12px; color: var(--viz-mut); font-family: "IBM Plex Mono", monospace; }
+  .viz .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; vertical-align: -1px; margin-right: 6px; }
+  .viz svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .viz .bar { transition: opacity .1s; }
+  .viz .bar:hover { opacity: 0.78; }
+  .viz text { font-family: "IBM Plex Mono", monospace; }
+  .viz .axlab { fill: var(--viz-mut); font-size: 11px; }
+  .viz .vallab { fill: var(--viz-ink); font-size: 10.5px; font-weight: 500; }
+  .viz .grid { stroke: var(--viz-grid); stroke-width: 1; }
+  .viz .base { stroke: var(--viz-axis); stroke-width: 1.4; }
+  .tooltip { position: fixed; z-index: 80; pointer-events: none; background: var(--ink); color: #eef2f8; border: 1px solid var(--line-strong); border-radius: 6px; padding: 7px 10px; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; line-height: 1.5; opacity: 0; transition: opacity .1s; max-width: 260px; }
+
+  ul.clean { list-style: none; padding: 0; margin: 0; }
+  ul.clean li { padding: 10px 0 10px 26px; border-bottom: 1px dotted var(--line-strong); position: relative; }
+  ul.clean li:last-child { border-bottom: 0; }
+  ul.clean li::before { content: "›"; position: absolute; left: 4px; color: var(--accent); font-weight: 700; }
+  ul.clean li b { color: var(--ink); }
+
+  .defect { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); overflow: hidden; margin-bottom: 16px; box-shadow: var(--shadow); }
+  .defect summary { list-style: none; cursor: pointer; padding: 16px 20px; display: grid; grid-template-columns: 46px 1fr auto; gap: 14px; align-items: center; }
+  .defect summary::-webkit-details-marker { display: none; }
+  .defect summary .id { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 1.1rem; color: var(--accent); }
+  .defect summary .ttl { font-weight: 600; color: var(--ink); font-family: "Archivo", sans-serif; }
+  .defect summary .ttl small { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 3px; letter-spacing: 0; }
+  .defect[open] summary { border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  .defect .body { padding: 18px 20px 20px; }
+  .defect .body .row { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px dotted var(--line-strong); }
+  .defect .body .row:last-child { border-bottom: 0; }
+  .defect .body .row .lab { font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding-top: 2px; }
+  .defect .body .row .txt { font-size: 0.95rem; }
+  .defect .body .row .txt code { font-size: 0.82em; }
+
+  footer { padding: 60px 0 80px; color: var(--faint); font-size: 0.85rem; }
+  footer .mono { color: var(--muted); }
+  hr.rule { border: 0; border-top: 1px solid var(--line); margin: 34px 0; }
+  .spacer { height: 8px; }
+  .note { font-size: 0.86rem; color: var(--faint); margin-top: 10px; }
+  sup.fn { color: var(--accent); font-family: "IBM Plex Mono", monospace; font-size: 0.7em; }
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+<nav class="rail" aria-label="Sections">
+  <a href="#top" aria-current="true"><span>Masthead</span></a>
+  <a href="#system"><span>System under test</span></a>
+  <a href="#method"><span>Method &amp; environment</span></a>
+  <a href="#escalation"><span>Run 1 → Run 2</span></a>
+  <a href="#act0"><span>Act 0 · Ingest</span></a>
+  <a href="#act1"><span>Act 1 · Local queries</span></a>
+  <a href="#act2"><span>Act 2 · Backend seam</span></a>
+  <a href="#act3"><span>Act 3 · Fencing</span></a>
+  <a href="#act4"><span>Act 4 · Read path</span></a>
+  <a href="#act5"><span>Act 5 · Search</span></a>
+  <a href="#act6"><span>Act 6 · Benchmarks</span></a>
+  <a href="#defects"><span>Defects &amp; fixes</span></a>
+  <a href="#matrix"><span>Coverage matrix</span></a>
+  <a href="#limits"><span>Limitations</span></a>
+  <a href="#appendix"><span>Appendix</span></a>
+</nav>
+
+<a id="top"></a>
+<header class="mast">
+  <div class="wrap">
+    <div class="kicker">
+      <span>EKOS · RFC 0111 / 0113</span><span class="dot"></span>
+      <span>Partitioned &amp; distributed storage</span><span class="dot"></span>
+      <span>Test campaign · 2026-08-31 → 09-01</span>
+    </div>
+    <h1>Distributed Storage<br>Under Fire</h1>
+    <p class="sub">Two autonomous end-to-end runs of EKOS's object-storage-backed, horizontally-distributed
+      knowledge ledger — fault injection at the coordinator, the compile worker, and the query gateway.
+      <b>Run&nbsp;1 found four defects. Run&nbsp;2 — harder environment — found four more. All eight are fixed,
+      with regression tests and zero workspace regressions.</b></p>
+
+    <div class="statstrip">
+      <div class="cell"><div class="n">2</div><div class="l">runs · 7 acts each</div></div>
+      <div class="cell"><div class="n">95</div><div class="l">live partitions on S3</div></div>
+      <div class="cell"><div class="n">8</div><div class="l">defects found &amp; fixed</div></div>
+      <div class="cell"><div class="n">6.56<small>s</small></div><div class="l">fencing recovery</div></div>
+      <div class="cell"><div class="n">0</div><div class="l">test regressions</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================ SYSTEM -->
+<section id="system">
+  <div class="wrap">
+    <div class="h-plain">01 — The system under test</div>
+    <h2 class="big">Four services, one <code>KnowledgeStore</code> trait</h2>
+    <p class="lede">EKOS is a compiler for enterprise knowledge: it observes source systems, compiles the
+      observations through deterministic passes into a Canonical Knowledge Model, and stores the result
+      in an append-only, evidence-carrying ledger. Distributed mode splits that ledger across many
+      independent fact-segment partitions in object storage and puts a metadata coordinator, a compile
+      worker, query workers, and a read-only gateway around it — every existing reader keeps working
+      because the gateway implements the same trait the local ledger does.</p>
+
+    <div class="spacer"></div>
+    <div class="diagram" role="img" aria-label="Architecture: a compile worker writes partitions to object storage under a coordinator lease; query workers materialise partitions from object storage and a gateway fans reads across them.">
+      <svg viewBox="0 0 940 430" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent-2)"/>
+          </marker>
+          <marker id="arwf" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--line-strong)"/>
+          </marker>
+        </defs>
+
+        <!-- write path (top row) -->
+        <text x="20" y="26" class="dg-cap">WRITE PATH — Service A</text>
+        <rect class="dg-box" x="20" y="38" width="132" height="58" rx="7"/>
+        <text x="86" y="63" text-anchor="middle" class="dg-t">Enterprise repo</text>
+        <text x="86" y="80" text-anchor="middle" class="dg-s">observe_paths</text>
+
+        <rect class="dg-box svc" x="196" y="30" width="176" height="74" rx="7"/>
+        <text x="284" y="54" text-anchor="middle" class="dg-t">ekos compile-worker</text>
+        <text x="284" y="70" text-anchor="middle" class="dg-s">build→…→commit</text>
+        <text x="284" y="84" text-anchor="middle" class="dg-s">under a heartbeated lease</text>
+
+        <rect class="dg-box" x="416" y="30" width="176" height="74" rx="7"/>
+        <text x="504" y="54" text-anchor="middle" class="dg-t">PartitionedLedger</text>
+        <text x="504" y="70" text-anchor="middle" class="dg-s">95 × FactLedger</text>
+        <text x="504" y="84" text-anchor="middle" class="dg-s">entity-kind × weekly</text>
+
+        <rect class="dg-box store" x="660" y="24" width="200" height="86" rx="7"/>
+        <text x="760" y="50" text-anchor="middle" class="dg-t">Object store — S3 / MinIO</text>
+        <text x="760" y="67" text-anchor="middle" class="dg-s">manifest · dict · HEAD</text>
+        <text x="760" y="81" text-anchor="middle" class="dg-s">segments (sealed + active)</text>
+        <text x="760" y="95" text-anchor="middle" class="dg-s">tantivy search/</text>
+
+        <path class="dg-l" d="M152,67 L192,67"/>
+        <path class="dg-l" d="M372,67 L412,67"/>
+        <path class="dg-l" d="M592,67 L656,67"/>
+        <text x="624" y="58" text-anchor="middle" class="dg-cap">publish</text>
+
+        <!-- coordinator (middle) -->
+        <rect class="dg-box svc" x="196" y="176" width="396" height="76" rx="7"/>
+        <text x="394" y="200" text-anchor="middle" class="dg-t">Coordinator — Service B3</text>
+        <text x="394" y="217" text-anchor="middle" class="dg-s">fencing-tokened write leases · per-shard watermark</text>
+        <text x="394" y="231" text-anchor="middle" class="dg-s">catalog · entity→partitions index · persisted JSON state</text>
+        <path class="dg-l faint" d="M300,176 L292,108"/>
+        <text x="238" y="150" class="dg-cap">lease · commit</text>
+
+        <!-- read path (bottom row) -->
+        <text x="20" y="296" class="dg-cap">READ PATH — Services B &amp; C</text>
+        <rect class="dg-box" x="20" y="308" width="150" height="58" rx="7"/>
+        <text x="95" y="333" text-anchor="middle" class="dg-t">ekos query · MCP</text>
+        <text x="95" y="350" text-anchor="middle" class="dg-s">Runtime · docs-gen</text>
+
+        <rect class="dg-box svc" x="214" y="300" width="180" height="74" rx="7"/>
+        <text x="304" y="324" text-anchor="middle" class="dg-t">DistributedLedger</text>
+        <text x="304" y="340" text-anchor="middle" class="dg-s">impl KnowledgeStore</text>
+        <text x="304" y="354" text-anchor="middle" class="dg-s">fan-out · merge · failover</text>
+
+        <rect class="dg-box svc" x="446" y="286" width="150" height="46" rx="7"/>
+        <text x="521" y="306" text-anchor="middle" class="dg-t">query-worker 1</text>
+        <text x="521" y="321" text-anchor="middle" class="dg-s">materialise + serve</text>
+        <rect class="dg-box svc" x="446" y="344" width="150" height="46" rx="7"/>
+        <text x="521" y="364" text-anchor="middle" class="dg-t">query-worker 2</text>
+        <text x="521" y="379" text-anchor="middle" class="dg-s">materialise + serve</text>
+
+        <path class="dg-l" d="M170,337 L210,337"/>
+        <path class="dg-l" d="M394,326 L442,309"/>
+        <path class="dg-l" d="M394,348 L442,367"/>
+        <path class="dg-l" d="M596,309 C650,309 650,120 660,110"/>
+        <path class="dg-l" d="M596,367 C660,367 700,130 720,110"/>
+        <text x="640" y="230" text-anchor="middle" class="dg-cap">pull partition</text>
+        <path class="dg-l faint" d="M360,300 L390,256"/>
+        <text x="326" y="278" class="dg-cap">catalog</text>
+      </svg>
+    </div>
+
+    <h3 class="mid">Component map</h3>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Component</th><th>RFC</th><th>Role</th><th>Crate</th></tr></thead>
+        <tbody>
+          <tr><td><b>PartitionedLedger</b></td><td class="mono">0111 A</td><td>Drop-in <code>KnowledgeStore</code> routing across many <code>FactLedger</code> partitions by entity kind + time bucket; persisted catalog, run-file index, cold tiering.</td><td class="mono">ekos-ledger</td></tr>
+          <tr><td><b>SegmentBackend</b> seam</td><td class="mono">0113 B1</td><td>Interface behind which sealed-segment reads/publishes go. <code>LocalFsBackend</code> (default) or…</td><td class="mono">ekos-segment-backend</td></tr>
+          <tr><td><b>ObjectStoreBackend</b></td><td class="mono">0113 B2</td><td>…an <code>object_store</code> 0.14 backend — S3, Azure ADLS, S3-compatible (MinIO), in-memory, <code>file://</code>. Feature-gated.</td><td class="mono">ekos-segment-backend</td></tr>
+          <tr><td><b>Coordinator</b></td><td class="mono">0113 B3</td><td>Metadata service over newline-delimited JSON-RPC/TCP: fencing-tokened write leases, per-shard commit watermarks, partition catalog, <code>entity→partitions</code> pruning index, atomic JSON persistence.</td><td class="mono">ekos-cluster</td></tr>
+          <tr><td><b>CompileWorker</b> (Service A)</td><td class="mono">0113 B3</td><td>Runs the real <code>build → recover → resolve → compile → commit</code> pipeline under a heartbeated lease, then registers its partitions and commits the new generation — fenced.</td><td class="mono">ekos-cluster</td></tr>
+          <tr><td><b>QueryWorker</b> (Service B)</td><td class="mono">0113 B4</td><td>Stateless read compute: materialises a partition into a local cache (from object storage or a local root), opens it read-only, serves the EAV fold + tantivy search over TCP.</td><td class="mono">ekos-distributed</td></tr>
+          <tr><td><b>DistributedLedger</b> gateway (Service C)</td><td class="mono">0113 B4</td><td>Read-only <code>KnowledgeStore</code>: pooled connections, concurrent multi-partition fan-out, <code>entity→partitions</code> id-pruning, per-shard BM25 top-<em>k</em> search merge, worker failover.</td><td class="mono">ekos-distributed</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ METHOD -->
+<section id="method">
+  <div class="wrap">
+    <div class="h-plain">02 — Method &amp; environment</div>
+    <h2 class="big">Seven acts, executed sequentially, everything logged</h2>
+    <p class="lede">Each run works through an executable test plan act by act. Every command's stdout,
+      stderr, and exit code is captured to disk; metrics land in <code>metrics/*.json</code>; a
+      <code>REPORT.md</code> is generated from the logs, not from memory. A step failure is recorded
+      as-is — no softening, no "fixing" a result before recording it.</p>
+
+    <div class="grid2" style="margin-top:26px;">
+      <div class="panel">
+        <div class="plabel"><span>The acts</span><span>test plan</span></div>
+        <ul class="clean">
+          <li><b>Act 0 — Ingest.</b> Fresh partitioned workspace; full pipeline; count partitions.</li>
+          <li><b>Act 1 — Local baseline.</b> <code>query object</code>, <code>query find</code>, <code>diff</code> against the local partitioned ledger — the control numbers.</li>
+          <li><b>Act 2 — Backend seam.</b> LocalFs test suite vs. an object-store backend on the same data.</li>
+          <li><b>Act 3 — Coordinator + Service A.</b> Lease acquisition, a competing worker (fencing), <code>kill -9</code> the holder, takeover.</li>
+          <li><b>Act 4 — Read path.</b> Query workers + gateway; latency vs. Act 1; kill a worker mid-query.</li>
+          <li><b>Act 5 — Distributed search.</b> A term present in several partitions; local vs. gateway result ordering.</li>
+          <li><b>Act 6 — Benchmarks.</b> Criterion micro-benchmarks + an explicit coverage check.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>Environment</span><span>both runs</span></div>
+        <div class="readout"><span class="k">Toolchain</span><span class="v">rustc 1.93.0 · cargo 1.93.0</span></div>
+        <div class="readout"><span class="k">Host</span><span class="v">12 CPU · 15 GiB RAM · Linux 6.8</span></div>
+        <div class="readout"><span class="k">Base commit</span><span class="v em">e8e1ca3</span></div>
+        <div class="readout"><span class="k">object_store</span><span class="v">0.14.1 (stock build: absent)</span></div>
+        <div class="readout"><span class="k">Container</span><span class="v">Docker 29.1.3</span></div>
+        <div class="readout"><span class="k">Object store</span><span class="v">minio/minio:latest @ :9100</span></div>
+        <div class="readout"><span class="k">LLM</span><span class="v">OpenAI gpt-4o-mini</span></div>
+      </div>
+    </div>
+
+    <h3 class="mid">The two runs</h3>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>&nbsp;</th><th>Run 1 — baseline</th><th>Run 2 — hardened</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">run id</td><td class="mono">run-20260831T212115Z</td><td class="mono">run-20260831T222159Z</td></tr>
+          <tr><td class="mono">binary</td><td>stock <code>e8e1ca3</code></td><td><code>e8e1ca3</code> + 18-file fix diff</td></tr>
+          <tr><td class="mono">workspace</td><td>Pentaho ETL — 20 files (<code>.ktr</code>/<code>.kjb</code>/SQL/PDF)</td><td>Plausible (Elixir) — 895 <code>.ex</code>/<code>.exs</code> in scope, 2 006 files copied</td></tr>
+          <tr><td class="mono">object store</td><td><code>file://</code> fixture dir</td><td><code>s3://ekos-partitions/run2c</code> on MinIO — real S3 API over HTTP</td></tr>
+          <tr><td class="mono">partitions</td><td class="num">12</td><td class="num">95</td></tr>
+          <tr><td class="mono">objects</td><td class="num">243</td><td class="num">6 999</td></tr>
+          <tr><td class="mono">LLM</td><td>skipped — structural only</td><td><code>[document-semantics]</code> via OpenAI — 250 concepts</td></tr>
+          <tr><td class="mono">lease TTL</td><td>30 s (default)</td><td>8 s — recovery measured by polling, not slept through</td></tr>
+          <tr><td class="mono">query workers</td><td>2 · caches stayed empty (shared FS)</td><td>2 · caches pulled 12–13 MB each from MinIO</td></tr>
+        </tbody>
+      </table>
+      <caption>Run 2 deliberately raised every axis the user flagged as a Run 1 limitation.</caption>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ESCALATION -->
+<section id="escalation">
+  <div class="wrap">
+    <div class="h-plain">03 — Run 1 → Run 2</div>
+    <h2 class="big">What got harder, and what broke because of it</h2>
+    <p class="lede">Run 1's fixes made the object-store path reachable through the CLI at all. Running
+      that path against a real S3 endpoint, a 95-partition workspace, an 8-second lease, and concurrent
+      RPC then exposed a second layer of defects that unit tests had never touched.</p>
+
+    <div class="tiles" style="margin-top:26px;">
+      <div class="tile"><div class="n">12 → 95</div><div class="l">partitions</div></div>
+      <div class="tile"><div class="n">243 → 6 999</div><div class="l">objects</div></div>
+      <div class="tile"><div class="n">file:// → S3</div><div class="l">object storage</div></div>
+      <div class="tile"><div class="n">30 s → 8 s</div><div class="l">lease TTL</div></div>
+      <div class="tile accent"><div class="n">4 + 4</div><div class="l">defects, run 1 + run 2</div></div>
+      <div class="tile"><div class="n">shared FS → S3 pull</div><div class="l">worker read source</div></div>
+      <div class="tile"><div class="n">structural → OpenAI</div><div class="l">recover enrichment</div></div>
+      <div class="tile pass"><div class="n">8 / 8</div><div class="l">fixed + tested</div></div>
+    </div>
+
+    <div class="callout">
+      <div class="t">The chain that only a real run reveals</div>
+      <p>Fixing the object-store CLI panic (defect 1) let <code>ekos compile-worker</code> reach a real
+        S3 endpoint — which then failed to authenticate (1b), and once authenticated published partitions
+        that a remote query worker read as empty (6), under a lease its own heartbeat couldn't sustain (7),
+        over a connection two concurrent calls corrupted (7b). None of these are visible until the whole
+        path runs end to end against real infrastructure.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ACT 0 -->
+<section id="act0" class="act">
+  <div class="wrap">
+    <div class="acthead">
+      <div class="num">00</div>
+      <div>
+        <div class="eyebrow">Ingest &amp; partitioning · RFC 0111 Phase A</div>
+        <h2>The pipeline builds a partitioned ledger and publishes it</h2>
+        <p class="thesis">A fresh workspace with <code>[storage.partition]</code> set compiles into
+          many independent fact-segment partitions keyed by entity kind and week, with a persisted
+          catalog and an <code>entity→partitions</code> index. Run 2 also publishes every partition
+          to object storage.</p>
+        <div style="margin-top:16px;"><span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> PASS · both runs</span></div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="viz" data-palette="#2a78d6,#eb6834">
+        <div class="vhead"><div class="vtitle">Pipeline stage wall time</div><div class="vsub">seconds · log scale</div></div>
+        <div class="legend"><span><i style="background:var(--viz-s1)"></i>Run 1 · 12 partitions · local</span><span><i style="background:var(--viz-s2)"></i>Run 2 · 95 partitions · MinIO</span></div>
+        <svg id="chart-stages" viewBox="0 0 440 260" role="img" aria-label="Grouped bar chart of pipeline stage wall times. build: 10.59s run 1, 38.38s run 2. recover: 0.62 / 5.29. resolve: 0.09 / 0.70. compile: 0.37 / 2.80. commit: 19.43 / 235.35."></svg>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>Compiled model</span><span>run 2 · run2c</span></div>
+        <div class="readout"><span class="k">Objects written</span><span class="v em">6 999</span></div>
+        <div class="readout"><span class="k">Relationships</span><span class="v">8 533</span></div>
+        <div class="readout"><span class="k">Evidence records</span><span class="v">1 874</span></div>
+        <div class="readout"><span class="k">Subsystem rollups</span><span class="v">51</span></div>
+        <div class="readout"><span class="k">Elixir modules / symbols</span><span class="v">908 / 4 250</span></div>
+        <div class="readout"><span class="k">Doc concepts / rels (OpenAI)</span><span class="v">250 / 114</span></div>
+        <div class="readout"><span class="k">Partitions</span><span class="v em">95</span></div>
+        <div class="readout"><span class="k"><code>entity→partitions</code> entries</span><span class="v">18 608</span></div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <div class="t">Why 95 partitions</div>
+      <p>Entity-kind partitioning makes one partition per <code>ObjectKind</code> <em>and</em> per relationship
+        kind. The <code>[document-semantics]</code> analyzer's LLM relationship extraction emits free-form
+        kinds — bare prepositions (<code>rel:from</code>, <code>rel:with</code>) and phrases with spaces
+        (<code>rel:can be downloaded via</code>) — so the count ballooned. The object-store key path
+        handled the space-containing keys without complaint; the analyzer's vocabulary is the thing to
+        tighten (tracked, not a storage defect).</p>
+    </div>
+
+    <div class="tbl-scroll" style="margin-top:8px;">
+      <table>
+        <thead><tr><th>Stage</th><th class="num">Run 1</th><th class="num">Run 2</th><th>Notes (Run 2)</th></tr></thead>
+        <tbody>
+          <tr><td>build</td><td class="num">10.59 s</td><td class="num">38.38 s</td><td>1 135 files observed</td></tr>
+          <tr><td>recover</td><td class="num">0.62 s</td><td class="num">5.29 s</td><td>Elixir AST + <code>document-semantics</code> via OpenAI (cached)</td></tr>
+          <tr><td>resolve <code>--force</code></td><td class="num">0.09 s</td><td class="num">0.70 s</td><td>19 identity conflicts (e.g. <code>error</code> as module &amp; symbol) — continue anyway</td></tr>
+          <tr><td>compile</td><td class="num">0.37 s</td><td class="num">2.80 s</td><td>13.8k candidate pairs, 171 auto-merged</td></tr>
+          <tr><td><b>commit</b></td><td class="num">19.43 s</td><td class="num"><b>235.35 s</b></td><td>95 partitions × manifest/segment PUT over HTTP — the S3 round-trips dominate</td></tr>
+        </tbody>
+      </table>
+      <caption>Commit is the cost centre in Distributed mode: every partition's metadata is written to object storage.</caption>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ACT 1 -->
+<section id="act1" class="act">
+  <div class="wrap">
+    <div class="acthead">
+      <div class="num">01</div>
+      <div>
+        <div class="eyebrow">Local baseline queries</div>
+        <h2>Control numbers, straight against the partitioned ledger</h2>
+        <p class="thesis">Three reads through the local <code>PartitionedLedger</code>: fetch an object
+          by id, full-text find, and a full-range diff. These are the baseline Act 4 is measured against.</p>
+        <div style="margin-top:16px;"><span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> PASS</span></div>
+      </div>
+    </div>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Operation</th><th class="num">Run 1</th><th class="num">Run 2</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td><code>query object &lt;id&gt;</code></td><td class="num">0.109 s</td><td class="num">0.45 s</td><td>Run 2: <code>Plausible.Billing</code> (ElixirModule), properties + evidence</td></tr>
+          <tr><td><code>query find</code></td><td class="num">0.109 s</td><td class="num">1.55 s</td><td>Run 1: 16 hits for <code>"customer"</code> · Run 2: 113 hits for <code>"Subscription"</code></td></tr>
+          <tr><td><code>diff</code> (full range)</td><td class="num">0.676 s</td><td class="num">27.55 s</td><td>Run 1: 1 292 versions · Run 2: 18 608 entities touched, resolved to <code>name (kind)</code></td></tr>
+        </tbody>
+      </table>
+      <caption>Run 2's <code>diff</code> fans to all 95 partitions with no time-bucket pruning for a wide range — the slow number here, and in Act 4.</caption>
+    </div>
+    <div class="callout">
+      <div class="t">Defect 4, fixed here</div>
+      <p><code>ekos diff</code> used to print opaque <code>entry #0 … entry #N</code> (per-backend row
+        ids, restarting per partition). It now resolves each touched logical id to its name and kind,
+        capped at 50 with an "… and N more".</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ACT 2 -->
+<section id="act2" class="act">
+  <div class="wrap">
+    <div class="acthead">
+      <div class="num">02</div>
+      <div>
+        <div class="eyebrow">Backend seam · RFC 0113 B1 / B2</div>
+        <h2>LocalFs works. Object storage now works too.</h2>
+        <p class="thesis">The <code>SegmentBackend</code> trait is the seam. Run 1 proved the LocalFs
+          default is untouched (146 ledger tests) but the object-store path <em>panicked</em> the moment
+          the CLI opened it. Run 2 runs the entire pipeline against a real S3 endpoint.</p>
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+          <span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> LocalFs · PASS both runs</span>
+          <span class="chip fail"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l8 8M12 4l-8 8"/></svg> ObjectStore · Run 1 FAIL (panic)</span>
+          <span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> ObjectStore · Run 2 PASS (real S3)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ba">
+      <div class="before">
+        <span class="tag">Run 1 — <code>segment-backend-url = "file://…"</code></span>
+        <pre class="log"><span class="c-dim">$ ekos build</span>
+<span class="c-fail">thread 'main' panicked at object_store_backend.rs</span>
+<span class="c-fail">Cannot drop a runtime in a context where</span>
+<span class="c-fail">blocking is not allowed.</span>
+<span class="c-dim"> 7: drop_in_place&lt;ObjectStoreBackend&gt;</span>
+<span class="c-dim"> 8: store::with_segment_backend_url  store.rs:132</span>
+<span class="c-dim">11: build::run</span>
+<span class="c-dim">12: ekos::main  &lt;#[tokio::main]&gt;</span></pre>
+        <p class="note">The backend owned a tokio <code>Runtime</code>, dropped inside the async
+          <code>main</code>. Every write-path command panicked; object storage was unreachable via the CLI.</p>
+      </div>
+      <div class="after">
+        <span class="tag">Run 2 — <code>segment-backend-url = "s3://ekos-partitions/run2c"</code></span>
+        <pre class="log"><span class="c-dim">$ AWS_ENDPOINT=http://127.0.0.1:9100 \</span>
+<span class="c-dim">  AWS_ALLOW_HTTP=true ekos build && … && ekos commit</span>
+<span class="c-pass">Commit complete.</span>
+  Objects written:       6999
+  Relationships written: 8533
+  Ledger: .ekos/ledger/partitioned
+<span class="c-dim">$ mc ls --recursive ekos-partitions/run2c | wc -l</span>
+<span class="c-key">631</span>  <span class="c-dim"># 95 × manifest.json + dict.bin, 8.4 MiB</span></pre>
+        <p class="note">Backend now runs its <code>object_store</code> calls on a dedicated OS-thread
+          runtime — safe to build, call, and drop from any context.</p>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:22px;">
+      <div class="panel">
+        <div class="plabel"><span>Crate test suites — post-fix</span><span>green</span></div>
+        <div class="readout"><span class="k"><code>ekos-ledger</code></span><span class="v">147</span></div>
+        <div class="readout"><span class="k"><code>ekos-segment-backend</code> <code>--features object-store</code></span><span class="v">9</span></div>
+        <div class="readout"><span class="k"><code>ekos-cluster</code> (unit + harness)</span><span class="v">12</span></div>
+        <div class="readout"><span class="k"><code>ekos-distributed</code></span><span class="v">14</span></div>
+        <div class="readout"><span class="k"><code>cargo test --workspace</code></span><span class="v em">green · 0 failed</span></div>
+        <div class="readout"><span class="k"><code>clippy -D warnings</code> · <code>fmt --check</code></span><span class="v em">clean</span></div>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>What lands in the bucket</span><span>after <code>compile-worker</code></span></div>
+        <div class="readout"><span class="k">Per partition</span><span class="v"><code>manifest.json</code> · <code>dict.bin</code></span></div>
+        <div class="readout"><span class="k">Per partition</span><span class="v"><code>segments/seg-000000.facts</code></span></div>
+        <div class="readout"><span class="k">Per partition</span><span class="v"><code>HEAD</code> watermark</span></div>
+        <div class="readout"><span class="k">Per partition</span><span class="v">full <code>search/</code> (tantivy)</span></div>
+        <div class="readout"><span class="k"><code>ElixirModule/2026-W36</code></span><span class="v">292 KiB segment + ~130 KiB index</span></div>
+        <div class="readout"><span class="k">Total after Act 3</span><span class="v em">~8.4 MiB / 630 objects</span></div>
+      </div>
+    </div>
+    <p class="note">The plan's <code>file://</code> fallback ("flag that it's not a full check") is no longer needed. Not covered: a real hyperscaler — MinIO is S3-API-compatible but self-hosted; IAM, regions, and TLS against AWS/Azure/GCS are untested.</p>
+  </div>
+</section>
+
+<!-- ============================================================ ACT 3 -->
+<section id="act3" class="act">
+  <div class="wrap">
+    <div class="acthead">
+      <div class="num">03</div>
+      <div>
+        <div class="eyebrow">Coordinator · leases · fencing · RFC 0113 B3</div>
+        <h2>A competing writer is rejected; a dead writer is taken over</h2>
+        <p class="thesis">Worker A holds a fencing-tokened write lease. Worker B, on the same shard,
+          must be rejected. <code>kill -9</code> A — a new worker must acquire with a higher token,
+          finish the pipeline, and commit the generation. Run 2 measures the recovery time by polling,
+          at an 8-second TTL.</p>
+        <div style="margin-top:16px;"><span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> PASS · both runs</span></div>
+      </div>
+    </div>
+
+    <div class="timeline" role="img" aria-label="Fencing timeline for Run 2: worker A holds token 1 and runs; worker B is rejected 'already leased'; worker A is killed; after 7 retries over 6.56 seconds worker C acquires token 2, runs the full pipeline, and commits generation 25499.">
+      <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
+        <line class="tl-track" x1="130" y1="40" x2="860" y2="40"/>
+        <line class="tl-track" x1="130" y1="110" x2="860" y2="110"/>
+        <line class="tl-track" x1="130" y1="180" x2="860" y2="180"/>
+        <text x="20" y="44" class="tl-t">worker&nbsp;A</text>
+        <text x="20" y="114" class="tl-t">worker&nbsp;B</text>
+        <text x="20" y="184" class="tl-t">worker&nbsp;C</text>
+
+        <!-- A: holds lease then killed -->
+        <rect class="tl-a" x="130" y="30" width="300" height="20" rx="3"/>
+        <text x="140" y="24" class="tl-s">lease held · token 1 · pipeline running</text>
+        <line class="tl-kill" x1="430" y1="14" x2="430" y2="66"/>
+        <text x="436" y="20" class="tl-s" fill="var(--fail)">kill -9</text>
+
+        <!-- B: rejected -->
+        <rect class="tl-b" x="210" y="100" width="90" height="20" rx="3" opacity="0.85"/>
+        <text x="306" y="114" class="tl-s" fill="var(--fail)">rejected — "partition main is already leased" · exit 1</text>
+
+        <!-- C: 7 retries then acquires -->
+        <g fill="var(--fail)" opacity="0.5">
+          <rect x="432" y="170" width="8" height="20" rx="1"/>
+          <rect x="446" y="170" width="8" height="20" rx="1"/>
+          <rect x="460" y="170" width="8" height="20" rx="1"/>
+          <rect x="474" y="170" width="8" height="20" rx="1"/>
+          <rect x="488" y="170" width="8" height="20" rx="1"/>
+          <rect x="502" y="170" width="8" height="20" rx="1"/>
+          <rect x="516" y="170" width="8" height="20" rx="1"/>
+        </g>
+        <text x="432" y="164" class="tl-s">7 × "already leased" · A's 8 s lease expiring</text>
+        <rect class="tl-c" x="530" y="170" width="320" height="20" rx="3"/>
+        <text x="540" y="205" class="tl-s">lease held · token 2 · full pipeline · generation 25499 · 95 partitions registered</text>
+
+        <!-- recovery bracket -->
+        <path d="M430,224 L430,232 L530,232 L530,224" stroke="var(--accent)" stroke-width="1.4" fill="none"/>
+        <text x="480" y="246" text-anchor="middle" class="tl-s" fill="var(--accent)">recovery 6.563 s</text>
+      </svg>
+    </div>
+
+    <div class="grid2" style="margin-top:22px;">
+      <div class="panel">
+        <div class="plabel"><span>Fencing — verbatim from <code>metrics/fencing.json</code></span><span>Run 2</span></div>
+        <div class="readout"><span class="k">Lease TTL</span><span class="v">8 s <span style="color:var(--faint)">(default 30 s)</span></span></div>
+        <div class="readout"><span class="k">Worker B rejected</span><span class="v em">true</span></div>
+        <div class="readout"><span class="k">Rejection error</span><span class="v">"partition main is already&nbsp;leased"</span></div>
+        <div class="readout"><span class="k">Token: A → C</span><span class="v">1 → 2</span></div>
+        <div class="readout"><span class="k">C acquire attempts</span><span class="v">7</span></div>
+        <div class="readout"><span class="k">C committed generation</span><span class="v em">25 499</span></div>
+        <div class="readout"><span class="k">C partitions registered</span><span class="v">95</span></div>
+        <div class="readout"><span class="k">C lost lease</span><span class="v em">false</span></div>
+        <div class="readout"><span class="k">Recovery (kill → "lease held")</span><span class="v em">6.563 s</span></div>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>Coordinator state after the run</span><span><code>coordinator status</code></span></div>
+        <pre class="log" style="margin-bottom:14px;"><span class="c-dim">$ ekos coordinator status</span>
+partition                       cold  location
+ElixirModule/2026-W36           false <span class="c-key">s3://…/run2c/ElixirModule/2026-W36</span>
+<span class="c-dim">… 94 more, all s3:// …</span>
+
+shard                           generation
+<span class="c-pass">main                                  25499</span></pre>
+        <div class="readout"><span class="k"><code>state.json</code> partitions</span><span class="v">95 · all <code>s3://</code></span></div>
+        <div class="readout"><span class="k"><code>watermarks</code></span><span class="v"><code>{"main": 25499}</code></span></div>
+        <div class="readout"><span class="k"><code>entity_partitions</code></span><span class="v">18 608 entries</span></div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <div class="t">Defect 7, found by the short-TTL methodology</div>
+      <p>The same scenario at 8 s TTL <em>before</em> the fix: worker C took over in 0.5 s (A's lease
+        was already perpetually near-expired, because the heartbeat was a fixed 10 s &gt; the 8 s TTL)
+        and then <em>lost its own lease</em> before committing — <code>watermarks {}</code>. The fix
+        derives the heartbeat from <code>lease.expires_at</code>; an 8 s lease now survives a
+        multi-minute pipeline. Run 1's 30 s TTL had masked this entirely.</p>
+    </div>
+    <p class="note">Run 1 result, for the record: worker B rejected (exit 1); token 1 → 2; generation 1720; 12 partitions; recovery bounded by the 30 s TTL (the 41 s wall figure included a 40 s scripted sleep — Run 2's polling removes that artefact).</p>
+  </div>
+</section>
+
+<!-- ============================================================ ACT 4 -->
+<section id="act4" class="act">
+  <div class="wrap">
+    <div class="acthead">
+      <div class="num">04</div>
+      <div>
+        <div class="eyebrow">Distributed read path · RFC 0113 B4</div>
+        <h2>Query workers pull partitions from object storage; the gateway fails over</h2>
+        <p class="thesis">Two query workers start with empty caches. Because the partitions are
+          registered as <code>ObjectStore</code> locations, each worker materialises what it needs
+          <em>from MinIO</em> — not a shared filesystem. Then one worker is killed mid-query.</p>
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+          <span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> Reads · PASS</span>
+          <span class="chip fail"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l8 8M12 4l-8 8"/></svg> Failover · Run 1 FAIL</span>
+          <span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> Failover · Run 2 PASS</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="viz" data-palette="#2a78d6,#eb6834">
+        <div class="vhead"><div class="vtitle">Query latency — local vs. gateway</div><div class="vsub">Run 2 · seconds</div></div>
+        <div class="legend"><span><i style="background:var(--viz-s1)"></i>Local <code>PartitionedLedger</code></span><span><i style="background:var(--viz-s2)"></i>DistributedLedger gateway</span></div>
+        <svg id="chart-latency" viewBox="0 0 440 220" role="img" aria-label="Grouped bars, Run 2 query latency local vs gateway. query object: 0.45 vs 0.59s. query find: 1.55 vs 0.84s. diff: 27.55 vs 12.10s."></svg>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>Worker caches after Act 4</span><span>pulled from MinIO</span></div>
+        <div class="readout"><span class="k">Registered as</span><span class="v"><code>PartitionLocation::ObjectStore</code></span></div>
+        <div class="readout"><span class="k">Worker 1 cache</span><span class="v em">839 files · 12 MB</span></div>
+        <div class="readout"><span class="k">Worker 2 cache</span><span class="v em">849 files · 13 MB</span></div>
+        <div class="readout"><span class="k">Per partition pulled</span><span class="v">manifest · seg-000000 · HEAD · search/</span></div>
+        <div class="readout"><span class="k">Shared filesystem</span><span class="v em">no</span></div>
+        <hr class="rule" style="margin:14px 0;">
+        <div class="readout"><span class="k"><code>query object</code></span><span class="v">0.59 s → <code>Plausible.Billing</code></span></div>
+        <div class="readout"><span class="k"><code>query find "Subscription"</code></span><span class="v">0.84 s · 50 hits</span></div>
+        <div class="readout"><span class="k"><code>diff</code></span><span class="v">12.10 s · 18 608 entities</span></div>
+      </div>
+    </div>
+
+    <h3 class="mid">Worker failure injection</h3>
+    <div class="ba">
+      <div class="before">
+        <span class="tag">Run 1 — no failover</span>
+        <pre class="log"><span class="c-dim"># kill -9 query-worker-1 (7811); worker-2 up</span>
+<span class="c-dim">$ ekos query object &lt;id&gt;</span>
+<span class="c-fail">Error: io error: Connection refused (os error 111)</span>
+<span class="c-fail">exit 1</span>
+<span class="c-dim">$ ekos query find …</span>
+<span class="c-fail">Error: ledger error: Connection refused  exit 1</span></pre>
+        <p class="note">Every query failed — the retry reconnected to the same dead address.</p>
+      </div>
+      <div class="after">
+        <span class="tag">Run 2 — <code>call_worker_failover</code></span>
+        <pre class="log"><span class="c-dim"># kill -9 query-worker-1 (7811); worker-2 up</span>
+<span class="c-dim">$ ekos query object &lt;id&gt;</span>
+<span class="c-warn">WARN gateway: query worker unreachable —</span>
+<span class="c-warn">     failing over  worker=127.0.0.1:7811</span>
+<span class="c-pass">Object: Plausible.Billing (ElixirModule)   exit 0</span>
+<span class="c-dim">$ ekos query find "Subscription"</span>
+<span class="c-pass">50 result(s)                              exit 0</span></pre>
+        <p class="note">Served from worker-2; recovers fully when worker-1 restarts. Clean error only when <em>all</em> workers are down.</p>
+      </div>
+    </div>
+
+    <div class="tbl-scroll" style="margin-top:22px;">
+      <table>
+        <thead><tr><th>Operation</th><th class="num">Local</th><th class="num">Gateway</th><th class="num">Δ</th><th>Run 1 (12 part)</th></tr></thead>
+        <tbody>
+          <tr><td><code>query object &lt;id&gt;</code></td><td class="num">0.45 s</td><td class="num">0.59 s</td><td class="num delta-pos">+0.14&nbsp;(1.31×)</td><td class="num">0.069 s vs 0.109 s local</td></tr>
+          <tr><td><code>query find</code></td><td class="num">1.55 s</td><td class="num">0.84 s</td><td class="num delta-neg">−0.71&nbsp;(0.54×)</td><td class="num">0.064 s vs 0.109 s local</td></tr>
+          <tr><td><code>diff</code> (full range)</td><td class="num">27.55 s</td><td class="num">12.10 s</td><td class="num delta-neg">−15.45&nbsp;(0.44×)</td><td class="num">0.254 s vs 0.676 s local</td></tr>
+        </tbody>
+      </table>
+      <caption>The gateway is faster than the local path on the fan-out reads — warm query workers vs. a cold per-invocation <code>PartitionedLedger</code> open with 95 tantivy writers. <code>query object</code> pays one extra RPC hop.</caption>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ ACT 5 -->
+<section id="act5" class="act">
+  <div class="wrap">
+    <div class="acthead">
+      <div class="num">05</div>
+      <div>
+        <div class="eyebrow">Distributed search · RFC 0113 B5</div>
+        <h2>Same result set, different rank — shard-local BM25</h2>
+        <p class="thesis">The gateway fans each shard's BM25 top-<em>k</em> to a worker and merge-sorts
+          the scored lists. Term statistics are per-partition (IDF is shard-local), so a match in a
+          small partition can outrank a more globally-relevant match in a large one. This is the
+          documented v1 approximation, not a defect — and both runs reproduce it.</p>
+        <div style="margin-top:16px;"><span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> PASS · caveat confirmed</span></div>
+      </div>
+    </div>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th class="num">Rank</th><th>Local — <code>PartitionedLedger</code></th><th>Distributed — gateway</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td><code>subscription</code> <span style="color:var(--faint)">— Concept (LLM)</span></td><td><code>plausible/billing/subscription.ex</code> <span style="color:var(--faint)">— File</span></td></tr>
+          <tr><td class="num">2</td><td><code>subscription flow</code> <span style="color:var(--faint)">— Concept</span></td><td><code>Money.Subscription</code> <span style="color:var(--faint)">— ElixirModule</span></td></tr>
+          <tr><td class="num">3</td><td><code>subscription business model</code></td><td><code>mix/tasks/cancel_subscription.ex</code></td></tr>
+          <tr><td class="num">4</td><td><code>Plausible</code></td><td><code>plausible/billing/subscription/status.ex</code></td></tr>
+          <tr><td class="num">5</td><td><code>Money.Subscription</code></td><td><code>mix/tasks/pull_sandbox_subscription.ex</code></td></tr>
+        </tbody>
+      </table>
+      <caption>Term <code>"Subscription"</code>, Run 2. Local ranks free-form LLM <code>Concept</code> objects top; the gateway ranks real Elixir files/modules top — the small <code>Concept</code> shard's local IDF differs from the corpus-wide one.</caption>
+    </div>
+
+    <div class="grid3" style="margin-top:22px;">
+      <div class="tile"><div class="n">113 / 16</div><div class="l">local hits · run 2 / run 1</div></div>
+      <div class="tile"><div class="n">50 / 16</div><div class="l">gateway hits · run 2 / run 1</div></div>
+      <div class="tile"><div class="n">k = 50</div><div class="l"><code>find_objects</code> cap (open item)</div></div>
+    </div>
+    <p class="note">Run 1, term <code>"customer"</code>: local and gateway returned the same 16-item de-duplicated set; local put the whole PDF first, the gateway put the small <code>TransformNode</code> shard's 10 hits first. Canonical test <code>crates/distributed/tests/search.rs</code> passes.</p>
+  </div>
+</section>
+
+<!-- ============================================================ ACT 6 -->
+<section id="act6" class="act">
+  <div class="wrap">
+    <div class="acthead">
+      <div class="num">06</div>
+      <div>
+        <div class="eyebrow">Benchmarks · Criterion</div>
+        <h2>Ran the micro-benchmarks — and verified they don't cover the distributed path</h2>
+        <p class="thesis">The <code>benchmark/</code> workspace has 11 Criterion benches. A grep over
+          <code>benches/</code> for <code>PartitionedLedger</code>, <code>SegmentBackend</code>,
+          <code>DistributedLedger</code>, <code>ekos_cluster</code>, <code>ObjectStoreBackend</code>
+          returns nothing. That gap is now a <em>verified fact</em>, not an assumption.</p>
+        <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+          <span class="chip pass"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg> benches ran</span>
+          <span class="chip neutral">0 distributed coverage — known gap</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="panel">
+        <div class="plabel"><span>Criterion medians</span><span>Run 2 · short measurement window</span></div>
+        <div class="readout"><span class="k"><code>ledger_append_object</code></span><span class="v">928 µs <span style="color:var(--faint)">[906 / 928 / 954]</span></span></div>
+        <div class="readout"><span class="k"><code>segment_append_batch</code></span><span class="v">2.17 ms <span style="color:var(--faint)">[2.12 / 2.17 / 2.24]</span></span></div>
+        <div class="readout"><span class="k"><code>segment_replay_1k_batches</code></span><span class="v">4.83 ms <span style="color:var(--faint)">[4.78 / 4.83 / 4.89]</span></span></div>
+        <p class="note" style="margin-top:14px;">Criterion printed <code>change:</code> deltas against a
+          prior local baseline, but those compare an uncontrolled earlier run at a different
+          measurement window — <em>not</em> a before/after of this patch.</p>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>Coverage check</span><span><code>metrics/criterion_distributed_coverage.txt</code></span></div>
+        <pre class="log">$ grep -rl 'PartitionedLedger|SegmentBackend|
+  DistributedLedger|ekos_cluster|
+  ObjectStoreBackend' benchmark/benches/
+<span class="c-warn">NO distributed / partitioned / cluster /</span>
+<span class="c-warn">object-store code referenced by any</span>
+<span class="c-warn">benchmark/benches/*.rs file</span></pre>
+        <p class="note" style="margin-top:14px;">All distributed-path timing in this report is CLI
+          wall-clock (Acts 0–5), carrying process-startup and RPC-framing overhead a real Criterion
+          bench would isolate. Authoring <code>partitioned_ledger.rs</code> /
+          <code>cluster_coordinator.rs</code> benches is separate work.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ DEFECTS -->
+<section id="defects">
+  <div class="wrap">
+    <div class="h-plain">04 — Defects found &amp; fixed</div>
+    <h2 class="big">Eight defects, nine fixes, one commit</h2>
+    <p class="lede">Every fix ships with a regression test. Branch
+      <code>fix/distributed-storage-issues</code>, commit <code>2896481</code> — 23 files,
+      +885 / −92. <code>cargo test --workspace</code>, <code>clippy -D warnings</code>, and
+      <code>fmt --check</code> all pass.</p>
+
+    <div class="spacer"></div>
+
+    <details class="defect" open>
+      <summary><span class="id">1</span><span class="ttl">ObjectStoreBackend runtime-drop panic<small>Run 1 · blocker · crates/cli/src/commands/store.rs:132</small></span><span class="chip fail">Run 1</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Symptom</span><span class="txt"><code>[storage.partition] segment-backend-url</code> + a <code>--features distributed</code> binary → <code>ekos build</code>/<code>commit</code> panic: <code>Cannot drop a runtime in a context where blocking is not allowed</code>. Object storage was unusable through the CLI at all.</span></div>
+        <div class="row"><span class="lab">Root cause</span><span class="txt">The backend owned an inner tokio <code>Runtime</code>; it (or a throwaway one built just to validate the URL) was dropped inside <code>#[tokio::main]</code>, where <code>BlockingPool::shutdown</code> panics.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt"><code>DedicatedRt</code> — a current-thread tokio runtime pinned to one private OS thread (<code>ekos-objstore-rt</code>). Every <code>object_store</code> call <code>spawn</code>s onto it and blocks on an <code>mpsc</code> reply; the <code>Runtime</code> is only ever dropped on its own thread. Safe to build/call/drop from a plain sync test, a <code>spawn_blocking</code> thread, a current-thread runtime, and <code>#[tokio::main]</code>. <code>store.rs</code> now validates the URL parse-only.</span></div>
+        <div class="row"><span class="lab">Test</span><span class="txt"><code>object_store_backend::usable_from_within_an_async_runtime</code></span></div>
+      </div>
+    </details>
+
+    <details class="defect">
+      <summary><span class="id">1b</span><span class="ttl"><code>parse_url</code> reads no configuration<small>Run 2 · s3:// never authenticated to MinIO</small></span><span class="chip fail">Run 2</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Symptom</span><span class="txt">Past the panic, an <code>s3://</code> URL against MinIO (or any non-AWS endpoint) never authenticated — <code>feature for AmazonS3 not enabled</code>, then unconfigured-credential failures.</span></div>
+        <div class="row"><span class="lab">Root cause</span><span class="txt"><code>object_store::parse_url</code> returns an unconfigured <code>AmazonS3Builder::new()</code>; it reads no env vars. The <code>object-store</code> cargo feature only pulled <code>object_store/fs</code>.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt">Forward every <code>AWS_* / AZURE_* / GOOGLE_* / OBJECT_STORE_*</code> process var (lowercased) to <code>object_store::parse_url_opts</code> — <code>builder_opts!</code> silently drops keys a scheme doesn't recognise, so it's safe for all backends. The feature now bundles <code>object_store/aws</code> + <code>object_store/azure</code>.</span></div>
+        <div class="row"><span class="lab">Verified</span><span class="txt">Full pipeline + <code>compile-worker</code> against <code>s3://…</code> on MinIO with <code>AWS_ENDPOINT</code> / <code>AWS_ACCESS_KEY_ID</code> / <code>AWS_ALLOW_HTTP=true</code>.</span></div>
+      </div>
+    </details>
+
+    <details class="defect" open>
+      <summary><span class="id">2</span><span class="ttl">Gateway has no read-path fault tolerance<small>Run 1 · one dead worker fails every query</small></span><span class="chip fail">Run 1</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Symptom</span><span class="txt">One <code>kill -9</code>'d query worker → every <code>DistributedLedger</code> read fails <code>io: Connection refused</code>, exit 1 — even with a second live worker holding the same partitions.</span></div>
+        <div class="row"><span class="lab">Root cause</span><span class="txt"><code>call_worker</code>'s single retry reconnects to the <em>same</em> address.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt"><code>DistributedLedger::call_worker_failover</code> — on a connection error, rotate to the next worker in the ring (every worker can materialise any partition). Non-connection errors return as-is; clean error only when all workers are down.</span></div>
+        <div class="row"><span class="lab">Tests</span><span class="txt"><code>gateway_fails_over_when_a_query_worker_is_down</code> · <code>gateway_errors_cleanly_when_all_workers_are_down</code></span></div>
+      </div>
+    </details>
+
+    <details class="defect">
+      <summary><span class="id">3</span><span class="ttl"><code>coordinator status</code> always shows watermark 0<small>Run 1 · cosmetic</small></span><span class="chip fail">Run 1</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Root cause</span><span class="txt"><code>status</code> queried <code>watermark(partition_id)</code> per catalogued partition; watermarks are keyed by <em>shard</em> (<code>main</code>), so every row read 0.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt">New <code>Request::Watermarks</code> RPC + <code>CoordinatorClient::watermarks()</code>; <code>status</code> prints a "shard / generation" section. Verified <code>main  25499</code>.</span></div>
+      </div>
+    </details>
+
+    <details class="defect">
+      <summary><span class="id">4</span><span class="ttl"><code>ekos diff</code> prints opaque <code>entry #N</code><small>Run 1 · cosmetic</small></span><span class="chip fail">Run 1</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Root cause</span><span class="txt"><code>LedgerDiff.added</code> holds per-backend entry ids (SQLite rowids / per-partition tx numbers); the counter restarts per partition.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt">Iterate <code>LedgerDiff.touched</code> (real logical ids) instead — resolve each to <code>name (kind)</code> / relationship label, capped at 50 with "… and N more".</span></div>
+      </div>
+    </details>
+
+    <details class="defect" open>
+      <summary><span class="id">5</span><span class="ttl"><code>[llm-description]</code> ignores the provider config<small>Run 2 · 1 112 × HTTP 401</small></span><span class="chip fail">Run 2</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Symptom</span><span class="txt"><code>[llm] provider = "openai"</code> — but the OpenAI key was sent to <code>api.anthropic.com</code>: 1 112 × <code>authentication_error</code>.</span></div>
+        <div class="row"><span class="lab">Root cause</span><span class="txt"><code>select_llm_provider_for_description</code> handled <code>ollama</code> then fell through to <code>AnthropicProvider</code>; the <code>openai</code> branch that <code>recover.rs</code> has was missing.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt">Add the <code>openai</code> branch, mirroring <code>recover.rs::build_llm_provider</code>. Descriptions then succeed via OpenAI (0 × 401).</span></div>
+      </div>
+    </details>
+
+    <details class="defect" open>
+      <summary><span class="id">6</span><span class="ttl">Object-storage partitions publish only sealed history<small>Run 2 · remote workers see empty partitions</small></span><span class="chip fail">Run 2</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Symptom</span><span class="txt">A partition below the 8&nbsp;MiB seal threshold — i.e. <em>almost every</em> partition under entity-kind partitioning — published only an empty <code>manifest.json</code>. A remote-only query worker saw it as empty.</span></div>
+        <div class="row"><span class="lab">Root cause</span><span class="txt">RFC 0113 B4 published sealed segments, <code>manifest.json</code>, <code>dict.bin</code>, and <code>search/</code>. The active (unsealed) segment — where all the data is when nothing seals — stayed writer-local by design.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt"><code>SegmentStore::publish_active</code> (active segment + <code>HEAD</code>) + <code>FactLedger::publish_active_to_backend</code> + <code>PartitionedLedger::publish_active_segments</code>, called by <code>compile-worker</code>'s <code>finalize_partitions</code>; <code>open_with_backend</code> pulls the active segment when the local one is absent.</span></div>
+        <div class="row"><span class="lab">Test</span><span class="txt"><code>active_segment_travels_through_the_backend</code> — default 8 MiB threshold, nothing seals, a fresh reader still sees every row.</span></div>
+      </div>
+    </details>
+
+    <details class="defect" open>
+      <summary><span class="id">7</span><span class="ttl">Compile-worker heartbeat is a fixed 10 s<small>Run 2 · any short TTL loses every lease</small></span><span class="chip fail">Run 2</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Symptom</span><span class="txt">At <code>--ttl-seconds 8</code>: the lease expires between every 10&nbsp;s beat → <code>guard.commit(watermark)</code> fails <code>LostLease</code>, the generation is never recorded, even with no competing writer.</span></div>
+        <div class="row"><span class="lab">Root cause</span><span class="txt"><code>CompileWorker::new</code> hard-codes <code>Duration::from_secs(10)</code> regardless of the coordinator's TTL. The 30 s default made it work by luck.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt">Derive the interval from <code>lease.expires_at - now</code> (≈ TTL/3, floored 500 ms, never slower than the 10 s default).</span></div>
+        <div class="row"><span class="lab">Test</span><span class="txt"><code>heartbeat_adapts_to_a_short_ttl_so_long_work_keeps_its_lease</code> — 1 s TTL, 4 s of work, default heartbeat → commit succeeds.</span></div>
+      </div>
+    </details>
+
+    <details class="defect">
+      <summary><span class="id">7b</span><span class="ttl">RPC clients cross response frames under concurrency<small>Run 2 · <code>Coordinator("unexpected Ok")</code></small></span><span class="chip fail">Run 2</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Root cause</span><span class="txt"><code>CoordinatorClient::call</code> / <code>QueryWorkerClient::call</code> guard write and read with <em>separate</em> mutexes; caller B can take the read lock between caller A's write and read and consume A's response line. Fires when a worker's heartbeat <code>lease_renew</code> races its guard's <code>manifest_commit</code>, or the gateway fans out concurrently.</span></div>
+        <div class="row"><span class="lab">Fix</span><span class="txt">Hold the write lock across the whole write-then-read round-trip.</span></div>
+      </div>
+    </details>
+
+    <details class="defect">
+      <summary><span class="id">+</span><span class="ttl"><code>ekos compile-worker run --force</code><small>new flag · Service-A equivalent of <code>ekos resolve --force</code></small></span><span class="chip neutral">gap</span></summary>
+      <div class="body">
+        <div class="row"><span class="lab">Why</span><span class="txt">Without it, any identity conflict aborted every compile-worker run. The Plausible workspace has 19 (e.g. <code>error</code> as both an <code>ElixirModule</code> and an <code>ElixirSymbol</code>). A co-located <code>ekos resolve</code> already had <code>--force</code>; Service A did not.</span></div>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ============================================================ MATRIX -->
+<section id="matrix">
+  <div class="wrap">
+    <div class="h-plain">05 — Feature coverage matrix</div>
+    <h2 class="big">Every feature, how it was exercised, in which run</h2>
+    <p class="lede">"PASS (new)" marks behaviour introduced by this campaign's fixes.
+      "PARTIAL" marks a feature exercised but not fully — noted, not hidden.</p>
+
+    <div class="tbl-scroll" style="margin-top:22px;">
+      <table>
+        <thead><tr><th>Feature</th><th>RFC</th><th>Exercised by</th><th>R1</th><th>R2</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Partitioned ledger — entity-kind × weekly</td><td class="mono">0111 A</td><td>full pipeline; catalog + index inspected</td><td class="num">12</td><td class="num">95</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td><code>SegmentBackend</code> seam / <code>LocalFsBackend</code></td><td class="mono">0113 B1</td><td>147 ledger tests + every local op</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td><code>ObjectStoreBackend</code> — <code>object_store</code> 0.14</td><td class="mono">0113 B2</td><td><code>file://</code> (R1) → S3/MinIO (R2)</td><td class="num">✕</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Coordinator — fencing-tokened write leases</td><td class="mono">0113 B3</td><td>worker B rejection; token increment</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Coordinator — per-shard commit watermark</td><td class="mono">0113 B3</td><td>generation 1720 / 25499; <code>state.json</code></td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Coordinator — <code>entity→partitions</code> prune index</td><td class="mono">0113 v1.1</td><td>1 292 / 18 608 entries; prune test</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Coordinator — persisted state / restart-safe leases</td><td class="mono">0113 B3</td><td><code>state.json</code> round-trip; harness</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>CompileWorker (Service A) — real pipeline under lease</td><td class="mono">0113 B3</td><td><code>build→…→commit</code> · <code>--force</code></td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>CompileWorker — lease loss &amp; takeover</td><td class="mono">0113 B3</td><td><code>kill -9</code> A; worker C resumes</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>CompileWorker — adaptive heartbeat</td><td class="mono">fix 7</td><td>survived <code>--ttl-seconds 8</code> + full pipeline</td><td class="num">—</td><td class="num">✓</td><td><span class="chip pass">PASS · new</span></td></tr>
+          <tr><td>QueryWorker (Service B) — materialise from S3</td><td class="mono">0113 B4</td><td>w1/w2 caches 12–13 MB from MinIO</td><td class="num">—</td><td class="num">✓</td><td><span class="chip pass">PASS · new</span></td></tr>
+          <tr><td>QueryWorker — read-only <code>FactLedger</code> + EAV fold</td><td class="mono">0113 B4</td><td>every gateway read</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>DistributedLedger gateway (Service C) — trait parity</td><td class="mono">0113 B4</td><td><code>object</code>/<code>find</code>/<code>diff</code> vs local</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Gateway — connection pool + concurrent fan-out</td><td class="mono">0113 v1.1</td><td>multi-partition reads over 95 shards</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Gateway — id-scoped pruning via entity index</td><td class="mono">0113 v1.1</td><td><code>query object</code> routing; prune test</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Gateway — worker failover</td><td class="mono">fix 2</td><td>kill worker-1; served by worker-2</td><td class="num">✕</td><td class="num">✓</td><td><span class="chip pass">PASS · new</span></td></tr>
+          <tr><td>Distributed search — per-shard BM25 top-<em>k</em> merge</td><td class="mono">0113 B5</td><td><code>"customer"</code> / <code>"Subscription"</code> ordering</td><td class="num">✓</td><td class="num">✓</td><td><span class="chip warn">PASS · caveat</span></td></tr>
+          <tr><td>Self-describing partition — sealed segments in S3</td><td class="mono">0113 B4</td><td>few partitions reached 8 MiB</td><td class="num">—</td><td class="num">~</td><td><span class="chip warn">PARTIAL</span></td></tr>
+          <tr><td>Self-describing partition — active segment + <code>HEAD</code> in S3</td><td class="mono">fix 6</td><td>95 × <code>seg-000000.facts</code> in MinIO</td><td class="num">—</td><td class="num">✓</td><td><span class="chip pass">PASS · new</span></td></tr>
+          <tr><td>Self-describing partition — tantivy <code>search/</code> in S3</td><td class="mono">0113 B4</td><td>ElixirModule 130 KiB index pulled by workers</td><td class="num">—</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td><code>[storage.distributed]</code> client config</td><td class="mono">0113 B4</td><td><code>client-ekos.toml</code> + <code>EKOS_CONFIG</code></td><td class="num">✓</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>OpenAI provider — <code>recover</code> / <code>document-semantics</code></td><td class="mono">0026 / 0046</td><td>250 concepts, 114 rels from README + CHANGELOG</td><td class="num">—</td><td class="num">✓</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>OpenAI provider — <code>[llm-description]</code></td><td class="mono">0088 / fix 5</td><td>module descriptions via OpenAI, 0 × 401</td><td class="num">—</td><td class="num">~</td><td><span class="chip pass">PASS</span></td></tr>
+          <tr><td>Criterion micro-benchmarks + coverage grep</td><td class="mono">—</td><td>11 benches run; <code>coverage.txt</code></td><td class="num">—</td><td class="num">✓</td><td><span class="chip warn">PASS · 0 dist. coverage</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ LIMITS -->
+<section id="limits">
+  <div class="wrap">
+    <div class="h-plain">06 — Limitations &amp; open follow-ons</div>
+    <h2 class="big">What this campaign did not prove, and what's still on the list</h2>
+
+    <div class="grid2" style="margin-top:24px;">
+      <div class="panel">
+        <div class="plabel"><span>Limitations of the run</span><span>documented, not hidden</span></div>
+        <ul class="clean">
+          <li><b>MinIO, not a hyperscaler.</b> S3-API-compatible and self-hosted; real AWS/Azure/GCS credentials, regions, IAM, and TLS are untested. <code>AWS_ALLOW_HTTP=true</code> for the local endpoint.</li>
+          <li><b>Single host.</b> Coordinator + 2 workers + compile workers on <code>127.0.0.1</code>. Network partitions and cross-host clock skew not exercised — but the workers genuinely materialise from object storage, so "shared filesystem" is no longer a caveat.</li>
+          <li><b><code>[llm-description]</code> not run to completion.</b> 1 112 sequential gpt-4o-mini calls (~30 min). Exercised far enough to prove defect 5. <code>recover</code>'s own LLM path ran fully.</li>
+          <li><b>No new Criterion bench</b> for the distributed path — that is benchmark-authoring work.</li>
+          <li><b>Recovery is TTL-bound.</b> 6.56 s = 8 s TTL minus elapsed lease time. Lower TTLs need the defect-7 fix to stay safe.</li>
+          <li><b>95-partition count is a side effect</b> of the document-semantics analyzer's free-form relationship vocabulary, not a deliberate choice.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>Open follow-ons</span><span>tracked</span></div>
+        <ul class="clean">
+          <li><b>Interrupt-of-in-flight-work on lease loss.</b> A fenced worker runs its pipeline to the end, then its <code>guard.commit</code> is rejected.</li>
+          <li><b><code>ekos compile-worker</code> has no acquire-retry.</b> It exits on <code>already leased</code>; fault-tolerant takeover needs an external supervisor (the test driver's loop stood in).</li>
+          <li><b><code>[document-semantics]</code> relationship vocabulary.</b> One partition per bare preposition (<code>rel:from</code>, <code>rel:with</code>) — tighten the analyzer.</li>
+          <li><b><code>find_objects</code> is hard-capped</b> at <code>search(query, 50)</code> — 113 vs 50 local for <code>"Subscription"</code>.</li>
+          <li><b><code>ekos diff</code> over many partitions</b> fans to every one (12–27 s); no time-bucket pruning for a wide range.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ APPENDIX -->
+<section id="appendix">
+  <div class="wrap">
+    <div class="h-plain">07 — Appendix</div>
+    <h2 class="big">Commands, config, artifacts</h2>
+
+    <h3 class="mid">The distributed CLI surface exercised</h3>
+    <pre class="log"><span class="c-dim"># write side — Service A, under a coordinator</span>
+ekos coordinator serve --listen 127.0.0.1:7801 --state coord.json --ttl-seconds 8
+ekos compile-worker run --coordinator 127.0.0.1:7801 --shard main --workspace WS <span class="c-key">--force</span>
+ekos coordinator status --coordinator 127.0.0.1:7801
+
+<span class="c-dim"># read side — Services B &amp; C</span>
+ekos query-worker serve --coordinator 127.0.0.1:7801 --listen 127.0.0.1:7811 --cache CACHE
+EKOS_CONFIG=client-ekos.toml ekos query object &lt;id&gt;
+EKOS_CONFIG=client-ekos.toml ekos query find "Subscription"
+EKOS_CONFIG=client-ekos.toml ekos diff --from 2020-01-01T00:00:00Z --to &lt;now&gt;</pre>
+
+    <div class="grid2" style="margin-top:22px;">
+      <div class="panel">
+        <div class="plabel"><span>Workspace config</span><span><code>ekos.toml</code> · Run 2</span></div>
+        <pre class="log">[storage.partition]
+dimension = "entity-kind"
+time-bucket = "weekly"
+segment-backend-url = "s3://ekos-partitions/run2c"
+
+[llm]
+provider = "openai"
+model = "gpt-4o-mini"
+
+[document-semantics]
+enabled = true</pre>
+      </div>
+      <div class="panel">
+        <div class="plabel"><span>Client config</span><span><code>client-ekos.toml</code></span></div>
+        <pre class="log">[storage.distributed]
+coordinator = "127.0.0.1:7801"
+query-workers = [
+  "127.0.0.1:7811",
+  "127.0.0.1:7812",
+]
+
+<span class="c-dim"># env for the object store (MinIO)</span>
+AWS_ENDPOINT=http://127.0.0.1:9100
+AWS_ACCESS_KEY_ID=…  AWS_SECRET_ACCESS_KEY=…
+AWS_ALLOW_HTTP=true</pre>
+      </div>
+    </div>
+
+    <h3 class="mid">Test totals — post-fix</h3>
+    <div class="tiles">
+      <div class="tile"><div class="n">147</div><div class="l">ekos-ledger</div></div>
+      <div class="tile"><div class="n">12</div><div class="l">ekos-cluster + harness</div></div>
+      <div class="tile"><div class="n">14</div><div class="l">ekos-distributed</div></div>
+      <div class="tile"><div class="n">9</div><div class="l">ekos-segment-backend</div></div>
+      <div class="tile pass"><div class="n">0</div><div class="l">workspace test failures</div></div>
+      <div class="tile"><div class="n">23</div><div class="l">files in the fix commit</div></div>
+      <div class="tile"><div class="n">+885 / −92</div><div class="l">lines</div></div>
+      <div class="tile accent"><div class="n">2896481</div><div class="l">commit · <code>fix/distributed-storage-issues</code></div></div>
+    </div>
+
+    <h3 class="mid">Artifact tree</h3>
+    <pre class="log">test-runs/
+├── run-20260831T212115Z/        <span class="c-dim"># Run 1 — stock e8e1ca3, Pentaho, file://</span>
+│   ├── REPORT.md
+│   ├── logs/{00-environment … 61-search-rs-test}.log
+│   └── metrics/{baseline,fencing,latency_comparison,search_ordering,…}.json
+└── run-20260831T222159Z/        <span class="c-dim"># Run 2 — + fix diff, Plausible/Elixir, MinIO</span>
+    ├── REPORT.md
+    ├── logs/00b-bugfix-diff.patch    <span class="c-dim"># the 18-file fix</span>
+    ├── logs/{10-baseline … 70-criterion-bench}.log
+    └── metrics/{baseline,fencing,latency_comparison,search_ordering,
+                 benchmark_summary,criterion_distributed_coverage}.{json,txt}</pre>
+    <p class="note">Both runs carry a generated <code>REPORT.md</code> built from the logs. Narrative and rationale: <code>devlogs/devlog_144.md</code>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><span class="mono">EKOS · RFC 0111 (partitioned storage) · RFC 0113 (distributed mode B1–B5)</span><br>
+      Test campaign 2026-08-31 → 2026-09-01 · base commit <span class="mono">e8e1ca3</span> ·
+      fixes on branch <span class="mono">fix/distributed-storage-issues</span> (<span class="mono">2896481</span>, not merged).<br>
+      Every number on this page is traceable to a file under <span class="mono">test-runs/</span>; qualitative claims cite the log they rest on.</p>
+  </div>
+</footer>
+
+<div class="tooltip" id="tt" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- progress bar ---------- */
+  var prog = document.getElementById('progress');
+  var railLinks = Array.prototype.slice.call(document.querySelectorAll('nav.rail a'));
+  var sections = railLinks.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  function onScroll() {
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    prog.style.width = (max > 0 ? (h.scrollTop / max) * 100 : 0) + '%';
+    var y = h.scrollTop + h.clientHeight * 0.33, cur = 0;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i] && sections[i].offsetTop <= y) cur = i;
+    }
+    railLinks.forEach(function (a, i) { a.setAttribute('aria-current', i === cur ? 'true' : 'false'); });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  onScroll();
+
+  /* ---------- tooltip ---------- */
+  var tt = document.getElementById('tt');
+  function showTip(html, x, y) {
+    tt.innerHTML = html;
+    tt.style.opacity = '1';
+    var r = tt.getBoundingClientRect();
+    var nx = Math.min(x + 14, window.innerWidth - r.width - 8);
+    var ny = Math.max(y - r.height - 10, 8);
+    tt.style.left = nx + 'px';
+    tt.style.top = ny + 'px';
+  }
+  function hideTip() { tt.style.opacity = '0'; }
+
+  /* ---------- tiny grouped bar chart renderer ---------- */
+  function groupedBars(svg, opts) {
+    var W = 440, H = opts.height, padL = 46, padR = 12, padT = 14, padB = 40;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var groups = opts.groups, series = opts.series;
+    var logScale = !!opts.log;
+    var maxV = 0;
+    groups.forEach(function (g) { g.values.forEach(function (v) { if (v > maxV) maxV = v; }); });
+
+    function sy(v) {
+      if (logScale) {
+        var lo = Math.log10(opts.min || 0.05), hi = Math.log10(maxV);
+        var t = (Math.log10(Math.max(v, opts.min || 0.05)) - lo) / (hi - lo);
+        return padT + plotH - t * plotH;
+      }
+      return padT + plotH - (v / maxV) * plotH;
+    }
+
+    var ns = 'http://www.w3.org/2000/svg';
+    function el(name, attrs) {
+      var e = document.createElementNS(ns, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+
+    // gridlines
+    var ticks = logScale ? [0.1, 1, 10, 100] : [0, maxV / 2, maxV];
+    ticks.forEach(function (tv) {
+      if (logScale && (tv > maxV || tv < (opts.min || 0.05))) return;
+      var yy = sy(tv);
+      svg.appendChild(el('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, class: 'grid' }));
+      var lab = el('text', { x: padL - 6, y: yy + 3, 'text-anchor': 'end', class: 'axlab' });
+      lab.textContent = logScale ? (tv >= 1 ? tv + 's' : tv + 's') : (Math.round(tv * 100) / 100) + 's';
+      svg.appendChild(lab);
+    });
+    // baseline
+    svg.appendChild(el('line', { x1: padL, y1: padT + plotH, x2: W - padR, y2: padT + plotH, class: 'base' }));
+
+    var gW = plotW / groups.length;
+    var barW = Math.min(26, (gW - 14) / series.length);
+    groups.forEach(function (g, gi) {
+      var gx = padL + gi * gW + (gW - barW * series.length) / 2;
+      series.forEach(function (s, si) {
+        var v = g.values[si];
+        var y = sy(v), bh = padT + plotH - y;
+        var x = gx + si * barW;
+        var rect = el('rect', {
+          x: x + 1, y: y, width: barW - 2, height: Math.max(bh, 1),
+          rx: 3, fill: si === 0 ? 'var(--viz-s1)' : 'var(--viz-s2)', class: 'bar'
+        });
+        rect.addEventListener('mousemove', function (ev) {
+          showTip('<b>' + g.label + '</b><br>' + s.name + ': ' + v + ' s', ev.clientX, ev.clientY);
+        });
+        rect.addEventListener('mouseleave', hideTip);
+        svg.appendChild(rect);
+        // value label on top for the taller/last series
+        var vl = el('text', { x: x + (barW - 2) / 2 + 1, y: y - 4, 'text-anchor': 'middle', class: 'vallab' });
+        vl.textContent = v >= 100 ? Math.round(v) : v;
+        if (bh > 14 || si === series.length - 1) svg.appendChild(vl);
+      });
+      var glab = el('text', { x: padL + gi * gW + gW / 2, y: H - padB + 16, 'text-anchor': 'middle', class: 'axlab' });
+      glab.textContent = g.label;
+      svg.appendChild(glab);
+    });
+  }
+
+  var stages = document.getElementById('chart-stages');
+  if (stages) groupedBars(stages, {
+    height: 260, log: true, min: 0.05,
+    series: [{ name: 'Run 1' }, { name: 'Run 2' }],
+    groups: [
+      { label: 'build',   values: [10.59, 38.38] },
+      { label: 'recover', values: [0.62, 5.29] },
+      { label: 'resolve', values: [0.09, 0.70] },
+      { label: 'compile', values: [0.37, 2.80] },
+      { label: 'commit',  values: [19.43, 235.35] }
+    ]
+  });
+
+  var lat = document.getElementById('chart-latency');
+  if (lat) groupedBars(lat, {
+    height: 220, log: true, min: 0.3,
+    series: [{ name: 'Local' }, { name: 'Gateway' }],
+    groups: [
+      { label: 'query object', values: [0.45, 0.59] },
+      { label: 'query find',   values: [1.55, 0.84] },
+      { label: 'diff',         values: [27.55, 12.10] }
+    ]
+  });
+
+  // bar fills reference CSS custom properties directly, so they follow the theme live —
+  // no re-render needed on a system-theme change.
+})();
+</script>
+</body>
+</html>
