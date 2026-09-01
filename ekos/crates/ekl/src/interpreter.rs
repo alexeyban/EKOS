@@ -3,7 +3,7 @@
 
 use crate::parser::{EklAst, Entity, Literal, Op, Order, Predicate};
 use ekos_kir::{KirGraph, KirId, KirObject, KirRelationship, RelationshipKind};
-use ekos_runtime::{ImpactDirection, Runtime, RuntimeError};
+use ekos_runtime::{ImpactDirection, RetrievalRequest, Runtime, RuntimeError};
 use serde_json::Value;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -138,11 +138,13 @@ impl<'a> EklInterpreter<'a> {
     }
 
     fn resolve_anchor(&self, name: &str) -> Result<KirId, EklError> {
+        // RFC 0119: route through the retrieval seam. Phase 0 keeps "top hit wins" exactly.
         self.runtime
-            .find_objects(name)?
+            .retrieve(&RetrievalRequest::lexical(name))?
+            .hits
             .into_iter()
             .next()
-            .map(|(id, _)| id)
+            .map(|hit| hit.id)
             .ok_or_else(|| EklError::AnchorNotFound(name.to_string()))
     }
 

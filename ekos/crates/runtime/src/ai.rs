@@ -5,7 +5,7 @@
 //! touches the ledger or enterprise systems directly — only through the
 //! Runtime, upholding the same read-only consumer-facing contract as RFC 0005.
 
-use crate::{ObjectState, Runtime, RuntimeError};
+use crate::{ObjectState, RetrievalRequest, Runtime, RuntimeError};
 use ekos_compiler_core::Diagnostic;
 use ekos_kir::KirId;
 use ekos_recovery::llm::{LlmError, LlmProvider, LlmRequest, Message};
@@ -336,22 +336,28 @@ impl<'a> AiRuntime<'a> {
     /// last resort so no previously-working query (e.g. one that was already just a bare name or
     /// a handful of keywords) can regress.
     fn search_for_question(&self, question: &str) -> Result<Vec<(KirId, String)>, AiError> {
+        // RFC 0119: route each rung of the AND→OR→raw ladder through the retrieval seam. Phase 0
+        // = BM25, byte-identical; RFC 0121 replaces the whole hand-rolled ladder with `understand`.
+        let search = |q: &str| -> Result<Vec<(KirId, String)>, RuntimeError> {
+            Ok(self
+                .runtime
+                .retrieve(&RetrievalRequest::lexical(q))?
+                .into_pairs())
+        };
         let terms = extract_search_terms(question);
         if !terms.is_empty() {
-            let and_query = terms.join(" ");
-            let hits = self.runtime.find_objects(&and_query)?;
+            let hits = search(&terms.join(" "))?;
             if !hits.is_empty() {
                 return Ok(hits);
             }
             if terms.len() > 1 {
-                let or_query = terms.join(" OR ");
-                let hits = self.runtime.find_objects(&or_query)?;
+                let hits = search(&terms.join(" OR "))?;
                 if !hits.is_empty() {
                     return Ok(hits);
                 }
             }
         }
-        Ok(self.runtime.find_objects(question)?)
+        Ok(search(question)?)
     }
 }
 

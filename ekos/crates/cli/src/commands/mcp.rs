@@ -24,7 +24,7 @@ use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
 use ekos_ledger::KnowledgeStore;
-use ekos_runtime::{ImpactDirection, Runtime};
+use ekos_runtime::{ImpactDirection, RetrievalRequest, Runtime};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -675,11 +675,12 @@ fn call_tool(
     match name {
         "ekos_search" => {
             let query = required_str(args, "query")?;
-            let matches = runtime.find_objects(query)?;
+            // RFC 0119: route through the retrieval seam. Phase 0 = BM25, byte-identical.
+            let hits = runtime.retrieve(&RetrievalRequest::lexical(query))?.hits;
             Ok(json!({
-                "matches": matches
+                "matches": hits
                     .iter()
-                    .map(|(id, name)| json!({ "id": id.to_string(), "name": name }))
+                    .map(|hit| json!({ "id": hit.id.to_string(), "name": hit.name }))
                     .collect::<Vec<_>>()
             }))
         }

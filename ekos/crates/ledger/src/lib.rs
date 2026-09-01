@@ -2,8 +2,11 @@ pub mod fact;
 pub mod fact_ledger;
 pub mod index;
 pub mod partitioned;
+pub mod retrieval;
 pub mod search;
 pub mod segment;
+
+pub use retrieval::{ArmSet, Hit, RRF_K, RankedResults, RetrievalRequest, Signal, SignalSource};
 
 /// RFC 0113 — the storage-backend seam. Re-exported so `ekos_ledger::SegmentBackend` stays the
 /// import path; the impls live in the `ekos-segment-backend` crate.
@@ -1595,6 +1598,21 @@ pub trait KnowledgeStore {
     /// newest (RFC 0047).
     fn relationship_history(&self, id: &KirId) -> Result<Vec<KirRelationship>, LedgerError>;
     fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError>;
+    /// Scored, multi-signal retrieval (RFC 0118 / 0119). The default wraps `find_objects` as a
+    /// single BM25 signal, rank-only — byte-identical id ordering. `FactLedger` /
+    /// `PartitionedLedger` / `DistributedLedger` override this with the real scored + fused path
+    /// in RFC 0120+.
+    fn retrieve(
+        &self,
+        req: &retrieval::RetrievalRequest,
+    ) -> Result<retrieval::RankedResults, LedgerError> {
+        let pairs = self.find_objects(req.bm25_query())?;
+        Ok(retrieval::RankedResults::from_ranked_pairs(
+            pairs,
+            retrieval::SignalSource::Bm25,
+            req.limit,
+        ))
+    }
     fn entry_count(&self) -> Result<usize, LedgerError>;
     fn object_count(&self) -> Result<usize, LedgerError>;
     fn relationship_count(&self) -> Result<usize, LedgerError>;

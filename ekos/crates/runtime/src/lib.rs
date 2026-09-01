@@ -16,6 +16,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
 pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig, ConversationTurn};
+/// RFC 0119 — the retrieval seam, re-exported so consumers import it from `ekos_runtime`.
+pub use ekos_ledger::{ArmSet, Hit, RankedResults, RetrievalRequest, Signal, SignalSource};
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
@@ -254,6 +256,12 @@ impl<'a> Runtime<'a> {
         Ok(self.ledger.find_objects(query)?)
     }
 
+    /// Scored, multi-signal retrieval (RFC 0118 / 0119) — the seam every search consumer routes
+    /// through. In Phase 0 this is `find_objects` wrapped as one BM25 signal.
+    pub fn retrieve(&self, req: &RetrievalRequest) -> Result<RankedResults, RuntimeError> {
+        Ok(self.ledger.retrieve(req)?)
+    }
+
     /// Every object currently in the ledger (RFC 0010 — EKL entity enumeration).
     pub fn list_objects(&self) -> Result<Vec<KirObject>, RuntimeError> {
         Ok(self.ledger.all_objects()?)
@@ -476,6 +484,25 @@ mod tests {
         let (ledger, _dir) = temp_ledger();
         let rt = Runtime::new(&ledger);
         assert!(rt.load_object(&KirId::new()).unwrap().is_none());
+    }
+
+    #[test]
+    fn retrieve_seam_matches_find_objects() {
+        let (ledger, _dir) = temp_ledger();
+        for n in ["orders", "order_items", "customers"] {
+            ledger.append_object(&obj(n)).unwrap();
+        }
+        let rt = Runtime::new(&ledger);
+        for q in ["order", "orders", "customers", "nope"] {
+            let legacy: Vec<KirId> = rt
+                .find_objects(q)
+                .unwrap()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
+            let seam = rt.retrieve(&RetrievalRequest::lexical(q)).unwrap().ids();
+            assert_eq!(seam, legacy, "query {q:?}");
+        }
     }
 
     #[test]

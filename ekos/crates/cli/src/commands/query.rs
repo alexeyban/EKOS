@@ -3,7 +3,7 @@ use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::KirId;
 use ekos_ledger::KnowledgeStore;
-use ekos_runtime::Runtime;
+use ekos_runtime::{RetrievalRequest, Runtime};
 use std::{path::Path, str::FromStr};
 
 pub fn object(config: &EkosConfig, cwd: &Path, id_str: &str, format: &str) -> Result<()> {
@@ -59,14 +59,15 @@ pub fn object(config: &EkosConfig, cwd: &Path, id_str: &str, format: &str) -> Re
 pub fn find(config: &EkosConfig, cwd: &Path, query: &str) -> Result<()> {
     let ledger = open_ledger(config, cwd)?;
     let rt = Runtime::over(&*ledger);
-    let results = rt.find_objects(query)?;
+    // RFC 0119: route through the retrieval seam. Phase 0 = BM25, byte-identical to `find_objects`.
+    let results = rt.retrieve(&RetrievalRequest::lexical(query))?;
 
-    if results.is_empty() {
+    if results.hits.is_empty() {
         println!("No objects found matching '{query}'.");
     } else {
-        println!("{} result(s) for '{query}':", results.len());
-        for (id, name) in &results {
-            println!("  {id}  {name}");
+        println!("{} result(s) for '{query}':", results.hits.len());
+        for hit in &results.hits {
+            println!("  {}  {}", hit.id, hit.name);
         }
     }
 
