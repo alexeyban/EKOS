@@ -4238,6 +4238,26 @@ are excluded — see the full exclusion list in the planning history if needed.
       needed. A dedicated `search_aliases` LLM property and tantivy's built-in typo-tolerant
       `FuzzyTermQuery` were both named as related, real, smaller future follow-ons and deliberately
       not bundled into this RFC.
+    - [ ] **Reframed 2026-09-01 into RFC 0118 — "Compiled-Knowledge Query Engine: SEARCH → QUERY →
+      REASON"** (`ekos/docs/rfcs/0118-compiled-knowledge-query-engine.md`, umbrella, Draft). After a
+      design discussion the retrieval story was repositioned around EKOS's actual differentiator, the
+      Knowledge Compiler: *traditional RAG searches documents; EKOS queries compiled knowledge.*
+      Three operations — **SEARCH** (BM25 + vector + entity resolution → RRF-fused ranked objects),
+      **QUERY** (direct `fact(entity, attr)` over the existing `FactIndexes` EAV engine + named graph
+      ops `dependents`/`path`/… — zero LLM), **REASON** (a Query Planner compiles the NL question into
+      a typed `QueryPlan` IR, executes it, assembles a typed `EvidenceSet` with per-item provenance,
+      and the LLM *explains* structured evidence instead of interpreting chunks). Design-only; no code.
+      Per-phase impl RFCs authored just-in-time: **0119** the `KnowledgeStore::retrieve` seam ·
+      **0120** RRF fusion + `ExactName` signal (also improves the RFC 0113 B5 shard-local-IDF merge) ·
+      **0121** query understanding (entity resolution + rules-first intent) · **0122** the QUERY
+      surface (fact lookup + per-`ObjectKind` fact schema + named graph ops) · **0123** REASON
+      (`QueryPlan` + `EvidenceSet` + `AiRuntime` rework) · **0124** surface (EKL `SEMANTIC`, MCP
+      `ekos_query`/`ekos_retrieve`, `ekos ask` wiring, `--explain`) · **0125** the vector arm
+      (`EmbeddingProvider` + `VectorIndex`) — **gated** on usage data per RFC 0100's stated condition ·
+      **0126** eval harness + telemetry (optional). Phases 0–4 are fully offline / zero-LLM. Computed
+      staleness/drift (`Custom("Drift")`, code↔doc signature diffing) is deliberately a separate
+      future **RFC 0127**, referenced but not designed here. (Also noted: commit `e8e1ca3` claims an
+      RFC 0117 for the dbt analyzer but no `0117-*.md` was ever filed — backfill needed.)
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
