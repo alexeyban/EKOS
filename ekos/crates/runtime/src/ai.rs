@@ -364,7 +364,7 @@ impl<'a> AiRuntime<'a> {
 /// Common English function words carrying no search-discriminating value on their own — dropped
 /// before building a keyword search from a natural-language question. Deliberately conservative
 /// (short, closed-class words only) so a real content word is never mistaken for a stopword.
-const QUESTION_STOPWORDS: &[&str] = &[
+pub(crate) const QUESTION_STOPWORDS: &[&str] = &[
     "a", "an", "the", "is", "are", "was", "were", "am", "be", "been", "being", "do", "does", "did",
     "doing", "what", "who", "whom", "whose", "which", "how", "why", "where", "when", "and", "or",
     "but", "to", "of", "in", "on", "for", "with", "at", "by", "from", "about", "into", "than",
@@ -381,7 +381,7 @@ const QUESTION_STOPWORDS: &[&str] = &[
 /// treats `_` as a token separator, not part of a token. This keeps every extracted term (and the
 /// query built from them) free of any character `Ledger::find_objects`'s `is_simple_term` check
 /// would otherwise treat as needing literal-phrase escaping.
-fn extract_search_terms(question: &str) -> Vec<String> {
+pub(crate) fn extract_search_terms(question: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     question
         .split(|c: char| !c.is_alphanumeric())

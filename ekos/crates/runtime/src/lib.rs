@@ -5,6 +5,7 @@
 //! methods that affect the ledger (RFC 0005).
 
 pub mod ai;
+pub mod retrieval;
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{

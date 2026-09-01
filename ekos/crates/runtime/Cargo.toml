@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 ekos-kir.workspace = true
 ekos-ledger.workspace = true
+ekos-identity.workspace = true
 ekos-compiler-core.workspace = true
 ekos-recovery.workspace = true
 thiserror.workspace = true
