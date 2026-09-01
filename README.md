@@ -186,7 +186,7 @@ cargo install --path crates\cli
 ```bash
 ekos --help                # or: cargo run -p ekos -- --help, from ekos/
 ekos init                  # creates .ekos/ in the current directory
-cargo test --workspace     # optional: run the test suite (500+ tests)
+cargo test --workspace     # optional: run the test suite (1,500+ tests)
 ```
 
 See [`CLAUDE.md`](CLAUDE.md) for the full command reference and the mandatory development
@@ -383,7 +383,34 @@ Opt-in and cost-gated like `[architecture-reasoning]` — a real, potentially la
 LLM calls at the default `scope = "modules"` against a real mid-size codebase, ~5x that at
 `scope = "all"`), never defaulting to the more expensive tier just because it was turned on.
 
-### Semantic (vector) search (RFC 0125, opt-in)
+### Compiled-knowledge query engine (RFC 0118 — SEARCH → QUERY → REASON)
+
+Traditional RAG searches documents; EKOS queries **compiled knowledge**. The retrieval stack is
+three operations, built as RFCs 0119–0126 (`devlog_143`–`devlog_149`):
+
+- **SEARCH** — one `KnowledgeStore::retrieve` seam behind every consumer, fusing a BM25 arm, an
+  exact-name arm, and (opt-in) a vector arm with Reciprocal Rank Fusion (Cormack RRF, `k=60`).
+  `ekos query find "<text>" --mode lexical|vector|hybrid`; `--explain` prints the compiled plan
+  and per-arm timings. The same fused path runs on the single `FactLedger`, the partitioned
+  store, and the distributed gateway.
+- **QUERY** — direct, zero-LLM answers over the compiled graph: `fact(entity, attr)` for one
+  attribute of one object, named ops (`dependents`, `callers`, `path`, …) for the graph. Exposed
+  as MCP `ekos_query` (a typed list of source-cited claims) and `ekos_retrieve` ("show your
+  work": the plan + evidence set + how the question was understood).
+- **REASON** — `ekos ask "<question>"` now *compiles* the question: a rules planner routes it to
+  fact lookups and graph traversals, executes them into a typed `EvidenceSet` where every item
+  carries its provenance, and the model's job shrinks to "explain this evidence, cite each item."
+  `--explain` prints the plan and evidence; `--classic` selects the pre-0123 retrieve-and-dump
+  path. A citation not backed by a source id in the evidence set is a reported finding, not a
+  formatting detail.
+
+EKL gains `FIND Object SEMANTIC 'text' [LIMIT k]` — the retriever as a candidate-set strategy.
+Retrieval quality is CI-gated: `ekos_runtime::retrieval_eval` holds a checked-in graded query set
+and a reference estate, and a workspace test fails the build if Recall@10 / MRR / nDCG@10 or
+intent-classification accuracy drops more than 2% below the recorded baseline;
+`cargo bench --bench retrieval_eval` prints the current scoreboard (RFC 0126).
+
+### The vector arm — semantic search (RFC 0125, opt-in)
 
 A question phrased with none of the target object's words ("the thing that sends welcome emails" →
 a function called `dispatch_signup_notification`) has no lexical hook. `[embeddings]` in
@@ -410,13 +437,8 @@ Opt-in and off by default — with no `[embeddings]` table nothing is embedded a
 pure BM25 + exact-name path. Embeddings are cheap and disk-cached, so unlike `[llm-description]`
 there is no spend prompt. Single-node only this phase (a no-op on a SQLite or partitioned
 workspace); a vector/hybrid search with no index built yet degrades to lexical with a visible
-note. The MCP `ekos_search` tool takes the same `mode` and reports `arms_run`.
-
-Retrieval quality is CI-gated (RFC 0126): `ekos_runtime::retrieval_eval` holds a checked-in
-graded query set and a reference estate, and a workspace test fails the build if Recall@10 / MRR /
-nDCG@10 or intent-classification accuracy drops more than 2% below the recorded baseline.
-`cargo bench --bench retrieval_eval` prints the current scoreboard. Per-arm wall-clock timings
-(`arm_timings`) ride along on the MCP `ekos_search` / `ekos_retrieve` results, into
+note. The MCP `ekos_search` tool takes the same `mode` and reports `arms_run`. Per-arm wall-clock
+timings (`arm_timings`, RFC 0126) ride along on the `ekos_search` / `ekos_retrieve` results, into
 `.ekos/query-log.jsonl`, and in `ekos query find --explain`.
 
 ### Hierarchical rollups (RFC 0044)
@@ -811,6 +833,7 @@ All significant architectural decisions begin as RFCs in `docs/rfcs/`. No featur
 
 Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presentations.html) — every claim in them is reproduced live against real repos, not staged:
 
+- [Full-Stack Test Run](https://alexeyban.github.io/EKOS/presentations/full-stack-test-run.html) — an autonomous 22-act pass over the distributed storage stack (RFC 0111/0113), the compiled-knowledge query engine (RFC 0118/0119–0126), and the MCP protocol (RFC 0013/0115): coordinator fencing, gateway failover, RRF fusion, REASON citation checks, the vector arm on a real embedding model, and the write-vs-read-only-gateway safety assertion. Three partitioned-store bugs it surfaced, fixed and re-verified in the same run.
 - [Claude Code + EKOS](https://alexeyban.github.io/EKOS/presentations/claude-code-with-ekos.html) — how Claude Code searches and analyzes a codebase through EKOS's MCP server instead of raw grep/Read, with a measured with-vs-without comparison and real token/usage numbers.
 - [The AI-Native Enterprise Knowledge Compiler](https://alexeyban.github.io/EKOS/presentations/ai-native-knowledge-compiler-pitch.html) — the startup pitch, audited live by Claude Code using EKOS's own MCP server.
 - [ClickHouse: Compiled Metadata + Live NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html) — the one explicit, audited exception to "AI never touches raw enterprise systems directly," verified live against a real ClickHouse container, honest failures included.
