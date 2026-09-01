@@ -82,7 +82,7 @@
 
 use crate::{
     ArmSet, FactLedger, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults,
-    RetrievalRequest, ScoredCandidate, SignalSource, rrf_fuse,
+    RetrievalRequest, ScoredCandidate, SignalSource, exact_name_matches, rrf_fuse,
 };
 
 use chrono::{DateTime, Utc};
@@ -1258,6 +1258,13 @@ impl PartitionedLedger {
     /// `FactLedger::retrieve` (BM25 + exact-name RRF); the per-partition ranked lists are then
     /// RRF-merged into one global order — replacing the old concat-and-dedup, which had no
     /// cross-partition ranking at all. Cold partitions are still skipped (any read promotes them).
+    ///
+    /// A per-partition `ExactName` promotion only ranks *within* its own partition, so once the
+    /// lists are merged an exact-name hit in one partition would merely tie (rank 0) with a strong
+    /// lexical hit in another and lose the `KirId` tiebreak — the exact RFC 0120 regression the
+    /// `ExactName` arm exists to fix, silently reintroduced by the partition boundary. To close
+    /// that, a **cross-partition `ExactName` arm** is added over the union of every partition's
+    /// candidates (mirrors `DistributedLedger::search_ranked`).
     pub fn retrieve(&self, req: &RetrievalRequest) -> Result<RankedResults, PartitionError> {
         let hot: Vec<PartitionKey> = {
             let catalog = self.catalog.lock().unwrap();
@@ -1268,7 +1275,9 @@ impl PartitionedLedger {
                 .map(|e| e.key.clone())
                 .collect()
         };
-        let mut lists: Vec<(SignalSource, Vec<ScoredCandidate>)> = Vec::with_capacity(hot.len());
+        let mut lists: Vec<(SignalSource, Vec<ScoredCandidate>)> =
+            Vec::with_capacity(hot.len() + 1);
+        let mut union: Vec<ScoredCandidate> = Vec::new();
         for key in hot {
             let ledger = self.partition(&key, false)?;
             let partition_hits = ledger
@@ -1277,19 +1286,24 @@ impl PartitionedLedger {
                     key: key.clone(),
                     source,
                 })?;
-            lists.push((
-                SignalSource::Bm25,
-                partition_hits
-                    .hits
-                    .into_iter()
-                    .map(|h| ScoredCandidate {
-                        id: h.id,
-                        name: h.name,
-                        kind: h.kind,
-                        raw_score: h.score,
-                    })
-                    .collect(),
-            ));
+            let cands: Vec<ScoredCandidate> = partition_hits
+                .hits
+                .into_iter()
+                .map(|h| ScoredCandidate {
+                    id: h.id,
+                    name: h.name,
+                    kind: h.kind,
+                    raw_score: h.score,
+                })
+                .collect();
+            union.extend(cands.iter().cloned());
+            lists.push((SignalSource::Bm25, cands));
+        }
+        // Cross-partition exact-name arm — matched against the raw query, same as
+        // `FactLedger::retrieve` and `DistributedLedger::search_ranked`.
+        let exact = exact_name_matches(&req.raw, &union);
+        if !exact.is_empty() {
+            lists.push((SignalSource::ExactName, exact));
         }
         Ok(RankedResults {
             hits: rrf_fuse(&lists, RRF_K, req.limit),

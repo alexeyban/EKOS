@@ -4,6 +4,34 @@ use ekos_ledger::Ledger;
 use std::path::Path;
 
 pub fn status(config: &EkosConfig, cwd: &Path, storage: bool) -> Result<()> {
+    // RFC 0111/0113 — a partitioned or distributed workspace is served through `open_store`, not a
+    // single ledger file. `uses_fact_engine` only checks for a `facts/manifest.json`, which a
+    // partitioned store doesn't have, so this branch must come first.
+    if config.storage.distributed.is_enabled() || super::store::uses_partitioned(config, cwd) {
+        let store = super::store::open_store(config, cwd)?;
+        let kind = if config.storage.distributed.is_enabled() {
+            "distributed cluster, RFC 0113"
+        } else {
+            "partitioned, RFC 0111"
+        };
+        println!(
+            "Ledger: {} ({kind})",
+            super::store::store_display(config, cwd)
+        );
+        println!("  Total entries : {}", store.entry_count()?);
+        println!("  Objects       : {}", store.object_count()?);
+        println!("  Relationships : {}", store.relationship_count()?);
+        if storage && !config.storage.distributed.is_enabled() {
+            let (bytes, files) = dir_size(&super::store::partitioned_root(config, cwd));
+            println!();
+            println!(
+                "  Partition store: {:>10}  ({files} files)",
+                human_bytes(bytes)
+            );
+        }
+        return Ok(());
+    }
+
     if super::store::uses_fact_engine(config, cwd) {
         let store = super::store::open_store(config, cwd)?;
         println!(
@@ -338,5 +366,28 @@ mod tests {
         let dir = tempdir().unwrap();
         let config = EkosConfig::default();
         repair(&config, dir.path()).expect("a never-built workspace must not error");
+    }
+
+    /// Regression: `ekos status` / `ekos ledger status` printed "Ledger not initialised" on any
+    /// `[storage.partition]` workspace because `uses_fact_engine` only checks for
+    /// `facts/manifest.json` — which a partitioned store doesn't have.
+    #[test]
+    fn status_reports_a_partitioned_ledger_instead_of_claiming_it_is_uninitialised() {
+        let dir = tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.storage.partition.dimension = Some("entity-kind".into());
+
+        {
+            let store = super::super::store::build_partitioned(&config, dir.path(), false).unwrap();
+            store
+                .append_object(&KirObject::new("customers", ObjectKind::Table))
+                .unwrap();
+        }
+
+        // The load-bearing check is that it doesn't fall through to the "not initialised" branch;
+        // it prints to stdout, so we assert on the counts via the store directly too.
+        status(&config, dir.path(), false).expect("status must not error on a partitioned ledger");
+        let store = super::super::store::open_store(&config, dir.path()).unwrap();
+        assert_eq!(store.object_count().unwrap(), 1);
     }
 }

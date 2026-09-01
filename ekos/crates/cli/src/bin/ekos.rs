@@ -447,25 +447,46 @@ enum QueryCommands {
     },
 }
 
+/// Resolve which `ekos.toml` to load. Precedence: explicit `--config`, then `EKOS_CONFIG`, then
+/// — for `ekos mcp serve` only — the `--workspace <dir>` flag's or `EKOS_WORKSPACE`'s `ekos.toml`
+/// (agent hosts spawn the server from an arbitrary cwd, so the workspace's own config must follow
+/// it — otherwise a `[storage.partition]`/`[storage.distributed]` workspace opens with the wrong
+/// routing config and every tool call fails), then `./ekos.toml`.
+fn resolve_config_path(
+    explicit: Option<PathBuf>,
+    env_config: Option<PathBuf>,
+    is_mcp: bool,
+    mcp_workspace: Option<&std::path::Path>,
+    env_workspace: Option<&std::path::Path>,
+) -> PathBuf {
+    explicit
+        .or(env_config)
+        .or_else(|| {
+            is_mcp
+                .then(|| mcp_workspace.or(env_workspace).map(|w| w.join("ekos.toml")))
+                .flatten()
+        })
+        .unwrap_or_else(|| PathBuf::from("ekos.toml"))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // The MCP server is spawned by agent hosts from arbitrary directories, so
-    // its workspace (and the config inside it) may arrive via environment
-    // variables instead of flags: EKOS_WORKSPACE, EKOS_CONFIG.
     let env_workspace = std::env::var_os("EKOS_WORKSPACE").map(PathBuf::from);
-    let config_path = cli
-        .config
-        .or_else(|| std::env::var_os("EKOS_CONFIG").map(PathBuf::from))
-        .or_else(|| {
-            if matches!(cli.command, Commands::Mcp { .. }) {
-                env_workspace.as_ref().map(|w| w.join("ekos.toml"))
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| PathBuf::from("ekos.toml"));
+    let mcp_workspace_flag: Option<PathBuf> = match &cli.command {
+        Commands::Mcp {
+            subcommand: McpCommands::Serve { workspace, .. },
+        } => workspace.clone(),
+        _ => None,
+    };
+    let config_path = resolve_config_path(
+        cli.config,
+        std::env::var_os("EKOS_CONFIG").map(PathBuf::from),
+        matches!(cli.command, Commands::Mcp { .. }),
+        mcp_workspace_flag.as_deref(),
+        env_workspace.as_deref(),
+    );
     let config = ekos_compiler_core::EkosConfig::from_file_or_default(&config_path);
     let cwd = std::env::current_dir()?;
 
@@ -672,5 +693,37 @@ mod tests {
                 subcommand: ClickHouseCommands::Ask { .. }
             }
         ));
+    }
+
+    #[test]
+    fn config_path_resolution_precedence() {
+        use std::path::Path;
+        let p = |s: &str| Some(PathBuf::from(s));
+
+        // explicit --config wins over everything
+        assert_eq!(
+            resolve_config_path(p("a.toml"), p("b.toml"), true, Some(Path::new("ws")), None),
+            PathBuf::from("a.toml")
+        );
+        // EKOS_CONFIG next
+        assert_eq!(
+            resolve_config_path(None, p("b.toml"), true, Some(Path::new("ws")), None),
+            PathBuf::from("b.toml")
+        );
+        // `ekos mcp serve --workspace ws` → ws/ekos.toml (the F5 fix)
+        assert_eq!(
+            resolve_config_path(None, None, true, Some(Path::new("ws")), None),
+            PathBuf::from("ws/ekos.toml")
+        );
+        // EKOS_WORKSPACE fallback for MCP
+        assert_eq!(
+            resolve_config_path(None, None, true, None, Some(Path::new("envws"))),
+            PathBuf::from("envws/ekos.toml")
+        );
+        // non-MCP command ignores the workspace entirely
+        assert_eq!(
+            resolve_config_path(None, None, false, Some(Path::new("ws")), None),
+            PathBuf::from("ekos.toml")
+        );
     }
 }

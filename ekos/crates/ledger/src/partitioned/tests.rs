@@ -924,6 +924,48 @@ fn partitioned_ledger_is_a_drop_in_knowledge_store() {
 }
 
 #[test]
+fn retrieve_promotes_an_exact_name_match_across_partitions() {
+    // Regression: a per-partition `ExactName` promotion only ranks within its own partition, so
+    // after the cross-partition RRF merge an exact-name hit in one partition would merely tie
+    // (rank 0) with a strong lexical hit in another and lose the `KirId` tiebreak. `retrieve` adds
+    // a cross-partition `ExactName` arm to fix this.
+    let dir = tempdir().unwrap();
+    let store = ledger_with_root(dir.path());
+
+    // A Table literally named "Customers" (→ Table partition).
+    let customers = KirObject::new("Customers", ObjectKind::Table);
+    // A File in another partition whose content is saturated with "customers" (→ File partition),
+    // so BM25 ranks it at the front of *its* partition list.
+    let sql_file = KirObject::new("schemas/shop.sql", ObjectKind::File).with_property(
+        "excerpt",
+        serde_json::json!(
+            "CREATE TABLE customers (id int); customers customers customers customers customers \
+             ALTER TABLE customers ADD COLUMN customers_note text; -- customers customers"
+        ),
+    );
+    store.append_object(&customers).unwrap();
+    store.append_object(&sql_file).unwrap();
+
+    let hits = store
+        .retrieve(&crate::RetrievalRequest::lexical("Customers"))
+        .unwrap()
+        .hits;
+    assert_eq!(
+        hits.first().map(|h| h.id),
+        Some(customers.id),
+        "the exact-name Table must rank above the lexical File hit in another partition; got {:?}",
+        hits.iter().map(|h| &h.name).collect::<Vec<_>>()
+    );
+    assert!(
+        hits[0]
+            .signals
+            .iter()
+            .any(|s| s.source == crate::SignalSource::ExactName),
+        "the #1 hit carries a cross-partition ExactName signal"
+    );
+}
+
+#[test]
 fn with_segment_backend_routes_each_partition_through_its_backend() {
     use std::sync::{Arc, Mutex};
 

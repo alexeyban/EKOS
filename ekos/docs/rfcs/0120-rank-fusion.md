@@ -85,10 +85,16 @@ fn retrieve(&self, req: &RetrievalRequest) -> Result<RankedResults, LedgerError>
 - `PartitionedLedger::retrieve`: for each **hot object partition**, `FactLedger::retrieve(req)`
   → per-partition `Hit`s; treat each partition's list as one ranked list keyed by
   `SignalSource::Bm25`; `rrf_fuse` across partitions (dedup by id inside the fuser); `limit`.
-  Cold partitions still skipped, documented.
+  Cold partitions still skipped, documented. **Plus a cross-partition `ExactName` arm** —
+  `exact_name_matches(req.raw, &union_of_all_partition_candidates)` as its own `rrf_fuse` list.
+  Without it, a per-partition exact-name promotion only ranks *within* its partition and, once
+  merged, merely ties (rank 0) with a strong lexical hit in another partition and loses the
+  `KirId` tiebreak — silently reintroducing the exact regression this signal fixes (found by the
+  RFC 0111/0118 full-stack test, `devlog_149`).
 - `DistributedLedger::retrieve` + `DistributedLedger::search`: fan `find_objects_scored` per
-  object partition (unchanged), then `rrf_fuse` the per-partition lists instead of the
-  `HashMap` keep-max + `total_cmp` sort. `find_objects` on the gateway rides `search` as before.
+  object partition (unchanged), then `rrf_fuse` the per-partition lists (with the same
+  cross-shard `ExactName` arm over the candidate union) instead of the `HashMap` keep-max +
+  `total_cmp` sort. `find_objects` on the gateway rides `search` as before.
 
 ### `Hit.kind`
 
