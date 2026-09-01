@@ -409,6 +409,13 @@ there is no spend prompt. Single-node only this phase (a no-op on a SQLite or pa
 workspace); a vector/hybrid search with no index built yet degrades to lexical with a visible
 note. The MCP `ekos_search` tool takes the same `mode` and reports `arms_run`.
 
+Retrieval quality is CI-gated (RFC 0126): `ekos_runtime::retrieval_eval` holds a checked-in
+graded query set and a reference estate, and a workspace test fails the build if Recall@10 / MRR /
+nDCG@10 or intent-classification accuracy drops more than 2% below the recorded baseline.
+`cargo bench --bench retrieval_eval` prints the current scoreboard. Per-arm wall-clock timings
+(`arm_timings`) ride along on the MCP `ekos_search` / `ekos_retrieve` results, into
+`.ekos/query-log.jsonl`, and in `ekos query find --explain`.
+
 ### Hierarchical rollups (RFC 0044)
 
 Every other context-saving mechanism in EKOS (capped search results, hop-bounded graph walks) is

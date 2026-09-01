@@ -4273,6 +4273,21 @@ are excluded — see the full exclusion list in the planning history if needed.
         `Runtime::dependencies`/`dependents`/`callers`/`related` + `graph_op(StructuralOp, …)`
         dispatch over `trace_impact`/`load_neighborhood`. Fact schema in analyzers +
         `FactIndexes` fast-path deferred (advisory). No CLI/EKL/MCP surface yet (that's 0124).
+      - [x] **0126 (Phase 7), `devlog_148`** — the retrieval eval harness + per-arm telemetry.
+        `ekos_runtime::retrieval_eval`: a checked-in graded query set (`reference_queries()`, ~30
+        queries × 5 `QueryType`s), a hand-built reference estate (`seed_reference_estate` —
+        Northwind tables + FK edges + code modules/symbols with `ai_overview` prose + doc sections)
+        and its mock-embedded `VectorIndex` (`seed_reference_vectors`), pure metric fns
+        (`recall_at_k`/`reciprocal_rank`/`ndcg_at_k`, unit-tested), `evaluate()` → `EvalReport`
+        (Recall@10 / MRR / nDCG@10 overall — over the retrieval-shaped types only — and per type,
+        plus intent-classifier accuracy), a `BASELINE` const + `check_regression`. **CI gate:**
+        `crates/runtime/tests/retrieval_eval.rs` fails the normal `cargo test` job on a > 2% drop.
+        **Scoreboard:** `benchmark/benches/retrieval_eval.rs` prints the table + times
+        understand/retrieve (lexical vs hybrid). **Telemetry:** `RankedResults.arm_timings:
+        Vec<ArmTiming{source, elapsed_ms, candidates}>`, populated by `FactLedger::retrieve` only
+        (bracketed per arm, pure observability — byte-identical hits); surfaced in `ekos_search` /
+        `ekos_retrieve` MCP results, lifted into `query_log::LogEntry.arm_timings`, and printed by
+        `ekos query find --explain`. Deferred: the optional `contextual_score` identity signal.
       - [x] **0125 (Phase 6), `devlog_147`** — the vector/semantic arm. `EmbeddingProvider` trait
         in `recovery` (`Mock` deterministic-offline / `Ollama` / `OpenAI` / `Cached` disk-cache),
         `build_embedding_provider` mirroring `build_llm_provider`. `ledger::vector::VectorIndex` —
