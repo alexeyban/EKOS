@@ -80,7 +80,10 @@
 //! **same** partition serialize on that partition's own lock — the single-writer-per-partition
 //! invariant RFC 0104's `write.lock` also enforces cross-process.
 
-use crate::{FactLedger, KnowledgeStore, LedgerDiff, LedgerError};
+use crate::{
+    ArmSet, FactLedger, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults,
+    RetrievalRequest, ScoredCandidate, SignalSource, rrf_fuse,
+};
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
@@ -1249,6 +1252,49 @@ impl PartitionedLedger {
             }
         }
         Ok(out)
+    }
+
+    /// RFC 0120 — scored retrieval across the hot object partitions. Each partition runs its own
+    /// `FactLedger::retrieve` (BM25 + exact-name RRF); the per-partition ranked lists are then
+    /// RRF-merged into one global order — replacing the old concat-and-dedup, which had no
+    /// cross-partition ranking at all. Cold partitions are still skipped (any read promotes them).
+    pub fn retrieve(&self, req: &RetrievalRequest) -> Result<RankedResults, PartitionError> {
+        let hot: Vec<PartitionKey> = {
+            let catalog = self.catalog.lock().unwrap();
+            catalog
+                .partitions
+                .iter()
+                .filter(|e| e.tier == Tier::Hot && is_object_partition(&e.key))
+                .map(|e| e.key.clone())
+                .collect()
+        };
+        let mut lists: Vec<(SignalSource, Vec<ScoredCandidate>)> = Vec::with_capacity(hot.len());
+        for key in hot {
+            let ledger = self.partition(&key, false)?;
+            let partition_hits = ledger
+                .retrieve(req)
+                .map_err(|source| PartitionError::Ledger {
+                    key: key.clone(),
+                    source,
+                })?;
+            lists.push((
+                SignalSource::Bm25,
+                partition_hits
+                    .hits
+                    .into_iter()
+                    .map(|h| ScoredCandidate {
+                        id: h.id,
+                        name: h.name,
+                        kind: h.kind,
+                        raw_score: h.score,
+                    })
+                    .collect(),
+            ));
+        }
+        Ok(RankedResults {
+            hits: rrf_fuse(&lists, RRF_K, req.limit),
+            arms_run: ArmSet::LEXICAL,
+        })
     }
 
     /// Total ledger entries across every partition.

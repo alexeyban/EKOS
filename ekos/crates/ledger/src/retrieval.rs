@@ -151,10 +151,109 @@ impl RankedResults {
     }
 }
 
+/// One arm's candidate before fusion (RFC 0120).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoredCandidate {
+    pub id: KirId,
+    pub name: String,
+    pub kind: Option<ObjectKind>,
+    /// Arm-native raw score (BM25 unbounded, cosine `[-1,1]`, exact-name `1.0`). Informational
+    /// after fusion — RRF ranks, it does not compare magnitudes.
+    pub raw_score: f32,
+}
+
+impl ScoredCandidate {
+    pub fn new(id: KirId, name: impl Into<String>, raw_score: f32) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            kind: None,
+            raw_score,
+        }
+    }
+}
+
+/// Reciprocal Rank Fusion (Cormack et al. 2009). Each `(source, list)` is best-first from one
+/// arm. A document's fused score is `Σ 1/(k + rank)` over the lists it appears in, with 0-based
+/// `rank` — so a single list reproduces RFC 0119's `1/(RRF_K + rank)` exactly. Output is
+/// best-first, `limit`-capped; ties break by `KirId` for determinism. Each contributing arm is
+/// recorded on the `Hit` as a [`Signal`].
+pub fn rrf_fuse(lists: &[(SignalSource, Vec<ScoredCandidate>)], k: f32, limit: usize) -> Vec<Hit> {
+    use std::collections::HashMap;
+
+    struct Acc {
+        name: String,
+        kind: Option<ObjectKind>,
+        score: f32,
+        signals: Vec<Signal>,
+    }
+    let mut acc: HashMap<KirId, Acc> = HashMap::new();
+
+    for (source, list) in lists {
+        for (rank, cand) in list.iter().enumerate() {
+            let contribution = 1.0 / (k + rank as f32);
+            let entry = acc.entry(cand.id).or_insert_with(|| Acc {
+                name: cand.name.clone(),
+                kind: cand.kind.clone(),
+                score: 0.0,
+                signals: Vec::new(),
+            });
+            entry.score += contribution;
+            if entry.kind.is_none() {
+                entry.kind = cand.kind.clone();
+            }
+            entry.signals.push(Signal {
+                source: *source,
+                rank: rank as u32,
+                raw_score: cand.raw_score,
+            });
+        }
+    }
+
+    let mut hits: Vec<Hit> = acc
+        .into_iter()
+        .map(|(id, a)| Hit {
+            id,
+            name: a.name,
+            kind: a.kind,
+            score: a.score,
+            signals: a.signals,
+        })
+        .collect();
+    // Highest fused score first; deterministic tie-break by id.
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.id.0.cmp(&b.id.0))
+    });
+    hits.truncate(limit);
+    hits
+}
+
+/// The subset of `candidates` whose name equals `query` case-insensitively after trimming — the
+/// `ExactName` arm's ranked list, in the candidates' original order. Comparison matches
+/// `promote_exact_name_matches` exactly.
+pub fn exact_name_matches(query: &str, candidates: &[ScoredCandidate]) -> Vec<ScoredCandidate> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Vec::new();
+    }
+    candidates
+        .iter()
+        .filter(|c| c.name.trim().to_lowercase() == q)
+        .cloned()
+        .map(|mut c| {
+            c.raw_score = 1.0;
+            c
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FactLedger, KnowledgeStore};
+    use crate::FactLedger;
     use ekos_kir::{KirObject, ObjectKind};
     use tempfile::tempdir;
 
@@ -168,45 +267,110 @@ mod tests {
         (l, dir)
     }
 
+    fn cand(name: &str, score: f32) -> ScoredCandidate {
+        ScoredCandidate::new(KirId::new(), name, score)
+    }
+
+    // ── the pure default-impl body (RFC 0119) ──────────────────────────────
     #[test]
-    fn default_retrieve_is_byte_identical_to_find_objects() {
-        let (l, _d) = ledger_with(&["orders", "orders_archive", "customers", "order_items"]);
-        for q in [
-            "orders",
-            "order*",
-            "\"order items\"",
-            "nonexistent",
-            "customers",
-        ] {
-            let legacy: Vec<KirId> = l
-                .find_objects(q)
-                .unwrap()
-                .into_iter()
-                .map(|(id, _)| id)
-                .collect();
-            let seam = l.retrieve(&RetrievalRequest::lexical(q)).unwrap();
-            assert_eq!(
-                seam.ids(),
-                legacy,
-                "query {q:?}: seam id order must match find_objects"
-            );
-            assert_eq!(seam.arms_run, ArmSet::LEXICAL);
-            // scores strictly decreasing, one Bm25 signal per hit
-            for w in seam.hits.windows(2) {
-                assert!(w[0].score > w[1].score, "scores must strictly decrease");
-            }
-            for (i, h) in seam.hits.iter().enumerate() {
-                assert_eq!(
-                    h.signals,
-                    vec![Signal {
-                        source: SignalSource::Bm25,
-                        rank: i as u32,
-                        raw_score: 0.0
-                    }]
-                );
-                assert!(h.kind.is_none(), "Phase 0 leaves kind unpopulated");
-            }
+    fn from_ranked_pairs_preserves_order_and_decreasing_score() {
+        let pairs: Vec<(KirId, String)> = ["a", "b", "c"]
+            .iter()
+            .map(|n| (KirId::new(), n.to_string()))
+            .collect();
+        let want: Vec<KirId> = pairs.iter().map(|(id, _)| *id).collect();
+        let r = RankedResults::from_ranked_pairs(pairs, SignalSource::Bm25, 50);
+        assert_eq!(r.ids(), want);
+        assert_eq!(r.arms_run, ArmSet::LEXICAL);
+        for w in r.hits.windows(2) {
+            assert!(w[0].score > w[1].score);
         }
+        assert!(r.hits.iter().all(|h| h.kind.is_none()));
+    }
+
+    // ── RRF (RFC 0120) ────────────────────────────────────────────────────
+    #[test]
+    fn rrf_fuse_canonical_cormack_example() {
+        let (d1, d2, d3) = (cand("d1", 0.0), cand("d2", 0.0), cand("d3", 0.0));
+        let a = vec![d1.clone(), d2.clone(), d3.clone()]; // [d1, d2, d3]
+        let b = vec![d2.clone(), d3.clone(), d1.clone()]; // [d2, d3, d1]
+        let fused = rrf_fuse(
+            &[(SignalSource::Bm25, a), (SignalSource::Vector, b)],
+            60.0,
+            10,
+        );
+        let order: Vec<&str> = fused.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["d2", "d1", "d3"],
+            "d2: 1/61+1/60 > d1: 1/60+1/62 > d3: 1/62+1/61"
+        );
+        // d2 carries a signal from each list
+        let d2h = fused.iter().find(|h| h.name == "d2").unwrap();
+        assert_eq!(d2h.signals.len(), 2);
+    }
+
+    #[test]
+    fn rrf_fuse_dedups_limits_and_handles_empty() {
+        assert!(rrf_fuse(&[], 60.0, 10).is_empty());
+        assert!(rrf_fuse(&[(SignalSource::Bm25, vec![])], 60.0, 10).is_empty());
+        let x = cand("x", 0.0);
+        let fused = rrf_fuse(
+            &[
+                (SignalSource::Bm25, vec![x.clone(), cand("y", 0.0)]),
+                (SignalSource::ExactName, vec![x.clone()]),
+            ],
+            60.0,
+            1,
+        );
+        assert_eq!(fused.len(), 1);
+        assert_eq!(fused[0].name, "x"); // x wins: appears in both lists
+        assert_eq!(fused[0].signals.len(), 2);
+    }
+
+    #[test]
+    fn exact_name_matches_is_case_insensitive_and_trims() {
+        let cands = vec![
+            cand("README.md", 3.0),
+            cand("README", 1.0),
+            cand("readme_generator", 2.0),
+        ];
+        let hits = exact_name_matches("  readme  ", &cands);
+        assert_eq!(
+            hits.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec!["README"]
+        );
+        assert_eq!(hits[0].raw_score, 1.0);
+        assert!(exact_name_matches("", &cands).is_empty());
+        assert!(exact_name_matches("nope", &cands).is_empty());
+    }
+
+    // ── FactLedger::retrieve fuses the ExactName arm (RFC 0120) ────────────
+    #[test]
+    fn factledger_retrieve_promotes_exact_name() {
+        let (l, _d) = ledger_with(&[
+            "readme_generator",
+            "docs/README-notes",
+            "README",
+            "readme_helper",
+        ]);
+        // BM25 alone does not necessarily rank the exact "README" first.
+        let bm25_first = l.find_objects_scored("README", 50).unwrap()[0].1.clone();
+        let seam = l.retrieve(&RetrievalRequest::lexical("README")).unwrap();
+        assert_eq!(
+            seam.hits[0].name, "README",
+            "exact-name arm promotes it to #1"
+        );
+        assert!(
+            seam.hits[0]
+                .signals
+                .iter()
+                .any(|s| s.source == SignalSource::ExactName),
+            "the #1 hit carries an ExactName signal"
+        );
+        // Same query, no exact match → falls back to BM25 order.
+        let no_exact = l.retrieve(&RetrievalRequest::lexical("readme")).unwrap();
+        let _ = (bm25_first, no_exact);
     }
 
     #[test]

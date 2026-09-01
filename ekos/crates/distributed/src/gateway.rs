@@ -25,7 +25,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use chrono::{DateTime, Utc};
 use ekos_cluster::{ClusterError, CoordinatorClient};
 use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
-use ekos_ledger::{KnowledgeStore, LedgerDiff, LedgerError};
+use ekos_ledger::{
+    ArmSet, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults, RetrievalRequest,
+    ScoredCandidate, SignalSource, exact_name_matches, rrf_fuse,
+};
 use futures::future::{join_all, try_join_all};
 use tokio::runtime::Handle;
 use tokio::sync::Mutex as AsyncMutex;
@@ -349,37 +352,63 @@ impl DistributedLedger {
         Ok(None)
     }
 
-    /// RFC 0113 B5 — distributed search. Fans each object partition's BM25 **top-`k`** to a query
-    /// worker, merges the per-shard scored lists, dedups by id (highest shard-local score kept),
-    /// and returns the global top-`k` best-first. Per-partition term statistics — the accepted
-    /// query-then-fetch approximation (RFC 0111 §7), not a corpus-global ranking.
+    /// RFC 0113 B5 + RFC 0120 — distributed search. Fans each object partition's BM25 **top-`k`**
+    /// to a query worker, then **RRF-merges** the per-shard ranked lists (plus an `ExactName`
+    /// list over the union) into one global order. RRF ranks rather than comparing the
+    /// per-partition (shard-local IDF) BM25 magnitudes the old merge sorted on — a defensible
+    /// improvement, still not a corpus-global ranking (RFC 0111 §7).
     pub fn search(&self, query: &str, k: usize) -> Result<Vec<(KirId, String, f32)>, LedgerError> {
-        let query = query.to_string();
+        Ok(self
+            .search_ranked(query, query, k)?
+            .hits
+            .into_iter()
+            .map(|h| (h.id, h.name, h.score))
+            .collect())
+    }
+
+    /// Shared body of [`Self::search`] and the `retrieve` trait impl. `bm25_q` drives the
+    /// per-partition fan-out; `exact_q` is matched (case-insensitively, trimmed) for the
+    /// `ExactName` arm.
+    fn search_ranked(
+        &self,
+        bm25_q: &str,
+        exact_q: &str,
+        k: usize,
+    ) -> Result<RankedResults, LedgerError> {
+        let bm25_q = bm25_q.to_string();
+        let exact_q = exact_q.to_string();
         self.run(async move {
             let pids = self.partitions(PClass::Object).await?;
             let per_partition = self
                 .fan_out(&pids, |w, pid| {
-                    let query = query.clone();
-                    async move { w.find_objects_scored(&pid, &query, k).await }
+                    let q = bm25_q.clone();
+                    async move { w.find_objects_scored(&pid, &q, k).await }
                 })
                 .await?;
-            let mut best: std::collections::HashMap<KirId, (String, f32)> = Default::default();
-            for hits in per_partition {
-                for (id, name, score) in hits {
-                    best.entry(id)
-                        .and_modify(|e| {
-                            if score > e.1 {
-                                *e = (name.clone(), score);
-                            }
-                        })
-                        .or_insert((name, score));
-                }
-            }
-            let mut hits: Vec<(KirId, String, f32)> =
-                best.into_iter().map(|(id, (n, s))| (id, n, s)).collect();
-            hits.sort_by(|a, b| b.2.total_cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
-            hits.truncate(k);
-            Ok(hits)
+            let union: Vec<ScoredCandidate> = per_partition
+                .iter()
+                .flatten()
+                .map(|(id, name, score)| ScoredCandidate::new(*id, name.clone(), *score))
+                .collect();
+            let mut lists: Vec<(SignalSource, Vec<ScoredCandidate>)> = per_partition
+                .into_iter()
+                .map(|hits| {
+                    (
+                        SignalSource::Bm25,
+                        hits.into_iter()
+                            .map(|(id, name, score)| ScoredCandidate::new(id, name, score))
+                            .collect(),
+                    )
+                })
+                .collect();
+            lists.push((
+                SignalSource::ExactName,
+                exact_name_matches(&exact_q, &union),
+            ));
+            Ok::<_, DistributedError>(RankedResults {
+                hits: rrf_fuse(&lists, RRF_K, k),
+                arms_run: ArmSet::LEXICAL,
+            })
         })
     }
 
@@ -620,6 +649,11 @@ impl KnowledgeStore for DistributedLedger {
             .into_iter()
             .map(|(id, name, _)| (id, name))
             .collect())
+    }
+
+    fn retrieve(&self, req: &RetrievalRequest) -> Result<RankedResults, LedgerError> {
+        // RFC 0120: BM25 fan-out + ExactName, RRF-merged across shards.
+        self.search_ranked(req.bm25_query(), &req.raw, req.limit)
     }
 
     fn entry_count(&self) -> Result<usize, LedgerError> {

@@ -73,6 +73,9 @@ impl KnowledgeStore for PartitionedLedger {
     fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
         Ok(PartitionedLedger::find_objects(self, query)?)
     }
+    fn retrieve(&self, req: &crate::RetrievalRequest) -> Result<crate::RankedResults, LedgerError> {
+        Ok(PartitionedLedger::retrieve(self, req)?)
+    }
     fn entry_count(&self) -> Result<usize, LedgerError> {
         Ok(PartitionedLedger::entry_count(self)?)
     }

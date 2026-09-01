@@ -6,7 +6,10 @@ pub mod retrieval;
 pub mod search;
 pub mod segment;
 
-pub use retrieval::{ArmSet, Hit, RRF_K, RankedResults, RetrievalRequest, Signal, SignalSource};
+pub use retrieval::{
+    ArmSet, Hit, RRF_K, RankedResults, RetrievalRequest, ScoredCandidate, Signal, SignalSource,
+    exact_name_matches, rrf_fuse,
+};
 
 /// RFC 0113 — the storage-backend seam. Re-exported so `ekos_ledger::SegmentBackend` stays the
 /// import path; the impls live in the `ekos-segment-backend` crate.
@@ -962,6 +965,18 @@ impl Ledger {
         Ok(results)
     }
 
+    /// RFC 0120 — scored retrieval. The SQLite backend is the degradation path: `find_objects`
+    /// already promotes exact-name matches internally and there is no vector storage, so this is a
+    /// rank-only wrap.
+    pub fn retrieve(&self, req: &RetrievalRequest) -> Result<RankedResults, LedgerError> {
+        let pairs = self.find_objects(req.bm25_query())?;
+        Ok(RankedResults::from_ranked_pairs(
+            pairs,
+            SignalSource::Bm25,
+            req.limit,
+        ))
+    }
+
     fn find_objects_v1(&self, match_expr: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
         let mut stmt = self.conn.prepare(
             // bm25 weights are positional per column: object_id (unindexed,
@@ -1693,6 +1708,12 @@ macro_rules! delegate_store {
             }
             fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, LedgerError> {
                 <$ty>::find_objects(self, query)
+            }
+            fn retrieve(
+                &self,
+                req: &retrieval::RetrievalRequest,
+            ) -> Result<retrieval::RankedResults, LedgerError> {
+                <$ty>::retrieve(self, req)
             }
             fn entry_count(&self) -> Result<usize, LedgerError> {
                 <$ty>::entry_count(self)

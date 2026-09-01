@@ -812,6 +812,34 @@ impl FactLedger {
             .collect())
     }
 
+    /// RFC 0120 — scored, RRF-fused retrieval: the BM25 arm (`find_objects_scored`) plus an
+    /// `ExactName` arm, so an exact case-insensitive name match is promoted to the front — what
+    /// the SQLite backend's `promote_exact_name_matches` has always done and the fact engine
+    /// never did. Vector/graph arms are added in RFC 0122/0125.
+    pub fn retrieve(
+        &self,
+        req: &crate::RetrievalRequest,
+    ) -> Result<crate::RankedResults, LedgerError> {
+        let bm25: Vec<crate::ScoredCandidate> = self
+            .find_objects_scored(req.bm25_query(), req.per_arm_limit)?
+            .into_iter()
+            .map(|(id, name, score)| crate::ScoredCandidate::new(id, name, score))
+            .collect();
+        let exact = crate::exact_name_matches(&req.raw, &bm25);
+        let hits = crate::rrf_fuse(
+            &[
+                (crate::SignalSource::ExactName, exact),
+                (crate::SignalSource::Bm25, bm25),
+            ],
+            crate::RRF_K,
+            req.limit,
+        );
+        Ok(crate::RankedResults {
+            hits,
+            arms_run: crate::ArmSet::LEXICAL,
+        })
+    }
+
     // ── Counters ──────────────────────────────────────────────────────────
 
     /// Total version count (committed batches) — mirrors the SQLite
