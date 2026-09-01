@@ -740,6 +740,18 @@ impl FactLedger {
         Ok(())
     }
 
+    /// RFC 0113 B4 follow-on — publish the active (unsealed) segment + `HEAD` to the backend so a
+    /// query worker materialising this partition from object storage alone sees committed-but-
+    /// not-yet-sealed rows, not just sealed history. Without this, a partition below the 8 MiB
+    /// seal threshold (i.e. most partitions under fine-grained partitioning) publishes only an
+    /// empty `manifest.json` and a remote-only reader sees it as empty. A no-op for a local
+    /// backend. Meant to run once after a compile, like [`Self::sync_search_to_backend`].
+    pub fn publish_active_to_backend(&self) -> Result<(), LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        inner.store.publish_active()?;
+        Ok(())
+    }
+
     /// Every historical version of the object at `id`, oldest to newest
     /// (RFC 0047).
     pub fn object_history(&self, id: &KirId) -> Result<Vec<KirObject>, LedgerError> {
@@ -1381,6 +1393,66 @@ mod tests {
         let l = FactLedger::open_read_only_with_backend(&root, backend).unwrap();
         assert_eq!(l.object_count().unwrap(), 2);
         assert_eq!(l.get_object(&a.id).unwrap().unwrap().name, "orders");
+    }
+
+    /// RFC 0113 B4 follow-on — a partition that never seals (default 8 MiB threshold, a handful of
+    /// objects) still travels to a fresh remote reader once `publish_active_to_backend` pushes the
+    /// active segment + `HEAD`. Without it, the remote reader sees the partition as empty.
+    #[test]
+    fn active_segment_travels_through_the_backend() {
+        let backend_cache = tempdir().unwrap();
+        let writer_root = tempdir().unwrap();
+        let backend = std::sync::Arc::new(crate::MemBackend::new(backend_cache.path()));
+
+        let a = KirObject::new("orders", ObjectKind::Table);
+        let b = KirObject::new("customers", ObjectKind::Table);
+        {
+            // DEFAULT seal threshold → nothing seals, everything stays in the active segment.
+            let l = FactLedger::open_with_backend(writer_root.path(), backend.clone()).unwrap();
+            l.append_object(&a).unwrap();
+            l.append_object(&b).unwrap();
+            assert!(
+                backend.list("segments/").unwrap().is_empty(),
+                "nothing sealed"
+            );
+            l.sync_search_to_backend().unwrap();
+            l.publish_active_to_backend().unwrap();
+        }
+        assert!(
+            backend
+                .list("segments/")
+                .unwrap()
+                .iter()
+                .any(|k| k.contains("seg-000000")),
+            "active segment must now be in the backend"
+        );
+
+        // Fresh reader root — only the backend has anything.
+        let reader_root = tempdir().unwrap();
+        std::fs::create_dir_all(reader_root.path().join("indexes")).unwrap();
+        let r =
+            FactLedger::open_read_only_with_backend(reader_root.path(), backend.clone()).unwrap();
+        assert_eq!(r.object_count().unwrap(), 2, "unsealed rows travelled");
+        assert_eq!(r.get_object(&a.id).unwrap().unwrap().name, "orders");
+
+        // A writer that does NOT publish_active leaves a fresh reader empty.
+        let bc = tempdir().unwrap();
+        let bw = tempdir().unwrap();
+        let bbe = std::sync::Arc::new(crate::MemBackend::new(bc.path()));
+        {
+            let l = FactLedger::open_with_backend(bw.path(), bbe.clone()).unwrap();
+            l.append_object(&KirObject::new("widgets", ObjectKind::Table))
+                .unwrap();
+            l.sync_search_to_backend().unwrap(); // search only, no publish_active
+        }
+        let br_root = tempdir().unwrap();
+        std::fs::create_dir_all(br_root.path().join("indexes")).unwrap();
+        let br = FactLedger::open_read_only_with_backend(br_root.path(), bbe).unwrap();
+        assert_eq!(
+            br.object_count().unwrap(),
+            0,
+            "unsealed + unpublished → invisible remotely"
+        );
     }
 
     /// RFC 0113 B4 — `sync_search_to_backend` publishes the `search/` index so a query worker on a

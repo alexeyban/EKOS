@@ -194,3 +194,35 @@ async fn coordinator_state_survives_restart_but_leases_do_not() {
     assert_eq!(fresh.token, 1);
     let _ = token;
 }
+
+/// Regression (found live 2026-09-01, `--ttl-seconds 8`): `CompileWorker`'s heartbeat interval is
+/// derived from the lease's real TTL, not the fixed 10s default — so a coordinator with a short
+/// TTL doesn't silently expire every worker's lease between beats mid-pipeline.
+#[tokio::test]
+async fn heartbeat_adapts_to_a_short_ttl_so_long_work_keeps_its_lease() {
+    // 1s TTL — far below the 10s default heartbeat.
+    let (addr, _srv) = spawn_ephemeral("127.0.0.1:0", Some(Duration::milliseconds(1000)))
+        .await
+        .unwrap();
+    let client = Arc::new(CoordinatorClient::connect(addr).await.unwrap());
+    client
+        .register_partition("s/2026-08", local("s"))
+        .await
+        .unwrap();
+
+    // DEFAULT heartbeat (no .with_heartbeat) — the production path.
+    let worker = CompileWorker::new(client.clone(), "slow-worker");
+    let res = worker
+        .run_shard("s/2026-08", |guard| async move {
+            // Work that outlasts several TTLs. Pre-fix the lease would be long expired here.
+            tokio::time::sleep(StdDuration::from_secs(4)).await;
+            guard.commit(9).await?; // fenced (LostLease) pre-fix; succeeds post-fix
+            Ok::<(), WorkerError>(())
+        })
+        .await;
+    assert!(
+        res.is_ok(),
+        "worker kept its lease through 4s of work under a 1s TTL: {res:?}"
+    );
+    assert_eq!(client.watermark("s/2026-08").await.unwrap(), 9);
+}

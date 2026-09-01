@@ -720,12 +720,16 @@ as the fact-engine default.
   `build → recover → resolve → compile → commit` pipeline under a coordinator lease, then
   registers the partitions it wrote and commits the new generation;
 - **self-describing object-storage partitions** — `[storage.partition] segment-backend-url =
-  "s3://…"` routes each partition's sealed segments, `manifest.json`, `dict.bin`, and search index
-  to S3/Azure; only the active segment and a small `HEAD` watermark stay local to the writer;
+  "s3://…"` routes each partition's segments (sealed **and** active), `manifest.json`, `dict.bin`,
+  `HEAD`, and search index to S3 / Azure / any S3-compatible store (MinIO included; provider
+  credentials come from the standard `AWS_*` / `AZURE_*` env vars). A query worker can then serve
+  the partition from its URL alone — including committed-but-unsealed rows, which under
+  fine-grained partitioning is most of the data;
 - **query workers** (`ekos query-worker serve`) that pull a partition into a local cache and serve
   reads for it, and a **`DistributedLedger` gateway** that implements the same `KnowledgeStore`
-  trait every command already uses — fanning reads across the workers and merging — so pointing a
-  workspace at a cluster is just `[storage.distributed]` in `ekos.toml`:
+  trait every command already uses — fanning reads across the workers, merging, and **failing over
+  to another worker** when one is unreachable — so pointing a workspace at a cluster is just
+  `[storage.distributed]` in `ekos.toml`:
 
   ```toml
   [storage.distributed]
@@ -735,13 +739,19 @@ as the fact-engine default.
 
 - **distributed search** — the gateway fans each shard's BM25 top-*k* to a worker and merge-sorts
   the results (shard-local term statistics, the standard query-then-fetch approximation);
-- **a pooled, concurrent, pruned gateway** — `DistributedLedger` reuses one connection per
-  coordinator/worker instead of reconnecting per call, fans a multi-partition read out
-  concurrently instead of one partition at a time, and prunes id-scoped reads (`get_object` and
-  friends) to the few partitions the coordinator's index says actually hold that id.
+- **a pooled, concurrent, pruned, fault-tolerant gateway** — `DistributedLedger` reuses one
+  connection per coordinator/worker instead of reconnecting per call, fans a multi-partition read
+  out concurrently, prunes id-scoped reads (`get_object` and friends) to the few partitions the
+  coordinator's index says actually hold that id, and rotates to the next worker on a connection
+  failure;
+- **adaptive leases** — `ekos compile-worker` derives its heartbeat from the lease's real TTL, so
+  `ekos coordinator serve --ttl-seconds 5` (fast failover) is safe; `ekos compile-worker run
+  --force` is the Service-A equivalent of `ekos resolve --force`.
 
-That completes Phase B at its v1 scope, with no tracked follow-ons remaining. None of this affects
-Local mode, which stays the default.
+That completes Phase B at its v1 scope. Known follow-ons: interrupt-of-in-flight-work on lease
+loss (a fenced worker currently runs its pipeline to the end, then its commit is rejected); a
+built-in acquire-retry loop in `ekos compile-worker`. None of this affects Local mode, which stays
+the default.
 
 ## Development Process
 

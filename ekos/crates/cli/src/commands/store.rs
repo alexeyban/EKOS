@@ -127,8 +127,9 @@ pub(crate) fn build_partitioned(
 #[cfg(feature = "distributed")]
 fn with_segment_backend_url(ledger: PartitionedLedger, url: String) -> Result<PartitionedLedger> {
     use std::sync::{Arc, Mutex};
-    // Validate the URL once, up front.
-    ekos_segment_backend::ObjectStoreBackend::from_url(&url, std::env::temp_dir())
+    // Validate the URL once, up front — parse only, so this never constructs (and then drops) a
+    // runtime-owning backend inside the `#[tokio::main]` async context `open_store` runs in.
+    ekos_segment_backend::ObjectStoreBackend::parse_url(&url)
         .map_err(|e| anyhow::anyhow!("[storage.partition] segment-backend-url {url:?}: {e}"))?;
 
     let cache: Arc<Mutex<std::collections::HashMap<String, Arc<dyn ekos_ledger::SegmentBackend>>>> =

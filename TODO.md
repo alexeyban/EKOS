@@ -2862,6 +2862,30 @@ These items have no single phase — they must be maintained and grown throughou
       the `||` against the placeholder entity-index check now removed; both the assertion and the
       underlying index are fixed. **RFC 0113 Phase B is now fully closed at v1 scope** — no
       tracked follow-ons remain.
+      **Hardening pass 2026-09-01 (devlog_144, branch `fix/distributed-storage-issues`)** — two
+      autonomous end-to-end runs (a Pentaho workspace on `file://`, then the 95-partition
+      Plausible/Elixir workspace on a real MinIO container with OpenAI enrichment) found and fixed
+      8 defects the unit tests never hit: (1) `ObjectStoreBackend` panicked when built/dropped
+      inside `#[tokio::main]` — now runs its `object_store` calls on a dedicated OS-thread runtime
+      (`DedicatedRt`), safe from any context; (1b) `parse_url` read no config so `s3://` never
+      authenticated to MinIO — now forwards `AWS_*`/`AZURE_*` env vars via `parse_url_opts`, and
+      the `object-store` feature bundles `object_store/aws`+`azure`; (2) a dead query worker failed
+      every gateway read — new `DistributedLedger::call_worker_failover` rotates to another worker;
+      (3) `ekos coordinator status` always showed watermark 0 — new `Request::Watermarks` + a
+      shard/generation section; (4) `ekos diff` printed opaque `entry #N` — now resolves touched
+      ids to names/kinds; (5) `[llm-description]` sent an OpenAI key to Anthropic — added the
+      `openai` branch to `select_llm_provider_for_description`; (6) an unsealed partition
+      (i.e. almost every partition under entity-kind partitioning) published only an empty
+      `manifest.json` — new `SegmentStore::publish_active` / `PartitionedLedger::publish_active_segments`,
+      called by `ekos compile-worker`, plus `open_with_backend` pulls the active segment when
+      local is absent; (7) `CompileWorker`'s heartbeat was a fixed 10s regardless of TTL — now
+      derived from `lease.expires_at`; (7b) `CoordinatorClient`/`QueryWorkerClient` `call` used
+      separate write/read mutexes so concurrent callers on one connection crossed frames — now
+      holds the write lock across the round-trip. Also `ekos compile-worker run --force`
+      (Service-A equivalent of `ekos resolve --force`). Open follow-ons noted: interrupt-in-flight
+      on lease loss; a built-in acquire-retry loop in `ekos compile-worker`; the
+      document-semantics analyzer's free-form relationship vocabulary (one partition per bare
+      preposition).
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

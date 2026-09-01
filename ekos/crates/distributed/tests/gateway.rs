@@ -209,3 +209,103 @@ async fn gateway_uses_the_entity_index_to_prune_when_present() {
 
     let _ = table_pid; // only needed to prove it exists; the gateway never sees it for `orders`
 }
+
+/// ISSUE-2 regression (2026-09-01): when one query worker is unreachable, the gateway must fail
+/// over to another — every worker can materialise and serve any partition, so a dead worker is
+/// not a dead partition. Before the fix, a single `kill -9`'d worker made every gateway query
+/// return `io error: Connection refused`.
+#[tokio::test(flavor = "multi_thread")]
+async fn gateway_fails_over_when_a_query_worker_is_down() {
+    let dir = tempdir().unwrap();
+    let c1 = tempdir().unwrap();
+    let c2 = tempdir().unwrap();
+    let (ledger, orders, _customers, _main_rs) = build_workspace(dir.path());
+    // Force each partition's tantivy index to commit so a read-only opener (the worker) sees it.
+    ledger.find_objects("orders").unwrap();
+
+    let (coord_addr, _c) = spawn_ephemeral("127.0.0.1:0", None).await.unwrap();
+    let coord = CoordinatorClient::connect(coord_addr).await.unwrap();
+    for key in ledger.catalog_partition_keys() {
+        let root = ledger.partition_root(&key).unwrap();
+        coord
+            .register_partition(
+                &partition_id(&key),
+                PartitionLocation::Local {
+                    root: root.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let want_all: usize = ledger.object_count().unwrap();
+
+    let (w1, h1) = spawn_ephemeral_worker("127.0.0.1:0", &coord_addr.to_string(), c1.path())
+        .await
+        .unwrap();
+    let (w2, _h2) = spawn_ephemeral_worker("127.0.0.1:0", &coord_addr.to_string(), c2.path())
+        .await
+        .unwrap();
+
+    // Kill worker 1 — abort the serve task, freeing its port so connects are refused.
+    h1.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let coord_s = coord_addr.to_string();
+    let workers = vec![w1.to_string(), w2.to_string()]; // dead worker still listed first
+    let orders_id = orders.id;
+
+    let handle = std::thread::spawn(move || {
+        let g = DistributedLedger::open(coord_s, workers).unwrap();
+        assert_eq!(
+            g.object_count().unwrap(),
+            want_all,
+            "fan-out count survives a dead worker"
+        );
+        assert!(
+            g.get_object(&orders_id).unwrap().is_some(),
+            "id-scoped read survives a dead worker"
+        );
+        assert_eq!(g.all_objects().unwrap().len(), want_all);
+        assert!(
+            !g.find_objects("orders").unwrap().is_empty(),
+            "distributed search survives a dead worker"
+        );
+    });
+    handle.join().unwrap();
+}
+
+/// With *every* worker down the gateway must surface a clean error, not hang.
+#[tokio::test(flavor = "multi_thread")]
+async fn gateway_errors_cleanly_when_all_workers_are_down() {
+    let dir = tempdir().unwrap();
+    let c1 = tempdir().unwrap();
+    let (ledger, orders, ..) = build_workspace(dir.path());
+    let (coord_addr, _c) = spawn_ephemeral("127.0.0.1:0", None).await.unwrap();
+    let coord = CoordinatorClient::connect(coord_addr).await.unwrap();
+    for key in ledger.catalog_partition_keys() {
+        let root = ledger.partition_root(&key).unwrap();
+        coord
+            .register_partition(
+                &partition_id(&key),
+                PartitionLocation::Local {
+                    root: root.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let (w1, h1) = spawn_ephemeral_worker("127.0.0.1:0", &coord_addr.to_string(), c1.path())
+        .await
+        .unwrap();
+    h1.abort();
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let coord_s = coord_addr.to_string();
+    let workers = vec![w1.to_string()];
+    let orders_id = orders.id;
+    let handle = std::thread::spawn(move || {
+        let g = DistributedLedger::open(coord_s, workers).unwrap();
+        assert!(g.get_object(&orders_id).is_err(), "no worker → clean error");
+        assert!(g.object_count().is_err());
+    });
+    handle.join().unwrap();
+}

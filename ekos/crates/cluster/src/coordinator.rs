@@ -170,6 +170,13 @@ impl Coordinator {
             Request::Watermark { partition } => Response::Watermark {
                 watermark: self.watermark(&partition),
             },
+            Request::Watermarks => Response::WatermarkMap {
+                watermarks: self
+                    .watermarks
+                    .iter()
+                    .map(|(k, v)| (k.clone(), *v))
+                    .collect(),
+            },
         }
     }
 

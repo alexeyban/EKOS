@@ -7,11 +7,21 @@ edition.workspace = true
 [features]
 default = []
 # Pulls the `object_store` crate + a tokio runtime for `ObjectStoreBackend` (RFC 0111 Distributed
-# mode). Off by default so a Local-mode build never compiles it.
-object-store = ["dep:object_store", "dep:tokio", "dep:futures", "dep:url", "object_store/fs"]
-# Cloud providers — each implies `object-store`.
-aws = ["object-store", "object_store/aws"]
-azure = ["object-store", "object_store/azure"]
+# mode). Off by default so a Local-mode build never compiles it. Includes the real cloud stores
+# (S3 / S3-compatible like MinIO, Azure ADLS Gen2) alongside `file://` — "object storage support"
+# means actual object storage, not just the local-FS scheme.
+object-store = [
+    "dep:object_store",
+    "dep:tokio",
+    "dep:futures",
+    "dep:url",
+    "object_store/fs",
+    "object_store/aws",
+    "object_store/azure",
+]
+# Back-compat aliases — the cloud providers now come with `object-store` itself.
+aws = ["object-store"]
+azure = ["object-store"]
 
 [dependencies]
 thiserror.workspace = true

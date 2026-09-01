@@ -233,6 +233,11 @@ enum CompileWorkerCommands {
         /// Recover connectors in parallel
         #[arg(long)]
         parallel: bool,
+        /// Print identity conflicts as diagnostics but don't fail the pipeline on them — the
+        /// Service A equivalent of `ekos resolve --force` (a co-located `ekos resolve` has this
+        /// flag; without it here, any conflict aborts every compile-worker run).
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -533,12 +538,14 @@ async fn main() -> Result<()> {
                 shard,
                 workspace,
                 parallel,
+                force,
             } => {
                 ekos::commands::cluster::compile_worker_run(
                     &coordinator,
                     &shard,
                     &workspace,
                     parallel,
+                    force,
                 )
                 .await
             }

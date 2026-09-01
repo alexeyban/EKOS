@@ -283,7 +283,7 @@ fn select_llm_provider_for_description(
     config: &EkosConfig,
     artifact_dir: &Path,
 ) -> Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
-    use ekos_recovery::{AnthropicProvider, CachedLlmProvider, OllamaProvider};
+    use ekos_recovery::{AnthropicProvider, CachedLlmProvider, OllamaProvider, OpenAiProvider};
 
     let cache_dir = artifact_dir
         .parent()
@@ -307,10 +307,24 @@ fn select_llm_provider_for_description(
         .api_key_env
         .as_deref()
         .unwrap_or("ANTHROPIC_API_KEY");
+
+    // Mirror `recover.rs::build_llm_provider` — `[llm] provider = "openai"` must route here too,
+    // not silently fall through to Anthropic (which then 401s on an OpenAI key).
+    if config.llm.provider.as_deref() == Some("openai") {
+        let provider = OpenAiProvider::from_env_var(key_env).map_err(|_| {
+            anyhow::anyhow!(
+                "{key_env} not set — [llm] provider = \"openai\" needs it for [llm-description]"
+            )
+        })?;
+        return Ok(std::sync::Arc::new(CachedLlmProvider::new(
+            provider, cache_dir,
+        )));
+    }
+
     let provider = AnthropicProvider::from_env_var(key_env).map_err(|_| {
         anyhow::anyhow!(
-            "{key_env} not set and no [llm] provider = \"ollama\" configured in ekos.toml — \
-             an LLM is required for [llm-description]"
+            "{key_env} not set and no [llm] provider = \"ollama\"/\"openai\" configured in \
+             ekos.toml — an LLM is required for [llm-description]"
         )
     })?;
     Ok(std::sync::Arc::new(CachedLlmProvider::new(

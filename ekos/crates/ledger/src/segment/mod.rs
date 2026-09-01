@@ -209,6 +209,26 @@ impl SegmentStore {
         };
         let active_seq = manifest.sealed.last().map(|s| s.seq + 1).unwrap_or(0);
 
+        // RFC 0113 B4 follow-on: if the active segment / `HEAD` aren't on local disk but the
+        // writer published them (`SegmentStore::publish_active`), pull them so a reader opening
+        // this partition from its URL alone sees committed-but-unsealed rows. Best-effort — a
+        // backend without them just leaves the active segment empty, exactly as before.
+        let active_name = format!("seg-{active_seq:06}.facts");
+        let active_local = root.join("segments").join(&active_name);
+        let active_absent_or_empty = std::fs::metadata(&active_local)
+            .map(|m| m.len())
+            .unwrap_or(0)
+            == 0;
+        if active_absent_or_empty
+            && let Ok(bytes) = backend.get(&format!("segments/{active_name}"))
+            && !bytes.is_empty()
+        {
+            std::fs::write(&active_local, &bytes)?;
+            if let Ok(head_bytes) = backend.get("HEAD") {
+                std::fs::write(root.join("HEAD"), &head_bytes)?;
+            }
+        }
+
         let head_path = root.join("HEAD");
         let stored_head: Option<Head> = std::fs::read(&head_path)
             .ok()
@@ -541,6 +561,32 @@ impl SegmentStore {
             }
             let bytes = std::fs::read(entry.path())?;
             self.backend.publish(&format!("{rel}/{name}"), &bytes)?;
+        }
+        Ok(())
+    }
+
+    /// Publish the **active (unsealed) segment** + `HEAD` to the backend (RFC 0113 B4 follow-on).
+    ///
+    /// Normally the active segment and `HEAD` stay writer-local — they are crash-recovery state a
+    /// reader of *sealed* history never needs. But a query worker that materialises an
+    /// object-storage partition from its URL alone (RFC 0113 B4) then has no way to see
+    /// committed-but-not-yet-sealed rows — and with fine-grained partitioning most partitions
+    /// never reach the 8 MiB seal threshold at all, so *everything* they hold is in the active
+    /// segment. A compile worker calls this once after each commit so an object-storage partition
+    /// is genuinely complete: `manifest.json` + `dict.bin` + sealed segments + `search/` (already
+    /// published) **plus** the active segment + its `HEAD` watermark. The reader opens the
+    /// materialised copy with [`crate::FactLedger::open_read_only`], which reads the active
+    /// segment up to `HEAD` exactly as the writer's own local open does.
+    ///
+    /// A no-op for a [`LocalFsBackend`] (publish writes back to the same file).
+    pub fn publish_active(&self) -> Result<(), SegmentError> {
+        let name = format!("seg-{:06}.facts", self.head.active_seq);
+        let seg_path = self.root.join("segments").join(&name);
+        if let Ok(bytes) = std::fs::read(&seg_path) {
+            self.backend.publish(&format!("segments/{name}"), &bytes)?;
+        }
+        if let Ok(bytes) = std::fs::read(self.root.join("HEAD")) {
+            self.backend.publish("HEAD", &bytes)?;
         }
         Ok(())
     }

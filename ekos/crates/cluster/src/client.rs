@@ -27,16 +27,18 @@ impl CoordinatorClient {
         })
     }
 
-    /// Send one request, read one response. Calls are serialised by the two `Mutex`es so
-    /// concurrent callers can't interleave frames on the shared connection.
+    /// Send one request, read one response. The write lock is held across the whole round-trip
+    /// (write **and** read), so two concurrent callers on this shared connection — e.g. a
+    /// `CompileWorker`'s heartbeat `lease_renew` racing its guard's `manifest_commit`, or the
+    /// gateway's concurrent fan-out — can never read each other's response frame. (Separate
+    /// write/read mutexes, as before, do *not* serialise a round-trip: caller B can grab the read
+    /// lock between caller A's write and read and consume A's line.)
     pub async fn call(&self, req: &Request) -> Result<Response, ClusterError> {
         let mut line = serde_json::to_vec(req)?;
         line.push(b'\n');
-        {
-            let mut w = self.write.lock().await;
-            w.write_all(&line).await?;
-            w.flush().await?;
-        }
+        let mut w = self.write.lock().await;
+        w.write_all(&line).await?;
+        w.flush().await?;
         let mut r = self.read.lock().await;
         let resp = r.next_line().await?.ok_or(ClusterError::Closed)?;
         Ok(serde_json::from_str(&resp)?)
@@ -186,6 +188,16 @@ impl CoordinatorClient {
             .ok()?
         {
             Response::Watermark { watermark } => Ok(watermark),
+            other => Err(ClusterError::Coordinator(format!("unexpected {other:?}"))),
+        }
+    }
+
+    /// Every committed watermark, keyed by the lease/shard name it was committed under.
+    pub async fn watermarks(
+        &self,
+    ) -> Result<std::collections::BTreeMap<PartitionId, u64>, ClusterError> {
+        match self.call(&Request::Watermarks).await?.ok()? {
+            Response::WatermarkMap { watermarks } => Ok(watermarks),
             other => Err(ClusterError::Coordinator(format!("unexpected {other:?}"))),
         }
     }

@@ -219,6 +219,40 @@ impl DistributedLedger {
         }
     }
 
+    /// Like [`Self::call_worker`], but on a **connection** failure (worker process down, peer
+    /// closed, connect refused) move on to the next worker in rotation and try there — every query
+    /// worker can materialise and serve any partition (RFC 0113 B4), so a dead worker is not a
+    /// dead partition. Only connection errors trigger failover; a real ledger/protocol error from
+    /// a reachable worker is returned as-is. Fails only when *no* worker could serve the call.
+    async fn call_worker_failover<T, F, Fut>(
+        &self,
+        start: usize,
+        f: F,
+    ) -> Result<T, DistributedError>
+    where
+        F: Fn(Arc<QueryWorkerClient>) -> Fut,
+        Fut: Future<Output = Result<T, DistributedError>>,
+    {
+        let n = self.worker_addrs.len();
+        let mut last: Option<DistributedError> = None;
+        for offset in 0..n {
+            let idx = (start + offset) % n;
+            match self.call_worker(idx, &f).await {
+                Err(e) if is_worker_conn_error(&e) => {
+                    self.worker_conns[idx].clear().await;
+                    if offset + 1 < n {
+                        tracing::warn!(worker = %self.worker_addrs[idx], %e, "query worker unreachable — failing over");
+                    }
+                    last = Some(e);
+                }
+                other => return other,
+            }
+        }
+        Err(last.unwrap_or_else(|| {
+            DistributedError::Other("no query workers reachable for this call".into())
+        }))
+    }
+
     // ── partition discovery / pruning ──────────────────────────────────────
 
     /// Catalogued partition ids of one class, newest bucket first.
@@ -275,7 +309,10 @@ impl DistributedLedger {
         let futs = pids.iter().map(|pid| {
             let idx = self.next_index();
             let pid = pid.clone();
-            async move { self.call_worker(idx, |w| call(w, pid.clone())).await }
+            async move {
+                self.call_worker_failover(idx, |w| call(w, pid.clone()))
+                    .await
+            }
         });
         try_join_all(futs).await
     }
@@ -299,7 +336,10 @@ impl DistributedLedger {
         let futs = pids.iter().map(|pid| {
             let idx = self.next_index();
             let pid = pid.clone();
-            async move { self.call_worker(idx, |w| call(w, pid.clone())).await }
+            async move {
+                self.call_worker_failover(idx, |w| call(w, pid.clone()))
+                    .await
+            }
         });
         for res in join_all(futs).await {
             if let Some(v) = res? {

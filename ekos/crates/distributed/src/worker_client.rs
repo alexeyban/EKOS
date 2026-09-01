@@ -37,14 +37,15 @@ impl QueryWorkerClient {
         })
     }
 
+    /// Hold the write lock across the whole round-trip (write **and** read). The gateway fans a
+    /// query to many partitions concurrently over one pooled connection per worker; separate
+    /// write/read mutexes would let those concurrent calls read each other's response frame.
     pub async fn call(&self, req: &WorkerRequest) -> Result<WorkerResponse, DistributedError> {
         let mut line = serde_json::to_vec(req)?;
         line.push(b'\n');
-        {
-            let mut w = self.write.lock().await;
-            w.write_all(&line).await?;
-            w.flush().await?;
-        }
+        let mut w = self.write.lock().await;
+        w.write_all(&line).await?;
+        w.flush().await?;
         let mut r = self.read.lock().await;
         let resp = r.next_line().await?.ok_or(DistributedError::Closed)?;
         serde_json::from_str::<WorkerResponse>(&resp)?.into_result()

@@ -66,17 +66,28 @@ pub async fn status(coordinator: &str) -> Result<()> {
         println!("no partitions registered");
         return Ok(());
     }
-    println!(
-        "{:<40}  {:>10}  {:>6}  location",
-        "partition", "watermark", "cold"
-    );
+    println!("{:<40}  {:>6}  location", "partition", "cold");
     for meta in &catalog {
-        let wm = client.watermark(&meta.id).await?;
         let loc = match &meta.location {
             PartitionLocation::Local { root } => format!("local:{root}"),
+            PartitionLocation::ObjectStore { url, prefix } if prefix.is_empty() => url.clone(),
             PartitionLocation::ObjectStore { url, prefix } => format!("{url}/{prefix}"),
         };
-        println!("{:<40}  {:>10}  {:>6}  {}", meta.id, wm, meta.cold, loc);
+        println!("{:<40}  {:>6}  {}", meta.id, meta.cold, loc);
+    }
+
+    // Committed watermarks (generation numbers) are keyed by the lease/shard name a compile
+    // worker committed under, not by partition id — show them as their own section so the numbers
+    // are actually visible (the old per-partition column always read 0).
+    let watermarks = client.watermarks().await?;
+    println!();
+    if watermarks.is_empty() {
+        println!("no committed generation watermarks yet");
+    } else {
+        println!("{:<40}  {:>12}", "shard", "generation");
+        for (shard, wm) in &watermarks {
+            println!("{shard:<40}  {wm:>12}");
+        }
     }
     Ok(())
 }
@@ -98,6 +109,7 @@ pub async fn compile_worker_run(
     shard: &str,
     workspace: &Path,
     parallel_recover: bool,
+    force_resolve: bool,
 ) -> Result<()> {
     let config_path = workspace.join("ekos.toml");
     let config = EkosConfig::from_file_or_default(&config_path);
@@ -145,7 +157,7 @@ pub async fn compile_worker_run(
                     .enable_all()
                     .build()
                     .map_err(|e| e.to_string())?
-                    .block_on(run_pipeline(&cfg2, &ws2, parallel_recover))
+                    .block_on(run_pipeline(&cfg2, &ws2, parallel_recover, force_resolve))
                     .map_err(|e| format!("{e:#}"))
             })
             .await
@@ -192,10 +204,15 @@ pub async fn compile_worker_run(
     Ok(())
 }
 
-async fn run_pipeline(config: &EkosConfig, cwd: &Path, parallel_recover: bool) -> Result<()> {
+async fn run_pipeline(
+    config: &EkosConfig,
+    cwd: &Path,
+    parallel_recover: bool,
+    force_resolve: bool,
+) -> Result<()> {
     crate::commands::build::run(config, cwd).await?;
     crate::commands::recover::run(config, cwd, parallel_recover).await?;
-    crate::commands::resolve::run(config, cwd, false)?;
+    crate::commands::resolve::run(config, cwd, force_resolve)?;
     crate::commands::compile::run(config, cwd).await?;
     crate::commands::commit::run(config, cwd, true).await?;
     Ok(())
@@ -219,6 +236,11 @@ type FinalizedPartitions = (Vec<(String, PartitionLocation)>, u64, Vec<(String, 
 fn finalize_partitions(config: &EkosConfig, cwd: &Path) -> Result<FinalizedPartitions> {
     let pl = store::build_partitioned(config, cwd, true)?;
     pl.publish_search_indexes()?;
+    // RFC 0113 B4 follow-on: also push the active (unsealed) segment + HEAD, so a query worker
+    // serving this partition from object storage alone sees committed-but-unsealed rows — which,
+    // with fine-grained partitioning where few partitions ever reach the 8 MiB seal threshold, is
+    // most of the data.
+    pl.publish_active_segments()?;
 
     let seg_url = config.storage.partition.segment_backend_url.clone();
     let mut partitions = Vec::new();

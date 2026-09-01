@@ -1479,6 +1479,26 @@ impl PartitionedLedger {
         Ok(n)
     }
 
+    /// Publish every catalogued partition's **active (unsealed) segment + `HEAD`** through its
+    /// [`SegmentBackend`] (RFC 0113 B4 follow-on) so a remote query worker sees committed-but-
+    /// unsealed rows — the bulk of the data when partitions are small enough that no 8 MiB
+    /// segment ever seals. A no-op per partition with no object-storage backend wired. Returns
+    /// the count. Run once after a compile, alongside [`Self::publish_search_indexes`].
+    pub fn publish_active_segments(&self) -> Result<usize, PartitionError> {
+        let mut n = 0;
+        for key in self.catalog_partition_keys() {
+            let ledger = self.partition(&key, false)?;
+            ledger
+                .publish_active_to_backend()
+                .map_err(|source| PartitionError::Ledger {
+                    key: key.clone(),
+                    source,
+                })?;
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// Every object/relationship id currently held by the catalogued partition `key` (RFC 0113
     /// v1.1 — lets Service A populate the coordinator's `entity_id → partitions` pruning index
     /// after a compile, so `DistributedLedger`'s id-scoped reads can fan to the few partitions

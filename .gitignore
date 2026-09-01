@@ -14,3 +14,6 @@
 /marketing/logs/
 /marketing/.env
 .env
+
+# Autonomous distributed-storage test runs (devlog_144) — local artifacts, not source
+/test-runs/

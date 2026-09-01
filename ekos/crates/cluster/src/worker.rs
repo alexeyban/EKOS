@@ -98,13 +98,24 @@ impl CompileWorker {
         let lease = self.client.lease_acquire(partition, &self.id).await?;
         let lost = Arc::new(AtomicBool::new(false));
 
+        // Derive the heartbeat interval from the lease's *actual* TTL (`expires_at - now`), not the
+        // fixed 10s default: a coordinator started with a short `--ttl-seconds` would otherwise
+        // expire the lease between beats and every compile-worker would silently lose its lease
+        // mid-pipeline (found live 2026-09-01 with `--ttl-seconds 8`). ~TTL/3, floored at 500ms,
+        // and never slower than the configured default.
+        let observed_ttl = (lease.expires_at - chrono::Utc::now())
+            .to_std()
+            .unwrap_or(self.heartbeat);
+        let hb_interval = (observed_ttl / 3)
+            .max(Duration::from_millis(500))
+            .min(self.heartbeat);
+
         // Heartbeat until the guard is dropped.
         let hb_client = self.client.clone();
         let hb_id = self.id.clone();
         let hb_partition = partition.to_string();
         let hb_token = lease.token;
         let hb_lost = lost.clone();
-        let hb_interval = self.heartbeat;
         let hb = tokio::spawn(async move {
             let mut tick = tokio::time::interval(hb_interval);
             tick.tick().await; // consume the immediate first tick

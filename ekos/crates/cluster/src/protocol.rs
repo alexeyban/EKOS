@@ -49,6 +49,11 @@ pub enum Request {
     PartitionsForEntity { entity: String },
     /// The committed watermark for a partition (`0` if none).
     Watermark { partition: PartitionId },
+    /// Every committed watermark the coordinator holds, keyed by the lease name it was committed
+    /// under (the shard, e.g. `"main"`, for entity-kind partitioning). Used by
+    /// `ekos coordinator status` to show real generation numbers instead of the per-partition-id
+    /// `Watermark` lookup, which is always `0` because commits are keyed by shard, not partition.
+    Watermarks,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +74,10 @@ pub enum Response {
     },
     Watermark {
         watermark: u64,
+    },
+    /// Every committed watermark, keyed by lease/shard name.
+    WatermarkMap {
+        watermarks: std::collections::BTreeMap<PartitionId, u64>,
     },
     /// A register/commit/other error the coordinator couldn't express as a `LeaseError`.
     Error {
