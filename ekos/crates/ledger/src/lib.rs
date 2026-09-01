@@ -1628,6 +1628,16 @@ pub trait KnowledgeStore {
             req.limit,
         ))
     }
+    /// Direct fact lookup (RFC 0122, the QUERY surface) — read one attribute of one compiled
+    /// object, no search, no LLM. `attr` is `"name"` / `"kind"` or a dotted path into
+    /// `properties` (`"foreign_keys.0.column"`). `None` means the object or the path is absent.
+    /// The default resolves against `get_object`; `FactLedger` may later override this with a
+    /// `FactIndexes` prefix scan.
+    fn fact(&self, entity: &KirId, attr: &str) -> Result<Option<serde_json::Value>, LedgerError> {
+        Ok(self
+            .get_object(entity)?
+            .and_then(|obj| retrieval::resolve_fact(&obj, attr)))
+    }
     fn entry_count(&self) -> Result<usize, LedgerError>;
     fn object_count(&self) -> Result<usize, LedgerError>;
     fn relationship_count(&self) -> Result<usize, LedgerError>;

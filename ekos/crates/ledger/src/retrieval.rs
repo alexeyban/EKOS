@@ -250,10 +250,38 @@ pub fn exact_name_matches(query: &str, candidates: &[ScoredCandidate]) -> Vec<Sc
         .collect()
 }
 
+/// Resolve a dotted attribute path against a compiled object — the fact-lookup primitive behind
+/// [`KnowledgeStore::fact`](crate::KnowledgeStore::fact) (RFC 0122, the QUERY surface).
+///
+/// - `"name"` → the object's name; `"kind"` → its kind's display string.
+/// - any other `attr` is a dotted path walked into `properties`: `"schema"` reads a top-level
+///   property, `"foreign_keys.0.column"` walks object → array index → object key.
+///
+/// Returns `None` for an absent path — the same "simply not present" contract a missing
+/// `ai_overview` has today, never an error.
+pub fn resolve_fact(obj: &ekos_kir::KirObject, attr: &str) -> Option<serde_json::Value> {
+    match attr.trim() {
+        "" => return None,
+        "name" => return Some(serde_json::Value::String(obj.name.clone())),
+        "kind" => return Some(serde_json::Value::String(obj.kind.to_string())),
+        _ => {}
+    }
+    let mut segments = attr.trim().split('.');
+    let mut cur = obj.properties.get(segments.next()?)?;
+    for seg in segments {
+        cur = match cur {
+            serde_json::Value::Object(map) => map.get(seg)?,
+            serde_json::Value::Array(arr) => arr.get(seg.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    Some(cur.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FactLedger;
+    use crate::{FactLedger, KnowledgeStore};
     use ekos_kir::{KirObject, ObjectKind};
     use tempfile::tempdir;
 
@@ -379,6 +407,47 @@ mod tests {
         let mut req = RetrievalRequest::lexical("order");
         req.limit = 2;
         assert_eq!(l.retrieve(&req).unwrap().hits.len(), 2);
+    }
+
+    // ── fact-path resolution (RFC 0122) ──────────────────────────────────
+    #[test]
+    fn resolve_fact_reads_header_properties_and_nested_paths() {
+        let mut obj = KirObject::new("orders", ObjectKind::Table);
+        obj.properties
+            .insert("schema".into(), serde_json::json!("public"));
+        obj.properties.insert(
+            "foreign_keys".into(),
+            serde_json::json!([{ "column": "customer_id", "references": "customers" }]),
+        );
+
+        assert_eq!(
+            resolve_fact(&obj, "name"),
+            Some(serde_json::json!("orders"))
+        );
+        assert_eq!(resolve_fact(&obj, "kind"), Some(serde_json::json!("Table")));
+        assert_eq!(
+            resolve_fact(&obj, "schema"),
+            Some(serde_json::json!("public"))
+        );
+        assert_eq!(
+            resolve_fact(&obj, "foreign_keys.0.column"),
+            Some(serde_json::json!("customer_id"))
+        );
+        assert_eq!(resolve_fact(&obj, "foreign_keys.9.column"), None);
+        assert_eq!(resolve_fact(&obj, "missing"), None);
+        assert_eq!(resolve_fact(&obj, ""), None);
+    }
+
+    #[test]
+    fn store_fact_default_impl_resolves_and_misses() {
+        let (l, _d) = ledger_with(&["customers"]);
+        let id = l.find_objects("customers").unwrap()[0].0;
+        assert_eq!(
+            l.fact(&id, "name").unwrap(),
+            Some(serde_json::json!("customers"))
+        );
+        assert_eq!(l.fact(&id, "nope").unwrap(), None);
+        assert_eq!(l.fact(&KirId::new(), "name").unwrap(), None);
     }
 
     #[test]

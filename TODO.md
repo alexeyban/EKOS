@@ -4258,6 +4258,21 @@ are excluded — see the full exclusion list in the planning history if needed.
       staleness/drift (`Custom("Drift")`, code↔doc signature diffing) is deliberately a separate
       future **RFC 0127**, referenced but not designed here. (Also noted: commit `e8e1ca3` claims an
       RFC 0117 for the dbt analyzer but no `0117-*.md` was ever filed — backfill needed.)
+      - [x] **0119 (Phase 0)** — `KnowledgeStore::retrieve(&RetrievalRequest) -> RankedResults`
+        seam, default wraps `find_objects` byte-identically; `Runtime::retrieve`; `AiRuntime` +
+        `ekos query find` + MCP + EKL routed through it.
+      - [x] **0120 (Phase 1)** — `rrf_fuse` (Cormack RRF, `k=60`) + `ExactName` signal in
+        `ledger`; `FactLedger`/`PartitionedLedger`/`DistributedLedger` scored-merge → RRF (also the
+        RFC 0113 B5 shard-local-IDF fix). `ekos query find "README"` now promotes the exact match
+        on the fact engine, not just SQLite.
+      - [x] **0121 (Phase 2)** — `runtime::retrieval::understand()`: mention extraction + fuzzy
+        entity resolution (`ResolvedEntity`, Jaro-Winkler ≥ 0.82) + rules-first intent classifier
+        (`QueryType` × `StructuralOp`), seeded from `extract_search_terms`.
+      - [x] **0122 (Phase 3)** — `KnowledgeStore::fact(entity, attr)` (dotted-path resolver,
+        default impl over `get_object`, all backends); `Runtime::fact`/`facts_of`; named graph ops
+        `Runtime::dependencies`/`dependents`/`callers`/`related` + `graph_op(StructuralOp, …)`
+        dispatch over `trace_impact`/`load_neighborhood`. Fact schema in analyzers +
+        `FactIndexes` fast-path deferred (advisory). No CLI/EKL/MCP surface yet (that's 0124).
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`

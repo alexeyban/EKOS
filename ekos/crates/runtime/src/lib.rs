@@ -263,6 +263,128 @@ impl<'a> Runtime<'a> {
         Ok(self.ledger.retrieve(req)?)
     }
 
+    // ── QUERY surface (RFC 0122) — direct fact + graph lookup, zero LLM ───────
+
+    /// Read one attribute of one compiled object — `"name"` / `"kind"` or a dotted path into
+    /// `properties` (`"foreign_keys.0.column"`). `None` if the object or the path is absent.
+    /// Thin wrapper over [`KnowledgeStore::fact`].
+    pub fn fact(
+        &self,
+        entity: &KirId,
+        attr: &str,
+    ) -> Result<Option<serde_json::Value>, RuntimeError> {
+        Ok(self.ledger.fact(entity, attr)?)
+    }
+
+    /// "Everything the compiler knows about this entity": `name`, `kind`, then every top-level
+    /// `properties` entry, key-sorted for a stable order. Empty vec if the object is unknown.
+    pub fn facts_of(
+        &self,
+        entity: &KirId,
+    ) -> Result<Vec<(String, serde_json::Value)>, RuntimeError> {
+        let Some(obj) = self.ledger.get_object(entity)? else {
+            return Ok(Vec::new());
+        };
+        let mut out = vec![
+            (
+                "name".to_string(),
+                serde_json::Value::String(obj.name.clone()),
+            ),
+            (
+                "kind".to_string(),
+                serde_json::Value::String(obj.kind.to_string()),
+            ),
+        ];
+        let mut props: Vec<_> = obj.properties.into_iter().collect();
+        props.sort_by(|a, b| a.0.cmp(&b.0));
+        out.extend(props);
+        Ok(out)
+    }
+
+    /// Edge kinds walked outward for [`dependencies`](Self::dependencies).
+    const DEPENDENCY_KINDS: [RelationshipKind; 5] = [
+        RelationshipKind::DependsOn,
+        RelationshipKind::Calls,
+        RelationshipKind::ForeignKey,
+        RelationshipKind::References,
+        RelationshipKind::Contains,
+    ];
+    /// Edge kinds walked inward for [`dependents`](Self::dependents).
+    const DEPENDENT_KINDS: [RelationshipKind; 4] = [
+        RelationshipKind::DependsOn,
+        RelationshipKind::Calls,
+        RelationshipKind::ForeignKey,
+        RelationshipKind::References,
+    ];
+
+    /// What `id` depends on — outward `DependsOn`/`Calls`/`ForeignKey`/`References`/`Contains`
+    /// edges, up to `hops`. Root excluded, first-reached-wins (the `trace_impact` contract).
+    pub fn dependencies(&self, id: &KirId, hops: u32) -> Result<Vec<KirObject>, RuntimeError> {
+        Ok(self
+            .trace_impact(
+                id,
+                ImpactDirection::Dependencies,
+                &Self::DEPENDENCY_KINDS,
+                hops,
+            )?
+            .into_iter()
+            .map(|h| h.object)
+            .collect())
+    }
+
+    /// What depends on `id` — inward `DependsOn`/`Calls`/`ForeignKey`/`References` edges, up to
+    /// `hops`.
+    pub fn dependents(&self, id: &KirId, hops: u32) -> Result<Vec<KirObject>, RuntimeError> {
+        Ok(self
+            .trace_impact(
+                id,
+                ImpactDirection::Dependents,
+                &Self::DEPENDENT_KINDS,
+                hops,
+            )?
+            .into_iter()
+            .map(|h| h.object)
+            .collect())
+    }
+
+    /// Who calls `id` — inward `Calls` edges only, up to `hops`.
+    pub fn callers(&self, id: &KirId, hops: u32) -> Result<Vec<KirObject>, RuntimeError> {
+        Ok(self
+            .trace_impact(
+                id,
+                ImpactDirection::Dependents,
+                &[RelationshipKind::Calls],
+                hops,
+            )?
+            .into_iter()
+            .map(|h| h.object)
+            .collect())
+    }
+
+    /// Everything connected to `id` within `depth` hops, any edge kind — the reached objects of
+    /// [`load_neighborhood`](Self::load_neighborhood), root excluded.
+    pub fn related(&self, id: &KirId, depth: u32) -> Result<Vec<KirObject>, RuntimeError> {
+        let graph = self.load_neighborhood(id, depth)?;
+        Ok(graph.objects.into_iter().filter(|o| &o.id != id).collect())
+    }
+
+    /// Dispatch a classified [`StructuralOp`](crate::retrieval::StructuralOp) (RFC 0121) to the
+    /// matching named graph op — the Query Planner's single entry point (RFC 0123).
+    pub fn graph_op(
+        &self,
+        op: crate::retrieval::StructuralOp,
+        id: &KirId,
+        hops: u32,
+    ) -> Result<Vec<KirObject>, RuntimeError> {
+        use crate::retrieval::StructuralOp;
+        match op {
+            StructuralOp::Dependents | StructuralOp::Impact => self.dependents(id, hops),
+            StructuralOp::Dependencies => self.dependencies(id, hops),
+            StructuralOp::Callers => self.callers(id, hops),
+            StructuralOp::Neighborhood => self.related(id, hops),
+        }
+    }
+
     /// Every object currently in the ledger (RFC 0010 — EKL entity enumeration).
     pub fn list_objects(&self) -> Result<Vec<KirObject>, RuntimeError> {
         Ok(self.ledger.all_objects()?)
@@ -504,6 +626,82 @@ mod tests {
             let seam = rt.retrieve(&RetrievalRequest::lexical(q)).unwrap().ids();
             assert_eq!(seam, legacy, "query {q:?}");
         }
+    }
+
+    // ── QUERY surface (RFC 0122) ──────────────────────────────────────────────
+
+    fn calls(from: KirId, to: KirId) -> KirRelationship {
+        KirRelationship::new(RelationshipKind::Calls, from, to)
+    }
+    fn depends_on(from: KirId, to: KirId) -> KirRelationship {
+        KirRelationship::new(RelationshipKind::DependsOn, from, to)
+    }
+
+    #[test]
+    fn fact_lookup_reads_header_and_properties() {
+        let (ledger, _dir) = temp_ledger();
+        let mut t = obj("orders");
+        t.properties
+            .insert("schema".into(), serde_json::json!("public"));
+        ledger.append_object(&t).unwrap();
+        let rt = Runtime::new(&ledger);
+
+        assert_eq!(
+            rt.fact(&t.id, "name").unwrap(),
+            Some(serde_json::json!("orders"))
+        );
+        assert_eq!(
+            rt.fact(&t.id, "kind").unwrap(),
+            Some(serde_json::json!("Table"))
+        );
+        assert_eq!(
+            rt.fact(&t.id, "schema").unwrap(),
+            Some(serde_json::json!("public"))
+        );
+        assert_eq!(rt.fact(&t.id, "absent").unwrap(), None);
+        assert_eq!(rt.fact(&KirId::new(), "name").unwrap(), None);
+
+        let facts = rt.facts_of(&t.id).unwrap();
+        assert_eq!(facts[0].0, "name");
+        assert_eq!(facts[1].0, "kind");
+        assert!(
+            facts
+                .iter()
+                .any(|(k, v)| k == "schema" && v == &serde_json::json!("public"))
+        );
+        assert!(rt.facts_of(&KirId::new()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn named_graph_ops_respect_direction_edge_kind_and_hops() {
+        let (ledger, _dir) = temp_ledger();
+        let (a, b, c) = (obj("a"), obj("b"), obj("c"));
+        for o in [&a, &b, &c] {
+            ledger.append_object(o).unwrap();
+        }
+        ledger.append_relationship(&calls(a.id, b.id)).unwrap(); // a calls b
+        ledger.append_relationship(&depends_on(b.id, c.id)).unwrap(); // b depends on c
+        let rt = Runtime::new(&ledger);
+
+        let names = |v: Vec<KirObject>| {
+            let mut n: Vec<String> = v.into_iter().map(|o| o.name).collect();
+            n.sort();
+            n
+        };
+
+        assert_eq!(names(rt.dependencies(&a.id, 5).unwrap()), vec!["b", "c"]);
+        assert_eq!(names(rt.dependencies(&a.id, 1).unwrap()), vec!["b"]); // hop bound
+        assert_eq!(names(rt.dependents(&c.id, 5).unwrap()), vec!["a", "b"]);
+        assert_eq!(names(rt.callers(&b.id, 5).unwrap()), vec!["a"]);
+        assert!(rt.callers(&c.id, 5).unwrap().is_empty()); // reached only via DependsOn
+        assert_eq!(names(rt.related(&b.id, 1).unwrap()), vec!["a", "c"]);
+
+        // graph_op dispatches to the same method
+        let via_op = names(
+            rt.graph_op(crate::retrieval::StructuralOp::Dependents, &c.id, 5)
+                .unwrap(),
+        );
+        assert_eq!(via_op, names(rt.dependents(&c.id, 5).unwrap()));
     }
 
     #[test]
