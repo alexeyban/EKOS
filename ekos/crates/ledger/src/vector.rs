@@ -113,12 +113,16 @@ impl VectorIndex {
             )));
         }
         let ids: Vec<KirId> = id_bytes
-            .chunks_exact(16)
-            .map(|c| KirId(uuid::Uuid::from_bytes(c.try_into().unwrap())))
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|c| KirId(uuid::Uuid::from_bytes(*c)))
             .collect();
         let vectors: Vec<f32> = vec_bytes
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
             .collect();
         let mut tombstones = tomb;
         tombstones.resize(count, 0);
