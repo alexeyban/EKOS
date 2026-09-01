@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS Full-Stack Test Run — RFC 0111/0113/0118–0126/0013/0115</title>
+<meta name="description" content="Results of the second autonomous full-stack test pass over EKOS's distributed storage, compiled-knowledge query engine and MCP protocol — all 22 acts pass; the F3/F5/F6 partitioned-store bugs confirmed fixed.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  html,body{margin:0}
+  [hidden]{display:none!important}
+  img{max-width:100%}
+  :root {
+    /* light — cool off-white with a faint patina bias */
+    --ground:      #f5f7f5;
+    --surface:     #ffffff;
+    --surface-2:   #eef1ee;
+    --ink:         #1a1f1d;
+    --ink-2:       #4d5652;
+    --ink-3:       #79837e;
+    --rule:        #dde2dd;
+    --rule-strong: #c4ccc6;
+    --accent:      #2f7d6b;   /* patina teal — oxidized copper of an aging ledger */
+    --accent-dim:  #dfeae6;
+    --pass:        #2c7a5c;
+    --pass-bg:     #dcefe5;
+    --fail:        #b23c31;
+    --fail-bg:     #f6e0dd;
+    --fixed:       #3f6bab;
+    --fixed-bg:    #e0e8f4;
+    --open:        #9a6b1f;
+    --open-bg:     #f4e9d5;
+    --na:          #6a736f;
+    --na-bg:       #e7eae7;
+    --shadow:      0 1px 2px rgba(20,30,25,.06), 0 8px 24px -12px rgba(20,30,25,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0f1311;
+      --surface:     #161b19;
+      --surface-2:   #1d2321;
+      --ink:         #e7ece9;
+      --ink-2:       #a7b0ac;
+      --ink-3:       #737d78;
+      --rule:        #2a312e;
+      --rule-strong: #3a423e;
+      --accent:      #5cb3a0;
+      --accent-dim:  #16302b;
+      --pass:        #57b98f;
+      --pass-bg:     #14332a;
+      --fail:        #e0776b;
+      --fail-bg:     #3a1e1b;
+      --fixed:       #7ba3d8;
+      --fixed-bg:    #1a2740;
+      --open:        #d3a860;
+      --open-bg:     #352a17;
+      --na:          #8b938f;
+      --na-bg:       #232825;
+      --shadow:      0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0f1311;
+    --surface:     #161b19;
+    --surface-2:   #1d2321;
+    --ink:         #e7ece9;
+    --ink-2:       #a7b0ac;
+    --ink-3:       #737d78;
+    --rule:        #2a312e;
+    --rule-strong: #3a423e;
+    --accent:      #5cb3a0;
+    --accent-dim:  #16302b;
+    --pass:        #57b98f;
+    --pass-bg:     #14332a;
+    --fail:        #e0776b;
+    --fail-bg:     #3a1e1b;
+    --fixed:       #7ba3d8;
+    --fixed-bg:    #1a2740;
+    --open:        #d3a860;
+    --open-bg:     #352a17;
+    --na:          #8b938f;
+    --na-bg:       #232825;
+    --shadow:      0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.55);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 72rem; margin: 0 auto; padding: clamp(1.25rem, 4vw, 3.5rem) clamp(1rem, 4vw, 2.5rem) 6rem; }
+
+  mono, code, .mono { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  code {
+    font-size: .86em;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .08em .38em;
+    word-break: break-word;
+  }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  h1, h2, h3 { font-weight: 600; text-wrap: balance; line-height: 1.25; margin: 0; }
+  h1 { font-size: clamp(1.7rem, 4.2vw, 2.5rem); font-weight: 700; letter-spacing: -.015em; }
+  h2 { font-size: 1.4rem; letter-spacing: -.01em; }
+  h3 { font-size: 1.02rem; }
+  p { margin: 0; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .7rem;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* ---- masthead ---- */
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.6rem; margin-bottom: 2.4rem; }
+  .masthead h1 { margin: .5rem 0 .9rem; }
+  .runbar {
+    display: flex; flex-wrap: wrap; gap: .5rem 1.6rem;
+    font-family: "IBM Plex Mono", monospace; font-size: .8rem; color: var(--ink-2);
+  }
+  .runbar b { color: var(--ink); font-weight: 500; }
+  .verdict-line {
+    margin-top: 1.3rem; padding: .8rem 1rem;
+    background: var(--pass-bg); border: 1px solid var(--pass);
+    border-radius: 8px; color: var(--pass);
+    font-weight: 600; font-size: .95rem;
+    display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+  }
+  .verdict-line .k { font-family: "IBM Plex Mono", monospace; letter-spacing: .1em; text-transform: uppercase; font-size: .72rem; }
+
+  /* ---- section scaffolding ---- */
+  section { margin-top: 3.2rem; }
+  .sec-head { display: flex; align-items: baseline; gap: .9rem; margin-bottom: 1.3rem; padding-bottom: .6rem; border-bottom: 1px solid var(--rule-strong); }
+  .sec-head .idx { font-family: "IBM Plex Mono", monospace; font-size: .95rem; color: var(--accent); font-weight: 600; }
+  .lede { max-width: 40rem; color: var(--ink-2); font-size: 1rem; }
+
+  /* ---- pills ---- */
+  .pill {
+    display: inline-flex; align-items: center; gap: .34em;
+    font-family: "IBM Plex Mono", monospace; font-size: .68rem; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: .22em .55em; border-radius: 999px; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .pill::before { content: ""; width: .5em; height: .5em; border-radius: 999px; background: currentColor; }
+  .pill.pass  { color: var(--pass);  background: var(--pass-bg);  border-color: color-mix(in srgb, var(--pass) 35%, transparent); }
+  .pill.fixed { color: var(--fixed); background: var(--fixed-bg); border-color: color-mix(in srgb, var(--fixed) 35%, transparent); }
+  .pill.open  { color: var(--open);  background: var(--open-bg);  border-color: color-mix(in srgb, var(--open) 35%, transparent); }
+  .pill.fail  { color: var(--fail);  background: var(--fail-bg);  border-color: color-mix(in srgb, var(--fail) 35%, transparent); }
+  .pill.na    { color: var(--na);    background: var(--na-bg);    border-color: color-mix(in srgb, var(--na) 35%, transparent); }
+  .pill.partial { color: var(--open); background: var(--open-bg); border-color: color-mix(in srgb, var(--open) 35%, transparent); }
+
+  /* ---- verdict matrix ---- */
+  .matrix { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr)); gap: .7rem; }
+  .m-col { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+  .m-col > header { padding: .7rem .9rem; border-bottom: 1px solid var(--rule); background: var(--surface-2); }
+  .m-col > header .t { font-weight: 600; font-size: .92rem; }
+  .m-col > header .s { font-family: "IBM Plex Mono", monospace; font-size: .68rem; color: var(--ink-3); letter-spacing: .04em; }
+  .m-row { display: flex; align-items: center; gap: .6rem; padding: .5rem .9rem; border-top: 1px solid var(--rule); font-size: .84rem; }
+  .m-row:first-of-type { border-top: 0; }
+  .m-row .lbl { flex: 1; color: var(--ink-2); }
+  .m-row .lbl b { color: var(--ink); font-weight: 500; }
+
+  /* ---- data tables ---- */
+  .tbl-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 10px; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; background: var(--surface); }
+  th, td { text-align: left; padding: .6rem .8rem; border-top: 1px solid var(--rule); vertical-align: top; }
+  thead th { border-top: 0; background: var(--surface-2); font-family: "IBM Plex Mono", monospace; font-size: .68rem; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; position: sticky; top: 0; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent-dim) 55%, transparent); }
+  td.mono, td .mono { font-family: "IBM Plex Mono", monospace; font-size: .82rem; }
+  td .path { color: var(--ink-3); font-size: .78rem; }
+
+  /* ---- fix cards ---- */
+  .fixes { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); }
+  .fix {
+    background: var(--surface); border: 1px solid var(--rule); border-left: 3px solid var(--fixed);
+    border-radius: 8px; padding: 1rem 1.1rem; box-shadow: var(--shadow);
+  }
+  .fix h3 { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; font-size: .95rem; }
+  .fix h3 .code { font-family: "IBM Plex Mono", monospace; color: var(--fixed); font-weight: 600; }
+  .fix p { font-size: .86rem; color: var(--ink-2); }
+  .fix .was { display: block; margin-top: .55rem; font-family: "IBM Plex Mono", monospace; font-size: .76rem; color: var(--ink-3); }
+  .fix .now { color: var(--pass); }
+
+  /* ---- detail blocks ---- */
+  .act { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 1.1rem 1.2rem; margin-top: .8rem; box-shadow: var(--shadow); }
+  .act > header { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin-bottom: .55rem; }
+  .act > header .name { font-weight: 600; font-size: .98rem; }
+  .act > header .rfc { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--ink-3); }
+  .act p { font-size: .88rem; color: var(--ink-2); }
+  .act ul { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .86rem; color: var(--ink-2); }
+  .act li { margin: .25rem 0; }
+  .act li b, .act p b { color: var(--ink); font-weight: 600; }
+
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1.1rem; margin-top: .6rem; font-size: .84rem; }
+  .kv dt { font-family: "IBM Plex Mono", monospace; font-size: .74rem; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; padding-top: .1rem; }
+  .kv dd { margin: 0; color: var(--ink-2); }
+  .kv dd b { color: var(--ink); }
+
+  .metric-row { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .7rem; }
+  .metric { background: var(--surface-2); border: 1px solid var(--rule); border-radius: 7px; padding: .5rem .7rem; min-width: 6.5rem; }
+  .metric .v { font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: .98rem; color: var(--ink); }
+  .metric .l { font-size: .7rem; color: var(--ink-3); letter-spacing: .03em; text-transform: uppercase; margin-top: .1rem; }
+
+  .callout { margin-top: 1rem; padding: .85rem 1rem; border-radius: 8px; font-size: .87rem; border: 1px solid; }
+  .callout.crit { background: var(--pass-bg); border-color: var(--pass); color: color-mix(in srgb, var(--pass) 80%, var(--ink)); }
+  .callout.note { background: var(--open-bg); border-color: color-mix(in srgb, var(--open) 45%, transparent); color: color-mix(in srgb, var(--open) 70%, var(--ink)); }
+  .callout b { font-weight: 700; }
+
+  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule-strong); font-size: .8rem; color: var(--ink-3); }
+  footer .mono { font-size: .78rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    tbody tr { transition: background .12s ease; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Autonomous verification &nbsp;·&nbsp; re-run</div>
+    <h1>EKOS Full-Stack Test Run</h1>
+    <div class="runbar">
+      <span>run <b>20260901T172928Z</b></span>
+      <span>commit <b>a948bed</b></span>
+      <span><b>2026-09-01</b></span>
+      <span>mode <b>partitioned + distributed + Ollama</b></span>
+      <span>plan <b>EKOS_FULL_TEST_PLAN_v2</b></span>
+    </div>
+    <div class="verdict-line">
+      <span class="k">Result</span>
+      <span>All 22 acts PASS &nbsp;·&nbsp; F3 / F5 / F6 confirmed fixed &nbsp;·&nbsp; no BLOCKER &nbsp;·&nbsp; 3 findings still open</span>
+    </div>
+  </header>
+
+  <p class="lede">
+    Second full pass over the distributed storage stack (RFC&nbsp;0111 / 0113), the
+    compiled-knowledge query engine (RFC&nbsp;0118 / 0119–0126) and the MCP protocol
+    (RFC&nbsp;0013 / 0115), run against a live <code>[storage.partition]</code> workspace plus a
+    two-worker distributed cluster and a local Ollama. Its purpose was to confirm the three
+    partitioned-store bugs the first run surfaced (F3, F5, F6) are closed, and that nothing
+    regressed. Every command was logged in full; results below come from the logs, not from
+    memory of what was expected.
+  </p>
+
+  <!-- ============ VERDICT MATRIX ============ -->
+  <section>
+    <div class="sec-head"><span class="idx">§1</span><h2>Verdict matrix</h2></div>
+    <div class="matrix">
+
+      <div class="m-col">
+        <header><div class="t">Part A — Distributed storage</div><div class="s">RFC 0111 / 0113</div></header>
+        <div class="m-row"><span class="lbl"><b>0</b> · env &amp; build</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>1</b> · local baseline</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>2</b> · backend seam</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>3</b> · coordinator + fencing</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>4</b> · read path + failover</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>5</b> · distributed search</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>6</b> · benchmarks</span><span class="pill pass">pass</span></div>
+      </div>
+
+      <div class="m-col">
+        <header><div class="t">Part B — Query engine</div><div class="s">RFC 0118 / 0119–0126</div></header>
+        <div class="m-row"><span class="lbl"><b>B1</b> · retrieval seam</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>B2</b> · RRF + ExactName</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>B3</b> · query understanding</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>B4</b> · QUERY surface</span><span class="pill partial">note</span></div>
+        <div class="m-row"><span class="lbl"><b>B5</b> · REASON + citations</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>B6</b> · surface</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>B7</b> · vector arm</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>B8</b> · eval harness</span><span class="pill pass">pass</span></div>
+      </div>
+
+      <div class="m-col">
+        <header><div class="t">Part C — MCP protocol</div><div class="s">RFC 0013 / 0115</div></header>
+        <div class="m-row"><span class="lbl"><b>C1</b> · handshake + tools/list</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>C2</b> · tool round-trip + writes</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>C3</b> · TCP transport</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>C4</b> · usage log + cache</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>C5</b> · MCP over the gateway</span><span class="pill pass">pass</span></div>
+        <div class="m-row"><span class="lbl"><b>C6</b> · multi-turn session</span><span class="pill pass">pass</span></div>
+      </div>
+
+    </div>
+    <div class="callout crit" style="margin-top:1.4rem">
+      <b>Safety-critical check (C5).</b> A write-capable operation issued against the read-only
+      distributed gateway fails with an explicit error —
+      <code>cannot write: ledger opened read-only at distributed gateway is read-only —
+      append_evidence must go through <b>ekos compile-worker</b> (Service A)</code>, exit 1.
+      No silent no-op, no crash, no state corruption.
+    </div>
+  </section>
+
+  <!-- ============ FIXES ============ -->
+  <section>
+    <div class="sec-head"><span class="idx">§2</span><h2>The three fixes, re-verified</h2></div>
+    <p class="lede">Committed in <code>78ffaae</code> after the first run; this pass exercised each in a real end-to-end context.</p>
+    <div class="fixes">
+
+      <div class="fix">
+        <h3><span class="pill fixed">fixed</span><span class="code">F3</span> cross-partition exact-name</h3>
+        <p>
+          <code>PartitionedLedger::retrieve</code> re-labelled every partition's ranked list as
+          <code>Bm25</code>, so a within-partition exact-name promotion only tied at rank&nbsp;0
+          with a strong lexical hit elsewhere and lost the <code>KirId</code> tiebreak. A
+          cross-partition <code>ExactName</code> arm over the candidate union was added — matching
+          what <code>DistributedLedger::search_ranked</code> already did.
+        </p>
+        <span class="was">was &nbsp;<code>query find "customers"</code> → schemas/ecommerce.sql #1</span>
+        <span class="was now">now &nbsp;→ <b>customers</b> (the table) #1, ecommerce.sql #2</span>
+      </div>
+
+      <div class="fix">
+        <h3><span class="pill fixed">fixed</span><span class="code">F5</span> mcp <code>--workspace</code> config</h3>
+        <p>
+          <code>ekos mcp serve --workspace &lt;dir&gt;</code> never loaded
+          <code>&lt;dir&gt;/ekos.toml</code>, so a server against a partitioned workspace failed
+          every call. A new <code>resolve_config_path</code> helper threads the
+          <code>--workspace</code> flag (and <code>EKOS_WORKSPACE</code>) into config resolution.
+        </p>
+        <span class="was">was &nbsp;every tool call → "time-bucket weekly vs monthly"</span>
+        <span class="was now">now &nbsp;used flag-only for all of Part&nbsp;B and C — zero failures</span>
+      </div>
+
+      <div class="fix">
+        <h3><span class="pill fixed">fixed</span><span class="code">F6</span> <code>ekos status</code> on partitions</h3>
+        <p>
+          <code>ledger::status</code> branched on <code>uses_fact_engine</code> (a
+          <code>facts/manifest.json</code> check) and fell through to the SQLite path for any
+          partitioned store. A partitioned / distributed branch now runs first via
+          <code>open_store</code>.
+        </p>
+        <span class="was">was &nbsp;"Ledger not initialised. Run <code>ekos commit</code> first."</span>
+        <span class="was now">now &nbsp;<b>(partitioned, RFC 0111)</b> · 1&nbsp;299 entries · 30 objects</span>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ PART A ============ -->
+  <section>
+    <div class="sec-head"><span class="idx">§3</span><h2>Part&nbsp;A — Distributed storage &amp; query</h2></div>
+
+    <div class="act">
+      <header><span class="name">0 · Environment &amp; build</span><span class="rfc">cargo</span><span class="pill pass">pass</span></header>
+      <p><code>cargo build --workspace</code> (stock) and <code>-p ekos --features distributed</code> both exit 0.
+         <code>object_store</code> absent from the stock tree, <code>v0.14.1</code> present with the feature — confirmed by <code>cargo tree</code>, not assumed.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">1 · Local baseline</span><span class="rfc">RFC 0111 Phase A</span><span class="pill pass">pass</span></header>
+      <p>Workspace: <code>northwind.sql</code> + <code>ecommerce.sql</code> + <code>sample_project/</code> + <code>sample_docs/</code>, <code>dimension = "entity-kind"</code>, <code>time-bucket = "weekly"</code>.</p>
+      <div class="metric-row">
+        <div class="metric"><div class="v tnum">11</div><div class="l">partitions</div></div>
+        <div class="metric"><div class="v tnum">27</div><div class="l">objects</div></div>
+        <div class="metric"><div class="v tnum">1 032</div><div class="l">relationships</div></div>
+        <div class="metric"><div class="v tnum">226</div><div class="l">evidence</div></div>
+        <div class="metric"><div class="v tnum">3.3 s</div><div class="l">build</div></div>
+        <div class="metric"><div class="v tnum">14.8 s</div><div class="l">commit</div></div>
+      </div>
+      <p style="margin-top:.7rem">Local queries: <code>query object</code> 0.07&nbsp;s · <code>diff</code> 0.60&nbsp;s · <code>query find</code> 0.10&nbsp;s.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">2 · Backend seam</span><span class="rfc">SegmentBackend</span><span class="pill pass">pass</span></header>
+      <p>Same workspace committed a second time with <code>segment-backend-url = "file://…"</code> and the distributed binary.
+         <b>Identical</b> object / relationship / evidence counts (27 / 1&nbsp;032 / 226); 11 partition manifests published to the file backend; 165 ledger unit tests pass. Behaviour did not change when the backend was swapped.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">3 · Coordinator + Service&nbsp;A fencing</span><span class="rfc">RFC 0113 B3</span><span class="pill pass">pass</span></header>
+      <dl class="kv">
+        <dt>worker B</dt><dd>rejected — <code>coordinator returned an error: partition main is already leased</code>, exit 1</dd>
+        <dt>worker C</dt><dd>after the 10&nbsp;s TTL, acquired <b>lease token 2</b>, ran the full pipeline, <code>Commit complete</code>, <code>released shard 'main'</code>, exit 0</dd>
+        <dt>recovery gap</dt><dd>~12.0&nbsp;s (TTL + agent scheduling latency; not a pure coordinator-reclaim number)</dd>
+        <dt>coordinator</dt><dd>11 partitions registered, each with a <code>file://</code> location; shard <code>main</code> generation 1&nbsp;315</dd>
+      </dl>
+    </div>
+
+    <div class="act">
+      <header><span class="name">4 · Read path — workers + gateway</span><span class="rfc">RFC 0113 B4</span><span class="pill pass">pass</span></header>
+      <p>Two query workers + a <code>[storage.distributed]</code> gateway. Reads via the gateway match local:
+         <code>query object</code> 0.08&nbsp;s, <code>query find</code> 0.06&nbsp;s.</p>
+      <p style="margin-top:.6rem"><b>Failover:</b> <code>kill -9</code> query-worker&nbsp;1 → gateway logs
+         <code>WARN query worker unreachable — failing over</code> → the query completes via worker&nbsp;2, exit 0, same result. Clean, no error surfaced to the client.</p>
+      <p style="margin-top:.6rem"><b>F6 over the gateway:</b> <code>ekos status</code> →
+         <code>Ledger: distributed cluster @ 127.0.0.1:7801 (distributed cluster, RFC 0113)</code>, 1&nbsp;315 entries.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">5 · Distributed search</span><span class="rfc">RFC 0113 B5</span><span class="pill pass">pass</span></header>
+      <p>For the shared term <code>customer</code>, the local partitioned <code>FactLedger</code> and the distributed
+         gateway's cross-shard RRF merge return a <b>byte-identical top-7</b>. No shard-local-IDF divergence at this corpus size.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">6 · Benchmarks</span><span class="rfc">Criterion</span><span class="pill pass">pass</span></header>
+      <p>All 22 Criterion bench functions run, exit 0. Coverage audit (grep): <b>no</b> bench references
+         <code>PartitionedLedger</code>, <code>DistributedLedger</code>, <code>SegmentBackend</code> or the coordinator — the
+         distributed path still has zero micro-benchmark coverage, verified rather than assumed.</p>
+    </div>
+  </section>
+
+  <!-- ============ PART B ============ -->
+  <section>
+    <div class="sec-head"><span class="idx">§4</span><h2>Part&nbsp;B — Compiled-knowledge query engine</h2></div>
+
+    <div class="act">
+      <header><span class="name">B1 · Retrieval seam</span><span class="rfc">RFC 0119</span><span class="pill pass">pass</span></header>
+      <p>9/9 ledger + 7/7 runtime retrieval unit tests. Default <code>arms_run = {bm25: true, vector: false}</code> — the Phase-0 contract.
+         The MCP server was reached with <code>--workspace</code> only (no <code>--config</code>) for this and every subsequent Part&nbsp;B/C step — <b>F5 in daily use</b>.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">B2 · RRF fusion + ExactName</span><span class="rfc">RFC 0120</span><span class="pill pass">pass</span></header>
+      <p><b>F3 confirmed:</b> <code>query find "customers"</code> on the partitioned store now ranks the
+         <code>customers</code> table #1 and <code>schemas/ecommerce.sql</code> #2. The <code>--explain</code>
+         plan shows the query routed to a <code>Fact</code> lookup at routing confidence 1.00.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">B3 · Query understanding</span><span class="rfc">RFC 0121</span><span class="pill pass">pass</span></header>
+      <p><code>ekos_retrieve "what does the customers table connect to"</code> → <code>query_type: Structural</code>,
+         <code>resolved_entities: [(customers, 1.0)]</code>. (Last run's F7 miss does not recur — the merged table is
+         named exactly <code>customers</code>, so the mention resolves cleanly.)</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">B4 · QUERY surface</span><span class="rfc">RFC 0122</span><span class="pill partial">note</span></header>
+      <p><code>ekos_query "what depends on the customers table"</code> returns the real dependents —
+         <code>orders</code>, <code>CustomerCustomerDemo</code>, <code>payments</code>, <code>"Order Details"</code>,
+         <code>order_items</code> — each source-traceable; <code>ekos_dependents</code> on the id agrees on the subset it scopes to.</p>
+      <div class="callout note">
+        <b>New observation.</b> The same <code>ekos_query</code> response also carried three
+        <em>fact</em> claims about <code>customers</code> itself (<code>name</code>, <code>kind</code>,
+        <code>columns</code>) from the <code>Compose</code> plan — noise for a "what depends on X"
+        question. The dependents are all correct; the extra facts look like planner scoping over-reach.
+      </div>
+    </div>
+
+    <div class="act">
+      <header><span class="name">B5 · REASON + citation check</span><span class="rfc">RFC 0123</span><span class="pill pass">pass</span></header>
+      <p>Plan: <code>Compose[ Search + Graph Neighborhood from #customers (1 hop) ]</code> → a two-item evidence set.
+         The answer (Ollama <code>llama3</code>) names exactly <code>CustomerCustomerDemo</code> and <code>orders</code> —
+         <b>every answer table is in the evidence set, none fabricated</b>.</p>
+      <div class="callout crit">
+        The <code>--classic</code> path, on the same question and model, produced an empty
+        <code>cited_evidence</code> block; EKOS printed
+        <code>treat this answer as ungrounded even though it parsed cleanly</code>. The grounding
+        safeguard held where the classic path did not.
+      </div>
+    </div>
+
+    <div class="act">
+      <header><span class="name">B6 · Surface</span><span class="rfc">RFC 0124</span><span class="pill pass">pass</span></header>
+      <ul>
+        <li><code>FIND Object SEMANTIC 'customer' LIMIT 5</code> → 5 rows (lexical BM25 fallback, no vector index, no error, no <code>vector: true</code>).</li>
+        <li><code>ekos_search { limit: 3 }</code> → exactly 3 matches.</li>
+        <li><code>query find --explain</code> prints the compiled plan.</li>
+      </ul>
+    </div>
+
+    <div class="act">
+      <header><span class="name">B7 · Vector arm</span><span class="rfc">RFC 0125</span><span class="pill pass">pass</span></header>
+      <p>On a non-partitioned workspace with <code>[embeddings] enabled=true, provider="ollama", model="nomic-embed-text"</code>:
+         <code>ekos commit</code> → <b>30 embedded, 0 errors, 768-dim</b>;
+         <code>vectors/{meta.json, ids.bin, vectors.f32, tombstones.bin}</code> created.</p>
+      <div class="tbl-scroll" style="margin-top:.7rem">
+        <table>
+          <thead><tr><th>semantic query</th><th>lexical</th><th>vector — top hit</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">money owed and received</td><td>0 hits</td><td class="mono"><b>payments</b> &nbsp;— shares no query word</td></tr>
+            <tr><td class="mono">the people we sell to</td><td>0 hits</td><td class="mono">payments, schemas/ecommerce.sql</td></tr>
+            <tr><td class="mono">moving goods to the buyer</td><td>0 hits</td><td class="mono">order_items, schemas/ecommerce.sql</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="act">
+      <header><span class="name">B8 · Eval harness</span><span class="rfc">RFC 0126</span><span class="pill pass">pass</span></header>
+      <p><code>cargo bench --bench retrieval_eval</code> → <code>baseline: OK (tol 0.02)</code>.</p>
+      <div class="metric-row">
+        <div class="metric"><div class="v tnum">0.841</div><div class="l">Recall@10</div></div>
+        <div class="metric"><div class="v tnum">0.739</div><div class="l">MRR</div></div>
+        <div class="metric"><div class="v tnum">0.745</div><div class="l">nDCG@10</div></div>
+        <div class="metric"><div class="v tnum">0.862</div><div class="l">intent acc</div></div>
+      </div>
+      <p class="mono" style="margin-top:.6rem;font-size:.8rem;color:var(--ink-3)">by type — Lookup 1.000 · Lexical 0.625 · Conceptual 0.938 · Structural 0.250 · Aggregate 1.000</p>
+    </div>
+  </section>
+
+  <!-- ============ PART C ============ -->
+  <section>
+    <div class="sec-head"><span class="idx">§5</span><h2>Part&nbsp;C — MCP protocol</h2></div>
+
+    <div class="act">
+      <header><span class="name">C1 · Handshake + tools/list</span><span class="rfc">RFC 0013</span><span class="pill pass">pass</span></header>
+      <p>Protocol <code>2025-03-26</code>; <b>17 tools</b> — all 8 legacy tools + <code>ekos_query</code> + <code>ekos_retrieve</code>;
+         <code>ekos_search</code> schema carries <code>limit</code> and <code>mode</code>.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">C2 · Tool round-trip + write tools</span><span class="rfc">RFC 0013</span><span class="pill pass">pass</span></header>
+      <ul>
+        <li>12 read tools, one call each → <b>all <code>isError: false</code></b> with real data.</li>
+        <li><code>ekos_identity_review { decision: "rejected" }</code> → <code>{ status: "recorded" }</code>; a re-scan reports <code>written: 0, skipped: 39</code> — the decision persisted.</li>
+        <li>The two write-capable tools are the project's own documented exception to the read-only surface — recorded as design, not flagged.</li>
+      </ul>
+    </div>
+
+    <div class="act">
+      <header><span class="name">C3 · TCP transport + concurrency</span><span class="rfc">RFC 0115</span><span class="pill pass">pass</span></header>
+      <p>Handshake over <code>nc</code>. Ten <code>ekos_status</code> calls: <b>3.020&nbsp;s</b> alone vs
+         <b>2.983&nbsp;s</b> with a second client holding a stalled connection — within noise. 10/10 responses both runs;
+         per-message (not per-connection) locking holds.</p>
+      <p style="margin-top:.5rem">Server logs <code>no authentication, trusted network only</code> — RFC 0115's stated v1 scope; only <code>127.0.0.1</code> was ever bound.</p>
+    </div>
+
+    <div class="act">
+      <header><span class="name">C4 · Usage log + cache</span><span class="rfc">RFC 0114</span><span class="pill pass">pass</span></header>
+      <p>One JSONL line per call (4 / 4). Within a live server session, an identical repeat of an Expensive call is served from cache:</p>
+      <div class="tbl-scroll" style="margin-top:.6rem">
+        <table>
+          <thead><tr><th>tool</th><th>class</th><th>call 1</th><th>call 2</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">ekos_impact (max_hops 6)</td><td class="mono">expensive</td><td class="mono">44 ms</td><td class="mono"><b>0 ms — cache_hit</b></td></tr>
+            <tr><td class="mono">ekos_architecture_evaluate</td><td class="mono">expensive</td><td class="mono">227 ms</td><td class="mono"><b>0 ms — cache_hit</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="act">
+      <header><span class="name">C5 · MCP over the distributed gateway</span><span class="rfc">A ∩ C</span><span class="pill pass">pass</span></header>
+      <p><b>Reads</b> from a partially-degraded cluster (query-worker 1 still dead): <code>ekos_status</code>
+         (<code>distributed cluster @ 127.0.0.1:7801</code>, 1&nbsp;315 entries) and <code>ekos_search</code> → all
+         <code>isError: false</code> via automatic failover.</p>
+      <div class="callout crit">
+        <b>Negative assertion (the single most safety-relevant check).</b>
+        <code>ekos identity scan</code> against the gateway →
+        <code>Error: cannot write: ledger opened read-only at distributed gateway is read-only —
+        append_evidence must go through <b>ekos compile-worker (Service A)</b></code>, exit 1.
+        Explicit, clean, no corruption.
+      </div>
+    </div>
+
+    <div class="act">
+      <header><span class="name">C6 · Multi-turn session</span><span class="rfc">mcp_session.rs pattern</span><span class="pill pass">pass</span></header>
+      <p>Turn 1: <code>ekos_status</code> + <code>ekos_ekl … SEMANTIC 'payments'</code> → the <code>payments</code> id.
+         Turn 2: that id through <code>ekos_query</code>, <code>ekos_retrieve</code>, <code>ekos_state</code>,
+         <code>ekos_dependents</code>, <code>ekos_neighborhood</code>, <code>ekos_diff</code> — all 6
+         <code>isError: false</code>. The <code>KirId</code> round-tripped through every tool with no
+         malformed-id rejection (the exact class the project's own session test guards against).</p>
+    </div>
+  </section>
+
+  <!-- ============ FINDINGS ============ -->
+  <section>
+    <div class="sec-head"><span class="idx">§6</span><h2>Findings status</h2></div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th style="width:3.2rem">#</th><th style="width:6.5rem">state</th><th>finding</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">F3</td><td><span class="pill fixed">fixed</span></td>
+            <td>Cross-partition <code>ExactName</code> promotion lost in <code>PartitionedLedger::retrieve</code>. Fixed &amp; re-verified: <code>query find "customers"</code> → the table ranks #1. New test <code>retrieve_promotes_an_exact_name_match_across_partitions</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">F5</td><td><span class="pill fixed">fixed</span></td>
+            <td><code>ekos mcp serve --workspace</code> ignored the workspace's <code>ekos.toml</code>. Fixed &amp; used flag-only throughout Part B/C. New test <code>config_path_resolution_precedence</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">F6</td><td><span class="pill fixed">fixed</span></td>
+            <td>CLI <code>ekos status</code> / <code>ekos ledger status</code> claimed "not initialised" on partitioned workspaces. Fixed &amp; re-verified local and over the gateway. New test in <code>ledger.rs</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">F2</td><td><span class="pill open">watch</span></td>
+            <td><code>ekos diff --from &lt;very-old-ts&gt;</code> returned an empty diff last run. <b>Did not reproduce</b> this run (<code>Versions written: 1106</code>). Needs a deterministic repro before it can be closed.</td>
+          </tr>
+          <tr>
+            <td class="mono">F4</td><td><span class="pill open">open</span></td>
+            <td><code>arm_timings</code> (RFC 0126) is <code>[]</code> on partitioned + distributed stores — only <code>FactLedger::retrieve</code> emits it. Documented design; a telemetry blind spot on exactly the multi-partition deployments.</td>
+          </tr>
+          <tr>
+            <td class="mono">F7</td><td><span class="pill na">n/a</span></td>
+            <td>Inflected entity-mention resolution miss. <b>Did not reproduce</b> — the merged table is named exactly <code>customers</code>, so the mention resolves at confidence 1.0. The original case was <code>customer</code> (singular) vs <code>Customers</code>.</td>
+          </tr>
+          <tr>
+            <td class="mono">B4</td><td><span class="pill open">new</span></td>
+            <td><code>ekos_query "what depends on X"</code> also returns fact claims about X itself, from the <code>Compose</code> plan. Dependents are correct; the extra facts are planner scoping over-reach.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ APPENDIX ============ -->
+  <section>
+    <div class="sec-head"><span class="idx">§7</span><h2>Environment &amp; limitations</h2></div>
+    <div class="kv" style="grid-template-columns:max-content 1fr;gap:.5rem 1.4rem">
+      <dt>workspace</dt><dd>Fixture set (<code>northwind</code> + <code>ecommerce</code> SQL + <code>sample_project</code> + <code>sample_docs</code>), 27 objects — chosen for tractability across 22 acts, not scale.</dd>
+      <dt>object store</dt><dd><code>file://</code> only; no real S3 / MinIO in this run (prior run <code>devlog_144</code> covers real MinIO).</dd>
+      <dt>LLM</dt><dd>Local Ollama — <code>llama3</code> for <code>ekos ask</code>, <code>nomic-embed-text</code> for embeddings. Structural checks verified, not answer <em>quality</em>.</dd>
+      <dt>criterion</dt><dd>Reduced sampling (warm-up 1&nbsp;s, measurement 2&nbsp;s, sample 10) to bound wall-clock. The point — benches run, zero distributed coverage — is unaffected.</dd>
+      <dt>fencing gap</dt><dd>~12&nbsp;s includes inter-command scheduling latency, not a pure coordinator-reclaim number. TTL (10&nbsp;s) and the clean token-2 takeover are the real signals.</dd>
+      <dt>merges</dt><dd>The <code>DefaultResolver</code> (RFC 0007) merged <code>northwind.Customers</code> with <code>ecommerce.customers</code> (and orders / products / categories) on exact normalized-name match — expected, and why the canonical name is lowercase <code>customers</code>.</dd>
+      <dt>artifacts</dt><dd class="mono">test-runs/run-20260901T172928Z/ — logs/ (≈40 files), metrics/*.json, mcp-*.ndjson, client-ekos.toml, 6 workspace copies</dd>
+    </div>
+  </section>
+
+  <footer>
+    <p><span class="mono">EKOS_FULL_TEST_PLAN_v2</span> · run <span class="mono">20260901T172928Z</span> · commit <span class="mono">a948bed</span> ·
+       gate after the F3/F5/F6 fixes: <span class="mono">cargo test --workspace</span> 1&nbsp;523 passed / 0 failed, <span class="mono">tests/integration</span> 4/4, clippy <span class="mono">-D warnings</span> clean, fmt clean.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>
