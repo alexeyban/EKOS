@@ -67,3 +67,7 @@ harness = false
 [[bench]]
 name = "fact_ledger"
 harness = false
+
+[[bench]]
+name = "retrieval_eval"
+harness = false

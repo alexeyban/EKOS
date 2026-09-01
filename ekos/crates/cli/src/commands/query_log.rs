@@ -37,6 +37,11 @@ pub struct LogEntry {
     pub cache_hit: bool,
     pub result_count: Option<usize>,
     pub duration_ms: u128,
+    /// RFC 0126 — per-retrieval-arm wall-clock breakdown, lifted verbatim from a retrieval
+    /// tool's `arm_timings` result field (`[{source, elapsed_ms, candidates}]`). `None` for
+    /// every non-retrieval tool and for a `FactLedger`-less backend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arm_timings: Option<serde_json::Value>,
 }
 
 impl LogEntry {
@@ -49,6 +54,7 @@ impl LogEntry {
             cache_hit: false,
             result_count: None,
             duration_ms: 0,
+            arm_timings: None,
         }
     }
 }

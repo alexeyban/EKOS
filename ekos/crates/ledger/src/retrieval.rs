@@ -77,12 +77,24 @@ pub struct Signal {
     pub raw_score: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum SignalSource {
     Bm25,
     Vector,
     Graph,
     ExactName,
+}
+
+/// Wall-clock cost of one retrieval arm — pure observability (RFC 0126). Fed into the RFC 0114
+/// usage log and `ekos query find --explain`; never influences fusion or ranking. Only
+/// [`crate::FactLedger::retrieve`] populates these; every other backend leaves
+/// [`RankedResults::arm_timings`] empty.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct ArmTiming {
+    pub source: SignalSource,
+    pub elapsed_ms: f64,
+    /// Rows this arm contributed to fusion (pre-dedup).
+    pub candidates: usize,
 }
 
 /// One ranked knowledge object, with the per-arm evidence for *why* it surfaced.
@@ -105,6 +117,9 @@ pub struct RankedResults {
     /// The arms that actually ran (not just the ones requested). `vector` drops to `false` when
     /// no index is on disk or no query embedding was supplied.
     pub arms_run: ArmSet,
+    /// Per-arm wall-clock cost (RFC 0126). Populated only by [`crate::FactLedger::retrieve`];
+    /// empty on every other backend and on the `from_ranked_pairs` default path.
+    pub arm_timings: Vec<ArmTiming>,
 }
 
 impl RankedResults {
@@ -137,6 +152,7 @@ impl RankedResults {
         Self {
             hits,
             arms_run: ArmSet::LEXICAL,
+            arm_timings: Vec::new(),
         }
     }
 

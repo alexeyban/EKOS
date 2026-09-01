@@ -1,6 +1,6 @@
 # RFC 0118 — Compiled-Knowledge Query Engine: SEARCH → QUERY → REASON
 
-**Status:** Draft
+**Status:** Accepted — all phases shipped (0119–0126, `devlog_143`–`devlog_148`); `contextual_score` + distributed `VectorSearch` RPC (0125b) are the only documented follow-ons
 **Author:** EKOS team
 **Created:** 2026-09-01
 **Supersedes (scope):** the deferred "full embedding-based semantic search" non-goal of RFC 0100
@@ -347,7 +347,7 @@ embedding (the vector arm is skipped unless it is `Some` *and* its length matche
 | **0123** | 4 — REASON | `QueryPlan` IR + rules planner (+ optional LLM planner tier); `EvidenceSet`; `AiRuntime` reworked: plan → execute nodes → assemble Evidence Set → LLM explains + cites; `Compare` / `Compose` multi-step. | ✅ (rules planner) |
 | **0124** | 5 — surface | EKL `SEMANTIC 'text' [LIMIT k]`; MCP `ekos_search {limit?, mode?}` + new `ekos_query` (fact / graph, no LLM) + `ekos_retrieve` (plan + signals); `ekos ask` wired to the planner; `ekos query find --explain`. | ✅ (BM25 fallback) |
 | **0125** | 6 — SEARCH vector arm **(gated)** | `EmbeddingProvider` (`recovery`: OpenAI `text-embedding-3-small`, Ollama `nomic-embed-text`, Mock, Cached); `VectorIndex` (`ledger`, §8.6); opt-in post-`commit` embed pass (like `[llm-description]`); `publish_aux("vectors")` distributed fan-out. **Gate: build when eval data / real usage shows BM25 + `ai_overview` prose + graph is insufficient** (RFC 0100's stated condition). | ✅ (opt-in, single-node; `ekos query find --mode vector\|hybrid`, `devlog_147`) |
-| **0126** | 7 — eval + telemetry *(optional)* | graded eval set `{query, relevant_ids[]}` vs. compiled fixtures + `analytics`; Recall@10 / MRR / nDCG@10 per `QueryType`, CI-gated; per-arm timings into the RFC 0114 usage log; optional `contextual_score` semantic-identity signal. **Pull the eval harness forward as scaffolding during RFC 0120** (needed to prove the `find_objects` flip is safe). | ✅ |
+| **0126** | 7 — eval + telemetry *(optional)* | graded eval set `{query, relevant_ids[]}` vs. compiled fixtures + `analytics`; Recall@10 / MRR / nDCG@10 per `QueryType`, CI-gated; per-arm timings into the RFC 0114 usage log; optional `contextual_score` semantic-identity signal. **Pull the eval harness forward as scaffolding during RFC 0120** (needed to prove the `find_objects` flip is safe). | ✅ (`ekos_runtime::retrieval_eval` + CI gate test + `retrieval_eval` bench + `RankedResults.arm_timings`; `contextual_score` deferred — `devlog_148`) |
 
 ### 8.1 Migration risk (carried into RFCs 0119–0120)
 

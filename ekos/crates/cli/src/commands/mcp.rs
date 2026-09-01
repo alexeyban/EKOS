@@ -582,6 +582,11 @@ fn log_call(
     entry.cache_hit = cache_hit;
     entry.duration_ms = duration_ms;
     entry.result_count = estimate_result_count(result);
+    // RFC 0126: retrieval tools return `arm_timings` in their result — carry it into the log.
+    entry.arm_timings = result
+        .get("arm_timings")
+        .filter(|v| v.as_array().is_some_and(|a| !a.is_empty()))
+        .cloned();
     let _ = query_log::record(&config.ekos_dir(workspace), &entry);
 }
 
@@ -729,6 +734,12 @@ fn call_tool(
             let result = runtime.retrieve(&req)?;
             Ok(json!({
                 "arms_run": { "bm25": result.arms_run.bm25, "vector": result.arms_run.vector },
+                // RFC 0126: per-arm wall-clock; `log_call` lifts this into the usage log.
+                "arm_timings": result.arm_timings.iter().map(|t| json!({
+                    "source": t.source,
+                    "elapsed_ms": t.elapsed_ms,
+                    "candidates": t.candidates,
+                })).collect::<Vec<_>>(),
                 "matches": result.hits
                     .iter()
                     .take(limit)
@@ -748,9 +759,18 @@ fn call_tool(
             let understanding = understand(question, &runtime)?;
             let plan = plan_question(question, &runtime)?;
             let evidence = execute(&plan, &runtime)?;
+            // RFC 0126: also run the raw retrieval seam so "show your work" includes which arms
+            // fired and how long each took.
+            let retrieved = runtime.retrieve(&RetrievalRequest::lexical(question))?;
             Ok(json!({
                 "plan": serde_json::to_value(&plan)?,
                 "evidence": serde_json::to_value(&evidence)?,
+                "arms_run": { "bm25": retrieved.arms_run.bm25, "vector": retrieved.arms_run.vector },
+                "arm_timings": retrieved.arm_timings.iter().map(|t| json!({
+                    "source": t.source,
+                    "elapsed_ms": t.elapsed_ms,
+                    "candidates": t.candidates,
+                })).collect::<Vec<_>>(),
                 "understanding": {
                     "query_type": format!("{:?}", understanding.query_type),
                     "keywords": understanding.keywords,
@@ -2089,6 +2109,13 @@ mod tests {
         assert_eq!(entry["cost_class"], "cheap");
         assert_eq!(entry["cache_hit"], false);
         assert!(entry["duration_ms"].is_number());
+        // RFC 0126: a lexical `ekos_search` over a `FactLedger` records its per-arm timings.
+        let arms = entry["arm_timings"].as_array().expect("arm_timings logged");
+        assert!(
+            arms.iter().any(|t| t["source"] == "Bm25"),
+            "the BM25 arm timing is in the usage log: {arms:?}"
+        );
+        assert!(arms.iter().all(|t| t["elapsed_ms"].is_number()));
     }
 
     #[test]

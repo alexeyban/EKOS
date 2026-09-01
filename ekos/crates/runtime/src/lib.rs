@@ -7,6 +7,7 @@
 pub mod ai;
 pub mod reason;
 pub mod retrieval;
+pub mod retrieval_eval;
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{

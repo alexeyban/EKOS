@@ -1294,6 +1294,9 @@ impl PartitionedLedger {
         Ok(RankedResults {
             hits: rrf_fuse(&lists, RRF_K, req.limit),
             arms_run: ArmSet::LEXICAL,
+            // Per-arm timing is per-partition here and already aggregated by the fan-out; the
+            // separable-arm breakdown (RFC 0126) is a `FactLedger`-only signal.
+            arm_timings: Vec::new(),
         })
     }
 

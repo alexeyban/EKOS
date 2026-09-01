@@ -10,6 +10,7 @@ ekos-ledger.workspace = true
 ekos-identity.workspace = true
 ekos-compiler-core.workspace = true
 ekos-recovery.workspace = true
+ekos-common.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 serde.workspace = true

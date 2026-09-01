@@ -67,6 +67,12 @@ impl MockEmbeddingProvider {
         Self { dim: dim.max(1) }
     }
 
+    /// Synchronous single-text embed — the async [`EmbeddingProvider::embed`] is just a batch of
+    /// these. Handy for sync call sites (the RFC 0126 eval harness embeds one query at a time).
+    pub fn embed_sync(&self, text: &str) -> Vec<f32> {
+        self.embed_one(text)
+    }
+
     fn embed_one(&self, text: &str) -> Vec<f32> {
         let mut v = vec![0.0f32; self.dim];
         for token in text

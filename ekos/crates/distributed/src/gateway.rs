@@ -408,6 +408,7 @@ impl DistributedLedger {
             Ok::<_, DistributedError>(RankedResults {
                 hits: rrf_fuse(&lists, RRF_K, k),
                 arms_run: ArmSet::LEXICAL,
+                arm_timings: Vec::new(),
             })
         })
     }

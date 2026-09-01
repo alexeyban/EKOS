@@ -82,6 +82,16 @@ pub fn find(config: &EkosConfig, cwd: &Path, query: &str, explain: bool, mode: &
     }
     let results = rt.retrieve(&req)?;
 
+    if explain && !results.arm_timings.is_empty() {
+        // RFC 0126: per-arm wall-clock, so a slow hybrid search shows which half is slow.
+        let arms: Vec<String> = results
+            .arm_timings
+            .iter()
+            .map(|t| format!("{:?} {:.1}ms ({})", t.source, t.elapsed_ms, t.candidates))
+            .collect();
+        println!("arms: {}\n", arms.join(" · "));
+    }
+
     if results.hits.is_empty() {
         println!("No objects found matching '{query}'.");
     } else {

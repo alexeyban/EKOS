@@ -830,7 +830,13 @@ impl FactLedger {
         &self,
         req: &crate::RetrievalRequest,
     ) -> Result<crate::RankedResults, LedgerError> {
+        use std::time::Instant;
+        // RFC 0126: each arm is bracketed for the per-arm timings on the result. Pure
+        // observability — the `Instant` reads don't touch what any arm returns or how it fuses.
+        let mut timings: Vec<crate::ArmTiming> = Vec::new();
+
         let run_bm25 = req.arms.bm25;
+        let t = Instant::now();
         let bm25: Vec<crate::ScoredCandidate> = if run_bm25 {
             self.find_objects_scored(req.bm25_query(), req.per_arm_limit)?
                 .into_iter()
@@ -839,11 +845,28 @@ impl FactLedger {
         } else {
             Vec::new()
         };
+        if run_bm25 {
+            timings.push(crate::ArmTiming {
+                source: crate::SignalSource::Bm25,
+                elapsed_ms: t.elapsed().as_secs_f64() * 1e3,
+                candidates: bm25.len(),
+            });
+        }
+
+        let t = Instant::now();
         let exact = crate::exact_name_matches(&req.raw, &bm25);
+        if !exact.is_empty() {
+            timings.push(crate::ArmTiming {
+                source: crate::SignalSource::ExactName,
+                elapsed_ms: t.elapsed().as_secs_f64() * 1e3,
+                candidates: exact.len(),
+            });
+        }
 
         // RFC 0125: the vector arm. Runs only when the orchestrator pre-computed a query embedding
         // *and* an on-disk `VectorIndex` exists whose `dim` matches it. Absent/mismatched → the
         // arm is silently skipped and `arms_run.vector` stays `false` (the RFC 0119 contract).
+        let t = Instant::now();
         let mut vector_ran = false;
         let vector: Vec<crate::ScoredCandidate> = match &req.query_embedding {
             Some(emb) => {
@@ -865,6 +888,13 @@ impl FactLedger {
             }
             None => Vec::new(),
         };
+        if vector_ran {
+            timings.push(crate::ArmTiming {
+                source: crate::SignalSource::Vector,
+                elapsed_ms: t.elapsed().as_secs_f64() * 1e3,
+                candidates: vector.len(),
+            });
+        }
 
         let hits = crate::rrf_fuse(
             &[
@@ -881,6 +911,7 @@ impl FactLedger {
                 bm25: run_bm25,
                 vector: vector_ran,
             },
+            arm_timings: timings,
         })
     }
 
@@ -2703,5 +2734,47 @@ mod tests {
         let res = ledger.retrieve(&req).unwrap();
         assert!(!res.arms_run.vector, "dim mismatch → arm silently skipped");
         assert_eq!(res.hits[0].id, o.id, "bm25 still finds it by name");
+        // The vector arm never ran, so it contributes no timing.
+        assert!(
+            res.arm_timings
+                .iter()
+                .all(|t| t.source != crate::SignalSource::Vector)
+        );
+    }
+
+    // ── RFC 0126: per-arm timings ────────────────────────────────────────
+    #[test]
+    fn retrieve_reports_per_arm_timings() {
+        use crate::vector::VectorIndex;
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("factledger");
+        let ledger = FactLedger::open(&root).unwrap();
+        let readme = KirObject::new("README", ObjectKind::Custom("Document".into()));
+        ledger.append_object(&readme).unwrap();
+
+        let (mut vi, _) = VectorIndex::open(&root.join("vectors"), 4, "mock-embed").unwrap();
+        vi.upsert(readme.id, vec![1.0, 0.0, 0.0, 0.0]).unwrap();
+        vi.flush(Some(TxId(1))).unwrap();
+
+        // Lexical-only: BM25 + ExactName ran, Vector did not.
+        let lex = ledger
+            .retrieve(&crate::RetrievalRequest::lexical("README"))
+            .unwrap();
+        let sources: Vec<_> = lex.arm_timings.iter().map(|t| t.source).collect();
+        assert!(sources.contains(&crate::SignalSource::Bm25));
+        assert!(sources.contains(&crate::SignalSource::ExactName));
+        assert!(!sources.contains(&crate::SignalSource::Vector));
+        assert!(lex.arm_timings.iter().all(|t| t.elapsed_ms >= 0.0));
+
+        // Hybrid: all three arms report, and each `candidates` matches its pre-fusion list.
+        let mut req = crate::RetrievalRequest::lexical("README");
+        req.query_embedding = Some(vec![0.9, 0.1, 0.0, 0.0]);
+        let hyb = ledger.retrieve(&req).unwrap();
+        let vec_timing = hyb
+            .arm_timings
+            .iter()
+            .find(|t| t.source == crate::SignalSource::Vector)
+            .expect("vector arm timing present");
+        assert_eq!(vec_timing.candidates, 1);
     }
 }
