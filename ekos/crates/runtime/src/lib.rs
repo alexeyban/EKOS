@@ -5,6 +5,7 @@
 //! methods that affect the ledger (RFC 0005).
 
 pub mod ai;
+pub mod reason;
 pub mod retrieval;
 
 use chrono::{DateTime, Utc};
@@ -19,6 +20,8 @@ use thiserror::Error;
 pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig, ConversationTurn};
 /// RFC 0119 — the retrieval seam, re-exported so consumers import it from `ekos_runtime`.
 pub use ekos_ledger::{ArmSet, Hit, RankedResults, RetrievalRequest, Signal, SignalSource};
+/// RFC 0123 — the REASON layer: Query Plan IR + typed Evidence Set.
+pub use reason::{EntityRef, EvidenceItem, EvidenceSet, PlanNode, PlannerTier, QueryPlan};
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {

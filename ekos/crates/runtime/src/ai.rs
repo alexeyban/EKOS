@@ -5,6 +5,7 @@
 //! touches the ledger or enterprise systems directly — only through the
 //! Runtime, upholding the same read-only consumer-facing contract as RFC 0005.
 
+use crate::reason::{EvidenceSet, QueryPlan, execute, plan_question, render_evidence};
 use crate::{ObjectState, RetrievalRequest, Runtime, RuntimeError};
 use ekos_compiler_core::Diagnostic;
 use ekos_kir::KirId;
@@ -26,6 +27,12 @@ Every claim must be traceable to the supplied evidence. End your response with a
 {"cited_evidence": ["<id>", ...]}
 If you cannot answer from the given context, say so explicitly."#;
 const PROMPT_VERSION: &str = "ai-runtime-ask-v1";
+/// RFC 0123 — the REASON prompt. The context is a numbered list of typed evidence claims, not raw
+/// `ObjectState` JSON: the model explains structured evidence rather than interpreting objects.
+const REASON_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime reasoner. You are given a question and a numbered list of structured evidence claims compiled from an enterprise knowledge ledger. Answer the question using only those claims. Every statement you make must rest on a claim shown. End your response with a JSON block:
+{"cited_evidence": ["<evidence id>", ...]}
+listing the `evidence <id>` values of every claim you relied on. If the evidence does not answer the question, say so explicitly."#;
+const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v1";
 
 #[derive(Debug, Error)]
 pub enum AiError {
@@ -172,6 +179,50 @@ impl<'a> AiRuntime<'a> {
             prompt_version: PROMPT_VERSION,
             max_tokens: self.config.max_tokens,
             history: &history_messages,
+        };
+        let resp = self.llm.complete(&req).await?;
+
+        let (answer, evidence_refs, citation_diagnostics) =
+            extract_citations(&resp.content, &known_evidence);
+        diagnostics.extend(citation_diagnostics);
+
+        Ok(AiAnswer {
+            answer,
+            evidence_refs,
+            diagnostics,
+        })
+    }
+
+    // ── RFC 0123: REASON — compile the question, assemble typed evidence, explain it ──────
+
+    /// Compile `question` into a [`QueryPlan`] (understand → rules planner). Offline, no LLM.
+    pub fn plan(&self, question: &str) -> Result<QueryPlan, AiError> {
+        Ok(plan_question(question, self.runtime)?)
+    }
+
+    /// Compile and execute `question`'s plan into a typed [`EvidenceSet`]. Offline, no LLM — this
+    /// is the QUERY-surface answer on its own.
+    pub fn gather_evidence(&self, question: &str) -> Result<EvidenceSet, AiError> {
+        let plan = self.plan(question)?;
+        Ok(execute(&plan, self.runtime)?)
+    }
+
+    /// The REASON pipeline: compile `question` → execute → assemble an [`EvidenceSet`] → the LLM
+    /// *explains* the structured evidence and cites the claims it used. Distinct from [`Self::ask`],
+    /// which dumps whole-object JSON; `ekos ask` is wired onto this in RFC 0124.
+    pub async fn reason(&self, question: &str) -> Result<AiAnswer, AiError> {
+        let evidence = self.gather_evidence(question)?;
+        let mut diagnostics = evidence.diagnostics.clone();
+        let known_evidence: HashSet<KirId> = evidence.source_ids().into_iter().collect();
+
+        let context = render_evidence(&evidence);
+        let user = format!("Question: {question}\n\nStructured evidence:\n{context}");
+        let req = LlmRequest {
+            system: REASON_SYSTEM_PROMPT,
+            user: &user,
+            prompt_version: REASON_PROMPT_VERSION,
+            max_tokens: self.config.max_tokens,
+            history: &[],
         };
         let resp = self.llm.complete(&req).await?;
 
@@ -685,10 +736,12 @@ mod tests {
         let (ledger, _dir) = temp_ledger();
         seed_hub(&ledger, 20);
         let runtime = Runtime::new(&ledger);
-        let mut config = AiRuntimeConfig::default();
-        config.max_matches = 1;
-        config.neighborhood_depth = 1;
-        config.max_context_chars = 1; // smaller than even one serialized object
+        let config = AiRuntimeConfig {
+            max_matches: 1,
+            neighborhood_depth: 1,
+            max_context_chars: 1, // smaller than even one serialized object
+            ..AiRuntimeConfig::default()
+        };
         let ai = AiRuntime::new(&runtime, Arc::new(MockLlmProvider::new("x")), config);
 
         let (contexts, diagnostics) = ai.gather_context("hub").unwrap();
@@ -703,10 +756,12 @@ mod tests {
         let (ledger, _dir) = temp_ledger();
         seed_hub(&ledger, 20);
         let runtime = Runtime::new(&ledger);
-        let mut config = AiRuntimeConfig::default();
-        config.max_matches = 1;
-        config.neighborhood_depth = 1;
-        config.max_context_chars = 500;
+        let config = AiRuntimeConfig {
+            max_matches: 1,
+            neighborhood_depth: 1,
+            max_context_chars: 500,
+            ..AiRuntimeConfig::default()
+        };
         let ai = AiRuntime::new(&runtime, Arc::new(MockLlmProvider::new("x")), config);
 
         let (contexts, diagnostics) = ai.gather_context("hub").unwrap();
@@ -727,10 +782,12 @@ mod tests {
         let (ledger, _dir) = temp_ledger();
         seed_hub(&ledger, 20);
         let runtime = Runtime::new(&ledger);
-        let mut config = AiRuntimeConfig::default();
-        config.max_matches = 1;
-        config.neighborhood_depth = 1;
-        config.max_context_chars = 500;
+        let config = AiRuntimeConfig {
+            max_matches: 1,
+            neighborhood_depth: 1,
+            max_context_chars: 500,
+            ..AiRuntimeConfig::default()
+        };
         let llm = Arc::new(MockLlmProvider::new("An answer with no citation block."));
         let ai = AiRuntime::new(&runtime, llm, config);
 
@@ -828,5 +885,63 @@ mod tests {
             "expected the underscore-named table to be retrieved from a full-sentence question, got: {:?}",
             answer.answer
         );
+    }
+
+    // ── RFC 0123: REASON ─────────────────────────────────────────────────
+
+    #[test]
+    fn plan_compiles_a_structural_question_offline() {
+        let (ledger, _dir) = temp_ledger();
+        seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+        let ai = AiRuntime::new(
+            &runtime,
+            Arc::new(MockLlmProvider::new("x")),
+            AiRuntimeConfig::default(),
+        );
+
+        let plan = ai.plan("what depends on the orders table").unwrap();
+        assert_eq!(plan.query_type, crate::retrieval::QueryType::Structural);
+        assert!(matches!(plan.root, crate::reason::PlanNode::Compose { .. }));
+    }
+
+    #[test]
+    fn gather_evidence_names_the_fk_dependent_table() {
+        let (ledger, _dir) = temp_ledger();
+        seed(&ledger); // orders <-FK- (orders → customers); customers is depended-on by orders
+        let runtime = Runtime::new(&ledger);
+        let ai = AiRuntime::new(
+            &runtime,
+            Arc::new(MockLlmProvider::new("x")),
+            AiRuntimeConfig::default(),
+        );
+
+        let evidence = ai.gather_evidence("what depends on customers").unwrap();
+        assert!(
+            evidence
+                .items
+                .iter()
+                .any(|i| i.claim.starts_with("orders — dependents of customers")),
+            "expected the FK-dependent table in the evidence set, got: {:?}",
+            evidence.items.iter().map(|i| &i.claim).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn reason_explains_evidence_and_a_cited_source_survives_extraction() {
+        let (ledger, _dir) = temp_ledger();
+        let (_orders_id, ev_id) = seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+
+        // The mock cites the evidence id that `orders`' first fragment carries.
+        let llm = Arc::new(MockLlmProvider::new(format!(
+            r#"Orders is a table in the public schema. {{"cited_evidence": ["{ev_id}"]}}"#
+        )));
+        let ai = AiRuntime::new(&runtime, llm, AiRuntimeConfig::default());
+        let answer = ai.reason("what is the orders table").await.unwrap();
+
+        assert!(answer.answer.contains("Orders is a table"));
+        assert_eq!(answer.evidence_refs, vec![ev_id]);
+        assert!(answer.diagnostics.is_empty());
     }
 }
