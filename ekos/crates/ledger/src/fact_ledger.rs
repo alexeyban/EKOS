@@ -421,6 +421,11 @@ impl FactLedger {
                 std::fs::create_dir_all(&search_dir).map_err(LedgerError::Io)?;
             }
         }
+        // RFC 0125: the vector index rides the same aux channel as `search/`. Best-effort — a
+        // partition with no embed pass run simply has no `vectors/` and the vector arm stays off.
+        if has_backend && !root.join("vectors").exists() {
+            let _ = store.fetch_aux("vectors");
+        }
         let (search, _search_marker) = SearchIndex::open_read_only(&search_dir)?;
 
         let inner = Inner {
@@ -737,6 +742,11 @@ impl FactLedger {
         let last_tx = inner.batch_times.last().map(|(t, _)| *t);
         inner.search.commit(last_tx)?;
         inner.store.publish_aux("search")?;
+        // RFC 0125: the vector index (built by the opt-in embed pass, if any) rides the same
+        // channel. Best-effort — nothing to publish when no `vectors/` exists.
+        if self.root.join("vectors").join("meta.json").exists() {
+            let _ = inner.store.publish_aux("vectors");
+        }
         Ok(())
     }
 
@@ -820,23 +830,57 @@ impl FactLedger {
         &self,
         req: &crate::RetrievalRequest,
     ) -> Result<crate::RankedResults, LedgerError> {
-        let bm25: Vec<crate::ScoredCandidate> = self
-            .find_objects_scored(req.bm25_query(), req.per_arm_limit)?
-            .into_iter()
-            .map(|(id, name, score)| crate::ScoredCandidate::new(id, name, score))
-            .collect();
+        let run_bm25 = req.arms.bm25;
+        let bm25: Vec<crate::ScoredCandidate> = if run_bm25 {
+            self.find_objects_scored(req.bm25_query(), req.per_arm_limit)?
+                .into_iter()
+                .map(|(id, name, score)| crate::ScoredCandidate::new(id, name, score))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let exact = crate::exact_name_matches(&req.raw, &bm25);
+
+        // RFC 0125: the vector arm. Runs only when the orchestrator pre-computed a query embedding
+        // *and* an on-disk `VectorIndex` exists whose `dim` matches it. Absent/mismatched → the
+        // arm is silently skipped and `arms_run.vector` stays `false` (the RFC 0119 contract).
+        let mut vector_ran = false;
+        let vector: Vec<crate::ScoredCandidate> = match &req.query_embedding {
+            Some(emb) => {
+                match crate::vector::VectorIndex::open_existing(&self.root.join("vectors"))? {
+                    Some(idx) if idx.dim() == emb.len() && !idx.is_empty() => {
+                        vector_ran = true;
+                        idx.query(emb, req.per_arm_limit)?
+                            .into_iter()
+                            // Drop hits whose object was retracted since it was embedded — the
+                            // index lags and is not pruned on retract this phase.
+                            .filter_map(|(id, score)| {
+                                let name = self.get_object(&id).ok().flatten()?.name;
+                                Some(crate::ScoredCandidate::new(id, name, score))
+                            })
+                            .collect()
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            None => Vec::new(),
+        };
+
         let hits = crate::rrf_fuse(
             &[
                 (crate::SignalSource::ExactName, exact),
                 (crate::SignalSource::Bm25, bm25),
+                (crate::SignalSource::Vector, vector),
             ],
             crate::RRF_K,
             req.limit,
         );
         Ok(crate::RankedResults {
             hits,
-            arms_run: crate::ArmSet::LEXICAL,
+            arms_run: crate::ArmSet {
+                bm25: run_bm25,
+                vector: vector_ran,
+            },
         })
     }
 
@@ -2587,5 +2631,77 @@ mod tests {
                 obj.name
             );
         }
+    }
+
+    // ── RFC 0125: the vector arm ─────────────────────────────────────────
+
+    #[test]
+    fn retrieve_fuses_the_vector_arm_when_a_query_embedding_is_supplied() {
+        use crate::vector::VectorIndex;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("factledger");
+        let ledger = FactLedger::open(&root).unwrap();
+
+        // An object whose *name* shares no token with the query.
+        let target = KirObject::new(
+            "dispatch_signup_notification",
+            ObjectKind::Custom("Symbol".into()),
+        );
+        let decoy = KirObject::new(
+            "quarterly_revenue_rollup",
+            ObjectKind::Custom("Symbol".into()),
+        );
+        ledger.append_object(&target).unwrap();
+        ledger.append_object(&decoy).unwrap();
+
+        // Plant vectors: the query "welcome email" embeds near the target, far from the decoy.
+        let (mut vi, _) = VectorIndex::open(&root.join("vectors"), 4, "mock-embed").unwrap();
+        vi.upsert(target.id, vec![1.0, 1.0, 0.0, 0.0]).unwrap();
+        vi.upsert(decoy.id, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        vi.flush(Some(TxId(1))).unwrap();
+
+        let query = vec![0.9, 1.0, 0.0, 0.0];
+
+        // With the embedding → the token-disjoint target surfaces and the vector arm ran.
+        let mut req = crate::RetrievalRequest::lexical("welcome email");
+        req.query_embedding = Some(query.clone());
+        let res = ledger.retrieve(&req).unwrap();
+        assert!(res.arms_run.vector, "vector arm should have run");
+        assert_eq!(res.hits[0].id, target.id);
+        assert!(
+            res.hits[0]
+                .signals
+                .iter()
+                .any(|s| s.source == crate::SignalSource::Vector),
+            "top hit carries a Vector signal"
+        );
+
+        // Without it → pure lexical, no match for either token-disjoint name, arm did not run.
+        let res_lexical = ledger
+            .retrieve(&crate::RetrievalRequest::lexical("welcome email"))
+            .unwrap();
+        assert!(!res_lexical.arms_run.vector);
+        assert!(res_lexical.hits.iter().all(|h| h.id != target.id));
+    }
+
+    #[test]
+    fn retrieve_skips_the_vector_arm_on_a_dim_mismatch() {
+        use crate::vector::VectorIndex;
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("factledger");
+        let ledger = FactLedger::open(&root).unwrap();
+        let o = KirObject::new("thing", ObjectKind::Table);
+        ledger.append_object(&o).unwrap();
+
+        let (mut vi, _) = VectorIndex::open(&root.join("vectors"), 8, "mock-embed").unwrap();
+        vi.upsert(o.id, vec![0.1; 8]).unwrap();
+        vi.flush(Some(TxId(1))).unwrap();
+
+        let mut req = crate::RetrievalRequest::lexical("thing");
+        req.query_embedding = Some(vec![0.1; 4]); // wrong dim
+        let res = ledger.retrieve(&req).unwrap();
+        assert!(!res.arms_run.vector, "dim mismatch → arm silently skipped");
+        assert_eq!(res.hits[0].id, o.id, "bm25 still finds it by name");
     }
 }

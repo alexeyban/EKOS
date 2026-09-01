@@ -76,6 +76,15 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
         None
     };
 
+    // RFC 0125: the opt-in vector-search index. Runs last (like `[llm-description]`) so it can
+    // embed the `ai_overview` prose that step just wrote. `[embeddings].enabled` gates it;
+    // `arms_run.vector` in `retrieve` reports the downgrade when it's absent.
+    let embed_stats = if config.embeddings.enabled {
+        run_embed(config, cwd, &*ledger).await?
+    } else {
+        None
+    };
+
     println!("Commit complete.");
     println!("  Objects written:       {objects_written}");
     println!("  Objects skipped:       {objects_skipped} (already in ledger)");
@@ -96,6 +105,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     }
     if lineage_links_added > 0 {
         println!("  Data lineage links:    {lineage_links_added}");
+    }
+    if let Some(stats) = &embed_stats {
+        println!(
+            "  Vector embeddings:     {} embedded, {} already indexed, {} error(s) ({}-dim {})",
+            stats.embedded, stats.already_indexed, stats.errors, stats.dim, stats.model
+        );
     }
     println!("  Ledger:                {}", store_display(config, cwd));
 
@@ -261,6 +276,118 @@ async fn run_llm_description(
     }
 
     Ok(stats)
+}
+
+/// RFC 0125: the opt-in post-`commit` embed pass. No spend prompt — embeddings are cheap and
+/// cached, unlike the `[llm-description]` generation calls. Vector search is a `FactLedger`-only
+/// feature (`Ledger`/SQLite has no vector arm), and single-node this phase, so this is a no-op on
+/// a SQLite or partitioned workspace.
+async fn run_embed(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+) -> Result<Option<ekos_recovery::EmbedStats>> {
+    use super::store::{facts_dir, uses_fact_engine};
+
+    if config.storage.partition.is_enabled() {
+        eprintln!(
+            "note: [embeddings] is single-node this phase — skipped on a partitioned workspace"
+        );
+        return Ok(None);
+    }
+    if !uses_fact_engine(config, cwd) {
+        eprintln!("note: [embeddings] needs the fact engine — skipped on a SQLite workspace");
+        return Ok(None);
+    }
+
+    let Some(provider) = build_embedding_provider(config, &config.artifact_dir(cwd))? else {
+        return Ok(None);
+    };
+    let index_dir = facts_dir(config, cwd).join("vectors");
+    let redaction = config.redaction_config();
+    let stats = ekos_recovery::embed_objects(ledger, &*provider, &index_dir, &redaction)
+        .await
+        .map_err(|e| anyhow::anyhow!("embedding pass failed: {e}"))?;
+    Ok(Some(stats))
+}
+
+/// Embed one query string for the retrieval vector arm (`ekos query find --mode vector`, MCP
+/// `ekos_search {mode}`). Bridges the sync call site into the async provider the same way
+/// `run_clickhouse_query_blocking` does. Errors clearly when `[embeddings]` is not configured.
+pub(crate) fn embed_query_blocking(
+    config: &EkosConfig,
+    cwd: &Path,
+    text: &str,
+) -> Result<Vec<f32>> {
+    let provider = build_embedding_provider(config, &config.artifact_dir(cwd))?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "vector search needs `[embeddings]` enabled in ekos.toml (and `ekos commit` re-run to \
+             build the index)"
+        )
+    })?;
+    let texts = [text.to_string()];
+    let fut = async move { provider.embed(&texts).await };
+    let vecs = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
+        Err(_) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(fut),
+    }
+    .map_err(|e| anyhow::anyhow!("embedding the query failed: {e}"))?;
+    vecs.into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("embedding provider returned no vector"))
+}
+
+/// Mirrors `select_llm_provider_for_description` for `[embeddings]`. `None` when the table is
+/// absent/disabled; provider kind falls back to `[llm] provider`, then `"mock"` (offline).
+pub(crate) fn build_embedding_provider(
+    config: &EkosConfig,
+    artifact_dir: &Path,
+) -> Result<Option<std::sync::Arc<dyn ekos_recovery::EmbeddingProvider>>> {
+    use ekos_recovery::{
+        CachedEmbeddingProvider, EmbeddingProvider, MockEmbeddingProvider, OllamaEmbeddingProvider,
+        OpenAiEmbeddingProvider,
+    };
+    use std::sync::Arc;
+
+    let ec = &config.embeddings;
+    if !ec.enabled {
+        return Ok(None);
+    }
+    let kind = ec
+        .provider
+        .as_deref()
+        .or(config.llm.provider.as_deref())
+        .unwrap_or("mock");
+    let base: Arc<dyn EmbeddingProvider> = match kind {
+        "mock" => Arc::new(MockEmbeddingProvider::default()),
+        "ollama" => Arc::new(OllamaEmbeddingProvider::from_env(ec.model.clone())),
+        "openai" => {
+            let key_env = ec.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY");
+            Arc::new(
+                OpenAiEmbeddingProvider::from_env(ec.model.clone(), key_env).map_err(|_| {
+                    anyhow::anyhow!(
+                        "{key_env} not set — [embeddings] provider = \"openai\" needs it"
+                    )
+                })?,
+            )
+        }
+        other => anyhow::bail!("unknown [embeddings] provider {other:?} (want mock/ollama/openai)"),
+    };
+    if ec.cache {
+        let cache_dir = artifact_dir
+            .parent()
+            .unwrap_or(artifact_dir)
+            .join("embed-cache");
+        std::fs::create_dir_all(&cache_dir).ok();
+        Ok(Some(Arc::new(CachedEmbeddingProvider::new(
+            base, cache_dir,
+        ))))
+    } else {
+        Ok(Some(base))
+    }
 }
 
 /// Same shape as `docs.rs::confirm_prose_spend`.

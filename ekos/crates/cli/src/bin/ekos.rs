@@ -434,6 +434,10 @@ enum QueryCommands {
         /// and routed — before the results.
         #[arg(long)]
         explain: bool,
+        /// Retrieval mode (RFC 0125): `lexical` (BM25, default), `vector`
+        /// (semantic only — needs `[embeddings]`), or `hybrid` (both, fused).
+        #[arg(long, default_value = "lexical")]
+        mode: String,
     },
     /// BFS neighbourhood graph up to --depth hops
     Neighbourhood {
@@ -498,9 +502,11 @@ async fn main() -> Result<()> {
             QueryCommands::Object { id, format } => {
                 ekos::commands::query::object(&config, &cwd, &id, &format)
             }
-            QueryCommands::Find { query, explain } => {
-                ekos::commands::query::find(&config, &cwd, &query, explain)
-            }
+            QueryCommands::Find {
+                query,
+                explain,
+                mode,
+            } => ekos::commands::query::find(&config, &cwd, &query, explain, &mode),
             QueryCommands::Neighbourhood { id, depth } => {
                 ekos::commands::query::neighbourhood(&config, &cwd, &id, depth)
             }

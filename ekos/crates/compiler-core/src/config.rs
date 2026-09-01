@@ -19,6 +19,8 @@ pub struct EkosConfig {
     #[serde(default)]
     pub llm_description: LlmDescriptionConfig,
     #[serde(default)]
+    pub embeddings: EmbeddingsConfig,
+    #[serde(default)]
     pub marketing: MarketingConfig,
     #[serde(default)]
     pub recover: RecoverConfig,
@@ -142,6 +144,32 @@ pub struct LlmDescriptionConfig {
     pub enabled: bool,
     #[serde(default)]
     pub scope: DescriptionScope,
+}
+
+/// RFC 0125: `[embeddings]` — the opt-in vector-search arm. Same opt-in-table shape as
+/// `[llm-description]`; `enabled = false` by default, so a workspace with no `[embeddings]` table
+/// never embeds anything and `retrieve` runs the pure BM25 + `ExactName` path.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct EmbeddingsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// `"ollama"` | `"openai"` | `"mock"`. Falls back to `[llm] provider` when unset.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Model override (else the provider default: `nomic-embed-text` / `text-embedding-3-small`).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Env var holding the API key for `provider = "openai"` (default `OPENAI_API_KEY`).
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    /// Wrap the provider in the `.ekos/embed-cache/` disk cache (default `true`).
+    #[serde(default = "default_true")]
+    pub cache: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -445,6 +473,7 @@ impl Default for EkosConfig {
             document_semantics: DocumentSemanticsConfig::default(),
             architecture_reasoning: ArchitectureReasoningConfig::default(),
             llm_description: LlmDescriptionConfig::default(),
+            embeddings: EmbeddingsConfig::default(),
             marketing: MarketingConfig::default(),
             recover: RecoverConfig::default(),
             security: SecurityConfig::default(),

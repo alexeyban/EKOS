@@ -5,6 +5,7 @@ pub mod partitioned;
 pub mod retrieval;
 pub mod search;
 pub mod segment;
+pub mod vector;
 
 pub use retrieval::{
     ArmSet, Hit, RRF_K, RankedResults, RetrievalRequest, ScoredCandidate, Signal, SignalSource,

@@ -337,7 +337,8 @@ fn base_tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Search text; a trailing * enables prefix search (e.g. 'order*')" },
-                    "limit": { "type": "integer", "description": "Max results (default 20, max 100)" }
+                    "limit": { "type": "integer", "description": "Max results (default 20, max 100)" },
+                    "mode": { "type": "string", "enum": ["lexical", "vector", "hybrid"], "description": "lexical (BM25, default); vector / hybrid do semantic matching — need [embeddings] configured + an index built by `ekos commit` (RFC 0125)" }
                 },
                 "required": ["query"]
             }
@@ -701,17 +702,34 @@ fn call_tool(
     match name {
         "ekos_search" => {
             let query = required_str(args, "query")?;
-            // RFC 0119: route through the retrieval seam. Phase 0 = BM25, byte-identical.
+            // RFC 0119: route through the retrieval seam. RFC 0125: `mode` vector/hybrid.
             let limit = args
                 .get("limit")
                 .and_then(Value::as_u64)
                 .map(|n| n.clamp(1, 100) as usize)
                 .unwrap_or(20);
+            let mode = args
+                .get("mode")
+                .and_then(Value::as_str)
+                .unwrap_or("lexical");
             let mut req = RetrievalRequest::lexical(query);
             req.limit = limit;
-            let hits = runtime.retrieve(&req)?.hits;
+            match mode {
+                "lexical" => {}
+                "vector" | "hybrid" => {
+                    req.query_embedding = Some(super::commit::embed_query_blocking(
+                        config, workspace, query,
+                    )?);
+                    if mode == "vector" {
+                        req.arms.bm25 = false;
+                    }
+                }
+                other => anyhow::bail!("unknown mode {other:?} (want lexical/vector/hybrid)"),
+            }
+            let result = runtime.retrieve(&req)?;
             Ok(json!({
-                "matches": hits
+                "arms_run": { "bm25": result.arms_run.bm25, "vector": result.arms_run.vector },
+                "matches": result.hits
                     .iter()
                     .take(limit)
                     .map(|hit| json!({ "id": hit.id.to_string(), "name": hit.name }))

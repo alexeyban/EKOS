@@ -57,7 +57,7 @@ pub fn object(config: &EkosConfig, cwd: &Path, id_str: &str, format: &str) -> Re
     Ok(())
 }
 
-pub fn find(config: &EkosConfig, cwd: &Path, query: &str, explain: bool) -> Result<()> {
+pub fn find(config: &EkosConfig, cwd: &Path, query: &str, explain: bool, mode: &str) -> Result<()> {
     let ledger = open_ledger(config, cwd)?;
     let rt = Runtime::over(&*ledger);
 
@@ -67,15 +67,42 @@ pub fn find(config: &EkosConfig, cwd: &Path, query: &str, explain: bool) -> Resu
         println!("{}\n", render_plan(&plan));
     }
 
-    // RFC 0119: route through the retrieval seam. Phase 0 = BM25, byte-identical to `find_objects`.
-    let results = rt.retrieve(&RetrievalRequest::lexical(query))?;
+    // RFC 0119: route through the retrieval seam. RFC 0125: `--mode vector|hybrid` attaches a
+    // pre-computed query embedding; `vector` also drops the BM25 arm.
+    let mut req = RetrievalRequest::lexical(query);
+    match mode {
+        "lexical" => {}
+        "vector" | "hybrid" => {
+            req.query_embedding = Some(super::commit::embed_query_blocking(config, cwd, query)?);
+            if mode == "vector" {
+                req.arms.bm25 = false;
+            }
+        }
+        other => anyhow::bail!("unknown --mode {other:?} (want lexical/vector/hybrid)"),
+    }
+    let results = rt.retrieve(&req)?;
 
     if results.hits.is_empty() {
         println!("No objects found matching '{query}'.");
     } else {
-        println!("{} result(s) for '{query}':", results.hits.len());
+        let arms = if results.arms_run.vector {
+            if results.arms_run.bm25 {
+                " (bm25 + vector)"
+            } else {
+                " (vector)"
+            }
+        } else {
+            ""
+        };
+        println!("{} result(s) for '{query}'{arms}:", results.hits.len());
         for hit in &results.hits {
             println!("  {}  {}", hit.id, hit.name);
+        }
+        if matches!(mode, "vector" | "hybrid") && !results.arms_run.vector {
+            eprintln!(
+                "note: no vector index on disk (or dim mismatch) — results are lexical only; run \
+                 `ekos commit` with [embeddings] enabled"
+            );
         }
     }
 

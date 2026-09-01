@@ -17,6 +17,7 @@ pub mod dbt_analyzer;
 pub mod dependency_analyzer;
 pub mod document_semantics_analyzer;
 pub mod elixir_analyzer;
+pub mod embed;
 pub mod git_analyzer;
 pub mod github_analyzer;
 pub mod javascript_analyzer;
@@ -56,6 +57,10 @@ pub use dbt_analyzer::DbtAnalyzerPass;
 pub use dependency_analyzer::DependencyAnalyzerPass;
 pub use document_semantics_analyzer::{DocumentSemanticsAnalyzerPass, DocumentSemanticsStats};
 pub use elixir_analyzer::{ElixirAnalyzerPass, ElixirStats};
+pub use embed::{
+    CachedEmbeddingProvider, EmbedStats, EmbeddingProvider, MockEmbeddingProvider,
+    OllamaEmbeddingProvider, OpenAiEmbeddingProvider, cosine, embed_objects, l2_normalize,
+};
 pub use git_analyzer::GitAnalyzerPass;
 pub use github_analyzer::GitHubAnalyzerPass;
 pub use javascript_analyzer::{JavaScriptAnalyzerPass, JavaScriptStats};
