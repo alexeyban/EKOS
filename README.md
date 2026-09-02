@@ -487,7 +487,9 @@ LLM — RFC 0124), `ekos_ekl` (EKL supports point-in-time `AS OF <timestamp>` qu
 `COUNT`/`GROUP BY` aggregation — RFC 0096, and `SEMANTIC 'text'` retrieval candidate sets — RFC
 0124), `ekos_neighborhood`,
 `ekos_state`, `ekos_dependents` (single-hop impact analysis), `ekos_impact` (directed,
-kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_diff` (raw ledger-entry changes since
+kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_graph_export` (the whole compiled
+graph as nodes + edges in one call — filtered, optionally collapsed to super-nodes, truncation
+reported; RFC 0127), `ekos_diff` (raw ledger-entry changes since
 T), `ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
 explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
 `ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,
@@ -730,7 +732,28 @@ ekos artifact repack           # loose JSON files → packed segments (~7x small
 ```
 
 `ekos status [--storage]` (RFC 0116) is a top-level alias for `ekos ledger status` — same output,
-shorter to type; both forms stay supported.
+shorter to type; both forms stay supported. `--json` (RFC 0127) emits one machine-readable object
+instead of the text report — entry/object/relationship/evidence counts, the backend tag, a
+per-component storage breakdown, and an mtime-proxy `last_write`; the text output is unchanged.
+
+### Bulk graph export (RFC 0127)
+
+`ekos graph export` writes the whole compiled graph — every object and relationship — as one JSON
+(or NDJSON) document. It's the first non-per-object, non-`LIMIT`-capped read path in EKOS:
+
+```bash
+ekos graph export                                  # the whole graph, JSON on stdout
+ekos graph export --kind Table --kind File         # filter to object kinds
+ekos graph export --exclude-rel-kind CoupledWith --min-degree 1
+ekos graph export --level aggregate --group-by kind   # one super-node per kind
+ekos graph export --format ndjson --output graph.ndjson
+```
+
+Node ids are real object ids (feed them straight to `ekos_state` / `ekos_neighborhood`), degree is
+computed over the post-filter edge set, and when the graph exceeds `--max-nodes`/`--max-edges` the
+export keeps the most-connected core and says so in a `truncated` block rather than silently
+returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
+`ekos_graph_export` MCP tool exposes the same function to agents.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 

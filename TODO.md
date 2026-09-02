@@ -4256,7 +4256,9 @@ are excluded — see the full exclusion list in the planning history if needed.
       (`EmbeddingProvider` + `VectorIndex`) — **gated** on usage data per RFC 0100's stated condition ·
       **0126** eval harness + telemetry (optional). Phases 0–4 are fully offline / zero-LLM. Computed
       staleness/drift (`Custom("Drift")`, code↔doc signature diffing) is deliberately a separate
-      future **RFC 0127**, referenced but not designed here. (Also noted: commit `e8e1ca3` claims an
+      future RFC — it was going to be *0127*, but that number was taken by the Web Console umbrella
+      (below); the staleness/drift RFC gets a fresh number (0128+) when authored, and these
+      cross-references are re-pointed then. (Also noted: commit `e8e1ca3` claims an
       RFC 0117 for the dbt analyzer but no `0117-*.md` was ever filed — backfill needed.)
       - [x] **0119 (Phase 0)** — `KnowledgeStore::retrieve(&RetrievalRequest) -> RankedResults`
         seam, default wraps `find_objects` byte-identically; `Runtime::retrieve`; `AiRuntime` +
@@ -4331,6 +4333,27 @@ are excluded — see the full exclusion list in the planning history if needed.
         `AiRuntime::{plan, gather_evidence, reason}`. `ask`/`ask_stream`/MCP/EKL unchanged — cutover
         is 0124. Whole RFC 0118 series (0119–0123) fast-forwarded onto `main` this session
         (`30b37cb..c79b189`).
+    - [~] **RFC 0127 — Web Console** (`ekos/docs/rfcs/0127-web-console.md`, umbrella, Accepted
+      2026-09-02). A browser surface over a compiled workspace: the cross-system impact trace
+      (the product's differentiating claim) has no visual form today. Per-increment impl RFCs
+      just-in-time (0128+). **Phase 0 contracts landed, `devlog_150`:**
+      - [x] **R1** — `ekos graph export`: the first bulk graph-extraction path in EKOS (every
+        other read is per-object or `LIMIT 50`). `ekos_runtime::export_graph` — one pure
+        read-only fn over `all_objects` + `all_relationships`, kind/rel-kind/min-degree filters,
+        `--level aggregate` super-nodes (by kind or path prefix), degree-descending truncation
+        reported in the payload. `--format json|ndjson`, deterministic modulo `generated_at`.
+      - [x] **R2** — `ekos status --json` / `ekos ledger status --json`: one flat JSON object
+        (entries/objects/relationships/evidence, backend tag, storage breakdown, mtime-proxy
+        `last_write`). Text output unchanged (RFC 0116 parity kept). Added
+        `KnowledgeStore::evidence_count` (real on sqlite/fact/partitioned; `Err` on the
+        distributed gateway pending a fan-out RPC) + `Ledger::format_tag`.
+      - [x] **R3** — `ekos_graph_export` MCP tool: thin wrapper over R1's fn so the console reads
+        the graph over one transport (MCP TCP). Classified `Expensive` → opportunistically cached.
+      - [ ] **Next increment (0128+):** R4 (`--tcp-token-file` / `EKOS_MCP_TOKEN` constant-time
+        handshake), the Python asyncio NDJSON/TCP MCP client, the `web/` FastAPI + Vite/React
+        skeleton, `docker-compose.yml`. Deferred within R1: `--as-of` graph export (the
+        `all_objects_at` primitive exists, scope doesn't), true streaming ndjson, the distributed
+        `evidence_count` RPC.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
