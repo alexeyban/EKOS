@@ -85,6 +85,9 @@ impl KnowledgeStore for PartitionedLedger {
     fn relationship_count(&self) -> Result<usize, LedgerError> {
         Ok(PartitionedLedger::relationship_count(self)?)
     }
+    fn evidence_count(&self) -> Result<usize, LedgerError> {
+        Ok(PartitionedLedger::evidence_count(self)?)
+    }
     fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
         Ok(PartitionedLedger::vacuum_into(self, dest)?)
     }

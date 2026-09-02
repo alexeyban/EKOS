@@ -1050,6 +1050,26 @@ impl Ledger {
         Ok(n as usize)
     }
 
+    /// Number of `Evidence` entries appended (RFC 0127 R2). Counts raw append entries, not
+    /// distinct ids — evidence is write-once and never versioned, so the two are equal.
+    pub fn evidence_count(&self) -> Result<usize, LedgerError> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM entries WHERE entry_type = 'evidence'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
+    /// Wire-format tag for `ekos status --json` — `"sqlite-v1"` before `migrate_to_v2`,
+    /// `"sqlite-v2"` after. The `Format` enum itself stays private.
+    pub fn format_tag(&self) -> &'static str {
+        match self.format {
+            Format::V1 => "sqlite-v1",
+            Format::V2 => "sqlite-v2",
+        }
+    }
+
     /// Per-table on-disk size in bytes, largest first, via the `dbstat`
     /// virtual table (RFC 0015 measurement). Returns an empty list when the
     /// bundled SQLite was built without `SQLITE_ENABLE_DBSTAT_VTAB`.
@@ -1642,6 +1662,10 @@ pub trait KnowledgeStore {
     fn entry_count(&self) -> Result<usize, LedgerError>;
     fn object_count(&self) -> Result<usize, LedgerError>;
     fn relationship_count(&self) -> Result<usize, LedgerError>;
+    /// Number of distinct `Evidence` primitives written (RFC 0127 R2 — surfaced by
+    /// `ekos status --json`). Like the other counters, never shrinks on retraction.
+    /// `DistributedLedger` returns an error until a fan-out `QueryWorker` RPC exists for it.
+    fn evidence_count(&self) -> Result<usize, LedgerError>;
     /// Write a complete branch copy to `dest` (file for SQLite, directory
     /// for the fact engine).
     fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError>;
@@ -1734,6 +1758,9 @@ macro_rules! delegate_store {
             }
             fn relationship_count(&self) -> Result<usize, LedgerError> {
                 <$ty>::relationship_count(self)
+            }
+            fn evidence_count(&self) -> Result<usize, LedgerError> {
+                <$ty>::evidence_count(self)
             }
             fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
                 <$ty>::vacuum_into(self, dest)

@@ -155,6 +155,10 @@ pub fn classify_tool(name: &str, args: &serde_json::Value) -> (CostClass, String
             CostClass::Expensive,
             "whole-workspace scan, no arguments to vary".into(),
         ),
+        "ekos_graph_export" => (
+            CostClass::Expensive,
+            "whole-store walk (all_objects + all_relationships)".into(),
+        ),
         _ => (CostClass::Cheap, "not classified as expensive".into()),
     }
 }

@@ -1,9 +1,21 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ledger::Ledger;
+use serde::Serialize;
 use std::path::Path;
 
-pub fn status(config: &EkosConfig, cwd: &Path, storage: bool) -> Result<()> {
+pub fn status(config: &EkosConfig, cwd: &Path, storage: bool, json: bool) -> Result<()> {
+    // RFC 0127 R2: `--json` is a pure alternate presentation — it shares the same backend opener
+    // as the text path below and adds zero side effects, so `ekos status` and `ekos status --json`
+    // can never disagree, and RFC 0116's `ekos status` == `ekos ledger status` byte-identity for
+    // the text form is preserved (the text body below is untouched).
+    if json {
+        let s = build_status_json(config, cwd)?;
+        println!("{}", serde_json::to_string_pretty(&s)?);
+        return Ok(());
+    }
+
     // RFC 0111/0113 — a partitioned or distributed workspace is served through `open_store`, not a
     // single ledger file. `uses_fact_engine` only checks for a `facts/manifest.json`, which a
     // partitioned store doesn't have, so this branch must come first.
@@ -72,6 +84,207 @@ pub fn status(config: &EkosConfig, cwd: &Path, storage: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// RFC 0127 R2 — the machine-readable form of `ekos status`. One flat object plus a nested
+/// storage breakdown; same field set on every backend so a consumer never has to branch.
+#[derive(Debug, Serialize)]
+pub struct StatusJson {
+    pub schema_version: u32,
+    pub workspace: String,
+    /// `"sqlite-v1"` / `"sqlite-v2"` / `"fact-segment"` / `"partitioned"` / `"distributed"`.
+    pub backend: &'static str,
+    pub entries: usize,
+    pub objects: usize,
+    pub relationships: usize,
+    /// `null` on the distributed gateway until a fan-out `evidence_count` RPC exists (RFC 0113).
+    pub evidence: Option<usize>,
+    /// Always `"unchecked"` in R2 — a real integrity pass (`verify_sealed_report` /
+    /// `PRAGMA integrity_check`) is seconds-to-minutes and `status` must stay instant. A future
+    /// `--verify` will populate this.
+    pub integrity: &'static str,
+    /// Newest mtime under the store root — a metadata-only proxy for "last write", not read from
+    /// the ledger itself. `null` on a distributed workspace (no local store) or one never built.
+    pub last_write: Option<DateTime<Utc>>,
+    pub storage: StorageJson,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StorageJson {
+    pub total_bytes: u64,
+    pub components: Vec<StorageComponent>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StorageComponent {
+    pub name: &'static str,
+    pub bytes: u64,
+    pub files: u64,
+}
+
+/// Builds [`StatusJson`] without touching stdout — the testable core of `status --json`.
+pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> {
+    let workspace = cwd
+        .canonicalize()
+        .unwrap_or_else(|_| cwd.to_path_buf())
+        .display()
+        .to_string();
+    let distributed = config.storage.distributed.is_enabled();
+    let partitioned = super::store::uses_partitioned(config, cwd);
+    let fact = super::store::uses_fact_engine(config, cwd);
+
+    // Same opener the text path uses, so the two can't disagree about the backend.
+    let (backend, entries, objects, relationships, evidence): (
+        &'static str,
+        usize,
+        usize,
+        usize,
+        Option<usize>,
+    ) = if distributed || partitioned {
+        let store = super::store::open_store(config, cwd)?;
+        let backend = if distributed {
+            "distributed"
+        } else {
+            "partitioned"
+        };
+        (
+            backend,
+            store.entry_count()?,
+            store.object_count()?,
+            store.relationship_count()?,
+            store.evidence_count().ok(),
+        )
+    } else if fact {
+        let store = super::store::open_store(config, cwd)?;
+        (
+            "fact-segment",
+            store.entry_count()?,
+            store.object_count()?,
+            store.relationship_count()?,
+            store.evidence_count().ok(),
+        )
+    } else {
+        let path = config.ledger_path(cwd);
+        if !path.exists() {
+            // Never-built SQLite-style workspace: honest zeros, no file to open.
+            return Ok(StatusJson {
+                schema_version: 1,
+                workspace,
+                backend: "fact-segment",
+                entries: 0,
+                objects: 0,
+                relationships: 0,
+                evidence: Some(0),
+                integrity: "unchecked",
+                last_write: None,
+                storage: storage_json(config, cwd, distributed, partitioned, fact),
+            });
+        }
+        let ledger = Ledger::open(&path).map_err(|e| anyhow::anyhow!("cannot open ledger: {e}"))?;
+        (
+            ledger.format_tag(),
+            ledger.entry_count()?,
+            ledger.object_count()?,
+            ledger.relationship_count()?,
+            Some(ledger.evidence_count()?),
+        )
+    };
+
+    Ok(StatusJson {
+        schema_version: 1,
+        workspace,
+        backend,
+        entries,
+        objects,
+        relationships,
+        evidence,
+        integrity: "unchecked",
+        last_write: last_write(config, cwd, distributed, partitioned, fact),
+        storage: storage_json(config, cwd, distributed, partitioned, fact),
+    })
+}
+
+/// Per-component byte/file breakdown, one shape per backend (RFC 0127 §5).
+fn storage_json(
+    config: &EkosConfig,
+    cwd: &Path,
+    distributed: bool,
+    partitioned: bool,
+    fact: bool,
+) -> StorageJson {
+    let ekos_dir = config.ekos_dir(cwd);
+    let dirs: Vec<(&'static str, std::path::PathBuf)> = if distributed {
+        vec![]
+    } else if partitioned {
+        vec![
+            ("partitioned", super::store::partitioned_root(config, cwd)),
+            ("artifacts", config.artifact_dir(cwd)),
+        ]
+    } else if fact || !config.ledger_path(cwd).exists() {
+        vec![
+            ("facts", super::store::facts_dir(config, cwd)),
+            ("artifacts", config.artifact_dir(cwd)),
+        ]
+    } else {
+        vec![
+            ("ledger", config.ledger_dir(cwd)),
+            ("artifacts", config.artifact_dir(cwd)),
+            ("snapshots", ekos_dir.join("snapshots")),
+            ("ckm", ekos_dir.join("ckm")),
+        ]
+    };
+
+    let mut total = 0u64;
+    let components = dirs
+        .into_iter()
+        .map(|(name, dir)| {
+            let (bytes, files) = dir_size(&dir);
+            total += bytes;
+            StorageComponent { name, bytes, files }
+        })
+        .collect();
+    StorageJson {
+        total_bytes: total,
+        components,
+    }
+}
+
+/// Newest mtime among the *durable-write* files of the store — cheap, metadata-only. Deliberately
+/// narrower than the whole store root: a fact/partitioned store rewrites its tantivy `search/`
+/// meta on every *read-only* open too, so pointing at `segments/` keeps this a real "last write"
+/// rather than "last opened". `None` for a distributed workspace or one never built.
+fn last_write(
+    config: &EkosConfig,
+    cwd: &Path,
+    distributed: bool,
+    partitioned: bool,
+    fact: bool,
+) -> Option<DateTime<Utc>> {
+    if distributed {
+        return None;
+    }
+    let root = if partitioned {
+        super::store::partitioned_root(config, cwd)
+    } else if fact || !config.ledger_path(cwd).exists() {
+        super::store::facts_dir(config, cwd).join("segments")
+    } else {
+        config.ledger_path(cwd)
+    };
+    newest_mtime(&root).map(DateTime::<Utc>::from)
+}
+
+/// The newest file-modification time at or below `path` (which may itself be a file). `None` if
+/// nothing exists there yet.
+fn newest_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    if path.is_file() {
+        return std::fs::metadata(path).ok()?.modified().ok();
+    }
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok()?.modified().ok())
+        .max()
 }
 
 /// Migrate the main ledger to the v2 compact format (RFC 0015): zstd
@@ -290,8 +503,98 @@ pub(crate) fn human_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ekos_kir::{KirObject, ObjectKind};
+    use ekos_kir::{KirEvidence, KirObject, ObjectKind, SourceLocation};
     use tempfile::tempdir;
+
+    fn ev(fragment: &str) -> KirEvidence {
+        KirEvidence::new(SourceLocation::at("schema.sql", 1), fragment)
+    }
+
+    #[test]
+    fn status_json_on_a_fresh_workspace_is_the_fact_backend_with_honest_zeros() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let s = build_status_json(&config, dir.path()).unwrap();
+        assert_eq!(s.schema_version, 1);
+        assert_eq!(s.backend, "fact-segment");
+        assert_eq!(s.objects, 0);
+        assert_eq!(s.relationships, 0);
+        assert_eq!(s.evidence, Some(0));
+        assert_eq!(s.integrity, "unchecked");
+        assert!(s.last_write.is_none());
+    }
+
+    #[test]
+    fn status_json_reports_the_sqlite_backend_tag_and_evidence_count() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        {
+            let l = Ledger::open(&config.ledger_path(dir.path())).unwrap();
+            l.append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+            l.append_evidence(&ev("CREATE TABLE orders")).unwrap();
+            l.append_evidence(&ev("CREATE TABLE customers")).unwrap();
+            assert_eq!(l.evidence_count().unwrap(), 2);
+            assert_eq!(l.format_tag(), "sqlite-v2");
+        }
+        let s = build_status_json(&config, dir.path()).unwrap();
+        assert_eq!(s.backend, "sqlite-v2");
+        assert_eq!(s.objects, 1);
+        assert_eq!(s.evidence, Some(2));
+        assert!(s.last_write.is_some());
+        assert!(s.storage.components.iter().any(|c| c.name == "ledger"));
+    }
+
+    #[test]
+    fn status_json_reports_the_fact_backend_evidence_count() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        {
+            let store = super::super::store::open_store(&config, dir.path()).unwrap();
+            store
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+            store.append_evidence(&ev("CREATE TABLE orders")).unwrap();
+        }
+        let s = build_status_json(&config, dir.path()).unwrap();
+        assert_eq!(s.backend, "fact-segment");
+        assert_eq!(s.evidence, Some(1));
+    }
+
+    #[test]
+    fn status_json_reports_a_partitioned_backend() {
+        let dir = tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.storage.partition.dimension = Some("entity-kind".into());
+        {
+            let store = super::super::store::build_partitioned(&config, dir.path(), false).unwrap();
+            store
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+        let s = build_status_json(&config, dir.path()).unwrap();
+        assert_eq!(s.backend, "partitioned");
+        assert_eq!(s.objects, 1);
+        assert_eq!(s.integrity, "unchecked");
+    }
+
+    #[test]
+    fn json_run_has_no_side_effects_on_the_text_output() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        {
+            let store = super::super::store::open_store(&config, dir.path()).unwrap();
+            store
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+        // A `--json` build in between must not change what the plain path computes.
+        let before = build_status_json(&config, dir.path()).unwrap();
+        status(&config, dir.path(), false, true).unwrap();
+        let after = build_status_json(&config, dir.path()).unwrap();
+        assert_eq!(before.objects, after.objects);
+        assert_eq!(before.entries, after.entries);
+    }
 
     /// Real sealed segments (RFC 0105 Phase 2 needs at least one to verify) via a tiny seal
     /// threshold — bypasses `repair()`'s own `FactLedger::open` (default threshold) to write the
@@ -386,7 +689,8 @@ mod tests {
 
         // The load-bearing check is that it doesn't fall through to the "not initialised" branch;
         // it prints to stdout, so we assert on the counts via the store directly too.
-        status(&config, dir.path(), false).expect("status must not error on a partitioned ledger");
+        status(&config, dir.path(), false, false)
+            .expect("status must not error on a partitioned ledger");
         let store = super::super::store::open_store(&config, dir.path()).unwrap();
         assert_eq!(store.object_count().unwrap(), 1);
     }

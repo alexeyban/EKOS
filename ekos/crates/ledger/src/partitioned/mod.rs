@@ -1051,6 +1051,19 @@ impl PartitionedLedger {
         Ok(self.all_relationships()?.len())
     }
 
+    /// Total `Evidence` count, summed across the `"evidence"` partitions (RFC 0127 R2). Each
+    /// evidence primitive is write-once and lands in exactly one partition by its `created_at`
+    /// bucket, so a plain sum is already distinct-correct — no cross-partition dedup.
+    pub fn evidence_count(&self) -> Result<usize, PartitionError> {
+        let mut total = 0;
+        for (key, ledger) in self.catalog_snapshot(Some(EVIDENCE_DV))? {
+            total += ledger
+                .evidence_count()
+                .map_err(|source| PartitionError::Ledger { key, source })?;
+        }
+        Ok(total)
+    }
+
     // ── events & evidence (RFC 0111 amendment §3) ───────────────────────────
 
     fn events_key(&self, at: DateTime<Utc>) -> PartitionKey {

@@ -693,6 +693,15 @@ impl KnowledgeStore for DistributedLedger {
         })
     }
 
+    fn evidence_count(&self) -> Result<usize, LedgerError> {
+        // deferred: needs an `evidence_count` RPC in the QueryWorker protocol (RFC 0113) to
+        // fan out over the evidence partitions. `ekos status --json` renders this as `null` on a
+        // distributed workspace (the CLI does `.ok()` on the result) rather than failing.
+        Err(LedgerError::Io(std::io::Error::other(
+            "evidence_count is not yet available over the distributed gateway",
+        )))
+    }
+
     fn vacuum_into(&self, _dest: &std::path::Path) -> Result<(), LedgerError> {
         Err(write_rejected("vacuum_into"))
     }

@@ -2,8 +2,8 @@
 //!
 //! Speaks newline-delimited JSON-RPC 2.0 and exposes the read-only Runtime as MCP tools
 //! (`ekos_search`, `ekos_query`/`ekos_retrieve` — RFC 0124, `ekos_ekl`, `ekos_neighborhood`,
-//! `ekos_state`, `ekos_dependents`, `ekos_impact`, `ekos_diff`, `ekos_status`,
-//! `ekos_transformation_explain`, `ekos_transformation_diff` — RFC 0028). Two transports, one
+//! `ekos_state`, `ekos_dependents`, `ekos_impact`, `ekos_graph_export` — RFC 0127, `ekos_diff`,
+//! `ekos_status`, `ekos_transformation_explain`, `ekos_transformation_diff` — RFC 0028). Two transports, one
 //! dispatch core:
 //!
 //! - **stdio** (default, unchanged since RFC 0013) — one client, spawned by an agent host that
@@ -27,7 +27,10 @@ use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
 use ekos_ledger::KnowledgeStore;
 use ekos_runtime::reason::{execute, plan_question};
 use ekos_runtime::retrieval::understand;
-use ekos_runtime::{ImpactDirection, RetrievalRequest, Runtime};
+use ekos_runtime::{
+    ExportLevel, GraphExportOptions, GroupBy, ImpactDirection, RetrievalRequest, Runtime,
+    export_graph,
+};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -423,6 +426,25 @@ fn base_tool_definitions() -> Vec<Value> {
                     "max_hops": { "type": "integer", "description": "Hop bound (default 5)" }
                 },
                 "required": ["id"]
+            }
+        },
+        {
+            "name": "ekos_graph_export",
+            "description": "Bulk graph extraction (RFC 0127): the whole compiled graph as nodes + edges in one call, instead of walking it one object at a time. Filter by object/relationship kind, drop low-degree nodes, or collapse to super-nodes (level=aggregate, one per kind or path prefix). Truncated by degree-descending when over the caps, and the truncation is reported in the result. Node ids are real object ids (feed them to ekos_state / ekos_neighborhood) unless level=aggregate.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "level": { "type": "string", "description": "\"object\" (default) or \"aggregate\" (super-nodes; ids are synthetic)" },
+                    "kinds": { "type": "array", "items": { "type": "string" }, "description": "Object kind include-list (default: all)" },
+                    "rel_kinds": { "type": "array", "items": { "type": "string" }, "description": "Relationship kind include-list (default: all)" },
+                    "exclude_rel_kinds": { "type": "array", "items": { "type": "string" }, "description": "Relationship kinds to drop, applied after rel_kinds" },
+                    "group_by": { "type": "string", "enum": ["kind", "path_prefix"], "description": "Aggregate grouping (level=aggregate only; default \"kind\")" },
+                    "path_prefix_depth": { "type": "integer", "description": "Path segments to group by for group_by=path_prefix (default 2)" },
+                    "max_nodes": { "type": "integer", "description": "Node cap (default 5000)" },
+                    "max_edges": { "type": "integer", "description": "Edge cap (default 20000)" },
+                    "min_degree": { "type": "integer", "description": "Drop object-level nodes below this post-filter degree (default 0)" },
+                    "include_properties": { "type": "array", "items": { "type": "string" }, "description": "Object property keys to carry into each node (default: none)" }
+                }
             }
         },
         {
@@ -901,6 +923,86 @@ fn call_tool(
                 "count": by_hop.len(),
                 "hops": by_hop,
             }))
+        }
+        "ekos_graph_export" => {
+            let str_list = |key: &str| -> Vec<String> {
+                args.get(key)
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let usize_arg = |key: &str, default: usize| {
+                args.get(key)
+                    .and_then(Value::as_u64)
+                    .map(|n| n as usize)
+                    .unwrap_or(default)
+            };
+
+            let level = match args.get("level").and_then(Value::as_str) {
+                Some("aggregate") => ExportLevel::Aggregate,
+                Some("object") | None => ExportLevel::Object,
+                Some(other) => {
+                    anyhow::bail!("invalid `level`: {other} (want \"object\" or \"aggregate\")")
+                }
+            };
+            let group_by = match args.get("group_by").and_then(Value::as_str) {
+                Some("path_prefix") => GroupBy::PathPrefix {
+                    depth: usize_arg("path_prefix_depth", 2).max(1),
+                },
+                Some("kind") | None => GroupBy::Kind,
+                Some(other) => {
+                    anyhow::bail!("invalid `group_by`: {other} (want \"kind\" or \"path_prefix\")")
+                }
+            };
+
+            let kinds = {
+                let v = str_list("kinds");
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(
+                        v.iter()
+                            .map(|s| super::graph::parse_object_kind(s))
+                            .collect(),
+                    )
+                }
+            };
+            let rel_kinds = {
+                let v = str_list("rel_kinds");
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(
+                        v.iter()
+                            .map(|s| RelationshipKind::from_str(s).expect("infallible"))
+                            .collect(),
+                    )
+                }
+            };
+            let exclude_rel_kinds = str_list("exclude_rel_kinds")
+                .iter()
+                .map(|s| RelationshipKind::from_str(s).expect("infallible"))
+                .collect();
+
+            let opts = GraphExportOptions {
+                level,
+                workspace: workspace.to_path_buf(),
+                kinds,
+                rel_kinds,
+                exclude_rel_kinds,
+                group_by,
+                max_nodes: usize_arg("max_nodes", 5_000),
+                max_edges: usize_arg("max_edges", 20_000),
+                min_degree: usize_arg("min_degree", 0),
+                include_properties: str_list("include_properties"),
+            };
+            let graph = export_graph(ledger, &opts)?;
+            Ok(serde_json::to_value(graph)?)
         }
         "ekos_diff" => {
             let from: DateTime<Utc> = required_str(args, "from")?
@@ -1623,6 +1725,7 @@ mod tests {
                 "ekos_state",
                 "ekos_dependents",
                 "ekos_impact",
+                "ekos_graph_export",
                 "ekos_diff",
                 "ekos_status",
                 "ekos_transformation_explain",
@@ -1948,6 +2051,56 @@ mod tests {
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(body["objects"], 0);
         assert_eq!(body["entries"], 0);
+    }
+
+    #[test]
+    fn graph_export_tool_returns_a_graph_and_the_second_call_is_a_cache_hit() {
+        use ekos_kir::{KirObject, KirRelationship, ObjectKind, RelationshipKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let a = KirObject::new("orders", ObjectKind::Table);
+        let b = KirObject::new("customers", ObjectKind::Table);
+        let facts = facts_dir(&config, dir);
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger.append_object(&a).unwrap();
+            ledger.append_object(&b).unwrap();
+            ledger
+                .append_relationship(&KirRelationship::new(
+                    RelationshipKind::ForeignKey,
+                    a.id,
+                    b.id,
+                ))
+                .unwrap();
+        }
+
+        let mut cache = StoreCache::new();
+        let line = req(
+            40,
+            "tools/call",
+            json!({ "name": "ekos_graph_export", "arguments": {} }),
+        );
+        let resp = parse(&handle_message(&config, dir, &line, &mut cache).unwrap());
+        assert_eq!(resp["result"]["isError"], false);
+        let body: Value =
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["schema_version"], 1);
+        assert_eq!(body["counts"]["returned_nodes"], 2);
+        assert_eq!(body["counts"]["returned_edges"], 1);
+
+        // `ekos_graph_export` is classified `Expensive` → cacheable. Poison the entry and prove
+        // the second identical call is served from the cache.
+        cache.cache_result(
+            "ekos_graph_export",
+            "{}",
+            json!({ "schema_version": 1, "poisoned": true }),
+        );
+        let resp2 = parse(&handle_message(&config, dir, &line, &mut cache).unwrap());
+        let body2: Value =
+            serde_json::from_str(resp2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body2["poisoned"], true, "second call must hit the cache");
     }
 
     // ── RFC 0107: MCP architecture query tools ──────────────────────────────

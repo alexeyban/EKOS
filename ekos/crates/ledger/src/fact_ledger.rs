@@ -938,6 +938,13 @@ impl FactLedger {
         Ok(inner.entities_with_attr("from")?.len())
     }
 
+    /// Number of distinct `Evidence` primitives (AEVT over `fragment` — the attribute the
+    /// entity-kind classifier keys on, `fact_ledger.rs` module doc). RFC 0127 R2.
+    pub fn evidence_count(&self) -> Result<usize, LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner.entities_with_attr("fragment")?.len())
+    }
+
     /// Real repair-tool report (RFC 0105 Phase 2): one row per sealed segment, checked
     /// unconditionally against its manifest hash — see
     /// [`crate::segment::SegmentStore::verify_sealed_report`] for what `ok: false` does and

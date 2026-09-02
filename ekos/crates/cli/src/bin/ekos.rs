@@ -60,6 +60,9 @@ enum Commands {
         /// Also report per-component storage sizes (RFC 0015)
         #[arg(long)]
         storage: bool,
+        /// Emit a single machine-readable JSON object instead of the text report (RFC 0127 R2)
+        #[arg(long)]
+        json: bool,
     },
     /// Query the knowledge ledger
     Query {
@@ -458,6 +461,9 @@ enum LedgerCommands {
         /// Also report per-component storage sizes (RFC 0015)
         #[arg(long)]
         storage: bool,
+        /// Emit a single machine-readable JSON object instead of the text report (RFC 0127 R2)
+        #[arg(long)]
+        json: bool,
     },
     /// Migrate the ledger: v2 compact format (RFC 0015), or --v3 for the
     /// fact engine (RFC 0016)
@@ -562,15 +568,17 @@ async fn main() -> Result<()> {
         Commands::Compile => ekos::commands::compile::run(&config, &cwd).await,
         Commands::Commit { yes } => ekos::commands::commit::run(&config, &cwd, yes).await,
         Commands::Ledger { subcommand } => match subcommand {
-            LedgerCommands::Status { storage } => {
-                ekos::commands::ledger::status(&config, &cwd, storage)
+            LedgerCommands::Status { storage, json } => {
+                ekos::commands::ledger::status(&config, &cwd, storage, json)
             }
             LedgerCommands::Migrate { v3 } => ekos::commands::ledger::migrate(&config, &cwd, v3),
             LedgerCommands::Repair => ekos::commands::ledger::repair(&config, &cwd),
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor => ekos::commands::doctor::run(&config, &cwd, &config_path),
-        Commands::Status { storage } => ekos::commands::ledger::status(&config, &cwd, storage),
+        Commands::Status { storage, json } => {
+            ekos::commands::ledger::status(&config, &cwd, storage, json)
+        }
         Commands::Query { subcommand } => match subcommand {
             QueryCommands::Object { id, format } => {
                 ekos::commands::query::object(&config, &cwd, &id, &format)
