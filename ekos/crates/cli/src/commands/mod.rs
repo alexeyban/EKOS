@@ -14,6 +14,7 @@ pub mod diff;
 pub mod docs;
 pub mod doctor;
 pub mod ekl;
+pub mod graph;
 pub mod identity;
 pub mod init;
 pub mod ledger;

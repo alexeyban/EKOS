@@ -5,6 +5,7 @@
 //! methods that affect the ledger (RFC 0005).
 
 pub mod ai;
+pub mod graph_export;
 pub mod reason;
 pub mod retrieval;
 pub mod retrieval_eval;
@@ -21,6 +22,8 @@ use thiserror::Error;
 pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig, ConversationTurn};
 /// RFC 0119 — the retrieval seam, re-exported so consumers import it from `ekos_runtime`.
 pub use ekos_ledger::{ArmSet, Hit, RankedResults, RetrievalRequest, Signal, SignalSource};
+/// RFC 0127 R1 — bulk graph extraction.
+pub use graph_export::{ExportLevel, GraphExport, GraphExportOptions, GroupBy, export_graph};
 /// RFC 0123 — the REASON layer: Query Plan IR + typed Evidence Set.
 pub use reason::{EntityRef, EvidenceItem, EvidenceSet, PlanNode, PlannerTier, QueryPlan};
 

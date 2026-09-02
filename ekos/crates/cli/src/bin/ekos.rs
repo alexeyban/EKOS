@@ -156,6 +156,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: DocsCommands,
     },
+    /// Bulk graph extraction from the compiled ledger (RFC 0127)
+    Graph {
+        #[command(subcommand)]
+        subcommand: GraphCommands,
+    },
     /// Pentaho -> dbt model export from the compiled Transformation IR (RFC 0036)
     Dbt {
         #[command(subcommand)]
@@ -330,6 +335,53 @@ enum DocsCommands {
         /// Skip the --prose confirmation prompt
         #[arg(long)]
         yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum GraphCommands {
+    /// Export the whole compiled graph as JSON (or NDJSON) — nodes, edges, and the filters and
+    /// truncation that produced them. Read-only, deterministic (modulo `generated_at`), no LLM.
+    Export {
+        /// Workspace directory (default: current directory)
+        #[arg(long, value_name = "DIR")]
+        workspace: Option<PathBuf>,
+        /// "object" (default, one node per compiled object) or "aggregate" (super-nodes)
+        #[arg(long, default_value = "object")]
+        level: String,
+        /// "json" (default, one pretty object) or "ndjson" (header + one record per node/edge)
+        #[arg(long, default_value = "json")]
+        format: String,
+        /// Object-kind include-list (repeatable). Default: every kind.
+        #[arg(long = "kind", value_name = "ObjectKind")]
+        kinds: Vec<String>,
+        /// Relationship-kind include-list (repeatable). Default: every kind.
+        #[arg(long = "rel-kind", value_name = "Kind")]
+        rel_kinds: Vec<String>,
+        /// Relationship kinds to drop, applied after --rel-kind (repeatable)
+        #[arg(long = "exclude-rel-kind", value_name = "Kind")]
+        exclude_rel_kinds: Vec<String>,
+        /// "kind" (default) or "path-prefix" — only used with --level aggregate
+        #[arg(long, default_value = "kind")]
+        group_by: String,
+        /// Path segments to group by for --group-by path-prefix
+        #[arg(long, default_value_t = 2)]
+        path_prefix_depth: usize,
+        /// Cap on returned nodes; excess dropped by degree-descending (reported in `truncated`)
+        #[arg(long, default_value_t = 5000)]
+        max_nodes: usize,
+        /// Cap on returned edges
+        #[arg(long, default_value_t = 20000)]
+        max_edges: usize,
+        /// Drop object-level nodes whose post-filter degree is below this (single pass)
+        #[arg(long, default_value_t = 0)]
+        min_degree: usize,
+        /// Object property keys to carry into each node's `p` (repeatable). Default: none.
+        #[arg(long = "include-property", value_name = "KEY")]
+        include_properties: Vec<String>,
+        /// Write to this file instead of stdout
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
     },
 }
 
@@ -635,6 +687,41 @@ async fn main() -> Result<()> {
                 ekos::commands::docs::generate(&config, &cwd, &output, format, layout, prose, yes)
                     .await
             }
+        },
+        Commands::Graph { subcommand } => match subcommand {
+            GraphCommands::Export {
+                workspace,
+                level,
+                format,
+                kinds,
+                rel_kinds,
+                exclude_rel_kinds,
+                group_by,
+                path_prefix_depth,
+                max_nodes,
+                max_edges,
+                min_degree,
+                include_properties,
+                output,
+            } => ekos::commands::graph::export(
+                &config,
+                &cwd,
+                ekos::commands::graph::ExportArgs {
+                    workspace,
+                    level,
+                    format,
+                    kinds,
+                    rel_kinds,
+                    exclude_rel_kinds,
+                    group_by,
+                    path_prefix_depth,
+                    max_nodes,
+                    max_edges,
+                    min_degree,
+                    include_properties,
+                    output,
+                },
+            ),
         },
         Commands::Dbt { subcommand } => match subcommand {
             DbtCommands::Generate { output } => {
