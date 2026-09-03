@@ -754,6 +754,13 @@ per-component storage breakdown, and an mtime-proxy `last_write`; the text outpu
 behind the web-console dashboard. All the `--json` / export commands send their logs to stderr so
 stdout is a clean document.
 
+`ekos config validate [--json] [--file <path>]` (RFC 0130) parses `ekos.toml` and reports syntax
+errors plus `[observe]` mistakes — most usefully, an `ignore-patterns` entry like `*.lock` or
+`src/fixtures` that *looks* like a glob or path but is matched as a bare **directory name**, so it
+matches nothing. `ekos config preview-scan [--json]` counts what `ekos build` would observe under
+the current `paths` / `ignore-patterns` (files, by extension, and how many directories each
+ignore pattern actually pruned) without reading or compiling anything.
+
 ### Bulk graph export (RFC 0127)
 
 `ekos graph export` writes the whole compiled graph — every object and relationship — as one JSON
@@ -782,10 +789,16 @@ and restarts one `ekos mcp serve --tcp` per workspace on its own (no hand-starte
 statistics dashboard: entry/object/relationship/evidence counts, storage breakdown, objects by
 kind, a cumulative growth timeline, query-log stats, and `doctor` status.
 
+**Phase 2** (RFC 0130) adds an `ekos.toml` editor: `GET`/`PUT /config`, `POST /config/validate`,
+`POST /config/preview-scan`. The `PUT` runs `ekos config validate` first, writes an
+`ekos.toml.bak`, and — if you narrowed `[observe] paths` or `ignore-patterns` — returns a warning
+that already-compiled data stays in the append-only ledger (a wipe-and-rebuild is the only remedy;
+that's a Phase 3 job).
+
 Endpoints: `/api/health` (public), `/api/workspaces` (`GET`/`POST`/`DELETE`),
-`/api/workspaces/{id}/{stats,health,stats/timeline,stats/kinds,stats/queries,graph,search}`. The
-first four shell out to `ekos status/doctor/ledger timeline --json` through a three-command
-read-only allowlist; the rest go through the running MCP server. Console requests carry a static
+`/api/workspaces/{id}/{stats,health,stats/timeline,stats/kinds,stats/queries,config,config/validate,config/preview-scan,graph,search}`.
+The stats + config reads shell out to `ekos {status,doctor,ledger timeline,config} --json` through
+a read-only command allowlist; the rest go through the running MCP server. Console requests carry a static
 bearer token (`EKOS_CONSOLE_CONSOLE_TOKEN`) — real users and a read/write role split arrive with
 the Phase 3 job runner.
 
@@ -802,9 +815,8 @@ curl -XPOST localhost:8000/api/workspaces -H 'Authorization: Bearer dev-console'
   -d '{"id":"self","name":"EKOS","path":"'"$PWD"'"}'
 ```
 
-`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). The `ekos.toml`
-config UX, command runner + job runner, scheduler, and graph views are RFC 0127 Phases 2–7, each
-authored just-in-time.
+`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). The command runner +
+job runner, scheduler, and graph views are RFC 0127 Phases 3–7, each authored just-in-time.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 

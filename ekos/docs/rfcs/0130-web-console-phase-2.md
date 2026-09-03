@@ -224,10 +224,24 @@ A **Config** route (`/w/:id/config`, linked from the dashboard):
 
 ## 8. Open questions
 
-1. **A real editor component.** Phase 2 ships a plain `<textarea>`. CodeMirror 6 with a TOML mode
-   is ~120 KB; worth it in Phase 7's polish pass, not now.
-2. **`config/history`.** Every `PUT` leaves one `.bak`. A rolling history (last N, or git-backed)
-   would let the console offer "revert to previous" — deferred until someone wants it.
+1. **A real editor component.** Phase 2 ships a plain `<textarea>` (as built). CodeMirror 6 with a
+   TOML mode is ~120 KB; worth it in Phase 7's polish pass, not now.
+2. **`config/history`.** Every `PUT` leaves one `.bak` (overwriting the previous). A rolling
+   history (last N, or git-backed) would let the console offer "revert to previous" — deferred.
 3. **Non-`observe` sections.** `[llm]`, `[embeddings]`, `[storage]` are editable as raw text but
    get no validation beyond parse + `deny_unknown_fields`. Section-specific checks land if and
    when a phase needs them.
+
+## 9. Implementation notes (`devlog_153`)
+
+- Validating **unsaved** editor text needed a CLI change: `ekos config validate --file <path>`.
+  The console writes the text to a temp file, runs `validate --file <tmp>` with `cwd = workspace`
+  so `[observe]` paths still resolve correctly, and deletes the temp file.
+- `deny_unknown_fields` is only on the top-level `EkosConfig` — a typo inside `[observe]` is
+  silently dropped; a typo'd *section* is a hard error. `observe_warnings` covers the `[observe]`
+  value mistakes that serde can't see.
+- `walk_observed` was factored out of `source_fingerprint` (observation-sdk) so preview-scan and
+  the fingerprint walk share one definition of "what `build` observes".
+- On first run against this repo, `validate` + `preview-scan` both flagged `*.lock` in the repo's
+  own `ekos.toml` `ignore-patterns` as a no-op (glob shape, matched as a dir name → matches
+  nothing). Left for the maintainer to decide — changing scan scope has ledger implications.

@@ -4383,10 +4383,11 @@ are excluded — see the full exclusion list in the planning history if needed.
         - [x] **UI** — react-router + recharts dashboard (stat tiles, growth area chart, kinds bar,
           storage bar, query-log stats, doctor checklist); workspace register form + server-status
           chips. `types.ts` still a hand-stub (gen wired, not CI-gated).
-      - [~] **RFC 0130 — Phase 2: `ekos.toml` config UX** (`ekos/docs/rfcs/0130-web-console-phase-2.md`,
+      - [x] **RFC 0130 — Phase 2: `ekos.toml` config UX, `devlog_153`** (`ekos/docs/rfcs/0130-web-console-phase-2.md`,
         Accepted 2026-09-03). Auth stays the static `CONSOLE_TOKEN` (RFC 0129 §10 Q3 resolved —
         role split does NOT move up; it's Phase 3). Raw editor + validate + preview-scan;
-        structured `[observe]` view is read-only.
+        structured `[observe]` view is read-only. **Found on first run: this repo's `ekos.toml`
+        has `*.lock` in ignore-patterns — a no-op, since patterns match dir names not globs.**
         - **R7** `ekos config validate --json` — `{ok, errors, warnings}`; errors from
           `deny_unknown_fields`/TOML syntax, warnings = observe-focused (ignore-pattern-looks-like-
           a-path — matched by dir NAME not glob; observe-path-missing; observe-empty).
