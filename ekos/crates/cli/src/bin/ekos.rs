@@ -59,6 +59,11 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect `ekos.toml` — validate it, or preview what `ekos build` would observe (RFC 0130)
+    Config {
+        #[command(subcommand)]
+        subcommand: ConfigCommands,
+    },
     /// Show ledger entry count and object count (top-level alias for `ekos ledger status`)
     Status {
         /// Also report per-component storage sizes (RFC 0015)
@@ -500,6 +505,26 @@ enum LedgerCommands {
 }
 
 #[derive(Subcommand)]
+enum ConfigCommands {
+    /// Parse `ekos.toml` and report syntax errors plus `[observe]` mistakes (RFC 0130 R7)
+    Validate {
+        /// Emit one machine-readable JSON object instead of the text summary
+        #[arg(long)]
+        json: bool,
+    },
+    /// Count what `ekos build` would observe under `[observe] paths` / `ignore-patterns`, without
+    /// reading or compiling anything (RFC 0130 R8)
+    PreviewScan {
+        /// Emit one machine-readable JSON object instead of the text summary
+        #[arg(long)]
+        json: bool,
+        /// Stop the walk after this many files and set `truncated: true`
+        #[arg(long, default_value_t = 200_000)]
+        max_files: usize,
+    },
+}
+
+#[derive(Subcommand)]
 enum QueryCommands {
     /// Retrieve an object by ID
     Object {
@@ -564,6 +589,10 @@ fn emits_machine_output(command: &Commands) -> bool {
             subcommand,
             LedgerCommands::Status { json: true, .. } | LedgerCommands::Timeline { .. }
         ),
+        Commands::Config { subcommand } => match subcommand {
+            ConfigCommands::Validate { json } => *json,
+            ConfigCommands::PreviewScan { json, .. } => *json,
+        },
         _ => false,
     }
 }
@@ -624,6 +653,14 @@ async fn main() -> Result<()> {
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor { json } => ekos::commands::doctor::run(&config, &cwd, &config_path, json),
+        Commands::Config { subcommand } => match subcommand {
+            ConfigCommands::Validate { json } => {
+                ekos::commands::config::validate(&config, &cwd, &config_path, json)
+            }
+            ConfigCommands::PreviewScan { json, max_files } => {
+                ekos::commands::config::preview_scan(&config, &cwd, max_files, json)
+            }
+        },
         Commands::Status { storage, json } => {
             ekos::commands::ledger::status(&config, &cwd, storage, json)
         }
