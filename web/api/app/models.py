@@ -50,6 +50,24 @@ class Run(SQLModel, table=True):
     ended_at: datetime | None = None
 
 
+class Schedule(SQLModel, table=True):
+    """A recurring command run (RFC 0132). This row is the source of truth; APScheduler is
+    rebuilt from the enabled rows on every console start."""
+
+    id: str = Field(primary_key=True)
+    workspace_id: str = Field(index=True)
+    command: str
+    params: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    trigger_kind: str  # "cron" | "interval"
+    trigger_expr: str  # cron: 5-field crontab string; interval: integer seconds as text
+    notify_url: str  # required — POSTed on a non-succeeded terminal run
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=_now)
+    last_run_at: datetime | None = None
+    last_run_id: str | None = None
+    last_status: str | None = None
+
+
 _engine = None
 
 
@@ -144,3 +162,48 @@ def sweep_stale_runs() -> int:
             s.add(row)
         s.commit()
         return len(rows)
+
+
+# ── Schedule ─────────────────────────────────────────────────────────────────
+
+
+def add_schedule(sched: Schedule) -> None:
+    with session() as s:
+        s.add(sched)
+        s.commit()
+
+
+def get_schedule(schedule_id: str) -> Schedule | None:
+    with session() as s:
+        return s.get(Schedule, schedule_id)
+
+
+def list_schedules(workspace_id: str | None = None) -> list[Schedule]:
+    with session() as s:
+        q = select(Schedule).order_by(Schedule.created_at)
+        if workspace_id:
+            q = q.where(Schedule.workspace_id == workspace_id)
+        return list(s.exec(q))
+
+
+def update_schedule(schedule_id: str, **fields: Any) -> Schedule | None:
+    with session() as s:
+        row = s.get(Schedule, schedule_id)
+        if row is None:
+            return None
+        for k, v in fields.items():
+            setattr(row, k, v)
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        return row
+
+
+def delete_schedule(schedule_id: str) -> bool:
+    with session() as s:
+        row = s.get(Schedule, schedule_id)
+        if row is None:
+            return False
+        s.delete(row)
+        s.commit()
+        return True

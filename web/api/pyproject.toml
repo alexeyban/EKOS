@@ -13,6 +13,7 @@ dependencies = [
     "authlib>=1.3",
     "itsdangerous>=2.2",
     "httpx>=0.27",
+    "apscheduler>=3.10,<4",
 ]
 
 [dependency-groups]

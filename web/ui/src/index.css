@@ -98,9 +98,18 @@ input {
 .token-row input {
   flex: 1;
 }
-.reg-form input {
+.reg-form input,
+.reg-form select {
   flex: 1;
   min-width: 8rem;
+}
+select {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--ground);
+  color: var(--ink);
 }
 .token-collapsed,
 .phase {
