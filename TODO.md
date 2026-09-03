@@ -4363,11 +4363,24 @@ are excluded — see the full exclusion list in the planning history if needed.
         (api + ui; `ekos` binary + workspace bind-mounted; console spawns the MCP servers itself in
         Phase 1). New `web` CI job: build `ekos` release, ruff + pytest (`EKOS_BIN`-gated live test)
         for `web/api`, tsc + vite build for `web/ui`. E2E verified against this repo's own `.ekos/`.
-      - [ ] **Next increment (0129+):** RFC 0127 Phases 1–7 — per-workspace MCP-server lifecycle
-        + real users/roles, the statistics dashboard, `ekos.toml` config UX, the command
-        allowlist + job runner + SSE logs, APScheduler, graph v1/v2. Deferred within R1: `--as-of`
-        graph export (the `all_objects_at` primitive exists, scope doesn't), true streaming ndjson,
-        the distributed `evidence_count` RPC.
+      - [~] **RFC 0129 — Phase 1: shell + statistics** (`ekos/docs/rfcs/0129-web-console-phase-1.md`,
+        Accepted 2026-09-03). **Locked decisions:** auth stays a single static `CONSOLE_TOKEN`
+        (no user table / role split until the first browser write path, Phase 3); MCP-server
+        supervision is its own module (`supervisor.py`), separate from the Phase 3 job runner.
+        **Scope:** persisted `Workspace` registry (SQLite `.ekos-web/console.db`, SQLModel, one
+        table); `McpSupervisor` spawns + restarts one `ekos mcp serve --tcp` per workspace with a
+        per-process random R4 token; a read-only subprocess seam (`readproc.py`, allowlist of
+        exactly `status --json` / `doctor --json` / `ledger timeline --json` — NOT the Phase 3
+        runner); dashboard (Recharts) — stat cards, storage breakdown, objects-by-kind, growth
+        timeline, query-log stats, doctor checklist; react-router; generated API types replace the
+        hand-stub. **Rust:** R5 `ekos doctor --json`, R6 `ekos ledger timeline --json` (cumulative
+        buckets over ledger append timestamps; `Err` on partitioned/distributed for now).
+      - [ ] **Next increments (0130+):** RFC 0127 Phase 2 (`ekos.toml` config UX + append-only
+        preview-scan), Phase 3 (command allowlist + job runner + per-workspace mutex + SSE logs +
+        the read/write role split), Phase 4 (APScheduler), Phases 5–6 (graph v1/v2 —
+        `react-force-graph-3d`, LOD, impact mode), Phase 7 (hardening). Deferred within R1:
+        `--as-of` graph export (the `all_objects_at` primitive exists, scope doesn't), true
+        streaming ndjson, the distributed `evidence_count` RPC.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
