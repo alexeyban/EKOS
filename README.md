@@ -748,6 +748,11 @@ ekos artifact repack           # loose JSON files → packed segments (~7x small
 shorter to type; both forms stay supported. `--json` (RFC 0127) emits one machine-readable object
 instead of the text report — entry/object/relationship/evidence counts, the backend tag, a
 per-component storage breakdown, and an mtime-proxy `last_write`; the text output is unchanged.
+`ekos doctor --json` (RFC 0129) does the same for the environment checklist
+(`{ok, checks:[{name, status, detail}]}`), and `ekos ledger timeline [--bucket day|week|month]`
+(RFC 0129) emits cumulative object/relationship counts bucketed by mint time — the growth series
+behind the web-console dashboard. All the `--json` / export commands send their logs to stderr so
+stdout is a clean document.
 
 ### Bulk graph export (RFC 0127)
 
@@ -768,28 +773,38 @@ export keeps the most-connected core and says so in a `truncated` block rather t
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
 
-### Web console (RFC 0127/0128) — skeleton
+### Web console (RFC 0127/0128/0129)
 
-`web/` is a browser surface over a compiled workspace, still at Phase 0 (a real skeleton, not a
-finished console). It is a FastAPI app (`web/api/`) that talks to one `ekos mcp serve --tcp` per
-workspace through a small asyncio NDJSON/TCP client (`app/mcp_client.py`), plus a Vite + React
-shell (`web/ui/`). The skeleton serves `/api/health`, `/api/workspaces`, and
-`/api/workspaces/{id}/{stats,graph,search}` — the last three proxied straight to the `ekos_status`,
-`ekos_graph_export`, and `ekos_search` MCP tools. Console requests carry a static bearer token
-(`EKOS_CONSOLE_CONSOLE_TOKEN`); the token forwarded to the MCP servers is `EKOS_MCP_TOKEN` (RFC
-0128 R4, above). Bring it up from `web/` after building the release binary
-(`cd ekos && cargo build --release -p ekos`):
+`web/` is a browser surface over one or more compiled workspaces. It is a FastAPI app (`web/api/`)
+that speaks to the read-only Runtime through the MCP server, plus a Vite + React dashboard
+(`web/ui/`). **Phase 1** (RFC 0129) adds a persisted workspace registry, a supervisor that spawns
+and restarts one `ekos mcp serve --tcp` per workspace on its own (no hand-started servers), and a
+statistics dashboard: entry/object/relationship/evidence counts, storage breakdown, objects by
+kind, a cumulative growth timeline, query-log stats, and `doctor` status.
+
+Endpoints: `/api/health` (public), `/api/workspaces` (`GET`/`POST`/`DELETE`),
+`/api/workspaces/{id}/{stats,health,stats/timeline,stats/kinds,stats/queries,graph,search}`. The
+first four shell out to `ekos status/doctor/ledger timeline --json` through a three-command
+read-only allowlist; the rest go through the running MCP server. Console requests carry a static
+bearer token (`EKOS_CONSOLE_CONSOLE_TOKEN`) — real users and a read/write role split arrive with
+the Phase 3 job runner.
 
 ```bash
-# start one MCP server by hand for the skeleton (Phase 1 has the console spawn these itself)
-printf 'dev-mcp-token\n' > /tmp/ekos-mcp-token
-ekos mcp serve --workspace "$EKOS_WS" --tcp 127.0.0.1:7331 --tcp-token-file /tmp/ekos-mcp-token &
+cd ekos && cargo build --release -p ekos && cd ..
+EKOS_BIN=$PWD/ekos/target/release/ekos \
+EKOS_CONSOLE_CONSOLE_TOKEN=dev-console \
+uv --directory web/api run uvicorn --factory app.main:create_app --port 8000 &
+cd web/ui && npm install && npm run dev        # http://localhost:5173
 
-EKOS_WS=/abs/path/to/a/compiled/workspace docker compose up   # api :8000, ui dev server :5173
+# then register a workspace from the UI, or:
+curl -XPOST localhost:8000/api/workspaces -H 'Authorization: Bearer dev-console' \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"self","name":"EKOS","path":"'"$PWD"'"}'
 ```
 
-The statistics dashboard, config UX, job runner, scheduler, and graph views are RFC 0127 Phases
-1–7, each authored just-in-time.
+`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). The `ekos.toml`
+config UX, command runner + job runner, scheduler, and graph views are RFC 0127 Phases 2–7, each
+authored just-in-time.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 

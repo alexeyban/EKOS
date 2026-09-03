@@ -4363,18 +4363,26 @@ are excluded — see the full exclusion list in the planning history if needed.
         (api + ui; `ekos` binary + workspace bind-mounted; console spawns the MCP servers itself in
         Phase 1). New `web` CI job: build `ekos` release, ruff + pytest (`EKOS_BIN`-gated live test)
         for `web/api`, tsc + vite build for `web/ui`. E2E verified against this repo's own `.ekos/`.
-      - [~] **RFC 0129 — Phase 1: shell + statistics** (`ekos/docs/rfcs/0129-web-console-phase-1.md`,
-        Accepted 2026-09-03). **Locked decisions:** auth stays a single static `CONSOLE_TOKEN`
-        (no user table / role split until the first browser write path, Phase 3); MCP-server
-        supervision is its own module (`supervisor.py`), separate from the Phase 3 job runner.
-        **Scope:** persisted `Workspace` registry (SQLite `.ekos-web/console.db`, SQLModel, one
-        table); `McpSupervisor` spawns + restarts one `ekos mcp serve --tcp` per workspace with a
-        per-process random R4 token; a read-only subprocess seam (`readproc.py`, allowlist of
-        exactly `status --json` / `doctor --json` / `ledger timeline --json` — NOT the Phase 3
-        runner); dashboard (Recharts) — stat cards, storage breakdown, objects-by-kind, growth
-        timeline, query-log stats, doctor checklist; react-router; generated API types replace the
-        hand-stub. **Rust:** R5 `ekos doctor --json`, R6 `ekos ledger timeline --json` (cumulative
-        buckets over ledger append timestamps; `Err` on partitioned/distributed for now).
+      - [x] **RFC 0129 — Phase 1: shell + statistics, `devlog_152`** (`ekos/docs/rfcs/0129-web-console-phase-1.md`,
+        Accepted 2026-09-03). Auth stays a single static `CONSOLE_TOKEN` (role split → Phase 3);
+        `McpSupervisor` is its own module, separate from the Phase 3 job runner.
+        - [x] **R5** `ekos doctor --json` — `{schema_version, ok, checks:[{name,status,detail}]}`,
+          always exits 0. Text output byte-identical.
+        - [x] **R6** `ekos ledger timeline [--json] [--bucket day|week|month] [--since]` —
+          cumulative object/relationship counts bucketed by `KirObject::created_at`. Backend-
+          agnostic (one `all_objects`+`all_relationships` pass), **no new `KnowledgeStore` method**,
+          no per-backend branch. `--since` trims display only.
+        - [x] **Logging fix** — `emits_machine_output()` routes `status --json` / `doctor --json` /
+          `ekl --json` / `ledger status|timeline --json` / `graph export` logs to stderr (a latent
+          R2 bug: tantivy log lines were interleaving with the JSON on stdout).
+        - [x] **Console** — SQLite `Workspace` registry (SQLModel, 1 table; `WORKSPACES_JSON` is
+          now just a seed); `McpSupervisor` (per-workspace `ekos mcp serve --tcp`, random R4 token,
+          readiness probe, exp-backoff restart, graceful teardown); `readproc.py` read-only
+          subprocess seam (3-shape allowlist, `cwd=<ws>`, never a shell — NOT the Phase 3 runner);
+          `routes/stats.py` — `/stats` `/health` `/stats/{timeline,kinds,queries}`.
+        - [x] **UI** — react-router + recharts dashboard (stat tiles, growth area chart, kinds bar,
+          storage bar, query-log stats, doctor checklist); workspace register form + server-status
+          chips. `types.ts` still a hand-stub (gen wired, not CI-gated).
       - [ ] **Next increments (0130+):** RFC 0127 Phase 2 (`ekos.toml` config UX + append-only
         preview-scan), Phase 3 (command allowlist + job runner + per-workspace mutex + SSE logs +
         the read/write role split), Phase 4 (APScheduler), Phases 5–6 (graph v1/v2 —
