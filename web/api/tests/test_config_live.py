@@ -27,6 +27,8 @@ def cfg_client(
     subprocess.run([ekos_bin, "init"], cwd=ws, check=True, capture_output=True)
 
     monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_TOKEN", "cfg-console")
+    monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_WRITE_TOKEN", "cfg-console")
+    monkeypatch.setenv("EKOS_CONSOLE_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_DB", str(tmp_path / "console.db"))
     monkeypatch.setenv("EKOS_BIN", ekos_bin)
     monkeypatch.setenv("EKOS_CONSOLE_MCP_PORT_BASE", "19100")

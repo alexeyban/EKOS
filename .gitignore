@@ -23,6 +23,10 @@ web/api/.venv/
 web/ui/node_modules/
 web/ui/dist/
 web/ui/*.tsbuildinfo
+
+# Web console per-workspace runtime state (RFC 0129/0130/0131) — written into a workspace dir
+.ekos-web/
+ekos.toml.bak
 __pycache__/
 *.egg-info/
 .pytest_cache/

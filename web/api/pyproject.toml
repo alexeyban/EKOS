@@ -10,6 +10,9 @@ dependencies = [
     "pydantic-settings>=2.6",
     "sqlmodel>=0.0.22",
     "tomlkit>=0.13",
+    "authlib>=1.3",
+    "itsdangerous>=2.2",
+    "httpx>=0.27",
 ]
 
 [dependency-groups]

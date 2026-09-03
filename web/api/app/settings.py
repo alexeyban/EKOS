@@ -29,10 +29,29 @@ class WorkspaceSeed(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EKOS_CONSOLE_", env_file=".env", extra="ignore")
 
-    # Bearer token the browser must present to every /api route except /api/health.
-    # Unrelated to the MCP token below. RFC 0129 keeps this a single static token — real users
-    # and the read/write role split land with the first browser write path (Phase 3).
+    # ── Auth (RFC 0131) ─────────────────────────────────────────────────────
+    # OIDC is the real path; the two static tokens below are the fallback used when OIDC_ISSUER
+    # is unset (CI, docker compose, local dev).
+    oidc_issuer: str = Field(default="", validation_alias="EKOS_CONSOLE_OIDC_ISSUER")
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = "http://localhost:8000/api/auth/callback"
+    # ID-token claim inspected for the write role, and the values that grant it.
+    oidc_role_claim: str = "groups"
+    oidc_write_values: str = ""  # comma-separated; empty => every authenticated user is read-only
+    post_login_redirect: str = "/"
+    session_secret: str = "dev-session-secret-change-me"
+
+    # Token-mode credentials. `console_token` → read; `console_write_token` → read + write.
     console_token: str = "dev-console-token"
+    console_write_token: str = ""  # unset => write is never granted in token mode
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer)
+
+    def oidc_write_value_set(self) -> set[str]:
+        return {v.strip() for v in self.oidc_write_values.split(",") if v.strip()}
 
     # Token base forwarded to `ekos mcp serve --tcp` (RFC 0128 R4). In Phase 1 the supervisor
     # generates a fresh random token per spawned server; this is only the fallback / seed default
@@ -47,6 +66,10 @@ class Settings(BaseSettings):
 
     # Loopback port range the supervisor allocates per-workspace MCP servers from.
     mcp_port_base: int = 7400
+
+    # Job runner (RFC 0131): per-workspace queue depth, and where run logs land.
+    run_queue_depth: int = 16
+    runs_dir: str = ".ekos-web/runs"
 
     # JSON array of WorkspaceSeed, e.g.
     #   EKOS_CONSOLE_WORKSPACES_JSON='[{"id":"self","name":"EKOS","path":"/repo"}]'

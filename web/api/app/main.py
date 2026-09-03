@@ -1,4 +1,4 @@
-"""FastAPI app factory for the EKOS web console (RFC 0127 §8, RFC 0129 §3).
+"""FastAPI app factory for the EKOS web console (RFC 0127 §8).
 
 uvicorn --factory app.main:create_app
 """
@@ -12,9 +12,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from . import models
-from .routes import config, graph, meta, stats, workspaces
+from .routes import auth, commands, config, graph, meta, runs, stats, workspaces
+from .runner import JobRunner
 from .settings import get_settings
 from .supervisor import McpSupervisor
 
@@ -44,28 +46,37 @@ async def _lifespan(app: FastAPI):
 
     app.state.supervisor = McpSupervisor(settings)
     await app.state.supervisor.start(models.list_workspaces())
+
+    app.state.runner = JobRunner(settings)
+    app.state.runner.start()
     try:
         yield
     finally:
+        await app.state.runner.aclose()
         await app.state.supervisor.aclose()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="EKOS Console API", version="0.1.0", lifespan=_lifespan)
+    app.state.settings = settings
 
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret,
+        same_site="lax",
+        https_only=False,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.dev_origin],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    app.include_router(meta.router, prefix="/api")
-    app.include_router(workspaces.router, prefix="/api")
-    app.include_router(stats.router, prefix="/api")
-    app.include_router(config.router, prefix="/api")
-    app.include_router(graph.router, prefix="/api")
+    for r in (meta, auth, commands, runs, workspaces, stats, config, graph):
+        app.include_router(r.router, prefix="/api")
 
     # Serve the built UI when it exists (Compose / production); the Vite dev server handles it
     # otherwise.

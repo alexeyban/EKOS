@@ -3,12 +3,12 @@ line-length = 100
 
 [lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
-# ASYNC240: the console does small, local-filesystem operations (a ~64-byte token file, a
-# `Path.is_dir()` check, reading `.ekos/query-log.jsonl`) inline in async handlers. The blocking
-# cost is sub-millisecond; a threadpool hop would cost more. Same tradeoff as the sync SQLModel
-# session in `models.py`. Phase 3's job runner, which does heavy I/O, uses `create_subprocess_exec`
-# and never blocks.
-ignore = ["ASYNC240"]
+# ASYNC230 / ASYNC240: the console does small, local-filesystem operations inline in async code —
+# a ~64-byte token file, `Path.is_dir()`, appending a run-log line, reading `.ekos/query-log.jsonl`.
+# The blocking cost is sub-millisecond; a threadpool hop would cost more. Same tradeoff as the sync
+# SQLModel session in `models.py`. The heavy I/O (running `ekos`) goes through
+# `create_subprocess_exec` and never blocks the loop.
+ignore = ["ASYNC230", "ASYNC240"]
 
 [lint.flake8-bugbear]
 # FastAPI's dependency-injection idiom: these calls in argument defaults are intentional.

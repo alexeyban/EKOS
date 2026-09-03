@@ -6,12 +6,13 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from ..deps import mcp_for_workspace, require_console_token
+from ..auth import require_role
+from ..deps import mcp_for_workspace
 from ..mcp_client import EkosMcpClient
 from ..schemas import GraphOut
 
 router = APIRouter(
-    prefix="/workspaces", tags=["graph"], dependencies=[Depends(require_console_token)]
+    prefix="/workspaces", tags=["graph"], dependencies=[Depends(require_role("read"))]
 )
 
 

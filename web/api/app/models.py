@@ -10,8 +10,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+from sqlalchemy import Column
+from sqlalchemy.types import JSON
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 class Workspace(SQLModel, table=True):
@@ -21,7 +28,26 @@ class Workspace(SQLModel, table=True):
     id: str = Field(primary_key=True)
     name: str
     path: str
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=_now)
+
+
+TERMINAL = {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
+
+
+class Run(SQLModel, table=True):
+    """One command execution (RFC 0131 §3)."""
+
+    id: str = Field(primary_key=True)
+    workspace_id: str = Field(index=True)
+    command: str
+    params: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    status: str = Field(default="queued", index=True)
+    stages: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    exit_code: int | None = None
+    log_path: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
 
 
 _engine = None
@@ -69,3 +95,52 @@ def delete_workspace(workspace_id: str) -> bool:
         s.delete(row)
         s.commit()
         return True
+
+
+# ── Run ──────────────────────────────────────────────────────────────────────
+
+
+def add_run(run: Run) -> None:
+    with session() as s:
+        s.add(run)
+        s.commit()
+
+
+def get_run(run_id: str) -> Run | None:
+    with session() as s:
+        return s.get(Run, run_id)
+
+
+def list_runs(
+    workspace_id: str | None = None, status: str | None = None, limit: int = 100
+) -> list[Run]:
+    with session() as s:
+        q = select(Run).order_by(Run.created_at.desc()).limit(limit)
+        if workspace_id:
+            q = q.where(Run.workspace_id == workspace_id)
+        if status:
+            q = q.where(Run.status == status)
+        return list(s.exec(q))
+
+
+def update_run(run_id: str, **fields: Any) -> None:
+    with session() as s:
+        row = s.get(Run, run_id)
+        if row is None:  # pragma: no cover - the runner always creates the row first
+            return
+        for k, v in fields.items():
+            setattr(row, k, v)
+        s.add(row)
+        s.commit()
+
+
+def sweep_stale_runs() -> int:
+    """On startup, any run left `queued`/`running` (the console died mid-run) is `interrupted`."""
+    with session() as s:
+        rows = list(s.exec(select(Run).where(Run.status.in_(["queued", "running"]))))
+        for row in rows:
+            row.status = "interrupted"
+            row.ended_at = _now()
+            s.add(row)
+        s.commit()
+        return len(rows)
