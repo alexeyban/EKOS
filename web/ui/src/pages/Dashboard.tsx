@@ -51,6 +51,10 @@ export function Dashboard() {
           ·{" "}
           <Link to={`/w/${id}/config`} className="linkish">
             ekos.toml
+          </Link>{" "}
+          ·{" "}
+          <Link to={`/w/${id}/graph`} className="linkish">
+            graph
           </Link>
         </span>
       </p>

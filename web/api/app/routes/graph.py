@@ -1,14 +1,14 @@
-"""Graph + search reads, proxied to the MCP tools (RFC 0128 §3.2)."""
+"""Graph + search + object-state reads, proxied to the MCP tools (RFC 0128 §3.2, RFC 0133 §1)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..auth import require_role
 from ..deps import mcp_for_workspace
-from ..mcp_client import EkosMcpClient
+from ..mcp_client import EkosMcpClient, McpToolError
 from ..schemas import GraphOut
 
 router = APIRouter(
@@ -26,6 +26,7 @@ async def graph_export(
     min_degree: int = Query(0, ge=0),
     max_nodes: int = Query(5000, ge=1),
     max_edges: int = Query(20000, ge=1),
+    include_properties: bool = Query(False),
 ) -> GraphOut:
     args: dict[str, Any] = {
         "level": level,
@@ -33,12 +34,26 @@ async def graph_export(
         "min_degree": min_degree,
         "max_nodes": max_nodes,
         "max_edges": max_edges,
+        "include_properties": include_properties,
     }
     if kind:
         args["kinds"] = kind
     if exclude_rel_kind:
         args["exclude_rel_kinds"] = exclude_rel_kind
     return GraphOut.model_validate(await mcp.call_tool("ekos_graph_export", args))
+
+
+@router.get("/{workspace_id}/objects/{object_id}")
+async def object_state(
+    object_id: str,
+    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+) -> Any:
+    """`ekos_state` — the object, its relationships, and the resolved evidence behind every
+    claim (RFC 0133 §2.4)."""
+    try:
+        return await mcp.call_tool("ekos_state", {"id": object_id})
+    except McpToolError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{workspace_id}/search")

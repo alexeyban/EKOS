@@ -310,3 +310,77 @@ button.danger-btn {
 header .chip {
   font-size: 0.7rem;
 }
+
+/* ── Graph view ── */
+.graph-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1rem;
+  height: calc(100vh - 160px);
+}
+.graph-layout:has(.obj-panel) {
+  grid-template-columns: 220px 1fr 320px;
+}
+.graph-side {
+  overflow: auto;
+  font-size: 0.85rem;
+}
+.graph-canvas {
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b0a12;
+}
+.graph-canvas > p {
+  padding: 1rem;
+}
+.flt {
+  display: block;
+  font-size: 0.82rem;
+  padding: 0.12rem 0;
+}
+.srch,
+.kinds {
+  list-style: none;
+  padding: 0;
+  margin: 0.3rem 0;
+  font-size: 0.82rem;
+}
+.srch li,
+.kinds li {
+  padding: 0.12rem 0;
+}
+.obj-panel {
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  font-size: 0.85rem;
+}
+.obj-panel details {
+  margin: 0.5rem 0;
+}
+.obj-panel summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+pre.props,
+pre.frag {
+  background: var(--ground);
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.72rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.rel-list,
+.ev-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.3rem 0;
+}
+.rel-list li,
+.ev-list li {
+  padding: 0.2rem 0;
+  border-top: 1px solid var(--rule);
+}
