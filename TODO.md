@@ -4383,10 +4383,25 @@ are excluded — see the full exclusion list in the planning history if needed.
         - [x] **UI** — react-router + recharts dashboard (stat tiles, growth area chart, kinds bar,
           storage bar, query-log stats, doctor checklist); workspace register form + server-status
           chips. `types.ts` still a hand-stub (gen wired, not CI-gated).
-      - [ ] **Next increments (0130+):** RFC 0127 Phase 2 (`ekos.toml` config UX + append-only
-        preview-scan), Phase 3 (command allowlist + job runner + per-workspace mutex + SSE logs +
-        the read/write role split), Phase 4 (APScheduler), Phases 5–6 (graph v1/v2 —
-        `react-force-graph-3d`, LOD, impact mode), Phase 7 (hardening). Deferred within R1:
+      - [~] **RFC 0130 — Phase 2: `ekos.toml` config UX** (`ekos/docs/rfcs/0130-web-console-phase-2.md`,
+        Accepted 2026-09-03). Auth stays the static `CONSOLE_TOKEN` (RFC 0129 §10 Q3 resolved —
+        role split does NOT move up; it's Phase 3). Raw editor + validate + preview-scan;
+        structured `[observe]` view is read-only.
+        - **R7** `ekos config validate --json` — `{ok, errors, warnings}`; errors from
+          `deny_unknown_fields`/TOML syntax, warnings = observe-focused (ignore-pattern-looks-like-
+          a-path — matched by dir NAME not glob; observe-path-missing; observe-empty).
+        - **R8** `ekos config preview-scan --json` — walks what `build` would observe (same
+          `walkdir`+`filter_entry`), counts files + `by_extension` + `ignored_dir_hits`
+          (`dirs_skipped: 0` = the pattern matched nothing). Reuses `source_fingerprint`'s walk.
+        - **Console**: `config_io.py` (tomlkit read/validate/`.bak` write/observe-diff);
+          `routes/config.py` — `GET`/`PUT`/`POST validate`/`POST preview-scan`. `PUT` that narrows
+          `paths`/`ignore-patterns` returns an `append_only_warning` (devlog 43 — future builds
+          only, wipe+rebuild is the only remedy, a Phase 3 job).
+        - **UI**: `/w/:id/config` — textarea editor + Validate + Preview-scan + Save (disabled
+          until validate passes) + read-only observe summary.
+      - [ ] **Next increments (0131+):** Phase 3 (command allowlist + job runner + per-workspace
+        mutex + SSE logs + the read/write role split), Phase 4 (APScheduler), Phases 5–6 (graph
+        v1/v2 — `react-force-graph-3d`, LOD, impact mode), Phase 7 (hardening). Deferred within R1:
         `--as-of` graph export (the `all_objects_at` primitive exists, scope doesn't), true
         streaming ndjson, the distributed `evidence_count` RPC.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
