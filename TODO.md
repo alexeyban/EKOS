@@ -4429,10 +4429,18 @@ are excluded — see the full exclusion list in the planning history if needed.
         (the only Phase 3 change). `routes/schedules.py` — `GET` (read) / `POST` / `PATCH` /
         `DELETE` / `POST /{id}/run-now` (write). UI `/schedules` page (write-role only). 68/68
         pytest.
-      - [ ] **Next increments (0133+):** Phases 5–6 (graph v1/v2 — `react-force-graph-3d`, LOD,
-        impact mode), Phase 7 (hardening). Deferred within R1: `--as-of` graph export (the
-        `all_objects_at` primitive exists, scope doesn't), true streaming ndjson, the distributed
-        `evidence_count` RPC.
+      - [~] **RFC 0133 — Phase 5: graph view (LOD 0/1)** (`ekos/docs/rfcs/0133-web-console-phase-5.md`,
+        Accepted 2026-09-03). **Locked decisions:** 2D (`react-force-graph-2d`), not the 3D build
+        RFC 0127 §9.2 named; scope = LOD 0 (aggregate super-nodes) + LOD 1 (expand one kind) +
+        kind/rel-kind filters + search-with-fly-to + an object panel showing `ekos_state` +
+        resolved evidence. Neighbourhood isolation, impact-mode trace, server-side ForceAtlas2,
+        glTF/PNG export → Phase 6. **API:** one new endpoint `GET /workspaces/{id}/objects/{id}`
+        (proxies `ekos_state`) + `include_properties` passthrough on `/graph`. Graph libs
+        lazy-loaded so the entry bundle is unchanged.
+      - [ ] **Next increments (0134+):** Phase 6 (graph v2 — neighbourhood isolation, impact mode,
+        server-side layout, export), Phase 7 (hardening). Deferred within R1: `--as-of` graph
+        export (the `all_objects_at` primitive exists, scope doesn't), true streaming ndjson, the
+        distributed `evidence_count` RPC.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
