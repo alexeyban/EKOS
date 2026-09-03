@@ -13,13 +13,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from . import _proc, models
 from .commands import BY_NAME, Command
 from .models import Run
 from .settings import Settings
+
+log = logging.getLogger("ekos.console.runner")
+
+OnDone = Callable[[Run], Awaitable[None]]
 
 
 class QueueFull(RuntimeError):
@@ -33,6 +39,8 @@ class JobRunner:
         self._workers: dict[str, asyncio.Task] = {}
         self._running: dict[str, asyncio.subprocess.Process] = {}  # run_id -> live process
         self._cancelled: set[str] = set()
+        self._on_done: dict[str, OnDone] = {}  # run_id -> terminal-status callback (RFC 0132)
+        self._bg: set[asyncio.Task] = set()  # fire-and-forget callback tasks (keep a strong ref)
 
     def start(self) -> None:
         models.sweep_stale_runs()
@@ -48,10 +56,20 @@ class JobRunner:
 
     # ── submission ───────────────────────────────────────────────────────────
 
-    async def submit(self, workspace_id: str, ws_path: str, command: Command, params: dict) -> str:
+    async def submit(
+        self,
+        workspace_id: str,
+        ws_path: str,
+        command: Command,
+        params: dict,
+        *,
+        on_done: OnDone | None = None,
+    ) -> str:
         command.render_argv(params)  # validate params up front → ValueError to the caller
 
         run_id = uuid.uuid4().hex
+        if on_done is not None:
+            self._on_done[run_id] = on_done
         log_path = str(Path(self._settings.runs_dir) / f"{run_id}.log")
         stages = (
             [{"name": s, "status": "pending", "exit_code": None} for s in command.stages]
@@ -78,9 +96,29 @@ class JobRunner:
         try:
             queue.put_nowait((run_id, params))
         except asyncio.QueueFull as exc:
-            models.update_run(run_id, status="failed", exit_code=None)
+            models.update_run(run_id, status="failed", exit_code=None, ended_at=models._now())
+            self._notify_done(run_id)
             raise QueueFull(f"workspace {workspace_id!r} run queue is full") from exc
         return run_id
+
+    def _notify_done(self, run_id: str) -> None:
+        """Fire the run's `on_done` callback (once), off the critical path."""
+        cb = self._on_done.pop(run_id, None)
+        if cb is None:
+            return
+        run = models.get_run(run_id)
+        if run is None:  # pragma: no cover
+            return
+
+        async def _run_cb() -> None:
+            try:
+                await cb(run)
+            except Exception:  # a webhook failure must not take the runner down
+                log.exception("on_done callback failed for run %s", run_id)
+
+        task = asyncio.create_task(_run_cb())
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
 
     async def cancel(self, run_id: str) -> bool:
         self._cancelled.add(run_id)
@@ -92,6 +130,7 @@ class JobRunner:
         run = models.get_run(run_id)
         if run is not None and run.status == "queued":
             models.update_run(run_id, status="cancelled", ended_at=models._now())
+            self._notify_done(run_id)
             return True
         return False
 
@@ -104,6 +143,7 @@ class JobRunner:
             try:
                 if run_id in self._cancelled:
                     models.update_run(run_id, status="cancelled", ended_at=models._now())
+                    self._notify_done(run_id)
                     continue
                 await self._execute(run_id, ws_path, params)
             finally:
@@ -145,6 +185,7 @@ class JobRunner:
             self._cancelled.discard(run_id)
 
         models.update_run(run_id, status=final, ended_at=models._now())
+        self._notify_done(run_id)
 
     async def _run_chain(
         self,

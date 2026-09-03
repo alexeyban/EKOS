@@ -8,6 +8,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Run } from "./pages/Run";
 import { RunDetail } from "./pages/RunDetail";
 import { Runs } from "./pages/Runs";
+import { Schedules } from "./pages/Schedules";
 import { Workspaces } from "./pages/Workspaces";
 import "./index.css";
 
@@ -26,6 +27,7 @@ const router = createBrowserRouter([
       { path: "w/:id/run", element: <Run /> },
       { path: "w/:id/runs", element: <Runs /> },
       { path: "runs/:runId", element: <RunDetail /> },
+      { path: "schedules", element: <Schedules /> },
     ],
   },
 ]);

@@ -780,7 +780,7 @@ export keeps the most-connected core and says so in a `truncated` block rather t
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
 
-### Web console (RFC 0127/0128/0129/0130/0131)
+### Web console (RFC 0127/0128/0129/0130/0131/0132)
 
 `web/` is a browser surface over one or more compiled workspaces — a FastAPI app (`web/api/`) plus
 a Vite + React app (`web/ui/`).
@@ -798,6 +798,10 @@ a Vite + React app (`web/ui/`).
   the first browser mutation, so it brings the **read/write role split**: auth is **OIDC**
   (Authorization Code + PKCE, a claim → the write role) or, when `OIDC_ISSUER` is unset, **two
   static tokens** — `CONSOLE_TOKEN` (read) and `CONSOLE_WRITE_TOKEN` (read + write).
+- **Phase 4** (RFC 0132): scheduled runs. A `Schedule` (workspace + command + cron or interval
+  trigger + a required `notify_url`) fires the same job runner; APScheduler is rebuilt from the
+  SQLite table on start. A non-`succeeded` run POSTs `{schedule_id, run_id, status, …}` to the
+  `notify_url`; the UI shows each schedule's last-run status.
 
 ```bash
 cd ekos && cargo build --release -p ekos && cd ..
@@ -808,8 +812,8 @@ uv --directory web/api run uvicorn --factory app.main:create_app --port 8000 &
 cd web/ui && npm install && npm run dev        # http://localhost:5173 — sign in with a token
 ```
 
-`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). The scheduler
-(Phase 4) and graph views (Phases 5–6) are still to come, each authored just-in-time.
+`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). The graph views
+(Phases 5–6) and a hardening pass (Phase 7) are still to come, each authored just-in-time.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 
