@@ -2,13 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { GLink, GNode } from "./graph-shared";
-import { colorFor } from "./graph-shared";
+import { colorFor, type GLink, type GNode } from "./graph-shared";
 import { ObjectPanel } from "./ObjectPanel";
 
-const GraphCanvas = lazy(() =>
-  import("./GraphCanvas").then((m) => ({ default: m.GraphCanvas })),
-);
+const GraphCanvas = lazy(() => import("./GraphCanvas").then((m) => ({ default: m.GraphCanvas })));
 
 interface GraphOut {
   level: "aggregate" | "object";
@@ -21,22 +18,27 @@ interface GraphOut {
 }
 
 const DEFAULT_OFF_RELS = ["CoupledWith", "FeedsInto"];
+const ALL_RELS = ["Calls", "Contains", "CoupledWith", "DependsOn", "References", "SameAs"];
+const OBJECT_BUDGET = 800;
 
 export function Graph() {
   const { id = "" } = useParams();
 
-  const [expandedKind, setExpandedKind] = useState<string | null>(null);
+  // null = overview (aggregate). Otherwise: object level, focused on this kind (others dimmed).
+  const [focusKind, setFocusKind] = useState<string | null>(null);
   const [excludedRels, setExcludedRels] = useState<Set<string>>(new Set(DEFAULT_OFF_RELS));
-  const [minDegree, setMinDegree] = useState(0);
+  const [minDegree, setMinDegree] = useState(2);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [fullscreen, setFullscreen] = useState(false);
+
+  const expanded = focusKind !== null;
 
   const params = new URLSearchParams();
-  if (expandedKind) {
+  if (expanded) {
     params.set("level", "object");
-    params.set("kind", expandedKind);
-    params.set("max_nodes", "500");
+    params.set("max_nodes", String(OBJECT_BUDGET));
     params.set("min_degree", String(minDegree));
   } else {
     params.set("level", "aggregate");
@@ -52,15 +54,16 @@ export function Graph() {
 
   const search = useQuery({
     queryKey: ["gsearch", id, q],
-    queryFn: () => api<{ matches: { id: string; name: string }[] }>(
-      `/workspaces/${id}/search?q=${encodeURIComponent(q)}&limit=15`,
-    ),
+    queryFn: () =>
+      api<{ matches: { id: string; name: string }[] }>(
+        `/workspaces/${id}/search?q=${encodeURIComponent(q)}&limit=15`,
+      ),
     enabled: q.trim().length > 1,
   });
 
-  const { nodes, links, relKinds } = useMemo(() => {
+  const { nodes, links } = useMemo(() => {
     const g = graph.data;
-    if (!g) return { nodes: [] as GNode[], links: [] as GLink[], relKinds: [] as string[] };
+    if (!g) return { nodes: [] as GNode[], links: [] as GLink[] };
     const isAgg = g.level === "aggregate";
     const nodes: GNode[] = g.nodes.map((n) => ({
       id: n.id,
@@ -78,48 +81,60 @@ export function Graph() {
       relKind: g.rel_kind_index[e.k ?? 0] ?? "?",
       weight: e.w ?? 1,
     }));
-    return { nodes, links, relKinds: g.rel_kind_index };
+    return { nodes, links };
   }, [graph.data]);
 
   const gotoObject = (oid: string) => {
     setSelectedId(oid);
     setFocusId(oid);
-    if (!nodes.some((n) => n.id === oid)) {
-      // not in the current view — expand its kind first (best effort: we don't know the kind
-      // without a lookup, so open the panel and let the user expand).
-    }
   };
 
+  const toggleRel = (rk: string, on: boolean) =>
+    setExcludedRels((s) => {
+      const n = new Set(s);
+      if (on) n.delete(rk);
+      else n.add(rk);
+      return n;
+    });
+
+  const overviewNodes = graph.data && !expanded ? [...graph.data.nodes] : [];
+  overviewNodes.sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
+
   return (
-    <>
+    <div className={fullscreen ? "graph-page fs" : "graph-page"}>
       <p className="crumbs">
         <Link to={`/w/${id}`} className="linkish">
           ← dashboard
         </Link>
-        {expandedKind && (
-          <button className="linkish" onClick={() => setExpandedKind(null)}>
-            ↑ back to overview
+        <span>
+          {expanded && (
+            <button className="linkish" onClick={() => setFocusKind(null)}>
+              ↑ overview
+            </button>
+          )}{" "}
+          <button className="linkish" onClick={() => setFullscreen((f) => !f)}>
+            {fullscreen ? "exit fullscreen" : "⛶ fullscreen"}
           </button>
-        )}
+        </span>
       </p>
 
       <div className="graph-layout">
         <aside className="graph-side">
-          <strong>{expandedKind ? `${expandedKind} objects` : "Overview — by kind"}</strong>
+          <strong>{expanded ? `Objects · focus: ${focusKind}` : "Overview — by kind"}</strong>
           {graph.data?.truncated?.nodes && (
             <p className="warn-line">
               showing the {graph.data.truncated.node_limit} most-connected of{" "}
-              {graph.data.counts.objects_after_filter ?? "?"}
+              {graph.data.counts.objects_after_filter ?? "?"} — raise min-degree to thin it
             </p>
           )}
 
-          {expandedKind && (
+          {expanded && (
             <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
-              min degree {minDegree}
+              min degree: {minDegree}
               <input
                 type="range"
                 min={0}
-                max={20}
+                max={15}
                 value={minDegree}
                 onChange={(e) => setMinDegree(Number(e.target.value))}
                 style={{ width: "100%" }}
@@ -130,22 +145,18 @@ export function Graph() {
           <p className="muted" style={{ marginTop: "0.75rem" }}>
             relationship kinds
           </p>
-          {relKinds.map((rk) => (
-            <label key={rk} className="flt">
-              <input
-                type="checkbox"
-                checked={!excludedRels.has(rk)}
-                onChange={(e) =>
-                  setExcludedRels((s) => {
-                    const n = new Set(s);
-                    e.target.checked ? n.delete(rk) : n.add(rk);
-                    return n;
-                  })
-                }
-              />{" "}
-              {rk}
-            </label>
-          ))}
+          {(graph.data && graph.data.rel_kind_index.length ? graph.data.rel_kind_index : ALL_RELS).map(
+            (rk) => (
+              <label key={rk} className="flt">
+                <input
+                  type="checkbox"
+                  checked={!excludedRels.has(rk)}
+                  onChange={(e) => toggleRel(rk, e.target.checked)}
+                />{" "}
+                {rk}
+              </label>
+            ),
+          )}
 
           <p className="muted" style={{ marginTop: "0.75rem" }}>
             search
@@ -166,29 +177,35 @@ export function Graph() {
             ))}
           </ul>
 
-          {!expandedKind && graph.data && (
-            <>
-              <p className="muted" style={{ marginTop: "0.75rem" }}>
-                click a bubble to expand
-              </p>
-              <ul className="kinds">
-                {[...graph.data.nodes]
-                  .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
-                  .map((n) => (
-                    <li key={n.id}>
-                      <button
-                        className="linkish"
-                        onClick={() => setExpandedKind(n.n ?? null)}
-                        style={{ color: colorFor(n.k ?? 0) }}
-                      >
-                        {n.n}
-                      </button>{" "}
-                      <span className="muted">{n.count}</span>
-                    </li>
-                  ))}
-              </ul>
-            </>
-          )}
+          <p className="muted" style={{ marginTop: "0.75rem" }}>
+            {expanded ? "focus a kind" : "click a bubble (or a name) to drill in"}
+          </p>
+          <ul className="kinds">
+            {overviewNodes.map((n) => (
+              <li key={n.id}>
+                <button
+                  className="linkish"
+                  onClick={() => setFocusKind(n.n ?? null)}
+                  style={{ color: colorFor(n.k ?? 0) }}
+                >
+                  {n.n}
+                </button>{" "}
+                <span className="muted">{n.count}</span>
+              </li>
+            ))}
+            {expanded &&
+              [...new Set(nodes.map((n) => n.kind))].sort().map((k) => (
+                <li key={k}>
+                  <button
+                    className="linkish"
+                    onClick={() => setFocusKind(k)}
+                    style={{ fontWeight: k === focusKind ? 700 : 400 }}
+                  >
+                    {k}
+                  </button>
+                </li>
+              ))}
+          </ul>
         </aside>
 
         <div className="graph-canvas">
@@ -201,8 +218,9 @@ export function Graph() {
                 links={links}
                 focusId={focusId}
                 selectedId={selectedId}
+                dimKind={expanded ? focusKind : null}
                 onNodeClick={(n) => {
-                  if (n.isAggregate) setExpandedKind(n.label);
+                  if (n.isAggregate) setFocusKind(n.label);
                   else {
                     setSelectedId(n.id);
                     setFocusId(n.id);
@@ -222,6 +240,6 @@ export function Graph() {
           />
         )}
       </div>
-    </>
+    </div>
   );
 }

@@ -312,27 +312,90 @@ header .chip {
 }
 
 /* ── Graph view ── */
+.graph-page.fs {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--ground);
+  padding: 0.6rem 1rem;
+  overflow: auto;
+}
 .graph-layout {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 230px 1fr;
   gap: 1rem;
-  height: calc(100vh - 160px);
+  height: calc(100vh - 150px);
+  min-height: 480px;
+}
+.graph-page.fs .graph-layout {
+  height: calc(100vh - 60px);
 }
 .graph-layout:has(.obj-panel) {
-  grid-template-columns: 220px 1fr 320px;
+  grid-template-columns: 230px 1fr 340px;
 }
 .graph-side {
   overflow: auto;
   font-size: 0.85rem;
+  padding-right: 0.25rem;
 }
 .graph-canvas {
+  position: relative;
   border: 1px solid var(--rule);
   border-radius: 12px;
   overflow: hidden;
   background: #0b0a12;
+  min-width: 0;
 }
 .graph-canvas > p {
   padding: 1rem;
+}
+.gc-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.gc-nav {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+.gc-nav button,
+.gc-pad button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: rgba(20, 18, 29, 0.9);
+  color: #d6d3e6;
+  cursor: pointer;
+}
+.gc-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 30px);
+  grid-template-rows: repeat(3, 30px);
+  gap: 3px;
+}
+.gc-pad button:nth-child(1) {
+  grid-area: 1 / 2;
+}
+.gc-pad button:nth-child(2) {
+  grid-area: 2 / 1;
+}
+.gc-pad button:nth-child(3) {
+  grid-area: 2 / 2;
+}
+.gc-pad button:nth-child(4) {
+  grid-area: 2 / 3;
+}
+.gc-pad button:nth-child(5) {
+  grid-area: 3 / 2;
 }
 .flt {
   display: block;
