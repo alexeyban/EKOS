@@ -4420,10 +4420,18 @@ are excluded — see the full exclusion list in the planning history if needed.
         - **models.Run** table; **routes/{auth,commands,runs}.py**; SSE `/api/runs/{id}/logs`.
         - **UI** — auth gate (Sign in / write-token field), `/w/:id/run` command cards,
           `/runs/:id` streaming log + cancel, `/w/:id/runs` history.
-      - [ ] **Next increments (0132+):** Phase 4 (APScheduler), Phases 5–6 (graph v1/v2 —
-        `react-force-graph-3d`, LOD, impact mode), Phase 7 (hardening). Deferred within R1:
-        `--as-of` graph export (the `all_objects_at` primitive exists, scope doesn't), true
-        streaming ndjson, the distributed `evidence_count` RPC.
+      - [~] **RFC 0132 — Phase 4: scheduled runs** (`ekos/docs/rfcs/0132-web-console-phase-4.md`,
+        Accepted 2026-09-03). **Locked decisions:** a SQLite `Schedule` row is the source of truth
+        (APScheduler runs in-memory, rebuilt from the table on start — no pickle job store); every
+        schedule has a **required `notify_url`** POSTed on a failed run, plus a UI last-run status.
+        `ConsoleScheduler` (APScheduler 3.x `AsyncIOScheduler`) — cron (`CronTrigger.from_crontab`,
+        UTC) or interval triggers, both validated at create. `JobRunner.submit` gains an `on_done`
+        callback (the only Phase 3 change). `routes/schedules.py` — `GET`/`POST`/`PATCH`/`DELETE`
+        + `POST /{id}/run-now`, write-gated. UI `/schedules` page.
+      - [ ] **Next increments (0133+):** Phases 5–6 (graph v1/v2 — `react-force-graph-3d`, LOD,
+        impact mode), Phase 7 (hardening). Deferred within R1: `--as-of` graph export (the
+        `all_objects_at` primitive exists, scope doesn't), true streaming ndjson, the distributed
+        `evidence_count` RPC.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
