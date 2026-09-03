@@ -97,19 +97,28 @@ impl ScanContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fingerprint(pub String);
 
-/// Compute a `Fingerprint` for the source tree rooted at `ctx.workspace_root`.
-pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
-    use sha2::{Digest, Sha256};
-
-    let mut entries: Vec<(String, u64, u128)> = Vec::new();
-
+/// Walk the source tree under `ctx.workspace_root` the way every connector does: `walkdir` with
+/// `filter_entry` pruning any **directory whose name** matches an `ignore_patterns` entry (name
+/// equality — not a glob, not a path prefix), plus a per-component `is_ignored` check on files.
+///
+/// `on_file(rel_path, metadata)` fires for each surviving file; `on_pruned_dir(dir_name)` fires
+/// once per directory pruned by an ignore pattern. Both are `FnMut` so the caller accumulates.
+/// This is the single source of "what would `ekos build` observe" — `source_fingerprint` and
+/// `ekos config preview-scan` (RFC 0130) both go through it so they cannot drift.
+pub fn walk_observed(
+    ctx: &ScanContext,
+    mut on_file: impl FnMut(&str, &std::fs::Metadata),
+    mut on_pruned_dir: impl FnMut(&str),
+) {
     for entry in walkdir::WalkDir::new(&ctx.workspace_root)
         .into_iter()
         .filter_entry(|e| {
             if e.file_type().is_dir()
                 && let Some(name) = e.file_name().to_str()
+                && ctx.ignore_patterns.iter().any(|p| name == p.as_str())
             {
-                return !ctx.ignore_patterns.iter().any(|p| name == p.as_str());
+                on_pruned_dir(name);
+                return false;
             }
             true
         })
@@ -126,14 +135,29 @@ pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
-        let mtime_nanos = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        entries.push((rel, meta.len(), mtime_nanos));
+        on_file(&rel, &meta);
     }
+}
+
+/// Compute a `Fingerprint` for the source tree rooted at `ctx.workspace_root`.
+pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
+    use sha2::{Digest, Sha256};
+
+    let mut entries: Vec<(String, u64, u128)> = Vec::new();
+
+    walk_observed(
+        ctx,
+        |rel, meta| {
+            let mtime_nanos = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            entries.push((rel.to_string(), meta.len(), mtime_nanos));
+        },
+        |_| {},
+    );
 
     entries.sort();
 

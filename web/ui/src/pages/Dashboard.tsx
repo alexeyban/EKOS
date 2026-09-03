@@ -36,9 +36,12 @@ export function Dashboard() {
 
   return (
     <>
-      <p>
+      <p className="crumbs">
         <Link to="/" className="linkish">
           ← workspaces
+        </Link>
+        <Link to={`/w/${id}/config`} className="linkish">
+          edit ekos.toml →
         </Link>
       </p>
 

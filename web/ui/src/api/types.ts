@@ -78,3 +78,49 @@ export interface QueryStats {
   p50_ms: number;
   p95_ms: number;
 }
+
+export interface ConfigOut {
+  raw: string;
+  observe: { paths: string[]; ignore_patterns: string[] };
+}
+
+export interface Finding {
+  code: string;
+  detail: string;
+}
+
+export interface ValidateResult {
+  schema_version: number;
+  ok: boolean;
+  errors: Finding[];
+  warnings: Finding[];
+}
+
+export interface ExtCount {
+  ext: string;
+  files: number;
+  bytes: number;
+}
+
+export interface PreviewScan {
+  schema_version: number;
+  roots: string[];
+  total_files: number;
+  total_bytes: number;
+  truncated: boolean;
+  by_extension: ExtCount[];
+  ignored_dir_hits: { pattern: string; dirs_skipped: number }[];
+  elapsed_ms: number;
+}
+
+export interface WriteResult {
+  written: boolean;
+  observe_delta: {
+    added_paths: string[];
+    removed_paths: string[];
+    added_patterns: string[];
+    removed_patterns: string[];
+  };
+  warnings: Finding[];
+  append_only_warning: string | null;
+}
