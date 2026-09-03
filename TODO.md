@@ -4429,14 +4429,13 @@ are excluded — see the full exclusion list in the planning history if needed.
         (the only Phase 3 change). `routes/schedules.py` — `GET` (read) / `POST` / `PATCH` /
         `DELETE` / `POST /{id}/run-now` (write). UI `/schedules` page (write-role only). 68/68
         pytest.
-      - [~] **RFC 0133 — Phase 5: graph view (LOD 0/1)** (`ekos/docs/rfcs/0133-web-console-phase-5.md`,
-        Accepted 2026-09-03). **Locked decisions:** 2D (`react-force-graph-2d`), not the 3D build
-        RFC 0127 §9.2 named; scope = LOD 0 (aggregate super-nodes) + LOD 1 (expand one kind) +
-        kind/rel-kind filters + search-with-fly-to + an object panel showing `ekos_state` +
-        resolved evidence. Neighbourhood isolation, impact-mode trace, server-side ForceAtlas2,
-        glTF/PNG export → Phase 6. **API:** one new endpoint `GET /workspaces/{id}/objects/{id}`
-        (proxies `ekos_state`) + `include_properties` passthrough on `/graph`. Graph libs
-        lazy-loaded so the entry bundle is unchanged.
+      - [x] **RFC 0133 — Phase 5: graph view (LOD 0/1), `devlog_156`** (`ekos/docs/rfcs/0133-web-console-phase-5.md`,
+        Accepted 2026-09-03). 2D `react-force-graph-2d` (revises 0127 §9.2's 3D). LOD 0 aggregate
+        super-nodes → click to expand one kind (LOD 1, 500-node budget); kind/rel-kind filter
+        toggles (`CoupledWith`/`FeedsInto` off by default); `min_degree` slider; search-with-fly-to;
+        object panel = `ekos_state` (properties, relationships, one evidence row per claim). API:
+        `GET /workspaces/{id}/objects/{id}` (proxies `ekos_state`) + `include_properties` on
+        `/graph`. `GraphCanvas` is a lazy chunk (177 KB) — entry bundle unchanged. 72/72 pytest.
       - [ ] **Next increments (0134+):** Phase 6 (graph v2 — neighbourhood isolation, impact mode,
         server-side layout, export), Phase 7 (hardening). Deferred within R1: `--as-of` graph
         export (the `all_objects_at` primitive exists, scope doesn't), true streaming ndjson, the
