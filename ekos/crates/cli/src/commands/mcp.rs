@@ -150,16 +150,60 @@ fn store_fingerprint(root: &Path) -> Option<SystemTime> {
 
 /// Entry point for `ekos mcp serve`. `tcp`, when given, runs the RFC 0115 TCP transport at that
 /// address instead; `None` keeps the original RFC 0013 stdio-only behavior completely unchanged.
-pub fn run(config: &EkosConfig, workspace: &Path, tcp: Option<&str>) -> Result<()> {
+pub fn run(
+    config: &EkosConfig,
+    workspace: &Path,
+    tcp: Option<&str>,
+    token: Option<String>,
+) -> Result<()> {
     match tcp {
-        Some(addr) => serve_tcp(config, workspace, addr),
+        Some(addr) => serve_tcp(config, workspace, addr, token),
         None => {
+            // stdio is a private pipe owned by the spawning host — never gated (RFC 0128 §1.1).
             let stdin = std::io::stdin();
             let stdout = std::io::stdout();
             let mut cache = StoreCache::new();
-            serve_messages(config, workspace, &mut cache, stdin.lock(), stdout.lock())
+            serve_messages(
+                config,
+                workspace,
+                &mut cache,
+                stdin.lock(),
+                stdout.lock(),
+                None,
+            )
         }
     }
+}
+
+/// Constant-time byte-slice equality. Hand-rolled (RFC 0128 §1.2) rather than promoting the
+/// transitive `subtle` dependency. The length check leaks the token length, which is acceptable
+/// for this threat model — a bearer token over a plaintext socket defends against a casual local
+/// process, not a network attacker.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// True iff `line` is a JSON-RPC `initialize` request whose `params._meta.token` matches
+/// `expected` (RFC 0128 §1.2). `_meta` is the MCP-standard slot for transport metadata.
+fn authorize_initialize(line: &str, expected: &str) -> bool {
+    let Ok(msg) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    if msg.get("method").and_then(Value::as_str) != Some("initialize") {
+        return false;
+    }
+    let token = msg
+        .pointer("/params/_meta/token")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    ct_eq(token.as_bytes(), expected.as_bytes())
 }
 
 /// The shared dispatch loop (RFC 0115): reads one JSON-RPC message per line from `reader`, writes
@@ -172,8 +216,44 @@ fn serve_messages(
     cache: &mut StoreCache,
     reader: impl BufRead,
     mut writer: impl Write,
+    require_token: Option<&str>,
 ) -> Result<()> {
-    for line in reader.lines() {
+    let mut lines = reader.lines();
+
+    if let Some(expected) = require_token {
+        // RFC 0128 §1.2: the first line on an authenticated connection must be an `initialize`
+        // request carrying a matching `params._meta.token`. Anything else gets one JSON-RPC error
+        // line and the connection closes — no tool is ever reachable unauthenticated.
+        let first = loop {
+            match lines.next() {
+                Some(line) => {
+                    let line = line?;
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    break line;
+                }
+                None => return Ok(()), // client hung up before sending anything
+            }
+        };
+        if !authorize_initialize(&first, expected) {
+            writeln!(
+                writer,
+                "{}",
+                error_response(Value::Null, -32001, "unauthorized")
+            )?;
+            writer.flush()?;
+            return Ok(());
+        }
+        // Authorized — answer this `initialize` normally, then fall through to the loop.
+        let msg: Value = serde_json::from_str(&first).unwrap_or(Value::Null);
+        let id = msg.get("id").cloned().unwrap_or(Value::Null);
+        let params = msg.get("params").cloned().unwrap_or(Value::Null);
+        writeln!(writer, "{}", ok_response(id, initialize_result(&params)))?;
+        writer.flush()?;
+    }
+
+    for line in lines {
         let line = line?;
         if line.trim().is_empty() {
             continue;
@@ -198,20 +278,27 @@ fn serve_messages(
 /// fast, RFC 0097), not a correctness compromise; sharing one cache safely is a real, separately
 /// scoped follow-on.
 ///
-/// **No authentication of any kind** — anyone who can reach `addr` gets the same read surface
-/// stdio gives a spawning parent process, plus the two write-capable tools. Bind `127.0.0.1` or a
-/// trusted network only; see the RFC's Security posture section.
-fn serve_tcp(config: &EkosConfig, workspace: &Path, addr: &str) -> Result<()> {
+/// Authentication is **opt-in** (RFC 0128 §1): with no `token`, anyone who can reach `addr` gets
+/// the same read surface stdio gives a spawning parent process, plus the two write-capable tools
+/// (RFC 0115 — bind `127.0.0.1` or a trusted network only). With a `token`, every connection's
+/// first line must be an `initialize` request carrying a matching `params._meta.token` or it is
+/// closed with a `-32001` error before any tool is reachable.
+fn serve_tcp(
+    config: &EkosConfig,
+    workspace: &Path,
+    addr: &str,
+    token: Option<String>,
+) -> Result<()> {
     let listener = std::net::TcpListener::bind(addr)
         .with_context(|| format!("binding MCP TCP listener on {addr}"))?;
     let bound = listener.local_addr()?;
-    tracing::info!(
-        %bound,
-        "MCP TCP server listening — RFC 0115, no authentication, trusted network only"
-    );
-    eprintln!(
-        "ekos mcp serve: listening on {bound} (TCP, unauthenticated — trusted network/localhost only)"
-    );
+    let auth_note = if token.is_some() {
+        "bearer-token auth required (RFC 0128)"
+    } else {
+        "unauthenticated — trusted network/localhost only"
+    };
+    tracing::info!(%bound, "MCP TCP server listening — RFC 0115, {auth_note}");
+    eprintln!("ekos mcp serve: listening on {bound} (TCP, {auth_note})");
 
     for stream in listener.incoming() {
         let stream = match stream {
@@ -224,6 +311,7 @@ fn serve_tcp(config: &EkosConfig, workspace: &Path, addr: &str) -> Result<()> {
         let peer = stream.peer_addr().ok();
         let config = config.clone();
         let workspace = workspace.to_path_buf();
+        let token = token.clone();
         std::thread::spawn(move || {
             let reader = match stream.try_clone() {
                 Ok(s) => std::io::BufReader::new(s),
@@ -233,7 +321,14 @@ fn serve_tcp(config: &EkosConfig, workspace: &Path, addr: &str) -> Result<()> {
                 }
             };
             let mut cache = StoreCache::new();
-            if let Err(e) = serve_messages(&config, &workspace, &mut cache, reader, &stream) {
+            if let Err(e) = serve_messages(
+                &config,
+                &workspace,
+                &mut cache,
+                reader,
+                &stream,
+                token.as_deref(),
+            ) {
                 tracing::debug!(%e, ?peer, "mcp tcp: connection ended");
             }
         });
@@ -2961,6 +3056,7 @@ mod tests {
             &mut cache,
             input.as_bytes(),
             &mut output,
+            None,
         )
         .unwrap();
 
@@ -2974,6 +3070,154 @@ mod tests {
         assert_eq!(parse(lines[0])["result"]["serverInfo"]["name"], "ekos");
         assert_eq!(parse(lines[1])["id"], 2);
         assert!(parse(lines[1])["result"]["tools"].is_array());
+    }
+
+    // ── RFC 0128 R4: optional bearer-token auth on the TCP transport ──────────
+
+    /// Drive `serve_messages` with `require_token` set and a script, returning the response lines.
+    fn serve_authed(require_token: &str, script: &str) -> Vec<String> {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cache = StoreCache::new();
+        let mut output = Vec::new();
+        serve_messages(
+            &config,
+            tmp.path(),
+            &mut cache,
+            script.as_bytes(),
+            &mut output,
+            Some(require_token),
+        )
+        .unwrap();
+        std::str::from_utf8(&output)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn ct_eq_is_length_and_content_sensitive() {
+        assert!(ct_eq(b"secret", b"secret"));
+        assert!(!ct_eq(b"secret", b"secreT"));
+        assert!(!ct_eq(b"secret", b"secret-longer"));
+        assert!(!ct_eq(b"", b"x"));
+        assert!(ct_eq(b"", b""));
+    }
+
+    #[test]
+    fn authed_connection_proceeds_when_the_initialize_token_matches() {
+        let init = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "protocolVersion": "2025-03-26", "_meta": { "token": "s3cret" } }
+        });
+        let lines = serve_authed(
+            "s3cret",
+            &format!("{init}\n{}\n", req(2, "tools/list", json!({}))),
+        );
+        assert_eq!(lines.len(), 2);
+        assert_eq!(parse(&lines[0])["id"], 1);
+        assert_eq!(parse(&lines[0])["result"]["serverInfo"]["name"], "ekos");
+        assert_eq!(parse(&lines[1])["id"], 2);
+        assert!(parse(&lines[1])["result"]["tools"].is_array());
+    }
+
+    #[test]
+    fn authed_connection_is_rejected_when_the_token_is_wrong_or_absent() {
+        for params in [
+            json!({ "_meta": { "token": "wrong" } }),
+            json!({ "_meta": {} }),
+            json!({}),
+        ] {
+            let init =
+                json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params });
+            let lines = serve_authed(
+                "s3cret",
+                &format!("{init}\n{}\n", req(2, "tools/list", json!({}))),
+            );
+            assert_eq!(lines.len(), 1, "only the error line, then the stream ends");
+            let err = parse(&lines[0]);
+            assert_eq!(err["error"]["code"], -32001);
+            assert_eq!(err["error"]["message"], "unauthorized");
+        }
+    }
+
+    #[test]
+    fn authed_connection_is_rejected_when_the_first_message_is_not_initialize() {
+        let lines = serve_authed(
+            "s3cret",
+            &format!(
+                "{}\n{}\n",
+                req(1, "tools/list", json!({})),
+                req(2, "tools/list", json!({}))
+            ),
+        );
+        assert_eq!(lines.len(), 1);
+        assert_eq!(parse(&lines[0])["error"]["code"], -32001);
+    }
+
+    /// A real socket: a token-authed `serve_tcp` rejects a bad token and serves a good one.
+    #[test]
+    fn tcp_transport_enforces_the_bearer_token() {
+        use std::io::{BufRead as _, BufReader};
+        use std::net::TcpStream;
+
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().to_path_buf();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let config = config.clone();
+                let workspace = workspace.clone();
+                std::thread::spawn(move || {
+                    let reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut cache = StoreCache::new();
+                    let _ = serve_messages(
+                        &config,
+                        &workspace,
+                        &mut cache,
+                        reader,
+                        &stream,
+                        Some("letmein"),
+                    );
+                });
+            }
+        });
+
+        // Wrong token → one error line, connection closes.
+        let mut bad = TcpStream::connect(addr).unwrap();
+        writeln!(
+            bad,
+            "{}",
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": { "_meta": { "token": "nope" } } })
+        )
+        .unwrap();
+        let mut line = String::new();
+        BufReader::new(&mut bad).read_line(&mut line).unwrap();
+        assert_eq!(parse(&line)["error"]["code"], -32001);
+
+        // Right token → initialize ok, then a real tool call works.
+        let mut good = TcpStream::connect(addr).unwrap();
+        writeln!(
+            good,
+            "{}",
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": { "_meta": { "token": "letmein" } } })
+        )
+        .unwrap();
+        writeln!(good, "{}", req(2, "tools/list", json!({}))).unwrap();
+        let mut reader = BufReader::new(&mut good);
+        let mut l1 = String::new();
+        reader.read_line(&mut l1).unwrap();
+        let mut l2 = String::new();
+        reader.read_line(&mut l2).unwrap();
+        assert_eq!(parse(&l1)["id"], 1);
+        assert!(parse(&l2)["result"]["tools"].is_array());
     }
 
     /// RFC 0115: two real concurrent TCP clients against one `serve_tcp` listener each get their
@@ -3001,7 +3245,7 @@ mod tests {
                 std::thread::spawn(move || {
                     let reader = BufReader::new(stream.try_clone().unwrap());
                     let mut cache = StoreCache::new();
-                    let _ = serve_messages(&config, &workspace, &mut cache, reader, &stream);
+                    let _ = serve_messages(&config, &workspace, &mut cache, reader, &stream, None);
                 });
             }
         });

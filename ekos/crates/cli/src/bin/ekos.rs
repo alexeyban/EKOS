@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -417,9 +417,14 @@ enum McpCommands {
         #[arg(long, value_name = "DIR")]
         workspace: Option<PathBuf>,
         /// Also/instead serve over TCP at this address (RFC 0115), e.g. 127.0.0.1:7331 —
-        /// unauthenticated, bind a trusted network/loopback only
+        /// bind a trusted network/loopback only
         #[arg(long, value_name = "ADDR")]
         tcp: Option<String>,
+        /// Require a bearer token on every TCP connection (RFC 0128): the first message must be an
+        /// `initialize` request carrying a matching `params._meta.token`. Read from this file
+        /// (whitespace-trimmed) or, if absent, the `EKOS_MCP_TOKEN` env var. No effect on stdio.
+        #[arg(long, value_name = "FILE")]
+        tcp_token_file: Option<PathBuf>,
     },
 }
 
@@ -628,9 +633,27 @@ async fn main() -> Result<()> {
             BranchCommands::Delete { name } => ekos::commands::branch::delete(&config, &cwd, &name),
         },
         Commands::Mcp { subcommand } => match subcommand {
-            McpCommands::Serve { workspace, tcp } => {
+            McpCommands::Serve {
+                workspace,
+                tcp,
+                tcp_token_file,
+            } => {
                 let workspace = workspace.or(env_workspace).unwrap_or_else(|| cwd.clone());
-                ekos::commands::mcp::run(&config, &workspace, tcp.as_deref())
+                // RFC 0128 §1.1: `--tcp-token-file` wins over `EKOS_MCP_TOKEN`; neither → no auth.
+                let token = match tcp_token_file {
+                    Some(path) => Some(
+                        std::fs::read_to_string(&path)
+                            .with_context(|| {
+                                format!("reading --tcp-token-file {}", path.display())
+                            })?
+                            .trim()
+                            .to_string(),
+                    ),
+                    None => std::env::var("EKOS_MCP_TOKEN")
+                        .ok()
+                        .filter(|t| !t.is_empty()),
+                };
+                ekos::commands::mcp::run(&config, &workspace, tcp.as_deref(), token)
             }
         },
         Commands::Artifact { subcommand } => match subcommand {
