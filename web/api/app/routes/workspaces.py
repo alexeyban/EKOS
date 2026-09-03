@@ -7,12 +7,13 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import models
-from ..deps import get_supervisor, require_console_token
+from ..auth import require_role
+from ..deps import get_supervisor
 from ..schemas import ServerStatus, WorkspaceCreate, WorkspaceOut
 from ..supervisor import McpSupervisor
 
 router = APIRouter(
-    prefix="/workspaces", tags=["workspaces"], dependencies=[Depends(require_console_token)]
+    prefix="/workspaces", tags=["workspaces"], dependencies=[Depends(require_role("read"))]
 )
 
 
@@ -29,7 +30,12 @@ async def list_workspaces(
     return [_out(ws, supervisor) for ws in models.list_workspaces()]
 
 
-@router.post("", response_model=WorkspaceOut, status_code=201)
+@router.post(
+    "",
+    response_model=WorkspaceOut,
+    status_code=201,
+    dependencies=[Depends(require_role("write"))],
+)
 async def register_workspace(
     body: WorkspaceCreate,
     supervisor: McpSupervisor = Depends(get_supervisor),
@@ -51,7 +57,7 @@ async def register_workspace(
     return _out(ws, supervisor)
 
 
-@router.delete("/{workspace_id}", status_code=204)
+@router.delete("/{workspace_id}", status_code=204, dependencies=[Depends(require_role("write"))])
 async def deregister_workspace(
     workspace_id: str,
     supervisor: McpSupervisor = Depends(get_supervisor),

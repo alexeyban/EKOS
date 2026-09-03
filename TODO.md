@@ -4400,13 +4400,13 @@ are excluded — see the full exclusion list in the planning history if needed.
           only, wipe+rebuild is the only remedy, a Phase 3 job).
         - **UI**: `/w/:id/config` — textarea editor + Validate + Preview-scan + Save (disabled
           until validate passes) + read-only observe summary.
-      - [~] **RFC 0131 — Phase 3: command runner + job runner + OIDC auth**
+      - [x] **RFC 0131 — Phase 3: command runner + job runner + OIDC auth, `devlog_154`**
         (`ekos/docs/rfcs/0131-web-console-phase-3.md`, Accepted 2026-09-03). First browser
-        mutation → brings the read/write role split. **Locked decisions:** auth is **OIDC**
-        (Authorization Code + PKCE, `authlib`, signed session cookie, a claim → write role) with a
-        **two-static-token fallback** when `OIDC_ISSUER` is unset (`CONSOLE_TOKEN` = read,
-        `CONSOLE_WRITE_TOKEN` = write) so CI / compose / dev work with no IdP. Run logs render in
-        a plain `<pre>` (ANSI stripped server-side), not xterm.js.
+        mutation → brings the read/write role split. Auth is **OIDC** (Authorization Code + PKCE,
+        `authlib`, signed session cookie, a claim → write role) with a **two-static-token
+        fallback** when `OIDC_ISSUER` is unset (`CONSOLE_TOKEN` = read, `CONSOLE_WRITE_TOKEN` =
+        write). Run logs render in a plain `<pre>` (ANSI stripped server-side), not xterm.js.
+        Console-only, no Rust changes.
         - **auth.py** — `Principal{subject,email,role}`, `/api/auth/{login,callback,logout,me}`,
           `require_role("read"|"write")` (401 unauth, 403 wrong role) replaces `require_console_token`.
         - **commands.py** — the real `COMMAND_ALLOWLIST` (doctor/build/recover/resolve/compile/

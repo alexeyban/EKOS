@@ -26,6 +26,8 @@ def live_client(
     if not (_REPO / ".ekos").is_dir():
         pytest.skip("this repo has no compiled .ekos/ to serve")
     monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_TOKEN", "live-console")
+    monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_WRITE_TOKEN", "live-console")
+    monkeypatch.setenv("EKOS_CONSOLE_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_DB", str(tmp_path / "console.db"))
     monkeypatch.setenv("EKOS_BIN", ekos_bin)
     monkeypatch.setenv("EKOS_CONSOLE_MCP_PORT_BASE", "18200")

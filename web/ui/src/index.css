@@ -269,3 +269,35 @@ ul.scan {
   gap: 0.4rem;
   margin: 0.25rem 0 0.6rem;
 }
+
+/* ── Run pages ── */
+pre.log {
+  max-height: 460px;
+  overflow: auto;
+  margin-top: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  background: #0b0a12;
+  color: #d6d3e6;
+  border-radius: 8px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.param {
+  margin: 0.35rem 0;
+  font-size: 0.87rem;
+}
+.param input[type="text"],
+.param input:not([type]) {
+  width: 100%;
+  margin-top: 0.2rem;
+}
+button.danger-btn {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+header .chip {
+  font-size: 0.7rem;
+}

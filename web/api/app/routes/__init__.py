@@ -1,3 +1,3 @@
-from . import config, graph, meta, stats, workspaces
+from . import auth, commands, config, graph, meta, runs, stats, workspaces
 
-__all__ = ["config", "graph", "meta", "stats", "workspaces"]
+__all__ = ["auth", "commands", "config", "graph", "meta", "runs", "stats", "workspaces"]

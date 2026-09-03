@@ -7,7 +7,16 @@ Every caller passes an argument list; nothing here ever runs a shell.
 from __future__ import annotations
 
 import asyncio
+import re
 import signal
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+
+def strip_ansi(text: str) -> str:
+    return _ANSI.sub("", text)
 
 
 async def spawn(argv: list[str], *, cwd: str | None = None) -> asyncio.subprocess.Process:
@@ -33,3 +42,47 @@ async def terminate(proc: asyncio.subprocess.Process, *, grace: float = 5.0) -> 
     except TimeoutError:
         proc.kill()
         await proc.wait()
+
+
+async def run_streaming(
+    argv: list[str],
+    *,
+    cwd: str,
+    log_path: Path,
+    register: Callable[[asyncio.subprocess.Process], None],
+    on_line: Callable[[str], Awaitable[None]] | None = None,
+    timeout_s: float,
+) -> int:
+    """Run `argv` in `cwd`, merging stdout+stderr, appending each ANSI-stripped line to `log_path`
+    and (optionally) calling `on_line`. `register` is handed the live process so the caller can
+    cancel it. Returns the exit code; a timeout SIGKILLs and returns 124.
+    """
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        cwd=cwd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    register(proc)
+
+    async def pump() -> None:
+        assert proc.stdout is not None
+        with log_path.open("a") as fh:
+            async for raw in proc.stdout:
+                line = strip_ansi(raw.decode(errors="replace").rstrip("\n"))
+                fh.write(line + "\n")
+                fh.flush()
+                if on_line is not None:
+                    await on_line(line)
+
+    try:
+        async with asyncio.timeout(timeout_s):
+            await asyncio.gather(pump(), proc.wait())
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        with log_path.open("a") as fh:
+            fh.write(f"\n[console] killed after {timeout_s}s timeout\n")
+        return 124
+    return proc.returncode or 0

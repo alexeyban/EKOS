@@ -40,9 +40,19 @@ export function Dashboard() {
         <Link to="/" className="linkish">
           ← workspaces
         </Link>
-        <Link to={`/w/${id}/config`} className="linkish">
-          edit ekos.toml →
-        </Link>
+        <span>
+          <Link to={`/w/${id}/run`} className="linkish">
+            run
+          </Link>{" "}
+          ·{" "}
+          <Link to={`/w/${id}/runs`} className="linkish">
+            history
+          </Link>{" "}
+          ·{" "}
+          <Link to={`/w/${id}/config`} className="linkish">
+            ekos.toml
+          </Link>
+        </span>
       </p>
 
       {stats.isError && <p className="err">{String(stats.error)}</p>}

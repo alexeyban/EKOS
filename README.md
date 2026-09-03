@@ -780,43 +780,36 @@ export keeps the most-connected core and says so in a `truncated` block rather t
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
 
-### Web console (RFC 0127/0128/0129)
+### Web console (RFC 0127/0128/0129/0130/0131)
 
-`web/` is a browser surface over one or more compiled workspaces. It is a FastAPI app (`web/api/`)
-that speaks to the read-only Runtime through the MCP server, plus a Vite + React dashboard
-(`web/ui/`). **Phase 1** (RFC 0129) adds a persisted workspace registry, a supervisor that spawns
-and restarts one `ekos mcp serve --tcp` per workspace on its own (no hand-started servers), and a
-statistics dashboard: entry/object/relationship/evidence counts, storage breakdown, objects by
-kind, a cumulative growth timeline, query-log stats, and `doctor` status.
+`web/` is a browser surface over one or more compiled workspaces — a FastAPI app (`web/api/`) plus
+a Vite + React app (`web/ui/`).
 
-**Phase 2** (RFC 0130) adds an `ekos.toml` editor: `GET`/`PUT /config`, `POST /config/validate`,
-`POST /config/preview-scan`. The `PUT` runs `ekos config validate` first, writes an
-`ekos.toml.bak`, and — if you narrowed `[observe] paths` or `ignore-patterns` — returns a warning
-that already-compiled data stays in the append-only ledger (a wipe-and-rebuild is the only remedy;
-that's a Phase 3 job).
-
-Endpoints: `/api/health` (public), `/api/workspaces` (`GET`/`POST`/`DELETE`),
-`/api/workspaces/{id}/{stats,health,stats/timeline,stats/kinds,stats/queries,config,config/validate,config/preview-scan,graph,search}`.
-The stats + config reads shell out to `ekos {status,doctor,ledger timeline,config} --json` through
-a read-only command allowlist; the rest go through the running MCP server. Console requests carry a static
-bearer token (`EKOS_CONSOLE_CONSOLE_TOKEN`) — real users and a read/write role split arrive with
-the Phase 3 job runner.
+- **Phase 1** (RFC 0129): a persisted workspace registry, a supervisor that spawns and restarts
+  one `ekos mcp serve --tcp` per workspace on its own, and a statistics dashboard
+  (entry/object/relationship/evidence counts, storage breakdown, objects by kind, a growth
+  timeline, query-log stats, `doctor`).
+- **Phase 2** (RFC 0130): an `ekos.toml` editor with `validate` + `preview-scan` and the
+  append-only warning when you narrow `[observe]`.
+- **Phase 3** (RFC 0131): run EKOS pipeline commands from the browser and watch them stream. A
+  hardcoded command allowlist (`build`/`recover`/`resolve`/`compile`/`commit`, `pipeline`,
+  `doctor`, `status`, `ekl`, `ledger repair`, `docs generate`, …), a per-workspace job queue
+  (SIGTERM→SIGKILL cancel, chained `pipeline` with per-stage status), and an SSE log tail. This is
+  the first browser mutation, so it brings the **read/write role split**: auth is **OIDC**
+  (Authorization Code + PKCE, a claim → the write role) or, when `OIDC_ISSUER` is unset, **two
+  static tokens** — `CONSOLE_TOKEN` (read) and `CONSOLE_WRITE_TOKEN` (read + write).
 
 ```bash
 cd ekos && cargo build --release -p ekos && cd ..
 EKOS_BIN=$PWD/ekos/target/release/ekos \
-EKOS_CONSOLE_CONSOLE_TOKEN=dev-console \
+EKOS_CONSOLE_CONSOLE_TOKEN=dev-read EKOS_CONSOLE_CONSOLE_WRITE_TOKEN=dev-write \
+EKOS_CONSOLE_SESSION_SECRET=$(openssl rand -hex 16) \
 uv --directory web/api run uvicorn --factory app.main:create_app --port 8000 &
-cd web/ui && npm install && npm run dev        # http://localhost:5173
-
-# then register a workspace from the UI, or:
-curl -XPOST localhost:8000/api/workspaces -H 'Authorization: Bearer dev-console' \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"self","name":"EKOS","path":"'"$PWD"'"}'
+cd web/ui && npm install && npm run dev        # http://localhost:5173 — sign in with a token
 ```
 
-`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). The command runner +
-job runner, scheduler, and graph views are RFC 0127 Phases 3–7, each authored just-in-time.
+`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). The scheduler
+(Phase 4) and graph views (Phases 5–6) are still to come, each authored just-in-time.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 

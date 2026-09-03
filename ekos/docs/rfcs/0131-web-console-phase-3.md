@@ -220,12 +220,26 @@ No new heavy deps (no xterm.js). `EventSource` is built in.
 
 ---
 
-## 9. Open questions
+## 9. Implementation notes (`devlog_154`)
+
+- **The single per-workspace worker serialises *all* commands, not just writes.** A quick `status`
+  queues behind a long `build`. RFC 0104 only requires write serialisation; letting reads run
+  concurrently is a Phase 7 refinement (open question 4).
+- **`EventSource` can't set headers**, so both auth modes land a session cookie (not the Phase 0–2
+  `localStorage` Bearer). Bearer stays accepted in token mode for curl/tests.
+- **Long background tasks can't be tested through the sync `TestClient`** — the loop only runs
+  during a request, so the runner's pipe never drains and the child deadlocks. `test_runner_live`
+  uses `httpx.AsyncClient(ASGITransport)` + `app.router.lifespan_context`.
+- `EKOS_CONSOLE_SESSION_SECRET` must be stable across restarts (authlib stores PKCE/state there).
+
+## 10. Open questions
 
 1. **Per-workspace queue depth.** Default 16; a deployment that batches many `ekl` runs might want
-   more. A config knob if anyone hits it.
+   more. `EKOS_CONSOLE_RUN_QUEUE_DEPTH` exists; no UI for it.
 2. **Log retention.** `.ekos-web/runs/*.log` grows unbounded. A max-age / max-count sweep on
    startup is a one-liner when it matters; not in this RFC.
 3. **`init` from the console.** Deferred — a workspace has to exist (`ekos.toml` + `.ekos/`) to be
    registered, and `init` on an arbitrary browser-supplied path is exactly the traversal risk
    §8.4 rule 3 guards against. A "scaffold a new workspace" flow needs its own design.
+4. **Concurrent reads.** Splitting the per-workspace worker into a write-serialising lock + a
+   concurrent read pool (RFC 0104 only locks writes) — Phase 7.

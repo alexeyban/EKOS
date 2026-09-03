@@ -1,50 +1,46 @@
-// Minimal fetch wrapper. The console token lives in localStorage for the skeleton; Phase 3
-// replaces this with real users + a read/write role split.
+// Session-cookie auth (RFC 0131). The browser authenticates once — OIDC redirect, or a
+// token-login in the fallback mode — and every subsequent request carries the signed session
+// cookie (so `EventSource`, which can't set headers, works for the SSE log stream).
 
-const TOKEN_KEY = "ekos-console-token";
-
-export function getToken(): string {
-  try {
-    return localStorage.getItem(TOKEN_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function setToken(value: string): void {
-  try {
-    localStorage.setItem(TOKEN_KEY, value);
-  } catch {
-    /* private mode / storage disabled — the request will just 401 */
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public body?: unknown,
+  ) {
+    super(message);
   }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
   const res = await fetch(`/api${path}`, {
     method,
     headers,
+    credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
-    let detail = `${res.status} ${res.statusText}`;
+    let detail: unknown = `${res.status} ${res.statusText}`;
     try {
       const j = await res.json();
-      if (j?.detail) detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+      detail = j?.detail ?? detail;
     } catch {
       /* keep the status line */
     }
-    throw new Error(`${detail} — ${method} /api${path}`);
+    const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
+    throw new ApiError(res.status, `${msg} — ${method} /api${path}`, detail);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
 export const api = <T>(path: string) => request<T>("GET", path);
-export const apiPost = <T>(path: string, body: unknown) => request<T>("POST", path, body);
+export const apiPost = <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {});
 export const apiPut = <T>(path: string, body: unknown) => request<T>("PUT", path, body);
 export const apiDelete = (path: string) => request<void>("DELETE", path);
+
+export const tokenLogin = (token: string) => apiPost<{ role: string }>("/auth/token-login", { token });
+export const logout = () => apiPost("/auth/logout");

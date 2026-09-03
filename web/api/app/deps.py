@@ -1,30 +1,15 @@
-"""Shared FastAPI dependencies: console auth + per-workspace MCP client resolution."""
+"""Shared FastAPI dependencies: workspace lookup + per-workspace MCP client resolution.
+
+Auth (`require_role`) lives in `app.auth`.
+"""
 
 from __future__ import annotations
 
-import secrets
-
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from . import models
 from .mcp_client import EkosMcpClient
-from .settings import Settings, get_settings
 from .supervisor import McpSupervisor, _NotReady
-
-
-def require_console_token(
-    authorization: str = Header(default=""),
-    settings: Settings = Depends(get_settings),
-) -> None:
-    """Bearer-token gate for every /api route except /api/health (RFC 0128 §3.3).
-
-    RFC 0129 keeps this a single static token; real users and a read/write role split arrive with
-    the first browser write path (Phase 3).
-    """
-    prefix = "Bearer "
-    supplied = authorization[len(prefix) :] if authorization.startswith(prefix) else ""
-    if not secrets.compare_digest(supplied, settings.console_token):
-        raise HTTPException(status_code=401, detail="invalid or missing console token")
 
 
 def get_supervisor(request: Request) -> McpSupervisor:

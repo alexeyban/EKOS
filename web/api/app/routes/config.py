@@ -15,11 +15,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .. import config_io, models, readproc
-from ..deps import require_console_token, require_workspace
+from ..auth import require_role
+from ..deps import require_workspace
 from ..settings import Settings, get_settings
 
 router = APIRouter(
-    prefix="/workspaces", tags=["config"], dependencies=[Depends(require_console_token)]
+    prefix="/workspaces", tags=["config"], dependencies=[Depends(require_role("read"))]
 )
 
 
@@ -103,7 +104,11 @@ async def preview_scan(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.put("/{workspace_id}/config", response_model=WriteOut)
+@router.put(
+    "/{workspace_id}/config",
+    response_model=WriteOut,
+    dependencies=[Depends(require_role("write"))],
+)
 async def put_config(
     body: RawIn,
     ws: models.Workspace = Depends(require_workspace),

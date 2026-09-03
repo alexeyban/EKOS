@@ -13,7 +13,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import models, readproc
-from ..deps import mcp_for_workspace, require_console_token, require_workspace
+from ..auth import require_role
+from ..deps import mcp_for_workspace, require_workspace
 from ..mcp_client import EkosMcpClient
 from ..schemas import (
     DoctorOut,
@@ -25,7 +26,7 @@ from ..schemas import (
 from ..settings import Settings, get_settings
 
 router = APIRouter(
-    prefix="/workspaces", tags=["stats"], dependencies=[Depends(require_console_token)]
+    prefix="/workspaces", tags=["stats"], dependencies=[Depends(require_role("read"))]
 )
 
 
