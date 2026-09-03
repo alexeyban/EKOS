@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { colorFor, type GLink, type GNode } from "./graph-shared";
 import { ObjectPanel } from "./ObjectPanel";
@@ -102,21 +102,20 @@ export function Graph() {
 
   return (
     <div className={fullscreen ? "graph-page fs" : "graph-page"}>
-      <p className="crumbs">
-        <Link to={`/w/${id}`} className="linkish">
-          ← dashboard
-        </Link>
+      <div className="graph-toolbar">
         <span>
-          {expanded && (
-            <button className="linkish" onClick={() => setFocusKind(null)}>
+          {expanded ? (
+            <button className="pill" onClick={() => setFocusKind(null)}>
               ↑ overview
             </button>
-          )}{" "}
-          <button className="linkish" onClick={() => setFullscreen((f) => !f)}>
-            {fullscreen ? "exit fullscreen" : "⛶ fullscreen"}
-          </button>
+          ) : (
+            <span className="muted">click a bubble to drill in</span>
+          )}
         </span>
-      </p>
+        <button className="pill" onClick={() => setFullscreen((f) => !f)}>
+          {fullscreen ? "✕ exit fullscreen" : "⛶ fullscreen"}
+        </button>
+      </div>
 
       <div className="graph-layout">
         <aside className="graph-side">

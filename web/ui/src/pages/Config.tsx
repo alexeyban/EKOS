@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { api, apiPost, apiPut } from "../api/client";
 import type { ConfigOut, PreviewScan, ValidateResult, WriteResult } from "../api/types";
 
@@ -46,12 +46,6 @@ export function Config() {
 
   return (
     <>
-      <p>
-        <Link to={`/w/${id}`} className="linkish">
-          ← dashboard
-        </Link>
-      </p>
-
       {current.isError && <p className="err">{String(current.error)}</p>}
 
       <section className="card">

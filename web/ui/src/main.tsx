@@ -11,6 +11,7 @@ import { RunDetail } from "./pages/RunDetail";
 import { Runs } from "./pages/Runs";
 import { Schedules } from "./pages/Schedules";
 import { Workspaces } from "./pages/Workspaces";
+import { WorkspaceShell } from "./WorkspaceShell";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -23,13 +24,19 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Workspaces /> },
-      { path: "w/:id", element: <Dashboard /> },
-      { path: "w/:id/config", element: <Config /> },
-      { path: "w/:id/graph", element: <Graph /> },
-      { path: "w/:id/run", element: <Run /> },
-      { path: "w/:id/runs", element: <Runs /> },
-      { path: "runs/:runId", element: <RunDetail /> },
       { path: "schedules", element: <Schedules /> },
+      { path: "runs/:runId", element: <RunDetail /> },
+      {
+        path: "w/:id",
+        element: <WorkspaceShell />,
+        children: [
+          { index: true, element: <Dashboard /> },
+          { path: "graph", element: <Graph /> },
+          { path: "run", element: <Run /> },
+          { path: "runs", element: <Runs /> },
+          { path: "config", element: <Config /> },
+        ],
+      },
     ],
   },
 ]);

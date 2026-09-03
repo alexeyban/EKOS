@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 
 interface Me {
@@ -23,21 +23,11 @@ export function Run() {
   });
 
   return (
-    <>
-      <p className="crumbs">
-        <Link to={`/w/${id}`} className="linkish">
-          ← dashboard
-        </Link>
-        <Link to={`/w/${id}/runs`} className="linkish">
-          run history →
-        </Link>
-      </p>
-      <div className="grid2">
-        {commands.data?.map((c) => (
-          <CommandCard key={c.name} workspace={id} command={c} role={me.role} />
-        ))}
-      </div>
-    </>
+    <div className="grid2">
+      {commands.data?.map((c) => (
+        <CommandCard key={c.name} workspace={id} command={c} role={me.role} />
+      ))}
+    </div>
   );
 }
 

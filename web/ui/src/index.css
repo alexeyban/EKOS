@@ -15,13 +15,13 @@ a {
 }
 header {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  padding: 1rem 1.5rem;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.7rem 1.25rem;
   border-bottom: 1px solid var(--rule);
 }
 .brand {
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   font-weight: 650;
   letter-spacing: -0.01em;
   text-decoration: none;
@@ -29,6 +29,88 @@ header {
 }
 .brand span {
   color: var(--accent-a);
+}
+.hdr-link {
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 550;
+  color: var(--ink-soft);
+  padding: 0.3rem 0.7rem;
+  border-radius: 7px;
+}
+.hdr-link:hover {
+  color: var(--ink);
+  background: var(--ground-raised);
+}
+
+/* ── per-workspace tab bar ── */
+.ws-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+.ws-nav-home {
+  text-decoration: none;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+.ws-nav-home:hover {
+  color: var(--accent-a);
+}
+.ws-nav-name {
+  font-weight: 650;
+  margin-right: 0.4rem;
+}
+.ws-nav-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+.ws-tab {
+  text-decoration: none;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  font-weight: 550;
+  padding: 0.4rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.ws-tab:hover {
+  color: var(--ink);
+  background: var(--ground-raised);
+}
+.ws-tab.active {
+  color: var(--accent-a);
+  background: var(--ground-raised);
+  border-color: var(--rule);
+}
+main:has(.graph-page) .ws-nav {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.35rem;
+}
+
+/* small rounded action button (graph toolbar, etc.) */
+.pill {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.32rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--ground-raised);
+  color: var(--ink);
+  cursor: pointer;
+}
+.pill:hover {
+  border-color: var(--accent-a);
+}
+.graph-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 0.5rem;
 }
 main {
   max-width: 940px;
@@ -333,14 +415,14 @@ header .chip {
   display: grid;
   grid-template-columns: 230px 1fr;
   gap: 0.9rem;
-  height: calc(100vh - 96px); /* near full-screen by default */
+  height: calc(100vh - 150px); /* header + tab bar + toolbar */
   min-height: 420px;
   /* drag the bottom-right corner to resize the whole graph area */
   resize: vertical;
   overflow: hidden;
 }
 .graph-page.fs .graph-layout {
-  height: calc(100vh - 52px);
+  height: calc(100vh - 48px);
   resize: none;
 }
 .graph-layout:has(.obj-panel) {

@@ -22,10 +22,9 @@ export function Layout() {
         <Link to="/" className="brand">
           <span>EKOS</span> Console
         </Link>
-        <span className="muted phase">RFC 0127 — web console</span>
         {me.data?.role === "write" && (
-          <Link to="/schedules" className="linkish" style={{ fontSize: "0.82rem" }}>
-            schedules
+          <Link to="/schedules" className="hdr-link">
+            Schedules
           </Link>
         )}
         <span style={{ flex: 1 }} />

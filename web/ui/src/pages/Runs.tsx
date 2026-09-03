@@ -19,14 +19,6 @@ export function Runs() {
 
   return (
     <>
-      <p className="crumbs">
-        <Link to={`/w/${id}`} className="linkish">
-          ← dashboard
-        </Link>
-        <Link to={`/w/${id}/run`} className="linkish">
-          run a command →
-        </Link>
-      </p>
       <section className="card">
         <strong>Run history</strong>
         {runs.data?.length === 0 && <p className="muted">nothing run yet</p>}
