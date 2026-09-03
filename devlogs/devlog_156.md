@@ -63,6 +63,12 @@ Local gates only (`[skip ci]`):
 
 ## Knowledge Captured
 
+- **The Phase 0 MCP client's NDJSON reader had a 64 KiB line limit** (asyncio's
+  `StreamReader` default). It never surfaced because every test until now used tiny fixture
+  workspaces; the first real `ekos_search` / object-level `ekos_graph_export` over this repo's
+  ledger produced a >64 KiB response line and `readline()` raised *"Separator is not found, and
+  chunk exceed the limit"* → HTTP 500. Fixed: `open_connection(..., limit=64 MiB)` in
+  `mcp_client.py`, plus a regression test that expands a large kind.
 - **A `React.lazy` boundary is defeated by any static import from the same module.** `Graph.tsx`
   originally did both `const GraphCanvas = lazy(() => import("./GraphCanvas"))` **and**
   `import { colorFor } from "./GraphCanvas"` — the static one pulled `react-force-graph-2d` into

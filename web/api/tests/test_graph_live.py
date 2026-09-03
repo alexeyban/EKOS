@@ -65,3 +65,14 @@ def test_object_state_404_for_a_bogus_id(client: TestClient) -> None:
 def test_include_properties_flag_is_accepted(client: TestClient) -> None:
     r = client.get("/api/workspaces/s/graph?level=aggregate&include_properties=true", headers=AUTH)
     assert r.status_code == 200
+
+
+def test_large_object_level_payload_does_not_overflow_the_ndjson_reader(client: TestClient) -> None:
+    # >64 KiB on one NDJSON line — the MCP client's StreamReader limit must be raised past the
+    # asyncio default or `readline()` raises "Separator is not found".
+    r = client.get(
+        "/api/workspaces/s/graph?level=object&kind=RustSymbol&max_nodes=500", headers=AUTH
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["nodes"]) > 100
+    assert client.get("/api/workspaces/s/search?q=ledger&limit=50", headers=AUTH).status_code == 200

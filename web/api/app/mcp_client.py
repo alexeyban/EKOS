@@ -39,10 +39,17 @@ class EkosMcpClient:
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
+    # A single NDJSON response line can be large — `ekos_search` over a real ledger, or
+    # `ekos_graph_export` at object level with `include_properties`, easily exceed asyncio's
+    # default 64 KiB StreamReader limit (which raises "Separator is not found, and chunk exceed
+    # the limit" on `readline()`). 64 MiB is comfortably above any real tool payload.
+    _READ_LIMIT = 64 * 1024 * 1024
+
     async def connect(self) -> None:
         """Open the socket; run the MCP handshake (`initialize` + `notifications/initialized`)."""
         self._reader, self._writer = await asyncio.wait_for(
-            asyncio.open_connection(self._host, self._port), self._timeout
+            asyncio.open_connection(self._host, self._port, limit=self._READ_LIMIT),
+            self._timeout,
         )
         params: dict[str, Any] = {"protocolVersion": "2025-06-18", "capabilities": {}}
         if self._token:
