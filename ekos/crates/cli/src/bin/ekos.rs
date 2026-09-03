@@ -54,7 +54,11 @@ enum Commands {
     /// Clear the artifact cache (.ekos/artifacts/)
     Clean,
     /// Check the environment and configuration
-    Doctor,
+    Doctor {
+        /// Emit one machine-readable JSON object instead of the text checklist (RFC 0129 R5)
+        #[arg(long)]
+        json: bool,
+    },
     /// Show ledger entry count and object count (top-level alias for `ekos ledger status`)
     Status {
         /// Also report per-component storage sizes (RFC 0015)
@@ -480,6 +484,19 @@ enum LedgerCommands {
     /// Verify every sealed segment's integrity and self-heal any torn active-segment tail or
     /// stale index runs (RFC 0105 Phase 2). Fact engine (RFC 0016) only.
     Repair,
+    /// Cumulative object/relationship counts bucketed over time — the growth timeline behind the
+    /// web console dashboard (RFC 0129 R6). Output is always JSON.
+    Timeline {
+        /// Accepted for parity with `status --json` / `doctor --json`; output is JSON regardless
+        #[arg(long)]
+        json: bool,
+        /// Bucket granularity: `day` (default), `week`, or `month`
+        #[arg(long, default_value = "day")]
+        bucket: String,
+        /// Only include buckets at or after this RFC 3339 timestamp
+        #[arg(long)]
+        since: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -578,9 +595,14 @@ async fn main() -> Result<()> {
             }
             LedgerCommands::Migrate { v3 } => ekos::commands::ledger::migrate(&config, &cwd, v3),
             LedgerCommands::Repair => ekos::commands::ledger::repair(&config, &cwd),
+            LedgerCommands::Timeline {
+                json: _,
+                bucket,
+                since,
+            } => ekos::commands::ledger::timeline(&config, &cwd, &bucket, since.as_deref()),
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
-        Commands::Doctor => ekos::commands::doctor::run(&config, &cwd, &config_path),
+        Commands::Doctor { json } => ekos::commands::doctor::run(&config, &cwd, &config_path, json),
         Commands::Status { storage, json } => {
             ekos::commands::ledger::status(&config, &cwd, storage, json)
         }

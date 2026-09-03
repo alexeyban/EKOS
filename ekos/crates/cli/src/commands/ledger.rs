@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ledger::Ledger;
 use serde::Serialize;
@@ -431,6 +431,152 @@ pub fn repair(config: &EkosConfig, cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+// ── RFC 0129 R6 — `ekos ledger timeline --json` ───────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bucket {
+    Day,
+    Week,
+    Month,
+}
+
+impl Bucket {
+    fn parse(s: &str) -> Result<Self> {
+        match s {
+            "day" => Ok(Self::Day),
+            "week" => Ok(Self::Week),
+            "month" => Ok(Self::Month),
+            other => anyhow::bail!("unknown --bucket {other:?} (expected day, week, or month)"),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+        }
+    }
+
+    /// The label for the bucket that contains `t` (`YYYY-MM-DD` for day/week — week uses its
+    /// Monday — and `YYYY-MM` for month).
+    fn label(self, t: DateTime<Utc>) -> String {
+        let d = t.date_naive();
+        match self {
+            Self::Day => d.format("%Y-%m-%d").to_string(),
+            Self::Week => d
+                .week(chrono::Weekday::Mon)
+                .first_day()
+                .format("%Y-%m-%d")
+                .to_string(),
+            Self::Month => d.format("%Y-%m").to_string(),
+        }
+    }
+
+    /// Exclusive upper bound of the bucket named `label` — the instant the next bucket starts.
+    fn end_of(self, label: &str) -> DateTime<Utc> {
+        use chrono::NaiveDate;
+        let start = match self {
+            Self::Day | Self::Week => {
+                NaiveDate::parse_from_str(label, "%Y-%m-%d").expect("own label format")
+            }
+            Self::Month => NaiveDate::parse_from_str(&format!("{label}-01"), "%Y-%m-%d")
+                .expect("own label format"),
+        };
+        let next = match self {
+            Self::Day => start.succ_opt().expect("in range"),
+            Self::Week => start + chrono::Duration::days(7),
+            Self::Month => {
+                let (y, m) = (start.year(), start.month());
+                let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+                NaiveDate::from_ymd_opt(ny, nm, 1).expect("valid first-of-month")
+            }
+        };
+        next.and_hms_opt(0, 0, 0).expect("midnight").and_utc()
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Timeline {
+    pub schema_version: u32,
+    pub bucket: &'static str,
+    /// Cumulative running totals as of the **end** of each bucket, oldest first. Empty buckets are
+    /// omitted — a consumer carries the previous point's values forward. `created_at` on the
+    /// compiled object/relationship is the timestamp used (set when the analyzer mints it, which
+    /// is the same compile run that commits it — so it tracks "when this knowledge came to be").
+    pub points: Vec<TimelinePoint>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TimelinePoint {
+    pub t: String,
+    pub objects: usize,
+    pub relationships: usize,
+}
+
+/// RFC 0129 R6. Backend-agnostic: one `all_objects` + one `all_relationships` pass (the same
+/// dashboard-tier cost as `ekos graph export`), bucketed by `created_at`. No new `KnowledgeStore`
+/// method, and it works identically on every backend.
+pub fn timeline(config: &EkosConfig, cwd: &Path, bucket: &str, since: Option<&str>) -> Result<()> {
+    let bucket = Bucket::parse(bucket)?;
+    let since: Option<DateTime<Utc>> = since
+        .map(|s| {
+            DateTime::parse_from_rfc3339(s)
+                .map(|d| d.with_timezone(&Utc))
+                .map_err(|e| anyhow::anyhow!("--since is not an RFC 3339 timestamp: {e}"))
+        })
+        .transpose()?;
+
+    let store = super::store::open_store_read_only(config, cwd)?;
+    let out = build_timeline(store.as_ref(), bucket, since)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// The stdout-free core of `timeline` — one `all_objects` + one `all_relationships` pass, bucketed
+/// by `created_at` into cumulative running totals.
+fn build_timeline(
+    store: &dyn ekos_ledger::KnowledgeStore,
+    bucket: Bucket,
+    since: Option<DateTime<Utc>>,
+) -> Result<Timeline> {
+    let mut objs: Vec<DateTime<Utc>> = store.all_objects()?.iter().map(|o| o.created_at).collect();
+    let mut rels: Vec<DateTime<Utc>> = store
+        .all_relationships()?
+        .iter()
+        .map(|r| r.created_at)
+        .collect();
+    objs.sort_unstable();
+    rels.sort_unstable();
+
+    // Distinct bucket labels present in either series, filtered by `--since`. The cumulative
+    // counts still reach back to the start of history — `--since` only trims which buckets show.
+    let mut labels = std::collections::BTreeSet::new();
+    for t in objs.iter().chain(rels.iter()) {
+        if since.is_none_or(|s| *t >= s) {
+            labels.insert(bucket.label(*t));
+        }
+    }
+
+    let points = labels
+        .into_iter()
+        .map(|label| {
+            let end = bucket.end_of(&label);
+            TimelinePoint {
+                t: label,
+                objects: objs.iter().take_while(|t| **t < end).count(),
+                relationships: rels.iter().take_while(|t| **t < end).count(),
+            }
+        })
+        .collect();
+
+    Ok(Timeline {
+        schema_version: 1,
+        bucket: bucket.as_str(),
+        points,
+    })
+}
+
 /// Per-component byte report for the whole `.ekos` workspace (RFC 0015).
 /// This is the before/after instrument for every storage change.
 fn print_storage_report(config: &EkosConfig, cwd: &Path, ledger: &Ledger) -> Result<()> {
@@ -693,5 +839,93 @@ mod tests {
             .expect("status must not error on a partitioned ledger");
         let store = super::super::store::open_store(&config, dir.path()).unwrap();
         assert_eq!(store.object_count().unwrap(), 1);
+    }
+
+    // ── RFC 0129 R6 — `ekos ledger timeline` ────────────────────────────────
+
+    #[test]
+    fn bucket_parse_rejects_anything_but_day_week_month() {
+        assert_eq!(Bucket::parse("day").unwrap(), Bucket::Day);
+        assert_eq!(Bucket::parse("week").unwrap(), Bucket::Week);
+        assert_eq!(Bucket::parse("month").unwrap(), Bucket::Month);
+        assert!(Bucket::parse("year").is_err());
+    }
+
+    #[test]
+    fn bucket_labels_and_bounds() {
+        let t = DateTime::parse_from_rfc3339("2026-08-26T15:04:05Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(Bucket::Day.label(t), "2026-08-26");
+        assert_eq!(Bucket::Month.label(t), "2026-08");
+        // 2026-08-26 is a Wednesday; its ISO week starts Monday 2026-08-24.
+        assert_eq!(Bucket::Week.label(t), "2026-08-24");
+
+        assert_eq!(
+            Bucket::Day.end_of("2026-08-26").to_rfc3339(),
+            "2026-08-27T00:00:00+00:00"
+        );
+        assert_eq!(
+            Bucket::Week.end_of("2026-08-24").to_rfc3339(),
+            "2026-08-31T00:00:00+00:00"
+        );
+        // Month rollover across the year boundary.
+        assert_eq!(
+            Bucket::Month.end_of("2026-12").to_rfc3339(),
+            "2027-01-01T00:00:00+00:00"
+        );
+    }
+
+    fn obj_at(name: &str, when: &str) -> KirObject {
+        let mut o = KirObject::new(name, ObjectKind::Table);
+        o.created_at = DateTime::parse_from_rfc3339(when)
+            .unwrap()
+            .with_timezone(&Utc);
+        o
+    }
+
+    #[test]
+    fn timeline_is_cumulative_per_bucket_and_since_only_trims_display() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        {
+            let store = super::super::store::open_store(&config, dir.path()).unwrap();
+            store
+                .append_object(&obj_at("a", "2026-08-10T09:00:00Z"))
+                .unwrap();
+            store
+                .append_object(&obj_at("b", "2026-08-10T18:00:00Z"))
+                .unwrap();
+            store
+                .append_object(&obj_at("c", "2026-09-02T12:00:00Z"))
+                .unwrap();
+        }
+        let store = super::super::store::open_store_read_only(&config, dir.path()).unwrap();
+
+        let daily = build_timeline(store.as_ref(), Bucket::Day, None).unwrap();
+        assert_eq!(daily.bucket, "day");
+        assert_eq!(daily.points.len(), 2);
+        assert_eq!(daily.points[0].t, "2026-08-10");
+        assert_eq!(daily.points[0].objects, 2);
+        // The second bucket's total includes everything before it — cumulative, not per-bucket.
+        assert_eq!(daily.points[1].t, "2026-09-02");
+        assert_eq!(daily.points[1].objects, 3);
+
+        // `--since` hides the August bucket but the September total still counts all 3.
+        let since = DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let trimmed = build_timeline(store.as_ref(), Bucket::Day, Some(since)).unwrap();
+        assert_eq!(trimmed.points.len(), 1);
+        assert_eq!(trimmed.points[0].objects, 3);
+    }
+
+    #[test]
+    fn timeline_on_an_empty_store_is_no_points() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let store = super::super::store::open_store_read_only(&config, dir.path()).unwrap();
+        let tl = build_timeline(store.as_ref(), Bucket::Month, None).unwrap();
+        assert!(tl.points.is_empty());
     }
 }

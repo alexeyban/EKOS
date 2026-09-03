@@ -1,11 +1,31 @@
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
+use serde::Serialize;
 use std::path::Path;
 
 struct Check {
     label: &'static str,
     ok: bool,
     detail: String,
+}
+
+/// RFC 0129 R5 — the machine-readable form of `ekos doctor`. Mirrors RFC 0127 R2's `StatusJson`
+/// in style: one flat object, `schema_version` first, text output left byte-identical.
+#[derive(Debug, Serialize)]
+pub struct DoctorJson {
+    pub schema_version: u32,
+    /// `true` iff no check has `status == "fail"`.
+    pub ok: bool,
+    pub checks: Vec<DoctorCheckJson>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DoctorCheckJson {
+    pub name: &'static str,
+    /// `"ok"` or `"fail"`. `"warn"` is reserved — `ekos doctor` produces no warning-level checks
+    /// today, but a consumer should treat any non-`"ok"` value as a problem.
+    pub status: &'static str,
+    pub detail: String,
 }
 
 impl Check {
@@ -63,7 +83,54 @@ fn llm_provider_check(
     }
 }
 
-pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
+pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path, json: bool) -> Result<()> {
+    let checks = collect_checks(config, cwd, config_path);
+    let all_ok = checks.iter().all(|c| c.ok);
+
+    // RFC 0129 R5: `--json` is a pure alternate presentation over the same checks — it prints one
+    // object and always exits 0 (the `ok` field carries the verdict), the same contract as
+    // `status --json`. A machine consumer reads `ok`, it does not inspect the exit code.
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&build_doctor_json(&checks))?
+        );
+        return Ok(());
+    }
+
+    println!("EKOS Doctor");
+    println!("{}", "─".repeat(40));
+    for check in &checks {
+        let status = if check.ok { "[OK]  " } else { "[FAIL]" };
+        println!("{status} {:<20} {}", check.label, check.detail);
+    }
+    println!("{}", "─".repeat(40));
+
+    if all_ok {
+        println!("All checks passed.");
+        Ok(())
+    } else {
+        anyhow::bail!("Some checks failed — see above.")
+    }
+}
+
+/// Serialize a check list into the RFC 0129 R5 shape. `ok` is `true` iff every check passed.
+fn build_doctor_json(checks: &[Check]) -> DoctorJson {
+    DoctorJson {
+        schema_version: 1,
+        ok: checks.iter().all(|c| c.ok),
+        checks: checks
+            .iter()
+            .map(|c| DoctorCheckJson {
+                name: c.label,
+                status: if c.ok { "ok" } else { "fail" },
+                detail: c.detail.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn collect_checks(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Vec<Check> {
     let mut checks = Vec::new();
 
     // Rust toolchain version
@@ -131,24 +198,7 @@ pub fn run(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Result<()> {
         |key_var| std::env::var(key_var).is_ok(),
     ));
 
-    println!("EKOS Doctor");
-    println!("{}", "─".repeat(40));
-    let mut all_ok = true;
-    for check in &checks {
-        let status = if check.ok { "[OK]  " } else { "[FAIL]" };
-        println!("{status} {:<20} {}", check.label, check.detail);
-        if !check.ok {
-            all_ok = false;
-        }
-    }
-    println!("{}", "─".repeat(40));
-
-    if all_ok {
-        println!("All checks passed.");
-        Ok(())
-    } else {
-        anyhow::bail!("Some checks failed — see above.")
-    }
+    checks
 }
 
 #[cfg(test)]
@@ -186,5 +236,55 @@ mod tests {
     fn no_provider_configured_is_ok_not_a_failure() {
         let check = llm_provider_check(None, None, |_| false);
         assert!(check.ok, "no LLM configured is a valid, non-failing state");
+    }
+
+    // ── RFC 0129 R5 — `ekos doctor --json` ──────────────────────────────────
+
+    #[test]
+    fn doctor_json_shape_and_all_ok_flag() {
+        let checks = vec![
+            Check::ok("Rust toolchain", "rustc 1.98.0"),
+            Check::ok(".ekos/", "/tmp/ws/.ekos"),
+        ];
+        let out = build_doctor_json(&checks);
+        assert_eq!(out.schema_version, 1);
+        assert!(out.ok);
+        assert_eq!(out.checks.len(), 2);
+        assert_eq!(out.checks[0].name, "Rust toolchain");
+        assert_eq!(out.checks[0].status, "ok");
+    }
+
+    #[test]
+    fn doctor_json_ok_is_false_when_any_check_fails() {
+        let checks = vec![
+            Check::ok("Rust toolchain", "rustc 1.98.0"),
+            Check::fail("ekos.toml", "not found — run `ekos init`"),
+        ];
+        let out = build_doctor_json(&checks);
+        assert!(!out.ok, "one failing check makes the whole report not-ok");
+        assert_eq!(out.checks[1].status, "fail");
+    }
+
+    #[test]
+    fn doctor_json_serializes_to_the_documented_keys() {
+        let out = build_doctor_json(&[Check::fail("ekos.toml", "missing")]);
+        let v: serde_json::Value = serde_json::to_value(&out).unwrap();
+        assert_eq!(v["schema_version"], 1);
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["checks"][0]["name"], "ekos.toml");
+        assert_eq!(v["checks"][0]["status"], "fail");
+        assert_eq!(v["checks"][0]["detail"], "missing");
+    }
+
+    #[test]
+    fn collect_checks_flags_a_missing_config_and_ekos_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let missing_cfg = tmp.path().join("ekos.toml");
+        let checks = collect_checks(&config, tmp.path(), &missing_cfg);
+        let by_name = |n: &str| checks.iter().find(|c| c.label == n).unwrap();
+        assert!(!by_name("ekos.toml").ok);
+        assert!(!by_name(".ekos/").ok);
+        // The Rust-toolchain check is environment-driven, not asserted here.
     }
 }
