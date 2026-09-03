@@ -1,3 +1,3 @@
-from . import graph, meta, workspaces
+from . import graph, meta, stats, workspaces
 
-__all__ = ["graph", "meta", "workspaces"]
+__all__ = ["graph", "meta", "stats", "workspaces"]

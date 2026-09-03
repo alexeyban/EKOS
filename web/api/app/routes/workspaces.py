@@ -1,32 +1,62 @@
-"""Workspace registry + per-workspace status (RFC 0128 §3.2)."""
+"""Workspace registry + per-workspace MCP-server status (RFC 0129 §4)."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from pathlib import Path
 
-from ..deps import mcp_for_workspace, require_console_token
-from ..mcp_client import EkosMcpClient
-from ..schemas import StatusOut, WorkspaceOut
-from ..settings import Settings, get_settings
+from fastapi import APIRouter, Depends, HTTPException
+
+from .. import models
+from ..deps import get_supervisor, require_console_token
+from ..schemas import ServerStatus, WorkspaceCreate, WorkspaceOut
+from ..supervisor import McpSupervisor
 
 router = APIRouter(
     prefix="/workspaces", tags=["workspaces"], dependencies=[Depends(require_console_token)]
 )
 
 
+def _out(ws: models.Workspace, supervisor: McpSupervisor) -> WorkspaceOut:
+    handle = supervisor.handle(ws.id)
+    server = ServerStatus(**handle.status()) if handle is not None else None
+    return WorkspaceOut(id=ws.id, name=ws.name, path=ws.path, server=server)
+
+
 @router.get("", response_model=list[WorkspaceOut])
-async def list_workspaces(settings: Settings = Depends(get_settings)) -> list[WorkspaceOut]:
-    return [WorkspaceOut(id=w.id, name=w.name, path=w.path) for w in settings.workspaces()]
+async def list_workspaces(
+    supervisor: McpSupervisor = Depends(get_supervisor),
+) -> list[WorkspaceOut]:
+    return [_out(ws, supervisor) for ws in models.list_workspaces()]
 
 
-@router.get("/{workspace_id}/stats", response_model=StatusOut)
-async def workspace_stats(mcp: EkosMcpClient = Depends(mcp_for_workspace)) -> StatusOut:
-    # The `ekos_status` MCP tool. The richer `ekos status --json` (RFC 0127 R2, with storage
-    # breakdown + evidence count + last_write) needs a subprocess and arrives with the Phase 1
-    # job runner.
-    result = await mcp.call_tool("ekos_status")
-    return StatusOut(
-        entries=result.get("entries", 0),
-        objects=result.get("objects", 0),
-        relationships=result.get("relationships"),
-    )
+@router.post("", response_model=WorkspaceOut, status_code=201)
+async def register_workspace(
+    body: WorkspaceCreate,
+    supervisor: McpSupervisor = Depends(get_supervisor),
+) -> WorkspaceOut:
+    if models.get_workspace(body.id) is not None:
+        raise HTTPException(status_code=409, detail=f"workspace {body.id!r} already registered")
+
+    root = Path(body.path).expanduser().resolve()
+    if not (root / "ekos.toml").is_file():
+        raise HTTPException(status_code=400, detail=f"{root} has no ekos.toml")
+    if not (root / ".ekos").is_dir():
+        raise HTTPException(
+            status_code=400, detail=f"{root} has no .ekos/ — run the pipeline there first"
+        )
+
+    ws = models.Workspace(id=body.id, name=body.name, path=str(root))
+    models.add_workspace(ws)
+    await supervisor.ensure(ws)
+    return _out(ws, supervisor)
+
+
+@router.delete("/{workspace_id}", status_code=204)
+async def deregister_workspace(
+    workspace_id: str,
+    supervisor: McpSupervisor = Depends(get_supervisor),
+) -> None:
+    if models.get_workspace(workspace_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown workspace {workspace_id!r}")
+    await supervisor.stop(workspace_id)
+    models.delete_workspace(workspace_id)
