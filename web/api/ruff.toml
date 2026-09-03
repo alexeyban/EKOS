@@ -1,0 +1,17 @@
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+
+[lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom: these calls in argument defaults are intentional.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Header",
+    "fastapi.Path",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["B011"]

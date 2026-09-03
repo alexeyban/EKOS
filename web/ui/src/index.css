@@ -1,0 +1,44 @@
+@import "./theme.css";
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem;
+}
+h1 {
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
+h1 span {
+  color: var(--accent-a);
+}
+.card {
+  background: var(--ground-raised);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0;
+}
+.muted {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+.err {
+  color: var(--bad);
+}
+code {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+ul {
+  padding-left: 1.1rem;
+}
