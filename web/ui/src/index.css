@@ -35,6 +35,15 @@ main {
   margin: 0 auto;
   padding: 1.5rem;
 }
+/* the graph page breaks out of the centered column and uses the full viewport */
+main:has(.graph-page) {
+  max-width: none;
+  padding: 0.5rem 0.9rem;
+}
+.graph-page > .crumbs {
+  margin: 0 0 0.4rem;
+  font-size: 0.82rem;
+}
 .card {
   background: var(--ground-raised);
   border: 1px solid var(--rule);
@@ -323,12 +332,16 @@ header .chip {
 .graph-layout {
   display: grid;
   grid-template-columns: 230px 1fr;
-  gap: 1rem;
-  height: calc(100vh - 150px);
-  min-height: 480px;
+  gap: 0.9rem;
+  height: calc(100vh - 96px); /* near full-screen by default */
+  min-height: 420px;
+  /* drag the bottom-right corner to resize the whole graph area */
+  resize: vertical;
+  overflow: hidden;
 }
 .graph-page.fs .graph-layout {
-  height: calc(100vh - 60px);
+  height: calc(100vh - 52px);
+  resize: none;
 }
 .graph-layout:has(.obj-panel) {
   grid-template-columns: 230px 1fr 340px;
