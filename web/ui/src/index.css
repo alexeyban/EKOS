@@ -42,3 +42,29 @@ code {
 ul {
   padding-left: 1.1rem;
 }
+li {
+  margin: 0.35rem 0;
+}
+.token-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+.token-row input {
+  flex: 1;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--ground);
+  color: var(--ink);
+  font: inherit;
+}
+.token-row button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--accent-a);
+  border-radius: 8px;
+  background: var(--accent-a);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
