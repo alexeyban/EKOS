@@ -85,7 +85,7 @@ ekos ledger timeline --json [--bucket day|week|month] [--since <rfc3339>]
   "schema_version": 1,
   "bucket": "day",
   "points": [
-    {"t": "2026-08-26", "entries": 20793, "objects": 5533, "relationships": 8364}
+    {"t": "2026-08-26", "objects": 5533, "relationships": 8364}
   ]
 }
 ```
@@ -93,19 +93,17 @@ ekos ledger timeline --json [--bucket day|week|month] [--since <rfc3339>]
 Points are **cumulative** (running totals as of the end of each bucket), so the frontend renders
 an area chart directly. Empty buckets are omitted; the frontend carries the last value forward.
 
-- **Fact-segment backend:** the fact record carries `created_at` (already in the segment schema —
-  `manifest.json` `attributes.names`). If `created_at` turns out to be observation-derived rather
-  than append-derived (see §6 Open questions), R6 falls back to **segment seal timestamps** —
-  coarser but honest, and monotonic by construction.
-- **SQLite backend:** entry rows are timestamped; `GROUP BY date(ts)` directly.
-- **Partitioned / distributed backends:** `Err("timeline not supported on <backend>")` for now,
-  the same way RFC 0127 R2's `evidence_count` returns `Err` on the distributed gateway. The
-  console degrades to hiding the timeline card.
+**As implemented** (`devlog_152`): backend-agnostic and with **no new `KnowledgeStore` method**.
+`build_timeline` does one `all_objects()` + one `all_relationships()` pass (the same dashboard-tier
+cost as `graph export`) and buckets each entity by its `created_at` — the timestamp the analyzer
+stamps when it mints the object/relationship, which is the same compile run that commits it, so it
+tracks "when this knowledge came to be". `--since` trims which buckets are *shown*; the cumulative
+totals still reach back to the start of history. A separate `entries` series was dropped: "entries"
+means different things on the SQLite vs fact backend (version rows vs batches), whereas
+objects/relationships-as-of-t is consistently defined everywhere. Works identically on all four
+backends — no per-backend branch, no `Err` case.
 
-Lives in `crates/cli/src/commands/ledger.rs` + a `timeline(&dyn KnowledgeStore, Bucket) ->
-Result<Timeline>` helper next to R2's status builder. No new `KnowledgeStore` trait method if
-`created_at` is already reachable through the existing read API; one narrow method
-(`append_timeline() -> Result<Vec<(DateTime, EntryKind)>>`) if not.
+Lives in `crates/cli/src/commands/ledger.rs` (`Bucket` enum + `build_timeline` + `timeline`).
 
 ---
 
@@ -294,12 +292,19 @@ pass).
 
 ## 10. Open questions
 
-1. **Is the fact record's `created_at` the append time or the observation time?** If the latter,
-   R6 uses segment seal timestamps (§1.2). Resolved during implementation by reading
-   `crates/ledger/src/fact.rs`; the RFC commits to *a* monotonic source, not a specific field.
-2. **Generated-TypeScript drift in CI.** Still open from RFC 0127 §12. Phase 1 wires the
-   generation; whether a CI step boots uvicorn and fails on a stale `schema.d.ts` is deferred to
-   whoever finds the first drift bug annoying.
+1. ~~Is the fact record's `created_at` the append time or the observation time?~~ **Resolved
+   (`devlog_152`):** R6 doesn't touch the fact record — it buckets by `KirObject::created_at` /
+   `KirRelationship::created_at`, the mint timestamp, read through the ordinary `all_objects()` /
+   `all_relationships()` API. Backend-agnostic, no new trait method.
+2. **Generated-TypeScript drift in CI.** Still open from RFC 0127 §12. Phase 1 keeps the hand-stub
+   `types.ts` (the generation script is wired but not run in CI); whether a CI step boots uvicorn
+   and fails on a stale `schema.d.ts` is deferred to whoever finds the first drift bug annoying.
 3. **When exactly does the read/write role split land?** Pinned to "the first browser write path",
    which is Phase 3. If Phase 2's `ekos.toml` editor counts as a write (it patches a file, not the
    ledger), the split moves up to Phase 2. Decided when Phase 2 is authored.
+4. **Bundle size.** `recharts` pushes the UI bundle to ~640 KB (188 KB gzipped). Acceptable for a
+   Phase 1 dashboard; Phase 7 (hardening) code-splits the chart routes.
+5. **Orphaned MCP servers.** A hard-killed console (SIGKILL, no lifespan teardown) leaves its
+   `ekos mcp serve` children running. The supervisor writes each token file under a per-run temp
+   dir, so a fresh console picks fresh ports and doesn't collide — but the orphans linger until
+   the OS or the operator reaps them. Adoption-on-startup is deferred.

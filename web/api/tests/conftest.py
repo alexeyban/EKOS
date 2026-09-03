@@ -16,6 +16,25 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+@pytest.fixture
+def reset_settings() -> Iterator[None]:
+    """Clear the module-level settings singleton so a test's monkeypatched env is picked up."""
+    import app.settings as settings_mod
+
+    settings_mod._settings = None
+    yield
+    settings_mod._settings = None
+
+
+@pytest.fixture
+def fake_workspace(tmp_path: Path) -> Path:
+    """A directory that *looks* like a compiled workspace (has `ekos.toml` + `.ekos/`) without
+    running the pipeline — enough for registry / path-validation tests."""
+    (tmp_path / "ekos.toml").write_text("[observe]\npaths = []\n")
+    (tmp_path / ".ekos").mkdir()
+    return tmp_path
+
+
 @pytest.fixture(scope="session")
 def ekos_bin() -> str:
     """Path to a built `ekos` binary, from $EKOS_BIN. Tests that need a real MCP server skip

@@ -21,9 +21,9 @@ class McpToolError(RuntimeError):
 
 
 class EkosMcpClient:
-    """One connection to one `ekos mcp serve --tcp`. Not safe for concurrent use by multiple
-    tasks — give each caller its own client, or serialize through an `asyncio.Lock` (the
-    :class:`ClientPool` does the former)."""
+    """One connection to one `ekos mcp serve --tcp`. Concurrent callers are serialised on an
+    internal `asyncio.Lock` (one request/response on the wire at a time). The
+    :class:`~app.supervisor.McpSupervisor` owns one client per workspace."""
 
     def __init__(self, host: str, port: int, token: str | None = None, *, timeout: float = 30.0):
         self._host = host
@@ -131,32 +131,3 @@ class EkosMcpClient:
         if not line:
             raise asyncio.IncompleteReadError(b"", None)
         return json.loads(line)
-
-
-class ClientPool:
-    """One :class:`EkosMcpClient` per workspace id, connected lazily.
-
-    Phase 0 connects to MCP servers the operator has already started. Owning the
-    `ekos mcp serve --tcp` process lifecycle per workspace is Phase 1 (RFC 0127 §11).
-    """
-
-    def __init__(self) -> None:
-        self._clients: dict[str, EkosMcpClient] = {}
-        self._lock = asyncio.Lock()
-
-    async def get(
-        self, workspace_id: str, host: str, port: int, token: str | None
-    ) -> EkosMcpClient:
-        async with self._lock:
-            client = self._clients.get(workspace_id)
-            if client is None:
-                client = EkosMcpClient(host, port, token)
-                await client.connect()
-                self._clients[workspace_id] = client
-            return client
-
-    async def aclose(self) -> None:
-        async with self._lock:
-            for client in self._clients.values():
-                await client.aclose()
-            self._clients.clear()

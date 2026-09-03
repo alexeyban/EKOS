@@ -1,7 +1,7 @@
-"""Pydantic response models for the console API (RFC 0128 §3.2).
+"""Pydantic response models for the console API.
 
-`GraphOut` / `StatusOut` mirror the Rust wire formats from RFC 0127 R1 / R2 loosely — the console
-does not re-validate every field, it passes the compiled payload through.
+The stats models mirror the Rust wire formats (RFC 0127 R2, RFC 0129 R5/R6) loosely — the console
+passes the compiled payload through rather than re-validating every field.
 """
 
 from __future__ import annotations
@@ -17,19 +17,76 @@ class Health(BaseModel):
     version: str
 
 
+class ServerStatus(BaseModel):
+    state: str  # "starting" | "ready" | "failed"
+    port: int
+    retries: int
+    detail: str = ""
+
+
 class WorkspaceOut(BaseModel):
+    id: str
+    name: str
+    path: str
+    server: ServerStatus | None = None
+
+
+class WorkspaceCreate(BaseModel):
     id: str
     name: str
     path: str
 
 
 class StatusOut(BaseModel):
-    """The `ekos_status` MCP tool result. Phase 1 swaps this for the richer `ekos status --json`
-    (RFC 0127 R2) once the job runner can shell out."""
+    """RFC 0127 R2 `ekos status --json`, passed through. Kept permissive."""
 
+    schema_version: int
+    workspace: str
+    backend: str
     entries: int
     objects: int
-    relationships: int | None = None
+    relationships: int
+    evidence: int | None = None
+    integrity: str
+    last_write: str | None = None
+    storage: dict[str, Any]
+
+
+class DoctorCheck(BaseModel):
+    name: str
+    status: str
+    detail: str
+
+
+class DoctorOut(BaseModel):
+    schema_version: int
+    ok: bool
+    checks: list[DoctorCheck]
+
+
+class KindCount(BaseModel):
+    kind: str
+    count: int
+
+
+class TimelinePoint(BaseModel):
+    t: str
+    objects: int
+    relationships: int
+
+
+class TimelineOut(BaseModel):
+    schema_version: int
+    bucket: str
+    points: list[TimelinePoint]
+
+
+class QueryStats(BaseModel):
+    total: int
+    by_tool: dict[str, int]
+    cache_hit_rate: float
+    p50_ms: float
+    p95_ms: float
 
 
 class GraphOut(BaseModel):
