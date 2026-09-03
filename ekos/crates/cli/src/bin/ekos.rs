@@ -549,6 +549,25 @@ fn resolve_config_path(
         .unwrap_or_else(|| PathBuf::from("ekos.toml"))
 }
 
+/// True for subcommands whose stdout is a single machine-readable document (JSON / NDJSON) that a
+/// program parses — their logs must go to stderr so nothing interleaves. Kept in sync with the
+/// `--json` flags on these subcommands and with `graph export` (always machine output).
+fn emits_machine_output(command: &Commands) -> bool {
+    match command {
+        Commands::Status { json, .. } | Commands::Doctor { json } | Commands::Ekl { json, .. } => {
+            *json
+        }
+        Commands::Graph {
+            subcommand: GraphCommands::Export { .. },
+        } => true,
+        Commands::Ledger { subcommand } => matches!(
+            subcommand,
+            LedgerCommands::Status { json: true, .. } | LedgerCommands::Timeline { .. }
+        ),
+        _ => false,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -570,8 +589,10 @@ async fn main() -> Result<()> {
     let config = ekos_compiler_core::EkosConfig::from_file_or_default(&config_path);
     let cwd = std::env::current_dir()?;
 
-    // The MCP server owns stdout for protocol frames; its logs go to stderr.
-    if matches!(cli.command, Commands::Mcp { .. }) {
+    // The MCP server owns stdout for protocol frames; the machine-readable `--json` / graph-export
+    // commands own stdout for the document a consumer parses. Both send logs to stderr so nothing
+    // interleaves with what a program reads (RFC 0127 R1/R2, RFC 0129 R5/R6).
+    if matches!(cli.command, Commands::Mcp { .. }) || emits_machine_output(&cli.command) {
         ekos::commands::init_logging_stderr(&config);
     } else {
         ekos::commands::init_logging(&config);
