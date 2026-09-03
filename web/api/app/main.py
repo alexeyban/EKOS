@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models
-from .routes import graph, meta, stats, workspaces
+from .routes import config, graph, meta, stats, workspaces
 from .settings import get_settings
 from .supervisor import McpSupervisor
 
@@ -64,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(meta.router, prefix="/api")
     app.include_router(workspaces.router, prefix="/api")
     app.include_router(stats.router, prefix="/api")
+    app.include_router(config.router, prefix="/api")
     app.include_router(graph.router, prefix="/api")
 
     # Serve the built UI when it exists (Compose / production); the Vite dev server handles it

@@ -20,12 +20,16 @@ from . import _proc
 _MAX_OUTPUT = 1 << 20  # 1 MiB
 _TIMEOUT = 20.0
 
-# Exact argv prefixes (before `--workspace <path>` is appended). Nothing else is runnable.
-_ALLOWED: tuple[tuple[str, ...], ...] = (
-    ("status", "--json"),
-    ("doctor", "--json"),
-    ("ledger", "timeline", "--json"),
-)
+# Each entry: an exact argv prefix (before `--workspace`/`cwd` handling) mapped to the set of
+# `--flag value` options that may follow it. Nothing else is runnable — there is no code path
+# that accepts an arbitrary command.
+_ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
+    ("status", "--json"): frozenset(),
+    ("doctor", "--json"): frozenset(),
+    ("ledger", "timeline", "--json"): frozenset({"--bucket", "--since"}),
+    ("config", "validate", "--json"): frozenset({"--file"}),
+    ("config", "preview-scan", "--json"): frozenset({"--max-files"}),
+}
 
 
 class ReadProcError(RuntimeError):
@@ -33,22 +37,16 @@ class ReadProcError(RuntimeError):
 
 
 def _check_allowed(argv: list[str]) -> None:
-    for prefix in _ALLOWED:
-        if tuple(argv[: len(prefix)]) == prefix:
-            # `ledger timeline` may carry --bucket / --since flags after the prefix; the others
-            # take no extra args.
-            if prefix == ("ledger", "timeline", "--json"):
-                extra = argv[len(prefix) :]
-                allowed_flags = {"--bucket", "--since"}
-                i = 0
-                while i < len(extra):
-                    if extra[i] not in allowed_flags:
-                        raise ReadProcError(f"disallowed argument {extra[i]!r}")
-                    i += 2
-                return
-            if argv[len(prefix) :]:
-                raise ReadProcError(f"unexpected trailing arguments: {argv[len(prefix) :]}")
-            return
+    for prefix, allowed_flags in _ALLOWED.items():
+        if tuple(argv[: len(prefix)]) != prefix:
+            continue
+        extra = argv[len(prefix) :]
+        i = 0
+        while i < len(extra):
+            if extra[i] not in allowed_flags:
+                raise ReadProcError(f"disallowed argument {extra[i]!r}")
+            i += 2  # skip the flag's value
+        return
     raise ReadProcError(f"argv not on the read-only allowlist: {argv}")
 
 

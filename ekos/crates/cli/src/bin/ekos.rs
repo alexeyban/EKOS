@@ -511,6 +511,10 @@ enum ConfigCommands {
         /// Emit one machine-readable JSON object instead of the text summary
         #[arg(long)]
         json: bool,
+        /// Validate this file instead of the workspace's `ekos.toml` — for editors checking
+        /// unsaved text. `[observe]` paths are still resolved against the workspace root.
+        #[arg(long)]
+        file: Option<PathBuf>,
     },
     /// Count what `ekos build` would observe under `[observe] paths` / `ignore-patterns`, without
     /// reading or compiling anything (RFC 0130 R8)
@@ -590,7 +594,7 @@ fn emits_machine_output(command: &Commands) -> bool {
             LedgerCommands::Status { json: true, .. } | LedgerCommands::Timeline { .. }
         ),
         Commands::Config { subcommand } => match subcommand {
-            ConfigCommands::Validate { json } => *json,
+            ConfigCommands::Validate { json, .. } => *json,
             ConfigCommands::PreviewScan { json, .. } => *json,
         },
         _ => false,
@@ -654,8 +658,9 @@ async fn main() -> Result<()> {
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor { json } => ekos::commands::doctor::run(&config, &cwd, &config_path, json),
         Commands::Config { subcommand } => match subcommand {
-            ConfigCommands::Validate { json } => {
-                ekos::commands::config::validate(&config, &cwd, &config_path, json)
+            ConfigCommands::Validate { json, file } => {
+                let target = file.as_deref().unwrap_or(&config_path);
+                ekos::commands::config::validate(&config, &cwd, target, json)
             }
             ConfigCommands::PreviewScan { json, max_files } => {
                 ekos::commands::config::preview_scan(&config, &cwd, max_files, json)

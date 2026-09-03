@@ -3,6 +3,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "./Layout";
+import { Config } from "./pages/Config";
 import { Dashboard } from "./pages/Dashboard";
 import { Workspaces } from "./pages/Workspaces";
 import "./index.css";
@@ -18,6 +19,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Workspaces /> },
       { path: "w/:id", element: <Dashboard /> },
+      { path: "w/:id/config", element: <Config /> },
     ],
   },
 ]);
