@@ -543,10 +543,23 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 A one-line JSON-RPC response (`"serverInfo":{"name":"ekos", ...}`) confirms the server is up and
 speaking the protocol correctly.
 
-**Remote — a client on a different machine.** There is **no authentication or TLS** on this
-transport (RFC 0115's explicit v1 scope) — binding an externally-reachable address exposes the same
-read surface stdio gives a spawning parent process, plus the two write-capable tools, to anyone who
-can reach it. Two safe ways to do this:
+**Optional bearer-token auth (RFC 0128).** `--tcp-token-file <path>` (or, if that flag is absent,
+the `EKOS_MCP_TOKEN` env var) requires every TCP connection's **first** message to be an
+`initialize` request carrying a matching `params._meta.token` — anything else gets a single
+`-32001 unauthorized` and the socket closes before any tool is reachable. The comparison is
+constant-time. Token-less `--tcp` is unchanged (RFC 0115 back-compat); stdio is never gated. This
+is a plaintext-socket bearer token — defence against a second local process connecting casually,
+**not** against a network attacker who can read the wire; use the SSH tunnel below for that.
+
+```bash
+ekos mcp serve --workspace /path/to/workspace --tcp 127.0.0.1:7331 \
+  --tcp-token-file /run/secrets/ekos-mcp-token
+```
+
+**Remote — a client on a different machine.** There is **no TLS** on this transport, and auth is
+only the optional plaintext bearer token above (RFC 0115/0128's explicit v1 scope) — binding an
+externally-reachable address exposes the same read surface stdio gives a spawning parent process,
+plus the two write-capable tools, to anyone who can reach it. Two safe ways to do this:
 
 - **Trusted private network only**, if the workspace machine and every client already sit on one
   (e.g. a home LAN, a VPN, a locked-down VPC): bind the interface facing that network instead of
@@ -754,6 +767,29 @@ computed over the post-filter edge set, and when the graph exceeds `--max-nodes`
 export keeps the most-connected core and says so in a `truncated` block rather than silently
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
+
+### Web console (RFC 0127/0128) — skeleton
+
+`web/` is a browser surface over a compiled workspace, still at Phase 0 (a real skeleton, not a
+finished console). It is a FastAPI app (`web/api/`) that talks to one `ekos mcp serve --tcp` per
+workspace through a small asyncio NDJSON/TCP client (`app/mcp_client.py`), plus a Vite + React
+shell (`web/ui/`). The skeleton serves `/api/health`, `/api/workspaces`, and
+`/api/workspaces/{id}/{stats,graph,search}` — the last three proxied straight to the `ekos_status`,
+`ekos_graph_export`, and `ekos_search` MCP tools. Console requests carry a static bearer token
+(`EKOS_CONSOLE_CONSOLE_TOKEN`); the token forwarded to the MCP servers is `EKOS_MCP_TOKEN` (RFC
+0128 R4, above). Bring it up from `web/` after building the release binary
+(`cd ekos && cargo build --release -p ekos`):
+
+```bash
+# start one MCP server by hand for the skeleton (Phase 1 has the console spawn these itself)
+printf 'dev-mcp-token\n' > /tmp/ekos-mcp-token
+ekos mcp serve --workspace "$EKOS_WS" --tcp 127.0.0.1:7331 --tcp-token-file /tmp/ekos-mcp-token &
+
+EKOS_WS=/abs/path/to/a/compiled/workspace docker compose up   # api :8000, ui dev server :5173
+```
+
+The statistics dashboard, config UX, job runner, scheduler, and graph views are RFC 0127 Phases
+1–7, each authored just-in-time.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 

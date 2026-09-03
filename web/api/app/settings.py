@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     mcp_token: str = Field(default="", validation_alias="EKOS_MCP_TOKEN")
 
     # JSON array of WorkspaceConfig, e.g.
-    #   EKOS_CONSOLE_WORKSPACES='[{"id":"self","name":"EKOS","path":"/repo","mcp_port":7331}]'
+    #   EKOS_CONSOLE_WORKSPACES_JSON='[{"id":"self","name":"EKOS","path":"/repo","mcp_port":7331}]'
     workspaces_json: str = "[]"
 
     # Origin the Vite dev server runs on, allowed through CORS.
