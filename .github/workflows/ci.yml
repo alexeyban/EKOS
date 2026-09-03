@@ -49,6 +49,68 @@ jobs:
         working-directory: ekos
         run: cargo fmt --check
 
+  web:
+    name: Web console
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build ekos (for the live MCP-client test)
+        working-directory: ekos
+        run: cargo build --release -p ekos
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync API deps
+        working-directory: web/api
+        run: uv sync --frozen
+
+      - name: Ruff (lint + format)
+        working-directory: web/api
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Pytest (unit + live MCP)
+        working-directory: web/api
+        run: uv run pytest -q
+        env:
+          EKOS_BIN: ${{ github.workspace }}/ekos/target/release/ekos
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      - name: Install UI deps
+        working-directory: web/ui
+        run: npm ci
+
+      - name: Typecheck + build UI
+        working-directory: web/ui
+        run: |
+          npm run typecheck
+          npm run build
+
   benchmark:
     name: Benchmark
     runs-on: ubuntu-latest

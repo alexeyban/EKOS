@@ -1,0 +1,23 @@
+/* EKOS house palette — mirrors docs/assets/theme.css (light + dark). */
+:root {
+  --ground: #f6f4fc;
+  --ground-raised: #ffffff;
+  --ink: #171326;
+  --ink-soft: #5c5578;
+  --rule: #e3ddf5;
+  --accent-a: #7c3aed;
+  --accent-b: #059669;
+  --bad: #dc2f57;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0b0a12;
+    --ground-raised: #14121d;
+    --ink: #f3f1fa;
+    --ink-soft: #a7a2c4;
+    --rule: rgba(255, 255, 255, 0.1);
+    --accent-a: #9945ff;
+    --accent-b: #14f195;
+    --bad: #ff5c7a;
+  }
+}

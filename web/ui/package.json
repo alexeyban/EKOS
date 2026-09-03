@@ -1,0 +1,28 @@
+{
+  "name": "ekos-console-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "EKOS web console — Vite + React shell (RFC 0128 Phase 0 skeleton)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "preview": "vite preview",
+    "gen:api": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.59.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "openapi-typescript": "^7.4.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.9"
+  }
+}

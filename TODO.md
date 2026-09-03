@@ -4349,11 +4349,25 @@ are excluded — see the full exclusion list in the planning history if needed.
         distributed gateway pending a fan-out RPC) + `Ledger::format_tag`.
       - [x] **R3** — `ekos_graph_export` MCP tool: thin wrapper over R1's fn so the console reads
         the graph over one transport (MCP TCP). Classified `Expensive` → opportunistically cached.
-      - [ ] **Next increment (0128+):** R4 (`--tcp-token-file` / `EKOS_MCP_TOKEN` constant-time
-        handshake), the Python asyncio NDJSON/TCP MCP client, the `web/` FastAPI + Vite/React
-        skeleton, `docker-compose.yml`. Deferred within R1: `--as-of` graph export (the
-        `all_objects_at` primitive exists, scope doesn't), true streaming ndjson, the distributed
-        `evidence_count` RPC.
+      - [x] **RFC 0128 — Phase 0 (part 2), `devlog_151`** (`ekos/docs/rfcs/0128-web-console-phase-0.md`,
+        Accepted 2026-09-03): **R4** — `ekos mcp serve --tcp --tcp-token-file` (or `EKOS_MCP_TOKEN`):
+        first line must be an `initialize` carrying `params._meta.token`, hand-rolled constant-time
+        compare, `-32001 unauthorized` + close otherwise; token-less `--tcp` unchanged (RFC 0115
+        back-compat); stdio never gated. **Python MCP client** — `web/api/app/mcp_client.py`,
+        ~150 lines asyncio, raw NDJSON/TCP, no MCP SDK; `EkosMcpClient` + lazy per-workspace
+        `ClientPool`; unwraps `{content:[{text}]}` tool results, one reconnect retry. **`web/`
+        skeleton** — FastAPI app factory (`create_app`), pydantic-settings, `/api/health` +
+        `/api/workspaces` + `/{id}/stats|graph|search` proxied to the MCP tools, static-token
+        console auth via `secrets.compare_digest`; `runner.py`/`scheduler.py`/`commands.py`/
+        `config_io.py` are Phase 1–4 stubs. Vite + React 18 + TS shell (one page). `docker-compose.yml`
+        (api + ui; `ekos` binary + workspace bind-mounted; console spawns the MCP servers itself in
+        Phase 1). New `web` CI job: build `ekos` release, ruff + pytest (`EKOS_BIN`-gated live test)
+        for `web/api`, tsc + vite build for `web/ui`. E2E verified against this repo's own `.ekos/`.
+      - [ ] **Next increment (0129+):** RFC 0127 Phases 1–7 — per-workspace MCP-server lifecycle
+        + real users/roles, the statistics dashboard, `ekos.toml` config UX, the command
+        allowlist + job runner + SSE logs, APScheduler, graph v1/v2. Deferred within R1: `--as-of`
+        graph export (the `all_objects_at` primitive exists, scope doesn't), true streaming ndjson,
+        the distributed `evidence_count` RPC.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`

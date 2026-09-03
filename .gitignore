@@ -17,3 +17,13 @@
 
 # Autonomous distributed-storage test runs (devlog_144) — local artifacts, not source
 /test-runs/
+
+# Web console (RFC 0128) — Python + Node build artifacts, not source
+web/api/.venv/
+web/ui/node_modules/
+web/ui/dist/
+web/ui/*.tsbuildinfo
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
