@@ -218,6 +218,13 @@ render-time callers.)
 
 ## Part D — make the identity kind-exclusion list a compile-time / test-time invariant
 
+**Status: implemented 2026-09-04 (`devlog_159`).** `ekos_kir::custom_kinds::REGISTRY` is the
+single source of truth (22 kinds, `structurally_keyed` per row); `DefaultResolver` derives its
+exclusion set from `is_structurally_keyed()`; the `ekos-identity` test
+`every_pipeline_custom_kind_is_registered` walks `crates/{recovery,semantic}/src` and fails CI on
+any unregistered `Custom` kind. Shipped **4 latent over-merge fixes** as a side effect —
+`Page` / `Risk` / `Rollup` / `ProjectSummary` were all structurally keyed but never excluded.
+
 ### Problem
 
 `CLAUDE.md` spells it out: every new `ObjectKind::Custom(_)` that is self-identified by a

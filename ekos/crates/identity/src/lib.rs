@@ -298,108 +298,32 @@ impl IdentityResolver for DefaultResolver {
 
         // ── Build blocks: (kind_str, first 3 chars of normalised name) ────────
         //
-        // `Custom("Section")` objects (RFC 0024 — one per document page/chunk,
-        // named "{path}: page {n}") are never resolution candidates: each is
-        // already deterministically identified by (document, page/index), so
-        // no two distinct Section objects can legitimately represent the same
-        // real-world entity. Without this exclusion, pages of the same
-        // document share a long name prefix ("{path}: page ") that scores
-        // high on Jaro-Winkler, and `structural_score`'s same-kind fallback of
-        // 1.0 (no `columns` property to compare) adds a flat +0.3 floor on
-        // top — collapsing an entire book's worth of distinct pages into one
-        // canonical object and defeating RFC 0024's purpose outright (verified
-        // against the real 82-book library: 8,624 raw objects fell to 120
-        // after resolution, almost all of it Section over-merging — see
-        // devlog 27).
+        // A `Custom(_)` kind that is *structurally keyed* (`ekos_kir::custom_kinds`) is never a
+        // resolution candidate — each instance is already identified by a file path / manifest
+        // dir / (source, index), so no two distinct instances can be the same real-world entity.
+        // Without the exclusion, instances of one kind share a long name prefix that scores high
+        // on Jaro-Winkler and `structural_score`'s same-kind `1.0` fallback (no `columns`
+        // property) adds a flat +0.3 floor, collapsing a whole book / crate graph / module tree
+        // into one canonical object (RFC 0024's Section case: 8,624 raw objects → 120, devlog 27).
+        // The registry has the per-kind key and RFC for all ~18 keyed kinds.
         //
-        // `Custom("Concept")` objects (RFC 0026 — LLM-extracted from document
-        // prose) are the mirror image: two mentions of the same real concept in
-        // different documents *should* merge, so they are not excluded by kind.
-        // What is excluded is a degenerate *name*: a normalised name that is one
-        // word or under `MIN_CONCEPT_NAME_CHARS` characters ("data", "the API")
-        // names something different in every document that uses it, and would
-        // reproduce the Section over-merge above on name similarity alone. A
-        // concrete concept like "Data Replication" blocks normally, and then has
-        // to clear the stricter `CONCEPT_MERGE_THRESHOLD` to actually merge.
+        // `Custom("Concept")` (RFC 0026) is the mirror image — two mentions of one concept across
+        // documents *should* merge — so it is `structurally_keyed: false`. What is excluded is a
+        // degenerate *name*: one word or under `MIN_CONCEPT_NAME_CHARS` ("data", "the API"). A
+        // concrete concept ("Data Replication") blocks normally and must clear the stricter
+        // `CONCEPT_MERGE_THRESHOLD` to actually merge.
         let mut blocks: HashMap<(String, String), Vec<usize>> = HashMap::new();
         for (i, obj) in objects.iter().enumerate() {
-            // `Custom("TransformNode")` objects (RFC 0027/0028) are the same
-            // failure shape as Section, discovered live while smoke-testing
-            // Phase 6's demo: each node is named "{source_path}:{index}"
-            // (`lower_to_kir`, `crates/semantic/src/transform_ir.rs`), so
-            // every node parsed from one file shares a long name prefix, and
-            // `structural_score`'s same-kind 1.0 fallback (no `columns`
-            // property) collapsed a real 3-node Source→Filter→Sink pipeline
-            // into one canonical object at confidence 0.99. Each node is
-            // already deterministically identified by (source, node index) —
-            // no two distinct TransformNode objects can legitimately be the
-            // same real-world entity, so — like Section, unlike Concept —
-            // this is a blanket kind exclusion, not a threshold/name-length
-            // guard.
-            //
-            // `Custom("RustSymbol")`/`Custom("RustModule")` (RFC 0041) and
-            // `Custom("PythonSymbol")`/`Custom("PythonModule")` (RFC 0038/0040) are the same
-            // failure shape again, discovered live while real-data-testing RFC 0041 against this
-            // repo's own ~50-crate workspace: many analyzer passes are literally named
-            // `<X>AnalyzerPass` (`ConfluenceAnalyzerPass`, `PentahoAnalyzerPass`,
-            // `PythonAnalyzerPass`, ...), so their long shared suffix scores high on Jaro-Winkler,
-            // and `structural_score`'s same-kind 1.0 fallback (no `columns` property) pushed
-            // several genuinely distinct structs in different files over the 0.85 merge threshold
-            // — e.g. `ConfluenceAnalyzerPass` (confluence_analyzer.rs) and `PentahoAnalyzerPass`
-            // (pentaho_analyzer.rs) collapsed into one canonical object, silently dropping the
-            // other from the ledger even though `resolve`'s cross-kind conflict detector (above)
-            // never flagged anything, since these merges are same-kind. Each of these objects is
-            // already deterministically identified by (file path, qualified name) — no two
-            // distinct source-code symbols/imports can legitimately be the same real-world entity
-            // — so this is a blanket kind exclusion, matching Section/TransformNode exactly.
-            //
-            // `Custom("Crate")` (RFC 0042) is the same failure shape yet again, caught the same
-            // way — by running `crate_topology_analyzer` against this repo's own ~40-crate
-            // workspace and finding only 1 of 39 `Crate` objects survived `ekos compile`. Crate
-            // names share a long common prefix (`ekos-cli`, `ekos-compiler-core`, `ekos-common`,
-            // …), and every `Crate` object has the same property shape (`path`/`description`/
-            // `version`, no `columns`), so `structural_score`'s same-kind 1.0 fallback pushed
-            // nearly every crate pair over threshold and collapsed the whole workspace's crate
-            // topology into one canonical object. Each `Crate` is already deterministically
-            // identified by its manifest directory — no two distinct crates can legitimately be
-            // the same real-world entity.
-            //
-            // `Custom("Claim")` and `Custom("ArchitectureGap")` (RFC 0065 Phase 1) are added
-            // proactively, before any real over-merge was observed, specifically to avoid
-            // rediscovering this exact failure shape a sixth time. Both are self-identified by a
-            // structural key: a `Claim` by the (subject, predicate, object) triple of the
-            // `DependsOn` relationship it was synthesized from, an `ArchitectureGap` by (crate,
-            // unresolved dependency name) — many claims/gaps from the same source crate share a
-            // long name/statement prefix exactly like `Crate`'s shared `ekos-*` prefix, and every
-            // instance of each kind has the same property shape (no `columns`), so the same
-            // same-kind 1.0 structural fallback would apply here too. No two distinct claims or
-            // gaps can legitimately be the same real-world entity.
-            //
-            // `Custom("ElixirModule")`/`Custom("ElixirSymbol")` (RFC 0081) and
-            // `Custom("JsModule")`/`Custom("JsSymbol")` (RFC 0085) hit this exact failure shape a
-            // seventh and eighth time — found live, not proactively, by reading a real generated
-            // entity page (`Plausible.Auth.Password`, a real password-hashing module) and finding
-            // an 18-times-duplicated `SameAs` relationship at confidence=1.00 to
-            // `PlausibleWeb.Plugins.API.Schemas.Funnel.CreateRequest`, a completely unrelated real
-            // module — CLAUDE.md's own crate-map already names this exact obligation ("New
-            // `ObjectKind::Custom(_)` variants... must be added to `DefaultResolver`'s blanket
-            // kind-exclusion list") and both RFCs missed it. Each is self-identified by a
-            // structural key (module: qualified name; symbol: owning module id + qualified name)
-            // — no two distinct instances can legitimately be the same real-world entity.
-            //
-            // `Custom("Document")` (RFC 0023/0025) is the ninth occurrence, found live 2026-08-25
-            // regenerating `pdf-reader`'s whole-project docs: two real, distinct `README.md`
-            // files (the project root's own, and `frontend`'s unmodified Vite scaffold template)
-            // both compile to a `Document` object literally named `"README.md"` — not just a
-            // shared prefix, an exact match, so `structural_score`'s same-kind 1.0 fallback (no
-            // `columns` property) merged them at maximum confidence. Originally misdiagnosed as
-            // an `local_docs_analyzer.rs` id-*collision* (its ids are real RFC 0079-qualified
-            // UUIDv5s and never actually collided — confirmed by direct inspection); the true
-            // cause was this same missing-exclusion class, one file away from where every prior
-            // instance was fixed. Each `Document` is already deterministically identified by its
-            // own (RFC 0079-qualified) path — no two distinct real files can legitimately be the
-            // same real-world entity.
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Section" || k == "TransformNode" || k == "RustSymbol" || k == "RustModule" || k == "PythonSymbol" || k == "PythonModule" || k == "Crate" || k == "Claim" || k == "ArchitectureGap" || k == "ElixirModule" || k == "ElixirSymbol" || k == "JsModule" || k == "JsSymbol" || k == "Document")
+            // RFC 0135 Part D — the exclusion set is derived from the single
+            // `ekos_kir::custom_kinds` registry (`structurally_keyed == true`), never a literal
+            // list maintained here. That is deliberate: the old inline list was rediscovered live
+            // ~13 times — Section (RFC 0024, devlog 27), TransformNode (0027), Rust/Python
+            // symbols+modules (0041/0038), Crate (0042, 39→1), Claim + ArchitectureGap (0065,
+            // proactive), Elixir/JS symbols+modules (0081/0085, an 18× duplicated SameAs found by
+            // reading a real entity page), Document (0023, two real README.md). Each kind's
+            // structural key and RFC live in the registry. A `recovery`/`semantic` coverage test
+            // fails CI if a new `Custom` kind an analyzer emits is missing from it.
+            if matches!(&obj.kind, ObjectKind::Custom(k) if ekos_kir::custom_kinds::is_structurally_keyed(k))
             {
                 continue;
             }
@@ -898,16 +822,16 @@ mod tests {
                 ObjectKind::Custom("Pipeline".into()),
             ),
             (
-                // A shared directory prefix (as the real RFC 0060 pair had) is required for
-                // both to land in the same `(kind, first-3-normalized-chars)` block — the
-                // differing part is only in the basename. `Custom("Page")`, not `"Document"`:
-                // `Document` became a blanket-excluded kind itself (2026-08-25, the real
-                // `pdf-reader` README over-merge) and would never reach comparison at all here,
-                // which is a different guarantee than this test's own (RFC 0060's exact-match
-                // flag on a pair that *does* get compared).
-                "docs/localization/ua_inspector.readme.md",
-                "docs/localization/ref_inspector.readme.md",
-                ObjectKind::Custom("Page".into()),
+                // A shared prefix (as the real RFC 0060 pair had) is required for both to land in
+                // the same `(kind, first-3-normalized-chars)` block — the differing part is only
+                // in the tail. `Custom("Pipeline")` here: a non-structurally-keyed kind that
+                // *does* reach comparison. Not `Document`/`Page` — both became structurally-keyed
+                // (RFC 0135 Part D registry) and would never reach comparison at all, which is a
+                // different guarantee than this test's own (RFC 0060's exact-match flag on a pair
+                // that *does* get compared).
+                "docs localization ua inspector readme",
+                "docs localization ref inspector readme",
+                ObjectKind::Custom("Pipeline".into()),
             ),
         ] {
             let g = make_graph(&[(name_a, kind.clone()), (name_b, kind.clone())]);
@@ -1533,18 +1457,70 @@ mod tests {
         );
     }
 
-    /// A non-excluded `Custom` kind is unaffected by the exclusion list — this pins the fix to
-    /// the specific listed kind strings, not `Custom` in general (e.g. `Custom("Page")` still
-    /// resolves normally).
+    /// A non-structurally-keyed `Custom` kind is unaffected by the exclusion — this pins the fix
+    /// to `custom_kinds::is_structurally_keyed`, not `Custom` in general. `Issue` is
+    /// `structurally_keyed: false` (RFC 0020 — identical titles legitimately merge).
     #[test]
-    fn other_custom_kinds_still_resolve_normally() {
-        let page = ObjectKind::Custom("Page".to_string());
-        let g = make_graph(&[("report.pdf", page.clone()), ("report.pdf", page)]);
+    fn a_non_keyed_custom_kind_still_resolves_normally() {
+        assert!(!ekos_kir::custom_kinds::is_structurally_keyed("Issue"));
+        let issue = ObjectKind::Custom("Issue".to_string());
+        let g = make_graph(&[
+            ("acme/api#1: fix the flaky test", issue.clone()),
+            ("acme/api#7: fix the flaky test", issue),
+        ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(
             result.proposals.len(),
             1,
-            "identical-name Pages should still merge"
+            "two issues with the same normalized title should still merge"
+        );
+    }
+
+    /// RFC 0135 Part D — every `ObjectKind::Custom("…")` string literal a `recover`/`compile`
+    /// pass emits must have a `custom_kinds::REGISTRY` entry, so a new analyzer kind that skips it
+    /// fails here rather than over-merging live weeks later (CLAUDE.md's recurring rediscovery).
+    #[test]
+    fn every_pipeline_custom_kind_is_registered() {
+        use std::collections::BTreeSet;
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let crates_dir = manifest.parent().expect("crates/identity has a parent");
+
+        let mut emitted: BTreeSet<String> = BTreeSet::new();
+        for sub in ["recovery/src", "semantic/src"] {
+            let root = crates_dir.join(sub);
+            for entry in walkdir::WalkDir::new(&root)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().is_some_and(|x| x == "rs"))
+            {
+                let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+                // Skip `#[cfg(test)]` modules crudely: only scan up to the first `mod tests`.
+                let src = text.split("mod tests").next().unwrap_or(&text);
+                for cap in src.split("ObjectKind::Custom(").skip(1) {
+                    if let Some(name) = cap
+                        .trim_start()
+                        .strip_prefix('"')
+                        .and_then(|r| r.split('"').next())
+                    {
+                        emitted.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        assert!(
+            !emitted.is_empty(),
+            "found no ObjectKind::Custom producers — path wrong?"
+        );
+
+        let missing: Vec<&String> = emitted
+            .iter()
+            .filter(|n| ekos_kir::custom_kinds::lookup(n).is_none())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these Custom object kinds are emitted by recover/compile but missing from \
+             ekos_kir::custom_kinds::REGISTRY — add each with structurally_keyed set correctly: \
+             {missing:?}"
         );
     }
 }
