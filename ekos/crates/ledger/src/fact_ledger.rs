@@ -1978,6 +1978,7 @@ mod tests {
         let holder = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(false)
             .open(&lock_path)
             .unwrap();
         fs4::FileExt::lock_exclusive(&holder).unwrap();

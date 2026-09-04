@@ -132,7 +132,6 @@ mod tests {
         sink.warning("W002", "another warning");
         sink.error("E001", "fatal problem");
 
-        assert!(!sink.has_errors() == false);
         assert!(sink.has_errors());
         assert_eq!(sink.errors().count(), 1);
         assert_eq!(sink.diagnostics().len(), 3);

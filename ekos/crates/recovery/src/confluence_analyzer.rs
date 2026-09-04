@@ -248,7 +248,7 @@ mod tests {
             "parent_id": parent_id,
         });
         let artifact =
-            ekos_artifact::ObservationArtifact::new("confluence", &format!("ENG:{id}"), data);
+            ekos_artifact::ObservationArtifact::new("confluence", format!("ENG:{id}"), data);
         let json = serde_json::to_value(&artifact).unwrap();
         ctx.artifact_store.write(&artifact.id, &json).unwrap();
         artifact.id

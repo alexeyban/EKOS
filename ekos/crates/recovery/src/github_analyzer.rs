@@ -370,16 +370,30 @@ mod tests {
         )
     }
 
-    fn seed_item(
-        ctx: &PassContext,
-        owner: &str,
-        repo: &str,
+    struct SeedItem<'a> {
+        owner: &'a str,
+        repo: &'a str,
         number: u64,
-        title: &str,
-        body: &str,
+        title: &'a str,
+        body: &'a str,
         is_pr: bool,
-        files: &[&str],
-    ) -> ArtifactId {
+        files: &'a [&'a str],
+    }
+
+    /// Tuple shape every `run_pass(vec![...])` call site below literally writes out —
+    /// factored into a named type rather than touching each of those call sites.
+    type SeedTuple<'a> = (&'a str, &'a str, u64, &'a str, &'a str, bool, Vec<&'a str>);
+
+    fn seed_item(ctx: &PassContext, item: SeedItem) -> ArtifactId {
+        let SeedItem {
+            owner,
+            repo,
+            number,
+            title,
+            body,
+            is_pr,
+            files,
+        } = item;
         let data = serde_json::json!({
             "owner": owner,
             "repo": repo,
@@ -392,7 +406,7 @@ mod tests {
         });
         let artifact = ekos_artifact::ObservationArtifact::new(
             "github",
-            &format!("{owner}/{repo}#{number}"),
+            format!("{owner}/{repo}#{number}"),
             data,
         );
         let json = serde_json::to_value(&artifact).unwrap();
@@ -400,14 +414,21 @@ mod tests {
         artifact.id
     }
 
-    async fn run_pass(
-        items: Vec<(&str, &str, u64, &str, &str, bool, Vec<&str>)>,
-    ) -> ekos_kir::KirGraph {
+    async fn run_pass(items: Vec<SeedTuple<'_>>) -> ekos_kir::KirGraph {
         let (c, _dir) = ctx();
         let mut ids = Vec::new();
         for (owner, repo, number, title, body, is_pr, files) in items {
             ids.push(seed_item(
-                &c, owner, repo, number, title, body, is_pr, &files,
+                &c,
+                SeedItem {
+                    owner,
+                    repo,
+                    number,
+                    title,
+                    body,
+                    is_pr,
+                    files: &files,
+                },
             ));
         }
         let mut pass = GitHubAnalyzerPass::new("test", ids);

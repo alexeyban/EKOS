@@ -474,7 +474,7 @@ SELECT * FROM customer
         assert_eq!(table.kind, ObjectKind::Table);
         assert_eq!(table.properties["dbt_kind"], "model");
         assert!(
-            table.properties.get("columns").is_none(),
+            !table.properties.contains_key("columns"),
             "no fabricated columns when no YAML documents this model"
         );
         assert_eq!(table.properties["materialized"], "incremental");

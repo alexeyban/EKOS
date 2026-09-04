@@ -1037,10 +1037,7 @@ mod tests {
     fn a_comment_containing_keyword_like_text_is_ignored() {
         let result = parse("defmodule M do\n  # def fake_fn do end\n  def real, do: :ok\nend\n");
         assert_eq!(result.symbol_count, 1);
-        assert_eq!(
-            result.objects.iter().find(|o| o.name == "real").is_some(),
-            true
-        );
+        assert!(result.objects.iter().find(|o| o.name == "real").is_some());
         assert!(result.objects.iter().all(|o| o.name != "fake_fn"));
     }
 

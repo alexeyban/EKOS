@@ -171,12 +171,12 @@ async fn gateway_uses_the_entity_index_to_prune_when_present() {
 
     // Wrong on purpose: orders actually lives in `table_pid`, not `file_pid`.
     coord
-        .record_entity_partitions(&orders.id.to_string(), &[file_pid.clone()])
+        .record_entity_partitions(&orders.id.to_string(), std::slice::from_ref(&file_pid))
         .await
         .unwrap();
     // Correct: main.rs really does live in `file_pid`.
     coord
-        .record_entity_partitions(&main_rs.id.to_string(), &[file_pid.clone()])
+        .record_entity_partitions(&main_rs.id.to_string(), std::slice::from_ref(&file_pid))
         .await
         .unwrap();
 

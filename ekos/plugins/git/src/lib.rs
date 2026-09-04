@@ -59,14 +59,14 @@ async fn git_output(cwd: &std::path::Path, args: &[&str]) -> Result<String, Obse
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// True only when `cwd` itself has a `.git` entry (directory, or the file a worktree/submodule
+/// uses) — deliberately *not* `git rev-parse --git-dir`, which walks up to any ancestor `.git`
+/// and so false-positives on a directory with no repo of its own that merely sits inside one
+/// (e.g. a second `[[observe]] paths` entry next to, not inside, the real repo). Found live
+/// against a real multi-project workspace: an unrelated ancestor `.git` made a docs-only
+/// directory register as a (tiny, wrong) git repo.
 async fn is_git_repo(cwd: &std::path::Path) -> bool {
-    Command::new("git")
-        .args(["rev-parse", "--git-dir"])
-        .current_dir(cwd)
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    cwd.join(".git").exists()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -243,6 +243,27 @@ mod tests {
         assert!(
             pkg.is_empty(),
             "non-git directory should produce no artifacts"
+        );
+    }
+
+    /// Regression: `is_git_repo` used to shell out to `git rev-parse --git-dir`, which walks up
+    /// to any *ancestor* `.git` — so a plain subdirectory with no repo of its own (a second
+    /// `[[observe]] paths` entry sitting inside the real repo, e.g. a docs-only folder) wrongly
+    /// registered as a git repo and would have surfaced the *parent* repo's commit history under
+    /// its own scan. Found live against a real multi-project workspace.
+    #[tokio::test]
+    async fn subdir_with_no_own_git_dir_is_not_a_repo_even_inside_an_ancestor_repo() {
+        let dir = TempDir::new().unwrap();
+        make_git_repo(&dir);
+        let subdir = dir.path().join("docs-only");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let ctx = ScanContext::new(&subdir);
+        let pkg = GitObserver::new().scan(&ctx).await.unwrap();
+        assert!(
+            pkg.is_empty(),
+            "a directory with no .git of its own must not be treated as a repo just because an \
+             ancestor directory has one"
         );
     }
 

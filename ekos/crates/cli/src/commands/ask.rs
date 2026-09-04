@@ -226,11 +226,13 @@ mod tests {
     #[test]
     fn ask_selects_ollama_provider_when_configured() {
         let dir = tempdir().unwrap();
-        let mut config = EkosConfig::default();
-        config.llm = LlmConfig {
-            provider: Some("ollama".to_string()),
-            api_key_env: None,
-            model: None,
+        let config = EkosConfig {
+            llm: LlmConfig {
+                provider: Some("ollama".to_string()),
+                api_key_env: None,
+                model: None,
+            },
+            ..Default::default()
         };
         let artifact_dir = config.artifact_dir(dir.path());
         let provider = build_llm_provider(&config, &artifact_dir);

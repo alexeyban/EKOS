@@ -1257,11 +1257,13 @@ mod tests {
     #[test]
     fn ollama_provider_selected_when_configured() {
         let dir = tempdir().unwrap();
-        let mut config = EkosConfig::default();
-        config.llm = LlmConfig {
-            provider: Some("ollama".to_string()),
-            api_key_env: None,
-            model: None,
+        let config = EkosConfig {
+            llm: LlmConfig {
+                provider: Some("ollama".to_string()),
+                api_key_env: None,
+                model: None,
+            },
+            ..Default::default()
         };
         let provider = build_llm_provider(&config, dir.path());
         assert_eq!(provider.model_name(), "llama3.1:8b");

@@ -3865,7 +3865,7 @@ mod tests {
         let page = render_object_page(
             &table,
             std::slice::from_ref(&rel),
-            &[ev.clone()],
+            std::slice::from_ref(&ev),
             &HashMap::new(),
         );
         // Phase 2 ("Real Descriptions, Purpose, and Links"): real relationships now group by
@@ -4186,7 +4186,7 @@ mod tests {
         let rel = KirRelationship::new(RelationshipKind::ForeignKey, table.id, other);
         let names = HashMap::from([(other, "orders".to_string())]);
 
-        let direct = render_object_page(&table, &[rel.clone()], &[], &names);
+        let direct = render_object_page(&table, std::slice::from_ref(&rel), &[], &names);
         let model = build_object_page_model(&table, &[rel], &[], &names);
         let via_model = render_markdown_object_page(&model);
         assert_eq!(direct, via_model);
@@ -5640,7 +5640,7 @@ mod tests {
             ObjectKind::Custom("ElixirModule".into()),
         );
         let symbol = KirObject::new("allowed?", ObjectKind::Custom("ElixirSymbol".into()));
-        let objects = vec![file.clone(), module.clone(), symbol.clone()];
+        let objects = [file.clone(), module.clone(), symbol.clone()];
         let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
         let relationships = vec![
             KirRelationship::new(RelationshipKind::Contains, file.id, module.id),
@@ -5661,7 +5661,7 @@ mod tests {
             "Plausible.IP.Tools",
             ObjectKind::Custom("ElixirModule".into()),
         );
-        let objects = vec![file.clone(), module.clone()];
+        let objects = [file.clone(), module.clone()];
         let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
         let relationships = vec![KirRelationship::new(
             RelationshipKind::Contains,
@@ -5680,7 +5680,7 @@ mod tests {
     fn resolve_defining_file_is_none_when_the_chain_never_reaches_a_real_file() {
         let a = KirObject::new("A", ObjectKind::Custom("ElixirModule".into()));
         let b = KirObject::new("b", ObjectKind::Custom("ElixirSymbol".into()));
-        let objects = vec![a.clone(), b.clone()];
+        let objects = [a.clone(), b.clone()];
         let objects_by_id: HashMap<_, _> = objects.iter().map(|o| (o.id, o)).collect();
         let relationships = vec![KirRelationship::new(RelationshipKind::Contains, a.id, b.id)];
         let parent_of = build_contains_parent_map(&relationships);

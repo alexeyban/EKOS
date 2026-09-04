@@ -41,12 +41,46 @@ jobs:
         working-directory: ekos
         run: cargo test --workspace
 
-      - name: Clippy (no warnings)
+      - name: Clippy (no warnings, including test code)
         working-directory: ekos
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Format check
         working-directory: ekos
+        run: cargo fmt --check
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tests/integration/target
+          key: ${{ runner.os }}-cargo-integration-${{ hashFiles('tests/integration/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-integration-
+
+      - name: Test
+        working-directory: tests/integration
+        run: cargo test
+
+      - name: Clippy (no warnings, including test code)
+        working-directory: tests/integration
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Format check
+        working-directory: tests/integration
         run: cargo fmt --check
 
   web:

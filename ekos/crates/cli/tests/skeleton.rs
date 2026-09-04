@@ -344,7 +344,7 @@ async fn build_single_dot_path_workspace_has_no_project_property() {
     assert!(!results.is_empty(), "expected to find main.rs object");
     let obj = ledger.get_object(&results[0].0).unwrap().unwrap();
     assert!(
-        obj.properties.get("project").is_none(),
+        !obj.properties.contains_key("project"),
         "a real `paths = [\".\"]` workspace must not gain a `project` property"
     );
     assert_eq!(obj.name, "main.rs");

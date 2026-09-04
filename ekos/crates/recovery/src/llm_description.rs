@@ -437,7 +437,10 @@ pub async fn describe_objects(
             .await
             {
                 Ok(()) => stats.modules_described += 1,
-                Err(_) => stats.llm_errors += 1,
+                Err(e) => {
+                    tracing::warn!(object = %obj.name, error = %e, "llm_description: module call failed");
+                    stats.llm_errors += 1;
+                }
             }
         }
     }
@@ -483,7 +486,10 @@ pub async fn describe_objects(
             .await
             {
                 Ok(()) => stats.symbols_described += 1,
-                Err(_) => stats.llm_errors += 1,
+                Err(e) => {
+                    tracing::warn!(object = %obj.name, error = %e, "llm_description: symbol call failed");
+                    stats.llm_errors += 1;
+                }
             }
         }
     }

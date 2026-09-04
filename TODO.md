@@ -3619,20 +3619,26 @@ are excluded — see the full exclusion list in the planning history if needed.
     post-`commit` each time; still not fixed, still correctly deferred to Storage Architecture
     Phase 2.
 
-- [ ] **`GitObserver::is_git_repo()` false-positive on an unrelated ancestor `.git`** — found live
-  while cleaning the analytics project's ledger (before the docs-decomposition plan started), not
-  yet fixed. `plugins/git/src/lib.rs` uses `git rev-parse --git-dir`, which walks up to *any*
-  ancestor `.git` — so a second `[[observe]] paths` entry with no `.git` of its own (e.g.
-  `../analytics-docs`) gets wrongly detected as a git repo if it happens to sit inside a parent
-  directory that does have one (`/home/legion/PycharmProjects/.git`). Compounded by
-  `recover.rs`'s `collect_git_artifact_ids`, which scans the *whole* artifact store for
-  `connector_name == "git"` artifacts with no per-project scoping and unconditionally overwrites
-  (`repo_id = Some(id)`, last-one-wins) which "repo" metadata is treated as authoritative — this
-  can nondeterministically surface the wrong (tiny, ~1-contributor) commit history instead of the
-  real one (~124 contributors), depending on artifact store iteration order. Real fix needs two
-  parts: `is_git_repo()` should check for a `.git` directly inside the given path, not walk
-  ancestors (or explicitly opt into ancestor discovery only when desired); `collect_git_artifact_ids`
-  needs the same per-project scoping RFC 0079 already gave the other multi-project analyzers.
+- [x] **`GitObserver::is_git_repo()` false-positive on an unrelated ancestor `.git`** — half
+  fixed 2026-09-04 (tech-debt paydown planning pass). `plugins/git/src/lib.rs`'s `is_git_repo` used
+  `git rev-parse --git-dir`, which walks up to *any* ancestor `.git` — so a second
+  `[[observe]] paths` entry with no `.git` of its own (e.g. `../analytics-docs`) got wrongly
+  detected as a git repo if it happened to sit inside a parent directory that does have one.
+  Fixed: `is_git_repo` now checks `cwd.join(".git").exists()` directly instead of shelling out —
+  true only when the given path itself has a `.git` entry, no ancestor walk. Regression test
+  `subdir_with_no_own_git_dir_is_not_a_repo_even_inside_an_ancestor_repo` (real git repo plus
+  a plain subdirectory inside it, asserts the subdirectory scans empty).
+  - [ ] **Still open — `collect_git_artifact_ids`'s per-project scoping** (`recover.rs`): scans
+    the *whole* artifact store for `connector_name == "git"` with no per-project scoping and
+    unconditionally overwrites (`repo_id = Some(id)`, last-one-wins) which "repo" metadata is
+    treated as authoritative. The `is_git_repo()` fix above closes the *false-positive* trigger
+    for this (a wrongly-detected second repo no longer produces spurious git artifacts to pool),
+    but a workspace with two *genuinely separate* real git repos across two `[[observe]] paths`
+    entries still has this gap — `GitAnalyzerPass::new(...)` takes one scalar `repo_id` for
+    a whole batch of commits that may span multiple real repos. Deliberately not rushed alongside
+    the above: this touches git-provenance linking logic that lands in the ledger, and needs the
+    same per-project scoping RFC 0079 already gave the other multi-project analyzers, with its
+    own tests-first pass rather than a same-session bolt-on.
 
 - [x] **Identity resolver: `ElixirModule`/`ElixirSymbol`/`JsModule`/`JsSymbol` missing from
   `DefaultResolver`'s blanket kind-exclusion list** — `devlog_90`. Found live reading a real
@@ -3719,6 +3725,22 @@ are excluded — see the full exclusion list in the planning history if needed.
     ambiguity). Live-verified: 291 real files, 434 real `JsModule`s, 851 real `JsSymbol`s, 99.3%
     parse success after the fix (2 real remaining failures are a real, uninvestigated gap in the
     pinned older `oxc_parser` version's own TS grammar coverage, not an EKOS bug).
+    - [ ] **The rustc-version blocker on the `oxc_parser` pin is gone (workspace toolchain is now
+      1.98, past the 1.95 the newer oxc needed) — but re-investigated 2026-09-04 (tech-debt
+      paydown planning pass) and the unpin itself is NOT a trivial bump.** Between 0.133.0 and
+      latest (0.148.0 confirmed to exist on crates.io), `oxc_ast::ast::ExportNamedDeclaration`
+      dropped its `declaration`/`source`/`with_clause` fields entirely (confirmed by diffing the
+      vendored struct definitions directly) — a real breaking AST restructuring, not a mechanical
+      rename; `javascript_analyzer.rs`'s declaration-form named-export detection
+      (`export function foo() {}`) reads `decl.declaration` and would need to migrate to whatever
+      now carries that information (not yet identified — needs its own investigation into oxc's
+      new export-representation shape, likely via `ModuleRecord` or a restructured `Statement`
+      variant, before writing a fix). `ParserReturn.errors` also renamed to `.diagnostics`
+      (trivial, separately confirmed). Attempted live 2026-09-04, reverted rather than guessing at
+      the new AST shape under time pressure — this touches the same export-detection logic behind
+      the live-verified 99.3%/434-JsModule numbers above; a wrong migration could silently
+      regress it with nothing to catch it. Real follow-up, not a quick win — needs a dedicated
+      pass with its own tests against the new AST shape before landing.
   - [x] **Phase 6 — real cross-tier edges (stretch)** — RFC 0086 / `devlog_89`. Backend→Database
     shipped: extended `elixir_analyzer.rs` (not a new pass) to detect real `use Ecto.Repo,
     adapter: Ecto.Adapters.X` declarations, emitting a real `Custom("Technology")` object +
