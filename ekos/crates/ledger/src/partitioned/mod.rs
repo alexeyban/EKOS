@@ -81,7 +81,7 @@
 //! invariant RFC 0104's `write.lock` also enforces cross-process.
 
 use crate::{
-    ArmSet, FactLedger, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults,
+    ArmSet, ArmTiming, FactLedger, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults,
     RetrievalRequest, ScoredCandidate, SignalSource, exact_name_matches, rrf_fuse,
 };
 
@@ -1291,6 +1291,11 @@ impl PartitionedLedger {
         let mut lists: Vec<(SignalSource, Vec<ScoredCandidate>)> =
             Vec::with_capacity(hot.len() + 1);
         let mut union: Vec<ScoredCandidate> = Vec::new();
+        // F4 (test-runs/run-20260901T160842Z): each partition's own `FactLedger::retrieve` already
+        // computes real per-arm timings — they were simply never read here. Summed per
+        // `SignalSource` across partitions (this loop runs them sequentially, so a sum is real
+        // total wall-clock, not double-counted parallel time); `candidates` summed the same way.
+        let mut timings: HashMap<SignalSource, ArmTiming> = HashMap::new();
         for key in hot {
             let ledger = self.partition(&key, false)?;
             let partition_hits = ledger
@@ -1299,6 +1304,15 @@ impl PartitionedLedger {
                     key: key.clone(),
                     source,
                 })?;
+            for t in &partition_hits.arm_timings {
+                let entry = timings.entry(t.source).or_insert(ArmTiming {
+                    source: t.source,
+                    elapsed_ms: 0.0,
+                    candidates: 0,
+                });
+                entry.elapsed_ms += t.elapsed_ms;
+                entry.candidates += t.candidates;
+            }
             let cands: Vec<ScoredCandidate> = partition_hits
                 .hits
                 .into_iter()
@@ -1318,12 +1332,12 @@ impl PartitionedLedger {
         if !exact.is_empty() {
             lists.push((SignalSource::ExactName, exact));
         }
+        let mut arm_timings: Vec<ArmTiming> = timings.into_values().collect();
+        arm_timings.sort_by_key(|t| format!("{:?}", t.source));
         Ok(RankedResults {
             hits: rrf_fuse(&lists, RRF_K, req.limit),
             arms_run: ArmSet::LEXICAL,
-            // Per-arm timing is per-partition here and already aggregated by the fan-out; the
-            // separable-arm breakdown (RFC 0126) is a `FactLedger`-only signal.
-            arm_timings: Vec::new(),
+            arm_timings,
         })
     }
 

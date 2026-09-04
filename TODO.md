@@ -4417,8 +4417,19 @@ are excluded — see the full exclusion list in the planning history if needed.
         **F5** `ekos mcp serve --workspace <dir>` didn't load `<dir>/ekos.toml` (`resolve_config_path`
         helper); **F6** `ekos status`/`ekos ledger status` said "not initialised" on any partitioned
         workspace (added a partitioned/distributed branch). Still open: F2 (`ekos diff` empty for
-        very-old `--from`), F4 (`arm_timings` empty on partitioned stores), F7 (inflected
-        entity-mention resolution).
+        very-old `--from`), F7 (inflected entity-mention resolution).
+        - [x] **F4 — fixed 2026-09-04 (tech-debt paydown planning pass).** `arm_timings` was always
+          `[]` on partitioned + distributed stores. `PartitionedLedger::retrieve`'s own comment
+          claimed timing was "already aggregated by the fan-out," but no aggregation code actually
+          existed — each partition's real `FactLedger::retrieve` timing was computed and then
+          discarded. Fixed: sum `elapsed_ms`/`candidates` per `SignalSource` across partitions
+          (the fan-out loop is sequential, so summing is real total wall-clock, not
+          double-counted). `DistributedLedger`'s query-worker RPC doesn't carry a worker-internal
+          arm breakdown over the wire, so it measures at the gateway boundary instead — wall-clock
+          around the fan-out round trip for `Bm25`, local compute time for `ExactName` — real
+          measured data, just coarser-grained than `FactLedger`'s own. 2 new tests: one
+          multi-partition (`retrieve_aggregates_arm_timings_across_partitions`), one a real
+          2-query-worker distributed gateway (`gateway_retrieve_populates_arm_timings`).
         - **F2 — investigated 2026-09-04 (tech-debt paydown planning pass), not reproduced, not
           closed.** Traced `FactLedger::diff`'s window computation (`window_start`/`in_window`),
           `SegmentStore::batches_after`'s `keep` predicate for a `None` cutoff, and

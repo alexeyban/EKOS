@@ -966,6 +966,46 @@ fn retrieve_promotes_an_exact_name_match_across_partitions() {
 }
 
 #[test]
+fn retrieve_aggregates_arm_timings_across_partitions() {
+    // F4 (test-runs/run-20260901T160842Z): `arm_timings` was always empty on partitioned stores
+    // even though each partition's own `FactLedger::retrieve` already computes real per-arm
+    // timing — it was simply never read. Two objects that land in two different partitions
+    // (different `ObjectKind`) exercises real multi-partition aggregation, not a single-partition
+    // no-op case.
+    let dir = tempdir().unwrap();
+    let store = ledger_with_root(dir.path());
+
+    let customers = KirObject::new("Customers", ObjectKind::Table);
+    let sql_file = KirObject::new("schemas/shop.sql", ObjectKind::File)
+        .with_property("excerpt", serde_json::json!("customers customers"));
+    store.append_object(&customers).unwrap();
+    store.append_object(&sql_file).unwrap();
+
+    let results = store
+        .retrieve(&crate::RetrievalRequest::lexical("customers"))
+        .unwrap();
+
+    assert!(
+        !results.arm_timings.is_empty(),
+        "arm_timings must be populated, not left empty, once real per-partition data exists"
+    );
+    let bm25 = results
+        .arm_timings
+        .iter()
+        .find(|t| t.source == crate::SignalSource::Bm25)
+        .expect("a Bm25 arm timing must be present");
+    assert!(
+        bm25.candidates >= 2,
+        "candidates should sum across both partitions' Bm25 arms, got {}",
+        bm25.candidates
+    );
+    assert!(
+        bm25.elapsed_ms >= 0.0,
+        "elapsed_ms must be a real non-negative measurement"
+    );
+}
+
+#[test]
 fn with_segment_backend_routes_each_partition_through_its_backend() {
     use std::sync::{Arc, Mutex};
 

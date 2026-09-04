@@ -130,6 +130,66 @@ async fn gateway_matches_partitioned_ledger_over_two_workers() {
     let _ = Arc::new(()); // keep imports tidy
 }
 
+/// F4 (test-runs/run-20260901T160842Z): `arm_timings` (RFC 0126) was always empty on the
+/// distributed gateway's `retrieve` — the query-worker RPC doesn't carry a worker-internal arm
+/// breakdown over the wire, so this measures at the gateway boundary (the fan-out round trip for
+/// Bm25, local compute for ExactName) instead of leaving it empty outright.
+#[tokio::test(flavor = "multi_thread")]
+async fn gateway_retrieve_populates_arm_timings() {
+    let dir = tempdir().unwrap();
+    let c1 = tempdir().unwrap();
+    let c2 = tempdir().unwrap();
+    let (ledger, _orders, _customers, _main_rs) = build_workspace(dir.path());
+
+    let (coord_addr, _c) = spawn_ephemeral("127.0.0.1:0", None).await.unwrap();
+    let coord = CoordinatorClient::connect(coord_addr).await.unwrap();
+    for key in ledger.catalog_partition_keys() {
+        let root = ledger.partition_root(&key).unwrap();
+        coord
+            .register_partition(
+                &partition_id(&key),
+                PartitionLocation::Local {
+                    root: root.to_string_lossy().into_owned(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let (w1, _h1) = spawn_ephemeral_worker("127.0.0.1:0", &coord_addr.to_string(), c1.path())
+        .await
+        .unwrap();
+    let (w2, _h2) = spawn_ephemeral_worker("127.0.0.1:0", &coord_addr.to_string(), c2.path())
+        .await
+        .unwrap();
+
+    let coord_s = coord_addr.to_string();
+    let workers = vec![w1.to_string(), w2.to_string()];
+
+    let handle = std::thread::spawn(move || {
+        let g = DistributedLedger::open(coord_s, workers).unwrap();
+        let results = g
+            .retrieve(&ekos_ledger::RetrievalRequest::lexical("orders"))
+            .unwrap();
+        assert!(
+            !results.arm_timings.is_empty(),
+            "arm_timings must be populated on the distributed gateway, not left empty"
+        );
+        assert!(
+            results
+                .arm_timings
+                .iter()
+                .any(|t| t.source == ekos_ledger::SignalSource::Bm25),
+            "a Bm25 arm timing must be present"
+        );
+        assert!(
+            results.arm_timings.iter().all(|t| t.elapsed_ms >= 0.0),
+            "every timing must be a real non-negative measurement"
+        );
+    });
+    handle.join().unwrap();
+}
+
 /// RFC 0113 v1.1 — when the coordinator's `entity_id → partitions` index has an entry for an id,
 /// the gateway must actually use it to prune, not just fall back to a full class scan. Proven by
 /// deliberately mis-registering `orders`' id against a partition that does *not* hold it: if the

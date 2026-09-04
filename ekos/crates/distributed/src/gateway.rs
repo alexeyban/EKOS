@@ -26,8 +26,8 @@ use chrono::{DateTime, Utc};
 use ekos_cluster::{ClusterError, CoordinatorClient};
 use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use ekos_ledger::{
-    ArmSet, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults, RetrievalRequest,
-    ScoredCandidate, SignalSource, exact_name_matches, rrf_fuse,
+    ArmSet, ArmTiming, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults,
+    RetrievalRequest, ScoredCandidate, SignalSource, exact_name_matches, rrf_fuse,
 };
 use futures::future::{join_all, try_join_all};
 use tokio::runtime::Handle;
@@ -379,12 +379,19 @@ impl DistributedLedger {
         let exact_q = exact_q.to_string();
         self.run(async move {
             let pids = self.partitions(PClass::Object).await?;
+            // F4 (test-runs/run-20260901T160842Z): the query-worker RPC doesn't carry a
+            // worker-internal arm breakdown over the wire, so this measures at the boundary where
+            // each arm's own work actually happens — the fan-out round trip for BM25, local
+            // compute for ExactName — rather than leaving `arm_timings` empty outright.
+            let bm25_start = std::time::Instant::now();
             let per_partition = self
                 .fan_out(&pids, |w, pid| {
                     let q = bm25_q.clone();
                     async move { w.find_objects_scored(&pid, &q, k).await }
                 })
                 .await?;
+            let bm25_elapsed_ms = bm25_start.elapsed().as_secs_f64() * 1000.0;
+            let bm25_candidates: usize = per_partition.iter().map(|hits| hits.len()).sum();
             let union: Vec<ScoredCandidate> = per_partition
                 .iter()
                 .flatten()
@@ -401,14 +408,26 @@ impl DistributedLedger {
                     )
                 })
                 .collect();
-            lists.push((
-                SignalSource::ExactName,
-                exact_name_matches(&exact_q, &union),
-            ));
+            let exact_start = std::time::Instant::now();
+            let exact = exact_name_matches(&exact_q, &union);
+            let exact_elapsed_ms = exact_start.elapsed().as_secs_f64() * 1000.0;
+            let exact_candidates = exact.len();
+            lists.push((SignalSource::ExactName, exact));
             Ok::<_, DistributedError>(RankedResults {
                 hits: rrf_fuse(&lists, RRF_K, k),
                 arms_run: ArmSet::LEXICAL,
-                arm_timings: Vec::new(),
+                arm_timings: vec![
+                    ArmTiming {
+                        source: SignalSource::Bm25,
+                        elapsed_ms: bm25_elapsed_ms,
+                        candidates: bm25_candidates,
+                    },
+                    ArmTiming {
+                        source: SignalSource::ExactName,
+                        elapsed_ms: exact_elapsed_ms,
+                        candidates: exact_candidates,
+                    },
+                ],
             })
         })
     }
