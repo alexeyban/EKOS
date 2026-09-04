@@ -3110,6 +3110,33 @@ are excluded — see the full exclusion list in the planning history if needed.
   confirm `File` objects return) and a regression guard the other direction (intact ledger +
   unchanged content still hits the cache, doesn't duplicate). Deliberately doesn't cover a
   hypothetical *partial* File-object loss with everything else intact — not what was found live.
+  - [x] **The *other* half — a redaction/analyzer *logic* change never re-scans unchanged source**
+    (RFC 0077 explicitly left this; `devlog_100` KC#2, `devlog_112` KC#3). Fixed by **RFC 0135
+    Part A / `devlog_158`**: `build`'s `fingerprints.json` **key** now folds in
+    `ekos_common::PIPELINE_LOGIC_VERSION` (hand-bumped `u32` for code changes) and an 8-hex hash of
+    the workspace's `RedactionConfig` (`[security]` changes, automatic). Either change misses the
+    cache → one forced re-scan → post-redaction artifact id recompute (RFC 0072) persists the
+    fresh artifact. No `.ekos` wipe needed. `preview-scan` untouched.
+
+- [~] **RFC 0135 — core provenance & determinism foundations**
+  (`ekos/docs/rfcs/0135-core-provenance-and-determinism-foundations.md`, Draft 2026-09-04). Four
+  independently-mergeable parts, each closing a standing gap + a mechanical guard so it can't
+  silently return:
+  - [x] **Part A** — `PIPELINE_LOGIC_VERSION` + redaction-config hash in `build`'s fingerprint
+    cache key (`devlog_158`). See the fingerprint item above.
+  - [ ] **Part B** — `WriteContext { run_id, stage, source_artifact_id }` on the store handle →
+    per-entry provenance + `audit_trail(id)` reader + `ekos ledger audit` / `ekos_audit`. Closes
+    the RFC 0004 "never built" audit-trail gap (see the Phase 9 item below). MVP = run+stage for
+    every write, artifact-level for `build`'s `File` objects; per-`KnowledgeArtifact` is a follow-up.
+  - [ ] **Part C** — audit the ~55 *producer* `KirRelationship::new()` call sites (recovery/ +
+    semantic/ + cli write paths; the ~175 render/query/sim sites are explicitly out of scope), add
+    `KirRelationship::deterministic(kind, from, to, discriminator)`, a per-site decision table, and
+    a guard test failing on bare `::new` in those modules. Continues RFC 0072/0076 (which fixed 2).
+  - [ ] **Part D** — `DefaultResolver`'s kind-exclusion list becomes a `structurally_keyed`
+    registry + a coverage test that fails CI when a new `Custom(_)` kind skips it. Guards the
+    CLAUDE.md-documented recurring over-merge rediscovery.
+  - *Out of scope:* `KnowledgeStore: Send` / RFC 0112 (its own RFC); the RFC 0060 residual fuzzy
+    mis-scores (no threshold fix exists); retroactive row de-dup (no tombstone).
 
 - [x] **Architecture Knowledge Model — reasoning layer, evaluator, MVP agent (RFC 0065/0066/0067)**:
   RFC 0065 Phase 1 (`devlog_70`) shipped the static knowledge model — `Claim`/`ArchitectureGap`

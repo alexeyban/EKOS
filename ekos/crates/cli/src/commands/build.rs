@@ -65,7 +65,28 @@ const CLICKHOUSE_DATABASE_ENV: &str = "EKOS_CLICKHOUSE_DATABASE";
 const CLICKHOUSE_USER_ENV: &str = "EKOS_CLICKHOUSE_USER";
 const CLICKHOUSE_PASSWORD_ENV: &str = "EKOS_CLICKHOUSE_PASSWORD";
 
-/// Load the `.ekos/fingerprints.json` map of observe-path → last-seen source fingerprint.
+/// RFC 0135 Part A — the `fingerprints.json` key for one observe path.
+///
+/// `<abs base path>@v<logic-version>#<8-hex of the redaction config>`. Folding the pipeline
+/// logic version and the per-workspace redaction config into the key means a change to either —
+/// EKOS's own redact/analyze code, or the workspace's `[security]` section — misses the cache and
+/// forces exactly one real re-scan of that path, instead of serving a now-stale artifact until a
+/// manual `.ekos` wipe. The source-tree fingerprint itself (the map *value*) is unchanged.
+fn fingerprint_cache_key(
+    base: &Path,
+    logic_version: u32,
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+) -> String {
+    let cfg_hash = ekos_common::ContentHash::of_str(&format!("{redaction_config:?}"));
+    format!(
+        "{}@v{logic_version}#{}",
+        base.display(),
+        &cfg_hash.as_str()[..8]
+    )
+}
+
+/// Load the `.ekos/fingerprints.json` map of observe-path cache key → last-seen source
+/// fingerprint (see [`fingerprint_cache_key`] for the key shape).
 fn load_fingerprints(path: &Path) -> HashMap<String, String> {
     std::fs::read_to_string(path)
         .ok()
@@ -237,7 +258,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
 
         let fp = source_fingerprint(&ctx);
-        let fp_key = base.display().to_string();
+        let fp_key =
+            fingerprint_cache_key(base, ekos_common::PIPELINE_LOGIC_VERSION, &redaction_config);
         if !ledger_is_empty && fingerprints.get(&fp_key) == Some(&fp.0) {
             connectors_skipped_cached += observers.len();
             continue;
@@ -611,12 +633,11 @@ mod tests {
             "unmatched content must be stored as-is on the first build"
         );
 
-        // Same real scenario the RFC 0077 test above already established forces a genuine
-        // rescan (not a cached-artifact re-derivation): clear just the ledger.
-        std::fs::remove_dir_all(config1.ekos_dir(dir.path()).join("ledger")).unwrap();
-
         // Second build: a real `[security]` custom pattern now matches the *same, unchanged*
         // raw file content — simulating a redaction-engine fix/addition between two runs.
+        // RFC 0135 Part A: the ledger is deliberately *not* cleared here. The redaction config
+        // is hashed into the fingerprint cache key, so adding a pattern misses the cache and
+        // forces a real re-scan on its own — no `.ekos` wipe needed.
         let mut config2 = EkosConfig::default();
         config2.security.extra_patterns.push(SecretPatternConfig {
             label: "test-secret".to_string(),
@@ -629,6 +650,65 @@ mod tests {
             second.iter().any(|s| s.contains("[REDACTED:test-secret]")),
             "a freshly, correctly re-redacted artifact must exist after the pattern addition — \
              got: {second:?}"
+        );
+    }
+
+    #[test]
+    fn fingerprint_cache_key_changes_with_logic_version_and_redaction_config() {
+        use ekos_common::redaction::RedactionConfig;
+        let base = Path::new("/ws/src");
+        let empty = RedactionConfig::default();
+
+        let k1 = fingerprint_cache_key(base, 1, &empty);
+        // Same inputs → byte-identical key.
+        assert_eq!(k1, fingerprint_cache_key(base, 1, &empty));
+        // A logic-version bump must change the key.
+        assert_ne!(k1, fingerprint_cache_key(base, 2, &empty));
+        // A `[security]` config change must change the key.
+        let with_pattern = RedactionConfig {
+            extra_patterns: vec![("x".into(), "y".into())],
+            ..Default::default()
+        };
+        assert_ne!(k1, fingerprint_cache_key(base, 1, &with_pattern));
+        // The absolute base path is still in there (multi-`[observe]`-path workspaces).
+        assert!(k1.starts_with("/ws/src@v1#"));
+    }
+
+    #[tokio::test]
+    async fn a_logic_version_bump_forces_a_rescan_of_unchanged_source() {
+        // RFC 0135 Part A, the code-change half: same source, same `[security]` config, but the
+        // pipeline logic version moved — the observe path must be re-scanned, not cache-skipped.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("hello.txt"), b"hello world").unwrap();
+        let config = EkosConfig::default();
+        let redaction = config.redaction_config();
+        let base = dir.path().canonicalize().unwrap();
+
+        run(&config, dir.path()).await.unwrap();
+
+        let fp_path = config.ekos_dir(dir.path()).join("fingerprints.json");
+        let mut fps = load_fingerprints(&fp_path);
+        // The current build wrote a key at the live PIPELINE_LOGIC_VERSION.
+        let live_key =
+            fingerprint_cache_key(&base, ekos_common::PIPELINE_LOGIC_VERSION, &redaction);
+        assert!(
+            fps.contains_key(&live_key),
+            "keys: {:?}",
+            fps.keys().collect::<Vec<_>>()
+        );
+        // Simulate the state left by a *different* logic version: re-key the entry under another
+        // version number. The next build must not trust it.
+        let val = fps.remove(&live_key).unwrap();
+        let other_version = ekos_common::PIPELINE_LOGIC_VERSION ^ 0x5555;
+        fps.insert(fingerprint_cache_key(&base, other_version, &redaction), val);
+        save_fingerprints(&fp_path, &fps).unwrap();
+
+        run(&config, dir.path()).await.unwrap();
+
+        let after = load_fingerprints(&fp_path);
+        assert!(
+            after.contains_key(&live_key),
+            "a build after a logic-version bump must re-scan and record the current-version key"
         );
     }
 
