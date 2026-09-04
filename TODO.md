@@ -2893,6 +2893,24 @@ These items have no single phase — they must be maintained and grown throughou
       on lease loss; a built-in acquire-retry loop in `ekos compile-worker`; the
       document-semantics analyzer's free-form relationship vocabulary (one partition per bare
       preposition).
+      - [x] **Acquire-retry loop — fixed 2026-09-04 (tech-debt paydown planning pass).**
+        `ekos compile-worker run --retry-lease-seconds <N>` (0 default, preserving the original
+        fail-fast contract `crates/cluster/tests/harness.rs`'s "B must not get the held shard"
+        test relies on). Lives in `compile_worker_run` (the CLI layer), not
+        `CompileWorker::run_shard` itself — `run_shard`'s fail-fast-on-conflict behavior is a
+        deliberate, tested contract other callers (including that same test) still need
+        unchanged. Retries *only* an `"already leased"` conflict (the one error `lease_acquire`
+        can produce before any work has started, so retrying it can never re-run a pipeline that
+        already started) — every other error (bad coordinator address, a genuinely failed
+        pipeline, a lease lost mid-run) still fails immediately regardless of the flag. Live
+        end-to-end test added (`tests/integration`): a real coordinator, a stub worker holding the
+        shard, `compile_worker_run` started concurrently with retries enabled, the shard released
+        mid-wait, the real pipeline still completes via retry. **Still open**: interrupt-in-flight
+        on lease loss (the pipeline currently always runs to completion even after the heartbeat
+        detects a lost lease, only reporting `LostLease` afterward) — deliberately not attempted
+        alongside this fix; it needs a cancellation signal threaded through the whole
+        build→recover→resolve→compile→commit pipeline, a materially bigger, riskier change than
+        this one.
     - *Phase A progress (2026-08-29):* being built incrementally against RFC 0111
       directly (that RFC doubles as the Phase A impl RFC, per user direction). Landed:
       `crates/ledger/src/partitioned.rs` — `PartitionedLedger` with all three `PartitionDimension`s

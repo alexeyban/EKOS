@@ -17,7 +17,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use chrono::Duration;
 use ekos_cluster::{
-    CompileWorker, Coordinator, CoordinatorClient, PartitionLocation, WorkerError, serve,
+    ClusterError, CompileWorker, Coordinator, CoordinatorClient, PartitionLocation, WorkerError,
+    serve,
 };
 use ekos_compiler_core::EkosConfig;
 use tokio::net::TcpListener;
@@ -110,6 +111,7 @@ pub async fn compile_worker_run(
     workspace: &Path,
     parallel_recover: bool,
     force_resolve: bool,
+    retry_lease_seconds: u64,
 ) -> Result<()> {
     let config_path = workspace.join("ekos.toml");
     let config = EkosConfig::from_file_or_default(&config_path);
@@ -137,12 +139,28 @@ pub async fn compile_worker_run(
     let worker = CompileWorker::new(client.clone(), id.clone());
 
     println!("{id}: acquiring lease on shard '{shard}'");
-    let ws = workspace.to_path_buf();
-    let cfg = config.clone();
-    let client_w = client.clone();
 
-    worker
-        .run_shard(shard, move |guard| async move {
+    // Open follow-on from RFC 0113 B3's live-testing notes: `run_shard` fails immediately if the
+    // shard's lease is already held (a deliberate, tested contract — see
+    // `crates/cluster/tests/harness.rs`'s "B must not get the held shard" case — so this retry
+    // lives here, not inside `run_shard` itself). Retries *only* an "already leased" conflict —
+    // the one error `lease_acquire` can produce before any work has run, so retrying it can never
+    // re-run a pipeline that already started. Any other error (bad coordinator address, a
+    // genuinely failed pipeline, a lease lost mid-run) still fails immediately regardless of this
+    // flag, matching the pre-existing behavior when `retry_lease_seconds` is 0 (the default).
+    const LEASE_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
+    let deadline = (retry_lease_seconds > 0)
+        .then(|| std::time::Instant::now() + std::time::Duration::from_secs(retry_lease_seconds));
+    let mut attempt = 0u32;
+
+    let run_result = loop {
+        attempt += 1;
+        let ws = workspace.to_path_buf();
+        let cfg = config.clone();
+        let client_w = client.clone();
+
+        let result = worker
+            .run_shard(shard, move |guard| async move {
             println!(
                 "  lease held (token {}); running build → recover → resolve → compile → commit",
                 guard.token()
@@ -198,8 +216,24 @@ pub async fn compile_worker_run(
             );
             Ok::<(), WorkerError>(())
         })
-        .await
-        .with_context(|| format!("compiling shard '{shard}'"))?;
+        .await;
+
+        let is_lease_conflict = matches!(
+            &result,
+            Err(WorkerError::Cluster(ClusterError::Coordinator(msg))) if msg.contains("already leased")
+        );
+        let still_within_deadline = deadline.is_some_and(|d| std::time::Instant::now() < d);
+        if is_lease_conflict && still_within_deadline {
+            println!(
+                "{id}: shard '{shard}' already leased (attempt {attempt}), retrying in \
+                 {LEASE_RETRY_INTERVAL:?}…"
+            );
+            tokio::time::sleep(LEASE_RETRY_INTERVAL).await;
+            continue;
+        }
+        break result;
+    };
+    run_result.with_context(|| format!("compiling shard '{shard}'"))?;
     println!("{id}: released shard '{shard}'");
     Ok(())
 }

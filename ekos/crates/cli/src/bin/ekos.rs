@@ -264,6 +264,12 @@ enum CompileWorkerCommands {
         /// flag; without it here, any conflict aborts every compile-worker run).
         #[arg(long)]
         force: bool,
+        /// Seconds to keep retrying if the shard's lease is already held by another worker,
+        /// before giving up — 0 (default) preserves the original fail-fast behavior. Only retries
+        /// an "already leased" conflict; every other error (bad coordinator address, invalid
+        /// workspace, …) still fails immediately regardless of this flag.
+        #[arg(long, default_value_t = 0)]
+        retry_lease_seconds: u64,
     },
 }
 
@@ -784,6 +790,7 @@ async fn main() -> Result<()> {
                 workspace,
                 parallel,
                 force,
+                retry_lease_seconds,
             } => {
                 ekos::commands::cluster::compile_worker_run(
                     &coordinator,
@@ -791,6 +798,7 @@ async fn main() -> Result<()> {
                     &workspace,
                     parallel,
                     force,
+                    retry_lease_seconds,
                 )
                 .await
             }

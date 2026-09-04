@@ -178,7 +178,8 @@ async fn compile_worker_runs_the_real_pipeline_under_a_lease() -> Result<()> {
         .unwrap();
     let coord_s = coord_addr.to_string();
 
-    ekos::commands::cluster::compile_worker_run(&coord_s, "main", dir.path(), false, false).await?;
+    ekos::commands::cluster::compile_worker_run(&coord_s, "main", dir.path(), false, false, 0)
+        .await?;
 
     // The coordinator now knows this shard's partitions and a non-zero generation watermark.
     let client = ekos_cluster::CoordinatorClient::connect(&coord_s)
@@ -217,6 +218,80 @@ async fn compile_worker_runs_the_real_pipeline_under_a_lease() -> Result<()> {
     assert!(
         indexed.iter().any(|p| p.starts_with("Table/")),
         "the object's own id must be indexed against its real Table/<bucket> partition: {indexed:?}"
+    );
+
+    Ok(())
+}
+
+/// Open follow-on from RFC 0113 B3's live-testing notes: `compile-worker run` previously failed
+/// immediately if the shard's lease was already held by another worker, with no way to just wait
+/// it out. `--retry-lease-seconds` (0 by default, preserving the original fail-fast contract) now
+/// lets a caller opt into retrying that one specific conflict. Proven live: a lightweight stub
+/// worker holds the "main" lease, `compile_worker_run` (the real pipeline) is started concurrently
+/// with retries enabled, the stub releases the lease partway through, and the retrying call must
+/// still succeed rather than fail on its first attempt.
+#[tokio::test(flavor = "multi_thread")]
+async fn compile_worker_retries_an_already_leased_shard_until_it_frees_up() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir_all(dir.path().join("schemas"))?;
+    std::fs::copy(
+        fixtures_dir().join("ecommerce.sql"),
+        dir.path().join("schemas/ecommerce.sql"),
+    )?;
+    std::fs::write(
+        dir.path().join("ekos.toml"),
+        "[storage.partition]\ndimension = \"entity-kind\"\ntime-bucket = \"monthly\"\n",
+    )?;
+
+    let (coord_addr, _coord) = ekos_cluster::spawn_ephemeral("127.0.0.1:0", None)
+        .await
+        .unwrap();
+    let coord_s = coord_addr.to_string();
+
+    // A lightweight stub worker holds the "main" lease until told to release it — the same shape
+    // `crates/cluster/tests/harness.rs`'s own "held lease" tests use.
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let holder_client = ekos_cluster::CoordinatorClient::connect(&coord_s)
+        .await
+        .unwrap();
+    let holder = ekos_cluster::CompileWorker::new(std::sync::Arc::new(holder_client), "holder")
+        .with_heartbeat(std::time::Duration::from_millis(200));
+    let holder_task = tokio::spawn(async move {
+        holder
+            .run_shard("main", |_guard| async move {
+                release_rx.await.ok();
+                Ok::<(), ekos_cluster::WorkerError>(())
+            })
+            .await
+    });
+
+    // Give the holder time to actually take the lease before the retrying attempt starts.
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let dir_path = dir.path().to_path_buf();
+    let coord_s2 = coord_s.clone();
+    let retrying_task = tokio::spawn(async move {
+        ekos::commands::cluster::compile_worker_run(&coord_s2, "main", &dir_path, false, false, 10)
+            .await
+    });
+
+    // Free the shard well before the retrying call's first attempt (immediate) or its retry
+    // (fires after a 3s backoff) — either way the retry must find it free and succeed.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    release_tx.send(()).unwrap();
+    holder_task.await.unwrap().unwrap();
+
+    retrying_task
+        .await
+        .unwrap()
+        .expect("the retrying compile-worker must succeed once the lease frees up");
+
+    let client = ekos_cluster::CoordinatorClient::connect(&coord_s)
+        .await
+        .unwrap();
+    assert!(
+        client.watermark("main").await.unwrap() > 0,
+        "the retried run must have actually compiled and committed"
     );
 
     Ok(())
