@@ -172,8 +172,12 @@ impl CompilerPass for ConfluenceAnalyzerPass {
                     format!("{} is a child of {parent_id}", data.title),
                 );
                 let ev_id = graph.add_evidence(ev);
-                let mut rel =
-                    KirRelationship::new(RelationshipKind::Contains, parent_kir_id, page_id);
+                let mut rel = KirRelationship::deterministic(
+                    RelationshipKind::Contains,
+                    parent_kir_id,
+                    page_id,
+                    "",
+                );
                 rel.evidence.push(ev_id);
                 graph.relationships.push(rel);
             }
@@ -187,7 +191,12 @@ impl CompilerPass for ConfluenceAnalyzerPass {
                     format!("{} links to {linked_title}", data.title),
                 );
                 let ev_id = graph.add_evidence(ev);
-                let mut rel = KirRelationship::new(RelationshipKind::References, page_id, to_id);
+                let mut rel = KirRelationship::deterministic(
+                    RelationshipKind::References,
+                    page_id,
+                    to_id,
+                    "",
+                );
                 rel.evidence.push(ev_id);
                 graph.relationships.push(rel);
             }

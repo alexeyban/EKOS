@@ -1,6 +1,7 @@
 # RFC 0135 — Core provenance & determinism foundations
 
-**Status:** Draft
+**Status:** Accepted — all four parts implemented (`devlog_158` A, `devlog_159` D, `devlog_160` B,
+`devlog_161` C)
 **Author:** EKOS team
 **Created:** 2026-09-04
 **Builds on:** RFC 0004 (ledger design + the never-built audit trail), RFC 0043 (redaction),
@@ -171,6 +172,18 @@ carry back-references through `compile` — a real follow-up, called out, not at
 
 ## Part C — `KirRelationship::new()` determinism sweep
 
+**Status: implemented 2026-09-04 (`devlog_161`).** `KirRelationship::deterministic(kind, from,
+to, discriminator)` added to `ekos-kir`. Every **producer** call site swept in one pass (not
+analyzer-by-analyzer — they were all the same `(from, to, kind)` shape once surveyed): ~24 bare
+`::new` sites across `recovery/` + `semantic/` + `cli/commands/identity.rs` converted, all with
+`discriminator = ""`. The ~7 sites that already assigned `rel.id = <helper>` (RFC 0072/0076/0092
+— `crate_topology`, `sql_analyzer` FK, `python_analyzer` FK/Extends, `dbt_analyzer`,
+`data_lineage`, `package_json`) are **left as-is** — converting them would change their ids and
+rewrite every existing ledger. Guard: `no_bare_relationship_new_in_production_code` in both
+`ekos-recovery` and `ekos-semantic` (strips `#[cfg(test)]` modules, then requires every
+`KirRelationship::new(` be followed within 600 chars by `.id =`). The ~175 render/query/sim
+sites were confirmed out of scope and untouched.
+
 ### Problem
 
 `KirRelationship::new` assigns `KirId::new()` (random). RFC 0072 fixed the one observed case
@@ -258,6 +271,40 @@ by reviewer memory.
 
 - The inventory/registry-coverage test.
 - A regression test per historically-failed kind (some already exist — consolidate them).
+
+---
+
+## Appendix — Part C per-call-site decisions
+
+**Converted to `::deterministic(_, _, _, "")`** — one edge of this kind per ordered pair:
+
+| Analyzer / module | Edge | Endpoints (both already deterministic) |
+|---|---|---|
+| `dependency_analyzer` | `DependsOn` | file → Technology |
+| `crypto_analyzer` | `Custom(kind)` | sentinel entity → entity |
+| `confluence_analyzer` | `Contains`, `References` | page → page |
+| `document_semantics_analyzer` | `References`, `Custom(kind)` | section → concept, concept → concept |
+| `git_analyzer` | `OwnedBy`, `CoupledWith` | commit → contributor, file → file |
+| `github_analyzer` | `References` ×3 | item → file / item |
+| `elixir_analyzer` | `Contains` ×2, `DependsOn` ×2 | file → module, module → symbol / Technology / module |
+| `rust_analyzer` | `Calls`, `DependsOn`, `Contains` | symbol → symbol, file → module |
+| `javascript_analyzer` | `DependsOn`, `Contains` | file → module / symbol |
+| `python_analyzer` | `DependsOn` ×2, `Contains` | file → module / symbol / ORM Table |
+| `local_docs_analyzer` | `Contains` ×2 | document → table / section |
+| `semantic::rollup` | `Contains` | rollup → member |
+| `semantic::lib` | `Custom("SameAs")`, `References` | canonical ↔ member, Risk → target |
+| `semantic::transform_ir` | `Custom("FeedsInto")` | node → node |
+| `cli::commands::identity` | `Custom("SameAs")` | cross-system candidate a ↔ b |
+
+**Left as-is** (already `rel.id = <helper>`, changing it rewrites ledgers): `crate_topology_analyzer`
+(`depends_on_kir_id`), `sql_analyzer` (`foreign_key_kir_id`, with `fk_desc` — the standing
+counter-example), `python_analyzer` (`orm_foreign_key_kir_id`, `extends_kir_id`), `dbt_analyzer`
+(`dbt_depends_on_kir_id`), `semantic::data_lineage` (`reads_writes_kir_id`), `package_json_analyzer`
+(`depends_on_kir_id`).
+
+**Out of scope** (throwaway objects, never `append_relationship`'d): `docs-gen` (73),
+`runtime::graph_export` (8), `dbt-gen`, `ekl::interpreter`, `cli::commands::mcp`, all of
+`simulation/` (its own identity model — sibling RFC if ever needed), every `#[cfg(test)]` module.
 
 ---
 

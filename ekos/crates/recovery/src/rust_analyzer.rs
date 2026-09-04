@@ -310,9 +310,12 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
         };
         visitor.visit_block(block);
         for (from, to) in visitor.edges {
-            result
-                .relationships
-                .push(KirRelationship::new(RelationshipKind::Calls, from, to));
+            result.relationships.push(KirRelationship::deterministic(
+                RelationshipKind::Calls,
+                from,
+                to,
+                "",
+            ));
         }
     }
 
@@ -378,10 +381,11 @@ fn add_import(module: &str, file_id: KirId, result: &mut RustFileResult) {
     let mut obj = KirObject::new(module, ObjectKind::Custom("RustModule".to_string()));
     obj.id = target_id;
     result.objects.push(obj);
-    result.relationships.push(KirRelationship::new(
+    result.relationships.push(KirRelationship::deterministic(
         RelationshipKind::DependsOn,
         file_id,
         target_id,
+        "",
     ));
 }
 
@@ -425,10 +429,11 @@ fn add_symbol(
         );
     }
     result.objects.push(obj);
-    result.relationships.push(KirRelationship::new(
+    result.relationships.push(KirRelationship::deterministic(
         RelationshipKind::Contains,
         file_id,
         target_id,
+        "",
     ));
     target_id
 }

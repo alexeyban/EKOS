@@ -83,3 +83,78 @@ pub use sql_dialect_registry::{
 pub use sql_transform_analyzer::{
     SqlTransformAnalyzerPass, SqlTransformStats, parse_sql_to_transform_graphs,
 };
+
+#[cfg(test)]
+mod relationship_determinism_guard {
+    //! RFC 0135 Part C — every persisted `KirRelationship` an analyzer emits must get a
+    //! deterministic id (`KirRelationship::deterministic`, or a `rel.id = <helper>` right after
+    //! `KirRelationship::new`). A random id lets logically-identical relationships pile up as
+    //! duplicate rows across `recover`/`commit` cycles (RFC 0070/0072). This test fails if a new
+    //! bare `KirRelationship::new(` slips into production code in this crate.
+
+    /// Remove `#[cfg(test)] mod … { … }` blocks (brace-matched) so only production code is scanned.
+    pub(crate) fn strip_test_modules(src: &str) -> String {
+        let mut out = String::new();
+        let mut rest = src;
+        while let Some(pos) = rest.find("#[cfg(test)]") {
+            let (before, after) = rest.split_at(pos);
+            out.push_str(before);
+            // find the opening brace of the following `mod … {`
+            let Some(brace) = after.find('{') else {
+                out.push_str(after);
+                return out;
+            };
+            let mut depth = 1usize;
+            let mut idx = brace + 1;
+            let bytes = after.as_bytes();
+            while idx < bytes.len() && depth > 0 {
+                match bytes[idx] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                idx += 1;
+            }
+            rest = &after[idx..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    pub(crate) fn offenders(dir: &std::path::Path) -> Vec<String> {
+        let mut bad = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let src = strip_test_modules(&std::fs::read_to_string(&path).unwrap());
+            let mut from = 0;
+            while let Some(rel) = src[from..].find("KirRelationship::new(") {
+                let at = from + rel;
+                let window = &src[at..(at + 600).min(src.len())];
+                if !window.contains(".id =") && !window.contains(".id=") {
+                    let line = src[..at].matches('\n').count() + 1;
+                    bad.push(format!(
+                        "{}:{}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        line
+                    ));
+                }
+                from = at + 1;
+            }
+        }
+        bad
+    }
+
+    #[test]
+    fn no_bare_relationship_new_in_production_code() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let bad = offenders(&dir);
+        assert!(
+            bad.is_empty(),
+            "bare `KirRelationship::new(` in production code — use `KirRelationship::deterministic` \
+             (RFC 0135 Part C), or assign `rel.id = <deterministic helper>` right after: {bad:?}"
+        );
+    }
+}

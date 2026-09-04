@@ -223,10 +223,11 @@ fn review_candidates_for(proposals: &[MergeProposal]) -> (Vec<KirEvidence>, Vec<
             let ev_id = ev.id;
             evidence.push(ev);
 
-            let mut rel = KirRelationship::new(
+            let mut rel = KirRelationship::deterministic(
                 RelationshipKind::Custom("SameAs".to_string()),
                 p.canonical_id,
                 member_id,
+                "",
             );
             rel.properties
                 .insert("status".into(), serde_json::json!("unconfirmed"));
@@ -337,7 +338,8 @@ fn concentration_risks(graph: &KirGraph) -> Vec<(KirObject, KirRelationship)> {
         {
             risk.evidence.push(ev_id);
         }
-        let rel = KirRelationship::new(RelationshipKind::References, risk_id, *target_id);
+        let rel =
+            KirRelationship::deterministic(RelationshipKind::References, risk_id, *target_id, "");
         risks.push((risk, rel));
     }
     risks
@@ -1012,5 +1014,71 @@ mod tests {
             ekos_common::compress::read_json_auto(&ckm_dir.join("model.json")).unwrap();
         assert_eq!(model.version, 1);
         assert!(model.objects.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod relationship_determinism_guard {
+    //! RFC 0135 Part C — see the identical guard in `ekos_recovery`. Every persisted
+    //! `KirRelationship` this crate emits (rollups, data-lineage links, concentration-risk edges,
+    //! `SameAs` merge proposals, `FeedsInto`) must carry a deterministic id.
+
+    fn strip_test_modules(src: &str) -> String {
+        let mut out = String::new();
+        let mut rest = src;
+        while let Some(pos) = rest.find("#[cfg(test)]") {
+            let (before, after) = rest.split_at(pos);
+            out.push_str(before);
+            let Some(brace) = after.find('{') else {
+                out.push_str(after);
+                return out;
+            };
+            let mut depth = 1usize;
+            let mut idx = brace + 1;
+            let bytes = after.as_bytes();
+            while idx < bytes.len() && depth > 0 {
+                match bytes[idx] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                idx += 1;
+            }
+            rest = &after[idx..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn no_bare_relationship_new_in_production_code() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut bad = Vec::new();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let src = strip_test_modules(&std::fs::read_to_string(&path).unwrap());
+            let mut from = 0;
+            while let Some(rel) = src[from..].find("KirRelationship::new(") {
+                let at = from + rel;
+                let window = &src[at..(at + 600).min(src.len())];
+                if !window.contains(".id =") && !window.contains(".id=") {
+                    let line = src[..at].matches('\n').count() + 1;
+                    bad.push(format!(
+                        "{}:{}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        line
+                    ));
+                }
+                from = at + 1;
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "bare `KirRelationship::new(` in production code — use `KirRelationship::deterministic` \
+             (RFC 0135 Part C): {bad:?}"
+        );
     }
 }

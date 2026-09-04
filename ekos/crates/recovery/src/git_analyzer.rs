@@ -232,7 +232,12 @@ impl CompilerPass for GitAnalyzerPass {
 
             // Authorship relationship: contributor → commit event.
             if let Some(&contrib_id) = contributor_ids.get(&author) {
-                let rel = KirRelationship::new(RelationshipKind::OwnedBy, subject_id, contrib_id);
+                let rel = KirRelationship::deterministic(
+                    RelationshipKind::OwnedBy,
+                    subject_id,
+                    contrib_id,
+                    "",
+                );
                 graph.add_relationship(rel);
             }
         }
@@ -244,7 +249,8 @@ impl CompilerPass for GitAnalyzerPass {
             }
             let id_a = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, file_a.as_bytes()));
             let id_b = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, file_b.as_bytes()));
-            let mut rel = KirRelationship::new(RelationshipKind::CoupledWith, id_a, id_b);
+            let mut rel =
+                KirRelationship::deterministic(RelationshipKind::CoupledWith, id_a, id_b, "");
             rel.properties
                 .insert("co_change_count".into(), serde_json::json!(count));
             graph.add_relationship(rel);

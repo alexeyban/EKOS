@@ -281,10 +281,11 @@ fn add_import(module: &str, file_id: KirId, result: &mut PythonFileResult) {
     let mut obj = KirObject::new(module, ObjectKind::Custom("PythonModule".to_string()));
     obj.id = target_id;
     result.objects.push(obj);
-    result.relationships.push(KirRelationship::new(
+    result.relationships.push(KirRelationship::deterministic(
         RelationshipKind::DependsOn,
         file_id,
         target_id,
+        "",
     ));
 }
 
@@ -340,10 +341,11 @@ fn add_symbol(
         );
     }
     result.objects.push(obj);
-    result.relationships.push(KirRelationship::new(
+    result.relationships.push(KirRelationship::deterministic(
         RelationshipKind::Contains,
         file_id,
         target_id,
+        "",
     ));
 }
 
@@ -524,10 +526,11 @@ fn add_orm_table(
         .with_evidence(ev_id);
     obj.id = table_id;
     result.objects.push(obj);
-    result.relationships.push(KirRelationship::new(
+    result.relationships.push(KirRelationship::deterministic(
         RelationshipKind::Contains,
         file_id,
         table_id,
+        "",
     ));
 
     for column in &columns {

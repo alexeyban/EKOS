@@ -171,7 +171,13 @@ impl CompilerPass for DependencyAnalyzerPass {
                     },
                 );
                 let file_id = file_kir_id(&qualified);
-                let mut rel = KirRelationship::new(RelationshipKind::DependsOn, file_id, tech_id);
+                // RFC 0135 Part C — one "this file depends on this technology" fact per pair.
+                let mut rel = KirRelationship::deterministic(
+                    RelationshipKind::DependsOn,
+                    file_id,
+                    tech_id,
+                    "",
+                );
                 rel.evidence.push(ev_id);
                 graph.relationships.push(rel);
             }

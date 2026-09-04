@@ -361,10 +361,11 @@ fn handle_import(specifier: &str, fc: &mut FileCtx, result: &mut JsFileResult) {
         result.objects.push(obj);
         result.module_count += 1;
     }
-    result.relationships.push(KirRelationship::new(
+    result.relationships.push(KirRelationship::deterministic(
         RelationshipKind::DependsOn,
         fc.file_id,
         target_id,
+        "",
     ));
 }
 
@@ -395,10 +396,11 @@ fn emit_symbol(
         result.objects.push(obj);
         result.symbol_count += 1;
     }
-    result.relationships.push(KirRelationship::new(
+    result.relationships.push(KirRelationship::deterministic(
         RelationshipKind::Contains,
         fc.file_id,
         sym_id,
+        "",
     ));
 }
 

@@ -217,7 +217,8 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 tbl_obj.evidence.push(tbl_ev_id);
                 graph.objects.push(tbl_obj);
 
-                let mut rel = KirRelationship::new(RelationshipKind::Contains, doc_id, tbl_id);
+                let mut rel =
+                    KirRelationship::deterministic(RelationshipKind::Contains, doc_id, tbl_id, "");
                 rel.evidence.push(tbl_ev_id);
                 graph.relationships.push(rel);
             }
@@ -261,7 +262,8 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 sec_obj.evidence.push(sec_ev_id);
                 graph.objects.push(sec_obj);
 
-                let mut rel = KirRelationship::new(RelationshipKind::Contains, doc_id, sec_id);
+                let mut rel =
+                    KirRelationship::deterministic(RelationshipKind::Contains, doc_id, sec_id, "");
                 rel.evidence.push(sec_ev_id);
                 graph.relationships.push(rel);
             }

@@ -54,8 +54,13 @@ pub fn scan(config: &EkosConfig, cwd: &Path) -> Result<()> {
         let ev_id = ev.id;
         ledger.append_evidence(&ev)?;
 
-        let mut rel =
-            KirRelationship::new(RelationshipKind::Custom("SameAs".to_string()), c.a, c.b);
+        // RFC 0135 Part C — one candidate per (a, b) pair; a re-scan must not pile up duplicates.
+        let mut rel = KirRelationship::deterministic(
+            RelationshipKind::Custom("SameAs".to_string()),
+            c.a,
+            c.b,
+            "",
+        );
         rel.properties
             .insert("status".into(), serde_json::json!("unconfirmed"));
         rel.properties

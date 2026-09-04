@@ -3125,8 +3125,9 @@ are excluded — see the full exclusion list in the planning history if needed.
     cache → one forced re-scan → post-redaction artifact id recompute (RFC 0072) persists the
     fresh artifact. No `.ekos` wipe needed. `preview-scan` untouched.
 
-- [~] **RFC 0135 — core provenance & determinism foundations**
-  (`ekos/docs/rfcs/0135-core-provenance-and-determinism-foundations.md`, Draft 2026-09-04). Four
+- [x] **RFC 0135 — core provenance & determinism foundations**
+  (`ekos/docs/rfcs/0135-core-provenance-and-determinism-foundations.md`, Accepted 2026-09-04, all
+  4 parts implemented: A `devlog_158`, D `devlog_159`, B `devlog_160`, C `devlog_161`). Four
   independently-mergeable parts, each closing a standing gap + a mechanical guard so it can't
   silently return:
   - [x] **Part A** — `PIPELINE_LOGIC_VERSION` + redaction-config hash in `build`'s fingerprint
@@ -3139,10 +3140,13 @@ are excluded — see the full exclusion list in the planning history if needed.
     stamps per stage w/ CKM hash; `build` stamps per `File` w/ observation `ArtifactId`. Closes
     the RFC 0004 "never built" audit-trail gap (Phase 9 item below). MVP = run+stage everywhere,
     artifact-level for `build` File objects; per-`KnowledgeArtifact` through `compile` = follow-up.
-  - [ ] **Part C** — audit the ~55 *producer* `KirRelationship::new()` call sites (recovery/ +
-    semantic/ + cli write paths; the ~175 render/query/sim sites are explicitly out of scope), add
-    `KirRelationship::deterministic(kind, from, to, discriminator)`, a per-site decision table, and
-    a guard test failing on bare `::new` in those modules. Continues RFC 0072/0076 (which fixed 2).
+  - [x] **Part C** — `KirRelationship::deterministic(kind, from, to, discriminator)` added to
+    `ekos-kir`; ~24 producer `::new` sites (recovery/ + semantic/ + `cli/commands/identity.rs`)
+    converted, all `discriminator = ""` — surveyed and they were all one shape, so one sweep not
+    analyzer-by-analyzer. ~7 already-`rel.id = <helper>` sites (RFC 0072/0076/0092) left as-is
+    (converting rewrites ledgers). Guard `no_bare_relationship_new_in_production_code` in
+    `ekos-recovery` + `ekos-semantic`. ~175 render/query/sim sites confirmed out of scope.
+    `devlog_161`. **RFC 0135 fully implemented.**
   - [x] **Part D** — `ekos_kir::custom_kinds::REGISTRY` (22 rows, `structurally_keyed` per kind);
     `DefaultResolver` derives its exclusion set from it; `ekos-identity` test
     `every_pipeline_custom_kind_is_registered` walks `crates/{recovery,semantic}/src` and fails CI
@@ -3503,10 +3507,10 @@ are excluded — see the full exclusion list in the planning history if needed.
     `(from,to,kind)`-based id would have silently collapsed them, losing a real fact). Each
     relationship kind needs its own real judgment call about what distinguishes two instances, not
     a mechanical global change.
-  - *Still open, real, separate work* — not folded into RFC 0072: the other 134 call sites remain
-    exposed to varying degrees (Crate topology Mermaid diagram, MCP tools, EKL queries, and any
-    other relationship-reading code); each needs the same kind of case-by-case investigation RFC
-    0072 did for `DependsOn`, not a batch fix. Also: this fix does not and cannot retroactively
+  - *Closed by RFC 0135 Part C / `devlog_161`*: surveyed, the ~134 grep hits are ~24 real
+    producer call sites (all one `(from, to, kind)` shape) + ~7 already-fixed + ~175 out-of-scope
+    render/query/sim. All ~24 converted to `KirRelationship::deterministic`; a guard test in
+    `ekos-recovery`/`ekos-semantic` fails on a new bare `::new` in production. Also: this fix does not and cannot retroactively
     clean up duplicate rows already committed to this repo's own real ledger before it shipped (no
     delete/tombstone mechanism exists anywhere in the codebase) — RFC 0070/0071's render-time dedup
     stays in place for exactly that reason and keeps working regardless.
