@@ -491,7 +491,9 @@ kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_graph_export` (the 
 graph as nodes + edges in one call — filtered, optionally collapsed to super-nodes, truncation
 reported; RFC 0127), `ekos_diff` (raw ledger-entry changes since
 T), `ekos_audit` (the write history of one object/relationship with the pipeline run, stage, and
-source artifact behind each version — RFC 0135), `ekos_status`,
+source artifact behind each version — RFC 0135; the source artifact is the object/relationship's
+own recovered `KnowledgeArtifact` id(s) where `compile` tracked one, falling back to the run's CKM
+content hash for compiler-synthesized objects like rollups and risks), `ekos_status`,
 `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
 explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
 `ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,
@@ -744,7 +746,9 @@ touching anything and leave backups):
 ekos ledger status --storage   # per-component size report (or the shorter `ekos status --storage`)
 ekos ledger migrate            # ledger v1 → v2: dictionary-zstd payloads (~2.5x smaller)
 ekos ledger audit <id>         # write history of one object/relationship — which run, stage and
-                               # source artifact produced each version (RFC 0135; --json)
+                               # source artifact produced each version (RFC 0135; --json).
+                               # source artifact is the recovered KnowledgeArtifact id(s) for a
+                               # tracked object, or the run's CKM hash for synthesized ones
 ekos artifact repack           # loose JSON files → packed segments (~7x smaller on disk)
 ```
 

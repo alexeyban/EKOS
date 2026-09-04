@@ -3139,7 +3139,14 @@ are excluded — see the full exclusion list in the planning history if needed.
     FactLedger = `provenance.jsonl` sidecar keyed by tx (no segment-format change). `commit`
     stamps per stage w/ CKM hash; `build` stamps per `File` w/ observation `ArtifactId`. Closes
     the RFC 0004 "never built" audit-trail gap (Phase 9 item below). MVP = run+stage everywhere,
-    artifact-level for `build` File objects; per-`KnowledgeArtifact` through `compile` = follow-up.
+    artifact-level for `build` File objects.
+    - [x] **Follow-up — per-`KnowledgeArtifact` provenance through `compile`** (`devlog_162`,
+      commit 0f8af97). `CkmObject`/`CkmRelationship` gained `source_artifact_ids: Vec<String>`;
+      `SemanticCompilerPass` tracks `KirId → KnowledgeArtifact id(s)` while reading each recovered
+      KIR graph, unions ids across identity-merged inputs before `apply_merges`, and passes the
+      map to `build_ckm_with_provenance`. `commit` now stamps each object/relationship's
+      `audit_trail` with its own `ka:<id,...>`, falling back to the run-level `ckm:<hash>` only
+      for compiler-synthesized objects (rollups, risks) or a pre-0135 CKM.
   - [x] **Part C** — `KirRelationship::deterministic(kind, from, to, discriminator)` added to
     `ekos-kir`; ~24 producer `::new` sites (recovery/ + semantic/ + `cli/commands/identity.rs`)
     converted, all `discriminator = ""` — surveyed and they were all one shape, so one sweep not
