@@ -2,6 +2,7 @@ pub mod fact;
 pub mod fact_ledger;
 pub mod index;
 pub mod partitioned;
+pub mod provenance;
 pub mod retrieval;
 pub mod search;
 pub mod segment;
@@ -243,9 +244,24 @@ pub struct Ledger {
     conn: Connection,
     format: Format,
     codec: Codec,
+    /// RFC 0135 Part B — provenance stamped onto every subsequent write. `Ledger` is already a
+    /// single-owner, `!Sync` handle (bare `Connection`), so a `RefCell` is enough.
+    write_ctx: std::cell::RefCell<Option<provenance::WriteContext>>,
 }
 
 impl Ledger {
+    /// Adds the provenance columns + builds the handle. Idempotent — `ALTER TABLE … ADD COLUMN`
+    /// only runs when the column is absent, so an existing store opens unchanged.
+    fn finish(conn: Connection, format: Format, codec: Codec) -> Result<Self, LedgerError> {
+        ensure_provenance_columns(&conn)?;
+        Ok(Self {
+            conn,
+            format,
+            codec,
+            write_ctx: std::cell::RefCell::new(None),
+        })
+    }
+
     /// Open (or create) the ledger database at the given path.
     ///
     /// New databases are created with the v2 (compact) schema. Existing v1
@@ -276,29 +292,17 @@ impl Ledger {
 
         if user_version >= 2 {
             let dict = load_dictionary(&conn)?;
-            return Ok(Self {
-                conn,
-                format: Format::V2,
-                codec: Codec::zstd(dict),
-            });
+            return Self::finish(conn, Format::V2, Codec::zstd(dict));
         }
         if has_entries {
-            let ledger = Self {
-                conn,
-                format: Format::V1,
-                codec: Codec::PlainText,
-            };
+            let ledger = Self::finish(conn, Format::V1, Codec::PlainText)?;
             ledger.migrate_fts_v2()?;
             return Ok(ledger);
         }
 
         // Fresh database → v2 schema.
         init_schema_v2(&conn)?;
-        Ok(Self {
-            conn,
-            format: Format::V2,
-            codec: Codec::zstd(None),
-        })
+        Self::finish(conn, Format::V2, Codec::zstd(None))
     }
 
     /// Create a v2 ledger at `path` with an optional pre-trained dictionary.
@@ -321,11 +325,7 @@ impl Ledger {
             }
             None => None,
         };
-        Ok(Self {
-            conn,
-            format: Format::V2,
-            codec: Codec::zstd(dict),
-        })
+        Self::finish(conn, Format::V2, Codec::zstd(dict))
     }
 
     /// RFC 0014 migration (v1 ledgers only): pre-content-column FTS tables are
@@ -526,14 +526,20 @@ impl Ledger {
             return Ok((false, rowid));
         }
 
+        let ctx = self.write_ctx.borrow();
         self.conn.execute(
-            "INSERT INTO entries (id, entry_type, payload, content_sig, written_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO entries \
+             (id, entry_type, payload, content_sig, written_at, prov_run_id, prov_stage, prov_source_artifact) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id_param,
                 entry.entry_type.as_str(),
                 self.payload_param(&payload_json)?,
                 sig_param,
                 self.ts_param(entry.written_at),
+                ctx.as_ref().map(|c| c.run_id.as_str()),
+                ctx.as_ref().map(|c| c.stage.as_str()),
+                ctx.as_ref().and_then(|c| c.source_artifact_id.as_deref()),
             ],
         )?;
         Ok((true, self.conn.last_insert_rowid()))
@@ -937,6 +943,42 @@ impl Ledger {
             .collect()
     }
 
+    // ── RFC 0135 Part B — write provenance ────────────────────────────────────
+
+    /// Stamp `ctx` onto every subsequent [`append`](Self::append) until changed or cleared.
+    pub fn set_write_context(&self, ctx: Option<provenance::WriteContext>) {
+        *self.write_ctx.borrow_mut() = ctx;
+    }
+
+    /// Every write to `id` (object or relationship), oldest first, with the provenance recorded
+    /// at write time. Pre-0135 entries carry `None` provenance.
+    pub fn audit_trail(&self, id: &KirId) -> Result<Vec<provenance::AuditRecord>, LedgerError> {
+        let id_param = self.id_param(&id.to_string());
+        let mut stmt = self.conn.prepare(
+            "SELECT written_at, prov_run_id, prov_stage, prov_source_artifact \
+             FROM entries WHERE id = ?1 ORDER BY written_at ASC, rowid ASC",
+        )?;
+        let rows = stmt.query_map(params![id_param], |row| {
+            Ok((
+                row.get::<_, SqlValue>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (ts, run_id, stage, src) = row?;
+            out.push(provenance::AuditRecord {
+                written_at: ts_value_to_datetime(ts)?,
+                run_id,
+                stage,
+                source_artifact_id: src,
+            });
+        }
+        Ok(out)
+    }
+
     // ── Full-text search ──────────────────────────────────────────────────────
 
     /// Full-text search over object names, kinds, and content excerpts
@@ -1154,6 +1196,25 @@ fn promote_exact_name_matches(results: &mut [(KirId, String)], query: &str) {
         return;
     }
     results.sort_by_key(|(_, name)| name.to_lowercase() != query_lower);
+}
+
+/// RFC 0135 Part B — add the nullable write-provenance columns to `entries` if absent.
+///
+/// Idempotent and version-independent (works on a v1 or v2 `entries` table). Purely additive:
+/// SQLite `ADD COLUMN` with no default is O(1) metadata-only, old rows read `NULL`, and every
+/// existing `SELECT` / `INSERT` that names columns explicitly is unaffected.
+fn ensure_provenance_columns(conn: &Connection) -> Result<(), LedgerError> {
+    let existing: std::collections::HashSet<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(entries)")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+        rows.filter_map(Result::ok).collect()
+    };
+    for col in ["prov_run_id", "prov_stage", "prov_source_artifact"] {
+        if !existing.contains(col) {
+            conn.execute(&format!("ALTER TABLE entries ADD COLUMN {col} TEXT"), [])?;
+        }
+    }
+    Ok(())
 }
 
 fn init_schema_v2(conn: &Connection) -> SqlResult<()> {
@@ -1607,6 +1668,14 @@ pub trait KnowledgeStore {
     fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError>;
     fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError>;
     fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError>;
+    /// RFC 0135 Part B — stamp `ctx` onto every subsequent write until changed / cleared.
+    /// Default: no-op (a backend that records no provenance ignores it).
+    fn set_write_context(&self, _ctx: Option<provenance::WriteContext>) {}
+    /// RFC 0135 Part B — every write to `id` (object or relationship), oldest first, with the
+    /// provenance recorded at write time. Default: empty — this backend records no provenance.
+    fn audit_trail(&self, _id: &KirId) -> Result<Vec<provenance::AuditRecord>, LedgerError> {
+        Ok(Vec::new())
+    }
     fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError>;
     fn get_evidence(&self, id: &KirId) -> Result<Option<KirEvidence>, LedgerError>;
     fn get_relationship(&self, id: &KirId) -> Result<Option<KirRelationship>, LedgerError>;
@@ -1687,6 +1756,12 @@ macro_rules! delegate_store {
             }
             fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
                 <$ty>::append_event(self, ev)
+            }
+            fn set_write_context(&self, ctx: Option<provenance::WriteContext>) {
+                <$ty>::set_write_context(self, ctx)
+            }
+            fn audit_trail(&self, id: &KirId) -> Result<Vec<provenance::AuditRecord>, LedgerError> {
+                <$ty>::audit_trail(self, id)
             }
             fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError> {
                 <$ty>::get_object(self, id)
@@ -1987,6 +2062,83 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ledger.db");
         (Ledger::open(&path).unwrap(), dir)
+    }
+
+    /// RFC 0135 Part B — provenance round-trips through `set_write_context` → `audit_trail` on
+    /// both backends; an entry written with no context set, or before this RFC, reads `None`.
+    fn provenance_round_trips(store: &dyn KnowledgeStore) {
+        use provenance::WriteContext;
+        let a = KirObject::new("orders", ObjectKind::Table);
+
+        // First write: no context.
+        store.append_object(&a).unwrap();
+
+        // Second write (real content change): a full context.
+        store.set_write_context(Some(WriteContext {
+            run_id: "run-xyz".into(),
+            stage: "commit".into(),
+            source_artifact_id: Some("ckm:abc123".into()),
+        }));
+        let mut a2 = a.clone();
+        a2.properties.insert("rows".into(), serde_json::json!(9));
+        std::thread::sleep(Duration::from_millis(3));
+        store.append_object(&a2).unwrap();
+
+        let trail = store.audit_trail(&a.id).unwrap();
+        assert_eq!(trail.len(), 2, "two real versions");
+        assert_eq!(
+            trail[0].run_id, None,
+            "the pre-context write has no provenance"
+        );
+        assert_eq!(trail[1].run_id.as_deref(), Some("run-xyz"));
+        assert_eq!(trail[1].stage.as_deref(), Some("commit"));
+        assert_eq!(trail[1].source_artifact_id.as_deref(), Some("ckm:abc123"));
+        assert!(trail[1].written_at >= trail[0].written_at);
+
+        // Clearing the context stops stamping.
+        store.set_write_context(None);
+        let mut a3 = a2.clone();
+        a3.properties.insert("rows".into(), serde_json::json!(10));
+        std::thread::sleep(Duration::from_millis(3));
+        store.append_object(&a3).unwrap();
+        let trail = store.audit_trail(&a.id).unwrap();
+        assert_eq!(trail.len(), 3);
+        assert_eq!(
+            trail[2].run_id, None,
+            "context cleared → no provenance again"
+        );
+    }
+
+    #[test]
+    fn audit_trail_sqlite() {
+        let (ledger, _dir) = temp_ledger();
+        provenance_round_trips(&ledger);
+    }
+
+    #[test]
+    fn audit_trail_fact_engine() {
+        let dir = tempdir().unwrap();
+        let store = FactLedger::open(&dir.path().join("facts")).unwrap();
+        provenance_round_trips(&store);
+    }
+
+    #[test]
+    fn provenance_columns_are_added_to_a_preexisting_ledger() {
+        // A ledger created without the columns (simulated by dropping them) still opens and reads.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("l.db");
+        {
+            let l = Ledger::open(&path).unwrap();
+            l.append_object(&KirObject::new("x", ObjectKind::Table))
+                .unwrap();
+        }
+        // Re-open: `ensure_provenance_columns` is idempotent, no error, existing row intact.
+        let l = Ledger::open(&path).unwrap();
+        assert_eq!(l.object_count().unwrap(), 1);
+        let obj = l.all_objects().unwrap().pop().unwrap();
+        let trail = l.audit_trail(&obj.id).unwrap();
+        assert_eq!(trail.len(), 1);
+        assert_eq!(trail[0].run_id, None);
     }
 
     #[test]

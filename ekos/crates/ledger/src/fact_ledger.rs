@@ -178,6 +178,37 @@ struct Inner {
     checkpoints: HashMap<Uuid, BTreeMap<TxId, Vec<Fact>>>,
     /// The `FactLedger`'s own root — where [`checkpoints_path`] writes new checkpoints.
     checkpoints_root: PathBuf,
+    /// RFC 0135 Part B — provenance stamped onto every subsequent write until changed.
+    write_ctx: Option<crate::provenance::WriteContext>,
+    /// RFC 0135 Part B — `tx` → the [`WriteContext`](crate::provenance::WriteContext) active when
+    /// that batch was appended. Loaded from the `provenance.jsonl` sidecar on open, appended to
+    /// it (and here) on each write. A batch written with no context set has no entry.
+    provenance: HashMap<u64, crate::provenance::WriteContext>,
+}
+
+/// RFC 0135 Part B — `<root>/provenance.jsonl`, one `{"tx":N,"ctx":{…}}` line per write that had
+/// a [`WriteContext`](crate::provenance::WriteContext) set. Purely additive: absent on a
+/// pre-0135 store, and `audit_trail` just returns `None` provenance for those batches.
+fn provenance_path(root: &Path) -> PathBuf {
+    root.join("provenance.jsonl")
+}
+
+fn load_provenance(root: &Path) -> HashMap<u64, crate::provenance::WriteContext> {
+    let mut out = HashMap::new();
+    let Ok(content) = std::fs::read_to_string(provenance_path(root)) else {
+        return out;
+    };
+    for line in content.lines().filter(|l| !l.trim().is_empty()) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
+            && let Some(tx) = v.get("tx").and_then(|t| t.as_u64())
+            && let Some(ctx) = v
+                .get("ctx")
+                .and_then(|c| serde_json::from_value(c.clone()).ok())
+        {
+            out.insert(tx, ctx);
+        }
+    }
+    out
 }
 
 /// A real, designed cross-process write lock (RFC 0104 Phase 1) — a dedicated `write.lock` file
@@ -318,6 +349,8 @@ impl FactLedger {
             read_only: false,
             checkpoints: load_checkpoints(root),
             checkpoints_root: root.to_path_buf(),
+            write_ctx: None,
+            provenance: load_provenance(root),
         };
 
         // Catch the search index up: entities committed past its marker get
@@ -439,6 +472,8 @@ impl FactLedger {
             read_only: true,
             checkpoints: load_checkpoints(root),
             checkpoints_root: root.to_path_buf(),
+            write_ctx: None,
+            provenance: load_provenance(root),
         };
 
         Ok(Self {
@@ -551,6 +586,20 @@ impl FactLedger {
         let wall = wall_override_us.unwrap_or_else(|| Utc::now().timestamp_micros());
         let (tx, sealed) = inner.store.append_with_seal(ops.clone(), wall)?;
         inner.batch_times.push((tx, wall));
+
+        // RFC 0135 Part B — record write provenance (best-effort sidecar; never fails the write).
+        if let Some(ctx) = inner.write_ctx.clone() {
+            inner.provenance.insert(tx.0, ctx.clone());
+            if let Ok(line) = serde_json::to_string(&serde_json::json!({ "tx": tx.0, "ctx": ctx }))
+                && let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(provenance_path(&inner.checkpoints_root))
+            {
+                use std::io::Write;
+                let _ = writeln!(f, "{line}");
+            }
+        }
         for (op, fact) in &ops {
             inner.memtable.push(IndexEntry::from_fact(fact, tx, *op));
         }
@@ -760,6 +809,45 @@ impl FactLedger {
         let inner = self.inner.lock().unwrap();
         inner.store.publish_active()?;
         Ok(())
+    }
+
+    // ── RFC 0135 Part B — write provenance ────────────────────────────────────
+
+    /// Stamp `ctx` onto every subsequent write until changed or cleared.
+    pub fn set_write_context(&self, ctx: Option<crate::provenance::WriteContext>) {
+        self.inner.lock().unwrap().write_ctx = ctx;
+    }
+
+    /// Every write to `id` (object or relationship), oldest first, with the provenance recorded
+    /// at write time. A batch written before RFC 0135 — or with no context set — carries `None`.
+    pub fn audit_trail(
+        &self,
+        id: &KirId,
+    ) -> Result<Vec<crate::provenance::AuditRecord>, LedgerError> {
+        let inner = self.inner.lock().unwrap();
+        let entries = inner.entity_entries(id.0)?;
+        let mut txs: Vec<TxId> = entries.iter().map(|e| e.tx).collect();
+        txs.sort_unstable();
+        txs.dedup();
+
+        let mut out = Vec::with_capacity(txs.len());
+        for tx in txs {
+            let wall_us = inner
+                .batch_times
+                .iter()
+                .find(|(t, _)| *t == tx)
+                .map(|(_, w)| *w)
+                .unwrap_or(0);
+            let ctx = inner.provenance.get(&tx.0);
+            out.push(crate::provenance::AuditRecord {
+                written_at: chrono::DateTime::from_timestamp_micros(wall_us)
+                    .unwrap_or_else(Utc::now),
+                run_id: ctx.map(|c| c.run_id.clone()),
+                stage: ctx.map(|c| c.stage.clone()),
+                source_artifact_id: ctx.and_then(|c| c.source_artifact_id.clone()),
+            });
+        }
+        Ok(out)
     }
 
     /// Every historical version of the object at `id`, oldest to newest

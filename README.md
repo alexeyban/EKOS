@@ -490,7 +490,9 @@ LLM — RFC 0124), `ekos_ekl` (EKL supports point-in-time `AS OF <timestamp>` qu
 kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_graph_export` (the whole compiled
 graph as nodes + edges in one call — filtered, optionally collapsed to super-nodes, truncation
 reported; RFC 0127), `ekos_diff` (raw ledger-entry changes since
-T), `ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
+T), `ekos_audit` (the write history of one object/relationship with the pipeline run, stage, and
+source artifact behind each version — RFC 0135), `ekos_status`,
+`ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
 explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
 `ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,
 documentation drift, and a real architecture-level diff between two points in time — technologies,
@@ -741,6 +743,8 @@ touching anything and leave backups):
 ```bash
 ekos ledger status --storage   # per-component size report (or the shorter `ekos status --storage`)
 ekos ledger migrate            # ledger v1 → v2: dictionary-zstd payloads (~2.5x smaller)
+ekos ledger audit <id>         # write history of one object/relationship — which run, stage and
+                               # source artifact produced each version (RFC 0135; --json)
 ekos artifact repack           # loose JSON files → packed segments (~7x smaller on disk)
 ```
 

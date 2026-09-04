@@ -533,6 +533,47 @@ pub fn timeline(config: &EkosConfig, cwd: &Path, bucket: &str, since: Option<&st
     Ok(())
 }
 
+/// RFC 0135 Part B — `ekos ledger audit <id>`: the write history of one object/relationship
+/// with the pipeline run + stage + source artifact behind each version.
+pub fn audit(config: &EkosConfig, cwd: &Path, id: &str, json: bool) -> Result<()> {
+    let kid = ekos_kir::KirId(
+        uuid::Uuid::parse_str(id).map_err(|_| anyhow::anyhow!("not a valid object id: {id}"))?,
+    );
+    let store = super::store::open_store_read_only(config, cwd)?;
+    let trail = store.audit_trail(&kid)?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "id": id,
+                "writes": trail,
+            }))?
+        );
+        return Ok(());
+    }
+
+    if trail.is_empty() {
+        println!(
+            "No ledger writes found for {id} (unknown id, or a read-only/partitioned backend)."
+        );
+        return Ok(());
+    }
+    println!("Write history of {id} ({} version(s)):", trail.len());
+    for (i, r) in trail.iter().enumerate() {
+        let run = r.run_id.as_deref().unwrap_or("—");
+        let stage = r.stage.as_deref().unwrap_or("—");
+        let src = r.source_artifact_id.as_deref().unwrap_or("—");
+        println!(
+            "  {:>2}. {}  run={run}  stage={stage}  from={src}",
+            i + 1,
+            r.written_at.to_rfc3339()
+        );
+    }
+    Ok(())
+}
+
 /// The stdout-free core of `timeline` — one `all_objects` + one `all_relationships` pass, bucketed
 /// by `created_at` into cumulative running totals.
 fn build_timeline(
@@ -918,6 +959,37 @@ mod tests {
         let trimmed = build_timeline(store.as_ref(), Bucket::Day, Some(since)).unwrap();
         assert_eq!(trimmed.points.len(), 1);
         assert_eq!(trimmed.points[0].objects, 3);
+    }
+
+    #[test]
+    fn audit_reports_provenance_written_by_a_stage() {
+        let dir = tempdir().unwrap();
+        let config = EkosConfig::default();
+        let oid;
+        {
+            let store = super::super::store::open_store(&config, dir.path()).unwrap();
+            store.set_write_context(Some(ekos_ledger::provenance::WriteContext {
+                run_id: "run-42".into(),
+                stage: "commit".into(),
+                source_artifact_id: Some("ckm:deadbeef".into()),
+            }));
+            let o = ekos_kir::KirObject::new("orders", ekos_kir::ObjectKind::Table);
+            oid = o.id;
+            store.append_object(&o).unwrap();
+        }
+        // Text path doesn't panic.
+        audit(&config, dir.path(), &oid.to_string(), false).unwrap();
+
+        // JSON path carries the provenance.
+        let store = super::super::store::open_store_read_only(&config, dir.path()).unwrap();
+        let trail = store.audit_trail(&oid).unwrap();
+        assert_eq!(trail.len(), 1);
+        assert_eq!(trail[0].run_id.as_deref(), Some("run-42"));
+        assert_eq!(trail[0].stage.as_deref(), Some("commit"));
+        assert_eq!(trail[0].source_artifact_id.as_deref(), Some("ckm:deadbeef"));
+
+        // A bogus id is a clean error, not a panic.
+        assert!(audit(&config, dir.path(), "not-a-uuid", true).is_err());
     }
 
     #[test]

@@ -222,6 +222,10 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     // fix's scope is deliberately the reported scenario, not every hypothetical partial-loss case.
     let ledger_is_empty = ledger.object_count()? == 0;
 
+    // RFC 0135 Part B — the inline `File` object/evidence writes below carry `(run_id, "build",
+    // observation artifact id)`. Set per-artifact inside the loop.
+    let run_id = ekos_ledger::provenance::new_run_id();
+
     let mut total_observed = 0usize;
     let mut total_skipped = 0usize;
     let mut connectors_rescanned = 0usize;
@@ -412,6 +416,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
                     }
                     obj.id = obj_id;
 
+                    ledger.set_write_context(Some(ekos_ledger::provenance::WriteContext {
+                        run_id: run_id.clone(),
+                        stage: "build".to_string(),
+                        source_artifact_id: Some(artifact.id.to_string()),
+                    }));
                     ledger.append_evidence(&ev)?;
                     let is_new = ledger.append_object(&obj)?;
                     if is_new {

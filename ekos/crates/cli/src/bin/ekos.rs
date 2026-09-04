@@ -508,6 +508,15 @@ enum LedgerCommands {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Write history of one object/relationship with per-write provenance — which run and
+    /// pipeline stage produced each version, and the artifact it came from (RFC 0135 Part B).
+    Audit {
+        /// Object or relationship id (UUID) — from `ekos query`, `ekos_search`, or a graph node
+        id: String,
+        /// Emit JSON instead of the text table
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -597,7 +606,9 @@ fn emits_machine_output(command: &Commands) -> bool {
         } => true,
         Commands::Ledger { subcommand } => matches!(
             subcommand,
-            LedgerCommands::Status { json: true, .. } | LedgerCommands::Timeline { .. }
+            LedgerCommands::Status { json: true, .. }
+                | LedgerCommands::Timeline { .. }
+                | LedgerCommands::Audit { json: true, .. }
         ),
         Commands::Config { subcommand } => match subcommand {
             ConfigCommands::Validate { json, .. } => *json,
@@ -660,6 +671,9 @@ async fn main() -> Result<()> {
                 bucket,
                 since,
             } => ekos::commands::ledger::timeline(&config, &cwd, &bucket, since.as_deref()),
+            LedgerCommands::Audit { id, json } => {
+                ekos::commands::ledger::audit(&config, &cwd, &id, json)
+            }
         },
         Commands::Clean => ekos::commands::clean::run(&config, &cwd),
         Commands::Doctor { json } => ekos::commands::doctor::run(&config, &cwd, &config_path, json),
