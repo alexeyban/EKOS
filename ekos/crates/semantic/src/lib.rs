@@ -10,6 +10,7 @@ pub mod transform_ir;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use ekos_artifact::{ArtifactId, ArtifactStore};
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_identity::{DefaultResolver, IdentityResolver, MergeProposal};
 use ekos_kir::{
@@ -466,6 +467,92 @@ impl SemanticCompilerPass {
     }
 }
 
+/// RFC 0080 (Storage Architecture) resolve-cost investigation — `compile` used to treat every
+/// `KnowledgeArtifact` ever written as current input, forever. A long-lived, repeatedly-
+/// `recover`'d workspace accumulates one stale `KnowledgeArtifact` per analyzer pass per past run
+/// of a changed file (each is a fresh content-addressed artifact — the old one is never
+/// overwritten, only superseded), and `SemanticCompilerPass` read them all: a real long-lived
+/// workspace produced 29.5M pairwise identity-resolution comparisons over 10,178 candidates,
+/// vs. 5,241 (~5,600x fewer) on a structurally identical fresh rebuild (TODO.md, RFC 0080).
+///
+/// This filters `compile`'s own candidate *read* — nothing is deleted from the artifact store, so
+/// it needs no relaxation of the ledger's append-only guarantee (physical retention/pruning of old
+/// artifact bytes to reclaim disk space is a separate, later, admin-operated concern).
+///
+/// Dedup key: `(pass_name, raw target)` when the artifact has exactly one input (the dominant
+/// shape — one `KnowledgeArtifact` per source file, from `rust_analyzer.rs`/`python_analyzer.rs`/
+/// etc.), resolved by reading that single input artifact's own `target` field. Passes with zero or
+/// multiple inputs (a handful of workspace-wide passes, e.g. `dependency_analyzer.rs` — not the
+/// measured dominant driver) fall back to `(pass_name, exact input_ids)`, which still collapses
+/// byte-identical reruns without attempting to model partial multi-input accumulation.
+fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -> Vec<ArtifactId> {
+    #[derive(Hash, Eq, PartialEq)]
+    enum Key {
+        SingleTarget(String, String),
+        ExactInputs(String, Vec<String>),
+    }
+
+    let mut newest: HashMap<Key, (ArtifactId, Option<DateTime<Utc>>)> = HashMap::new();
+
+    for id in ids {
+        let Ok(Some(json)) = store.read(id) else {
+            continue;
+        };
+        if json["artifact_type"].as_str() != Some("knowledge") {
+            continue;
+        }
+        let pass_name = json["pass_name"].as_str().unwrap_or_default().to_string();
+        let input_ids: Vec<String> = json["input_ids"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let created_at = json["meta"]["created_at"]
+            .as_str()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc));
+
+        let key = if input_ids.len() == 1 {
+            let target = store
+                .read(&ArtifactId(input_ids[0].clone()))
+                .ok()
+                .flatten()
+                .and_then(|input_json| input_json["target"].as_str().map(String::from));
+            match target {
+                Some(target) => Key::SingleTarget(pass_name, target),
+                // Input artifact no longer readable (shouldn't happen, artifacts are never
+                // deleted today) — fall back rather than risk silently dropping this candidate.
+                None => Key::ExactInputs(pass_name, input_ids),
+            }
+        } else {
+            Key::ExactInputs(pass_name, input_ids)
+        };
+
+        let candidate_id = id.clone();
+        match newest.get(&key) {
+            Some((_, existing_created_at)) => {
+                let is_newer = match created_at {
+                    Some(t) => Some(t) > *existing_created_at,
+                    None => false,
+                };
+                if is_newer {
+                    newest.insert(key, (candidate_id, created_at));
+                }
+            }
+            None => {
+                newest.insert(key, (candidate_id, created_at));
+            }
+        }
+    }
+
+    let mut result: Vec<ArtifactId> = newest.into_values().map(|(id, _)| id).collect();
+    result.sort_by_key(|id| id.to_string());
+    result
+}
+
 #[async_trait]
 impl CompilerPass for SemanticCompilerPass {
     fn name(&self) -> &str {
@@ -477,11 +564,12 @@ impl CompilerPass for SemanticCompilerPass {
     }
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
-        // ── Load all KnowledgeArtifacts ───────────────────────────────────────
-        let ids = ctx
+        // ── Load all KnowledgeArtifacts, deduped to the newest per logical target ──────────
+        let all_ids = ctx
             .artifact_store
             .list()
             .map_err(|e| PassError::failed(format!("artifact store list failed: {e}")))?;
+        let ids = dedup_knowledge_artifact_ids(&*ctx.artifact_store, &all_ids);
 
         let mut combined = KirGraph::new();
         let mut ka_count = 0usize;
@@ -1098,6 +1186,171 @@ mod tests {
             ekos_common::compress::read_json_auto(&ckm_dir.join("model.json")).unwrap();
         assert_eq!(model.version, 1);
         assert!(model.objects.is_empty());
+    }
+
+    // ── dedup_knowledge_artifact_ids (RFC 0080 resolve-cost fix) ────────────────────────
+
+    /// `content` distinguishes two observations of the *same* `target` (simulating the file's
+    /// content changing between two `recover` runs) — content-addressed ids need distinct content
+    /// to actually differ, since the target string alone isn't part of what varies here.
+    fn write_observation(
+        store: &ekos_artifact::FileSystemArtifactStore,
+        target: &str,
+        content: &str,
+    ) -> ArtifactId {
+        let artifact = ekos_artifact::ObservationArtifact::new(
+            "file",
+            target,
+            serde_json::json!({"path": target, "content": content}),
+        );
+        let json = serde_json::to_value(&artifact).unwrap();
+        store.write(&artifact.id, &json).unwrap();
+        artifact.id
+    }
+
+    fn write_knowledge(
+        store: &ekos_artifact::FileSystemArtifactStore,
+        pass_name: &str,
+        input_ids: Vec<ArtifactId>,
+        created_at: DateTime<Utc>,
+        // A distinct object name so different fixture graphs actually produce different ids.
+        object_name: &str,
+    ) -> ArtifactId {
+        let mut graph = KirGraph::new();
+        graph
+            .objects
+            .push(KirObject::new(object_name, ObjectKind::Table));
+        let mut artifact = ekos_artifact::KnowledgeArtifact::new(pass_name, input_ids, graph);
+        artifact.meta.created_at = created_at;
+        let json = serde_json::to_value(&artifact).unwrap();
+        store.write(&artifact.id, &json).unwrap();
+        artifact.id
+    }
+
+    #[test]
+    fn dedup_keeps_only_the_newest_knowledge_artifact_for_the_same_single_input_target() {
+        use ekos_artifact::FileSystemArtifactStore;
+
+        let dir = TempDir::new().unwrap();
+        let store = FileSystemArtifactStore::new(dir.path());
+
+        // Two separate `recover` runs against the same file, content changed between them —
+        // two distinct raw ObservationArtifacts (different content -> different id), same target.
+        let old_input = write_observation(&store, "src/main.rs", "old content");
+        let new_input = write_observation(&store, "src/main.rs", "new content");
+        assert_ne!(old_input, new_input, "content differs, so ids must differ");
+
+        let t0 = Utc::now() - chrono::Duration::hours(2);
+        let t1 = Utc::now();
+        let old_ka = write_knowledge(&store, "rust_analyzer", vec![old_input], t0, "old_symbol");
+        let new_ka = write_knowledge(&store, "rust_analyzer", vec![new_input], t1, "new_symbol");
+
+        let all_ids = store.list().unwrap();
+        let deduped = dedup_knowledge_artifact_ids(&store, &all_ids);
+
+        assert_eq!(
+            deduped,
+            vec![new_ka],
+            "only the newer KnowledgeArtifact for this target should survive; got old={old_ka:?}"
+        );
+    }
+
+    #[test]
+    fn dedup_keeps_knowledge_artifacts_for_genuinely_different_targets() {
+        use ekos_artifact::FileSystemArtifactStore;
+
+        let dir = TempDir::new().unwrap();
+        let store = FileSystemArtifactStore::new(dir.path());
+
+        let input_a = write_observation(&store, "src/a.rs", "a content");
+        let input_b = write_observation(&store, "src/b.rs", "b content");
+        let t = Utc::now();
+        let ka_a = write_knowledge(&store, "rust_analyzer", vec![input_a], t, "a_symbol");
+        let ka_b = write_knowledge(&store, "rust_analyzer", vec![input_b], t, "b_symbol");
+
+        let all_ids = store.list().unwrap();
+        let mut deduped = dedup_knowledge_artifact_ids(&store, &all_ids);
+        deduped.sort_by_key(|id| id.to_string());
+        let mut expected = vec![ka_a, ka_b];
+        expected.sort_by_key(|id| id.to_string());
+
+        assert_eq!(
+            deduped, expected,
+            "unrelated targets must not collapse into each other"
+        );
+    }
+
+    #[test]
+    fn dedup_collapses_exact_reruns_of_a_multi_input_pass() {
+        use ekos_artifact::FileSystemArtifactStore;
+
+        let dir = TempDir::new().unwrap();
+        let store = FileSystemArtifactStore::new(dir.path());
+
+        let input_1 = write_observation(&store, "dep1.txt", "1 content");
+        let input_2 = write_observation(&store, "dep2.txt", "2 content");
+        let t0 = Utc::now() - chrono::Duration::hours(1);
+        let t1 = Utc::now();
+        // Same pass, same exact input set, two reruns (e.g. an unrelated recover of another
+        // connector triggered a full re-run) -> must collapse to the newer one.
+        let old_ka = write_knowledge(
+            &store,
+            "dependency_analyzer",
+            vec![input_1.clone(), input_2.clone()],
+            t0,
+            "dep_old",
+        );
+        let new_ka = write_knowledge(
+            &store,
+            "dependency_analyzer",
+            vec![input_1, input_2],
+            t1,
+            "dep_new",
+        );
+
+        let all_ids = store.list().unwrap();
+        let deduped = dedup_knowledge_artifact_ids(&store, &all_ids);
+
+        assert_eq!(
+            deduped,
+            vec![new_ka],
+            "byte-identical multi-input reruns must still collapse; got old={old_ka:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_compiler_pass_only_compiles_the_newest_knowledge_artifact_per_target() {
+        use ekos_artifact::FileSystemArtifactStore;
+        use ekos_compiler_core::{EkosConfig, pass::PassContext};
+        use std::sync::Arc;
+
+        let dir = TempDir::new().unwrap();
+        let ckm_dir = dir.path().join("ckm");
+        let store_dir = dir.path().join("artifacts");
+        let store = FileSystemArtifactStore::new(&store_dir);
+
+        let old_input = write_observation(&store, "src/main.rs", "old content");
+        let new_input = write_observation(&store, "src/main.rs", "new content");
+        let t0 = Utc::now() - chrono::Duration::hours(2);
+        let t1 = Utc::now();
+        write_knowledge(&store, "rust_analyzer", vec![old_input], t0, "stale_object");
+        write_knowledge(&store, "rust_analyzer", vec![new_input], t1, "fresh_object");
+
+        let config = Arc::new(EkosConfig::default());
+        let store = Arc::new(store);
+        let mut ctx = PassContext::new(config, dir.path().to_path_buf()).with_artifact_store(store);
+
+        let mut pass = SemanticCompilerPass::new(&ckm_dir);
+        pass.run(&mut ctx).await.unwrap();
+
+        let model: CkModel =
+            ekos_common::compress::read_json_auto(&ckm_dir.join("model.json")).unwrap();
+        assert_eq!(
+            model.objects.len(),
+            1,
+            "the stale re-recover's object must not appear alongside the fresh one"
+        );
+        assert_eq!(model.objects[0].name, "fresh_object");
     }
 }
 

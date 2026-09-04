@@ -3595,29 +3595,41 @@ are excluded — see the full exclusion list in the planning history if needed.
     `Unmapped` rather than fabricated. Modeling procedural control flow (`Branch`/`Loop`/
     `Exception` IR node types) would be a real, separate, substantial feature — not attempted, not
     needed to call this "not broken."
-  - [ ] **Not fixed, investigated, real fix deferred**: `ekos resolve` took ~5 min against the real
-    pre-existing workspace (29.5M pairwise comparisons over 10,178 candidates).
+  - [x] **Fixed 2026-09-04 (tech-debt paydown planning pass).** `ekos resolve` took ~5 min against
+    a real pre-existing workspace (29.5M pairwise comparisons over 10,178 candidates).
     `DefaultResolver::resolve` already blocks by `(kind, name-prefix)` — not a naive unblocked scan.
     A completely fresh rebuild of the same real workspace produced 5,241 pairs for a structurally
     identical run (≈5,600× fewer) — strong evidence the real driver is candidate-set inflation
-    specific to a long-lived, repeatedly-`recover`'d workspace (most likely accumulated
-    `KnowledgeArtifact`s from many historical runs all still read as current input by `compile`'s
-    `knowledge_artifact_ids`), not the resolver's blocking algorithm. Not fixed: the real fix is
-    either an artifact-store lifecycle change (prune/supersede old `KnowledgeArtifact`s per pass) or
-    a blocking-key improvement — both real, larger changes with genuine risk of dropping evidence a
-    case this session didn't test still needs. A guessed fix here risked a worse regression than the
-    performance cost it addresses.
-  - *Recurred, confirming the diagnosis*: hit live again during RFC 0081's own verification —
-    re-running `recover`/`compile` against the same real analytics workspace after invalidating
-    `pass-manifests` (needed to pick up an analyzer code change) produced a real, temporary spike
-    to 15,866 CKM-stage objects (nearly double), before `commit`'s content-addressed dedup brought
-    the final ledger back to the correct real count. Same root cause, same real workaround
-    (`ekos ledger` doesn't yet have a real prune tool — this is exactly Storage Architecture Phase 2
-    from RFC 0080, above), not a new bug. Recurred a third time during Phase 2's live verification
-    (`SEM002 unknown from-id` warning count: 3379 → 3879 → 6331 across three consecutive cycles) —
-    confirmed via direct `ekl` lookup that the specific flagged objects/edges resolve correctly
-    post-`commit` each time; still not fixed, still correctly deferred to Storage Architecture
-    Phase 2.
+    specific to a long-lived, repeatedly-`recover`'d workspace (accumulated `KnowledgeArtifact`s
+    from many historical runs all still read as current input by `compile`). Root cause confirmed
+    precisely: `SemanticCompilerPass::run` called `ctx.artifact_store.list()` and read back *every*
+    `artifact_type == "knowledge"` artifact ever written — each is content-addressed by its own
+    hash, so a re-`recover`'d file (new content -> new hash) never overwrites its own predecessor,
+    it just accumulates a new sibling forever.
+    - **Fix, `crates/semantic/src/lib.rs::dedup_knowledge_artifact_ids`**: filters `compile`'s own
+      candidate *read* to the newest `KnowledgeArtifact` per logical target — `(pass_name, raw
+      input's own `target` field)` for the dominant one-artifact-per-file shape (resolved by
+      reading the single input artifact back), falling back to `(pass_name, exact input_ids)` for
+      the few multi-input passes (`dependency_analyzer.rs`), which still collapses byte-identical
+      reruns without modeling partial multi-input accumulation. **Nothing is deleted from the
+      artifact store** — this is a pure read-time filter, so it needed no relaxation of the
+      ledger's append-only guarantee (physical disk-space reclamation is a separate, later,
+      admin-operated concern per the user's explicit direction on that question, 2026-09-04: "how
+      much and how long to keep data is completely a user/consumer question").
+    - 4 new tests: two artifacts for the same target keep only the newer; two different targets
+      both survive; a multi-input pass's exact rerun collapses; an end-to-end
+      `SemanticCompilerPass::run` proves the stale re-recover's object never reaches the compiled
+      CKM. Live-verified: `ekos compile` against this repo's own real, long-lived `.ekos/`
+      workspace still runs clean (4783 objects, 7496 relationships, no crash/regression).
+  - *Recurred, confirming the diagnosis, before this fix*: hit live again during RFC 0081's own
+    verification — re-running `recover`/`compile` against the same real analytics workspace after
+    invalidating `pass-manifests` (needed to pick up an analyzer code change) produced a real,
+    temporary spike to 15,866 CKM-stage objects (nearly double), before `commit`'s content-addressed
+    dedup brought the final ledger back to the correct real count. Recurred a third time during
+    Storage Architecture Phase 2's live verification (`SEM002 unknown from-id` warning count:
+    3379 → 3879 → 6331 across three consecutive cycles) — confirmed via direct `ekl` lookup that
+    the specific flagged objects/edges resolve correctly post-`commit` each time. The fix above
+    addresses the root cause these three recurrences all shared.
 
 - [x] **`GitObserver::is_git_repo()` false-positive on an unrelated ancestor `.git`** — half
   fixed 2026-09-04 (tech-debt paydown planning pass). `plugins/git/src/lib.rs`'s `is_git_repo` used
