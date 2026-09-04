@@ -389,9 +389,12 @@ Traditional RAG searches documents; EKOS queries **compiled knowledge**. The ret
 three operations, built as RFCs 0119–0126 (`devlog_143`–`devlog_149`):
 
 - **SEARCH** — one `KnowledgeStore::retrieve` seam behind every consumer, fusing a BM25 arm, an
-  exact-name arm, and (opt-in) a vector arm with Reciprocal Rank Fusion (Cormack RRF, `k=60`).
+  exact-name arm, and (opt-in) a vector arm with Reciprocal Rank Fusion (Cormack RRF, `k=60`). BM25
+  indexes object names and content with English stemming, so a singular mention ("the customer
+  table") resolves the same object a plural exact mention ("the Customers table") already did.
   `ekos query find "<text>" --mode lexical|vector|hybrid`; `--explain` prints the compiled plan
-  and per-arm timings. The same fused path runs on the single `FactLedger`, the partitioned
+  and per-arm timings (populated on partitioned and distributed stores too, not just a single
+  `FactLedger`). The same fused path runs on the single `FactLedger`, the partitioned
   store, and the distributed gateway.
 - **QUERY** — direct, zero-LLM answers over the compiled graph: `fact(entity, attr)` for one
   attribute of one object, named ops (`dependents`, `callers`, `path`, …) for the graph. Exposed
@@ -923,12 +926,15 @@ test (`devlog_144`). What it provides:
   failure;
 - **adaptive leases** — `ekos compile-worker` derives its heartbeat from the lease's real TTL, so
   `ekos coordinator serve --ttl-seconds 5` (fast failover) is safe; `ekos compile-worker run
-  --force` is the Service-A equivalent of `ekos resolve --force`.
+  --force` is the Service-A equivalent of `ekos resolve --force`; `ekos compile-worker run
+  --retry-lease-seconds <N>` keeps retrying (every 3s) if the shard's lease is already held by
+  another worker instead of failing immediately — 0 (default) preserves the original fail-fast
+  behavior, and only an "already leased" conflict is ever retried, never a genuinely failed run.
 
-That completes Phase B at its v1 scope. Known follow-ons: interrupt-of-in-flight-work on lease
-loss (a fenced worker currently runs its pipeline to the end, then its commit is rejected); a
-built-in acquire-retry loop in `ekos compile-worker`. None of this affects Local mode, which stays
-the default.
+That completes Phase B at its v1 scope. Known follow-on: interrupt-of-in-flight-work on lease
+loss (a fenced worker currently runs its pipeline to the end, then its commit is rejected) — needs
+a cancellation signal threaded through the whole pipeline, materially bigger than the acquire-retry
+loop above. None of this affects Local mode, which stays the default.
 
 ## Development Process
 
