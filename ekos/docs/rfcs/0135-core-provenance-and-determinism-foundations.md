@@ -39,6 +39,13 @@ committed ledger (no tombstone exists — render-time dedup stays).
 
 ## Part A — pipeline logic version in the build fingerprint
 
+**Status: implemented 2026-09-04 (`devlog_158`).** Shipped slightly wider than proposed: the
+fingerprint cache key folds in **both** `PIPELINE_LOGIC_VERSION` (code changes) **and an 8-hex
+hash of the workspace's `RedactionConfig`** (per-workspace `[security]` changes), so a
+`[security]` edit re-scans automatically with no constant bump. `build.rs`'s existing
+`a_later_redaction_pattern_addition_actually_re_redacts_unchanged_source` test no longer needs its
+`remove_dir_all(ledger)` — the key miss forces the rescan on its own.
+
 ### Problem
 
 `crates/cli/src/commands/build.rs` skips a whole observe path when
