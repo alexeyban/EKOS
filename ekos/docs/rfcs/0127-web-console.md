@@ -6,9 +6,11 @@
 **Umbrella.** Per-increment implementation RFCs authored just-in-time (0128+), same pattern as
 RFC 0118 → 0119–0126.
 **Numbering note.** RFC 0118 §"Prior art" and TODO.md reserved *0127* in prose for a future
-computed-staleness/drift RFC; this console RFC took the number instead. When the staleness/drift
-RFC is authored it gets a fresh number (0128+), and the RFC 0118 / TODO.md cross-references are
-re-pointed then.
+computed-staleness/drift RFC; this console RFC took the number instead. Its replacement pointer
+("0128+") also went stale as 0128-0135 were consumed by this umbrella's own phases and RFC 0135's
+provenance work — **the staleness/drift RFC is now assigned RFC 0137** (allocated 2026-09-04,
+tech-debt paydown planning pass; not yet authored). RFC 0118 / TODO.md cross-references
+re-pointed at the same time.
 **Depends on:** RFC 0013 (MCP server), RFC 0115 (MCP over TCP), RFC 0097 (cached read-only store
 handle), RFC 0114 (query usage log), RFC 0116 (`ekos status`), RFC 0104 (cross-process write lock).
 

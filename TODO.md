@@ -3064,9 +3064,28 @@ are excluded — see the full exclusion list in the planning history if needed.
   `devlog_65.md`'s "Not fixed" section for the full reasoning); a dedicated `ekos_summarize` MCP
   tool, per-sub-project curated docs generation, and opt-in LLM-written rollup synthesis (RFC 0044).
 
-- [ ] **Security**: `ArtifactId` is still computed from pre-redaction bytes, and redaction isn't
-  applied at each of ~15 individual plugin `data`-construction call sites (RFC 0043) — flag as
-  security-relevant, not routine cleanup.
+- [x] **Security**: re-investigated 2026-09-04 (tech-debt paydown planning pass) — **stale, not a
+  live gap.** Both original concerns are already closed, independently of when this line was
+  written:
+  - `ArtifactId` pre-redaction bytes: `build.rs:338-340` recomputes `artifact.id =
+    ArtifactId::compute(...)` from the artifact's `content` *after* `redact_json` mutates `data`
+    in place (fixed 2026-08-25 for a staleness bug, `devlog_100`-adjacent — the id-vs-content
+    mismatch it closed also happens to close this).
+  - "~15 individual plugin `data`-construction call sites" without redaction: confirmed 20
+    `ObservationArtifact::new(...)` sites across 17 plugins via grep — but every one of them
+    returns through `Observer::scan()` into `build.rs`'s single `for observer in &observers`
+    loop (`build.rs:273-341`), which calls `ekos_common::redaction::redact_json` (recursive over
+    every `Value::String` in the tree — confirmed in `redaction.rs:289-304`) on **every**
+    artifact's `data` from **every** observer, unconditionally, before persistence. This was
+    RFC 0043's whole design (`devlog_43`'s own "Decisions" section: "Central `build.rs` choke
+    point over per-plugin redaction — chosen specifically because it can't be forgotten by a
+    future connector author"). Plugins were never supposed to self-redact; conflating "plugins
+    don't redact themselves" (true, deliberate) with "content isn't redacted" (false) is how this
+    line drifted into reading as an open gap.
+  - Direct-file-read entry points that bypass `build.rs` (`recover.rs`'s dependency-scan block,
+    `crypto_analyzer`, `crate_topology_analyzer`, `cicd_analyzer`) already have their own explicit
+    `redact()`/`is_excluded_path()` calls (`recover.rs:104-116`, `:201-213`, `:440-451`,
+    `:589-600`, `:688-699`) — separately confirmed, per CLAUDE.md's `common` crate-map entry.
 
 - [ ] **Demo server**: general multi-tenant/self-serve ingestion beyond the fixed two-repo
   catalog, and a no-LLM/ledger-only `/ask` answer mode (RFC 0045).
@@ -3161,6 +3180,25 @@ are excluded — see the full exclusion list in the planning history if needed.
     `Page`/`Risk`/`Rollup`/`ProjectSummary` were structurally keyed but never excluded.
   - *Out of scope:* `KnowledgeStore: Send` / RFC 0112 (its own RFC); the RFC 0060 residual fuzzy
     mis-scores (no threshold fix exists); retroactive row de-dup (no tombstone).
+
+- [ ] **RFC 0112 — lock-free snapshot reads for `FactLedger`, plus the `KnowledgeStore: Send`
+  audit it's blocked on.** Given a dedicated TODO.md item 2026-09-04 (tech-debt paydown planning
+  pass) — previously only a passing out-of-scope mention above, which is how it went untracked
+  despite being Draft since 2026-08-27. Exists to close the cross-process visibility gap RFC 0104
+  documented; that gap is more load-bearing now, not less — the Web Console's supervisor
+  (`web/api`) spawns a long-lived `ekos mcp serve` per workspace while the job runner mutates the
+  same workspace from a subprocess (RFC 0129/0131), and `devlog_141` (RFC 0115 MCP-over-TCP)
+  explicitly declined to add a `Send` bound to `Box<dyn KnowledgeStore>` for lack of a real audit,
+  sidestepping via per-connection caches instead — an accepted v1 shortcut, not a resolved
+  question. Do the `KnowledgeStore: Send` audit first; its answer (what actually blocks `Send`)
+  determines whether RFC 0112 is a small change or a structural one.
+
+- [ ] **`devlog_100`'s permission-denial incident — needs its own tracked follow-up, currently
+  prose-only.** Given a dedicated TODO.md item 2026-09-04 (tech-debt paydown planning pass). A
+  destructive command ran despite a reported permission denial (`devlog_100.md:75`, 2026-08-24) —
+  re-read that devlog's account before scheduling this; determine what guard (if any) is still
+  missing and whether it's a Claude Code harness question outside this repo's control or a
+  workflow change this repo can make (e.g. a pre-command check in a script this repo owns).
 
 - [x] **Architecture Knowledge Model — reasoning layer, evaluator, MVP agent (RFC 0065/0066/0067)**:
   RFC 0065 Phase 1 (`devlog_70`) shipped the static knowledge model — `Claim`/`ArchitectureGap`
@@ -4308,9 +4346,11 @@ are excluded — see the full exclusion list in the planning history if needed.
       **0126** eval harness + telemetry (optional). Phases 0–4 are fully offline / zero-LLM. Computed
       staleness/drift (`Custom("Drift")`, code↔doc signature diffing) is deliberately a separate
       future RFC — it was going to be *0127*, but that number was taken by the Web Console umbrella
-      (below); the staleness/drift RFC gets a fresh number (0128+) when authored, and these
-      cross-references are re-pointed then. (Also noted: commit `e8e1ca3` claims an
-      RFC 0117 for the dbt analyzer but no `0117-*.md` was ever filed — backfill needed.)
+      (below); its replacement pointer ("0128+") went stale too as 0128-0135 were consumed by the
+      Web Console's own phases and RFC 0135's provenance work — **now assigned RFC 0137**
+      (allocated 2026-09-04, tech-debt paydown planning pass; not yet authored). (Also noted:
+      commit `e8e1ca3` claims an RFC 0117 for the dbt analyzer but no `0117-*.md` was ever filed —
+      backfill needed, low priority, `dbt_analyzer` itself shipped per `devlog_143`.)
       - [x] **0119 (Phase 0)** — `KnowledgeStore::retrieve(&RetrievalRequest) -> RankedResults`
         seam, default wraps `find_objects` byte-identically; `Runtime::retrieve`; `AiRuntime` +
         `ekos query find` + MCP + EKL routed through it.
@@ -4497,7 +4537,9 @@ are excluded — see the full exclusion list in the planning history if needed.
         fetch, **frozen layout** (`onEngineStop` pins `fx`/`fy`), "viewing as of" banner, panel
         `as_of`. Known limit: only as deep as the ledger's retained history — flat on a
         wiped-and-rebuilt workspace (RFC §7). 78/78 pytest.
-      - [ ] **Next increments (0135+):** Phase 6 remainder (graph v2 — neighbourhood isolation,
+      - [ ] **Next increments (RFC 0136, reassigned 2026-09-04 — 0135 was claimed by the
+        core-provenance-and-determinism-foundations RFC instead):** Phase 6 remainder (graph v2 —
+        neighbourhood isolation,
         impact mode, server-side layout, PNG/glTF export), Phase 7 (hardening). Deferred within R1:
         true streaming ndjson, the distributed `evidence_count` RPC. Deferred within 0134:
         per-commit (sub-day) checkpoint ticks, source/world-time slider axis, deep-linking

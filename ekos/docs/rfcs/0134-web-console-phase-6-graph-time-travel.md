@@ -10,7 +10,9 @@ RFC 0096 (`AS OF` point-in-time reconstruction)
 **Closes:** the `--as-of` graph-export deferral recorded in `TODO.md` ("the `all_objects_at`
 primitive exists, scope doesn't")
 **Defers:** RFC 0127 Phase 6's other items — neighbourhood isolation, impact-mode trace,
-server-side ForceAtlas2, PNG/glTF export — and Phase 7 (hardening) → RFC 0135+
+server-side ForceAtlas2, PNG/glTF export — and Phase 7 (hardening) → RFC 0136 (repointed
+2026-09-04: RFC 0135 was claimed by the core-provenance-and-determinism-foundations RFC instead —
+see that RFC's own header for why 0135 wasn't free when this handoff was written)
 
 ---
 
@@ -48,7 +50,7 @@ stood then.
 
 **Not in this RFC:** anything that writes; source/world-time axis; per-commit (sub-day)
 checkpoint granularity; neighbourhood isolation / impact mode / image export (still Phase 6/7 of
-RFC 0127, now → RFC 0135+).
+RFC 0127, now → RFC 0136).
 
 ---
 
