@@ -1543,6 +1543,57 @@ mod tests {
         (FactLedger::open(&path).unwrap(), dir)
     }
 
+    /// F2 (full-stack test run, `test-runs/run-20260901T160842Z/REPORT.md`) — `ekos diff --from
+    /// <a date before the ledger's first tx>` returned an *empty* diff, while a window that
+    /// genuinely contains every write returned the real count. A `--from` older than the first tx
+    /// should never return *fewer* changes than a tighter, real window.
+    #[test]
+    fn diff_from_before_the_first_write_returns_everything_up_to_that_point() {
+        let (ledger, _dir) = temp_ledger();
+        let a = KirObject::new("orders", ObjectKind::Table);
+        let b = KirObject::new("customers", ObjectKind::Table);
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+
+        let ancient = Utc::now() - Duration::days(365 * 30); // long before the ledger existed
+        let now = Utc::now() + Duration::seconds(1);
+
+        let diff = ledger.diff(ancient, now).unwrap();
+        assert_eq!(
+            diff.touched.len(),
+            2,
+            "a --from before the first write must see every write, not zero"
+        );
+    }
+
+    /// Same as above, but forcing every write into its own *sealed* segment (the branch
+    /// `diff_from_before_the_first_write_returns_everything_up_to_that_point` doesn't exercise —
+    /// that test only ever has one, still-active segment).
+    #[test]
+    fn diff_from_before_the_first_write_sees_sealed_segments_too() {
+        let root_dir = tempdir().unwrap();
+        let backend_cache = tempdir().unwrap();
+        let root = root_dir.path().join("part");
+        let backend = std::sync::Arc::new(crate::MemBackend::new(backend_cache.path()));
+        let ledger = FactLedger::open_with_backend_and_seal_threshold(&root, backend, 1).unwrap();
+
+        let a = KirObject::new("orders", ObjectKind::Table);
+        let b = KirObject::new("customers", ObjectKind::Table);
+        let c = KirObject::new("products", ObjectKind::Table);
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_object(&c).unwrap();
+
+        let ancient = Utc::now() - Duration::days(365 * 30);
+        let now = Utc::now() + Duration::seconds(1);
+        let diff = ledger.diff(ancient, now).unwrap();
+        assert_eq!(
+            diff.touched.len(),
+            3,
+            "sealed segments must be included when --from predates the first write"
+        );
+    }
+
     /// RFC 0113 B4 — with a `SegmentBackend`, the sealed segments (a partition's bulk) live on the
     /// backend, not local disk: wiping the local `segments/` dir loses nothing.
     #[test]

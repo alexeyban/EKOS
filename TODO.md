@@ -4419,6 +4419,20 @@ are excluded — see the full exclusion list in the planning history if needed.
         workspace (added a partitioned/distributed branch). Still open: F2 (`ekos diff` empty for
         very-old `--from`), F4 (`arm_timings` empty on partitioned stores), F7 (inflected
         entity-mention resolution).
+        - **F2 — investigated 2026-09-04 (tech-debt paydown planning pass), not reproduced, not
+          closed.** Traced `FactLedger::diff`'s window computation (`window_start`/`in_window`),
+          `SegmentStore::batches_after`'s `keep` predicate for a `None` cutoff, and
+          `PartitionedLedger::diff`'s per-partition merge — all read as correct for a `--from`
+          before the ledger's first write. Added 2 regression tests (there were previously *zero*
+          tests for `diff` at all): one on a fresh single-segment `FactLedger`, one forcing every
+          write into its own sealed segment (`seal_threshold=1`) to exercise the sealed-segment
+          scan path specifically — **both pass against current code.** The original report's
+          symptom (`Unchanged: 0` too, not just `touched`) points more at `self_counts`/
+          `entities_with_attr` returning empty, or `open_store` routing to an empty store entirely
+          — closer in shape to F5/F6 (both found in the same run, both root-caused to a
+          partitioned workspace's config/state not loading correctly in some code path) than to a
+          `diff` math bug. Couldn't confirm without the original multi-invocation, 11-partition
+          live workspace. Left open; the 2 new tests are real, standing coverage either way.
       - [x] **0126 (Phase 7), `devlog_148`** — the retrieval eval harness + per-arm telemetry.
         `ekos_runtime::retrieval_eval`: a checked-in graded query set (`reference_queries()`, ~30
         queries × 5 `QueryType`s), a hand-built reference estate (`seed_reference_estate` —
@@ -4451,6 +4465,23 @@ are excluded — see the full exclusion list in the planning history if needed.
         `publish_aux("vectors")`/`fetch_aux("vectors")` reuse the `"search"` aux channel — the
         distributed `VectorSearch` RPC and `ekos ask`/EKL `SEMANTIC` vector wiring are deferred
         (RFC 0125b / fast-follow).
+        - **Investigated 2026-09-04 (tech-debt paydown planning pass), deliberately not
+          implemented this pass — real design surface, not a quick wiring gap.** `ekos ask`'s
+          *default* path is `reason.rs::execute`/`exec_node` (`ai.rs`'s legacy `--classic`
+          `search_for_question` AND→OR→raw ladder is secondary) — both hardcode
+          `RetrievalRequest::lexical` at `reason.rs:321` (`PlanNode::Resolve`) and `:337`
+          (`PlanNode::Search`). `ekos-runtime` already depends on `ekos-recovery` (where
+          `EmbeddingProvider` lives), so there's no crate-layering blocker, but wiring this in
+          correctly means: threading an optional precomputed question-level embedding through
+          `AiRuntime::gather_evidence` → `reason::execute` → `ExecCtx` → `exec_node` (a public
+          fn signature change, used elsewhere — check callers before touching it); deciding
+          whether one embedding of the whole original question gets reused across every
+          `PlanNode::Search`/`Resolve` sub-query in a plan (cheap, one call) vs. a fresh embedding
+          per node (more accurate, N calls); and doing the equivalent for EKL's separate
+          `SEMANTIC` handler (`ekl/src/interpreter.rs:118`, same `RetrievalRequest::lexical`
+          hardcode, a different call site entirely). None of this is hard individually, but it's
+          real design surface across three call sites, not a one-line swap — deferred to its own
+          pass rather than rushed.
       - [x] **0124 (Phase 5), `devlog_146`** — the surface. `ekos ask` compiles the question
         through the REASON planner by default (`--classic` = the old `gather_context` path, implied
         by `--stream`; `--explain` prints the plan + evidence set). MCP `ekos_query` (compiled
