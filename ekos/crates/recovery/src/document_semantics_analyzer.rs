@@ -336,8 +336,12 @@ impl CompilerPass for DocumentSemanticsAnalyzerPass {
                 graph.objects.push(obj);
                 stats.concepts += 1;
 
-                let mut rel =
-                    KirRelationship::new(RelationshipKind::References, section.id, concept_id);
+                let mut rel = KirRelationship::deterministic(
+                    RelationshipKind::References,
+                    section.id,
+                    concept_id,
+                    "",
+                );
                 rel.evidence.push(ev_id);
                 graph.relationships.push(rel);
 
@@ -371,10 +375,11 @@ impl CompilerPass for DocumentSemanticsAnalyzerPass {
                 );
                 let ev_id = graph.add_evidence(ev);
 
-                let mut edge = KirRelationship::new(
+                let mut edge = KirRelationship::deterministic(
                     RelationshipKind::Custom(rel.kind.clone()),
                     from_id,
                     to_id,
+                    "",
                 );
                 edge.properties
                     .insert("description".into(), serde_json::json!(rel.description));

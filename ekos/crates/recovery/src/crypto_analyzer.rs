@@ -132,8 +132,14 @@ impl CompilerPass for CryptoAnalyzerPass {
                     continue;
                 };
 
-                let mut kir_rel =
-                    KirRelationship::new(RelationshipKind::Custom(rel.kind.clone()), from, to);
+                // RFC 0135 Part C — the export's own relationships are already deduped by the
+                // sentinel's evidence model; `(kind, from, to)` is the stable identity.
+                let mut kir_rel = KirRelationship::deterministic(
+                    RelationshipKind::Custom(rel.kind.clone()),
+                    from,
+                    to,
+                    "",
+                );
                 kir_rel.properties = parse_attrs(&rel.attrs);
                 for ev_id in &rel.evidence_ids {
                     if let Some(&kid) = evidence_kir_ids.get(ev_id) {

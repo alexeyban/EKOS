@@ -163,8 +163,12 @@ pub fn synthesize_rollups(graph: &mut KirGraph, depth: usize) {
             let ev_id = ev.id;
             new_evidence.push(ev);
 
-            let mut contains =
-                KirRelationship::new(RelationshipKind::Contains, rollup_id, member.id);
+            let mut contains = KirRelationship::deterministic(
+                RelationshipKind::Contains,
+                rollup_id,
+                member.id,
+                "",
+            );
             contains.evidence.push(ev_id);
             new_relationships.push(contains);
         }

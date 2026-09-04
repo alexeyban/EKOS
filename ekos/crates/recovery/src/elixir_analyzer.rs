@@ -393,10 +393,11 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                     result.objects.push(obj);
                     result.module_count += 1;
                 }
-                result.relationships.push(KirRelationship::new(
+                result.relationships.push(KirRelationship::deterministic(
                     RelationshipKind::Contains,
                     file_id,
                     mod_id,
+                    "",
                 ));
                 stack.push(Block::Module(mod_id));
             }
@@ -434,10 +435,11 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                     .insert("ecosystem".into(), serde_json::json!("database"));
                 result.objects.push(obj);
             }
-            result.relationships.push(KirRelationship::new(
+            result.relationships.push(KirRelationship::deterministic(
                 RelationshipKind::DependsOn,
                 owner,
                 tech_id,
+                "",
             ));
         }
 
@@ -487,10 +489,11 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                     // below, possibly several real lines later (guard clause).
                     pending_symbol = Some((sym_id, line_idx + 1));
                 }
-                result.relationships.push(KirRelationship::new(
+                result.relationships.push(KirRelationship::deterministic(
                     RelationshipKind::Contains,
                     owner,
                     sym_id,
+                    "",
                 ));
             }
             // Fall through to the generic scan: this line's own trailing `do` (if the signature
@@ -519,10 +522,11 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                         obj.id = target_id;
                         result.objects.push(obj);
                     }
-                    result.relationships.push(KirRelationship::new(
+                    result.relationships.push(KirRelationship::deterministic(
                         RelationshipKind::DependsOn,
                         owner,
                         target_id,
+                        "",
                     ));
                 }
             }

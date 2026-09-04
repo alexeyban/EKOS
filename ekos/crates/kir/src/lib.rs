@@ -386,6 +386,31 @@ impl KirRelationship {
         }
     }
 
+    /// RFC 0135 Part C — a relationship whose id is a deterministic function of
+    /// `(kind, from, to, discriminator)` instead of `KirRelationship::new`'s random `KirId`.
+    ///
+    /// A non-deterministic relationship id lets logically-identical relationships accumulate as
+    /// real duplicate rows across repeated `recover`/`commit` cycles — the append-only ledger has
+    /// no dedup on `(from, to, kind)` (RFC 0070/0072).
+    ///
+    /// `discriminator` is `""` for the common "at most one edge of this kind between these two
+    /// objects" case. It carries a real distinguishing key only where more than one legitimately
+    /// exists — e.g. two foreign keys between the same two tables via different columns
+    /// (`sql_analyzer.rs`'s `fk_desc`), the one standing counter-example to a blanket
+    /// `(from, to, kind)` rule.
+    pub fn deterministic(
+        kind: RelationshipKind,
+        from: KirId,
+        to: KirId,
+        discriminator: &str,
+    ) -> Self {
+        let seed = format!("rel:{kind}:{from}:{to}:{discriminator}");
+        Self {
+            id: KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, seed.as_bytes())),
+            ..Self::new(kind, from, to)
+        }
+    }
+
     /// Set the domain-time validity window (RFC 0047). See the field docs on
     /// `valid_from`/`valid_until` for how this differs from the ledger's
     /// observation-time history.
@@ -675,6 +700,32 @@ mod tests {
         let back: KirEvidence = serde_json::from_str(&json).unwrap();
         assert!((back.confidence - 0.95).abs() < 0.001);
         assert_eq!(back.location.line, Some(42));
+    }
+
+    #[test]
+    fn deterministic_relationship_id_is_stable_and_discriminator_sensitive() {
+        let (a, b) = (KirId::new(), KirId::new());
+        let r1 = KirRelationship::deterministic(RelationshipKind::DependsOn, a, b, "");
+        let r2 = KirRelationship::deterministic(RelationshipKind::DependsOn, a, b, "");
+        assert_eq!(r1.id, r2.id, "same inputs → same id");
+        assert_ne!(
+            r1.id,
+            KirRelationship::new(RelationshipKind::DependsOn, a, b).id,
+            "and not the random default"
+        );
+        // Direction, kind, and discriminator all matter.
+        assert_ne!(
+            r1.id,
+            KirRelationship::deterministic(RelationshipKind::DependsOn, b, a, "").id
+        );
+        assert_ne!(
+            r1.id,
+            KirRelationship::deterministic(RelationshipKind::Calls, a, b, "").id
+        );
+        assert_ne!(
+            r1.id,
+            KirRelationship::deterministic(RelationshipKind::DependsOn, a, b, "col:x").id
+        );
     }
 
     #[test]

@@ -647,8 +647,12 @@ pub fn lower_to_kir(graph: &TransformGraph) -> KirGraph {
     for (from, to) in &graph.edges {
         let from_id = node_ids[from.0 as usize];
         let to_id = node_ids[to.0 as usize];
-        let rel =
-            KirRelationship::new(RelationshipKind::Custom("FeedsInto".into()), from_id, to_id);
+        let rel = KirRelationship::deterministic(
+            RelationshipKind::Custom("FeedsInto".into()),
+            from_id,
+            to_id,
+            "",
+        );
         kir.add_relationship(rel);
     }
 

@@ -280,8 +280,12 @@ impl CompilerPass for GitHubAnalyzerPass {
                     format!("PR #{} changes {path}", data.number),
                 );
                 let ev_id = graph.add_evidence(ev);
-                let mut rel =
-                    KirRelationship::new(RelationshipKind::References, from_id, file_kir_id(path));
+                let mut rel = KirRelationship::deterministic(
+                    RelationshipKind::References,
+                    from_id,
+                    file_kir_id(path),
+                    "",
+                );
                 rel.evidence.push(ev_id);
                 graph.relationships.push(rel);
             }
@@ -296,7 +300,12 @@ impl CompilerPass for GitHubAnalyzerPass {
                     format!("#{} body references closing #{closed_number}", data.number),
                 );
                 let ev_id = graph.add_evidence(ev);
-                let mut rel = KirRelationship::new(RelationshipKind::References, from_id, to_id);
+                let mut rel = KirRelationship::deterministic(
+                    RelationshipKind::References,
+                    from_id,
+                    to_id,
+                    "",
+                );
                 rel.evidence.push(ev_id);
                 graph.relationships.push(rel);
             }
@@ -319,7 +328,12 @@ impl CompilerPass for GitHubAnalyzerPass {
                     format!("#{} body mentions #{mentioned_number}", data.number),
                 );
                 let ev_id = graph.add_evidence(ev);
-                let mut rel = KirRelationship::new(RelationshipKind::References, from_id, to_id);
+                let mut rel = KirRelationship::deterministic(
+                    RelationshipKind::References,
+                    from_id,
+                    to_id,
+                    "",
+                );
                 rel.evidence.push(ev_id);
                 graph.relationships.push(rel);
             }
