@@ -1663,7 +1663,20 @@ pub fn merge_branch(main: &Ledger, branch: &Ledger) -> Result<MergeReport, Ledge
 /// The `Ledger` API as a trait — the seam RFC 0016 flips behind. Both the
 /// SQLite backend ([`Ledger`]) and the fact engine ([`FactLedger`])
 /// implement it; the runtime, EKL, CLI, and MCP consume only this surface.
-pub trait KnowledgeStore {
+///
+/// `Send` supertrait added 2026-09-04 (RFC 0112 concurrency audit, Wave 2 of the tech-debt
+/// paydown pass) — previously omitted pending an audit of whether every real implementor actually
+/// satisfies it (`devlog_141` explicitly declined to add this without one, sidestepping via
+/// per-connection caches in RFC 0115 instead). The audit: every real implementor (`Ledger`,
+/// `FactLedger`, `partitioned::PartitionedLedger`, `ekos_distributed::DistributedLedger`) is
+/// already `Send` today, verified directly via `assert_send::<T>()` static-assertion probes
+/// against each concrete type before this bound was added — the *only* thing that was missing
+/// `Send` was `dyn KnowledgeStore` itself, for lack of this declaration. Confirmed via the same
+/// probe against `dyn KnowledgeStore` pre-change (compiler error naming exactly this trait, no
+/// other cause). This is additive only: any external implementor that happened to not be `Send`
+/// would now fail to compile, which is a `1.0`-breaking (not yet reached) concern, not a runtime
+/// one — no such implementor exists in this codebase.
+pub trait KnowledgeStore: Send {
     fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError>;
     fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError>;
     fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError>;

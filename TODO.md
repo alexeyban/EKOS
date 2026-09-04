@@ -3181,17 +3181,26 @@ are excluded — see the full exclusion list in the planning history if needed.
   - *Out of scope:* `KnowledgeStore: Send` / RFC 0112 (its own RFC); the RFC 0060 residual fuzzy
     mis-scores (no threshold fix exists); retroactive row de-dup (no tombstone).
 
-- [ ] **RFC 0112 — lock-free snapshot reads for `FactLedger`, plus the `KnowledgeStore: Send`
-  audit it's blocked on.** Given a dedicated TODO.md item 2026-09-04 (tech-debt paydown planning
-  pass) — previously only a passing out-of-scope mention above, which is how it went untracked
-  despite being Draft since 2026-08-27. Exists to close the cross-process visibility gap RFC 0104
-  documented; that gap is more load-bearing now, not less — the Web Console's supervisor
-  (`web/api`) spawns a long-lived `ekos mcp serve` per workspace while the job runner mutates the
-  same workspace from a subprocess (RFC 0129/0131), and `devlog_141` (RFC 0115 MCP-over-TCP)
-  explicitly declined to add a `Send` bound to `Box<dyn KnowledgeStore>` for lack of a real audit,
-  sidestepping via per-connection caches instead — an accepted v1 shortcut, not a resolved
-  question. Do the `KnowledgeStore: Send` audit first; its answer (what actually blocks `Send`)
-  determines whether RFC 0112 is a small change or a structural one.
+- [x] **`KnowledgeStore: Send` audit — done, and it was a non-issue.** 2026-09-04 (tech-debt
+  paydown planning pass). `devlog_141` (RFC 0115 MCP-over-TCP) explicitly declined to add a `Send`
+  bound to `Box<dyn KnowledgeStore>` for lack of a real audit, sidestepping via per-connection
+  caches instead. The audit: static-assertion probes (`fn assert_send<T: Send>()`, a scratch test
+  deleted after use) against every real implementor — `Ledger`, `FactLedger`,
+  `partitioned::PartitionedLedger`, `ekos_distributed::DistributedLedger` — showed **all four are
+  already `Send`**; a separate probe against `dyn KnowledgeStore` itself failed with exactly one
+  cause (`the trait Send is not implemented for dyn KnowledgeStore`, no other blocker named). So
+  the missing bound was purely a declaration gap, not a structural one. Fixed:
+  `pub trait KnowledgeStore: Send` (`crates/ledger/src/lib.rs`). Full workspace
+  build/test/clippy/fmt clean with the bound added — confirms the audit's finding, not just
+  asserts it.
+  - [ ] **RFC 0112 itself — lock-free snapshot reads for `FactLedger` — remains open, separate
+    from the `Send` bound above.** Exists to close the cross-process visibility gap RFC 0104
+    documented; that gap is more load-bearing now, not less — the Web Console's supervisor
+    (`web/api`) spawns a long-lived `ekos mcp serve` per workspace while the job runner mutates
+    the same workspace from a subprocess (RFC 0129/0131). This is a real, separate implementation
+    effort (per-read incremental snapshot refresh replacing `StoreCache`'s full-reopen — touches
+    `SegmentStore`'s committed-length watermark and tantivy's `IndexReader::reload()`, per the
+    RFC's own Scope section), not something the `Send` bound alone unblocks or simplifies.
 
 - [ ] **`devlog_100`'s permission-denial incident — needs its own tracked follow-up, currently
   prose-only.** Given a dedicated TODO.md item 2026-09-04 (tech-debt paydown planning pass). A
