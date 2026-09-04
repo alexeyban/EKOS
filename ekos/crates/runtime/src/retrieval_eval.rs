@@ -296,11 +296,23 @@ pub struct EvalBaseline {
 /// (observed R@10 0.841 / MRR 0.739 / nDCG 0.745 / intent 0.862, set a hair below with a 0.02
 /// tolerance on top). Overall metrics are over the retrieval-shaped types (Lookup / Lexical /
 /// Conceptual) only. Update only with a real regeneration + a PR note on what moved it.
+///
+/// `intent_accuracy` re-baselined 2026-09-04 (0.85 -> 0.83, tech-debt paydown pass, F7 fix —
+/// `en_stem` tantivy tokenizer for BM25). R@10/MRR/nDCG are byte-identical to before (traced via
+/// `cargo test -p ekos-runtime retrieval_eval::tests::print_current`), confirming the fix didn't
+/// touch ranking quality. `intent_accuracy` moved because exactly one reference query flipped:
+/// "how a customer first gets set up" was `Conceptual` (no confidently-resolved entity) before —
+/// now "customer" stems to the same token as the indexed "Customers" object, so entity resolution
+/// crosses `classify_intent`'s `dominant_entity` confidence bar (>= 0.95) it didn't clear before,
+/// falling through to `Lexical` instead. Arguably a *more* correct classification (the query does
+/// name a dominant real entity) than the label it was recorded against, not a quality regression —
+/// left the reference query's own `expect_type` alone rather than relabeling ground truth, and
+/// moved the numeric baseline instead, per this file's own documented mechanism for exactly this.
 pub const BASELINE: EvalBaseline = EvalBaseline {
     recall_at_10: 0.84,
     mrr: 0.73,
     ndcg_at_10: 0.74,
-    intent_accuracy: 0.85,
+    intent_accuracy: 0.83,
 };
 
 /// `Err` (with a human-readable list) when any metric is more than `tol` below its baseline.

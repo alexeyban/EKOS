@@ -2567,8 +2567,43 @@ mod tests {
             .append_object(&KirObject::new("orders", ObjectKind::Table))
             .unwrap();
         let results = ledger.find_objects("orders").unwrap();
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].1, "orders", "name match must rank first");
+        // F7 fix (RFC — en_stem tokenizer): `order_items` now also matches "orders" — its name
+        // tokenizes to "order"/"items" (`_` is a word boundary to `SimpleTokenizer`), sharing the
+        // "order" stem with "orders". A real, correct recall improvement, not a regression: the
+        // exact-name match still ranks first, `order_items` (a real partial name match) ranks
+        // above the content-only mention.
+        assert_eq!(
+            results.iter().map(|r| r.1.as_str()).collect::<Vec<_>>(),
+            vec!["orders", "order_items", "random-notes.md"],
+            "name match must rank first, stemmed partial-name match second, content-only mention last"
+        );
+    }
+
+    /// F7 (test-runs/run-20260901T160842Z): a singular mention ("the customer table") must
+    /// resolve the same real object a plural exact mention ("the Customers table") already did —
+    /// BM25 previously used tantivy's plain, unstemmed `"default"` tokenizer, so "customer" never
+    /// lexically matched an indexed "Customers". Direct regression for the query-side fix: query
+    /// terms for `name`/`content` must be stemmed the same way those fields are indexed, or a
+    /// stemmed-at-index-time token never matches an unstemmed-at-query-time one (verified this
+    /// exact failure mode live while building the fix — every search briefly returned zero
+    /// results before the query side was updated to match).
+    #[test]
+    fn find_objects_matches_a_singular_mention_against_a_plural_indexed_name() {
+        let (ledger, _dir) = temp_ledger();
+        ledger
+            .append_object(&KirObject::new("Customers", ObjectKind::Table))
+            .unwrap();
+
+        let plural = ledger.find_objects("Customers").unwrap();
+        assert_eq!(plural.len(), 1, "the exact plural form must still resolve");
+
+        let singular = ledger.find_objects("customer").unwrap();
+        assert_eq!(
+            singular.len(),
+            1,
+            "a singular mention must resolve the same plural-named object via stemming"
+        );
+        assert_eq!(singular[0].1, "Customers");
     }
 
     /// RFC 0019: a symbol name is searchable even when it isn't in the excerpt.

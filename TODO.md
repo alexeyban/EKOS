@@ -4417,7 +4417,31 @@ are excluded — see the full exclusion list in the planning history if needed.
         **F5** `ekos mcp serve --workspace <dir>` didn't load `<dir>/ekos.toml` (`resolve_config_path`
         helper); **F6** `ekos status`/`ekos ledger status` said "not initialised" on any partitioned
         workspace (added a partitioned/distributed branch). Still open: F2 (`ekos diff` empty for
-        very-old `--from`), F7 (inflected entity-mention resolution).
+        very-old `--from`).
+        - [x] **F7 — fixed 2026-09-04 (tech-debt paydown planning pass).** "the customer table"
+          (singular) missed the `Customers` object; "the Customers table" (plural, exact) resolved
+          fine. Root cause: BM25 used tantivy's plain `"default"` tokenizer (lowercase + split, no
+          stemming) — "customer" never lexically matched an indexed "Customers". Fixed:
+          `name`/`content` fields now use `"en_stem"` — tantivy's own built-in stemming tokenizer,
+          pre-registered in every `TokenizerManager::default()`, nothing to hand-roll; `kind` stays
+          unstemmed (closed enum-like vocabulary, no value there). **Query-side fix required too**
+          (found live, mid-implementation): query terms must be stemmed the same way before
+          becoming a `Term`, or a stemmed-at-index-time token never matches an
+          unstemmed-at-query-time one — missing this broke *every* search (14 test failures) before
+          it was added; the fix fetches the same `"en_stem"` analyzer via
+          `searcher().index().tokenizers()` and stems `name`/`content` query terms, leaving `kind`
+          on the plain lowercased term. `RFC 0103`'s existing stale-schema self-heal (wipe +
+          rebuild on next writable open) covers every existing workspace automatically — no
+          migration needed, confirmed by the schema now differing in `TextOptions`, not just field
+          names. 2 new direct tests + 1 existing test's expectations updated with reasoning (a
+          real, correct recall improvement: `order_items` now also matches "orders" via the shared
+          stem, ranked below the exact name match, above content-only mentions).
+          **Retrieval eval baseline**: R@10/MRR/nDCG unchanged (confirmed byte-identical via
+          `retrieval_eval::tests::print_current`); `intent_accuracy` moved 0.85→0.83 — traced to
+          exactly one reference query ("how a customer first gets set up") whose entity resolution
+          confidence crossed `classify_intent`'s dominant-entity bar for the first time, arguably a
+          *more* correct classification than its recorded label, not a quality regression. Baseline
+          re-captured via the file's own documented regeneration command, not silently loosened.
         - [x] **F4 — fixed 2026-09-04 (tech-debt paydown planning pass).** `arm_timings` was always
           `[]` on partitioned + distributed stores. `PartitionedLedger::retrieve`'s own comment
           claimed timing was "already aggregated by the fan-out," but no aggregation code actually

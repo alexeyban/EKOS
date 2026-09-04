@@ -30,7 +30,10 @@
 use std::path::{Path, PathBuf};
 use tantivy::collector::TopDocs;
 use tantivy::query::{BooleanQuery, BoostQuery, Occur, PhrasePrefixQuery, Query, TermQuery};
-use tantivy::schema::{Field, IndexRecordOption, STORED, STRING, Schema, TEXT, Value};
+use tantivy::schema::{
+    Field, IndexRecordOption, STORED, STRING, Schema, TEXT, TextFieldIndexing, TextOptions, Value,
+};
+use tantivy::tokenizer::TokenStream;
 use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument, Term};
 use uuid::Uuid;
 
@@ -121,11 +124,30 @@ impl SearchIndex {
         }
         std::fs::create_dir_all(dir).map_err(LedgerError::Io)?;
 
+        // F7 (test-runs/run-20260901T160842Z): plain BM25 `TEXT` uses tantivy's `"default"`
+        // tokenizer (lowercase + split, no stemming) — a singular mention ("the customer table")
+        // never lexically matched a plural indexed name ("Customers"), while the exact plural form
+        // did. `"en_stem"` is tantivy's own built-in tokenizer (pre-registered in every
+        // `TokenizerManager::default()`, nothing to register by hand) — lowercase + stemming, so
+        // "customer"/"customers" index to the same stem. Applied to `name`/`content` (free
+        // natural-language text); `kind` stays default (a closed enum-like vocabulary, stemming
+        // has no value there); `id`/`memory_path` stay `STRING` (exact-match, untouched).
+        let stemmed_stored = TextOptions::default().set_stored().set_indexing_options(
+            TextFieldIndexing::default()
+                .set_tokenizer("en_stem")
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+        );
+        let stemmed = TextOptions::default().set_indexing_options(
+            TextFieldIndexing::default()
+                .set_tokenizer("en_stem")
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+        );
+
         let mut schema_builder = Schema::builder();
         let f_id = schema_builder.add_text_field("id", STRING | STORED);
-        let f_name = schema_builder.add_text_field("name", TEXT | STORED);
+        let f_name = schema_builder.add_text_field("name", stemmed_stored);
         let f_kind = schema_builder.add_text_field("kind", TEXT);
-        let f_content = schema_builder.add_text_field("content", TEXT);
+        let f_content = schema_builder.add_text_field("content", stemmed);
         // RFC 0101: STRING (exact-match, no tokenizer splitting), never
         // STORED — this field only ever needs to be searched, its value is
         // never read back out of a hit.
@@ -271,15 +293,36 @@ impl SearchIndex {
             return Ok(Vec::new());
         }
 
+        // `name`/`content` are indexed with the `"en_stem"` tokenizer (F7 fix, see the schema
+        // comment in `open_impl`) — query terms must be stemmed the same way before becoming a
+        // `Term`, or a stemmed-at-index-time token never matches an unstemmed-at-query-time one.
+        // `kind` stays on the plain lowercased term (unstemmed at index time too).
+        let mut stemmer = self
+            .reader
+            .searcher()
+            .index()
+            .tokenizers()
+            .get("en_stem")
+            .ok_or_else(|| terr("en_stem tokenizer not registered"))?;
+        let stem = |analyzer: &mut tantivy::tokenizer::TextAnalyzer, term: &str| -> String {
+            let mut stream = analyzer.token_stream(term);
+            if stream.advance() {
+                stream.token().text.clone()
+            } else {
+                term.to_string()
+            }
+        };
+
         let mut must: Vec<(Occur, Box<dyn Query>)> = Vec::new();
         for (term, prefix) in &terms {
+            let stemmed_term = stem(&mut stemmer, term);
             let mut fields: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-            for (field, boost) in [
-                (self.f_name, 10.0f32),
-                (self.f_kind, 4.0),
-                (self.f_content, 1.0),
+            for (field, boost, text) in [
+                (self.f_name, 10.0f32, &stemmed_term),
+                (self.f_kind, 4.0, term),
+                (self.f_content, 1.0, &stemmed_term),
             ] {
-                let t = Term::from_field_text(field, term);
+                let t = Term::from_field_text(field, text);
                 let q: Box<dyn Query> = if *prefix {
                     Box::new(PhrasePrefixQuery::new(vec![t]))
                 } else {
