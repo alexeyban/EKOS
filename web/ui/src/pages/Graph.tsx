@@ -3,16 +3,18 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { colorFor, type GLink, type GNode } from "./graph-shared";
+import { GraphTimeline, type TimelinePoint } from "./GraphTimeline";
 import { ObjectPanel } from "./ObjectPanel";
 
 const GraphCanvas = lazy(() => import("./GraphCanvas").then((m) => ({ default: m.GraphCanvas })));
 
 interface GraphOut {
   level: "aggregate" | "object";
+  as_of?: string | null;
   counts: Record<string, number>;
   truncated: { nodes: boolean; node_limit: number };
-  nodes: { id: string; n?: string; k?: number; d?: number; count?: number }[];
-  edges: { s: number; t: number; k?: number; w?: number }[];
+  nodes: { id: string; n?: string; k?: number; d?: number; count?: number; fs?: string }[];
+  edges: { s: number; t: number; k?: number; w?: number; fs?: string }[];
   kind_index: string[];
   rel_kind_index: string[];
 }
@@ -32,6 +34,8 @@ export function Graph() {
   const [focusId, setFocusId] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
+  // RFC 0134 — null = live. Otherwise an RFC 3339 instant the graph is shown "as of".
+  const [asOf, setAsOf] = useState<string | null>(null);
 
   const expanded = focusKind !== null;
 
@@ -45,10 +49,20 @@ export function Graph() {
     params.set("group_by", "kind");
   }
   for (const r of excludedRels) params.append("exclude_rel_kind", r);
+  // Always fetch the union (latest) graph with first-seen stamps — the slider filters it
+  // client-side, so scrubbing never refetches (RFC 0134 §3.1/§3.3).
+  params.set("include_first_seen", "1");
 
   const graph = useQuery({
     queryKey: ["graph", id, params.toString()],
     queryFn: () => api<GraphOut>(`/workspaces/${id}/graph?${params}`),
+    enabled: id !== "",
+  });
+
+  const timeline = useQuery({
+    queryKey: ["graph-timeline", id],
+    queryFn: () =>
+      api<{ points: TimelinePoint[] }>(`/workspaces/${id}/stats/timeline?bucket=day`),
     enabled: id !== "",
   });
 
@@ -73,6 +87,7 @@ export function Graph() {
       degree: n.d ?? 0,
       count: n.count,
       isAggregate: isAgg,
+      firstSeen: n.fs,
     }));
     const byIdx = g.nodes.map((n) => n.id);
     const links: GLink[] = g.edges.map((e) => ({
@@ -80,9 +95,17 @@ export function Graph() {
       target: byIdx[e.t],
       relKind: g.rel_kind_index[e.k ?? 0] ?? "?",
       weight: e.w ?? 1,
+      firstSeen: e.fs,
     }));
     return { nodes, links };
   }, [graph.data]);
+
+  // Node count visible at the current `asOf` — for the "viewing as of" banner (monotonic graph,
+  // so this is just a filter, never a refetch).
+  const visibleCount = useMemo(
+    () => (asOf ? nodes.filter((n) => !n.firstSeen || n.firstSeen <= asOf).length : nodes.length),
+    [nodes, asOf],
+  );
 
   const gotoObject = (oid: string) => {
     setSelectedId(oid);
@@ -218,6 +241,7 @@ export function Graph() {
                 focusId={focusId}
                 selectedId={selectedId}
                 dimKind={expanded ? focusKind : null}
+                asOf={asOf}
                 onNodeClick={(n) => {
                   if (n.isAggregate) setFocusKind(n.label);
                   else {
@@ -228,12 +252,27 @@ export function Graph() {
               />
             </Suspense>
           )}
+
+          {asOf && (
+            <div className="graph-asof-banner">
+              viewing as of <strong>{asOf.slice(0, 10)}</strong> · {visibleCount} of {nodes.length}{" "}
+              nodes
+              <button className="linkish" onClick={() => setAsOf(null)}>
+                back to live
+              </button>
+            </div>
+          )}
+
+          {graph.data && timeline.data && (
+            <GraphTimeline points={timeline.data.points} value={asOf} onChange={setAsOf} />
+          )}
         </div>
 
         {selectedId && (
           <ObjectPanel
             workspace={id}
             objectId={selectedId}
+            asOf={asOf}
             onClose={() => setSelectedId(null)}
             onGoto={gotoObject}
           />

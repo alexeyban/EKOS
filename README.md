@@ -780,7 +780,7 @@ export keeps the most-connected core and says so in a `truncated` block rather t
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
 
-### Web console (RFC 0127/0128/0129/0130/0131/0132/0133)
+### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134)
 
 `web/` is a browser surface over one or more compiled workspaces — a FastAPI app (`web/api/`) plus
 a Vite + React app (`web/ui/`).
@@ -807,6 +807,14 @@ a Vite + React app (`web/ui/`).
   kind / relationship-kind filter toggles (`CoupledWith` / `FeedsInto` off by default), a search
   that flies the camera to a node, and an object panel showing `ekos_state` — properties,
   relationships, and one evidence row per claim (path · analyzer · confidence · fragment).
+- **Phase 6** (RFC 0134): a **timelapse slider** under the graph. Drag it back and the diagram
+  redraws as the knowledge existed at that instant; a clicked node's panel then shows the evidence
+  it had *then*. Backed by `ekos graph export --as-of <rfc3339> --first-seen` (and the same
+  `as_of` / `include_first_seen` on `ekos_graph_export`); the browser fetches the latest graph
+  once with per-element first-seen stamps and filters it client-side against a **frozen layout**,
+  so scrubbing never refetches and nodes never move. Ticks + the activity histogram come from
+  `ekos ledger timeline`. The slider is only as deep as the ledger's retained history — rich on a
+  workspace committed incrementally, near-flat on a freshly-rebuilt one.
 
 ```bash
 cd ekos && cargo build --release -p ekos && cd ..

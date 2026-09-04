@@ -525,7 +525,7 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_graph_export",
-            "description": "Bulk graph extraction (RFC 0127): the whole compiled graph as nodes + edges in one call, instead of walking it one object at a time. Filter by object/relationship kind, drop low-degree nodes, or collapse to super-nodes (level=aggregate, one per kind or path prefix). Truncated by degree-descending when over the caps, and the truncation is reported in the result. Node ids are real object ids (feed them to ekos_state / ekos_neighborhood) unless level=aggregate.",
+            "description": "Bulk graph extraction (RFC 0127): the whole compiled graph as nodes + edges in one call, instead of walking it one object at a time. Filter by object/relationship kind, drop low-degree nodes, or collapse to super-nodes (level=aggregate, one per kind or path prefix). Truncated by degree-descending when over the caps, and the truncation is reported in the result. Node ids are real object ids (feed them to ekos_state / ekos_neighborhood) unless level=aggregate. Pass as_of (RFC 3339) to reconstruct the graph as it stood at that instant (RFC 0134); include_first_seen stamps each node/edge with its first-seen time.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -538,7 +538,9 @@ fn base_tool_definitions() -> Vec<Value> {
                     "max_nodes": { "type": "integer", "description": "Node cap (default 5000)" },
                     "max_edges": { "type": "integer", "description": "Edge cap (default 20000)" },
                     "min_degree": { "type": "integer", "description": "Drop object-level nodes below this post-filter degree (default 0)" },
-                    "include_properties": { "type": "array", "items": { "type": "string" }, "description": "Object property keys to carry into each node (default: none)" }
+                    "include_properties": { "type": "array", "items": { "type": "string" }, "description": "Object property keys to carry into each node (default: none)" },
+                    "as_of": { "type": "string", "description": "RFC 3339 timestamp — reconstruct the graph as of this instant (default: now)" },
+                    "include_first_seen": { "type": "boolean", "description": "Stamp each node/edge with its first-seen time as `fs` (default false)" }
                 }
             }
         },
@@ -1084,6 +1086,12 @@ fn call_tool(
                 .map(|s| RelationshipKind::from_str(s).expect("infallible"))
                 .collect();
 
+            let as_of = match args.get("as_of").and_then(Value::as_str) {
+                Some(raw) => Some(raw.parse::<DateTime<Utc>>().map_err(|e| {
+                    anyhow::anyhow!("invalid `as_of` timestamp (want RFC 3339): {e}")
+                })?),
+                None => None,
+            };
             let opts = GraphExportOptions {
                 level,
                 workspace: workspace.to_path_buf(),
@@ -1095,6 +1103,11 @@ fn call_tool(
                 max_edges: usize_arg("max_edges", 20_000),
                 min_degree: usize_arg("min_degree", 0),
                 include_properties: str_list("include_properties"),
+                as_of,
+                include_first_seen: args
+                    .get("include_first_seen")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             };
             let graph = export_graph(ledger, &opts)?;
             Ok(serde_json::to_value(graph)?)

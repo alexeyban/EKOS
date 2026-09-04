@@ -4436,10 +4436,21 @@ are excluded — see the full exclusion list in the planning history if needed.
         object panel = `ekos_state` (properties, relationships, one evidence row per claim). API:
         `GET /workspaces/{id}/objects/{id}` (proxies `ekos_state`) + `include_properties` on
         `/graph`. `GraphCanvas` is a lazy chunk (177 KB) — entry bundle unchanged. 72/72 pytest.
-      - [ ] **Next increments (0134+):** Phase 6 (graph v2 — neighbourhood isolation, impact mode,
-        server-side layout, export), Phase 7 (hardening). Deferred within R1: `--as-of` graph
-        export (the `all_objects_at` primitive exists, scope doesn't), true streaming ndjson, the
-        distributed `evidence_count` RPC.
+      - [x] **RFC 0134 — Phase 6: graph time-travel (timelapse slider), `devlog_157`**
+        (`ekos/docs/rfcs/0134-web-console-phase-6-graph-time-travel.md`, Accepted 2026-09-04). A
+        ledger-time slider under the graph. Rust: `as_of` + `include_first_seen` on
+        `ekos_runtime::export_graph` → `ekos graph export --as-of/--first-seen` + `ekos_graph_export`
+        params (**closes the `--as-of` deferral**). API: `as_of` + `include_first_seen` on `/graph`,
+        `as_of` on `/objects/{id}`; slider ticks reuse `/stats/timeline`. UI: `GraphTimeline`
+        (day-bucket range + activity histogram + play), client-side `fs <= T` filter over the union
+        fetch, **frozen layout** (`onEngineStop` pins `fx`/`fy`), "viewing as of" banner, panel
+        `as_of`. Known limit: only as deep as the ledger's retained history — flat on a
+        wiped-and-rebuilt workspace (RFC §7). 78/78 pytest.
+      - [ ] **Next increments (0135+):** Phase 6 remainder (graph v2 — neighbourhood isolation,
+        impact mode, server-side layout, PNG/glTF export), Phase 7 (hardening). Deferred within R1:
+        true streaming ndjson, the distributed `evidence_count` RPC. Deferred within 0134:
+        per-commit (sub-day) checkpoint ticks, source/world-time slider axis, deep-linking
+        `?as_of=&focus=`.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`

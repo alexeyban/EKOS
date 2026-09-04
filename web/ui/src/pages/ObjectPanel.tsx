@@ -29,17 +29,22 @@ interface StateOut {
 export function ObjectPanel({
   workspace,
   objectId,
+  asOf,
   onClose,
   onGoto,
 }: {
   workspace: string;
   objectId: string;
+  asOf?: string | null; // RFC 0134 — reconstruct the object's state as of this instant
   onClose: () => void;
   onGoto: (id: string) => void;
 }) {
   const state = useQuery({
-    queryKey: ["object", workspace, objectId],
-    queryFn: () => api<StateOut>(`/workspaces/${workspace}/objects/${objectId}`),
+    queryKey: ["object", workspace, objectId, asOf ?? "live"],
+    queryFn: () =>
+      api<StateOut>(
+        `/workspaces/${workspace}/objects/${objectId}${asOf ? `?as_of=${encodeURIComponent(asOf)}` : ""}`,
+      ),
   });
 
   const o = state.data?.object;
@@ -59,6 +64,7 @@ export function ObjectPanel({
             <span className="chip">{o.kind}</span>{" "}
             <code style={{ fontSize: "0.7rem" }}>{o.id}</code>
           </p>
+          {asOf && <p className="muted">state as of {asOf.slice(0, 10)}</p>}
 
           {o.properties && Object.keys(o.properties).length > 0 && (
             <details open>
