@@ -53,6 +53,14 @@ struct ItemData {
     is_pull_request: bool,
     #[serde(default)]
     files_changed: Vec<String>,
+    /// RFC 0079 project qualification — `build.rs`'s central choke point stamps this onto every
+    /// connector's artifact `data` in a multi-`[observe]`-paths workspace (absent entirely for the
+    /// common single-project case). Was never read here: `file_kir_id(path)` below hashed the bare
+    /// path with no project context, so a `References` edge landed on a `KirId` that no longer
+    /// matched `build.rs`'s own project-qualified `File`-object id the moment a workspace had more
+    /// than one `[observe]` path — silently wrong, not just untested.
+    #[serde(default)]
+    project: Option<String>,
 }
 
 /// Deterministic id for an issue/PR object — stable across passes and
@@ -280,10 +288,12 @@ impl CompilerPass for GitHubAnalyzerPass {
                     format!("PR #{} changes {path}", data.number),
                 );
                 let ev_id = graph.add_evidence(ev);
+                let qualified_path =
+                    ekos_common::project::project_qualify(path, data.project.as_deref());
                 let mut rel = KirRelationship::deterministic(
                     RelationshipKind::References,
                     from_id,
-                    file_kir_id(path),
+                    file_kir_id(&qualified_path),
                     "",
                 );
                 rel.evidence.push(ev_id);
@@ -486,6 +496,62 @@ mod tests {
                 .relationships
                 .iter()
                 .all(|r| r.kind == RelationshipKind::References)
+        );
+    }
+
+    /// Real bug, found live: `file_kir_id(path)` hashed the *bare* path with no project
+    /// qualification, even though `build.rs`'s central choke point stamps a `"project"` field
+    /// onto every connector's artifact `data` in a multi-`[observe]`-paths workspace — so a
+    /// `References` edge silently pointed at a `KirId` that no longer matched `build.rs`'s own
+    /// project-qualified `File`-object id the moment a workspace had more than one `[observe]`
+    /// path. This constructs the artifact directly (bypassing the shared `seed_item` test helper,
+    /// which has no `project` field) to prove the qualified id is used once `data.project` is
+    /// present, and matches `build.rs`'s own `id_key = format!("{project_key}:{rel_str}")` scheme
+    /// exactly.
+    #[tokio::test]
+    async fn a_project_qualified_artifact_emits_a_project_qualified_file_reference() {
+        let (ctx, _dir) = ctx();
+        let data = serde_json::json!({
+            "owner": "acme",
+            "repo": "widgets",
+            "number": 9,
+            "title": "Fix crash",
+            "body": "no closes here",
+            "state": "open",
+            "is_pull_request": true,
+            "files_changed": ["src/lib.rs"],
+            "project": "backend",
+        });
+        let artifact = ekos_artifact::ObservationArtifact::new("github", "acme/widgets#9", data);
+        let json = serde_json::to_value(&artifact).unwrap();
+        ctx.artifact_store.write(&artifact.id, &json).unwrap();
+
+        let mut pass = GitHubAnalyzerPass::new("test", vec![artifact.id]);
+        let mut c = ctx;
+        pass.run(&mut c).await.unwrap();
+        let ids: Vec<ArtifactId> = c.artifact_store.list().unwrap();
+        let knowledge_json = ids
+            .iter()
+            .find_map(|id| {
+                let j = c.artifact_store.read(id).unwrap()?;
+                (j["artifact_type"] == "knowledge").then_some(j)
+            })
+            .unwrap();
+        let graph: ekos_kir::KirGraph =
+            serde_json::from_value(knowledge_json["kir"].clone()).unwrap();
+
+        let rel = graph
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::References)
+            .unwrap();
+        let expected_id = ekos_kir::KirId(uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            b"backend:src/lib.rs",
+        ));
+        assert_eq!(
+            rel.to, expected_id,
+            "the References edge must land on build.rs's own project-qualified File id"
         );
     }
 

@@ -1878,12 +1878,17 @@ These items have no single phase — they must be maintained and grown throughou
     `git_analyzer.rs`'s `CoupledWith`. Live-verified: a real two-project fixture with an
     identically-named/shaped Rust file in each produced two distinct `RustSymbol` ids (caught and
     fixed a real bug in the first attempt — see devlog for the live-test failure that found it).
-    - *Still open, honestly scoped*: `github_analyzer.rs`'s `file_kir_id` (for `References` edges
-      to files mentioned in PR/issue text) is a structurally different problem — a path parsed
-      from free text has no single `[observe] paths` entry it naturally belongs to. Investigation
-      found it's now *silently wrong*, not just collision-risky, in a multi-project workspace: it
-      still computes the bare-path id, which no longer matches `build.rs`'s own project-qualified
-      `File` object, so the `References` edge dangles rather than colliding.
+    - [x] *`github_analyzer.rs`'s `file_kir_id` — fixed 2026-09-04 (tech-debt paydown planning
+      pass).* Turned out not to need guessing which `[observe] paths` entry a PR/issue's file path
+      belongs to — `build.rs`'s central choke point already stamps `data.project` onto **every**
+      connector's artifact (GitHub items included, same as git/rust/python), the item's `ItemData`
+      struct just never had a field to read it back into, so it was silently dropped by
+      `serde_json::from_value`. Fixed: added `project: Option<String>` to `ItemData`, qualify
+      `path` via `ekos_common::project::project_qualify` before `file_kir_id` — verified
+      byte-identical to `build.rs`'s own `id_key = format!("{project_key}:{rel_str}")` scheme via
+      a direct id-equality test, not just "it runs." Before this fix, a `References` edge silently
+      pointed at a `KirId` that no longer matched `build.rs`'s own project-qualified `File` object
+      the moment a workspace had more than one `[observe] paths` entry — dangling, not colliding.
   - [ ] *Per-sub-project curated docs* — not yet done. `ekos docs generate` (any layout) reads the
     whole ledger; there's no way to scope curated output to one project within a shared estate
     ledger. Today this requires N separate `ekos.toml`/`.ekos` setups (confirmed this session for
