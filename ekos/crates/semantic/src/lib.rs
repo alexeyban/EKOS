@@ -48,6 +48,12 @@ pub struct CkmObject {
     /// Evidence sorted by confidence descending.
     #[serde(default)]
     pub evidence: Vec<EvidenceRecord>,
+    /// RFC 0135 Part B follow-up — the `KnowledgeArtifact` id(s) (`recover` output) this object
+    /// was compiled from, sorted. Two ids means identity resolution merged inputs from two
+    /// artifacts. Empty for an object synthesized in `compile` itself (a concentration `Risk`) or
+    /// from a pre-0135 CKM. `commit` stamps this as the entry's `source_artifact_id`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_artifact_ids: Vec<String>,
 }
 
 /// Canonical, deduplicated relationship between two `CkmObject`s.
@@ -61,6 +67,9 @@ pub struct CkmRelationship {
     pub properties: HashMap<String, serde_json::Value>,
     #[serde(default)]
     pub evidence: Vec<EvidenceRecord>,
+    /// RFC 0135 Part B follow-up — see [`CkmObject::source_artifact_ids`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_artifact_ids: Vec<String>,
 }
 
 /// The Canonical Knowledge Model — the final output of one compilation run.
@@ -347,6 +356,16 @@ fn concentration_risks(graph: &KirGraph) -> Vec<(KirObject, KirRelationship)> {
 
 /// Build a `CkModel` from a resolved `KirGraph`.
 pub fn build_ckm(graph: &KirGraph) -> CkModel {
+    build_ckm_with_provenance(graph, &HashMap::new())
+}
+
+/// [`build_ckm`] plus per-object/relationship source-artifact provenance (RFC 0135 Part B
+/// follow-up). `provenance` maps a `KirId` to the sorted `KnowledgeArtifact` id(s) it came from;
+/// an id absent from the map gets an empty `source_artifact_ids` (a `compile`-synthesized object).
+pub fn build_ckm_with_provenance(
+    graph: &KirGraph,
+    provenance: &HashMap<KirId, Vec<String>>,
+) -> CkModel {
     // Build evidence_index from graph.evidence
     let mut evidence_index: HashMap<String, EvidenceRecord> = HashMap::new();
     for ev in &graph.evidence {
@@ -383,6 +402,7 @@ pub fn build_ckm(graph: &KirGraph) -> CkModel {
                 properties: obj.properties.clone(),
                 primary_description,
                 evidence: ev_records,
+                source_artifact_ids: provenance.get(&obj.id).cloned().unwrap_or_default(),
             }
         })
         .collect();
@@ -403,6 +423,7 @@ pub fn build_ckm(graph: &KirGraph) -> CkModel {
                 to: rel.to,
                 properties: rel.properties.clone(),
                 evidence: ev_records,
+                source_artifact_ids: provenance.get(&rel.id).cloned().unwrap_or_default(),
             }
         })
         .collect();
@@ -464,6 +485,8 @@ impl CompilerPass for SemanticCompilerPass {
 
         let mut combined = KirGraph::new();
         let mut ka_count = 0usize;
+        // RFC 0135 Part B follow-up — KirId → the KnowledgeArtifact id(s) it was recovered from.
+        let mut provenance: HashMap<KirId, std::collections::BTreeSet<String>> = HashMap::new();
 
         for id in &ids {
             let json = match ctx.artifact_store.read(id) {
@@ -475,6 +498,13 @@ impl CompilerPass for SemanticCompilerPass {
             }
             match serde_json::from_value::<KirGraph>(json["kir"].clone()) {
                 Ok(graph) => {
+                    let ka = id.to_string();
+                    for o in &graph.objects {
+                        provenance.entry(o.id).or_default().insert(ka.clone());
+                    }
+                    for r in &graph.relationships {
+                        provenance.entry(r.id).or_default().insert(ka.clone());
+                    }
                     merge_graphs(&mut combined, graph);
                     ka_count += 1;
                 }
@@ -530,6 +560,17 @@ impl CompilerPass for SemanticCompilerPass {
         }
 
         // ── Apply merges ──────────────────────────────────────────────────────
+        // Fold each merged-away object's provenance into its canonical id first (RFC 0135).
+        for p in &auto_merge {
+            for &sid in &p.source_ids {
+                if sid == p.canonical_id {
+                    continue;
+                }
+                if let Some(from) = provenance.get(&sid).cloned() {
+                    provenance.entry(p.canonical_id).or_default().extend(from);
+                }
+            }
+        }
         let mut resolved = apply_merges(combined, &auto_merge);
 
         // ── Review candidates ───────────────────────────────────────────────────
@@ -554,7 +595,11 @@ impl CompilerPass for SemanticCompilerPass {
         }
 
         // ── Build CKM ────────────────────────────────────────────────────────
-        let model = build_ckm(&resolved);
+        let provenance: HashMap<KirId, Vec<String>> = provenance
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().collect()))
+            .collect();
+        let model = build_ckm_with_provenance(&resolved, &provenance);
 
         // ── Validate ─────────────────────────────────────────────────────────
         let validation_errors = model.validate();
@@ -642,6 +687,42 @@ mod tests {
         assert_eq!(model.objects.len(), 2);
         assert_eq!(model.relationships.len(), 1);
         assert_eq!(model.evidence_index.len(), 1);
+        // No provenance passed → empty, and it serializes away entirely.
+        assert!(
+            model
+                .objects
+                .iter()
+                .all(|o| o.source_artifact_ids.is_empty())
+        );
+        let json = serde_json::to_string(&model.objects[0]).unwrap();
+        assert!(!json.contains("source_artifact_ids"));
+    }
+
+    #[test]
+    fn build_ckm_with_provenance_stamps_source_artifact_ids() {
+        let graph = two_object_graph();
+        let mut prov: HashMap<KirId, Vec<String>> = HashMap::new();
+        prov.insert(graph.objects[0].id, vec!["ka-a".into()]);
+        prov.insert(
+            graph.objects[1].id,
+            vec!["ka-a".into(), "ka-b".into()], // merged from two artifacts
+        );
+        prov.insert(graph.relationships[0].id, vec!["ka-a".into()]);
+
+        let model = build_ckm_with_provenance(&graph, &prov);
+        let by_name = |n: &str| model.objects.iter().find(|o| o.name == n).unwrap();
+        assert_eq!(by_name("customers").source_artifact_ids, vec!["ka-a"]);
+        assert_eq!(by_name("orders").source_artifact_ids, vec!["ka-a", "ka-b"]);
+        assert_eq!(model.relationships[0].source_artifact_ids, vec!["ka-a"]);
+        // An object with no map entry → still empty, no panic.
+        let mut prov2 = HashMap::new();
+        prov2.insert(KirId::new(), vec!["ka-x".into()]);
+        assert!(
+            build_ckm_with_provenance(&graph, &prov2)
+                .objects
+                .iter()
+                .all(|o| o.source_artifact_ids.is_empty())
+        );
     }
 
     #[test]
@@ -676,6 +757,7 @@ mod tests {
             to: phantom,
             properties: HashMap::new(),
             evidence: vec![],
+            source_artifact_ids: vec![],
         });
         let errors = model.validate();
         assert!(errors.iter().any(|e| e.contains("unknown to-id")));
@@ -693,6 +775,7 @@ mod tests {
             to: phantom_to,
             properties: HashMap::new(),
             evidence: vec![],
+            source_artifact_ids: vec![],
         });
         model.relationships.push(CkmRelationship {
             id: KirId::new(),
@@ -701,6 +784,7 @@ mod tests {
             to: model.objects[0].id,
             properties: HashMap::new(),
             evidence: vec![],
+            source_artifact_ids: vec![],
         });
         let missing = model.dangling_relationship_target_ids();
         assert_eq!(missing.len(), 2);

@@ -40,6 +40,20 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     let mut rels_written = 0usize;
     let mut evidence_written = 0usize;
 
+    // RFC 0135 Part B follow-up — stamp each committed object/relationship with its own
+    // originating `KnowledgeArtifact` id(s) (`ckm_*.source_artifact_ids`, threaded through
+    // `compile`), falling back to the run-level `(run_id, "commit", ckm-hash)` for anything the
+    // compiler synthesized itself (rollups, risks) or a pre-0135 CKM.
+    let per_source_ctx = |src: &[String]| ekos_ledger::provenance::WriteContext {
+        run_id: run_id.clone(),
+        stage: "commit".to_string(),
+        source_artifact_id: if src.is_empty() {
+            ckm_hash.clone()
+        } else {
+            Some(format!("ka:{}", src.join(",")))
+        },
+    };
+
     // Write evidence first (objects may reference evidence IDs).
     for ev_record in model.evidence_index.values() {
         let kir_ev = evidence_record_to_kir(ev_record);
@@ -49,6 +63,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
 
     // Write canonical objects.
     for ckm_obj in &model.objects {
+        ledger.set_write_context(Some(per_source_ctx(&ckm_obj.source_artifact_ids)));
         let mut kir_obj = ckm_object_to_kir(ckm_obj);
         preserve_claim_review_status(&*ledger, &mut kir_obj)?;
         if ledger.append_object(&kir_obj)? {
@@ -60,6 +75,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
 
     // Write canonical relationships.
     for ckm_rel in &model.relationships {
+        ledger.set_write_context(Some(per_source_ctx(&ckm_rel.source_artifact_ids)));
         let kir_rel = ckm_rel_to_kir(ckm_rel);
         if ledger.append_relationship(&kir_rel)? {
             rels_written += 1;
@@ -526,6 +542,72 @@ mod tests {
     use super::*;
     use ekos_kir::{KirId, ObjectKind};
     use ekos_ledger::FactLedger;
+
+    /// RFC 0135 Part B follow-up — a `commit` stamps each entry with its CKM object's own
+    /// `source_artifact_ids` (`ka:…`), and falls back to the run-level `ckm:` hash for anything
+    /// the CKM carries no per-artifact provenance for.
+    #[tokio::test]
+    async fn commit_stamps_per_object_source_artifact_provenance() {
+        use ekos_semantic::{CkModel, CkmObject};
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ckm_dir = config.ekos_dir(dir.path()).join("ckm");
+        std::fs::create_dir_all(&ckm_dir).unwrap();
+
+        let tracked = KirId::new();
+        let synthesized = KirId::new();
+        let obj = |id: KirId, name: &str, src: Vec<String>| CkmObject {
+            id,
+            name: name.into(),
+            kind: ObjectKind::Table,
+            properties: Default::default(),
+            primary_description: None,
+            evidence: vec![],
+            source_artifact_ids: src,
+        };
+        let model = CkModel {
+            version: 1,
+            compiled_at: chrono::Utc::now(),
+            objects: vec![
+                obj(tracked, "orders", vec!["hash-a".into(), "hash-b".into()]),
+                obj(synthesized, "the_risk", vec![]),
+            ],
+            relationships: vec![],
+            evidence_index: Default::default(),
+        };
+        std::fs::write(
+            ckm_dir.join("model.json"),
+            serde_json::to_string(&model).unwrap(),
+        )
+        .unwrap();
+
+        run(&config, dir.path(), true).await.unwrap();
+
+        let ledger = super::open_ledger(&config, dir.path()).unwrap();
+        let tracked_trail = ledger.audit_trail(&tracked).unwrap();
+        assert_eq!(tracked_trail.len(), 1);
+        assert_eq!(
+            tracked_trail[0].source_artifact_id.as_deref(),
+            Some("ka:hash-a,hash-b")
+        );
+        assert_eq!(tracked_trail[0].stage.as_deref(), Some("commit"));
+
+        let synth_trail = ledger.audit_trail(&synthesized).unwrap();
+        assert_eq!(synth_trail.len(), 1);
+        assert!(
+            synth_trail[0]
+                .source_artifact_id
+                .as_deref()
+                .unwrap()
+                .starts_with("ckm:"),
+            "a CKM object with no per-artifact provenance falls back to the run-level ckm hash"
+        );
+        assert_eq!(
+            synth_trail[0].run_id, tracked_trail[0].run_id,
+            "both writes share one run id"
+        );
+    }
 
     fn role_claim(id: KirId, crate_name: &str, value: &str) -> KirObject {
         let mut o = KirObject::new(crate_name, ObjectKind::Custom("Claim".to_string()))
