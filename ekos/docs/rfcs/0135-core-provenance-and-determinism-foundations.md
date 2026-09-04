@@ -90,6 +90,15 @@ bug-1's fix already handles the rest), so genuinely-changed artifacts get persis
 
 ## Part B — ledger entry provenance (`source_artifact_id` + `audit_trail`)
 
+**Status: implemented 2026-09-04 (`devlog_160`).** `WriteContext` on the handle as designed
+below; **SQLite** = 3 nullable `entries` columns via `ALTER TABLE … ADD COLUMN` on open (no
+`user_version` bump — additive is enough); **FactLedger** = a `<root>/provenance.jsonl` sidecar
+keyed by `tx` (no segment-format change — §6.2's cleaner option). `audit_trail(id)` on both;
+`ekos ledger audit <id> [--json]` + the read-only `ekos_audit` MCP tool. `commit` stamps
+`(run_id, "commit[:stage]", ckm-hash)`; `build` stamps `(run_id, "build", observation ArtifactId)`
+per File object. MVP scope as written — run+stage everywhere, artifact-level for `build`'s File
+objects; per-`KnowledgeArtifact` through `compile` still a follow-up.
+
 ### Problem
 
 `LedgerEntry` carries `id / entry_type / payload / written_at` and nothing else

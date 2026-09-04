@@ -1095,7 +1095,14 @@ ekos ledger status   # prints entry count, last write time
   - *Test/Validate:* Write object at t1, update at t2. Assert `object_at(id, t1)` returns v1,
     `object_at(id, t2)` returns v2, `object_at(id, t0)` returns `None`.
 
-- [ ] **Full audit trail (every write timestamped and sourced)** — **genuine, confirmed gap (2026-08-26
+- [x] **Full audit trail (every write timestamped and sourced)** — **closed by RFC 0135 Part B /
+  `devlog_160`.** `set_write_context` on the `KnowledgeStore` handle + `audit_trail(id)` on both
+  backends + `ekos ledger audit` / `ekos_audit`. `commit`/`build` stamp `(run_id, stage,
+  source_artifact_id)`. MVP is run+stage everywhere, artifact-level for `build`'s File objects;
+  per-`KnowledgeArtifact` provenance through `compile` is the one remaining follow-up. Original
+  gap writeup (still accurate context for the follow-up) below:
+
+  **genuine, confirmed gap (2026-08-26
   audit, RFC 0004 written to close the missing-doc half of this finding)**: `written_at` is real
   (every `LedgerEntry` has it), but `source_artifact_id`/artifact-level provenance was never built —
   grepped `crates/ledger/src/*.rs` directly, no such field or method exists anywhere. What shipped
@@ -3124,10 +3131,14 @@ are excluded — see the full exclusion list in the planning history if needed.
   silently return:
   - [x] **Part A** — `PIPELINE_LOGIC_VERSION` + redaction-config hash in `build`'s fingerprint
     cache key (`devlog_158`). See the fingerprint item above.
-  - [ ] **Part B** — `WriteContext { run_id, stage, source_artifact_id }` on the store handle →
-    per-entry provenance + `audit_trail(id)` reader + `ekos ledger audit` / `ekos_audit`. Closes
-    the RFC 0004 "never built" audit-trail gap (see the Phase 9 item below). MVP = run+stage for
-    every write, artifact-level for `build`'s `File` objects; per-`KnowledgeArtifact` is a follow-up.
+  - [x] **Part B** — `ekos_ledger::provenance::WriteContext { run_id, stage, source_artifact_id }`
+    on the store handle (`set_write_context`, default no-op) → per-entry provenance +
+    `audit_trail(id)` + `ekos ledger audit <id> [--json]` + read-only `ekos_audit` MCP tool.
+    `devlog_160`. SQLite = 3 nullable `entries` columns (`ADD COLUMN`, no `user_version` bump);
+    FactLedger = `provenance.jsonl` sidecar keyed by tx (no segment-format change). `commit`
+    stamps per stage w/ CKM hash; `build` stamps per `File` w/ observation `ArtifactId`. Closes
+    the RFC 0004 "never built" audit-trail gap (Phase 9 item below). MVP = run+stage everywhere,
+    artifact-level for `build` File objects; per-`KnowledgeArtifact` through `compile` = follow-up.
   - [ ] **Part C** — audit the ~55 *producer* `KirRelationship::new()` call sites (recovery/ +
     semantic/ + cli write paths; the ~175 render/query/sim sites are explicitly out of scope), add
     `KirRelationship::deterministic(kind, from, to, discriminator)`, a per-site decision table, and

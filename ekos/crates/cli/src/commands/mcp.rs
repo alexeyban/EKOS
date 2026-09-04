@@ -487,6 +487,15 @@ fn base_tool_definitions() -> Vec<Value> {
             }
         },
         {
+            "name": "ekos_audit",
+            "description": "The write history of one object/relationship (RFC 0135): every version, oldest first, with the pipeline run id, stage (build / commit / commit:rollup / …), and source artifact behind each write. Pre-0135 entries and reads on a partitioned backend carry null provenance. Read-only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "id": { "type": "string", "description": "Object or relationship id (UUID)" } },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "ekos_state",
             "description": "Reconstruct the full state of one object: the object, its relationships, and the evidence behind each conclusion. Pass `at` (RFC 3339 timestamp) to reconstruct historical state.",
             "inputSchema": {
@@ -918,6 +927,11 @@ fn call_tool(
             let depth = args.get("depth").and_then(Value::as_u64).unwrap_or(1) as u32;
             let graph = runtime.load_neighborhood(&id, depth)?;
             Ok(serde_json::to_value(&graph)?)
+        }
+        "ekos_audit" => {
+            let id = required_id(args)?;
+            let trail = ledger.audit_trail(&id)?;
+            Ok(serde_json::json!({ "id": id.to_string(), "writes": trail }))
         }
         "ekos_state" => {
             let id = required_id(args)?;
@@ -1830,6 +1844,7 @@ mod tests {
                 "ekos_retrieve",
                 "ekos_ekl",
                 "ekos_neighborhood",
+                "ekos_audit",
                 "ekos_state",
                 "ekos_dependents",
                 "ekos_impact",

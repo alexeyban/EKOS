@@ -21,6 +21,20 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
 
     let ledger = open_ledger(config, cwd)?;
 
+    // RFC 0135 Part B — every entry this `commit` writes carries `(run_id, stage, ckm hash)`.
+    // The CKM content hash stands in for per-`KnowledgeArtifact` provenance until `compile`
+    // propagates that (RFC 0135 §B scope line).
+    let run_id = ekos_ledger::provenance::new_run_id();
+    let ckm_hash = ekos_common::compress::resolve_auto(&model_path)
+        .and_then(|p| std::fs::read(p).ok())
+        .map(|b| format!("ckm:{}", ekos_common::ContentHash::of(&b).as_str()));
+    let write_ctx = |stage: &'static str| ekos_ledger::provenance::WriteContext {
+        run_id: run_id.clone(),
+        stage: stage.to_string(),
+        source_artifact_id: ckm_hash.clone(),
+    };
+    ledger.set_write_context(Some(write_ctx("commit")));
+
     let mut objects_written = 0usize;
     let mut objects_skipped = 0usize;
     let mut rels_written = 0usize;
@@ -52,6 +66,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
         }
     }
 
+    ledger.set_write_context(Some(write_ctx("commit:rollup")));
+
     // RFC 0044: hierarchical rollups run here, not in `SemanticCompilerPass` (`ekos compile`) —
     // `File` objects, the only kind rollups group by directly, are written straight to the ledger
     // by `ekos build`, never through a `KnowledgeArtifact` the compiler reads. This is the first
@@ -64,7 +80,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     // rollups for the same reason rollups run here at all — this is the first point in the
     // pipeline where every kind of object involved (CKM-derived `TransformNode`s and `Table`s,
     // just committed above) coexists in one ledger read.
+    ledger.set_write_context(Some(write_ctx("commit:lineage")));
     let lineage_links_added = commit_data_lineage(&*ledger)?;
+    ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
     // in-scope `Module`/`Rollup`/`Symbol` — opt-in (`[llm-description].enabled`), same reasoning
