@@ -3132,9 +3132,11 @@ are excluded — see the full exclusion list in the planning history if needed.
     semantic/ + cli write paths; the ~175 render/query/sim sites are explicitly out of scope), add
     `KirRelationship::deterministic(kind, from, to, discriminator)`, a per-site decision table, and
     a guard test failing on bare `::new` in those modules. Continues RFC 0072/0076 (which fixed 2).
-  - [ ] **Part D** — `DefaultResolver`'s kind-exclusion list becomes a `structurally_keyed`
-    registry + a coverage test that fails CI when a new `Custom(_)` kind skips it. Guards the
-    CLAUDE.md-documented recurring over-merge rediscovery.
+  - [x] **Part D** — `ekos_kir::custom_kinds::REGISTRY` (22 rows, `structurally_keyed` per kind);
+    `DefaultResolver` derives its exclusion set from it; `ekos-identity` test
+    `every_pipeline_custom_kind_is_registered` walks `crates/{recovery,semantic}/src` and fails CI
+    on any unregistered `Custom` kind. `devlog_159`. **Also fixed 4 latent over-merges** —
+    `Page`/`Risk`/`Rollup`/`ProjectSummary` were structurally keyed but never excluded.
   - *Out of scope:* `KnowledgeStore: Send` / RFC 0112 (its own RFC); the RFC 0060 residual fuzzy
     mis-scores (no threshold fix exists); retroactive row de-dup (no tombstone).
 
