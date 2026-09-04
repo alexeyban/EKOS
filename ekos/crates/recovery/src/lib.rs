@@ -30,6 +30,7 @@ pub mod openai;
 pub mod package_json_analyzer;
 pub mod pentaho_analyzer;
 pub mod python_analyzer;
+pub mod requirements_analyzer;
 pub mod rust_analyzer;
 pub mod sql_analyzer;
 pub mod sql_dialect_registry;
@@ -75,6 +76,7 @@ pub use openai::OpenAiProvider;
 pub use package_json_analyzer::PackageJsonAnalyzerPass;
 pub use pentaho_analyzer::{PentahoAnalyzerPass, PentahoStats};
 pub use python_analyzer::{PythonAnalyzerPass, PythonStats};
+pub use requirements_analyzer::RequirementsAnalyzerPass;
 pub use rust_analyzer::{RustAnalyzerPass, RustStats};
 pub use sql_analyzer::{SqlAnalyzerPass, parse_ddl_structural};
 pub use sql_dialect_registry::{

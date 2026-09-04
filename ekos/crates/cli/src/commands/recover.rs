@@ -12,9 +12,9 @@ use ekos_recovery::{
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
     JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
     OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass,
-    PythonStats, RustAnalyzerPass, RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass,
-    SqlTransformStats, anthropic::AnthropicProvider, build_dialect_registry,
-    cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
+    PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
+    SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
+    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -522,6 +522,65 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         pass_manager.register(Box::new(package_json_pass));
     }
 
+    // ── requirements.txt dependency extraction ──────────────────────────────
+    // Same collection pattern as package.json above — real gap found running the full pipeline
+    // against a real external project (`pdf-reader`): every Technology Inventory / System Context
+    // view was blind to all of a real FastAPI backend's declared pip dependencies, even though the
+    // Python source itself was fully analyzed by `python_analyzer.rs`.
+    let mut requirements_manifests: Vec<(String, String, Option<String>)> = Vec::new();
+    for base in &observe_paths {
+        let project_key = {
+            let key = ekos_common::project::project_key_for_base(base, cwd);
+            if key.is_empty() { None } else { Some(key) }
+        };
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_str().unwrap_or("");
+                    return !ignore.iter().any(|p| name == p.as_str());
+                }
+                true
+            })
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "requirements.txt" {
+                continue;
+            }
+            let path = entry.path();
+            let rel = path.strip_prefix(base).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
+            let content = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let content = ekos_common::redaction::redact(&content, &redaction_config);
+            requirements_manifests.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
+        }
+    }
+    let requirements_count = requirements_manifests.len();
+    if !requirements_manifests.is_empty() {
+        let requirements_pass = RequirementsAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            requirements_manifests,
+        );
+        pass_manager.register(Box::new(requirements_pass));
+    }
+
     let mut archreasoning_stats: Option<Arc<std::sync::Mutex<ArchitectureReasoningStats>>> = None;
     if !cargo_manifests.is_empty() {
         let crate_count = cargo_manifests
@@ -820,6 +879,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
     }
     if package_json_count > 0 {
         println!("  package.json manifests analysed: {package_json_count}");
+    }
+    if requirements_count > 0 {
+        println!("  requirements.txt manifests analysed: {requirements_count}");
     }
     if let Some(stats) = &archreasoning_stats {
         let s = *stats.lock().unwrap();

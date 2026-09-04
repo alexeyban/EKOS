@@ -161,62 +161,62 @@ pub async fn compile_worker_run(
 
         let result = worker
             .run_shard(shard, move |guard| async move {
-            println!(
-                "  lease held (token {}); running build → recover → resolve → compile → commit",
-                guard.token()
-            );
+                println!(
+                    "  lease held (token {}); running build → recover → resolve → compile → commit",
+                    guard.token()
+                );
 
-            // The whole pipeline runs on a blocking thread with its own runtime, so the worker's
-            // executor stays free to heartbeat the lease through a multi-minute compile.
-            let ws2 = ws.clone();
-            let cfg2 = cfg.clone();
-            tokio::task::spawn_blocking(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| e.to_string())?
-                    .block_on(run_pipeline(&cfg2, &ws2, parallel_recover, force_resolve))
-                    .map_err(|e| format!("{e:#}"))
+                // The whole pipeline runs on a blocking thread with its own runtime, so the worker's
+                // executor stays free to heartbeat the lease through a multi-minute compile.
+                let ws2 = ws.clone();
+                let cfg2 = cfg.clone();
+                tokio::task::spawn_blocking(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| e.to_string())?
+                        .block_on(run_pipeline(&cfg2, &ws2, parallel_recover, force_resolve))
+                        .map_err(|e| format!("{e:#}"))
+                })
+                .await
+                .map_err(|e| WorkerError::Work(format!("pipeline task panicked: {e}")))?
+                .map_err(WorkerError::Work)?;
+
+                // Publish each partition's search index to its backend (no-op for a local backend),
+                // collect what we produced (partitions + the new watermark), and collect every
+                // object/relationship id's home partition for the coordinator's pruning index — one
+                // `PartitionedLedger` open for all three (RFC 0113 v1.1).
+                let cfg3 = cfg.clone();
+                let ws3 = ws.clone();
+                let (partitions, watermark, entity_ids) = tokio::task::spawn_blocking(move || {
+                    finalize_partitions(&cfg3, &ws3).map_err(|e| format!("{e:#}"))
+                })
+                .await
+                .map_err(|e| WorkerError::Work(format!("finalize-partitions task panicked: {e}")))?
+                .map_err(WorkerError::Work)?;
+
+                for (pid, location) in &partitions {
+                    client_w.register_partition(pid, location.clone()).await?;
+                }
+                // An id can (rarely) span more than one partition across recompiles, so group before
+                // recording — one `RecordEntityPartitions` call per distinct id, not per (id, partition)
+                // pair.
+                let mut by_entity: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+                for (id, pid) in entity_ids {
+                    by_entity.entry(id).or_default().push(pid);
+                }
+                for (id, pids) in &by_entity {
+                    client_w.record_entity_partitions(id, pids).await?;
+                }
+                guard.commit(watermark).await?;
+                println!(
+                    "  generation {watermark} committed; {} partitions registered",
+                    partitions.len()
+                );
+                Ok::<(), WorkerError>(())
             })
-            .await
-            .map_err(|e| WorkerError::Work(format!("pipeline task panicked: {e}")))?
-            .map_err(WorkerError::Work)?;
-
-            // Publish each partition's search index to its backend (no-op for a local backend),
-            // collect what we produced (partitions + the new watermark), and collect every
-            // object/relationship id's home partition for the coordinator's pruning index — one
-            // `PartitionedLedger` open for all three (RFC 0113 v1.1).
-            let cfg3 = cfg.clone();
-            let ws3 = ws.clone();
-            let (partitions, watermark, entity_ids) = tokio::task::spawn_blocking(move || {
-                finalize_partitions(&cfg3, &ws3).map_err(|e| format!("{e:#}"))
-            })
-            .await
-            .map_err(|e| WorkerError::Work(format!("finalize-partitions task panicked: {e}")))?
-            .map_err(WorkerError::Work)?;
-
-            for (pid, location) in &partitions {
-                client_w.register_partition(pid, location.clone()).await?;
-            }
-            // An id can (rarely) span more than one partition across recompiles, so group before
-            // recording — one `RecordEntityPartitions` call per distinct id, not per (id, partition)
-            // pair.
-            let mut by_entity: std::collections::HashMap<String, Vec<String>> =
-                std::collections::HashMap::new();
-            for (id, pid) in entity_ids {
-                by_entity.entry(id).or_default().push(pid);
-            }
-            for (id, pids) in &by_entity {
-                client_w.record_entity_partitions(id, pids).await?;
-            }
-            guard.commit(watermark).await?;
-            println!(
-                "  generation {watermark} committed; {} partitions registered",
-                partitions.len()
-            );
-            Ok::<(), WorkerError>(())
-        })
-        .await;
+            .await;
 
         let is_lease_conflict = matches!(
             &result,

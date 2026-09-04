@@ -3530,10 +3530,10 @@ are excluded — see the full exclusion list in the planning history if needed.
     way RFC 0069-0075/0107-0109 were, continuing automatically down the roadmap per the standing
     instruction not to cut anything here.
 
-- [ ] **Real gap found running EKOS end to end on a real, non-EKOS project (2026-08-26):** Python's
-  `requirements.txt` (and, by the same reasoning, `pyproject.toml`) has no dependency analyzer at
-  all — confirmed by grepping `crates/recovery/src/` directly (no `requirements`/`pip` file
-  anywhere), unlike `package_json_analyzer.rs` (npm) and `dependency_analyzer.rs`/
+- [x] **Real gap found running EKOS end to end on a real, non-EKOS project (2026-08-26) — fixed
+  2026-09-04 (tech-debt paydown planning pass).** Python's `requirements.txt` had no dependency
+  analyzer at all — confirmed by grepping `crates/recovery/src/` directly (no `requirements`/`pip`
+  file anywhere), unlike `package_json_analyzer.rs` (npm) and `dependency_analyzer.rs`/
   `crate_topology_analyzer.rs` (Cargo). Found by running the full real pipeline
   (`init`/`build`/`recover`/`resolve`/`compile`/`commit` + `docs generate --layout
   curated`/`solution-architect`) against a real external project (`pdf-reader`: FastAPI Python
@@ -3542,20 +3542,33 @@ are excluded — see the full exclusion list in the planning history if needed.
   real `package.json` dependencies; all 10 real `backend/requirements.txt` dependencies (`fastapi`,
   `sqlalchemy`, `pymupdf`, `pytesseract`, `openai`, etc.) were completely invisible to every one of
   those views, even though the Python *source code itself* was correctly analyzed in full (55
-  `PythonModule`/39 `PythonSymbol` objects, real AI overviews grounding on real source lines). A
-  real, concretely-scoped gap for a future increment: a `requirements_analyzer.rs` mirroring
-  `package_json_analyzer.rs`'s exact shape (`Custom("Technology")` per declared dependency,
-  `DependsOn` edge from the owning `File`) — `requirements.txt`'s `pkg==1.2.3`/`pkg>=1.2.3` line
-  format is simpler to parse than `package.json`'s JSON, so this is likely a *smaller* increment
-  than its npm sibling, not a bigger one. Two secondary findings from the same live run, both
+  `PythonModule`/39 `PythonSymbol` objects, real AI overviews grounding on real source lines).
+  - **Fixed:** new `requirements_analyzer.rs` mirrors `package_json_analyzer.rs`'s exact shape —
+    same `Custom("Technology")` id scheme, same `File`→`Technology` `DependsOn` edge (version spec
+    as a property), same RFC 0079 project qualification, same manifest-collection pattern wired
+    into `recover.rs` right alongside the `package.json` one. Parses PEP 508's common subset
+    (`pkg==1.2.3`, `pkg>=1.0,<2.0`, bare `pkg`, `pkg[extra]`, `; env marker`) — comments, blank
+    lines, `-r`/`-e`/`--flag` option lines, and VCS/URL requirements are skipped rather than
+    fabricating a `Technology` for something that isn't a plain declared package version. 8 new
+    unit tests. **Live-verified end to end** against a fresh scratch workspace with a real
+    6-dependency `requirements.txt` (mirroring `pdf-reader`'s actual shape): `ekos recover` →
+    `requirements-analyzer... technologies=6 edges=6`; `ekos query find "fastapi"` finds the real
+    `Technology` object in the committed ledger; `ekos docs generate --layout curated` renders all
+    6 in `Architecture.md`'s Technology Inventory (`fastapi`, `sqlalchemy`, `pymupdf`,
+    `pytesseract`, `openai`, `requests` — the extras/env-marker/option-line noise in the fixture
+    correctly produced nothing extra). `pyproject.toml` (PEP 621 / Poetry / Flit each shape
+    dependencies differently) is a deliberately separate, not-yet-attempted follow-on — this pass
+    covers only the concretely-verified `requirements.txt` gap, not the broader claim.
+  - Two secondary findings from the same live run, both
   real-usage observations rather than code bugs: (1) a small local Ollama model (`qwen2.5:1.5b`)
   was unreliable for RFC 0088's structured-JSON-output description task — 111 of 119 real attempted
-  calls failed (presumably malformed JSON the model produced, not caught/logged in detail anywhere
-  today — `llm_description.rs`'s `call_and_apply` discards the real error string after counting it,
-  a real, separate, smaller gap worth its own fix); the properly-sized `llama3:latest` (the
-  project's own configured model) worked correctly on the same task but was too slow on this
-  hardware (CPU-bound 8B inference) to finish within a reasonable interactive wait, so the smaller
-  model was substituted for the live test — not a silent swap, disclosed here. (2) the LLM-assisted
+  calls failed (presumably malformed JSON the model produced). `llm_description.rs`'s
+  `call_and_apply` discarding the real error string after counting it — **fixed 2026-09-04 as part
+  of Wave 0 hygiene**, now logged at `warn` with the real provider error (see the Ollama-model /
+  hygiene item elsewhere in this file). The properly-sized `llama3:latest` (the project's own
+  configured model) worked correctly on the same task but was too slow on this hardware (CPU-bound
+  8B inference) to finish within a reasonable interactive wait, so the smaller model was
+  substituted for the live test — not a silent swap, disclosed here. (2) the LLM-assisted
   `Architecture style` field said "microservices" for a project that's really a single FastAPI
   backend + a separate SPA frontend (arguably not accurate microservices terminology) — the pipeline
   itself worked exactly as designed (the field is honestly labeled "(LLM-assisted, RFC 0088 — see
