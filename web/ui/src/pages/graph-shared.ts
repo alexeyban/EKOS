@@ -9,6 +9,7 @@ export interface GNode {
   degree: number;
   count?: number; // aggregate super-nodes only
   isAggregate: boolean;
+  firstSeen?: string; // RFC 0134 — `fs`, RFC 3339; when the node first entered the ledger
 }
 
 export interface GLink {
@@ -16,7 +17,13 @@ export interface GLink {
   target: string;
   relKind: string;
   weight: number;
+  firstSeen?: string; // RFC 0134 — `fs`
 }
+
+// RFC 0134 — an `ekos ledger timeline` bucket label ("2026-08-26") → the end of that day as an
+// RFC 3339 instant, so a lexical `firstSeen <= asOf` compare (and the `as_of` query param) both
+// see everything minted on or before that bucket.
+export const bucketEnd = (label: string): string => `${label}T23:59:59.999Z`;
 
 const PALETTE = [
   "#7c3aed",

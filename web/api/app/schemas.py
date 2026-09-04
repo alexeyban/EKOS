@@ -90,10 +90,15 @@ class QueryStats(BaseModel):
 
 
 class GraphOut(BaseModel):
-    """Pass-through of a RFC 0127 R1 `GraphExport`. Kept permissive on purpose."""
+    """Pass-through of a RFC 0127 R1 `GraphExport`. Kept permissive on purpose.
+
+    Nodes/edges are raw dicts, so RFC 0134's per-element ``fs`` (first-seen) key rides through
+    untouched; ``as_of`` is echoed at the top level when the export was time-sliced.
+    """
 
     schema_version: int
     level: str
+    as_of: str | None = None
     counts: dict[str, int]
     truncated: dict[str, Any]
     nodes: list[dict[str, Any]]

@@ -391,6 +391,12 @@ enum GraphCommands {
         /// Object property keys to carry into each node's `p` (repeatable). Default: none.
         #[arg(long = "include-property", value_name = "KEY")]
         include_properties: Vec<String>,
+        /// Reconstruct the graph as it stood at this RFC 3339 instant (RFC 0134). Default: now.
+        #[arg(long = "as-of", value_name = "RFC3339")]
+        as_of: Option<String>,
+        /// Stamp each node/edge with its first-seen time (`fs` in the output) — RFC 0134
+        #[arg(long = "first-seen")]
+        first_seen: bool,
         /// Write to this file instead of stdout
         #[arg(long, value_name = "FILE")]
         output: Option<PathBuf>,
@@ -818,6 +824,8 @@ async fn main() -> Result<()> {
                 max_edges,
                 min_degree,
                 include_properties,
+                as_of,
+                first_seen,
                 output,
             } => ekos::commands::graph::export(
                 &config,
@@ -835,6 +843,8 @@ async fn main() -> Result<()> {
                     max_edges,
                     min_degree,
                     include_properties,
+                    as_of,
+                    first_seen,
                     output,
                 },
             ),

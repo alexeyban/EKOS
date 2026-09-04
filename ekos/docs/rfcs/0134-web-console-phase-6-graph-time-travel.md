@@ -1,8 +1,9 @@
 # RFC 0134 — Web Console Phase 6: graph time-travel (timelapse slider)
 
-**Status:** Draft
+**Status:** Accepted
 **Author:** EKOS team
 **Created:** 2026-09-04
+**Implemented:** 2026-09-04 (`devlog_157`)
 **Phase 6 of:** RFC 0127 (§9, §10) · **builds on:** RFC 0133 (Phase 5 graph view), RFC 0128 R1
 (`ekos graph export` / `ekos_graph_export`), RFC 0129 R6 (`ekos ledger timeline --json`),
 RFC 0096 (`AS OF` point-in-time reconstruction)
@@ -91,6 +92,12 @@ naturally "as of `t`".
   - **aggregate level:** the super-node's `fs` = the **minimum** `created_at` over its members;
     a group edge's `fs` = the minimum over the collapsed underlying relationships. (A super-node
     appears the instant its first member does.)
+  - **Caveat:** `created_at` tracks the *latest* stored version of the payload (a real content
+    change on a later `commit` writes a new version with a fresh `created_at`; an unchanged
+    re-observation does not, because `content_signature` strips `created_at`). So `fs` is an
+    exact first-seen for objects that never changed and an upper bound otherwise. `as_of` — which
+    filters on the ledger row's `written_at` — is the precise path; the client-side `fs` scrub is
+    the fast approximation, and "accurate mode" (§3.8) is the exact one.
 
 ### 1.3 CLI + MCP
 

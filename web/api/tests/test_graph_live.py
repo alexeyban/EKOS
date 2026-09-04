@@ -67,6 +67,32 @@ def test_include_properties_flag_is_accepted(client: TestClient) -> None:
     assert r.status_code == 200
 
 
+def test_as_of_and_first_seen_against_the_repo(client: TestClient) -> None:
+    # RFC 0134 — first-seen stamps every node when asked.
+    latest = client.get(
+        "/api/workspaces/s/graph?level=aggregate&group_by=kind&include_first_seen=true",
+        headers=AUTH,
+    ).json()
+    assert latest["nodes"]
+    assert all("fs" in n for n in latest["nodes"])
+
+    # A cutoff years before this repo existed → the graph is empty, and `as_of` is echoed.
+    past = client.get(
+        "/api/workspaces/s/graph?level=aggregate&group_by=kind&as_of=2020-01-01T00:00:00Z",
+        headers=AUTH,
+    ).json()
+    assert past["as_of"] == "2020-01-01T00:00:00Z"
+    assert past["nodes"] == []
+
+
+def test_object_state_accepts_as_of(client: TestClient) -> None:
+    hit = client.get("/api/workspaces/s/search?q=ledger&limit=1", headers=AUTH).json()
+    oid = hit["matches"][0]["id"]
+    # Far future → still current state; the point is the param is accepted end to end.
+    r = client.get(f"/api/workspaces/s/objects/{oid}?as_of=2030-01-01T00:00:00Z", headers=AUTH)
+    assert r.status_code == 200, r.text
+
+
 def test_large_object_level_payload_does_not_overflow_the_ndjson_reader(client: TestClient) -> None:
     # >64 KiB on one NDJSON line — the MCP client's StreamReader limit must be raised past the
     # asyncio default or `readline()` raises "Separator is not found".

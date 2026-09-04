@@ -492,6 +492,93 @@ header .chip {
 .gc-pad button:nth-child(5) {
   grid-area: 3 / 2;
 }
+
+/* RFC 0134 — timelapse slider */
+.graph-canvas:has(.graph-timeline) .gc-nav {
+  bottom: 66px;
+}
+.graph-timeline {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: rgba(12, 10, 20, 0.86);
+  backdrop-filter: blur(3px);
+}
+.gt-play,
+.gt-latest {
+  flex: none;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: rgba(30, 26, 42, 0.9);
+  color: #d6d3e6;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.gt-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+}
+.gt-hist {
+  position: absolute;
+  inset: 0 0 8px 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  pointer-events: none;
+}
+.gt-bar {
+  flex: 1;
+  min-width: 1px;
+  background: rgba(160, 160, 190, 0.25);
+  border-radius: 1px 1px 0 0;
+}
+.gt-bar.on {
+  background: var(--accent, #a78bfa);
+  opacity: 0.75;
+}
+.gt-track input[type="range"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  margin: 0;
+}
+.gt-label {
+  flex: none;
+  font-size: 0.75rem;
+  color: #d6d3e6;
+  min-width: 4.5rem;
+  text-align: right;
+}
+.graph-asof-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: rgba(12, 10, 20, 0.9);
+  color: #d6d3e6;
+  font-size: 0.8rem;
+}
+
 .flt {
   display: block;
   font-size: 0.82rem;

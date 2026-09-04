@@ -8,6 +8,7 @@ export function GraphCanvas({
   focusId,
   selectedId,
   dimKind,
+  asOf,
   onNodeClick,
 }: {
   nodes: GNode[];
@@ -15,6 +16,7 @@ export function GraphCanvas({
   focusId: string | null;
   selectedId: string | null;
   dimKind: string | null; // when set, nodes of other kinds are dimmed
+  asOf: string | null; // RFC 0134 — hide anything minted after this instant
   onNodeClick: (n: GNode) => void;
 }) {
   const fgRef = useRef<ForceGraphMethods<GNode, GLink> | undefined>(undefined);
@@ -34,6 +36,12 @@ export function GraphCanvas({
     setSize({ w: el.clientWidth, h: el.clientHeight });
     return () => ro.disconnect();
   }, []);
+
+  // RFC 0134 — `nodeVisibility` / `linkVisibility` depend on `asOf`; nudge the renderer to
+  // re-evaluate them (the layout is frozen, so this only repaints).
+  useEffect(() => {
+    (fgRef.current as unknown as { refresh?: () => void } | undefined)?.refresh?.();
+  }, [asOf]);
 
   useEffect(() => {
     if (!focusId || !fgRef.current) return;
@@ -88,9 +96,21 @@ export function GraphCanvas({
         }}
         linkColor={() => "rgba(160,160,190,0.22)"}
         linkWidth={(l) => 0.4 + Math.min(4, Math.log2(1 + l.weight))}
+        nodeVisibility={(n) => !asOf || !n.firstSeen || n.firstSeen <= asOf}
+        linkVisibility={(l) => !asOf || !l.firstSeen || l.firstSeen <= asOf}
         onNodeClick={(n) => onNodeClick(n)}
         cooldownTicks={120}
-        onEngineStop={() => fgRef.current?.zoomToFit(400, 40)}
+        onEngineStop={() => {
+          // RFC 0134 — freeze the layout once it settles, so scrubbing the time slider only
+          // toggles visibility and never re-simulates; surviving nodes never move.
+          for (const n of nodes as (GNode & { x?: number; y?: number; fx?: number; fy?: number })[]) {
+            if (n.x != null && n.fx == null) {
+              n.fx = n.x;
+              n.fy = n.y;
+            }
+          }
+          fgRef.current?.zoomToFit(400, 40);
+        }}
       />
 
       <div className="gc-nav">

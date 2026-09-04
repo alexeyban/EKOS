@@ -111,6 +111,10 @@ pub struct ExportArgs {
     pub max_edges: usize,
     pub min_degree: usize,
     pub include_properties: Vec<String>,
+    /// RFC 0134 — reconstruct the graph as of this RFC 3339 instant (`None` = current).
+    pub as_of: Option<String>,
+    /// RFC 0134 — stamp each node/edge with its first-seen time (`fs`).
+    pub first_seen: bool,
     pub output: Option<PathBuf>,
 }
 
@@ -149,6 +153,16 @@ pub fn export(config: &EkosConfig, cwd: &Path, args: ExportArgs) -> Result<()> {
         .map(|s| RelationshipKind::from_str(s).unwrap())
         .collect();
 
+    let as_of = args
+        .as_of
+        .as_deref()
+        .map(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .with_context(|| format!("--as-of is not an RFC 3339 timestamp: {s}"))
+        })
+        .transpose()?;
+
     let opts = GraphExportOptions {
         level,
         workspace: workspace.clone(),
@@ -160,6 +174,8 @@ pub fn export(config: &EkosConfig, cwd: &Path, args: ExportArgs) -> Result<()> {
         max_edges: args.max_edges,
         min_degree: args.min_degree,
         include_properties: args.include_properties,
+        as_of,
+        include_first_seen: args.first_seen,
     };
 
     // A read — read-only open (RFC 0005/0097).
@@ -274,6 +290,8 @@ mod tests {
             max_edges: 20000,
             min_degree: 0,
             include_properties: vec![],
+            as_of: None,
+            first_seen: false,
             output: None,
         }
     }
@@ -313,5 +331,32 @@ mod tests {
         assert_eq!(v["record"], "header");
         assert_eq!(v["schema_version"], 1);
         assert!(v.get("nodes").is_none());
+    }
+
+    #[test]
+    fn export_rejects_a_non_rfc3339_as_of() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let mut a = args();
+        a.workspace = Some(dir.path().to_path_buf());
+        a.as_of = Some("last tuesday".into());
+        let err = export(&config, dir.path(), a).unwrap_err().to_string();
+        assert!(err.contains("RFC 3339"), "{err}");
+    }
+
+    #[test]
+    fn export_with_as_of_and_first_seen_echoes_as_of_in_the_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let out = dir.path().join("g.json");
+        let mut a = args();
+        a.workspace = Some(dir.path().to_path_buf());
+        a.as_of = Some("2026-09-01T00:00:00Z".into());
+        a.first_seen = true;
+        a.output = Some(out.clone());
+        export(&config, dir.path(), a).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(v["as_of"], "2026-09-01T00:00:00Z");
     }
 }
