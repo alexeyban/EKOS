@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { lazy, Suspense, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { GraphCanvasHandle } from "./GraphCanvas";
 import { colorFor, SERVER_LAYOUT_THRESHOLD, type GLink, type GNode } from "./graph-shared";
@@ -27,17 +27,51 @@ const OBJECT_BUDGET = 800;
 
 export function Graph() {
   const { id = "" } = useParams();
+  // RFC 0136 §7 (deep-linking) — `?as_of=&focus=` seed the initial view once on mount (a lazy
+  // initializer, so this reads the URL exactly once, not on every render) and are kept in sync as
+  // the corresponding state changes below. One-directional (state -> URL) rather than a full
+  // two-way binding: simple enough to satisfy "paste this link, see the same view" without also
+  // having to guard against browser back/forward re-driving state mid-session.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // null = overview (aggregate). Otherwise: object level, focused on this kind (others dimmed).
   const [focusKind, setFocusKind] = useState<string | null>(null);
   const [excludedRels, setExcludedRels] = useState<Set<string>>(new Set(DEFAULT_OFF_RELS));
   const [minDegree, setMinDegree] = useState(2);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get("focus"));
+  const [focusId, setFocusId] = useState<string | null>(() => searchParams.get("focus"));
   const [q, setQ] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   // RFC 0134 — null = live. Otherwise an RFC 3339 instant the graph is shown "as of".
-  const [asOf, setAsOf] = useState<string | null>(null);
+  const [asOf, setAsOf] = useState<string | null>(() => searchParams.get("as_of"));
+
+  // Deep-link a selected object into an expanded (object-level) view — a bare `?focus=<id>` with
+  // no other state would otherwise land on the aggregate overview, where the id can't resolve to
+  // a visible node. `""` (not a real kind name) is a deliberate "expanded, no kind filter" value:
+  // `focusKind` is only ever sent to the backend as an `expanded` boolean (`level=object` vs
+  // `aggregate`), never as a `kind=` filter param, and `dimKind={... ? focusKind : null}` treats
+  // an empty string as falsy, so nothing gets dimmed — this reaches the same "show me the object
+  // among every kind" state a real click-driven expansion never actually produces on its own.
+  useEffect(() => {
+    if (searchParams.get("focus") && focusKind === null) setFocusKind("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (asOf) next.set("as_of", asOf);
+        else next.delete("as_of");
+        if (selectedId) next.set("focus", selectedId);
+        else next.delete("focus");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asOf, selectedId]);
   // RFC 0136 §2 — set replaces the normal graph fetch with just this object's BFS neighbourhood.
   const [isolate, setIsolate] = useState<{ id: string; depth: number } | null>(null);
   // RFC 0136 §3 — set overlays a hop-distance trace on whatever graph is currently on screen.
@@ -219,8 +253,21 @@ export function Graph() {
         <span>
           <button
             className="pill"
+            onClick={() => {
+              navigator.clipboard?.writeText(window.location.href).then(() => {
+                setLinkCopied(true);
+                window.setTimeout(() => setLinkCopied(false), 1500);
+              });
+            }}
+            title="copy a link to this exact view (time-travel position + selected object)"
+          >
+            {linkCopied ? "✓ copied" : "🔗 copy link"}
+          </button>
+          <button
+            className="pill"
             onClick={() => canvasRef.current?.exportPng()}
             title="save the current view as a PNG"
+            style={{ marginLeft: "0.4rem" }}
           >
             ⬇ PNG
           </button>

@@ -3,38 +3,57 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "./Layout";
-import { Config } from "./pages/Config";
-import { Dashboard } from "./pages/Dashboard";
-import { Graph } from "./pages/Graph";
-import { Run } from "./pages/Run";
-import { RunDetail } from "./pages/RunDetail";
-import { Runs } from "./pages/Runs";
-import { Schedules } from "./pages/Schedules";
-import { Workspaces } from "./pages/Workspaces";
-import { WorkspaceShell } from "./WorkspaceShell";
 import "./index.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 });
 
+// RFC 0136 §7 (performance pass) — every page used to be a top-level `import`, so the whole
+// console (every page's own dependencies, `recharts` for `Dashboard` included) shipped as one
+// eagerly-loaded bundle regardless of which single page a visit actually needed. React Router's
+// per-route `lazy` (v6.4+) splits each page into its own chunk, fetched only when its route is
+// visited — the same lazy-loading `GraphCanvas` already used on its own, just applied
+// consistently at the route level instead of one component at a time.
 const router = createBrowserRouter([
   {
     path: "/",
     element: <Layout />,
     children: [
-      { index: true, element: <Workspaces /> },
-      { path: "schedules", element: <Schedules /> },
-      { path: "runs/:runId", element: <RunDetail /> },
+      {
+        index: true,
+        lazy: () => import("./pages/Workspaces").then((m) => ({ Component: m.Workspaces })),
+      },
+      {
+        path: "schedules",
+        lazy: () => import("./pages/Schedules").then((m) => ({ Component: m.Schedules })),
+      },
+      {
+        path: "runs/:runId",
+        lazy: () => import("./pages/RunDetail").then((m) => ({ Component: m.RunDetail })),
+      },
       {
         path: "w/:id",
-        element: <WorkspaceShell />,
+        lazy: () =>
+          import("./WorkspaceShell").then((m) => ({ Component: m.WorkspaceShell })),
         children: [
-          { index: true, element: <Dashboard /> },
-          { path: "graph", element: <Graph /> },
-          { path: "run", element: <Run /> },
-          { path: "runs", element: <Runs /> },
-          { path: "config", element: <Config /> },
+          {
+            index: true,
+            lazy: () => import("./pages/Dashboard").then((m) => ({ Component: m.Dashboard })),
+          },
+          {
+            path: "graph",
+            lazy: () => import("./pages/Graph").then((m) => ({ Component: m.Graph })),
+          },
+          { path: "run", lazy: () => import("./pages/Run").then((m) => ({ Component: m.Run })) },
+          {
+            path: "runs",
+            lazy: () => import("./pages/Runs").then((m) => ({ Component: m.Runs })),
+          },
+          {
+            path: "config",
+            lazy: () => import("./pages/Config").then((m) => ({ Component: m.Config })),
+          },
         ],
       },
     ],

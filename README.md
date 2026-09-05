@@ -791,7 +791,7 @@ export keeps the most-connected core and says so in a `truncated` block rather t
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
 
-### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134)
+### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134/0136)
 
 `web/` is a browser surface over one or more compiled workspaces — a FastAPI app (`web/api/`) plus
 a Vite + React app (`web/ui/`).

@@ -1,4 +1,5 @@
-# EKOS web console — Phase 0 skeleton (RFC 0128 §3.5).
+# EKOS web console — dev-convenience Compose file (not a production deployment manifest: the UI
+# service runs Vite's own dev server, not a built static bundle).
 #
 # Prerequisite: build the release binary first —
 #   (cd ekos && cargo build --release -p ekos)
@@ -6,11 +7,15 @@
 # Then, from web/:
 #   EKOS_WS=/abs/path/to/a/compiled/workspace docker compose up
 #
-# The console does NOT run `ekos mcp serve --tcp` from Compose — per RFC 0127 §11 it will spawn
-# one per registered workspace itself (Phase 1). For the skeleton, start one by hand:
-#   printf 'dev-mcp-token\n' > /tmp/ekos-mcp-token
-#   ekos mcp serve --workspace "$EKOS_WS" --tcp 127.0.0.1:7331 --tcp-token-file /tmp/ekos-mcp-token
-# and point EKOS_CONSOLE_WORKSPACES_JSON at it.
+# No manual `ekos mcp serve` step needed — the console's own McpSupervisor (RFC 0129) spawns and
+# restarts one `ekos mcp serve --tcp` per registered workspace itself, on a dynamically-picked
+# port, using the `ekos` binary bind-mounted below. `EKOS_CONSOLE_WORKSPACES_JSON` only *seeds* the
+# workspace registry on first start (its `mcp_host`/`mcp_port` fields, if present, are ignored —
+# see `app/settings.py::WorkspaceSeed`'s own docstring); the seed here carries none.
+#
+# Read-only by default: set WRITE_TOKEN to enable the write role (running commands, scheduling) —
+# unset, this Compose config only ever grants the read role, matching the API's own
+# never-grant-write-when-unset default in token mode.
 
 services:
   api:
@@ -19,17 +24,15 @@ services:
       - "8000:8000"
     environment:
       EKOS_CONSOLE_CONSOLE_TOKEN: ${CONSOLE_TOKEN:-dev-console-token}
-      EKOS_MCP_TOKEN: ${EKOS_MCP_TOKEN:-dev-mcp-token}
+      EKOS_CONSOLE_CONSOLE_WRITE_TOKEN: ${WRITE_TOKEN:-}
+      EKOS_CONSOLE_SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-me}
       EKOS_CONSOLE_WORKSPACES_JSON: >-
-        [{"id":"self","name":"workspace","path":"/workspace",
-          "mcp_host":"host.docker.internal","mcp_port":7331}]
+        [{"id":"self","name":"workspace","path":"/workspace"}]
       EKOS_CONSOLE_DEV_ORIGIN: http://localhost:5173
       EKOS_BIN: /usr/local/bin/ekos
     volumes:
       - ../ekos/target/release/ekos:/usr/local/bin/ekos:ro
       - ${EKOS_WS:-../.}:/workspace:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   ui:
     image: node:20-slim
