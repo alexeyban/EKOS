@@ -1,24 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
-import { colorFor, type GLink, type GNode } from "./graph-shared";
+import { colorFor, impactColorFor, type GLink, type GNode } from "./graph-shared";
+import { exportGltf, exportPng } from "./graph-export";
 
-export function GraphCanvas({
-  nodes,
-  links,
-  focusId,
-  selectedId,
-  dimKind,
-  asOf,
-  onNodeClick,
-}: {
-  nodes: GNode[];
-  links: GLink[];
-  focusId: string | null;
-  selectedId: string | null;
-  dimKind: string | null; // when set, nodes of other kinds are dimmed
-  asOf: string | null; // RFC 0134 — hide anything minted after this instant
-  onNodeClick: (n: GNode) => void;
-}) {
+// RFC 0136 §5 — imperative export handle, so the toolbar (in `Graph.tsx`) can trigger a PNG/glTF
+// download without `GraphCanvas` needing to know anything about buttons or file names.
+export interface GraphCanvasHandle {
+  exportPng: () => void;
+  exportGltf: () => void;
+}
+
+export const GraphCanvas = forwardRef<
+  GraphCanvasHandle,
+  {
+    nodes: GNode[];
+    links: GLink[];
+    focusId: string | null;
+    selectedId: string | null;
+    dimKind: string | null; // when set, nodes of other kinds are dimmed
+    asOf: string | null; // RFC 0134 — hide anything minted after this instant
+    impactHops?: Map<string, number> | null; // RFC 0136 §3 — id -> hop distance, when active
+    onNodeClick: (n: GNode) => void;
+  }
+>(function GraphCanvas(
+  { nodes, links, focusId, selectedId, dimKind, asOf, impactHops, onNodeClick },
+  ref,
+) {
   const fgRef = useRef<ForceGraphMethods<GNode, GLink> | undefined>(undefined);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
@@ -64,6 +71,28 @@ export function GraphCanvas({
     g.centerAt(c.x + dx / k, c.y + dy / k, 200);
   };
 
+  // RFC 0136 §3 — an edge is "on the trace" when both its endpoints were reached by impact mode.
+  // Real evidence (the edge survived `/graph`'s own filters), not a reconstructed path — see the
+  // RFC's own §3 note on why a precise hop-to-hop path isn't attempted here.
+  const isImpactEdge = (l: GLink) => {
+    if (!impactHops) return false;
+    const s = typeof l.source === "string" ? l.source : (l.source as GNode).id;
+    const t = typeof l.target === "string" ? l.target : (l.target as GNode).id;
+    return impactHops.has(s) && impactHops.has(t);
+  };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      exportPng: () => {
+        const canvas = wrapRef.current?.querySelector("canvas");
+        if (canvas) exportPng(canvas);
+      },
+      exportGltf: () => exportGltf(nodes, links),
+    }),
+    [nodes, links],
+  );
+
   return (
     <div ref={wrapRef} className="gc-wrap">
       <ForceGraph2D
@@ -78,6 +107,10 @@ export function GraphCanvas({
         }
         nodeColor={(n) => {
           if (n.id === selectedId) return "#ffffff";
+          if (impactHops) {
+            const hop = impactHops.get(n.id);
+            return hop === undefined ? "#4b4b5e33" : impactColorFor(hop);
+          }
           const c = colorFor(n.kindIdx);
           return dimKind && n.kind !== dimKind ? c + "33" : c;
         }}
@@ -94,8 +127,8 @@ export function GraphCanvas({
           ctx.textAlign = "center";
           ctx.fillText(n.label, n.x ?? 0, (n.y ?? 0) + 14 / scale);
         }}
-        linkColor={() => "rgba(160,160,190,0.22)"}
-        linkWidth={(l) => 0.4 + Math.min(4, Math.log2(1 + l.weight))}
+        linkColor={(l) => (isImpactEdge(l) ? "#f97316cc" : "rgba(160,160,190,0.22)")}
+        linkWidth={(l) => (isImpactEdge(l) ? 2.5 : 0.4 + Math.min(4, Math.log2(1 + l.weight)))}
         nodeVisibility={(n) => !asOf || !n.firstSeen || n.firstSeen <= asOf}
         linkVisibility={(l) => !asOf || !l.firstSeen || l.firstSeen <= asOf}
         onNodeClick={(n) => onNodeClick(n)}
@@ -140,4 +173,4 @@ export function GraphCanvas({
       </div>
     </div>
   );
-}
+});

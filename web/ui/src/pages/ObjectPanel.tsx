@@ -32,12 +32,18 @@ export function ObjectPanel({
   asOf,
   onClose,
   onGoto,
+  onIsolate,
+  onImpact,
 }: {
   workspace: string;
   objectId: string;
   asOf?: string | null; // RFC 0134 — reconstruct the object's state as of this instant
   onClose: () => void;
   onGoto: (id: string) => void;
+  // RFC 0136 §2/§3 — undefined hides the action entirely (e.g. while already in isolate/impact
+  // mode for a different object, `Graph.tsx` still renders a panel but doesn't wire these in).
+  onIsolate?: (id: string) => void;
+  onImpact?: (id: string, direction: "dependents" | "dependencies") => void;
 }) {
   const state = useQuery({
     queryKey: ["object", workspace, objectId, asOf ?? "live"],
@@ -65,6 +71,26 @@ export function ObjectPanel({
             <code style={{ fontSize: "0.7rem" }}>{o.id}</code>
           </p>
           {asOf && <p className="muted">state as of {asOf.slice(0, 10)}</p>}
+
+          {(onIsolate || onImpact) && (
+            <p style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", margin: "0.5rem 0" }}>
+              {onIsolate && (
+                <button className="pill" onClick={() => onIsolate(o.id)}>
+                  ⊕ isolate neighbourhood
+                </button>
+              )}
+              {onImpact && (
+                <>
+                  <button className="pill" onClick={() => onImpact(o.id, "dependents")}>
+                    ⇐ what depends on this
+                  </button>
+                  <button className="pill" onClick={() => onImpact(o.id, "dependencies")}>
+                    ⇒ what this depends on
+                  </button>
+                </>
+              )}
+            </p>
+          )}
 
           {o.properties && Object.keys(o.properties).length > 0 && (
             <details open>

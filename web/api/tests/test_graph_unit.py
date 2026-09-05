@@ -35,6 +35,16 @@ class RecordingMcp:
                 "kind_index": [],
                 "rel_kind_index": [],
             }
+        if name == "ekos_neighborhood":
+            return {"objects": [{"id": (args or {}).get("id")}], "relationships": []}
+        if name == "ekos_impact":
+            return {
+                "target": {"id": (args or {}).get("id")},
+                "direction": (args or {}).get("direction", "dependents"),
+                "max_hops": (args or {}).get("max_hops"),
+                "count": 0,
+                "hops": [],
+            }
         return {"object": {"id": "x"}, "relationships": [], "evidence": []}
 
 
@@ -80,3 +90,100 @@ def test_object_state_forwards_as_of_as_at(rec: tuple[TestClient, RecordingMcp])
     name, args = recorder.calls[-1]
     assert name == "ekos_state"
     assert args == {"id": "abc", "at": "2026-08-01T00:00:00Z"}
+
+
+def test_neighborhood_forwards_id_and_depth(rec: tuple[TestClient, RecordingMcp]) -> None:
+    client, recorder = rec
+    r = client.get("/api/workspaces/any/neighborhood/abc?depth=2", headers=AUTH)
+    assert r.status_code == 200, r.text
+    name, args = recorder.calls[-1]
+    assert name == "ekos_neighborhood"
+    assert args == {"id": "abc", "depth": 2}
+    assert r.json()["objects"] == [{"id": "abc"}]
+
+
+def test_neighborhood_defaults_depth_to_one(rec: tuple[TestClient, RecordingMcp]) -> None:
+    client, recorder = rec
+    client.get("/api/workspaces/any/neighborhood/abc", headers=AUTH)
+    _, args = recorder.calls[-1]
+    assert args["depth"] == 1
+
+
+def test_neighborhood_rejects_depth_above_three(rec: tuple[TestClient, RecordingMcp]) -> None:
+    client, _ = rec
+    r = client.get("/api/workspaces/any/neighborhood/abc?depth=4", headers=AUTH)
+    assert r.status_code == 422
+
+
+def test_impact_forwards_direction_max_hops_and_kinds(
+    rec: tuple[TestClient, RecordingMcp],
+) -> None:
+    client, recorder = rec
+    r = client.get(
+        "/api/workspaces/any/impact/abc?direction=dependencies&max_hops=3&kind=ForeignKey&kind=DependsOn",
+        headers=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    name, args = recorder.calls[-1]
+    assert name == "ekos_impact"
+    assert args == {
+        "id": "abc",
+        "direction": "dependencies",
+        "max_hops": 3,
+        "kinds": ["ForeignKey", "DependsOn"],
+    }
+
+
+def test_impact_defaults_direction_to_dependents_and_omits_kinds(
+    rec: tuple[TestClient, RecordingMcp],
+) -> None:
+    client, recorder = rec
+    client.get("/api/workspaces/any/impact/abc", headers=AUTH)
+    _, args = recorder.calls[-1]
+    assert args["direction"] == "dependents"
+    assert "kinds" not in args
+
+
+def test_impact_rejects_an_invalid_direction(rec: tuple[TestClient, RecordingMcp]) -> None:
+    client, _ = rec
+    r = client.get("/api/workspaces/any/impact/abc?direction=sideways", headers=AUTH)
+    assert r.status_code == 422
+
+
+def test_impact_translates_a_tool_error_into_a_404(
+    rec: tuple[TestClient, RecordingMcp],
+) -> None:
+    client, recorder = rec
+
+    async def failing_call_tool(name: str, args: dict[str, Any] | None = None) -> Any:
+        from app.mcp_client import McpToolError
+
+        raise McpToolError("object not found: abc")
+
+    recorder.call_tool = failing_call_tool  # type: ignore[method-assign]
+    r = client.get("/api/workspaces/any/impact/abc", headers=AUTH)
+    assert r.status_code == 404
+
+
+def test_graph_layout_returns_a_position_per_node(rec: tuple[TestClient, RecordingMcp]) -> None:
+    client, _ = rec
+    r = client.post(
+        "/api/workspaces/any/graph/layout",
+        headers=AUTH,
+        json={"nodes": ["a", "b", "c"], "edges": [["a", "b"], ["b", "c"]]},
+    )
+    assert r.status_code == 200, r.text
+    positions = r.json()["positions"]
+    assert set(positions.keys()) == {"a", "b", "c"}
+    for xy in positions.values():
+        assert len(xy) == 2
+
+
+def test_graph_layout_rejects_a_malformed_body(rec: tuple[TestClient, RecordingMcp]) -> None:
+    client, _ = rec
+    r = client.post(
+        "/api/workspaces/any/graph/layout",
+        headers=AUTH,
+        json={"nodes": ["a"]},  # missing required `edges`
+    )
+    assert r.status_code == 422

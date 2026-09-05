@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..auth import require_role
 from ..deps import mcp_for_workspace
+from ..layout import compute_layout
 from ..mcp_client import EkosMcpClient, McpToolError
-from ..schemas import GraphOut
+from ..schemas import GraphOut, LayoutIn, LayoutOut
 
 router = APIRouter(
     prefix="/workspaces", tags=["graph"], dependencies=[Depends(require_role("read"))]
@@ -72,3 +73,46 @@ async def search(
     limit: int = Query(20, ge=1, le=100),
 ) -> Any:
     return await mcp.call_tool("ekos_search", {"query": q, "limit": limit})
+
+
+@router.get("/{workspace_id}/neighborhood/{object_id}")
+async def neighborhood(
+    object_id: str,
+    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+    depth: int = Query(1, ge=1, le=3),
+) -> Any:
+    """`ekos_neighborhood` (RFC 0136 §2) — a real sub-graph (objects *and* relationships), not
+    just an id list, so the console draws the returned edges directly rather than reconstructing
+    them client-side."""
+    return await mcp.call_tool("ekos_neighborhood", {"id": object_id, "depth": depth})
+
+
+@router.get("/{workspace_id}/impact/{object_id}")
+async def impact(
+    object_id: str,
+    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+    direction: str = Query("dependents", pattern="^(dependents|dependencies)$"),
+    max_hops: int = Query(5, ge=1, le=50),
+    kind: list[str] = Query(default=[]),
+) -> Any:
+    """`ekos_impact` (RFC 0136 §3) — a hop-depth node list (`hops: [{hop, id, name, kind, via}]`),
+    not an edge-path trace; the console highlights nodes by hop and edges already present in the
+    loaded graph between two impacted nodes, rather than reconstructing a precise path."""
+    args: dict[str, Any] = {"id": object_id, "direction": direction, "max_hops": max_hops}
+    if kind:
+        args["kinds"] = kind
+    try:
+        return await mcp.call_tool("ekos_impact", args)
+    except McpToolError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{workspace_id}/graph/layout", response_model=LayoutOut)
+async def graph_layout(workspace_id: str, body: LayoutIn) -> LayoutOut:
+    """Server-side ForceAtlas2 (RFC 0136 §4) — for graphs past the client-side simulation
+    threshold. No MCP call: pure graph-structure input already held by the caller from its own
+    prior `/graph` fetch. `workspace_id` isn't used (layout has no per-workspace state), but kept
+    in the path for URL symmetry with every other route here and to leave room for a future
+    per-workspace cache namespace without a breaking route change."""
+    positions = compute_layout(body.nodes, body.edges)
+    return LayoutOut(positions=positions)

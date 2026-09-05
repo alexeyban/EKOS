@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "../api/client";
-import { colorFor, type GLink, type GNode } from "./graph-shared";
+import { api, apiPost } from "../api/client";
+import type { GraphCanvasHandle } from "./GraphCanvas";
+import { colorFor, SERVER_LAYOUT_THRESHOLD, type GLink, type GNode } from "./graph-shared";
+import { impactHopMap, neighborhoodToGraph, type ImpactOut, type NeighborhoodOut } from "./graph-v2";
 import { GraphTimeline, type TimelinePoint } from "./GraphTimeline";
 import { ObjectPanel } from "./ObjectPanel";
 
@@ -36,6 +38,14 @@ export function Graph() {
   const [fullscreen, setFullscreen] = useState(false);
   // RFC 0134 — null = live. Otherwise an RFC 3339 instant the graph is shown "as of".
   const [asOf, setAsOf] = useState<string | null>(null);
+  // RFC 0136 §2 — set replaces the normal graph fetch with just this object's BFS neighbourhood.
+  const [isolate, setIsolate] = useState<{ id: string; depth: number } | null>(null);
+  // RFC 0136 §3 — set overlays a hop-distance trace on whatever graph is currently on screen.
+  const [impact, setImpact] = useState<{
+    id: string;
+    direction: "dependents" | "dependencies";
+  } | null>(null);
+  const canvasRef = useRef<GraphCanvasHandle>(null);
 
   const expanded = focusKind !== null;
 
@@ -75,7 +85,33 @@ export function Graph() {
     enabled: q.trim().length > 1,
   });
 
+  // RFC 0136 §2 — a real sub-graph (objects + relationships), fetched instead of `/graph` when
+  // isolate mode is active. Depth is part of the key so dragging the slider refetches.
+  const neighborhood = useQuery({
+    queryKey: ["neighborhood", id, isolate?.id, isolate?.depth],
+    queryFn: () =>
+      api<NeighborhoodOut>(
+        `/workspaces/${id}/neighborhood/${isolate?.id}?depth=${isolate?.depth}`,
+      ),
+    enabled: isolate !== null,
+  });
+
+  // RFC 0136 §3 — a hop-distance node list, overlaid on whatever graph is already on screen.
+  const impactQuery = useQuery({
+    queryKey: ["impact", id, impact?.id, impact?.direction],
+    queryFn: () =>
+      api<ImpactOut>(
+        `/workspaces/${id}/impact/${impact?.id}?direction=${impact?.direction}&max_hops=5`,
+      ),
+    enabled: impact !== null,
+  });
+
   const { nodes, links } = useMemo(() => {
+    if (isolate) {
+      return neighborhood.data
+        ? neighborhoodToGraph(neighborhood.data)
+        : { nodes: [] as GNode[], links: [] as GLink[] };
+    }
     const g = graph.data;
     if (!g) return { nodes: [] as GNode[], links: [] as GLink[] };
     const isAgg = g.level === "aggregate";
@@ -98,7 +134,43 @@ export function Graph() {
       firstSeen: e.fs,
     }));
     return { nodes, links };
-  }, [graph.data]);
+  }, [graph.data, isolate, neighborhood.data]);
+
+  // RFC 0136 §4 — above the client-side simulation threshold, ask the console to precompute
+  // ForceAtlas2 positions server-side rather than let the browser's own force simulation choke.
+  const needsServerLayout = nodes.length > SERVER_LAYOUT_THRESHOLD;
+  const layout = useQuery({
+    queryKey: ["graph-layout", id, params.toString(), isolate?.id, isolate?.depth],
+    queryFn: () =>
+      apiPost<{ positions: Record<string, [number, number]> }>(
+        `/workspaces/${id}/graph/layout`,
+        {
+          nodes: nodes.map((n) => n.id),
+          edges: links.map((l) => [
+            typeof l.source === "string" ? l.source : (l.source as GNode).id,
+            typeof l.target === "string" ? l.target : (l.target as GNode).id,
+          ]),
+        },
+      ),
+    enabled: needsServerLayout,
+  });
+
+  // Pins nodes at their server-computed position (the same `fx`/`fy` fields the client-side
+  // simulation's own `onEngineStop` uses to freeze itself) — `GraphCanvas`/d3-force then skips
+  // simulating those nodes entirely, matching `react-force-graph`'s documented pre-positioned
+  // behavior. Falls back to the plain `nodes` (client-simulated) below the threshold or before
+  // the layout call resolves.
+  const positionedNodes = useMemo(() => {
+    if (!needsServerLayout || !layout.data) return nodes;
+    const positions = layout.data.positions;
+    return nodes.map((n) => {
+      const p = positions[n.id];
+      return p ? { ...n, fx: p[0], fy: p[1] } : n;
+    });
+  }, [nodes, needsServerLayout, layout.data]);
+
+  // RFC 0136 §3 — id -> hop distance, or null when impact mode isn't active.
+  const impactHops = impact && impactQuery.data ? impactHopMap(impactQuery.data) : null;
 
   // Node count visible at the current `asOf` — for the "viewing as of" banner (monotonic graph,
   // so this is just a filter, never a refetch).
@@ -127,30 +199,94 @@ export function Graph() {
     <div className={fullscreen ? "graph-page fs" : "graph-page"}>
       <div className="graph-toolbar">
         <span>
-          {expanded ? (
+          {isolate ? (
+            <button className="pill" onClick={() => setIsolate(null)}>
+              ↑ back to full graph
+            </button>
+          ) : expanded ? (
             <button className="pill" onClick={() => setFocusKind(null)}>
               ↑ overview
             </button>
           ) : (
             <span className="muted">click a bubble to drill in</span>
           )}
+          {impact && (
+            <button className="pill" onClick={() => setImpact(null)} style={{ marginLeft: "0.4rem" }}>
+              ✕ clear impact trace
+            </button>
+          )}
         </span>
-        <button className="pill" onClick={() => setFullscreen((f) => !f)}>
-          {fullscreen ? "✕ exit fullscreen" : "⛶ fullscreen"}
-        </button>
+        <span>
+          <button
+            className="pill"
+            onClick={() => canvasRef.current?.exportPng()}
+            title="save the current view as a PNG"
+          >
+            ⬇ PNG
+          </button>
+          <button
+            className="pill"
+            onClick={() => canvasRef.current?.exportGltf()}
+            title="save the current view as a glTF model"
+            style={{ marginLeft: "0.4rem" }}
+          >
+            ⬇ glTF
+          </button>
+          <button
+            className="pill"
+            onClick={() => setFullscreen((f) => !f)}
+            style={{ marginLeft: "0.4rem" }}
+          >
+            {fullscreen ? "✕ exit fullscreen" : "⛶ fullscreen"}
+          </button>
+        </span>
       </div>
 
       <div className="graph-layout">
         <aside className="graph-side">
-          <strong>{expanded ? `Objects · focus: ${focusKind}` : "Overview — by kind"}</strong>
-          {graph.data?.truncated?.nodes && (
+          <strong>
+            {isolate
+              ? `Isolated neighbourhood (depth ${isolate.depth})`
+              : expanded
+                ? `Objects · focus: ${focusKind}`
+                : "Overview — by kind"}
+          </strong>
+          {impact && (
+            <p className="muted">
+              impact trace: {impact.direction} of <code>{impact.id.slice(0, 8)}…</code>
+              {!expanded && !isolate && (
+                <> — switch to object-level view (or isolate this object) to see it highlighted</>
+              )}
+            </p>
+          )}
+          {needsServerLayout && (
+            <p className="muted">
+              {nodes.length} nodes — server-computed layout{" "}
+              {layout.isLoading ? "(computing…)" : "(cached)"}
+            </p>
+          )}
+          {graph.data?.truncated?.nodes && !isolate && (
             <p className="warn-line">
               showing the {graph.data.truncated.node_limit} most-connected of{" "}
               {graph.data.counts.objects_after_filter ?? "?"} — raise min-degree to thin it
             </p>
           )}
 
-          {expanded && (
+          {isolate && (
+            <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
+              neighbourhood depth: {isolate.depth}
+              <input
+                type="range"
+                min={1}
+                max={3}
+                value={isolate.depth}
+                onChange={(e) => setIsolate({ id: isolate.id, depth: Number(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+            </label>
+          )}
+
+          {expanded && !isolate && (
             <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
               min degree: {minDegree}
               <input
@@ -164,20 +300,25 @@ export function Graph() {
             </label>
           )}
 
-          <p className="muted" style={{ marginTop: "0.75rem" }}>
-            relationship kinds
-          </p>
-          {(graph.data && graph.data.rel_kind_index.length ? graph.data.rel_kind_index : ALL_RELS).map(
-            (rk) => (
-              <label key={rk} className="flt">
-                <input
-                  type="checkbox"
-                  checked={!excludedRels.has(rk)}
-                  onChange={(e) => toggleRel(rk, e.target.checked)}
-                />{" "}
-                {rk}
-              </label>
-            ),
+          {!isolate && (
+            <>
+              <p className="muted" style={{ marginTop: "0.75rem" }}>
+                relationship kinds
+              </p>
+              {(graph.data && graph.data.rel_kind_index.length
+                ? graph.data.rel_kind_index
+                : ALL_RELS
+              ).map((rk) => (
+                <label key={rk} className="flt">
+                  <input
+                    type="checkbox"
+                    checked={!excludedRels.has(rk)}
+                    onChange={(e) => toggleRel(rk, e.target.checked)}
+                  />{" "}
+                  {rk}
+                </label>
+              ))}
+            </>
           )}
 
           <p className="muted" style={{ marginTop: "0.75rem" }}>
@@ -199,49 +340,62 @@ export function Graph() {
             ))}
           </ul>
 
-          <p className="muted" style={{ marginTop: "0.75rem" }}>
-            {expanded ? "focus a kind" : "click a bubble (or a name) to drill in"}
-          </p>
-          <ul className="kinds">
-            {overviewNodes.map((n) => (
-              <li key={n.id}>
-                <button
-                  className="linkish"
-                  onClick={() => setFocusKind(n.n ?? null)}
-                  style={{ color: colorFor(n.k ?? 0) }}
-                >
-                  {n.n}
-                </button>{" "}
-                <span className="muted">{n.count}</span>
-              </li>
-            ))}
-            {expanded &&
-              [...new Set(nodes.map((n) => n.kind))].sort().map((k) => (
-                <li key={k}>
-                  <button
-                    className="linkish"
-                    onClick={() => setFocusKind(k)}
-                    style={{ fontWeight: k === focusKind ? 700 : 400 }}
-                  >
-                    {k}
-                  </button>
-                </li>
-              ))}
-          </ul>
+          {!isolate && (
+            <>
+              <p className="muted" style={{ marginTop: "0.75rem" }}>
+                {expanded ? "focus a kind" : "click a bubble (or a name) to drill in"}
+              </p>
+              <ul className="kinds">
+                {overviewNodes.map((n) => (
+                  <li key={n.id}>
+                    <button
+                      className="linkish"
+                      onClick={() => setFocusKind(n.n ?? null)}
+                      style={{ color: colorFor(n.k ?? 0) }}
+                    >
+                      {n.n}
+                    </button>{" "}
+                    <span className="muted">{n.count}</span>
+                  </li>
+                ))}
+                {expanded &&
+                  [...new Set(nodes.map((n) => n.kind))].sort().map((k) => (
+                    <li key={k}>
+                      <button
+                        className="linkish"
+                        onClick={() => setFocusKind(k)}
+                        style={{ fontWeight: k === focusKind ? 700 : 400 }}
+                      >
+                        {k}
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </>
+          )}
         </aside>
 
         <div className="graph-canvas">
-          {graph.isError && <p className="err">{String(graph.error)}</p>}
-          {graph.isLoading && <p className="muted">loading graph…</p>}
-          {graph.data && (
+          {(isolate ? neighborhood.isError : graph.isError) && (
+            <p className="err">{String(isolate ? neighborhood.error : graph.error)}</p>
+          )}
+          {(isolate ? neighborhood.isLoading : graph.isLoading) && (
+            <p className="muted">{isolate ? "loading neighbourhood…" : "loading graph…"}</p>
+          )}
+          {impact?.id && impactQuery.isError && (
+            <p className="err">impact trace failed: {String(impactQuery.error)}</p>
+          )}
+          {nodes.length > 0 && (
             <Suspense fallback={<p className="muted">loading renderer…</p>}>
               <GraphCanvas
-                nodes={nodes}
+                ref={canvasRef}
+                nodes={positionedNodes}
                 links={links}
                 focusId={focusId}
                 selectedId={selectedId}
-                dimKind={expanded ? focusKind : null}
-                asOf={asOf}
+                dimKind={!isolate && expanded ? focusKind : null}
+                asOf={isolate ? null : asOf}
+                impactHops={impactHops}
                 onNodeClick={(n) => {
                   if (n.isAggregate) setFocusKind(n.label);
                   else {
@@ -253,7 +407,7 @@ export function Graph() {
             </Suspense>
           )}
 
-          {asOf && (
+          {asOf && !isolate && (
             <div className="graph-asof-banner">
               viewing as of <strong>{asOf.slice(0, 10)}</strong> · {visibleCount} of {nodes.length}{" "}
               nodes
@@ -263,7 +417,7 @@ export function Graph() {
             </div>
           )}
 
-          {graph.data && timeline.data && (
+          {!isolate && graph.data && timeline.data && (
             <GraphTimeline points={timeline.data.points} value={asOf} onChange={setAsOf} />
           )}
         </div>
@@ -272,9 +426,14 @@ export function Graph() {
           <ObjectPanel
             workspace={id}
             objectId={selectedId}
-            asOf={asOf}
+            asOf={isolate ? null : asOf}
             onClose={() => setSelectedId(null)}
             onGoto={gotoObject}
+            onIsolate={(oid) => {
+              setImpact(null);
+              setIsolate({ id: oid, depth: 1 });
+            }}
+            onImpact={(oid, direction) => setImpact({ id: oid, direction })}
           />
         )}
       </div>

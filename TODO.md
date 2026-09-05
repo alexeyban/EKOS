@@ -4682,13 +4682,28 @@ are excluded — see the full exclusion list in the planning history if needed.
         fetch, **frozen layout** (`onEngineStop` pins `fx`/`fy`), "viewing as of" banner, panel
         `as_of`. Known limit: only as deep as the ledger's retained history — flat on a
         wiped-and-rebuilt workspace (RFC §7). 78/78 pytest.
-      - [ ] **Next increments (RFC 0136, reassigned 2026-09-04 — 0135 was claimed by the
-        core-provenance-and-determinism-foundations RFC instead):** Phase 6 remainder (graph v2 —
-        neighbourhood isolation,
-        impact mode, server-side layout, PNG/glTF export), Phase 7 (hardening). Deferred within R1:
-        true streaming ndjson, the distributed `evidence_count` RPC. Deferred within 0134:
-        per-commit (sub-day) checkpoint ticks, source/world-time slider axis, deep-linking
-        `?as_of=&focus=`.
+      - [x] **RFC 0136 — Phase 6 remainder (graph v2), `devlog_164` (2026-09-05).** Neighbourhood
+        isolation (`GET /workspaces/{id}/neighborhood/{object_id}`, proxying the existing,
+        unmodified `ekos_neighborhood` MCP tool — a real sub-graph, both nodes *and* edges, not
+        just an id list), impact mode (`GET /workspaces/{id}/impact/{object_id}`, proxying
+        `ekos_impact`; renders as hop-distance node coloring + highlighting already-loaded edges
+        between two impacted nodes, since `ekos_impact` returns hop-depth nodes not an edge path —
+        see the RFC's own §3 for why precise edge-path attribution needs a new Rust primitive,
+        deliberately not built here), server-side ForceAtlas2 layout (`POST
+        /workspaces/{id}/graph/layout` — `networkx` + `fa2_modified`, the real Python equivalent
+        of RFC 0127's "graphology + ForceAtlas2" line, which named a JS-only library; `lru_cache`
+        keyed on graph structure), and PNG/glTF export (entirely client-side — canvas
+        `toBlob`/a hand-built minimal valid glTF 2.0 document, no backend involvement). **A real
+        scope finding, not assumed going in: zero Rust-side changes** — every piece is `web/api` +
+        `web/ui` only. 20 new Python tests (8 pure-function layout unit tests, 8 route unit tests
+        via the existing `RecordingMcp` fake, 4 live tests against this repo's own compiled
+        `.ekos/`); `tsc -b --noEmit` + `vite build` clean (this project's only frontend gate).
+        **Not visually verified in a real browser** — no browser tooling available this session;
+        verified instead via full backend test coverage, strict typecheck, a clean production
+        build, and confirming Vite's dev server serves every new module without a transform error.
+      - [ ] **Phase 7 (hardening).** Deferred within R1: true streaming ndjson, the distributed
+        `evidence_count` RPC. Deferred within 0134: per-commit (sub-day) checkpoint ticks,
+        source/world-time slider axis, deep-linking `?as_of=&focus=`.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`

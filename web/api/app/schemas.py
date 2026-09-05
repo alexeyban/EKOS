@@ -89,6 +89,18 @@ class QueryStats(BaseModel):
     p95_ms: float
 
 
+class LayoutIn(BaseModel):
+    """RFC 0136 §4 — ids only. The console already has full node/edge objects from its own prior
+    `/graph` call; there is no reason to round-trip them."""
+
+    nodes: list[str]
+    edges: list[tuple[str, str]]
+
+
+class LayoutOut(BaseModel):
+    positions: dict[str, tuple[float, float]]
+
+
 class GraphOut(BaseModel):
     """Pass-through of a RFC 0127 R1 `GraphExport`. Kept permissive on purpose.
 

@@ -93,6 +93,47 @@ def test_object_state_accepts_as_of(client: TestClient) -> None:
     assert r.status_code == 200, r.text
 
 
+def test_neighborhood_returns_a_real_subgraph(client: TestClient) -> None:
+    hit = client.get("/api/workspaces/s/search?q=ledger&limit=1", headers=AUTH).json()
+    oid = hit["matches"][0]["id"]
+    r = client.get(f"/api/workspaces/s/neighborhood/{oid}?depth=1", headers=AUTH)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert any(o["id"] == oid for o in body["objects"])
+
+
+def test_impact_returns_real_hop_data(client: TestClient) -> None:
+    hit = client.get("/api/workspaces/s/search?q=ledger&limit=1", headers=AUTH).json()
+    oid = hit["matches"][0]["id"]
+    r = client.get(f"/api/workspaces/s/impact/{oid}?direction=dependents&max_hops=3", headers=AUTH)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["target"]["id"] == oid
+    assert body["direction"] == "dependents"
+    assert "hops" in body
+
+
+def test_impact_404s_for_a_bogus_id(client: TestClient) -> None:
+    r = client.get("/api/workspaces/s/impact/00000000-0000-0000-0000-000000000000", headers=AUTH)
+    assert r.status_code == 404
+
+
+def test_graph_layout_positions_a_real_object_level_graph(client: TestClient) -> None:
+    graph = client.get(
+        "/api/workspaces/s/graph?level=object&kind=RustSymbol&max_nodes=100", headers=AUTH
+    ).json()
+    node_ids = [n["id"] for n in graph["nodes"]]
+    edges = [[node_ids[e["s"]], node_ids[e["t"]]] for e in graph["edges"]]
+    r = client.post(
+        "/api/workspaces/s/graph/layout",
+        headers=AUTH,
+        json={"nodes": node_ids, "edges": edges},
+    )
+    assert r.status_code == 200, r.text
+    positions = r.json()["positions"]
+    assert set(positions.keys()) == set(node_ids)
+
+
 def test_large_object_level_payload_does_not_overflow_the_ndjson_reader(client: TestClient) -> None:
     # >64 KiB on one NDJSON line — the MCP client's StreamReader limit must be raised past the
     # asyncio default or `readline()` raises "Separator is not found".
