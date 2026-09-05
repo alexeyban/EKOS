@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     #   EKOS_CONSOLE_WORKSPACES_JSON='[{"id":"self","name":"EKOS","path":"/repo"}]'
     workspaces_json: str = "[]"
 
+    # Optional containment for `POST /workspaces` (SonarCloud pythonsecurity:S2083 hardening):
+    # when set, a registered workspace's resolved `path` must be this directory or a descendant
+    # of it — closing off a `write`-role caller pointing the registry at an arbitrary host path
+    # that happens to contain `ekos.toml` + `.ekos/`. Unset (default) preserves the original
+    # unrestricted behavior existing Compose setups rely on (e.g. registering "/repo" directly).
+    workspaces_root: str = Field(default="", validation_alias="EKOS_CONSOLE_WORKSPACES_ROOT")
+
     # Origin the Vite dev server runs on, allowed through CORS.
     dev_origin: str = "http://localhost:5173"
 

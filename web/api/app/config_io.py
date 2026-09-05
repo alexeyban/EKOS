@@ -53,7 +53,16 @@ def parse(raw: str) -> tomlkit.TOMLDocument:
 
 
 def config_path(workspace_path: str) -> Path:
-    return Path(workspace_path) / "ekos.toml"
+    """Resolve to a real, canonical path and verify it still lands directly inside
+    `workspace_path` (SonarCloud pythonsecurity:S2083 hardening). This also rejects a `ekos.toml`
+    that is itself a symlink pointing outside the workspace — `resolve()` follows it, so the
+    parent-directory check catches the escape.
+    """
+    root = Path(workspace_path).resolve()
+    path = (root / "ekos.toml").resolve()
+    if path.parent != root:
+        raise ConfigError(f"{path} escapes workspace root {root}")
+    return path
 
 
 def read_config(workspace_path: str) -> tuple[str, ObserveView]:

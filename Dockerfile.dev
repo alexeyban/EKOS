@@ -24,4 +24,4 @@ WORKDIR /workspace
 # this image runs from there, matching every CI step's own `working-directory: ekos`.
 WORKDIR /workspace/ekos
 
-CMD ["cargo", "build", "--workspace"]
+CMD ["cargo", "build", "--workspace", "--locked"]

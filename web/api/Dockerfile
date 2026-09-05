@@ -6,8 +6,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --no-build
 COPY app ./app
+
+# `/app` stays writable by this user: `.ekos-web/` (SQLite registry + run logs, app/models.py)
+# is created under the CWD at runtime and isn't a Compose volume, so it lands here.
+RUN useradd --create-home --uid 1000 ekos && chown -R ekos:ekos /app
+USER ekos
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000

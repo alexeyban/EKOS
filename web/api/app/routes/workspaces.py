@@ -10,6 +10,7 @@ from .. import models
 from ..auth import require_role
 from ..deps import get_supervisor
 from ..schemas import ServerStatus, WorkspaceCreate, WorkspaceOut
+from ..settings import Settings, get_settings
 from ..supervisor import McpSupervisor
 
 router = APIRouter(
@@ -39,11 +40,19 @@ async def list_workspaces(
 async def register_workspace(
     body: WorkspaceCreate,
     supervisor: McpSupervisor = Depends(get_supervisor),
+    settings: Settings = Depends(get_settings),
 ) -> WorkspaceOut:
     if models.get_workspace(body.id) is not None:
         raise HTTPException(status_code=409, detail=f"workspace {body.id!r} already registered")
 
     root = Path(body.path).expanduser().resolve()
+    if settings.workspaces_root:
+        allowed_root = Path(settings.workspaces_root).expanduser().resolve()
+        if root != allowed_root and allowed_root not in root.parents:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{root} is outside the configured workspaces root {allowed_root}",
+            )
     if not (root / "ekos.toml").is_file():
         raise HTTPException(status_code=400, detail=f"{root} has no ekos.toml")
     if not (root / ".ekos").is_dir():

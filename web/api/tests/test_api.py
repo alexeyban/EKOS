@@ -68,6 +68,38 @@ def test_register_validates_the_path(client: TestClient, tmp_path: Path) -> None
     assert no_ekos_dir.status_code == 400
 
 
+def test_register_enforces_workspaces_root_when_configured(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient, tmp_path: Path
+) -> None:
+    """SonarCloud pythonsecurity:S2083 hardening: with EKOS_CONSOLE_WORKSPACES_ROOT set, a
+    registration path outside it is rejected even though it otherwise looks like a valid
+    workspace (has ekos.toml + .ekos/)."""
+    allowed_root = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    for root in (allowed_root, outside):
+        root.mkdir()
+        (root / "ekos.toml").write_text("[observe]\npaths = []\n")
+        (root / ".ekos").mkdir()
+
+    monkeypatch.setenv("EKOS_CONSOLE_WORKSPACES_ROOT", str(allowed_root))
+    import app.settings as settings_mod
+
+    settings_mod._settings = None  # the running app already resolved Settings() once at startup
+
+    rejected = client.post(
+        "/api/workspaces", headers=WAUTH, json={"id": "x", "name": "X", "path": str(outside)}
+    )
+    assert rejected.status_code == 400
+    assert "workspaces root" in rejected.json()["detail"]
+
+    accepted = client.post(
+        "/api/workspaces",
+        headers=WAUTH,
+        json={"id": "y", "name": "Y", "path": str(allowed_root)},
+    )
+    assert accepted.status_code == 201
+
+
 def test_register_list_and_delete_roundtrip(client: TestClient, fake_workspace: Path) -> None:
     created = client.post(
         "/api/workspaces",

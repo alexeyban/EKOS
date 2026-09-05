@@ -29,6 +29,19 @@ def test_read_config_returns_raw_and_observe(tmp_path: Path) -> None:
     assert observe.ignore_patterns == ["target", ".git"]
 
 
+def test_config_path_rejects_a_symlinked_ekos_toml_escaping_the_workspace(tmp_path: Path) -> None:
+    """SonarCloud pythonsecurity:S2083 hardening: `ekos.toml` resolving outside the workspace
+    root (e.g. a symlink) is rejected rather than silently followed."""
+    outside = tmp_path / "outside.toml"
+    outside.write_text(SAMPLE)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "ekos.toml").symlink_to(outside)
+
+    with pytest.raises(config_io.ConfigError, match="escapes workspace root"):
+        config_io.config_path(str(workspace))
+
+
 def test_diff_observe_detects_narrowing() -> None:
     after = SAMPLE.replace('["crates", "docs"]', '["crates"]').replace(
         '"target", ".git"', '"target"'
