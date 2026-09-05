@@ -4867,3 +4867,16 @@ are excluded — see the full exclusion list in the planning history if needed.
     hallucinated-answer scenarios in the adversarial set (the small local model fabricating detail
     about a nonexistent entity instead of declining) and correctly passed the other 3, a genuine
     finding the harness exists to surface, not a bug in it.
+  - [x] **SonarCloud scan regression — found and fixed, `devlog_167` (2026-09-05, commit
+    `7942fe2`).** The prior session's `sonar.tests` fix (`3756a9b`) left `sonar.sources` unset;
+    confirmed via `-X` that the scanner does NOT default it to `.` once `sonar.tests` is set,
+    dropping indexing to the 24 files matching `sonar.test.inclusions` and nothing else (0 of 237
+    `.rs`, 0 of 26 non-test `web/api/app/*.py`, 0 of 22 non-test `web/ui/src/**/*.tsx`) — the scan
+    still "succeeded" and reported a clean Quality Gate, because ~0 analyzed source has ~0 issues.
+    Fixed with `sonar.sources=.`: indexing 24 → 2,941 files, `ncloc` 81k/`files` 294/`coverage`
+    86%+ appeared for the first time (previously absent from the API, not zero — never computed).
+    Real analysis then surfaced a genuine `new_coverage` gate failure (73.0% vs. 80%), 205 of 251
+    uncovered new-code lines traced to RFC 0138's own `ekos-evals` crate never getting the
+    `agent_runner`/`MockLlmProvider` test its own RFC promised — written for real this session,
+    `new_coverage` → 84.4%, Quality Gate OK. Verified on a fully-committed, clean-blame rescan:
+    `alert_status: OK`, reliability/security/maintainability all A, 0 bugs/vulnerabilities/hotspots.
