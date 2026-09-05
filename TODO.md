@@ -4924,3 +4924,27 @@ are excluded — see the full exclusion list in the planning history if needed.
     in this environment for an actual screenshot/click-through — named as a real, not glossed-over,
     gap versus the ideal verification standard. Also added SonarCloud Maintainability/Reliability/
     Security/Quality-Gate badges to the top of the root `README.md`.
+  - [ ] **Real finding from `ekos eval run`, not a harness bug: current agent answer quality is
+    weak — needs improvement, not just measurement.** The most complete run so far
+    (`evals/reports/20260905T144932Z-ekos-full.json`, the pre-Phase-2 32-scenario suite against
+    `ollama llama3:latest`, the model this workspace's `ekos.toml` is configured with) came back
+    `Status: FAIL` against every gate: Answer correctness 45.8% (gate ≥85%), Evidence groundedness
+    77.8% (gate ≥90%), Completeness 43.1% (gate ≥80%), Hallucination rate 12.5% (gate ≤5%). A
+    smaller architecture-only rerun after RFC 0138 Phase 2 scored even lower (Answer correctness
+    11.1%, 0/3 passed) — small-sample noise, but consistent with the same weakness, not a
+    contradiction. This is the harness doing exactly its job (RFC 0138's whole point), not
+    something to silence — the underlying gap is real. **Not yet done**: a full run of the current
+    101-scenario, 7-category `ekos-full` dataset (only the older 32-scenario version has ever been
+    run end-to-end) to get an honest current baseline; then close the gap itself — candidates,
+    roughly in order of expected leverage: (1) A/B a stronger provider via `ekos eval run --agent
+    claude` (needs `ANTHROPIC_API_KEY`, currently unset in this environment) or `--agent openai`
+    against the same suite, to separate "local-model-specific weakness" from "prompt/retrieval
+    weakness that would hurt any provider"; (2) inspect low-scoring scenarios' actual answers in
+    the saved report JSON (`scenarios[].answer_score`/`error`) for a real failure-mode pattern
+    (wrong-but-plausible answers vs. right-fact-wrong-phrasing the keyword matcher is just too
+    strict for) rather than guessing; (3) only after that diagnosis, consider prompt tuning in
+    `ai.rs`'s `REASON_SYSTEM_PROMPT`/`DEFAULT_SYSTEM_PROMPT` or retrieval-side changes (`AiRuntime
+    Config`'s `max_matches`/`neighborhood_depth`/`max_context_chars`) — not a blind swap, since
+    RFC 0138's evaluators are deliberately strict keyword/id matching (RFC 0138 Non-goals: no LLM
+    judge), so part of any low score may legitimately be matcher strictness rather than a bad
+    answer; distinguishing the two is step (2)'s job before touching anything in step (3).
