@@ -124,11 +124,11 @@ fn all_category_files(datasets_dir: &Path) -> Result<Vec<std::path::PathBuf>, Sc
             path: datasets_dir.display().to_string(),
             source,
         })?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| {
-            p.extension().and_then(|e| e.to_str()) == Some("yaml")
-                && p.file_name().and_then(|n| n.to_str()) != Some("manifest.yaml")
+            p.extension().and_then(std::ffi::OsStr::to_str) == Some("yaml")
+                && p.file_name().and_then(std::ffi::OsStr::to_str) != Some("manifest.yaml")
         })
         .collect();
     files.sort();
