@@ -23,6 +23,7 @@ web/api/.venv/
 web/ui/node_modules/
 web/ui/dist/
 web/ui/*.tsbuildinfo
+web/ui/coverage/
 
 # Web console per-workspace runtime state (RFC 0129/0130/0131) — written into a workspace dir
 .ekos-web/
@@ -34,3 +35,5 @@ __pycache__/
 
 # SonarCloud scanner working directory (local scanner runs) — not source
 .scannerwork/
+web/api/coverage.xml
+web/api/.coverage

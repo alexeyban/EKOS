@@ -406,7 +406,9 @@ export function Graph() {
                   </li>
                 ))}
                 {expanded &&
-                  [...new Set(nodes.map((n) => n.kind))].sort().map((k) => (
+                  [...new Set(nodes.map((n) => n.kind))]
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((k) => (
                     <li key={k}>
                       <button
                         className="linkish"

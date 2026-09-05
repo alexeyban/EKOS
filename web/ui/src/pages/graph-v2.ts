@@ -35,7 +35,7 @@ export interface ImpactOut {
 /// `kind_index` table here the way `/graph` has one, since this is a real sub-graph, not a
 /// pre-indexed export.
 export function neighborhoodToGraph(data: NeighborhoodOut): { nodes: GNode[]; links: GLink[] } {
-  const kinds = [...new Set(data.objects.map((o) => o.kind))].sort();
+  const kinds = [...new Set(data.objects.map((o) => o.kind))].sort((a, b) => a.localeCompare(b));
   const kindIdx = new Map(kinds.map((k, i) => [k, i]));
   const nodes: GNode[] = data.objects.map((o) => ({
     id: o.id,

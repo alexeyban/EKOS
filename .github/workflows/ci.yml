@@ -145,6 +145,10 @@ jobs:
         # normal optionalDependencies package, not the script, so the build still succeeds.
         run: npm ci --ignore-scripts
 
+      - name: Test UI
+        working-directory: web/ui
+        run: npm test
+
       - name: Typecheck + build UI
         working-directory: web/ui
         run: |
