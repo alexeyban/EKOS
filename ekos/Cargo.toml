@@ -23,6 +23,7 @@ members = [
     "crates/docs-gen",
     "crates/dbt-gen",
     "crates/cli",
+    "crates/evals",
     "crates/demo-server",
     "plugins/file",
     "plugins/localdocs",
@@ -85,6 +86,7 @@ ekos-ekl       = { path = "crates/ekl" }
 ekos-marketing = { path = "crates/marketing" }
 ekos-docs-gen  = { path = "crates/docs-gen" }
 ekos-dbt-gen   = { path = "crates/dbt-gen" }
+ekos-evals     = { path = "crates/evals" }
 ekos           = { path = "crates/cli" }
 
 # Async

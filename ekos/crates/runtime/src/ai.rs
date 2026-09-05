@@ -82,6 +82,15 @@ pub struct AiAnswer {
     pub answer: String,
     pub evidence_refs: Vec<KirId>,
     pub diagnostics: Vec<Diagnostic>,
+    pub token_usage: TokenUsage,
+}
+
+/// Token accounting for one LLM completion call (RFC 0138), lifted straight from the provider's
+/// own [`LlmResponse`] — no separate counting logic, so it is exactly what the provider billed.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct TokenUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
 }
 
 #[derive(Deserialize)]
@@ -190,6 +199,10 @@ impl<'a> AiRuntime<'a> {
             answer,
             evidence_refs,
             diagnostics,
+            token_usage: TokenUsage {
+                input_tokens: resp.input_tokens,
+                output_tokens: resp.output_tokens,
+            },
         })
     }
 
@@ -247,6 +260,10 @@ impl<'a> AiRuntime<'a> {
             answer,
             evidence_refs,
             diagnostics,
+            token_usage: TokenUsage {
+                input_tokens: resp.input_tokens,
+                output_tokens: resp.output_tokens,
+            },
         })
     }
 
@@ -304,6 +321,10 @@ impl<'a> AiRuntime<'a> {
             answer,
             evidence_refs,
             diagnostics,
+            token_usage: TokenUsage {
+                input_tokens: resp.input_tokens,
+                output_tokens: resp.output_tokens,
+            },
         })
     }
 

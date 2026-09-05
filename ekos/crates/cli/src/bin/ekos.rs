@@ -216,6 +216,40 @@ enum Commands {
         #[arg(long)]
         ledger: Option<PathBuf>,
     },
+    /// End-to-end agent/answer evaluation harness (RFC 0138)
+    Eval {
+        #[command(subcommand)]
+        subcommand: EvalCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum EvalCommands {
+    /// Run a scenario dataset against a real, already-built workspace and print the report
+    Run {
+        /// Named dataset from evals/datasets/manifest.yaml, or a bare category file stem
+        /// (e.g. "architecture"). Omit to run every *.yaml in --datasets-dir, named
+        /// "ekos-<total scenario count>".
+        #[arg(long)]
+        dataset: Option<String>,
+        /// Default: <cwd>/evals/datasets
+        #[arg(long, value_name = "DIR")]
+        datasets_dir: Option<PathBuf>,
+        /// Only run scenarios from this dataset file's `category:`
+        #[arg(long)]
+        category: Option<String>,
+        /// Override config.llm.provider for this run only: claude|ollama|openai
+        #[arg(long)]
+        agent: Option<String>,
+        /// Grade only the first N matching scenarios
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+        /// Save the JSON report here instead of evals/reports/<timestamp>-<dataset>.json
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -620,6 +654,9 @@ fn emits_machine_output(command: &Commands) -> bool {
             ConfigCommands::Validate { json, .. } => *json,
             ConfigCommands::PreviewScan { json, .. } => *json,
         },
+        Commands::Eval { subcommand } => match subcommand {
+            EvalCommands::Run { json, .. } => *json,
+        },
         _ => false,
     }
 }
@@ -906,6 +943,28 @@ async fn main() -> Result<()> {
             round,
             ledger,
         } => ekos::commands::replay::run(&config, &cwd, &scenario, round, ledger),
+        Commands::Eval { subcommand } => match subcommand {
+            EvalCommands::Run {
+                dataset,
+                datasets_dir,
+                category,
+                agent,
+                limit,
+                json,
+                output,
+            } => {
+                let opts = ekos::commands::eval::EvalRunOpts {
+                    dataset: dataset.as_deref(),
+                    datasets_dir,
+                    category: category.as_deref(),
+                    agent: agent.as_deref(),
+                    limit,
+                    json,
+                    output,
+                };
+                ekos::commands::eval::run(&config, &cwd, opts).await
+            }
+        },
     }
 }
 

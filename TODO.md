@@ -4843,3 +4843,27 @@ are excluded — see the full exclusion list in the planning history if needed.
     question about?") and the model answered correctly, proof the real conversation history was
     used, not just plumbed through unused code; the session file round-tripped on disk as two clean
     question/answer pairs with no leaked retrieval context or citation JSON.
+  - [x] **RFC E — RFC 0138, `devlog_166` (2026-09-05).** End-to-end agent/answer evaluation
+    harness — distinct from RFC 0126's narrower, CI-gated, LLM-free retrieval-only harness. New
+    `ekos-evals` crate (`runners::{agent_runner, retrieval_runner}` +
+    `evaluators::{answer, evidence, retrieval, completeness, groundedness, trajectory}` + `report`
+    aggregation), new `ekos eval run --dataset <name> [--agent claude|ollama|openai] [--category]
+    [--limit] [--json] [--output]` CLI subcommand, and `evals/` at the repo root (`datasets/*.yaml`
+    — architecture/code/lineage/security/adversarial, 32 real scenarios verified against this
+    repo's own ledger before being written down; `reports/` for generated JSON). `AiAnswer` gains
+    `token_usage: TokenUsage` (lifted from the existing `LlmResponse`, previously discarded).
+    Retrieval evaluator reuses `ekos_runtime::retrieval_eval::recall_at_k` (RFC 0126) rather than
+    reimplementing rank-metric math. Every score is `Option<f32>`/`Option<f64>` — `None` means not
+    applicable, excluded from that metric's average, never silently scored as a pass. Deliberately
+    **not wired into CI** (real LLM calls against a real workspace; see the RFC's Non-goals) and
+    **not an LLM-judge** (every score is deterministic keyword/id matching, consistent with the
+    project's existing no-fabrication ethos). 26 new unit tests in `ekos-evals` (pure evaluator/
+    schema/report logic, no LLM), full workspace gate clean (`build`/`test`/`clippy -D warnings`/
+    `fmt --check`), `tests/integration` 5/5 unaffected. **Live-verified against this repo's own
+    real ~5,533-object self-analysis ledger with the real local `llama3:latest` Ollama provider
+    already configured in `ekos.toml`**: a real 32-scenario run (`Answer correctness 45.8%`,
+    `Evidence groundedness 77.8%`, `Recall@10 75.0%`, `Hallucination rate 12.5%`, `Status: FAIL`)
+    — inspecting the saved JSON report confirmed the harness correctly caught 4 real
+    hallucinated-answer scenarios in the adversarial set (the small local model fabricating detail
+    about a nonexistent entity instead of declining) and correctly passed the other 3, a genuine
+    finding the harness exists to surface, not a bug in it.

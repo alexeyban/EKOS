@@ -444,6 +444,56 @@ note. The MCP `ekos_search` tool takes the same `mode` and reports `arms_run`. P
 timings (`arm_timings`, RFC 0126) ride along on the `ekos_search` / `ekos_retrieve` results, into
 `.ekos/query-log.jsonl`, and in `ekos query find --explain`.
 
+### Eval harness (RFC 0138, on-demand)
+
+`ekos eval run` grades whole `ekos ask` answers against a checked-in scenario suite
+(`evals/datasets/*.yaml` — architecture, code, lineage, security, adversarial), not just retrieval
+ranking (that's RFC 0126's separate, narrower, CI-gated `ekos_runtime::retrieval_eval`). Every
+score is deterministic keyword/id matching — no LLM judge: did the answer state the expected
+facts, cite real (non-hallucinated) evidence, cover what was asked, surface the right objects in
+the top-10, route to the right REASON planner query type, and — for the adversarial set — actually
+decline a question with no grounded answer instead of inventing one.
+
+```bash
+cd ekos
+cargo run -p ekos -- eval run --dataset ekos-full   # every category, "evals/" at the repo root
+cargo run -p ekos -- eval run --dataset architecture --agent ollama
+```
+
+```
+EKOS EVALUATION
+─────────────────────────────
+
+Dataset: ekos-full
+Agent: ollama (llama3:latest)
+Runtime: local
+
+Scenarios:                   32
+Passed:                      17
+Failed:                      15
+
+Answer correctness:       45.8%
+Evidence groundedness:    77.8%
+Completeness:             43.1%
+Recall@10:                 75.0%
+Hallucination rate:        12.5%
+
+Status: FAIL
+```
+
+That's a real run against this repo's own live ~5,500-object ledger with the local `llama3:latest`
+model already configured in this repo's `ekos.toml` — not a simulated example. It's also a real
+finding: a small local model correctly declines most nonexistent-entity questions but fabricates
+an answer on roughly a third of this suite's adversarial set, and its raw answer-correctness rate
+against short structural facts is weak — exactly the gap this harness exists to surface, not
+something the demo dataset was tuned to hide.
+
+Every run saves a timestamped JSON report to `evals/reports/` and exits non-zero when the
+aggregate gate (`ekos_evals::report::GateThresholds`) misses — deliberately **not wired into CI**
+(real LLM calls against a real workspace, not free/fast/deterministic enough for every PR yet).
+See `evals/README.md` for the scenario schema and `ekos/docs/rfcs/0138-eval-harness.md` for the
+full design.
+
 ### Hierarchical rollups (RFC 0044)
 
 Every other context-saving mechanism in EKOS (capped search results, hop-bounded graph walks) is

@@ -93,6 +93,7 @@
     <a href="#rollups">Hierarchical rollups</a>
     <a href="#mcp">AI agent access (MCP)</a>
     <a href="#ekl">Query language (EKL)</a>
+    <a href="#eval">Eval harness</a>
     <a href="#marketing">Marketing agent</a>
     <a href="#worldengine">World Engine simulation</a>
     <a href="#clickhouse">ClickHouse connector</a>
@@ -253,30 +254,37 @@
     <p class="lede" style="max-width:56rem;">A small purpose-built query language over the compiled ledger — <code class="mono">ekos ekl "FIND Object WHERE kind = 'Table' AND name CONTAINS 'order' ORDER BY name LIMIT 10"</code> — with point-in-time <code class="mono">AS OF &lt;timestamp&gt;</code> queries, <code class="mono">COUNT</code>/<code class="mono">GROUP BY</code> aggregation, and <code class="mono">SEMANTIC 'text' [LIMIT k]</code> — start from a ranked retrieval candidate set instead of a full scan, then filter/project/order it like any other <code class="mono">FIND Object</code> (mutually exclusive with <code class="mono">FROM</code> / <code class="mono">AS OF</code> / <code class="mono">COUNT</code>). Every result row carries the evidence it was derived from, the same as any other read path.<span class="rfc">RFC 0010 / 0096 / 0124</span></p>
   </section>
 
+  <!-- ═══════════════════════════════════════════════ EVAL HARNESS ═══ -->
+  <section class="cap" id="eval">
+    <div class="cap-num">12</div>
+    <h2>Eval harness</h2>
+    <p class="lede" style="max-width:56rem;"><code class="mono">ekos eval run --dataset ekos-full</code> grades whole <code class="mono">ekos ask</code> answers against a checked-in scenario suite (<code class="mono">evals/datasets/*.yaml</code> — architecture, code, lineage, security, adversarial), distinct from RFC 0126's narrower, CI-gated, LLM-free retrieval-ranking regression check. Every score is deterministic keyword/id matching, no LLM judge: did the answer state the expected facts, cite real (non-hallucinated) evidence, cover what was asked, surface the right objects in the top-10 (recall@10, reusing RFC 0126's rank-metric math), route to the right REASON planner query type, and — for the adversarial set — actually decline a question with no grounded answer instead of inventing one. Prints a report (Answer correctness / Evidence groundedness / Completeness / Recall@10 / Hallucination rate / token+latency stats / a PASS-FAIL gate), saves a timestamped JSON copy to <code class="mono">evals/reports/</code>, and supports <code class="mono">--agent claude|ollama|openai</code> to A/B a different provider than <code class="mono">ekos.toml</code>'s configured one for one run. Deliberately not wired into CI — real LLM calls against a real workspace, not yet fast/free/deterministic enough for every PR.<span class="rfc">RFC 0138</span></p>
+  </section>
+
   <!-- ═══════════════════════════════════════════════ MARKETING ═══ -->
   <section class="cap" id="marketing">
-    <div class="cap-num">12</div>
+    <div class="cap-num">13</div>
     <h2>Marketing agent</h2>
     <p class="lede" style="max-width:56rem;"><code class="mono">ekos marketing publish [devlog]</code> turns a <code class="mono">devlog_N.md</code> into a human-approved X (Twitter) release announcement: classifies the devlog's importance, drafts a tweet through the same <code class="mono">LlmProvider</code> used elsewhere, validates it, asks for Y/N/E approval, and publishes via a real OAuth 1.0a-signed API call — with a posted-history file preventing the same devlog from ever being posted twice. Off by default; requires explicit Twitter credentials and an explicit opt-in flag.<span class="rfc">RFC 0030</span></p>
   </section>
 
   <!-- ═══════════════════════════════════════════════ WORLD ENGINE ═══ -->
   <section class="cap" id="worldengine">
-    <div class="cap-num">13</div>
+    <div class="cap-num">14</div>
     <h2>World Engine simulation <span style="font-size:0.6em; color:var(--ink-soft); font-weight:500;">(experimental, opt-in)</span></h2>
     <p class="lede" style="max-width:56rem;">Auxiliary tooling built on the same ledger, kept deliberately separate from the compiler pipeline above: multi-agent scenarios with beliefs and goals, deterministic round-based decision-making with seed-reproducible conflict resolution, a <code class="mono">VirtualForum</code> (channels, replies, likes, follows, shares), a durable replayable event log, and real document ingestion into a scenario's starting world. <code class="mono">ekos simulate scenario.yaml</code> runs it; <code class="mono">ekos replay scenario.yaml</code> reads it back, read-only. Writes to a dedicated per-scenario ledger by default — never the real workspace ledger, since the ledger has no delete/tombstone mechanism and simulated agents/events are fictional.<span class="rfc">RFC 0047–0055</span></p>
   </section>
 
   <!-- ═══════════════════════════════════════════════ CLICKHOUSE ═══ -->
   <section class="cap" id="clickhouse">
-    <div class="cap-num">14</div>
+    <div class="cap-num">15</div>
     <h2>ClickHouse connector</h2>
     <p class="lede" style="max-width:56rem;">Two independent pieces. <strong>Compiled metadata</strong>: <code class="mono">ekos build</code>/<code class="mono">recover</code> observe a configured ClickHouse database's live schema over its stock HTTP interface and compile every table into a real, searchable, cross-system identity-resolvable <code class="mono">Table</code> object. <strong>Live NL-to-SQL</strong> (<code class="mono">ekos clickhouse ask "…"</code>): the one path in EKOS that intentionally crosses the "AI never touches raw systems directly" invariant — an LLM builds a ClickHouse <code class="mono">SELECT</code>, it's parsed and hard-rejected unless it's exactly one read-only statement, then run live, redacted, and returned, with every call recorded as an Evidence/Event pair for audit. The matching <code class="mono">ekos_clickhouse_query</code> MCP tool is off by default, gated behind an explicit <code class="mono">ekos.toml</code> opt-in.<span class="rfc">RFC 0056</span></p>
   </section>
 
   <!-- ═══════════════════════════════════════════════ EVIDENCE ═══ -->
   <section class="cap" id="evidence">
-    <div class="cap-num">15</div>
+    <div class="cap-num">16</div>
     <h2>Live, generated evidence: this repo, compiled by itself</h2>
     <p class="lede">Everything below this line is rendered straight from <code class="mono">ekos docs generate --layout curated</code> and <code class="mono">--layout solution-architect</code>'s own output, run against EKOS's real, currently-committed ledger — the same commands and output shape any other project gets. Nothing here is hand-typed.</p>
 

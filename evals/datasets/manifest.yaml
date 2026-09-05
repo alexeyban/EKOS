@@ -1,0 +1,16 @@
+# Named datasets `ekos eval run --dataset <name>` can resolve, mapping a short name to one or
+# more of the category files below (RFC 0138). `--dataset` can also be omitted entirely — the
+# runner then loads every *.yaml file here and names the run "ekos-<total scenario count>",
+# which is where the "ekos-100" style naming in the RFC's worked example comes from.
+version: 1
+datasets:
+  ekos-full:
+    files:
+      - architecture.yaml
+      - code.yaml
+      - lineage.yaml
+      - security.yaml
+      - adversarial.yaml
+  hallucination:
+    files:
+      - adversarial.yaml

@@ -1,0 +1,60 @@
+# RFC 0138 — architecture-shaped scenarios: what crate/module implements a given piece of the
+# compiler pipeline. Every fact and evidence path here was verified live against this repo's own
+# self-analysis ledger (`ekos query find`) before being written down — not invented.
+version: 1
+category: architecture
+scenarios:
+  - id: arch-001
+    question: "What crate implements the SQL DDL recovery analyzer?"
+    mode: reason
+    expected_facts:
+      - "sql_analyzer"
+    expected_evidence_contains:
+      - "sql_analyzer"
+    expected_query_type: conceptual
+    difficulty: easy
+
+  - id: arch-002
+    question: "AiRuntime"
+    mode: reason
+    expected_facts:
+      - "runtime"
+    expected_query_type: lookup
+    difficulty: easy
+
+  - id: arch-003
+    question: "what depends on the recovery crate"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: arch-004
+    question: "Which trait must every EKOS connector implement to observe an enterprise system?"
+    mode: reason
+    expected_facts:
+      - "Observer"
+    expected_evidence_contains:
+      - "observation-sdk"
+    difficulty: medium
+
+  - id: arch-005
+    question: "Is the EKOS Semantic Knowledge Ledger append-only, or can existing entries be modified in place?"
+    mode: reason
+    expected_facts:
+      - "append-only"
+    difficulty: easy
+
+  - id: arch-006
+    question: "What crate parses and interprets Enterprise Knowledge Language (EKL) queries?"
+    mode: reason
+    expected_facts:
+      - "ekl"
+    difficulty: medium
+
+  - id: arch-007
+    question: "recovery crate"
+    mode: retrieval
+    expected_objects:
+      - "ekos-recovery"
+      - "ekos/crates/recovery"
+    difficulty: easy

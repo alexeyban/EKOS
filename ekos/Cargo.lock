@@ -894,6 +894,7 @@ dependencies = [
  "ekos-distributed",
  "ekos-docs-gen",
  "ekos-ekl",
+ "ekos-evals",
  "ekos-identity",
  "ekos-kir",
  "ekos-ledger",
@@ -1102,6 +1103,24 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ekos-evals"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ekos-kir",
+ "ekos-ledger",
+ "ekos-recovery",
+ "ekos-runtime",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

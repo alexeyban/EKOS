@@ -1,0 +1,54 @@
+# RFC 0138 — code-level scenarios: real symbols, functions, and structs from this repo's own
+# compiled ledger (verified via `ekos query find` before being written down).
+version: 1
+category: code
+scenarios:
+  - id: code-001
+    question: "What function parses SQL DDL into structural form inside sql_analyzer?"
+    mode: reason
+    expected_facts:
+      - "parse_ddl_structural"
+    difficulty: medium
+
+  - id: code-002
+    question: "What function builds the LlmProvider used by ekos ask, choosing between Anthropic, OpenAI, and Ollama?"
+    mode: reason
+    expected_facts:
+      - "build_llm_provider"
+    difficulty: medium
+
+  - id: code-003
+    question: "sql_analyzer::SqlAnalyzerPass"
+    mode: reason
+    expected_query_type: lookup
+    difficulty: easy
+
+  - id: code-004
+    question: "What Rust edition does the EKOS Cargo workspace target?"
+    mode: reason
+    expected_facts:
+      - "2024"
+    difficulty: easy
+
+  - id: code-005
+    question: "Under what module in ekos-runtime does the REASON query planner live?"
+    mode: reason
+    expected_facts:
+      - "reason"
+    difficulty: medium
+
+  - id: code-006
+    question: "sql_analyzer pass"
+    mode: retrieval
+    expected_objects:
+      - "sql_analyzer::SqlAnalyzerPass"
+    difficulty: easy
+
+  - id: code-007
+    question: "What does CLAUDE.md say EKOS's coding rules require regarding the `unsafe` keyword?"
+    mode: reason
+    expected_facts:
+      - "unsafe"
+    expected_evidence_contains:
+      - "CLAUDE.md"
+    difficulty: medium

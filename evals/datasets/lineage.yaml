@@ -1,0 +1,49 @@
+# RFC 0138 — lineage/provenance scenarios: the Canonical Knowledge Model's own primitives and
+# what they connect, plus real dependency-graph questions against this repo's own compiled ledger.
+version: 1
+category: lineage
+scenarios:
+  - id: lin-001
+    question: "What must every semantic conclusion recorded in the EKOS ledger be traceable to?"
+    mode: reason
+    expected_facts:
+      - "Evidence"
+    difficulty: easy
+
+  - id: lin-002
+    question: "What are the four core primitives of the Canonical Knowledge Model?"
+    mode: reason
+    expected_facts:
+      - "Object"
+      - "Relationship"
+      - "Event"
+      - "Evidence"
+    difficulty: medium
+    pass_threshold: 0.5
+
+  - id: lin-003
+    question: "What Rust module in ekos-semantic defines the shared Transformation IR used by both the Pentaho and SQL legacy-format parsers?"
+    mode: reason
+    expected_facts:
+      - "transform_ir"
+    difficulty: medium
+
+  - id: lin-004
+    question: "what depends on ekos_common::redaction"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: lin-005
+    question: "Does EKOS support deleting or tombstoning an object that has already been written to the ledger?"
+    mode: reason
+    expected_facts:
+      - "tombstone"
+    difficulty: hard
+
+  - id: lin-006
+    question: "AiRuntime"
+    mode: retrieval
+    expected_objects:
+      - "AiRuntime"
+    difficulty: easy
