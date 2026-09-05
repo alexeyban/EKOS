@@ -1,5 +1,6 @@
-# RFC 0138 — lineage/provenance scenarios: the Canonical Knowledge Model's own primitives and
-# what they connect, plus real dependency-graph questions against this repo's own compiled ledger.
+# RFC 0138 — Category D: Data lineage. Where a compiled fact came from, what evidence backs a
+# claim, and the Canonical Knowledge Model's own provenance primitives — distinct from Category C
+# (Dependencies), which is about the code/object dependency graph, not evidence provenance.
 version: 1
 category: lineage
 scenarios:
@@ -29,9 +30,10 @@ scenarios:
     difficulty: medium
 
   - id: lin-004
-    question: "what depends on ekos_common::redaction"
+    question: "What does an Evidence record in the EKOS ledger carry, besides the raw text fragment itself — what tells you exactly where that fragment came from?"
     mode: reason
-    expected_query_type: structural
+    expected_facts:
+      - "location"
     difficulty: medium
 
   - id: lin-005
@@ -46,4 +48,46 @@ scenarios:
     mode: retrieval
     expected_objects:
       - "AiRuntime"
+    difficulty: easy
+
+  - id: lin-007
+    question: "What field on a KirEvidence record holds the analyzer's own confidence in that piece of evidence?"
+    mode: reason
+    expected_facts:
+      - "confidence"
+    difficulty: medium
+
+  - id: lin-008
+    question: "When ekos ask answers a question, what does it append to the end of its response to show which evidence it actually used?"
+    mode: reason
+    expected_facts:
+      - "cited_evidence"
+    difficulty: medium
+
+  - id: lin-009
+    question: "What is the content-addressable, checksummed unit of raw observed data that an EKOS Observer connector produces, before any recovery pass interprets it?"
+    mode: reason
+    expected_facts:
+      - "ObservationArtifact"
+    difficulty: hard
+
+  - id: lin-010
+    question: "redaction"
+    mode: retrieval
+    expected_objects:
+      - "ekos_common::redaction::redact"
+    difficulty: easy
+
+  - id: lin-011
+    question: "What determines whether a compiler pass's output is reproducible across two separate runs over the same input, according to EKOS's own coding rules?"
+    mode: reason
+    expected_facts:
+      - "deterministic"
+    difficulty: medium
+
+  - id: lin-012
+    question: "sql_analyzer::parse_ddl_structural"
+    mode: retrieval
+    expected_objects:
+      - "sql_analyzer::parse_ddl_structural"
     difficulty: easy

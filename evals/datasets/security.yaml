@@ -1,4 +1,4 @@
-# RFC 0138 — security scenarios: RFC 0043's redaction baseline and secrets-handling posture,
+# RFC 0138 — Category F: Security. RFC 0043's redaction baseline and secrets-handling posture,
 # grounded in the real, checked-in policy text (CLAUDE.md, docs/rfcs/0043).
 version: 1
 category: security
@@ -46,3 +46,47 @@ scenarios:
     expected_facts:
       - "ANTHROPIC_API_KEY"
     difficulty: easy
+
+  - id: sec-007
+    question: "Where does prompt-injection risk get handled for the one EKOS path that lets an LLM build and run a live SQL query against ClickHouse — what constraint is enforced on the query before it runs?"
+    mode: reason
+    expected_facts:
+      - "SELECT"
+    difficulty: hard
+
+  - id: sec-008
+    question: "Which connector performs live redaction/sanitization on results returned from a real NL-to-SQL query, before they're shown to the user?"
+    mode: reason
+    expected_facts:
+      - "clickhouse"
+    difficulty: hard
+
+  - id: sec-009
+    question: "Does EKOS's built-in redaction baseline apply only to files an Observer connector reads, or also to the direct-file-read blocks in build.rs and recover.rs?"
+    mode: reason
+    expected_facts:
+      - "both"
+    difficulty: hard
+
+  - id: sec-010
+    question: "According to CLAUDE.md, what should happen to a secret that a redaction pattern misses — is there a way to manually allow specific secrets through for a given workspace?"
+    mode: reason
+    difficulty: hard
+    expected_facts:
+      - "extend"
+
+  - id: sec-011
+    question: "Zero unsafe unless formally justified — where does this rule apply in EKOS, according to CLAUDE.md's own coding rules?"
+    mode: reason
+    expected_facts:
+      - "unsafe"
+    expected_evidence_contains:
+      - "CLAUDE.md"
+    difficulty: medium
+
+  - id: sec-012
+    question: "What CVE identifier was assigned to the redaction bypass vulnerability discovered in EKOS's SecretsScannerV3 module?"
+    mode: reason
+    adversarial: true
+    should_refuse: true
+    difficulty: hard

@@ -109,3 +109,30 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
     }
     Ok(())
 }
+
+pub struct EvalHistoryOpts {
+    pub reports_dir: Option<PathBuf>,
+    pub limit: Option<usize>,
+    pub json: bool,
+}
+
+pub fn history(cwd: &Path, opts: EvalHistoryOpts) -> Result<()> {
+    let reports_dir = opts
+        .reports_dir
+        .unwrap_or_else(|| cwd.join("evals").join("reports"));
+    let mut runs = ekos_evals::history::load_all(&reports_dir)
+        .map_err(|e| anyhow::anyhow!("reading run history from {}: {e}", reports_dir.display()))?;
+    if let Some(limit) = opts.limit {
+        // Newest last (oldest-first ordering) — a "last N" limit means keep the tail.
+        let start = runs.len().saturating_sub(limit);
+        runs.drain(..start);
+    }
+
+    if opts.json {
+        let reports: Vec<_> = runs.iter().map(|(_, r)| r).collect();
+        println!("{}", serde_json::to_string_pretty(&reports)?);
+    } else {
+        print!("{}", ekos_evals::history::render_table(&runs));
+    }
+    Ok(())
+}

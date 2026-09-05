@@ -7,6 +7,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+fn cpu_time_ms(d: Option<Duration>) -> Option<f64> {
+    d.map(|d| d.as_secs_f64() * 1000.0)
+}
+
 /// Gate thresholds the report's `Status` line is decided against. A metric with no applicable
 /// scenarios (`None`) never blocks the gate — you can't fail a bar nothing was measured against.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -30,7 +34,7 @@ impl Default for GateThresholds {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioReport {
     pub id: String,
     pub passed: bool,
@@ -43,6 +47,16 @@ pub struct ScenarioReport {
     pub trajectory_score: Option<f32>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    /// `Some(true)` when served from the LLM provider's disk cache — no fresh tokens spent.
+    /// `#[serde(default)]`: absent in a report saved before this field existed (RFC 0138's own
+    /// report schema evolves — `ekos eval history` reads old and new reports side by side, so
+    /// every field added after the first release needs to tolerate a missing key, not error).
+    #[serde(default)]
+    pub cache_hit: Option<bool>,
+    #[serde(default)]
+    pub rss_kb_end: Option<u64>,
+    #[serde(default)]
+    pub cpu_time_ms: Option<f64>,
     pub latency_ms: f64,
     pub error: Option<String>,
 }
@@ -61,13 +75,16 @@ impl From<&EvalOutcome> for ScenarioReport {
             trajectory_score: o.trajectory_score,
             input_tokens: o.tokens.map(|t| t.input_tokens),
             output_tokens: o.tokens.map(|t| t.output_tokens),
+            cache_hit: o.cache_hit,
+            rss_kb_end: o.resource.rss_kb_end,
+            cpu_time_ms: cpu_time_ms(o.resource.cpu_time),
             latency_ms: o.latency.as_secs_f64() * 1000.0,
             error: o.error.clone(),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metrics {
     pub scenarios: usize,
     pub passed: usize,
@@ -79,10 +96,28 @@ pub struct Metrics {
     pub hallucination_rate: f32,
     pub avg_tokens: Option<f64>,
     pub p95_latency_ms: f64,
+    /// Scenarios whose LLM call was served from the disk cache — no fresh network call.
+    /// `#[serde(default)]` on this and the rest of this struct's cache/resource fields: absent in
+    /// a report saved before they existed — see `ScenarioReport::cache_hit`'s doc comment.
+    #[serde(default)]
+    pub cache_hits: usize,
+    /// Scenarios whose LLM call was a genuine fresh network call.
+    #[serde(default)]
+    pub cache_misses: usize,
+    /// Sum of `tokens` over cache-hit scenarios — real content that would have cost tokens again
+    /// had the cache not existed, but didn't this run (RFC 0138's "tokens saved" metric).
+    #[serde(default)]
+    pub tokens_saved: Option<f64>,
+    /// Highest RSS reading (KB) seen across every scenario — `None` off-Linux.
+    #[serde(default)]
+    pub peak_rss_kb: Option<u64>,
+    /// Sum of per-scenario CPU time deltas — `None` off-Linux, or when no delta was measurable.
+    #[serde(default)]
+    pub total_cpu_time_ms: Option<f64>,
     pub status_pass: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub dataset: String,
     pub agent: String,
@@ -145,6 +180,29 @@ pub fn build(
     );
     let p95_latency_ms = p95(outcomes.iter().map(|o| o.latency).collect()).as_secs_f64() * 1000.0;
 
+    let cache_hits = outcomes
+        .iter()
+        .filter(|o| o.cache_hit == Some(true))
+        .count();
+    let cache_misses = outcomes
+        .iter()
+        .filter(|o| o.cache_hit == Some(false))
+        .count();
+    let tokens_saved: f64 = outcomes
+        .iter()
+        .filter(|o| o.cache_hit == Some(true))
+        .filter_map(|o| o.tokens.map(|t| (t.input_tokens + t.output_tokens) as f64))
+        .sum();
+    let tokens_saved = (cache_hits > 0).then_some(tokens_saved);
+    let peak_rss_kb = outcomes.iter().filter_map(|o| o.resource.rss_kb_end).max();
+    let total_cpu_time_ms = {
+        let (sum, n) = outcomes
+            .iter()
+            .filter_map(|o| o.resource.cpu_time)
+            .fold((Duration::ZERO, 0usize), |(s, n), d| (s + d, n + 1));
+        (n > 0).then_some(sum.as_secs_f64() * 1000.0)
+    };
+
     let status_pass = answer_correctness.is_none_or(|v| v >= gates.min_answer_correctness)
         && evidence_groundedness.is_none_or(|v| v >= gates.min_evidence_groundedness)
         && completeness.is_none_or(|v| v >= gates.min_completeness)
@@ -168,6 +226,11 @@ pub fn build(
             hallucination_rate,
             avg_tokens,
             p95_latency_ms,
+            cache_hits,
+            cache_misses,
+            tokens_saved,
+            peak_rss_kb,
+            total_cpu_time_ms,
             status_pass,
         },
         scenarios,
@@ -212,6 +275,30 @@ fn fmt_latency(ms: f64) -> String {
         format!("{:.1}s", ms / 1000.0)
     } else {
         format!("{:.0}ms", ms)
+    }
+}
+
+fn fmt_duration_opt(ms: Option<f64>) -> String {
+    match ms {
+        Some(ms) => fmt_latency(ms),
+        None => "n/a".to_string(),
+    }
+}
+
+fn fmt_rss(kb: Option<u64>) -> String {
+    match kb {
+        Some(kb) if kb >= 1024 => format!("{:.1} MB", kb as f64 / 1024.0),
+        Some(kb) => format!("{kb} KB"),
+        None => "n/a".to_string(),
+    }
+}
+
+fn fmt_cache(hits: usize, misses: usize) -> String {
+    let total = hits + misses;
+    if total == 0 {
+        "n/a".to_string()
+    } else {
+        format!("{hits}/{total}")
     }
 }
 
@@ -272,6 +359,19 @@ pub fn render_text(report: &Report) -> String {
         row("P95 latency:", &fmt_latency(m.p95_latency_ms))
     ));
     out.push_str(&format!(
+        "{}\n",
+        row("Cache hits:", &fmt_cache(m.cache_hits, m.cache_misses))
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        row("Tokens saved:", &fmt_tokens(m.tokens_saved))
+    ));
+    out.push_str(&format!("{}\n", row("Peak RSS:", &fmt_rss(m.peak_rss_kb))));
+    out.push_str(&format!(
+        "{}\n\n",
+        row("CPU time:", &fmt_duration_opt(m.total_cpu_time_ms))
+    ));
+    out.push_str(&format!(
         "Status: {}\n",
         if m.status_pass { "PASS" } else { "FAIL" }
     ));
@@ -282,6 +382,7 @@ pub fn render_text(report: &Report) -> String {
 mod tests {
     use super::*;
     use crate::evaluators::EvalOutcome;
+    use crate::resource::ResourceDelta;
     use ekos_runtime::ai::TokenUsage;
 
     fn outcome(passed: bool, hallucinated: bool) -> EvalOutcome {
@@ -298,6 +399,8 @@ mod tests {
                 input_tokens: 100,
                 output_tokens: 50,
             }),
+            cache_hit: Some(false),
+            resource: ResourceDelta::default(),
             latency: Duration::from_millis(500),
             error: None,
             passed,

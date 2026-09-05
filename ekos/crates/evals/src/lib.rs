@@ -13,7 +13,9 @@
 //! ```
 
 pub mod evaluators;
+pub mod history;
 pub mod report;
+pub mod resource;
 pub mod runners;
 pub mod schema;
 

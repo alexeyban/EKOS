@@ -250,6 +250,17 @@ enum EvalCommands {
         #[arg(long, value_name = "FILE")]
         output: Option<PathBuf>,
     },
+    /// List saved eval runs (evals/reports/*.json) as a trend table
+    History {
+        /// Default: <cwd>/evals/reports
+        #[arg(long, value_name = "DIR")]
+        reports_dir: Option<PathBuf>,
+        /// Show only the last N runs
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -656,6 +667,7 @@ fn emits_machine_output(command: &Commands) -> bool {
         },
         Commands::Eval { subcommand } => match subcommand {
             EvalCommands::Run { json, .. } => *json,
+            EvalCommands::History { json, .. } => *json,
         },
         _ => false,
     }
@@ -963,6 +975,18 @@ async fn main() -> Result<()> {
                     output,
                 };
                 ekos::commands::eval::run(&config, &cwd, opts).await
+            }
+            EvalCommands::History {
+                reports_dir,
+                limit,
+                json,
+            } => {
+                let opts = ekos::commands::eval::EvalHistoryOpts {
+                    reports_dir,
+                    limit,
+                    json,
+                };
+                ekos::commands::eval::history(&cwd, opts)
             }
         },
     }

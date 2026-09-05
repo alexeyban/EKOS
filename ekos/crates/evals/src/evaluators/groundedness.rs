@@ -9,7 +9,12 @@
 use super::evidence::EvidenceCheck;
 use crate::schema::Scenario;
 
+/// "Insufficient evidence" is the canonical phrase this harness's Category G (unknown/adversarial)
+/// scenarios are written to expect (RFC 0138 §Non-goals amendment, 2026-09-05) — the rest of the
+/// list are equivalent real phrasings a grounded model reasonably uses instead, kept so a correct
+/// refusal in different wording still passes.
 const DEFAULT_REFUSAL_PHRASES: &[&str] = &[
+    "insufficient evidence",
     "cannot find",
     "can't find",
     "could not find",
@@ -27,6 +32,10 @@ const DEFAULT_REFUSAL_PHRASES: &[&str] = &[
     "no record of",
     "cannot answer",
     "can't answer",
+    "not enough evidence",
+    "not enough information",
+    "no mention",
+    "not mentioned",
 ];
 
 fn is_refusal(scenario: &Scenario, answer: &str) -> bool {

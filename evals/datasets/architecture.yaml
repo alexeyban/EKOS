@@ -1,10 +1,42 @@
-# RFC 0138 — architecture-shaped scenarios: what crate/module implements a given piece of the
-# compiler pipeline. Every fact and evidence path here was verified live against this repo's own
-# self-analysis ledger (`ekos query find`) before being written down — not invented.
+# RFC 0138 — Category A: Architecture (20 scenarios). What EKOS is, how it's structured, and why
+# — grounded in CLAUDE.md's own architecture section and RFC text, both real, checked-in, compiled
+# documents in this repo's ledger. Every fact here was verified live against the ledger
+# (`ekos query find`/`ekos ask --explain`) before being written down.
 version: 1
 category: architecture
 scenarios:
   - id: arch-001
+    question: "How is EKOS structured, at a high level — what does it compile enterprise systems into?"
+    mode: reason
+    expected_facts:
+      - "Canonical Knowledge Model"
+    difficulty: medium
+
+  - id: arch-002
+    question: "What are the main stages of the EKOS compiler pipeline, in order?"
+    mode: reason
+    expected_facts:
+      - "build"
+      - "recover"
+      - "compile"
+    difficulty: medium
+    pass_threshold: 0.4
+
+  - id: arch-003
+    question: "What is the role of the Semantic Knowledge Ledger in EKOS?"
+    mode: reason
+    expected_facts:
+      - "append-only"
+    difficulty: easy
+
+  - id: arch-004
+    question: "Why is the EKOS Runtime read-only?"
+    mode: reason
+    expected_facts:
+      - "read-only"
+    difficulty: medium
+
+  - id: arch-005
     question: "What crate implements the SQL DDL recovery analyzer?"
     mode: reason
     expected_facts:
@@ -14,7 +46,7 @@ scenarios:
     expected_query_type: conceptual
     difficulty: easy
 
-  - id: arch-002
+  - id: arch-006
     question: "AiRuntime"
     mode: reason
     expected_facts:
@@ -22,13 +54,7 @@ scenarios:
     expected_query_type: lookup
     difficulty: easy
 
-  - id: arch-003
-    question: "what depends on the recovery crate"
-    mode: reason
-    expected_query_type: structural
-    difficulty: medium
-
-  - id: arch-004
+  - id: arch-007
     question: "Which trait must every EKOS connector implement to observe an enterprise system?"
     mode: reason
     expected_facts:
@@ -37,24 +63,94 @@ scenarios:
       - "observation-sdk"
     difficulty: medium
 
-  - id: arch-005
-    question: "Is the EKOS Semantic Knowledge Ledger append-only, or can existing entries be modified in place?"
-    mode: reason
-    expected_facts:
-      - "append-only"
-    difficulty: easy
-
-  - id: arch-006
+  - id: arch-008
     question: "What crate parses and interprets Enterprise Knowledge Language (EKL) queries?"
     mode: reason
     expected_facts:
       - "ekl"
     difficulty: medium
 
-  - id: arch-007
+  - id: arch-009
     question: "recovery crate"
     mode: retrieval
     expected_objects:
       - "ekos-recovery"
       - "ekos/crates/recovery"
     difficulty: easy
+
+  - id: arch-010
+    question: "What four primitives does every semantic conclusion in the Canonical Knowledge Model rest on?"
+    mode: reason
+    expected_facts:
+      - "Evidence"
+    difficulty: medium
+
+  - id: arch-011
+    question: "Does the EKOS Runtime touch raw enterprise systems directly, or only the compiled ledger?"
+    mode: reason
+    expected_facts:
+      - "ledger"
+    difficulty: medium
+
+  - id: arch-012
+    question: "What must compiler passes in EKOS be, according to the project's own invariants — deterministic, or allowed to vary between runs?"
+    mode: reason
+    expected_facts:
+      - "deterministic"
+    difficulty: medium
+
+  - id: arch-013
+    question: "What does RFC 0013 expose to AI agents, and over what protocol?"
+    mode: reason
+    expected_facts:
+      - "MCP"
+    difficulty: medium
+
+  - id: arch-014
+    question: "Is EKOS a database, or a compiler for enterprise knowledge?"
+    mode: reason
+    expected_facts:
+      - "compiler"
+    difficulty: easy
+
+  - id: arch-015
+    question: "What ledger primitive does the World Engine simulation crate deliberately stay separate from, to avoid mixing fictional data with real compiled knowledge?"
+    mode: reason
+    expected_facts:
+      - "ledger"
+    difficulty: hard
+
+  - id: arch-016
+    question: "artifact store"
+    mode: retrieval
+    expected_objects:
+      - "ekos-artifact"
+    difficulty: easy
+
+  - id: arch-017
+    question: "What kind of thing does an EKOS Observer connector return after observing a source system?"
+    mode: reason
+    expected_facts:
+      - "ObservationPackage"
+    difficulty: hard
+
+  - id: arch-018
+    question: "Are secrets and PII ever stored in the EKOS ledger, according to the project's own security invariant?"
+    mode: reason
+    expected_facts:
+      - "never"
+    difficulty: medium
+
+  - id: arch-019
+    question: "What does EKOS call the typed, intermediate representation that knowledge-recovery passes produce, before the semantic compiler turns it into the Canonical Knowledge Model?"
+    mode: reason
+    expected_facts:
+      - "Knowledge Intermediate Representation"
+    difficulty: hard
+
+  - id: arch-020
+    question: "Does the append-only design of the EKOS ledger allow an object to be deleted once it has been written?"
+    mode: reason
+    expected_facts:
+      - "tombstone"
+    difficulty: hard

@@ -213,6 +213,13 @@ impl<'a> AiRuntime<'a> {
         Ok(plan_question(question, self.runtime)?)
     }
 
+    /// Cumulative `(hits, misses)` on the underlying `LlmProvider`'s disk cache, if it has one —
+    /// thin passthrough to [`LlmProvider::cache_stats`] (RFC 0138: the eval harness diffs this
+    /// before/after each call to tell whether that specific answer was served from cache).
+    pub fn cache_stats(&self) -> Option<(u64, u64)> {
+        self.llm.cache_stats()
+    }
+
     /// Compile and execute `question`'s plan into a typed [`EvidenceSet`]. Offline, no LLM — this
     /// is the QUERY-surface answer on its own.
     pub fn gather_evidence(&self, question: &str) -> Result<EvidenceSet, AiError> {

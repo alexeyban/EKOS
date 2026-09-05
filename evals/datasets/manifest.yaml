@@ -2,15 +2,29 @@
 # more of the category files below (RFC 0138). `--dataset` can also be omitted entirely — the
 # runner then loads every *.yaml file here and names the run "ekos-<total scenario count>",
 # which is where the "ekos-100" style naming in the RFC's worked example comes from.
+#
+# Seven categories (A-G), matching the shape this suite was requested in:
+#   A architecture.yaml    — what EKOS is and how it's structured
+#   B code.yaml            — where a symbol/function/crate lives
+#   C dependencies.yaml    — what depends on X / what breaks if X changes
+#   D lineage.yaml         — evidence/fact provenance, not the dependency graph
+#   E history.yaml         — RFC/devlog provenance ("why was X built")
+#   F security.yaml        — RFC 0043 redaction posture
+#   G adversarial.yaml     — hallucination resistance: every scenario should_refuse: true
 version: 1
 datasets:
   ekos-full:
     files:
       - architecture.yaml
       - code.yaml
+      - dependencies.yaml
       - lineage.yaml
+      - history.yaml
       - security.yaml
       - adversarial.yaml
   hallucination:
     files:
       - adversarial.yaml
+  structural:
+    files:
+      - dependencies.yaml

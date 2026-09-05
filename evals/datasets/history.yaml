@@ -1,0 +1,91 @@
+# RFC 0138 — Category E: Git/history. RFC provenance and devlog-grounded "why was X built/fixed"
+# questions. Deliberately grounded only in RFCs/devlogs already confirmed present in this repo's
+# currently-compiled ledger (verified via `ekos ekl "FIND Object WHERE kind='Document' AND name
+# CONTAINS ... COUNT"` before writing this file: RFCs up to 0095, devlogs up to 111 — the ledger
+# lags the git history, a real, separate finding worth knowing on its own, see devlog_167-adjacent
+# notes) — not every RFC/devlog that exists in git actually has compiled evidence behind it yet.
+version: 1
+category: history
+scenarios:
+  - id: hist-001
+    question: "What RFC first defined EKOS's core compiler abstractions — CompilerPass, PassManager, Scheduler?"
+    mode: reason
+    expected_facts:
+      - "0001"
+    difficulty: medium
+
+  - id: hist-002
+    question: "Why was the Model Context Protocol server (RFC 0013) built — what could AI agents not do before it existed?"
+    mode: reason
+    expected_facts:
+      - "compiled knowledge"
+    difficulty: hard
+
+  - id: hist-003
+    question: "What RFC introduced the fact-segment storage engine that later became the default backend for new EKOS workspaces?"
+    mode: reason
+    expected_facts:
+      - "0016"
+    difficulty: medium
+
+  - id: hist-004
+    question: "What RFC introduced the built-in secrets/PII redaction baseline, and why — what property of the ledger made this a prevention problem rather than a cleanup problem?"
+    mode: reason
+    expected_facts:
+      - "append-only"
+    difficulty: hard
+
+  - id: hist-005
+    question: "What real bug did devlog_100 record — what happened to a real Python file's compiled symbols, and why?"
+    mode: reason
+    expected_facts:
+      - "redaction"
+    difficulty: hard
+
+  - id: hist-006
+    question: "According to devlog_100, was the root cause of the missing services/ai_service.py symbols a bug in the Python parser, or somewhere else?"
+    mode: reason
+    expected_facts:
+      - "redaction"
+    difficulty: hard
+
+  - id: hist-007
+    question: "0043-secrets-and-pii-redaction"
+    mode: retrieval
+    expected_objects:
+      - "ekos/docs/rfcs/0043-secrets-and-pii-redaction.md"
+    difficulty: easy
+
+  - id: hist-008
+    question: "What was RFC 0004 in the EKOS project about?"
+    mode: reason
+    expected_facts:
+      - "ledger"
+    difficulty: medium
+
+  - id: hist-009
+    question: "RFC 0013"
+    mode: reason
+    expected_query_type: lookup
+    difficulty: easy
+
+  - id: hist-010
+    question: "Which came first in EKOS's own RFC history: the Model Context Protocol server, or the append-only Semantic Knowledge Ledger's original design?"
+    mode: reason
+    expected_facts:
+      - "ledger"
+    difficulty: hard
+
+  - id: hist-011
+    question: "What does RFC 0001's own Motivation section give as the reason for defining compiler abstractions before writing any domain logic?"
+    mode: reason
+    expected_facts:
+      - "API churn"
+    difficulty: hard
+
+  - id: hist-012
+    question: "Which RFC's own Motivation section says it depends on RFC 0015 for its pack-segment machinery?"
+    mode: reason
+    expected_facts:
+      - "0016"
+    difficulty: hard

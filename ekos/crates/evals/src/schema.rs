@@ -273,4 +273,57 @@ mod tests {
         let err = load_dataset(Some("does-not-exist"), dir.path()).unwrap_err();
         assert!(matches!(err, SchemaError::UnknownDataset(_)));
     }
+
+    /// Loads the real, checked-in `evals/datasets/` directory (not a synthetic tempdir) — catches
+    /// a YAML syntax error, a duplicate id, or an empty question/id before it ever reaches a real
+    /// `ekos eval run`. `CARGO_MANIFEST_DIR` is `ekos/crates/evals`; the real datasets dir is
+    /// three levels up (`crates/evals` -> `crates` -> `ekos` -> repo root) then `evals/datasets`.
+    #[test]
+    fn real_ekos_full_dataset_loads_and_every_scenario_has_a_unique_nonempty_id() {
+        let datasets_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../evals/datasets");
+        let (name, scenarios) = load_dataset(Some("ekos-full"), &datasets_dir)
+            .unwrap_or_else(|e| panic!("loading real evals/datasets/ekos-full: {e}"));
+        assert_eq!(name, "ekos-full");
+        assert!(
+            scenarios.len() >= 90,
+            "expected a real, substantial suite across 7 categories, got {}",
+            scenarios.len()
+        );
+
+        let mut seen_ids = std::collections::HashSet::new();
+        for s in &scenarios {
+            assert!(!s.id.is_empty(), "empty scenario id");
+            assert!(!s.question.is_empty(), "empty question for {}", s.id);
+            assert!(
+                seen_ids.insert(s.id.clone()),
+                "duplicate scenario id: {}",
+                s.id
+            );
+            // Every scenario must be gradable by at least one signal — a scenario with none of
+            // these contributes a silent neutral pass forever (documented in evals/README.md).
+            let gradable = !s.expected_facts.is_empty()
+                || !s.expected_evidence_contains.is_empty()
+                || !s.expected_objects.is_empty()
+                || s.expected_query_type.is_some()
+                || s.should_refuse;
+            assert!(gradable, "{} has no gradable signal at all", s.id);
+        }
+
+        let categories: std::collections::HashSet<&str> =
+            scenarios.iter().map(|s| s.category.as_str()).collect();
+        assert_eq!(
+            categories,
+            std::collections::HashSet::from([
+                "architecture",
+                "code",
+                "dependencies",
+                "lineage",
+                "history",
+                "security",
+                "adversarial",
+            ]),
+            "expected exactly the 7 A-G categories"
+        );
+    }
 }

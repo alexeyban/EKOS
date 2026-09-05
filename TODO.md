@@ -4880,3 +4880,29 @@ are excluded — see the full exclusion list in the planning history if needed.
     `agent_runner`/`MockLlmProvider` test its own RFC promised — written for real this session,
     `new_coverage` → 84.4%, Quality Gate OK. Verified on a fully-committed, clean-blame rescan:
     `alert_status: OK`, reliability/security/maintainability all A, 0 bugs/vulnerabilities/hotspots.
+  - [x] **RFC 0138 Phase 2 — 7-category eval suite + cache/resource metrics + run history,
+    `devlog_168` (2026-09-05).** Grew the harness from 5 categories/32 scenarios to 7/101:
+    Architecture (20)/Code (15)/**Dependencies (12, new)**/Lineage (12, refocused)/**History (12,
+    new)**/Security (12)/Adversarial (18) — every fact verified against the live ledger, every
+    dependency-style phrasing verified via `ekos ask --explain` to actually route to
+    `QueryType::Structural` before being written down. Category G (adversarial) now treats
+    "Insufficient evidence" as the canonical expected refusal phrase. New metrics beyond the five
+    headline scores: real cache-hit token attribution (`LlmProvider::cache_stats()` new default
+    trait method + `CachedLlmProvider` atomic hit/miss counters + `AiRuntime::cache_stats()`
+    passthrough — a miss-count delta means *that* call genuinely spent tokens, not an estimate),
+    CPU time + peak RSS (`ekos_evals::resource`, `/proc`-based, Linux-only, honestly `None`
+    elsewhere), and a new `ekos eval history` command reading every saved report back as a trend
+    table. Real forward-compat bug found by actually running the new command (not just its unit
+    tests): the new report fields had no `#[serde(default)]`, so a report saved minutes earlier
+    failed to parse — fixed, with a regression test pinning a pre-fix JSON shape. Two real
+    operational findings along the way: an interrupted `ekos build` needed `ekos ledger repair`'s
+    own designed-for-this tantivy segment-merge path (3 min, 3/3 segments verified clean — RFC
+    0104/0097's self-healing working under a genuine failure, not a simulated one), and the
+    compiled self-analysis ledger was found to lag git history significantly (RFCs only to 0095,
+    devlogs only to 111 were actually compiled in) — every Category E scenario is grounded only in
+    content confirmed present via direct ledger query, not assumed from git. 33/33 `ekos-evals`
+    tests (including a real test loading the actual checked-in `evals/datasets/` directory, not a
+    tempdir), full workspace gate clean, `tests/integration` 5/5. Live-verified: a real 3-scenario
+    run against the now much larger (28,024-object) refreshed ledger produced a report with every
+    new metric line populated, and `ekos eval history` correctly read back all three of this
+    session's saved reports as one trend table.

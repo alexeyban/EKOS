@@ -9,6 +9,7 @@ pub mod groundedness;
 pub mod retrieval;
 pub mod trajectory;
 
+use crate::resource::ResourceDelta;
 use crate::runners::ScenarioRun;
 use crate::schema::Scenario;
 use ekos_ledger::KnowledgeStore;
@@ -30,6 +31,10 @@ pub struct EvalOutcome {
     pub trajectory_score: Option<f32>,
     pub hallucinated: bool,
     pub tokens: Option<TokenUsage>,
+    /// `Some(true)` when this scenario's answer was served from the LLM provider's disk cache —
+    /// no fresh tokens were actually spent (RFC 0138's "tokens saved" metric).
+    pub cache_hit: Option<bool>,
+    pub resource: ResourceDelta,
     pub latency: Duration,
     pub error: Option<String>,
     pub passed: bool,
@@ -53,6 +58,8 @@ pub fn evaluate(
             trajectory_score: None,
             hallucinated: false,
             tokens: run.token_usage,
+            cache_hit: run.cache_hit,
+            resource: run.resource,
             latency: run.latency,
             error: Some(err.clone()),
             passed: false,
@@ -100,6 +107,8 @@ pub fn evaluate(
         trajectory_score,
         hallucinated,
         tokens: run.token_usage,
+        cache_hit: run.cache_hit,
+        resource: run.resource,
         latency: run.latency,
         error: None,
         passed,

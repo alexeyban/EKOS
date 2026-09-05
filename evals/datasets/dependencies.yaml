@@ -1,0 +1,83 @@
+# RFC 0138 — Category C: Dependencies. Structural graph questions ("what depends on X", "what
+# would be affected if Y changed") — every phrasing here was verified live via
+# `ekos ask --explain` to actually route to QueryType::Structural in the REASON planner before
+# being written down; a phrasing that classifies differently doesn't test what this category
+# claims to test.
+version: 1
+category: dependencies
+scenarios:
+  - id: dep-001
+    question: "what depends on the recovery crate"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-002
+    question: "what breaks if I change redact"
+    mode: reason
+    expected_query_type: structural
+    expected_facts:
+      - "redact"
+    difficulty: medium
+
+  - id: dep-003
+    question: "callers of redact"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-004
+    question: "what depends on ekos_common::redaction"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-005
+    question: "what calls plan_question"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-006
+    question: "what depends on ekos_kir"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-007
+    question: "what depends on ekos-ledger"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-008
+    question: "callers of build_llm_provider"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-009
+    question: "Which crates in the EKOS workspace does the cli crate itself depend on to implement `ekos ask`?"
+    mode: reason
+    expected_facts:
+      - "runtime"
+    difficulty: hard
+
+  - id: dep-010
+    question: "what breaks if I change SqlAnalyzerPass"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium
+
+  - id: dep-011
+    question: "Does the EKOS Runtime crate depend on the recovery crate, or is it the other way around — which one can exist without the other?"
+    mode: reason
+    expected_facts:
+      - "runtime"
+    difficulty: hard
+
+  - id: dep-012
+    question: "what depends on the ObjectKind enum"
+    mode: reason
+    expected_query_type: structural
+    difficulty: medium

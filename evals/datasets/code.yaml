@@ -1,5 +1,5 @@
-# RFC 0138 — code-level scenarios: real symbols, functions, and structs from this repo's own
-# compiled ledger (verified via `ekos query find` before being written down).
+# RFC 0138 — Category B: Code understanding (real symbols, functions, and structs from this
+# repo's own compiled ledger, verified via `ekos query find` before being written down).
 version: 1
 category: code
 scenarios:
@@ -31,7 +31,7 @@ scenarios:
     difficulty: easy
 
   - id: code-005
-    question: "Under what module in ekos-runtime does the REASON query planner live?"
+    question: "Where is the query planning logic that turns a natural-language question into a QueryPlan implemented — which crate and module?"
     mode: reason
     expected_facts:
       - "reason"
@@ -52,3 +52,59 @@ scenarios:
     expected_evidence_contains:
       - "CLAUDE.md"
     difficulty: medium
+
+  - id: code-008
+    question: "Which crate owns the KirObject, KirRelationship, and KirEvidence type definitions?"
+    mode: reason
+    expected_facts:
+      - "kir"
+    difficulty: medium
+
+  - id: code-009
+    question: "What function in ekos_common performs secrets/PII redaction on raw content?"
+    mode: reason
+    expected_facts:
+      - "redact"
+    difficulty: easy
+
+  - id: code-010
+    question: "git_analyzer"
+    mode: retrieval
+    expected_objects:
+      - "ekos/crates/recovery/src/git_analyzer.rs"
+    difficulty: medium
+
+  - id: code-011
+    question: "What struct does ekos_runtime::AiRuntime wrap to answer natural-language questions?"
+    mode: reason
+    expected_facts:
+      - "Runtime"
+    difficulty: medium
+
+  - id: code-012
+    question: "Which crate implements the dbt-model code generator that renders the Transformation IR into executable SQL?"
+    mode: reason
+    expected_facts:
+      - "dbt-gen"
+    difficulty: medium
+
+  - id: code-013
+    question: "What binary crate name does the EKOS CLI compile to (the actual executable name, not the package directory)?"
+    mode: reason
+    expected_facts:
+      - "ekos"
+    difficulty: hard
+
+  - id: code-014
+    question: "What is the name of the pass in ekos-recovery responsible for real AST + Calls function-call graph recovery for Rust source?"
+    mode: reason
+    expected_facts:
+      - "rust_analyzer"
+    difficulty: medium
+
+  - id: code-015
+    question: "redact function"
+    mode: retrieval
+    expected_objects:
+      - "ekos_common::redaction::redact"
+    difficulty: easy

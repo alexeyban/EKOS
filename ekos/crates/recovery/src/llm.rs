@@ -101,6 +101,15 @@ pub trait LlmProvider: Send + Sync {
         on_chunk(resp.content.clone());
         Ok(resp)
     }
+
+    /// Cumulative `(hits, misses)` for a disk-backed cache wrapping this provider, if any (RFC
+    /// 0138 — the eval harness's "tokens saved" metric samples this before/after each call to
+    /// tell whether that specific call was served from cache). `None` by default — only
+    /// `CachedLlmProvider` overrides it; every other implementor (including a `CachedLlmProvider`
+    /// wrapping another `CachedLlmProvider`, which nobody does) reports no cache at all.
+    fn cache_stats(&self) -> Option<(u64, u64)> {
+        None
+    }
 }
 
 /// Reads an HTTP response body incrementally and calls `on_line` once per

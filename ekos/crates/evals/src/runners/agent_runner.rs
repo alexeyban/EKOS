@@ -3,6 +3,7 @@
 //! pattern), so this module never touches configuration or credentials.
 
 use super::ScenarioRun;
+use crate::resource::{self, ResourceDelta};
 use crate::schema::{Mode, Scenario};
 use ekos_runtime::{AiRuntime, RetrievalRequest, Runtime};
 use std::time::Instant;
@@ -20,12 +21,21 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
         "agent_runner::run called on a retrieval-mode scenario"
     );
 
+    let cache_before = ai.cache_stats();
+    let resource_before = resource::sample();
     let start = Instant::now();
     let answer_result = match scenario.mode {
         Mode::Ask => ai.ask(&scenario.question).await,
         Mode::Reason | Mode::Retrieval => ai.reason(&scenario.question).await,
     };
     let latency = start.elapsed();
+    let resource_delta = ResourceDelta::between(resource_before, resource::sample());
+    // A miss-count that grew means this specific call actually hit the network; anything else
+    // (hit-count grew, or the provider isn't cached at all) means it didn't spend fresh tokens.
+    let cache_hit = match (cache_before, ai.cache_stats()) {
+        (Some((_, misses_before)), Some((_, misses_after))) => Some(misses_after == misses_before),
+        _ => None,
+    };
 
     let mut run = match answer_result {
         Ok(answer) => ScenarioRun {
@@ -33,10 +43,14 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
             evidence_refs: answer.evidence_refs,
             token_usage: Some(answer.token_usage),
             latency,
+            cache_hit,
+            resource: resource_delta,
             ..Default::default()
         },
         Err(e) => ScenarioRun {
             latency,
+            cache_hit,
+            resource: resource_delta,
             error: Some(e.to_string()),
             ..Default::default()
         },

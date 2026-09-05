@@ -7,6 +7,7 @@
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::llm::{LlmError, LlmProvider, LlmRequest, LlmResponse};
 
@@ -42,6 +43,8 @@ fn cache_path(root: &Path, key: &str) -> PathBuf {
 pub struct CachedLlmProvider<T> {
     inner: T,
     cache_root: PathBuf,
+    hits: AtomicU64,
+    misses: AtomicU64,
 }
 
 impl<T: LlmProvider> CachedLlmProvider<T> {
@@ -49,6 +52,8 @@ impl<T: LlmProvider> CachedLlmProvider<T> {
         Self {
             inner,
             cache_root: cache_root.into(),
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
         }
     }
 
@@ -72,12 +77,14 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
             let bytes = tokio::fs::read(&path).await?;
             let resp: LlmResponse = serde_json::from_slice(&bytes)?;
             tracing::debug!(key = %key[..8], "llm cache hit");
+            self.hits.fetch_add(1, Ordering::Relaxed);
             return Ok(resp);
         }
 
         // Cache miss — call inner provider.
         tracing::debug!(key = %key[..8], "llm cache miss — calling api");
         let resp = self.inner.complete(req).await?;
+        self.misses.fetch_add(1, Ordering::Relaxed);
 
         // Persist to cache.
         tokio::fs::create_dir_all(path.parent().unwrap()).await?;
@@ -85,6 +92,13 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
         tokio::fs::write(&path, json.as_bytes()).await?;
 
         Ok(resp)
+    }
+
+    fn cache_stats(&self) -> Option<(u64, u64)> {
+        Some((
+            self.hits.load(Ordering::Relaxed),
+            self.misses.load(Ordering::Relaxed),
+        ))
     }
 
     /// Deliberately **not** cached (RFC 0098): the disk cache needs one

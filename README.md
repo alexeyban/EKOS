@@ -446,53 +446,69 @@ timings (`arm_timings`, RFC 0126) ride along on the `ekos_search` / `ekos_retrie
 
 ### Eval harness (RFC 0138, on-demand)
 
-`ekos eval run` grades whole `ekos ask` answers against a checked-in scenario suite
-(`evals/datasets/*.yaml` — architecture, code, lineage, security, adversarial), not just retrieval
-ranking (that's RFC 0126's separate, narrower, CI-gated `ekos_runtime::retrieval_eval`). Every
-score is deterministic keyword/id matching — no LLM judge: did the answer state the expected
-facts, cite real (non-hallucinated) evidence, cover what was asked, surface the right objects in
-the top-10, route to the right REASON planner query type, and — for the adversarial set — actually
-decline a question with no grounded answer instead of inventing one.
+`ekos eval run` grades whole `ekos ask` answers against a checked-in, 101-scenario suite spanning
+seven categories — Architecture, Code, Dependencies, Lineage, History, Security, Adversarial
+(`evals/datasets/*.yaml`) — not just retrieval ranking (that's RFC 0126's separate, narrower,
+CI-gated `ekos_runtime::retrieval_eval`). Every score is deterministic keyword/id matching — no
+LLM judge: did the answer state the expected facts, cite real (non-hallucinated) evidence, cover
+what was asked, surface the right objects in the top-10, route to the right REASON planner query
+type, and — for the Adversarial category — actually say **"Insufficient evidence"** for a question
+with no grounded answer instead of inventing one. That last category is the harness's strictest:
+every scenario in it expects a refusal, and an answer that invents a plausible-sounding detail
+(a database name, a version number, a person) counts as a hallucination regardless of how
+confidently it reads.
 
 ```bash
 cd ekos
 cargo run -p ekos -- eval run --dataset ekos-full   # every category, "evals/" at the repo root
 cargo run -p ekos -- eval run --dataset architecture --agent ollama
+cargo run -p ekos -- eval run --dataset hallucination   # Category G only
+cargo run -p ekos -- eval history                       # every past run, as a trend table
 ```
 
 ```
 EKOS EVALUATION
 ─────────────────────────────
 
-Dataset: ekos-full
+Dataset: architecture
 Agent: ollama (llama3:latest)
 Runtime: local
 
-Scenarios:                   32
-Passed:                      17
-Failed:                      15
+Scenarios:                    3
+Passed:                       0
+Failed:                       3
 
-Answer correctness:       45.8%
-Evidence groundedness:    77.8%
-Completeness:             43.1%
-Recall@10:                 75.0%
-Hallucination rate:        12.5%
+Answer correctness:       11.1%
+Evidence groundedness:   100.0%
+Completeness:             11.1%
+Recall@10:                  n/a
+Hallucination rate:        0.0%
+
+Avg tokens:               1,221
+P95 latency:              49.4s
+
+Cache hits:                 0/3
+Tokens saved:               n/a
+Peak RSS:               69.7 MB
+CPU time:                 14.7s
 
 Status: FAIL
 ```
 
-That's a real run against this repo's own live ~5,500-object ledger with the local `llama3:latest`
-model already configured in this repo's `ekos.toml` — not a simulated example. It's also a real
-finding: a small local model correctly declines most nonexistent-entity questions but fabricates
-an answer on roughly a third of this suite's adversarial set, and its raw answer-correctness rate
-against short structural facts is weak — exactly the gap this harness exists to surface, not
-something the demo dataset was tuned to hide.
+That's a real run against this repo's own live, currently ~28,000-object self-analysis ledger with
+the local `llama3:latest` model already configured in this repo's `ekos.toml` — not a simulated
+example. Beyond the five headline scores, every run also captures real resource usage: **tokens
+saved** is genuine cache-hit attribution (`CachedLlmProvider` tracks hits/misses; a scenario whose
+answer came from the disk cache instead of a fresh network call is diffed and counted, not
+estimated), and **CPU time / peak RSS** are best-effort, Linux-only, read straight from
+`/proc/self/{stat,status}` — honestly `n/a` off-Linux or when unavailable, never fabricated.
 
 Every run saves a timestamped JSON report to `evals/reports/` and exits non-zero when the
 aggregate gate (`ekos_evals::report::GateThresholds`) misses — deliberately **not wired into CI**
 (real LLM calls against a real workspace, not free/fast/deterministic enough for every PR yet).
-See `evals/README.md` for the scenario schema and `ekos/docs/rfcs/0138-eval-harness.md` for the
-full design.
+`ekos eval history` reads every saved report back and renders one line per run, newest last — the
+"run history" a saved-JSON-per-run design gives for free. See `evals/README.md` for the scenario
+schema and category breakdown, and `ekos/docs/rfcs/0138-eval-harness.md` for the full design.
 
 ### Hierarchical rollups (RFC 0044)
 

@@ -5,6 +5,7 @@
 pub mod agent_runner;
 pub mod retrieval_runner;
 
+use crate::resource::ResourceDelta;
 use ekos_kir::KirId;
 use ekos_runtime::ai::TokenUsage;
 use std::time::Duration;
@@ -26,6 +27,13 @@ pub struct ScenarioRun {
     /// (RFC 0138 §2.3).
     pub planned_query_type: Option<String>,
     pub latency: Duration,
+    /// `Some(true)` if this scenario's LLM call (if any) was served from `CachedLlmProvider`'s
+    /// disk cache — real tokens were not spent for it. `None` for a `retrieval`-mode scenario
+    /// (no LLM call at all) or when the provider isn't cached.
+    pub cache_hit: Option<bool>,
+    /// Process RSS/CPU delta measured around this one scenario's execution (RFC 0138) — best
+    /// effort, `None` fields off-Linux. Diagnostic only, never gates pass/fail.
+    pub resource: ResourceDelta,
     /// Set when the runner itself errored (LLM call failed, store error, …) — a scenario with an
     /// error is always a hard fail, never silently scored.
     pub error: Option<String>,
