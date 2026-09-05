@@ -4701,7 +4701,8 @@ are excluded — see the full exclusion list in the planning history if needed.
         **Not visually verified in a real browser** — no browser tooling available this session;
         verified instead via full backend test coverage, strict typecheck, a clean production
         build, and confirming Vite's dev server serves every new module without a transform error.
-      - [ ] **Phase 7 (hardening), in progress 2026-09-05.**
+      - [x] **Phase 7 (hardening), `devlog_165`, 2026-09-05 — done** (2 items below deliberately
+        out of scope for a hardening pass, not left incomplete; see their own entries).
         - [x] **Distributed `evidence_count` RPC — fixed.** `WorkerRequest::EvidenceCount` +
           `QueryWorkerClient::evidence_count` (same shape as `ObjectCount`/`RelationshipCount`,
           RFC 0113's existing pattern) + `DistributedLedger::evidence_count`'s real fan-out
@@ -4720,8 +4721,31 @@ are excluded — see the full exclusion list in the planning history if needed.
           design decision ("Ledger time, not source/world time... world time needs every
           observation to carry a trustworthy source timestamp, which most don't"), not a simple
           polish item — would need every analyzer to carry meaningful observation timestamps.
-          Deep-linking `?as_of=&focus=` — a real, separately-scoped console UX item, tracked on
-          its own below rather than folded into this note.
+        - [x] **Deep-linking `?as_of=&focus=` — done.** `Graph.tsx` seeds `selectedId`/`focusId`/
+          `asOf` from `useSearchParams()` on mount (lazy initializers, read once) and syncs them
+          back one-directionally (state -> URL, `replace: true`) as the time-travel slider or
+          object selection change; a bare `?focus=<id>` with no other params forces an expanded
+          object-level view rather than landing on an overview the id can't resolve against. A
+          "🔗 copy link" toolbar button shares `window.location.href`. Typecheck/build-verified
+          only — no browser available this session to visually confirm.
+        - [x] **Performance pass — done.** Every route now uses `react-router-dom`'s per-route
+          `lazy` (v6.4+) instead of a top-level `import`; production build's main chunk drops
+          669KB -> 254KB and `Dashboard`'s `recharts` dependency (376KB) is isolated to its own
+          chunk. `GraphCanvas` was already component-level lazy; this extends the same idea to
+          every page. Confirmed via a clean `vite build` with no chunk-size warning (there was one
+          before).
+        - [x] **Theming — checked, no work needed.** `index.css` already carries ~70
+          `var(--...)` custom-property usages (color, spacing, radius) from earlier phases; no
+          hardcoded-color/light-mode-only styling found to fix.
+        - [x] **Docs/packaging — done.** `web/README.md` rewritten for current (Phases 0-6
+          shipped) status, replacing stale Phase-0-skeleton language; root `README.md`'s Web
+          console section header now credits RFC 0136; `web/docker-compose.yml` dropped the dead
+          `mcp_host`/`mcp_port` seed fields and `host.docker.internal` extra_hosts entry (confirmed
+          dead via `WorkspaceSeed`'s own docstring — the supervisor has owned spawning+porting
+          since Phase 1) and added the session-secret/write-token env vars the current auth flow
+          needs. No production Dockerfile added for `web/ui` — the compose file is dev-convenience
+          only (runs Vite's dev server, not a built bundle), and nothing in RFC 0127 asked for a
+          production deployment manifest.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`
