@@ -818,14 +818,22 @@ a Vite + React app (`web/ui/`).
   kind / relationship-kind filter toggles (`CoupledWith` / `FeedsInto` off by default), a search
   that flies the camera to a node, and an object panel showing `ekos_state` — properties,
   relationships, and one evidence row per claim (path · analyzer · confidence · fragment).
-- **Phase 6** (RFC 0134): a **timelapse slider** under the graph. Drag it back and the diagram
-  redraws as the knowledge existed at that instant; a clicked node's panel then shows the evidence
-  it had *then*. Backed by `ekos graph export --as-of <rfc3339> --first-seen` (and the same
-  `as_of` / `include_first_seen` on `ekos_graph_export`); the browser fetches the latest graph
+- **Phase 6** (RFC 0134, RFC 0136): a **timelapse slider** under the graph — drag it back and the
+  diagram redraws as the knowledge existed at that instant; a clicked node's panel then shows the
+  evidence it had *then*. Backed by `ekos graph export --as-of <rfc3339> --first-seen` (and the
+  same `as_of` / `include_first_seen` on `ekos_graph_export`); the browser fetches the latest graph
   once with per-element first-seen stamps and filters it client-side against a **frozen layout**,
   so scrubbing never refetches and nodes never move. Ticks + the activity histogram come from
   `ekos ledger timeline`. The slider is only as deep as the ledger's retained history — rich on a
-  workspace committed incrementally, near-flat on a freshly-rebuilt one.
+  workspace committed incrementally, near-flat on a freshly-rebuilt one. **Graph v2** (RFC 0136)
+  adds: **neighbourhood isolation** (an object's real BFS sub-graph, real edges included, at a
+  depth of 1-3 — `ekos_neighborhood`, unmodified); **impact mode** (`ekos_impact`'s hop-distance
+  trace rendered as node coloring source-outward plus highlighted edges between two impacted
+  nodes already on screen — the differentiating screen RFC 0127 called out as "the visual form of
+  the claim that currently has none"); a **server-side ForceAtlas2 layout** (`networkx` +
+  `fa2_modified`) for graphs past ~2,000 nodes, where the browser's own force simulation stops
+  keeping up; and one-click **PNG/glTF export** of the current view, entirely client-side (whatever
+  zoom, filters, and isolate/impact state are on screen, not a server-rendered reproduction).
 
 ```bash
 cd ekos && cargo build --release -p ekos && cd ..
@@ -836,9 +844,8 @@ uv --directory web/api run uvicorn --factory app.main:create_app --port 8000 &
 cd web/ui && npm install && npm run dev        # http://localhost:5173 — sign in with a token
 ```
 
-`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). Graph v2
-(neighbourhood isolation, impact-mode trace, export — Phase 6) and a hardening pass (Phase 7) are
-still to come, each authored just-in-time.
+`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). A hardening pass
+(Phase 7 — performance, theming, packaging) is still to come, authored just-in-time.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces
 
