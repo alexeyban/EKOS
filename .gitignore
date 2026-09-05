@@ -1,4 +1,5 @@
 /ekos/target/
+/ekos/lcov.info
 /benchmark/target/
 /tests/integration/target/
 .ekos/
