@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import models
-from .routes import auth, commands, config, graph, meta, runs, schedules, stats, workspaces
+from .routes import auth, commands, config, evals, graph, meta, runs, schedules, stats, workspaces
 from .runner import JobRunner
 from .scheduler import ConsoleScheduler
 from .settings import get_settings
@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (meta, auth, commands, runs, schedules, workspaces, stats, config, graph):
+    for r in (meta, auth, commands, runs, schedules, workspaces, stats, config, graph, evals):
         app.include_router(r.router, prefix="/api")
 
     # Serve the built UI when it exists (Compose / production); the Vite dev server handles it

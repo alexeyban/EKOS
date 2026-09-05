@@ -107,6 +107,22 @@ COMMAND_ALLOWLIST: list[Command] = [
         is_write=True,
         summary="Generate curated Markdown docs into doc/",
     ),
+    Command(
+        "eval-run",
+        ("eval", "run"),
+        is_write=True,  # writes a report file under evals/reports/, same reasoning as docs-generate
+        timeout=3600.0,  # RFC 0138's own suite took ~8 min against a small ledger; a larger real
+        # workspace or a slower local model can run well past the 1800s default.
+        params={
+            "dataset": Param("string", help="Named dataset or category file stem (default: all)"),
+            "agent": Param(
+                "string", help="claude|ollama|openai — override the configured provider"
+            ),
+            "category": Param("string", help="Only scenarios from this dataset file's category"),
+            "limit": Param("string", help="Grade only the first N matching scenarios"),
+        },
+        summary="Grade ekos ask answers against the RFC 0138 scenario suite",
+    ),
 ]
 
 BY_NAME: dict[str, Command] = {c.name: c for c in COMMAND_ALLOWLIST}

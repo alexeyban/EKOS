@@ -8,9 +8,11 @@ config editor with validation and a preview-scan; a command/job runner with SSE 
 the read/write role split; scheduled runs; and a 2D graph view — overview → drill-in, kind/
 relationship filters, search-with-fly-to, an evidence-backed object panel, a time-travel slider,
 neighbourhood isolation, impact-mode tracing, a server-side layout for large graphs, and PNG/glTF
-export. See the root [`README.md`](../README.md)'s own "Web console" section for the full,
-versioned feature list per RFC; this file stays focused on running and developing the console
-itself.
+export; and an **Evals** tab browsing every saved RFC 0138 `ekos eval run` report (history table +
+per-scenario detail), with a new run triggerable from the existing **Run** tab like any other
+allowlisted command. See the root [`README.md`](../README.md)'s own "Web console" section for the
+full, versioned feature list per RFC; this file stays focused on running and developing the
+console itself.
 
 ```
 web/

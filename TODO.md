@@ -4906,3 +4906,21 @@ are excluded — see the full exclusion list in the planning history if needed.
     run against the now much larger (28,024-object) refreshed ledger produced a report with every
     new metric line populated, and `ekos eval history` correctly read back all three of this
     session's saved reports as one trend table.
+  - [x] **RFC 0138 in the Web Console + SonarCloud badges, `devlog_169` (2026-09-05).** New
+    read-only `GET /workspaces/{id}/evals/reports[/{filename}]` route (`web/api/app/routes/
+    evals.py`, path-traversal containment mirrors `config_io.config_path`'s exact
+    resolve()+parent-check pattern) reading the same `evals/reports/*.json` files the CLI already
+    writes; a new `eval-run` entry in the existing command allowlist (`is_write=True`, 3600s
+    timeout) means the console's existing generic `Run` page auto-generates a trigger form for it
+    — no bespoke run-trigger UI needed. Two new UI pages (`Evals` history table, `EvalDetail`
+    11-tile metrics grid + per-scenario breakdown) wired into the per-workspace tab bar. 10 new
+    backend tests (empty state, summary shape, corrupt-file-skip, detail fetch, 404, 3 path-
+    traversal attempts, role gating, `eval-run` registration), 6 new frontend tests, `ruff`/
+    `tsc -b`/`vite build` all clean. **Live-verified**: built a fresh release `ekos` binary (the
+    one on disk predated the `eval` subcommand by two weeks — a real, easy-to-miss staleness trap,
+    caught before it silently broke the trigger command), ran the real FastAPI backend + Vite dev
+    server locally, registered this repo as a workspace, and fetched real report data through
+    `localhost:5173/api/...` — the exact path a browser hits. No Chrome browser tool was available
+    in this environment for an actual screenshot/click-through — named as a real, not glossed-over,
+    gap versus the ideal verification standard. Also added SonarCloud Maintainability/Reliability/
+    Security/Quality-Gate badges to the top of the root `README.md`.

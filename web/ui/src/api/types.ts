@@ -124,3 +124,66 @@ export interface WriteResult {
   warnings: Finding[];
   append_only_warning: string | null;
 }
+
+// RFC 0138 — ekos eval run/history. `file` is the saved report's own filename, the id
+// GET /evals/reports/{file} takes.
+export interface EvalReportSummary {
+  file: string;
+  dataset: string;
+  agent: string;
+  runtime: string;
+  generated_at: string;
+  status_pass: boolean;
+  scenarios: number;
+  passed: number;
+  failed: number;
+  answer_correctness: number | null;
+  evidence_groundedness: number | null;
+  completeness: number | null;
+  recall_at_10: number | null;
+  hallucination_rate: number;
+  avg_tokens: number | null;
+  p95_latency_ms: number;
+  cache_hits: number;
+  cache_misses: number;
+  tokens_saved: number | null;
+  peak_rss_kb: number | null;
+  total_cpu_time_ms: number | null;
+}
+
+export interface EvalScenarioReport {
+  id: string;
+  passed: boolean;
+  hallucinated: boolean;
+  answer_score: number | null;
+  evidence_score: number | null;
+  completeness_score: number | null;
+  retrieval_recall: number | null;
+  groundedness_score: number | null;
+  trajectory_score: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_hit: boolean | null;
+  rss_kb_end: number | null;
+  cpu_time_ms: number | null;
+  latency_ms: number;
+  error: string | null;
+}
+
+export interface EvalGateThresholds {
+  min_answer_correctness: number;
+  min_evidence_groundedness: number;
+  min_completeness: number;
+  min_recall_at_10: number;
+  max_hallucination_rate: number;
+}
+
+export interface EvalReport {
+  dataset: string;
+  agent: string;
+  runtime: string;
+  generated_at: string;
+  gates: EvalGateThresholds;
+  metrics: Omit<EvalReportSummary, "file">;
+  scenarios: EvalScenarioReport[];
+}

@@ -18,6 +18,7 @@ const TABS = [
   { to: "graph", label: "Graph" },
   { to: "run", label: "Run" },
   { to: "runs", label: "History" },
+  { to: "evals", label: "Evals" },
   { to: "config", label: "ekos.toml" },
 ];
 

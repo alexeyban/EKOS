@@ -1,5 +1,10 @@
 # EKOS — Enterprise Knowledge Operating System
 
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
+[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=alexeyban_EKOS)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
+
 EKOS is an AI-native platform that continuously reconstructs, compiles, stores and serves enterprise knowledge.
 
 Unlike traditional enterprise systems that manage data, documents or metadata independently, EKOS treats the entire enterprise as a living knowledge system — a permanently evolving semantic model that can be trusted by both humans and AI.
@@ -857,7 +862,7 @@ export keeps the most-connected core and says so in a `truncated` block rather t
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
 
-### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134/0136)
+### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134/0136/0138)
 
 `web/` is a browser surface over one or more compiled workspaces — a FastAPI app (`web/api/`) plus
 a Vite + React app (`web/ui/`).
@@ -900,6 +905,13 @@ a Vite + React app (`web/ui/`).
   `fa2_modified`) for graphs past ~2,000 nodes, where the browser's own force simulation stops
   keeping up; and one-click **PNG/glTF export** of the current view, entirely client-side (whatever
   zoom, filters, and isolate/impact state are on screen, not a server-rendered reproduction).
+- **Eval history** (RFC 0138): every saved `ekos eval run` report, browsable under a workspace's
+  **Evals** tab — a history table (dataset, agent, PASS/FAIL, answer-correctness/hallucination-rate)
+  and a detail view (all eleven metrics — the five headline scores plus tokens/latency/cache/RSS/
+  CPU — and the full per-scenario pass/fail/hallucinated breakdown). Triggering a new run reuses
+  the existing command runner (`eval-run` in the allowlist) rather than a bespoke UI — it shows up
+  on the **Run** tab like any other command, with `dataset`/`agent`/`category`/`limit` params, and
+  its progress streams through the same job log every other command already uses.
 
 ```bash
 cd ekos && cargo build --release -p ekos && cd ..
