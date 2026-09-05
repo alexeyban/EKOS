@@ -78,8 +78,9 @@ function SignIn({ error }: { error: unknown }) {
       ) : (
         <>
           <p className="muted">
-            Enter the console token (<code>CONSOLE_TOKEN</code> for read, or{" "}
-            <code>CONSOLE_WRITE_TOKEN</code> for read + write).
+            Enter the token value your operator configured — the value set for{" "}
+            <code>CONSOLE_TOKEN</code> (read access) or <code>CONSOLE_WRITE_TOKEN</code> (read +
+            write), not those names themselves.
           </p>
           <form
             className="token-row"
