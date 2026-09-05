@@ -97,7 +97,11 @@ pub struct StatusJson {
     pub entries: usize,
     pub objects: usize,
     pub relationships: usize,
-    /// `null` on the distributed gateway until a fan-out `evidence_count` RPC exists (RFC 0113).
+    /// `Option` rather than a bare `usize` for backward compatibility with pre-RFC-0136 JSON
+    /// consumers that may still check for `null` on a distributed workspace — the distributed
+    /// gateway's `evidence_count` is real now (a fan-out RPC, RFC 0136 Phase 7), so this is
+    /// `Some` unconditionally in practice; `.ok()` below only ever produces `None` on a genuine
+    /// per-call error.
     pub evidence: Option<usize>,
     /// Always `"unchecked"` in R2 — a real integrity pass (`verify_sealed_report` /
     /// `PRAGMA integrity_check`) is seconds-to-minutes and `status` must stay instant. A future

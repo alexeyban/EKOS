@@ -87,6 +87,11 @@ pub enum WorkerRequest {
     EntryCount {
         partition: String,
     },
+    /// RFC 0136 Phase 7 — closes the one remaining `Err`-stubbed `KnowledgeStore` method on
+    /// `DistributedLedger`; same shape as `ObjectCount`/`RelationshipCount`.
+    EvidenceCount {
+        partition: String,
+    },
 }
 
 impl WorkerRequest {
@@ -111,7 +116,8 @@ impl WorkerRequest {
             | WorkerRequest::Diff { partition, .. }
             | WorkerRequest::ObjectCount { partition }
             | WorkerRequest::RelationshipCount { partition }
-            | WorkerRequest::EntryCount { partition } => Some(partition),
+            | WorkerRequest::EntryCount { partition }
+            | WorkerRequest::EvidenceCount { partition } => Some(partition),
         }
     }
 }

@@ -6,7 +6,9 @@ use std::sync::Arc;
 use chrono::Utc;
 use ekos_cluster::{CoordinatorClient, PartitionLocation, spawn_ephemeral};
 use ekos_distributed::{DistributedLedger, partition_id, spawn_ephemeral_worker};
-use ekos_kir::{KirObject, KirRelationship, ObjectKind, RelationshipKind};
+use ekos_kir::{
+    KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
+};
 use ekos_ledger::KnowledgeStore;
 use ekos_ledger::partitioned::{PartitionDimension, PartitionedLedger, TimeBucket};
 use tempfile::tempdir;
@@ -37,6 +39,20 @@ fn build_workspace(root: &std::path::Path) -> (PartitionedLedger, KirObject, Kir
             RelationshipKind::DependsOn,
             customers.id,
             orders.id,
+        ))
+        .unwrap();
+    // RFC 0136 Phase 7 — real evidence, so `evidence_count` (a new distributed RPC, previously
+    // an Err stub) has something real to fan out over and sum.
+    ledger
+        .append_evidence(&KirEvidence::new(
+            SourceLocation::file("schema.sql"),
+            "CREATE TABLE orders (...)",
+        ))
+        .unwrap();
+    ledger
+        .append_evidence(&KirEvidence::new(
+            SourceLocation::file("schema.sql"),
+            "CREATE TABLE customers (...)",
         ))
         .unwrap();
     (ledger, orders, customers, main_rs)
@@ -82,6 +98,7 @@ async fn gateway_matches_partitioned_ledger_over_two_workers() {
     let want_all: usize = ledger.object_count().unwrap();
     let want_hist = ledger.object_history(&orders_id).unwrap().len();
     let want_rels = ledger.relationships_for(&customers_id).unwrap().len();
+    let want_evidence: usize = ledger.evidence_count().unwrap();
 
     // The gateway's `KnowledgeStore` calls are sync; run them off the test runtime so the gateway
     // uses its own runtime (no ambient handle on a plain thread).
@@ -112,6 +129,11 @@ async fn gateway_matches_partitioned_ledger_over_two_workers() {
         assert_eq!(g.object_history(&orders_id).unwrap().len(), want_hist);
         assert_eq!(g.relationships_for(&customers_id).unwrap().len(), want_rels);
         assert_eq!(g.relationship_count().unwrap(), 1);
+        assert_eq!(
+            g.evidence_count().unwrap(),
+            want_evidence,
+            "RFC 0136 Phase 7 — evidence_count now fans out over the distributed gateway"
+        );
 
         let now = Utc::now();
         assert!(g.object_at(&orders_id, now).unwrap().is_some());

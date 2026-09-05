@@ -251,4 +251,11 @@ impl QueryWorkerClient {
             WorkerResponse::Count(n) => n
         )
     }
+
+    pub async fn evidence_count(&self, partition: &str) -> Result<usize, DistributedError> {
+        expect!(
+            self.call(&WorkerRequest::EvidenceCount { partition: partition.into() }).await?,
+            WorkerResponse::Count(n) => n
+        )
+    }
 }

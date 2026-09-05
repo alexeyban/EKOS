@@ -4701,9 +4701,27 @@ are excluded — see the full exclusion list in the planning history if needed.
         **Not visually verified in a real browser** — no browser tooling available this session;
         verified instead via full backend test coverage, strict typecheck, a clean production
         build, and confirming Vite's dev server serves every new module without a transform error.
-      - [ ] **Phase 7 (hardening).** Deferred within R1: true streaming ndjson, the distributed
-        `evidence_count` RPC. Deferred within 0134: per-commit (sub-day) checkpoint ticks,
-        source/world-time slider axis, deep-linking `?as_of=&focus=`.
+      - [ ] **Phase 7 (hardening), in progress 2026-09-05.**
+        - [x] **Distributed `evidence_count` RPC — fixed.** `WorkerRequest::EvidenceCount` +
+          `QueryWorkerClient::evidence_count` (same shape as `ObjectCount`/`RelationshipCount`,
+          RFC 0113's existing pattern) + `DistributedLedger::evidence_count`'s real fan-out
+          replacing the `Err` stub. `ekos status --json`/`ekos_status` now report a real evidence
+          count on a distributed workspace instead of `null`. Real end-to-end test (a live
+          coordinator + 2 query workers, real `KirEvidence` fanned out and summed), not mocked.
+        - [ ] **Deferred within R1** (`ekos graph export`): true streaming ndjson — `Runtime`
+          currently builds the whole `GraphExport` in memory before any output writes begin (only
+          the *write* side is incremental); genuinely streaming would need the graph-construction
+          side restructured as a lazy iterator, a bigger `ekos-runtime` refactor. Not attempted as
+          part of web-console hardening — the console's own `ekos_graph_export` calls are already
+          capped (`max_nodes`/`max_edges`, default 5000/20000), so this specifically matters for
+          the CLI's own uncapped standalone export, not the console.
+        - [ ] **Deferred within 0134**: per-commit (sub-day) checkpoint ticks, source/world-time
+          slider axis — both real, but source/world-time specifically was a *deliberate* RFC 0134
+          design decision ("Ledger time, not source/world time... world time needs every
+          observation to carry a trustworthy source timestamp, which most don't"), not a simple
+          polish item — would need every analyzer to carry meaningful observation timestamps.
+          Deep-linking `?as_of=&focus=` — a real, separately-scoped console UX item, tracked on
+          its own below rather than folded into this note.
   - [x] **RFC A — RFC 0096, `devlog_113`**: `AS OF <timestamp>` (new bulk
     `all_objects_at`/`all_relationships_at` on `KnowledgeStore`, both backends — the primitive didn't
     exist before, only single-id `object_at`/`relationships_at`, RFC 0047) and `COUNT`/`GROUP BY`

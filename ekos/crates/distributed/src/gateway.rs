@@ -713,12 +713,15 @@ impl KnowledgeStore for DistributedLedger {
     }
 
     fn evidence_count(&self) -> Result<usize, LedgerError> {
-        // deferred: needs an `evidence_count` RPC in the QueryWorker protocol (RFC 0113) to
-        // fan out over the evidence partitions. `ekos status --json` renders this as `null` on a
-        // distributed workspace (the CLI does `.ok()` on the result) rather than failing.
-        Err(LedgerError::Io(std::io::Error::other(
-            "evidence_count is not yet available over the distributed gateway",
-        )))
+        // RFC 0136 Phase 7 — was deferred pending an `EvidenceCount` RPC in the QueryWorker
+        // protocol; now real, same fan-out shape as `object_count`/`relationship_count`.
+        self.run(async move {
+            let pids = self.partitions(PClass::Evidence).await?;
+            let counts = self
+                .fan_out(&pids, |w, pid| async move { w.evidence_count(&pid).await })
+                .await?;
+            Ok(counts.into_iter().sum())
+        })
     }
 
     fn vacuum_into(&self, _dest: &std::path::Path) -> Result<(), LedgerError> {

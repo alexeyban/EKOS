@@ -164,6 +164,7 @@ fn run(ledger: &FactLedger, req: WorkerRequest) -> WorkerResponse {
                 WorkerResponse::Count(ledger.relationship_count()?)
             }
             WorkerRequest::EntryCount { .. } => WorkerResponse::Count(ledger.entry_count()?),
+            WorkerRequest::EvidenceCount { .. } => WorkerResponse::Count(ledger.evidence_count()?),
         })
     })();
     r.unwrap_or_else(|e| WorkerResponse::Error {
