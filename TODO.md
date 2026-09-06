@@ -4924,7 +4924,7 @@ are excluded — see the full exclusion list in the planning history if needed.
     in this environment for an actual screenshot/click-through — named as a real, not glossed-over,
     gap versus the ideal verification standard. Also added SonarCloud Maintainability/Reliability/
     Security/Quality-Gate badges to the top of the root `README.md`.
-  - [ ] **Real finding from `ekos eval run`, not a harness bug: current agent answer quality is
+  - [x] **Real finding from `ekos eval run`, not a harness bug: current agent answer quality is
     weak — needs improvement, not just measurement.** The most complete run so far
     (`evals/reports/20260905T144932Z-ekos-full.json`, the pre-Phase-2 32-scenario suite against
     `ollama llama3:latest`, the model this workspace's `ekos.toml` is configured with) came back
@@ -4948,3 +4948,27 @@ are excluded — see the full exclusion list in the planning history if needed.
     RFC 0138's evaluators are deliberately strict keyword/id matching (RFC 0138 Non-goals: no LLM
     judge), so part of any low score may legitimately be matcher strictness rather than a bad
     answer; distinguishing the two is step (2)'s job before touching anything in step (3).
+
+    **Resolved 2026-09-06 (devlog_170)**: ran the full 101-scenario `ekos-full` baseline
+    (`evals/reports/20260906T132949Z-ekos-full-baseline.json`, 47/101 passed). Diagnosis (step 2)
+    found a real, separate bug first: `ekos.toml`'s `[observe] ignore-patterns` was missing
+    `evals/` and a 2.3GB local `test-runs/` directory (RFC 0111/0113 E2E leftovers), so the ledger
+    was self-contaminated — `ekos ask` on `sec-001` cited `evals/datasets/security.yaml` back at
+    itself instead of naming `redaction.rs`. Fixed both, rebuilt the pipeline from scratch, and
+    re-ran clean (`evals/reports/20260906T182532Z-ekos-full-clean.json`, 48/101 passed). Result:
+    hallucination rate improved (12.9%→9.9%) and evidence groundedness improved (75.5%→78.3%), but
+    answer correctness (39.3%→37.6%) and completeness (37.6%→36.8%) stayed flat, and recall@10
+    dropped (75.0%→65.0%, not yet root-caused — retrieval-ranking shift from a smaller corpus, or
+    `ollama` sampling noise). **Conclusion**: contamination was a real, worth-fixing bug but not
+    the dominant cause of the weak scores — `llama3:latest`'s own answer-generation quality is.
+  - [ ] **Follow-up from the above, still open**: (1) A/B a stronger provider (`--agent claude`/
+    `--agent openai`) once an API key is available in this environment — still the highest-leverage
+    unexplored lever; (2) root-cause the recall@10 regression (75.0%→65.0%) the contamination fix
+    introduced — check whether it's scenario-specific (a handful of `expected_objects` no longer
+    rank in the top 10 post-purge) or genuinely `ollama` run-to-run noise, by re-running the clean
+    dataset a second time and diffing per-scenario `retrieval_recall`; (3) regenerate
+    `[llm-description]` — it was temporarily disabled during the contamination-fix rebuild to keep
+    the measurement fast (`.ekos/`'s `ai_overview`/`ai_usage`/`ai_comment_check` properties are
+    currently stale/absent for most objects) and re-enabled in `ekos.toml` afterward, but the
+    regeneration itself (a slow, LLM-call-heavy pass over ~5,000+ symbols) was deferred, not run;
+    (4) only after (1)-(2), revisit prompt/retrieval tuning per the original step (3) above.

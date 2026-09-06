@@ -26,6 +26,25 @@ ignore-patterns = [
     "doc",
     "doc-sa",
     "doc-objects",
+    # Found live 2026-09-06 during an `ekos eval run` baseline: RFC 0138's `evals/` directory
+    # (scenario YAML + saved JSON reports) was never added here, so it self-contaminated the
+    # ledger the eval harness grades answers against — a search for `FooBarNonexistentAnalyzer`
+    # (an intentionally-fake name from an adversarial scenario) hit `evals/datasets/adversarial.
+    # yaml` directly, and a real question about the redaction module got answered by citing
+    # `evals/datasets/security.yaml` back at itself instead of `redaction.rs`. Same class of bug
+    # as the `doc`/`doc-sa`/`doc-objects` exclusion above (devlog_90).
+    "evals",
+    # Found live 2026-09-06, same rebuild that found the `evals/` gap above: `test-runs/` is a
+    # ~2.3GB, git-ignored (see .gitignore) local directory of leftover artifacts from the RFC
+    # 0111/0113 distributed-storage E2E soak tests (devlog_144, 2026-08-31) — full copies of a
+    # 95-partition Elixir workspace plus duplicated MySQL/MSSQL DB-script fixtures. Being
+    # git-ignored doesn't exclude it from `ekos build`'s own observation walk, so it was being
+    # fully re-ingested as if it were EKOS's own multi-language source — the actual cause of the
+    # 376 identity conflicts a `resolve` hit on this rebuild (generic names like `generate`/
+    # `validate`/`json`/`test` colliding across Rust/Python/Elixir/JS symbols from that test
+    # workspace), and a much bigger contamination source for `ekos ask`/eval answers than the
+    # `evals/` gap alone.
+    "test-runs",
 ]
 
 [llm]

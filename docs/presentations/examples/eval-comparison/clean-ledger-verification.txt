@@ -1,0 +1,26 @@
+$ ./ekos/target/debug/ekos query find "FooBarNonexistentAnalyzer" --mode lexical
+No objects found matching 'FooBarNonexistentAnalyzer'.
+
+$ ./ekos/target/debug/ekos query find "ekos-full" --mode lexical
+  4ae04863-471a-55d5-80a0-3b9619c8dc9c  ekos/docs/rfcs/0074-data-architecture-view.md
+  42c3600c-9395-543b-9742-affff8e8d6fa  ekos/docs/rfcs/0074-data-architecture-view.md
+  d17026ad-039c-57ad-927c-7ce93e7d458e  docs/generated/ekos-self-documentation.html: section 13
+  6e34dc38-652b-512d-a36b-14b09d2a7032  docs/presentations/claude-code-with-ekos.html: section 5
+  8301a218-80f0-5403-a59f-5f12d35095de  ekos/crates/ledger/src/partitioned/tests.rs
+  122a89a7-128a-5a42-84c9-4b30bc3640b6  ekos/crates/recovery/src/requirements_analyzer.rs
+  911520ae-707f-58db-975c-78372babfa95  ekos/docs/rfcs/0047-claims-and-temporal-validity.md
+  94017f55-a93d-5c79-bf2c-35240668a684  ekos/docs/rfcs/0125-vector-search-arm.md
+  7b4ee58b-a968-5895-88c4-7fb36ced8487  ekos/docs/rfcs/0125-vector-search-arm.md
+  5145608e-3b13-5fb7-a7f4-2879d7304107  ekos/docs/rfcs/0047-claims-and-temporal-validity.md
+
+# Ran against the CLEAN ledger, after adding "evals" and "test-runs" to ekos.toml's
+# [observe] ignore-patterns and rebuilding the full pipeline from a wiped .ekos/
+# (init -> build -> recover -> resolve --force -> compile -> commit).
+#
+# "FooBarNonexistentAnalyzer" (only ever present in evals/datasets/adversarial.yaml)
+# now correctly returns zero ledger hits. A broader search for "ekos-full" (the eval
+# dataset/run name) returns only real RFC/doc/code files -- no evals/ paths at all.
+#
+# Ledger object count dropped 35,444 -> 23,443 (~34%) once evals/ and the 2.3GB
+# git-ignored-but-not-ekos-ignored test-runs/ directory (RFC 0111/0113 E2E soak-test
+# leftovers, devlog_144) were excluded from observation.

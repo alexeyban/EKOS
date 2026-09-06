@@ -1,0 +1,20 @@
+$ ./ekos/target/debug/ekos ask "How is EKOS structured, at a high level — what does it compile enterprise systems into?"
+
+[INFO ekos::commands::recover] using local Ollama provider with disk cache
+[INFO tantivy::directory::file_watcher] Meta file ".ekos/ledger/facts/search/meta.json" was modified
+EKOS is structured as a compilation of enterprise systems into a runtime environment, which allows it to execute and manage various dependencies.
+
+{"cited_evidence": ["6", "9", "13", "18"]}
+Claims 6, 9, 13, and 18 provide evidence that EKOS compiles enterprise systems into a runtime environment.
+warning: evidence set truncated to 60 items — 26 dropped
+warning: LLM response did not include a valid cited_evidence block
+
+# Scenario arch-001 (evals/datasets/architecture.yaml), expected_facts: ["Canonical Knowledge
+# Model"]. The real answer is "the Canonical Knowledge Model" (CLAUDE.md's own architecture
+# section, compiled and present in the ledger). llama3:latest instead answers "a runtime
+# environment" — plausible-sounding, wrong, and it leaked its own citation-block JSON
+# ({"cited_evidence": [...]})  into the visible answer text rather than only the prose.
+# Unlike sec-001/adv-001 above, this is NOT a ledger-contamination artifact — evals/ paths
+# are nowhere in this answer or its evidence. This is the separate, larger problem the
+# comparison report's Conclusions section names directly: llama3:latest's own
+# answer-generation quality, not retrieval contamination, is the dominant remaining gap.

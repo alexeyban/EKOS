@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eval Comparison: Fixing a Self-Contaminated Ledger</title>
+<meta name="description" content="RFC 0138's eval harness flagged weak agent answer quality. Diagnosing it live found a real bug -- evals/ and a 2.3GB test-runs/ directory were self-contaminating the ledger the eval harness grades answers against. Fixed, rebuilt the pipeline from scratch, and re-ran the full 101-scenario suite for an honest before/after comparison -- including where the fix did NOT move the number.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — RFC 0138 Eval Harness</div>
+  <h1>The harness found weak answers.<br><span class="arrow-word">The diagnosis found a ledger bug.</span></h1>
+  <p class="lede">A full 101-scenario baseline run came back failing every quality gate. Instead of
+  guessing at prompt tuning, the low scores were reproduced live, one real answer at a time. That
+  surfaced a genuine, previously-undiscovered bug — the eval harness's own scenario files, plus a
+  2.3GB leftover test directory, were being ingested into the very ledger it grades answers
+  against. Fixed both, rebuilt the whole pipeline from scratch, and re-ran the identical suite for
+  a controlled before/after. The honest result: real improvement in some metrics, none in others —
+  reported here without smoothing it over.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">47/101 passed, contaminated</span><span class="sep mono">→</span>
+    <span class="chip">2 ledger-contamination bugs found &amp; fixed</span><span class="sep mono">→</span>
+    <span class="chip hot">48/101 passed, clean rebuild</span><span class="sep mono">→</span>
+    <span class="chip bad">answer quality still the open gap</span>
+  </div>
+  <div class="byline"><span class="dot"></span> `ekos-full` dataset, 101 scenarios, 7 categories · agent: <code class="mono">ollama llama3:latest</code> · devlog_170 · 2026-09-06</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / purpose</div>
+  <div class="eyebrow">Why this report exists</div>
+  <h2>RFC 0138 exists to catch exactly this. It did its job.</h2>
+  <p class="lede">A previous session's most complete eval run (the pre-Phase-2, 32-scenario suite)
+  came back <code class="mono">Status: FAIL</code> against every gate — 45.8% answer correctness
+  against an 85% bar, 12.5% hallucination against a 5% ceiling. That was logged as an open finding,
+  not silenced: the harness doing its job is not a bug. Two things were still undone: (1) the
+  current 101-scenario, 7-category dataset had never been run end-to-end, only the older
+  32-scenario version had; (2) nobody had yet looked at <em>why</em> specific answers were scoring
+  low — matcher strictness, a genuinely wrong answer, and a contaminated evidence set all produce
+  the same low number, and only reading the real answers tells them apart.</p>
+  <p class="lede">This report's purpose is narrow and honest: run the full baseline, diagnose real
+  failures instead of guessing, fix what diagnosis actually finds, and report the before/after
+  numbers plainly — including the parts that didn't improve.</p>
+  <div class="tag" style="margin-top:0.8rem;">Prior finding this session continues:
+    <code class="mono">TODO.md</code> — "Real finding from `ekos eval run`, not a harness bug"</div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / methodology</div>
+  <div class="eyebrow">RFC 0138's harness, and the procedure run against it</div>
+  <h2>Five deterministic evaluators. No LLM judge. Same suite, twice.</h2>
+  <table class="ttable">
+    <thead><tr><th>Evaluator</th><th>What it measures</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Answer correctness</td><td class="desc">Fraction of a scenario's <code>expected_facts</code> present as a case-insensitive substring of the answer text — strict keyword matching, deliberately no LLM judge (RFC 0138 Non-goals).</td></tr>
+      <tr><td class="tool">Evidence groundedness</td><td class="desc">Whether cited evidence actually backs the claim made.</td></tr>
+      <tr><td class="tool">Completeness</td><td class="desc">Combines answer + evidence match coverage for the scenario.</td></tr>
+      <tr><td class="tool">Recall@10</td><td class="desc">Whether a scenario's <code>expected_objects</code> rank in the top 10 lexical retrieval hits.</td></tr>
+      <tr><td class="tool">Hallucination rate</td><td class="desc">For adversarial scenarios (<code>should_refuse: true</code>) — did the agent fabricate an answer instead of refusing?</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">Dataset: <code class="mono">ekos-full</code>, 101 scenarios across 7 categories —
+  architecture (20), code (15), dependencies (12), lineage (12), history (12), security (12),
+  adversarial (18). Agent: <code class="mono">ollama llama3:latest</code>, the model this
+  workspace's own <code class="mono">ekos.toml</code> is configured with (no
+  <code class="mono">ANTHROPIC_API_KEY</code>/<code class="mono">OPENAI_API_KEY</code> was set in
+  this environment, so an A/B against a stronger provider stays an open follow-up, not part of
+  this comparison). Gates: correctness ≥85%, groundedness ≥90%, completeness ≥80%, recall@10
+  ≥80%, hallucination ≤5%.</p>
+  <p class="lede">Procedure: (1) run the full suite cold against the existing ledger — the
+  contaminated baseline; (2) reproduce individual low scorers live via <code class="mono">ekos
+  ask</code> to find a real failure pattern; (3) fix what that diagnosis actually found; (4) wipe
+  <code class="mono">.ekos/</code> and rebuild the whole pipeline from scratch
+  (<code class="mono">init → build → recover → resolve --force → compile → commit</code>); (5)
+  re-run the identical suite, same agent, same gates — the clean baseline. Only the ledger's
+  underlying data changed between the two runs.</p>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / the diagnostic questions</div>
+  <div class="eyebrow">Three real scenario questions, three real, unedited answers</div>
+  <h2>The model cited its own exam paper as the evidence.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited — contaminated ledger</div>
+<pre style="margin:0;">$ ekos ask "What module redacts secrets and PII before content reaches
+             the artifact store or ledger?"
+
+<span class="s">"...the module responsible for redacting secrets and PII is the one
+mentioned in `evals/datasets/security.yaml`."</span>
+
+Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a source)</span>
+          ekos/crates/common/src/redaction.rs  (the real answer, present but not named)</pre>
+  </div>
+  <p class="lede">Scenario <code class="mono">sec-001</code> expects the word "redaction" in the
+  answer. The real module (<code class="mono">redaction.rs</code>) was in the model's evidence set
+  — but the final answer names the eval's own question file back at itself instead. Confirmed
+  directly against the ledger, not inferred from the answer alone:</p>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos query find "FooBarNonexistentAnalyzer" --mode lexical
+<span class="s">1 result(s): evals/datasets/adversarial.yaml</span>  <span class="bad">← an intentionally-fake
+                                                       name that exists nowhere
+                                                       in EKOS's real source</span></pre>
+  </div>
+  <p class="lede">The adversarial scenario built around that fake name (<code class="mono">adv-001
+  </code>) <em>did</em> correctly refuse to fabricate a description — no hallucination there — but
+  its stated reason was circular: "the only available information... comes from a search match in
+  the <code class="mono">evals/datasets/adversarial.yaml</code> file." A separate, architecturally
+  unrelated question (<code class="mono">arch-001</code>, "what does EKOS compile enterprise
+  systems into?") got a plausible-sounding but flatly wrong answer — "a runtime environment"
+  instead of "the Canonical Knowledge Model" — with no <code class="mono">evals/</code> path
+  anywhere in sight, showing the two problems are genuinely separate.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcripts:
+    <a href="examples/eval-comparison/sec-001-contaminated.txt" style="color:var(--accent-a);">sec-001-contaminated.txt</a>,
+    <a href="examples/eval-comparison/adv-001-contaminated.txt" style="color:var(--accent-a);">adv-001-contaminated.txt</a>,
+    <a href="examples/eval-comparison/arch-001-model-quality-miss.txt" style="color:var(--accent-a);">arch-001-model-quality-miss.txt</a></div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / results — the fix</div>
+  <div class="eyebrow">What was wrong, and what changed</div>
+  <h2>Two missing exclusions. One ~34% smaller, cleaner ledger.</h2>
+  <p class="lede"><code class="mono">ekos.toml</code>'s <code class="mono">[observe]
+  ignore-patterns</code> was missing two directories — the same contamination class already fixed
+  once for <code class="mono">doc</code>/<code class="mono">doc-sa</code>/<code class="mono">doc-objects</code>
+  (devlog_90):</p>
+  <div class="codeblock">
+    <div class="tag">ekos.toml — real diff</div>
+<pre style="margin:0;"><span class="diffline add">+ "evals",       # RFC 0138's own scenario YAML + saved JSON reports</span>
+<span class="diffline add">+ "test-runs",   # 2.3GB local, git-ignored leftover from the RFC 0111/0113</span>
+<span class="diffline add">+              # E2E soak test (devlog_144) -- git-ignored is not the same</span>
+<span class="diffline add">+              # as ekos.toml-ignored</span></pre>
+  </div>
+  <p class="lede"><code class="mono">test-runs/</code> was the larger of the two: a duplicated
+  95-partition Elixir workspace plus MySQL/MSSQL DB-script fixtures, fully re-observed on every
+  build despite being correctly excluded from git. It alone caused a 376-conflict
+  <code class="mono">ekos resolve</code> hard-stop (generic names like <code class="mono">generate
+  </code>/<code class="mono">validate</code>/<code class="mono">json</code> colliding across
+  Rust/Python/Elixir/JS symbols from that test corpus) and roughly a third of the ledger's total
+  object count.</p>
+  <div class="stat-grid" style="margin-top:1.2rem;">
+    <div class="stat"><div class="num">35,444 → 23,443</div><div class="label">ledger objects (~34% smaller) after excluding both directories</div></div>
+    <div class="stat"><div class="num">376 → 223</div><div class="label"><code class="mono">ekos resolve</code> identity conflicts</div></div>
+  </div>
+  <div class="tag" style="margin-top:0.8rem;">Open the real transcript:
+    <a href="examples/eval-comparison/clean-ledger-verification.txt" style="color:var(--accent-a);">clean-ledger-verification.txt</a>
+    — <code class="mono">FooBarNonexistentAnalyzer</code> now returns zero ledger hits.</div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / results — the numbers</div>
+  <div class="eyebrow"><code class="mono">ekos-full</code>, 101 scenarios, same agent, same gates</div>
+  <h2>Some metrics moved. Answer correctness didn't.</h2>
+  <table class="ttable">
+    <thead><tr><th>Metric</th><th>Contaminated</th><th>Clean</th><th>Δ</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Passed</td><td class="desc">47/101</td><td class="desc">48/101</td><td class="good">+1</td></tr>
+      <tr><td class="tool">Answer correctness</td><td class="desc">39.3%</td><td class="desc">37.6%</td><td class="bad">−1.7pp</td></tr>
+      <tr><td class="tool">Evidence groundedness</td><td class="desc">75.5%</td><td class="desc">78.3%</td><td class="good">+2.8pp</td></tr>
+      <tr><td class="tool">Completeness</td><td class="desc">37.6%</td><td class="desc">36.8%</td><td class="bad">−0.8pp</td></tr>
+      <tr><td class="tool">Recall@10</td><td class="desc">75.0%</td><td class="desc">65.0%</td><td class="bad">−10pp</td></tr>
+      <tr><td class="tool">Hallucination rate</td><td class="desc">12.9%</td><td class="desc">9.9%</td><td class="good">−3.0pp (better)</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;">Category pass counts, contaminated → clean: adversarial
+  7→10/18, architecture 9→8/20, code 8→7/15, dependencies 11→11/12, history 2→2/12, lineage 6→7/12,
+  security 4→3/12. No gate passes in either run — both are still
+  <code class="mono">Status: FAIL</code>.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real report JSON:
+    <a href="examples/eval-comparison/20260906T132949Z-ekos-full-baseline.json" style="color:var(--accent-a);">contaminated baseline</a>,
+    <a href="examples/eval-comparison/20260906T182532Z-ekos-full-clean.json" style="color:var(--accent-a);">clean baseline</a></div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / conclusions</div>
+  <div class="eyebrow">Stated plainly, not smoothed over</div>
+  <h2>Worth fixing on its own merits. Not the dominant cause.</h2>
+  <table class="ttable">
+    <thead><tr><th>This report shows</th><th>Does not claim</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">A real, confirmed ledger-contamination bug, with a live repro and a zero-hits verification after the fix</td><td class="desc">That fixing it explains the original 45%-correctness finding — it doesn't</td></tr>
+      <tr><td class="tool">A real, modest improvement in hallucination rate (−3.0pp) and evidence groundedness (+2.8pp)</td><td class="desc">A win across every metric — answer correctness and completeness are flat, and recall@10 dropped 10pp, not yet root-caused</td></tr>
+      <tr><td class="tool">The RFC 0016 fact-ledger's WAL surviving an OOM-kill mid-commit with zero corruption, confirmed under a real failure</td><td class="desc">A performance benchmark — the from-scratch debug-build rebuild took roughly 1.5-2 hours at this corpus size</td></tr>
+    </tbody>
+  </table>
+  <p class="lede">The honest conclusion: ledger self-contamination was real and worth fixing — a
+  system should never cite its own exam paper as evidence — but it was not the dominant cause of
+  weak answer quality. <code class="mono">llama3:latest</code>'s own answer-generation quality
+  (see <code class="mono">arch-001</code>, §03) remains the primary open gap. The original TODO's
+  next steps are now the clearer priority: A/B a stronger provider once an API key is available,
+  root-cause the recall@10 regression, and only after that, revisit prompt/retrieval tuning.</p>
+</section>
+
+<section class="slide cta" id="s8">
+  <div class="eyebrow">Reproduce it yourself</div>
+  <h2>Same suite. Same agent. Same gates.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ ekos eval run --dataset ekos-full --agent ollama --json \
+    --output evals/reports/run.json
+$ ekos eval history   # trend table across every saved run</pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Everything behind this deck</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Real <code>ekos ask</code>/<code>ekos query find</code> transcripts</td><td class="desc"><code>docs/presentations/examples/eval-comparison/</code></td></tr>
+      <tr><td class="tool">Full contaminated + clean report JSON</td><td class="desc">same folder, both saved verbatim</td></tr>
+      <tr><td class="tool">Write-up with full "Knowledge Captured" section</td><td class="desc"><code>devlogs/devlog_170.md</code></td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · RFC 0138 eval harness · 2 ledger-contamination bugs found and fixed, one open follow-up named plainly · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

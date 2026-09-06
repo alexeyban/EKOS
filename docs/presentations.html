@@ -198,6 +198,15 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
       <div class="rfc">RFC 0128–0133 · devlog 151–156</div>
     </li>
     <li>
+      <a class="deck" href="presentations/eval-comparison-report.html">Eval Comparison: Fixing a Self-Contaminated Ledger</a>
+      <p class="desc">RFC 0138's eval harness flagged weak agent answer quality. Diagnosing it live
+      found a real bug — the harness's own scenario files and a 2.3GB leftover test directory were
+      self-contaminating the ledger it grades answers against. Fixed, rebuilt from scratch, and
+      re-ran the full 101-scenario suite for an honest before/after — including where the fix
+      didn't move the number.</p>
+      <div class="rfc">RFC 0138 · devlog_170</div>
+    </li>
+    <li>
       <a class="deck" href="presentations/vision-and-token-utility.html">Vision &amp; Token Utility</a>
       <p class="desc">Why the EKOS token's relevance is designed to grow as a consequence of
       platform adoption, not a promise of price — the phased ecosystem roadmap from contributor

@@ -1,0 +1,18 @@
+$ ./ekos/target/debug/ekos ask "What module redacts secrets and PII before content reaches the artifact store or ledger?"
+
+[INFO ekos::commands::recover] using local Ollama provider with disk cache
+[INFO tantivy::directory::file_watcher] Meta file ".ekos/ledger/facts/search/meta.json" was modified
+According to claim 1, the module responsible for redacting secrets and PII is mentioned in `evals/datasets/security.yaml`. This information is also supported by claims 2-3, which relate to the `redaction.rs` file and its functions `redact_with_pattern` and `redact_json`, indicating that this module is involved in redacting sensitive data.
+
+Therefore, the answer is: The module responsible for redacting secrets and PII before content reaches the artifact store or ledger is the one mentioned in `evals/datasets/security.yaml`.
+
+Sources:
+  [100%] evals/datasets/security.yaml — "file: evals/datasets/security.yaml (1387 bytes)"
+  [100%] /home/legion/PycharmProjects/EKOS/./ekos/crates/common/src/redaction.rs — "file: ekos/crates/common/src/redaction.rs (23701 bytes)"
+
+# Scenario sec-001 (evals/datasets/security.yaml), expected_facts: ["redaction"].
+# The model had the correct file (redaction.rs) in its evidence set, but its final answer
+# names the eval's own question file back at itself instead of the real module — direct
+# evidence of the evals/ ledger self-contamination fixed in ekos.toml this session
+# (devlog_170). Ran against the CONTAMINATED ledger, before the `evals`/`test-runs`
+# ignore-pattern fix and full pipeline rebuild.
