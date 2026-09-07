@@ -265,7 +265,13 @@ impl<'a> AiRuntime<'a> {
         // relaxation deliberately returns loosely-related objects, and handing those to a model as
         // "evidence" for a question about something that does not exist is exactly what produced
         // the measured jump from 10 to 15 fabrications when relaxation shipped without it.
-        if evidence.items.is_empty() || evidence.is_all_weak() {
+        // Only a genuinely *empty* evidence set refuses. `is_all_weak` was tried here and
+        // measured worse every time: with §3.0's gate removing hub noise, an all-weak set is
+        // usually an honest question whose match was loose, not an unanswerable one — refusing on
+        // it cost 17 legitimate questions and 13.3pp of answer correctness while the gate alone
+        // already halved fabrication. The gate removes the fuel; the refusal does not need to
+        // remove the question too.
+        if evidence.items.is_empty() {
             diagnostics.push(Diagnostic::warning(
                 "RSN006",
                 "no evidence answers this question (the set was empty or held only \

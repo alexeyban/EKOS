@@ -17,11 +17,15 @@ use std::collections::HashMap;
 /// Default cap on [`EvidenceSet`] items — keeps a hub entity from flooding the set.
 pub const DEFAULT_EVIDENCE_CAP: usize = 60;
 /// Most neighbours a *supporting* (planner-added) neighbourhood may contribute before it is
-/// skipped entirely as hub noise (RFC 0139 §3.0). Sized well under [`DEFAULT_EVIDENCE_CAP`]: this
-/// is background context around a search, so if it alone would dominate the evidence budget it is
-/// describing the corpus rather than the question. Never applies to a traversal the question
+/// skipped entirely as hub noise (RFC 0139 §3.0). Never applies to a traversal the question
 /// actually asked for.
-const MAX_SUPPORTING_NEIGHBORS: usize = 12;
+///
+/// Two thirds of [`DEFAULT_EVIDENCE_CAP`]: background context that would fill most of the evidence
+/// budget on its own is describing the corpus, not the question. The measured distribution on this
+/// repo is sharply bimodal and agrees — of 36 gated neighbourhoods, 31 were size 46-47 (the `ekos`
+/// hub, i.e. the whole crate graph) and only 5 were smaller. An earlier value of 12 also gated
+/// those 5 mid-size neighbourhoods, costing legitimate questions their context for no benefit.
+const MAX_SUPPORTING_NEIGHBORS: usize = DEFAULT_EVIDENCE_CAP * 2 / 3;
 /// Hop depth a `Structural` plan traverses.
 const STRUCTURAL_HOPS: u32 = 2;
 /// The `attr` sentinel meaning "every fact about this entity" (→ [`Runtime::facts_of`]).
