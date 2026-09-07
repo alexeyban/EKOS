@@ -104,7 +104,7 @@ mod tests {
             adversarial: false,
             should_refuse: false,
             refusal_phrases: vec![],
-            expected_facts: facts.iter().map(|s| s.to_string()).collect(),
+            expected_facts: facts.iter().map(|s| (*s).into()).collect(),
             expected_evidence_contains: vec![],
             expected_objects: vec![],
             expected_query_type: None,

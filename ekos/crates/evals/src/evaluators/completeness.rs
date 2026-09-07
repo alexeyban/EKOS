@@ -38,7 +38,7 @@ mod tests {
             adversarial: false,
             should_refuse: false,
             refusal_phrases: vec![],
-            expected_facts: facts.into_iter().map(String::from).collect(),
+            expected_facts: facts.into_iter().map(Into::into).collect(),
             expected_evidence_contains: evidence_contains.into_iter().map(String::from).collect(),
             expected_objects: vec![],
             expected_query_type: None,

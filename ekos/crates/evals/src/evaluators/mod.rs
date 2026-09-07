@@ -6,6 +6,7 @@ pub mod answer;
 pub mod completeness;
 pub mod evidence;
 pub mod groundedness;
+pub mod normalize;
 pub mod retrieval;
 pub mod trajectory;
 
@@ -113,13 +114,20 @@ pub fn attribute(scenario: &Scenario, run: &ScenarioRun) -> Attribution {
     // A fact the model was shown but did not state is a generation failure; one that never
     // appeared in the evidence at all is a retrieval failure. When both kinds are present, the
     // retrieval gap is the more fundamental one — report it.
-    let evidence = run.evidence_text.as_deref().unwrap_or("").to_lowercase();
-    let answer = run.answer.as_deref().unwrap_or("").to_lowercase();
+    // Same normalisation the ruler uses, so attribution and grading never disagree about whether
+    // a fact is "present" (RFC 0139 §2.1).
+    let evidence_tokens = normalize::tokens(run.evidence_text.as_deref().unwrap_or(""));
+    let answer_tokens = normalize::tokens(run.answer.as_deref().unwrap_or(""));
+    let present = |tokens: &[String], fact: &crate::schema::ExpectedFact| {
+        fact.alternates()
+            .iter()
+            .any(|alt| normalize::contains_tokens(tokens, &normalize::tokens(alt)))
+    };
     let missing_from_evidence = scenario
         .expected_facts
         .iter()
-        .filter(|f| !answer.contains(&f.to_lowercase()))
-        .any(|f| !evidence.contains(&f.to_lowercase()));
+        .filter(|f| !present(&answer_tokens, f))
+        .any(|f| !present(&evidence_tokens, f));
     if missing_from_evidence {
         Attribution::Retrieval
     } else {
@@ -241,7 +249,7 @@ mod attribution_tests {
             adversarial: false,
             should_refuse: false,
             refusal_phrases: vec![],
-            expected_facts: expected_facts.iter().map(|s| s.to_string()).collect(),
+            expected_facts: expected_facts.iter().map(|s| (*s).into()).collect(),
             expected_evidence_contains: vec![],
             expected_objects: vec![],
             expected_query_type: None,

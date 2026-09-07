@@ -205,7 +205,12 @@ fn default_ruler_version() -> u32 {
 }
 
 /// The current grading semantics. **Bump this whenever grading changes** — see [`Report::ruler_version`].
-pub const RULER_VERSION: u32 = 1;
+///
+/// - **v1** — RFC 0138 as shipped: raw case-insensitive substring containment on `expected_facts`.
+/// - **v2** — RFC 0139 §2.1: token matching with separator/word-ending normalisation
+///   (`crate::evaluators::normalize`) and `any_of` alternates. Removes false negatives where a
+///   correct answer used a different word form, without loosening what counts as a fact.
+pub const RULER_VERSION: u32 = 2;
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
     let (sum, n) = values.fold((0.0f32, 0usize), |(s, n), v| (s + v, n + 1));

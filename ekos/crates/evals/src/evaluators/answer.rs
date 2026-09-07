@@ -1,6 +1,12 @@
-//! Answer-correctness evaluator (RFC 0138) — deterministic, no LLM judge: fraction of
-//! `Scenario::expected_facts` present as a case-insensitive substring of the answer text.
+//! Answer-correctness evaluator (RFC 0138) — deterministic, no LLM judge: the fraction of
+//! `Scenario::expected_facts` a correct answer actually states.
+//!
+//! RFC 0139 §2.1 replaced raw case-insensitive substring containment with token matching under
+//! [`crate::evaluators::normalize`], and let a fact declare accepted alternates. The measured
+//! problem was not that the ruler was strict but that it was strict about the *wrong thing*:
+//! `"redaction"` failed an answer saying "redacted", and `"append-only"` failed "append only".
 
+use crate::evaluators::normalize;
 use crate::schema::Scenario;
 
 /// `(matched, total)` — exposed separately from [`score`] so `evaluators::completeness` can
@@ -13,11 +19,16 @@ pub fn matched_count(scenario: &Scenario, answer: Option<&str>) -> (usize, usize
     let matched = match answer {
         None => 0,
         Some(text) => {
-            let lower = text.to_lowercase();
+            let answer_tokens = normalize::tokens(text);
             scenario
                 .expected_facts
                 .iter()
-                .filter(|f| lower.contains(&f.to_lowercase()))
+                // An `any_of` fact is satisfied by any one of its wordings, and still counts once.
+                .filter(|fact| {
+                    fact.alternates().iter().any(|alt| {
+                        normalize::contains_tokens(&answer_tokens, &normalize::tokens(alt))
+                    })
+                })
                 .count()
         }
     };
@@ -50,7 +61,7 @@ mod tests {
             adversarial: false,
             should_refuse: false,
             refusal_phrases: vec![],
-            expected_facts: expected_facts.into_iter().map(String::from).collect(),
+            expected_facts: expected_facts.into_iter().map(Into::into).collect(),
             expected_evidence_contains: vec![],
             expected_objects: vec![],
             expected_query_type: None,

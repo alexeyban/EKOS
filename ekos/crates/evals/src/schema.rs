@@ -23,6 +23,52 @@ fn default_pass_threshold() -> f32 {
     0.7
 }
 
+/// One thing a correct answer has to say (RFC 0139 §2.1).
+///
+/// `Literal` is the original form and every existing dataset line still deserialises as one — the
+/// enum is `untagged`, so this was a purely additive schema change. `AnyOf` exists because a
+/// deterministic matcher cannot be expected to know that "CKM" means "Canonical Knowledge Model";
+/// rather than guess at synonyms, the scenario declares which wordings it accepts:
+///
+/// ```yaml
+/// expected_facts:
+///   - any_of: ["Canonical Knowledge Model", "CKM"]
+///   - "append-only"
+/// ```
+///
+/// An `AnyOf` counts as **one** slot in the denominator no matter how many alternates it lists —
+/// it removes false negatives without inflating the score.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ExpectedFact {
+    Literal(String),
+    AnyOf { any_of: Vec<String> },
+}
+
+impl From<&str> for ExpectedFact {
+    fn from(s: &str) -> Self {
+        Self::Literal(s.to_string())
+    }
+}
+
+impl ExpectedFact {
+    /// Every accepted wording for this fact.
+    pub fn alternates(&self) -> &[String] {
+        match self {
+            Self::Literal(s) => std::slice::from_ref(s),
+            Self::AnyOf { any_of } => any_of,
+        }
+    }
+
+    /// The canonical wording, for diagnostics and attribution.
+    pub fn primary(&self) -> &str {
+        match self {
+            Self::Literal(s) => s,
+            Self::AnyOf { any_of } => any_of.first().map(String::as_str).unwrap_or(""),
+        }
+    }
+}
+
 /// One graded question. See `ekos/docs/rfcs/0138-eval-harness.md` §1 for the full field
 /// contract and worked examples.
 #[derive(Debug, Clone, Deserialize)]
@@ -50,9 +96,11 @@ pub struct Scenario {
     /// scenario, e.g. wording specific to the question's phrasing.
     #[serde(default)]
     pub refusal_phrases: Vec<String>,
-    /// Keywords/phrases expected to appear (case-insensitive substring) in the answer text.
+    /// Facts a correct answer must state. Each entry is either a literal phrase or a set of
+    /// accepted alternates (RFC 0139 §2.1) — matched under
+    /// [`crate::evaluators::normalize`], so wording and word endings don't decide correctness.
     #[serde(default)]
-    pub expected_facts: Vec<String>,
+    pub expected_facts: Vec<ExpectedFact>,
     /// Substrings expected in the fragment/path of at least one *valid* cited evidence entry.
     #[serde(default)]
     pub expected_evidence_contains: Vec<String>,
