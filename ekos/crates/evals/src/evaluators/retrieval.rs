@@ -31,6 +31,13 @@ pub fn recall_at_10(
         .iter()
         .filter_map(|n| name_to_id.get(&n.to_lowercase()).copied())
         .collect();
+    // RFC 0139 §2.6 — a name that resolves to nothing used to be dropped silently, shrinking the
+    // relevant set instead of failing. A typo'd or renamed object therefore made recall look
+    // *better* (fewer things to find), which is the wrong direction for a mistake to push a
+    // metric. Scoring it 0.0 makes an unverifiable expectation visible instead of flattering.
+    if relevant.is_empty() {
+        return Some(0.0);
+    }
     Some(recall_at_k(ranked_ids, &relevant, 10))
 }
 
@@ -95,5 +102,16 @@ mod tests {
         let s = scenario(vec!["sql_analyzer::SqlAnalyzerPass"]);
         let got = recall_at_10(&s, &[other], &store).unwrap();
         assert_eq!(got, 0.0);
+    }
+
+    /// RFC 0139 §2.6 — an expectation naming an object that doesn't exist (a typo, or an object
+    /// renamed since the scenario was written) must not quietly make recall easier.
+    #[test]
+    fn an_unresolvable_expected_object_scores_zero_rather_than_vanishing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ekos_ledger::Ledger::open(&dir.path().join("db.sqlite")).unwrap();
+        let mut s = scenario(vec!["no-such-object-anywhere"]);
+        s.expected_objects = vec!["no-such-object-anywhere".into()];
+        assert_eq!(recall_at_10(&s, &[KirId::new()], &store), Some(0.0));
     }
 }

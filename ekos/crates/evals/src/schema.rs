@@ -19,6 +19,12 @@ pub enum Mode {
     Retrieval,
 }
 
+/// Words too common in ordinary prose to serve as evidence that an answer *declined* (RFC 0139
+/// §2.5). Listed rather than inferred so the rule is auditable: each of these appears in
+/// fabricated answers as readily as in refusals.
+#[cfg(test)]
+const DEGENERATE_REFUSAL_PHRASES: &[&str] = &["not", "no", "never", "none", "n/a", "isn't", "cant"];
+
 fn default_pass_threshold() -> f32 {
     0.7
 }
@@ -356,6 +362,30 @@ mod tests {
                 || s.expected_query_type.is_some()
                 || s.should_refuse;
             assert!(gradable, "{} has no gradable signal at all", s.id);
+
+            // RFC 0139 §2.5 — a refusal phrase short or generic enough to appear in ordinary
+            // prose makes its scenario impossible to fail. `adv-014` shipped with a bare `"not"`,
+            // which matches almost any English sentence, so a confident fabrication containing a
+            // negation scored a perfect refusal. A check that cannot fail measures nothing.
+            for phrase in &s.refusal_phrases {
+                let p = phrase.trim().to_lowercase();
+                assert!(
+                    p.len() >= 5 && !DEGENERATE_REFUSAL_PHRASES.contains(&p.as_str()),
+                    "{}: refusal phrase {phrase:?} is too generic to ever fail — use wording a \
+                     fabricated answer would not contain",
+                    s.id
+                );
+                // A phrase quoted from the question is satisfied by *echoing the question*, which
+                // is what a fabrication does. Found the hard way: `adv-014` accepted "new
+                // version", its own question says "rather than appending a new version", and an
+                // answer confirming the false premise verbatim scored as a correct refusal.
+                assert!(
+                    !s.question.to_lowercase().contains(&p),
+                    "{}: refusal phrase {phrase:?} appears in the question itself, so an answer \
+                     that merely echoes the question counts as refusing",
+                    s.id
+                );
+            }
         }
 
         let categories: std::collections::HashSet<&str> =

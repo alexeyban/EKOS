@@ -91,7 +91,16 @@ scenarios:
   - id: code-013
     question: "What binary crate name does the EKOS CLI compile to (the actual executable name, not the package directory)?"
     mode: reason
+    # "ekos" alone appears in 59.3% of all answers whether or not they are right, so it carries
+    # almost no signal on its own. The fact stays (it *is* the answer) but the scenario now also
+    # has to retrieve the right object (RFC 0139 §2.5/§2.6).
     expected_facts:
+      - "ekos"
+    # Verified against the live ledger before being written down (evals/README.md's rule): the
+    # Crate object is named `ekos`, not `ekos-cli`. A name that resolves to nothing is silently
+    # dropped by the recall evaluator rather than failing loudly, so an unverified guess here
+    # would quietly weaken the metric instead of strengthening it.
+    expected_objects:
       - "ekos"
     difficulty: hard
 

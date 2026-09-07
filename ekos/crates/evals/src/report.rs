@@ -215,7 +215,12 @@ fn default_ruler_version() -> u32 {
 ///   is weighted rather than an unweighted mean; a scenario with no gradable signal fails visibly
 ///   instead of scoring a silent 1.0; and an answered-but-uncited scenario scores 0 for
 ///   groundedness instead of vanishing from its denominator.
-pub const RULER_VERSION: u32 = 3;
+/// - **v4** — RFC 0139 §2.5/§2.6 dataset hygiene: degenerate refusal phrases removed (`adv-014`
+///   accepted a bare `"not"`, which matches almost any sentence), near-free-pass `expected_facts`
+///   replaced with discriminating ones, and an unresolvable `expected_objects` name now scores 0
+///   instead of silently shrinking the relevant set. A dataset edit changes grading, so it gets a
+///   version like any evaluator change.
+pub const RULER_VERSION: u32 = 4;
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
     let (sum, n) = values.fold((0.0f32, 0usize), |(s, n), v| (s + v, n + 1));

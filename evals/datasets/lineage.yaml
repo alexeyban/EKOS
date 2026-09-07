@@ -7,8 +7,16 @@ scenarios:
   - id: lin-001
     question: "What must every semantic conclusion recorded in the EKOS ledger be traceable to?"
     mode: reason
+    # Bare "Evidence" appeared in 54.9% of all answers regardless of correctness — the word is
+    # unavoidable in this domain and the prompt itself uses it. Require the *relation* instead,
+    # which a wrong answer does not state (RFC 0139 §2.5).
     expected_facts:
-      - "Evidence"
+      - any_of:
+          - "traceable to evidence"
+          - "backed by evidence"
+          - "rests on evidence"
+          - "rest on evidence"
+          - "supported by evidence"
     difficulty: easy
 
   - id: lin-002

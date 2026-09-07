@@ -81,7 +81,12 @@ scenarios:
   - id: arch-010
     question: "What four primitives does every semantic conclusion in the Canonical Knowledge Model rest on?"
     mode: reason
+    # The question asks for four; checking only "Evidence" made it near-free, since the REASON
+    # prompt itself says "structured evidence claims" and answers echo the word (RFC 0139 §2.5).
     expected_facts:
+      - "Object"
+      - "Relationship"
+      - "Event"
       - "Evidence"
     difficulty: medium
 
