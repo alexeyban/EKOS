@@ -373,7 +373,26 @@ query, exactly as the corrected diagnosis predicted — no entity gate required 
    > `architecture`. Eliminating fabrication by declining to answer a third of real questions is
    > the worse failure, so it was reverted.
    >
-   > **Why it cannot work as specified:** relaxation means *legitimate* questions also retrieve
+   > *Attempt 3 (§3.7, term-coverage scoring)* replaced the binary flag with a graded one —
+   > `matched_terms`/`total_terms` per hit, weak below a 0.5 coverage floor. Same outcome as
+   > attempt 2: adversarial 18/18 with 0 fabrications, `code` correctness **72.7% → 18.2%** again,
+   > `architecture` 8 → 4 passed. Reverted. Coverage *alone* (neighbourhood not weak) measures at
+   > parity with the baseline — code 9→7 passed, adversarial unchanged at 13 fabrications.
+   >
+   > **The threshold was never the problem.** Long natural-language questions legitimately produce
+   > sub-threshold coverage, so `is_all_weak` cannot separate "nothing answers this" from "the match
+   > was loose but right" *while a spurious neighbourhood is attached at all*. Three attempts have
+   > now failed on the same mechanism.
+   >
+   > **The untried lever is §3.0's entity gate.** Stop a corpus-wide hub name — "ekos", present in
+   > nearly every question in an EKOS workspace — from driving neighbourhood expansion. Then an
+   > adversarial question retrieves only low-coverage search hits and is genuinely all-weak, while a
+   > question naming a specific entity keeps its neighbourhood. This is the §3.0 fix originally
+   > deferred as "treating a symptom": correct for answer *correctness*, wrong for fabrication,
+   > where the spurious neighbourhood is the fuel.
+
+   > **Why the `is_all_weak` mechanism cannot work as specified:** relaxation means *legitimate*
+   > questions also retrieve
    > partial-overlap hits, so "every claim is weak" does not separate "nothing answers this" from
    > "the match was loose but correct". The needed signal is **how much of the query a hit
    > matched** — term-coverage scoring — which the binary relaxed/strict flag cannot express.

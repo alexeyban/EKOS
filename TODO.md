@@ -5036,7 +5036,29 @@ are excluded — see the full exclusion list in the planning history if needed.
       **Still open from Phase 1**: degenerate keys (`adv-014`'s `refusal_phrases` includes bare
       `"not"`; near-free-pass `expected_facts` like `"ledger"`/`"ekos"`), and raising metric power
       (only 10 of 101 scenarios carry `expected_objects`, so recall@10 is a 10-sample mean).
-    - [ ] **Phase 1 remainder — dataset hygiene**: `any_of` alternates +
+    - [x] **Phase 1 remainder — dataset hygiene (done, ruler v4, `e0ad385`).** Three checks could not
+      fail: `adv-014` accepted a bare `"not"` as proof of refusal, `adv-010` the same with
+      `"never"`, and `arch-010`/`lin-001`/`code-013` keyed on words appearing in 55-59% of ALL
+      answers regardless of correctness (the REASON prompt itself says "structured evidence
+      claims", so answers echo "evidence"). Two guards added so the class cannot return: a refusal
+      phrase must not be short/generic, and **must not appear in the scenario's own question** —
+      the second found the hard way, when my first fix added `"new version"` to `adv-014` whose
+      question says "rather than appending a new version", letting a textbook fabrication score as
+      a correct refusal. Also §2.6: an unresolvable `expected_objects` name now scores 0 instead of
+      shrinking the relevant set (all 12 existing entries verified against the live ledger).
+      Measured on identical R0 answers: v3 31/101 → v4 31/101, correctness 37.1% → 36.2%,
+      recall@10 65.0% → 59.1%.
+    - [ ] **§3.7 term-coverage scoring landed as infrastructure but did NOT close the fabrication
+      regression (`ebd26b2`).** Third failed attempt on the same mechanism: attempt 1 (relaxed
+      search hits weak) never fired; attempts 2 and 3 (neighbourhood weak; coverage-graded
+      neighbourhood weak) both reached adversarial 18/18 with 0 fabrications while collapsing
+      `code` answer correctness 72.7% → 18.2%. Both reverted. **The threshold was never the
+      problem** — long questions legitimately produce sub-threshold coverage, so `is_all_weak`
+      cannot separate "nothing answers this" from "loose but right" while a spurious neighbourhood
+      is attached. **Next attempt must change §3.0's entity gate instead**: stop a corpus-wide hub
+      name ("ekos", in nearly every question) from driving neighbourhood expansion. Fabrication
+      stands at 15/101 vs a 10/101 baseline.
+    - [ ] **Phase 1 remainder — metric power**: `any_of` alternates +
       normalisation (hyphen/underscore/space) + `en_stem` stemming so "redacted" matches
       `"redaction"` and "CKM" matches `"Canonical Knowledge Model"`; stop `completeness`
       double-counting a missed fact (it costs 2 of 3 composite slots today, so one substring miss
