@@ -29,10 +29,31 @@ If you cannot answer from the given context, say so explicitly."#;
 const PROMPT_VERSION: &str = "ai-runtime-ask-v1";
 /// RFC 0123 — the REASON prompt. The context is a numbered list of typed evidence claims, not raw
 /// `ObjectState` JSON: the model explains structured evidence rather than interpreting objects.
-const REASON_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime reasoner. You are given a question and a numbered list of structured evidence claims compiled from an enterprise knowledge ledger. Answer the question using only those claims. Every statement you make must rest on a claim shown. End your response with a JSON block:
+///
+/// RFC 0139 §4.3 rewrote it around one finding: the v1 prompt said "if the evidence does not answer
+/// the question, say so explicitly", while `ekos_evals` graded refusals against a fixed list of 22
+/// phrases. The model was being marked on a rubric it had never been shown, so a correct refusal in
+/// its own wording scored identically to a fabrication. This version states the exact opening words
+/// a refusal must use, names the weak-claim marker the retrieval layer emits, and asks for
+/// identifiers verbatim — every instruction here corresponds to a measured failure mode.
+const REASON_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime reasoner. You are given a question and a numbered list of structured evidence claims compiled from an enterprise knowledge ledger.
+
+Answer using only those claims. Every statement must rest on a claim shown.
+
+ANSWERING. Most questions here do have an answer in the claims. Assemble the best answer the claims support, even if it is partial — say what they do show and note what is missing.
+
+REFUSING. Refuse only when no claim names or describes the thing the question asks about at all. A loose, partial or indirect match is not grounds to refuse. When you do refuse, begin your reply with exactly:
+Insufficient evidence.
+Then say in one sentence what you looked for. Do not guess, do not describe what such a thing would probably do, and do not confirm a premise the claims do not support — a question can be mistaken, and saying so is a correct answer.
+
+WEAK CLAIMS. A claim prefixed "possible search match (partial term overlap)" shares only some words with the question, so weigh it less than a direct one. It can still be right — prefer a supported answer over refusing.
+
+NAMING. Give exact identifiers as they appear in the claims — crate, module, function and file names verbatim, not paraphrased or prettified.
+
+CITING. End your response with a JSON block and nothing after it:
 {"cited_evidence": ["<evidence id>", ...]}
-listing the `evidence <id>` values of every claim you relied on. If the evidence does not answer the question, say so explicitly."#;
-const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v1";
+listing the `evidence <id>` value of every claim you relied on."#;
+const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v2";
 /// The refusal returned when the ledger holds nothing that answers a question (RFC 0139 §3.6).
 ///
 /// Worded to contain phrases the groundedness evaluator already recognises
@@ -63,6 +84,11 @@ pub struct AiRuntimeConfig {
     pub neighborhood_depth: u32,
     pub max_tokens: u32,
     pub system_prompt: String,
+    /// RFC 0139 §4.1 — the REASON prompt, overridable via `[ai] reason-system-prompt`. Until this
+    /// existed the tunable prompt (`system_prompt`) was the one the eval suite never exercised:
+    /// 91 of its scenarios are `mode: reason`, 10 `retrieval`, and **zero** `ask`. The prompt
+    /// under test was the hardcoded one.
+    pub reason_system_prompt: String,
     /// Cap on the total serialized size (characters) of gathered `ObjectState` context sent to
     /// the LLM. `max_matches`/`neighborhood_depth` bound seed count and hop depth, but not what a
     /// single hop pulls in — a hub-like object with hundreds of neighbors could still blow past
@@ -78,6 +104,7 @@ impl Default for AiRuntimeConfig {
             neighborhood_depth: 1,
             max_tokens: 1024,
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
+            reason_system_prompt: REASON_SYSTEM_PROMPT.to_string(),
             max_context_chars: DEFAULT_MAX_CONTEXT_CHARS,
         }
     }
@@ -289,7 +316,7 @@ impl<'a> AiRuntime<'a> {
         let user = format!("Question: {question}\n\nStructured evidence:\n{context}");
         let history_messages = history_messages(history);
         let req = LlmRequest {
-            system: REASON_SYSTEM_PROMPT,
+            system: &self.config.reason_system_prompt,
             user: &user,
             prompt_version: REASON_PROMPT_VERSION,
             max_tokens: self.config.max_tokens,

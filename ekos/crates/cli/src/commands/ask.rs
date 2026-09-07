@@ -206,6 +206,11 @@ pub fn ai_config(config: &EkosConfig) -> AiRuntimeConfig {
             .system_prompt
             .clone()
             .unwrap_or(default.system_prompt),
+        reason_system_prompt: config
+            .ai
+            .reason_system_prompt
+            .clone()
+            .unwrap_or(default.reason_system_prompt),
         max_context_chars: config
             .ai
             .max_context_chars

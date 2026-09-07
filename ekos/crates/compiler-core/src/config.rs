@@ -106,6 +106,9 @@ pub struct AiConfig {
     pub neighborhood_depth: Option<u32>,
     pub max_tokens: Option<u32>,
     pub system_prompt: Option<String>,
+    /// Overrides the REASON prompt (`ekos ask`'s default path). Separate from `system_prompt`,
+    /// which only affects the pre-RFC-0123 `--classic` path (RFC 0139 §4.1).
+    pub reason_system_prompt: Option<String>,
     pub max_context_chars: Option<u32>,
 }
 
