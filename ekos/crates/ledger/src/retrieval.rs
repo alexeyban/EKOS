@@ -80,6 +80,11 @@ pub struct Signal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum SignalSource {
     Bm25,
+    /// A hit from RFC 0139 §3.1's relaxed pass: it shares *some* query terms, but not all of them.
+    /// A legitimate ranking candidate, and explicitly **not** evidence that the thing being asked
+    /// about exists — consumers deciding whether the corpus can answer at all (the refusal path in
+    /// `ekos_runtime::reason`) must treat an all-relaxed result as "nothing found".
+    Bm25Relaxed,
     Vector,
     Graph,
     ExactName,

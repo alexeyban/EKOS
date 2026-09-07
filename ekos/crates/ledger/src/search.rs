@@ -280,6 +280,27 @@ impl SearchIndex {
         query: &str,
         limit: usize,
     ) -> Result<Vec<(Uuid, String, f32)>, LedgerError> {
+        Ok(self
+            .query_scored_marked(query, limit)?
+            .into_iter()
+            .map(|(id, name, score, _relaxed)| (id, name, score))
+            .collect())
+    }
+
+    /// [`SearchIndex::query_scored`], plus whether each hit came from the relaxed pass
+    /// (RFC 0139 §3.1) rather than matching every query term.
+    ///
+    /// Callers that reason about *whether the corpus really answers a question* need this
+    /// distinction: a relaxed hit means "this document shares some words with your question", which
+    /// is a fine retrieval candidate but is not evidence that the thing asked about exists. Without
+    /// it, relaxation turns questions about things that do not exist into confident answers built
+    /// from whatever shared a word — measured live, fabrications rose 10 → 15 on the RFC 0138 suite
+    /// when relaxation shipped un-marked.
+    pub fn query_scored_marked(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(Uuid, String, f32, bool)>, LedgerError> {
         let terms: Vec<(String, bool)> = query
             .split(|c: char| !(c.is_alphanumeric() || c == '*'))
             .filter(|t| !t.is_empty())
@@ -366,7 +387,11 @@ impl SearchIndex {
         must.push((Occur::Should, memory_boost));
 
         let searcher = self.reader.searcher();
-        let mut out = self.run_query(&searcher, BooleanQuery::new(must), limit)?;
+        let mut out: Vec<(Uuid, String, f32, bool)> = self
+            .run_query(&searcher, BooleanQuery::new(must), limit)?
+            .into_iter()
+            .map(|(id, name, score)| (id, name, score, false))
+            .collect();
 
         // RFC 0139 §3.1 — progressive relaxation. Every term above is `Occur::Must`, so a
         // natural-language question ("what crate implements the SQL DDL recovery analyzer?")
@@ -386,10 +411,11 @@ impl SearchIndex {
             }
             let relaxed = self.run_query(&searcher, BooleanQuery::new(should), limit)?;
 
-            let seen: std::collections::HashSet<Uuid> = out.iter().map(|(id, _, _)| *id).collect();
+            let seen: std::collections::HashSet<Uuid> =
+                out.iter().map(|(id, _, _, _)| *id).collect();
             // Anchor the appended band strictly below the weakest strict hit so the result list
             // stays strictly decreasing (`retrieval::RankedResults` documents that invariant).
-            let floor = out.last().map(|(_, _, s)| *s).unwrap_or(f32::MAX);
+            let floor = out.last().map(|(_, _, s, _)| *s).unwrap_or(f32::MAX);
             for (i, (id, name, _)) in relaxed.into_iter().enumerate() {
                 if out.len() >= limit {
                     break;
@@ -404,7 +430,7 @@ impl SearchIndex {
                 } else {
                     floor * (0.999 - (i as f32 * 1e-4)).max(0.0)
                 };
-                out.push((id, name, score));
+                out.push((id, name, score, true));
             }
         }
         Ok(out)

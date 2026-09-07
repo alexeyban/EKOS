@@ -33,6 +33,15 @@ const REASON_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime reasone
 {"cited_evidence": ["<evidence id>", ...]}
 listing the `evidence <id>` values of every claim you relied on. If the evidence does not answer the question, say so explicitly."#;
 const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v1";
+/// The refusal returned when the ledger holds nothing that answers a question (RFC 0139 §3.6).
+///
+/// Worded to contain phrases the groundedness evaluator already recognises
+/// (`ekos_evals::evaluators::groundedness::DEFAULT_REFUSAL_PHRASES`) — a refusal the grader cannot
+/// recognise is indistinguishable from a fabrication, and the model was previously being graded
+/// against a rubric it had never been shown.
+const NO_EVIDENCE_REFUSAL: &str = "Insufficient evidence: I could not find anything in the \
+    compiled ledger that answers this question. No matching object, fact, or document was found, \
+    so there is no grounded answer to give.";
 
 #[derive(Debug, Error)]
 pub enum AiError {
@@ -246,6 +255,29 @@ impl<'a> AiRuntime<'a> {
         let evidence = self.gather_evidence(question)?;
         let mut diagnostics = evidence.diagnostics.clone();
         let known_evidence: HashSet<KirId> = evidence.source_ids().into_iter().collect();
+
+        // RFC 0139 §3.6 — refuse deterministically rather than asking a model to be careful.
+        //
+        // When the evidence set is empty, or holds nothing but partial-term-overlap matches, the
+        // ledger does not answer the question and no amount of prompt wording makes fabricating a
+        // reply less likely. Short-circuiting here costs zero tokens and converts a probabilistic
+        // refusal into a guaranteed one. This guard is what makes §3.1's query relaxation safe:
+        // relaxation deliberately returns loosely-related objects, and handing those to a model as
+        // "evidence" for a question about something that does not exist is exactly what produced
+        // the measured jump from 10 to 15 fabrications when relaxation shipped without it.
+        if evidence.items.is_empty() || evidence.is_all_weak() {
+            diagnostics.push(Diagnostic::warning(
+                "RSN006",
+                "no evidence answers this question (the set was empty or held only \
+                 partial-term-overlap matches) — refused without calling the LLM",
+            ));
+            return Ok(AiAnswer {
+                answer: NO_EVIDENCE_REFUSAL.to_string(),
+                evidence_refs: Vec::new(),
+                diagnostics,
+                token_usage: TokenUsage::default(),
+            });
+        }
 
         let context = render_evidence(&evidence);
         let user = format!("Question: {question}\n\nStructured evidence:\n{context}");
@@ -616,6 +648,73 @@ mod tests {
     use ekos_ledger::Ledger;
     use ekos_recovery::MockLlmProvider;
     use tempfile::TempDir;
+
+    /// RFC 0139 §3.6 — the guard that keeps query relaxation from becoming a fabrication engine.
+    mod weak_evidence_refusal {
+        use super::*;
+        use crate::reason::{EvidenceItem, EvidenceSet};
+
+        fn item(weak: bool) -> EvidenceItem {
+            EvidenceItem {
+                claim: "possible search match (partial term overlap): ekos-common".into(),
+                value: serde_json::Value::Null,
+                source: None,
+                location: String::new(),
+                confidence: 0.5,
+                extracted_by: String::new(),
+                entity: None,
+                weak,
+            }
+        }
+
+        fn set(items: Vec<EvidenceItem>) -> EvidenceSet {
+            EvidenceSet {
+                items,
+                plan: QueryPlan {
+                    raw: "q".into(),
+                    query_type: crate::retrieval::QueryType::Lexical,
+                    root: crate::reason::PlanNode::Search {
+                        query: "q".into(),
+                        limit: 20,
+                    },
+                    confidence: 0.5,
+                },
+                diagnostics: Vec::new(),
+            }
+        }
+
+        #[test]
+        fn an_all_weak_set_counts_as_no_evidence() {
+            // "What port does the EKOS message broker listen on?" retrieves real crates that
+            // merely share a word. Full-looking, and it answers nothing.
+            assert!(set(vec![item(true), item(true)]).is_all_weak());
+        }
+
+        #[test]
+        fn one_real_claim_is_enough_to_answer_from() {
+            assert!(!set(vec![item(true), item(false)]).is_all_weak());
+        }
+
+        #[test]
+        fn an_empty_set_is_not_reported_as_all_weak() {
+            // Empty and all-weak are both refusals, but they are different conditions — callers
+            // check `items.is_empty()` separately, and conflating them would hide which occurred.
+            assert!(!set(vec![]).is_all_weak());
+        }
+
+        #[test]
+        fn the_canonical_refusal_is_phrased_so_the_grader_recognises_it() {
+            // A refusal the evaluator cannot detect scores identically to a fabrication, which is
+            // how a correctly-behaving system ends up looking like a hallucinating one.
+            let refusal = NO_EVIDENCE_REFUSAL.to_lowercase();
+            assert!(
+                ["insufficient evidence", "could not find", "no matching"]
+                    .iter()
+                    .any(|p| refusal.contains(p)),
+                "refusal must contain a phrase from the evaluator's known list: {refusal}"
+            );
+        }
+    }
 
     /// RFC 0139 §4.2 — the response shapes a real local model actually produces. Each of these
     /// previously fell through to `AI001` ("no valid cited_evidence block") because the parser

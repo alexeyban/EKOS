@@ -233,6 +233,12 @@ pub struct EvidenceItem {
     pub extracted_by: String,
     /// The object this claim is about, when applicable.
     pub entity: Option<KirId>,
+    /// RFC 0139 §3.6 — this claim came from a partial-term-overlap ("relaxed") retrieval hit, so
+    /// it is a plausible candidate rather than support for the question's premise. An evidence set
+    /// where *every* item is weak means the corpus did not answer the question, however full the
+    /// set looks: see [`EvidenceSet::is_all_weak`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub weak: bool,
 }
 
 /// The typed output of [`execute`] — the input to the LLM's "explain this" step.
@@ -245,6 +251,19 @@ pub struct EvidenceSet {
 }
 
 impl EvidenceSet {
+    /// True when the set holds nothing but partial-term-overlap matches (RFC 0139 §3.6).
+    ///
+    /// This is the guard that keeps §3.1's retrieval relaxation from becoming a fabrication engine.
+    /// Relaxing the query made evidence sets non-empty for questions about things that do not
+    /// exist — asked *"what port does the EKOS message broker listen on?"*, the pipeline now
+    /// returns real EKOS crates that merely share a word, and a model handed that will invent a
+    /// port. Measured live when relaxation shipped un-guarded: fabrications rose 10 → 15 on the
+    /// RFC 0138 suite. An all-weak set must therefore be treated as "found nothing", not as
+    /// evidence.
+    pub fn is_all_weak(&self) -> bool {
+        !self.items.is_empty() && self.items.iter().all(|i| i.weak)
+    }
+
     /// Cap the item count, emitting an `RSN001` diagnostic if anything was dropped.
     pub fn truncate_to(&mut self, cap: usize) {
         if self.items.len() > cap {
@@ -339,12 +358,23 @@ fn exec_node(
             req.per_arm_limit = (*limit).max(req.per_arm_limit);
             let hits = runtime.retrieve(&req)?;
             for hit in hits.hits.into_iter().take(*limit) {
-                items.push(entity_item(
-                    runtime,
-                    hit.id,
-                    format!("search match: {}", hit.name),
-                    serde_json::Value::String(hit.name),
-                )?);
+                // RFC 0139 §3.6: a hit that only matched *some* query terms shares vocabulary with
+                // the question without being evidence the thing asked about exists. Labelling it
+                // in the claim keeps that distinction visible to the model, and `weak` lets the
+                // caller tell an all-weak evidence set from a real one.
+                let weak = hit
+                    .signals
+                    .iter()
+                    .any(|s| s.source == ekos_ledger::SignalSource::Bm25Relaxed);
+                let claim = if weak {
+                    format!("possible search match (partial term overlap): {}", hit.name)
+                } else {
+                    format!("search match: {}", hit.name)
+                };
+                let mut item =
+                    entity_item(runtime, hit.id, claim, serde_json::Value::String(hit.name))?;
+                item.weak = weak;
+                items.push(item);
             }
         }
 
@@ -446,6 +476,10 @@ fn entity_item(
         confidence,
         extracted_by,
         entity: Some(id),
+        // Callers that know a claim came from a partial-term-overlap hit set this themselves; a
+        // fact/graph claim is never weak, since it was reached structurally rather than by
+        // vocabulary similarity.
+        weak: false,
     })
 }
 

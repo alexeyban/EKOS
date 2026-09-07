@@ -925,10 +925,29 @@ impl FactLedger {
 
         let run_bm25 = req.arms.bm25;
         let t = Instant::now();
+        // RFC 0139 §3.1/§3.6: the relaxed subset is tracked but deliberately **not** fused as a
+        // separate list — a separate list would restart RRF ranks at 1 and hand the best relaxed
+        // hit the same rank contribution as the best strict one, destroying the append-only
+        // ordering the relaxation's safety argument rests on. Instead the ids are remembered and
+        // annotated onto the fused hits below.
+        let mut relaxed_ids: std::collections::HashSet<KirId> = std::collections::HashSet::new();
         let bm25: Vec<crate::ScoredCandidate> = if run_bm25 {
-            self.find_objects_scored(req.bm25_query(), req.per_arm_limit)?
+            let mut inner = self.inner.lock().unwrap();
+            let last_tx = inner.batch_times.last().map(|(t, _)| *t);
+            inner.search.commit(last_tx)?;
+            let marked = inner
+                .search
+                .query_scored_marked(req.bm25_query(), req.per_arm_limit)?;
+            drop(inner);
+            marked
                 .into_iter()
-                .map(|(id, name, score)| crate::ScoredCandidate::new(id, name, score))
+                .map(|(id, name, score, relaxed)| {
+                    let id = KirId(id);
+                    if relaxed {
+                        relaxed_ids.insert(id);
+                    }
+                    crate::ScoredCandidate::new(id, name, score)
+                })
                 .collect()
         } else {
             Vec::new()
@@ -984,7 +1003,7 @@ impl FactLedger {
             });
         }
 
-        let hits = crate::rrf_fuse(
+        let mut hits = crate::rrf_fuse(
             &[
                 (crate::SignalSource::ExactName, exact),
                 (crate::SignalSource::Bm25, bm25),
@@ -993,6 +1012,25 @@ impl FactLedger {
             crate::RRF_K,
             req.limit,
         );
+        // Annotate after fusion so ranking is untouched: a hit that only ever matched *some* query
+        // terms carries a `Bm25Relaxed` signal, letting the answer pipeline tell "the corpus
+        // answers this" from "the corpus merely shares vocabulary with the question".
+        if !relaxed_ids.is_empty() {
+            for hit in &mut hits {
+                if relaxed_ids.contains(&hit.id)
+                    && hit
+                        .signals
+                        .iter()
+                        .all(|s| s.source != crate::SignalSource::ExactName)
+                {
+                    for signal in &mut hit.signals {
+                        if signal.source == crate::SignalSource::Bm25 {
+                            signal.source = crate::SignalSource::Bm25Relaxed;
+                        }
+                    }
+                }
+            }
+        }
         Ok(crate::RankedResults {
             hits,
             arms_run: crate::ArmSet {
