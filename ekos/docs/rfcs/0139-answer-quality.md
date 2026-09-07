@@ -358,6 +358,28 @@ query, exactly as the corrected diagnosis predicted — no entity gate required 
    `EvidenceSet` is empty, return the canonical refusal deterministically, with zero tokens and no
    LLM call — converting a probabilistic fabrication into a guaranteed refusal.
 
+   > **Measured outcome (2026-09-07): the coupling below was real, and the mitigation failed
+   > twice.** §3.1 raised answer correctness 37.6% → 48.1% and simultaneously pushed fabrications
+   > **10 → 15** of 101, groundedness 78.3% → 72.7%.
+   >
+   > *Attempt 1* marked only relaxed **search** hits weak and refused when every claim was weak.
+   > Fabrications stayed at 15; the guard fired twice in the whole suite. Cause: an adversarial
+   > question's evidence set also contains graph-neighbourhood claims, which were not weak, so
+   > "all weak" was never true.
+   >
+   > *Attempt 2* additionally marked the planner-added neighbourhood weak. That **did** drive
+   > adversarial to 18/18 passing with 0 fabrications — and collapsed `code` answer correctness
+   > from **72.7% to 18.2%**, refusing 8 legitimate questions, with 7 more refused in
+   > `architecture`. Eliminating fabrication by declining to answer a third of real questions is
+   > the worse failure, so it was reverted.
+   >
+   > **Why it cannot work as specified:** relaxation means *legitimate* questions also retrieve
+   > partial-overlap hits, so "every claim is weak" does not separate "nothing answers this" from
+   > "the match was loose but correct". The needed signal is **how much of the query a hit
+   > matched** — term-coverage scoring — which the binary relaxed/strict flag cannot express.
+   > `supporting` and `weak` ship for rendering only; the empty-evidence refusal stands. The
+   > fabrication regression is **open**, recorded rather than papered over.
+
    > **⚠ This is coupled to §3.1, and the coupling runs the wrong way.** Relaxed retrieval makes the
    > evidence set *non-empty* for adversarial questions (`FooBarNonexistentAnalyzer` → `analyzer`
    > matches dozens of real objects), which both disarms this short-circuit and hands the model
@@ -434,6 +456,31 @@ model, so the report records what actually answered.
 - **No fix to the SQLite/FTS5 query path** to match the new tantivy relaxation semantics (§3.1).
 
 ---
+
+## Measured results (2026-09-07)
+
+All 101 scenarios, `ollama llama3:latest`, **unchanged ruler** throughout — so every delta below is
+a system change, not a grading artifact. R0 reproduces the published baseline exactly.
+
+| | R0 baseline | R1 (§3.1) | R2 (+§4.2, §3.6 attempt 1) |
+|---|---|---|---|
+| passed | 48/101 | 49/101 | 48/101 |
+| answer correctness | 37.6% | **48.1%** | 46.0% |
+| completeness | 36.8% | **46.4%** | 46.0% |
+| groundedness | 78.3% | 72.7% | 70.6% |
+| fabrications | 10 | **15** | **15** |
+| `AI001` (unreadable citation block) | 16 | 7 | **6** |
+| scenarios with zero search claims | 80/89 | **25/90** | 25/90 |
+| largest identical-evidence cluster | 26 | **4** | 4 |
+
+**What this says, plainly.** §3.1 is a clear win on the primary metric (+10.5pp answer correctness)
+and it removed the structural pathology — evidence sets stopped being interchangeable. §4.2 cut
+unreadable citation blocks 16 → 6. Neither §3.6 attempt reduced fabrication without an unacceptable
+cost, so the fabrication regression stands open at 15/101 against a 10/101 baseline.
+
+The net position is a real trade, not a clean victory: **the system answers meaningfully better and
+refuses meaningfully worse.** Both halves are on the record because a report that showed only the
+first half would be the kind of number this whole RFC exists to distrust.
 
 ## Verification
 
