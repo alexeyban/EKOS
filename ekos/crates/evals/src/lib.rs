@@ -14,6 +14,7 @@
 
 pub mod evaluators;
 pub mod history;
+pub mod regrade;
 pub mod report;
 pub mod resource;
 pub mod runners;

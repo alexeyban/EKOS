@@ -254,6 +254,19 @@ enum EvalCommands {
         #[arg(long)]
         save_answers: bool,
     },
+    /// Re-score a saved report under the current evaluators — no LLM calls (RFC 0139)
+    Regrade {
+        /// The saved report to re-grade (must have been written with --save-answers)
+        report: PathBuf,
+        /// Default: <cwd>/evals/datasets
+        #[arg(long, value_name = "DIR")]
+        datasets_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+        /// Write the re-graded report here
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
     /// List saved eval runs (evals/reports/*.json) as a trend table
     History {
         /// Default: <cwd>/evals/reports
@@ -672,6 +685,7 @@ fn emits_machine_output(command: &Commands) -> bool {
         Commands::Eval { subcommand } => match subcommand {
             EvalCommands::Run { json, .. } => *json,
             EvalCommands::History { json, .. } => *json,
+            EvalCommands::Regrade { json, .. } => *json,
         },
         _ => false,
     }
@@ -982,6 +996,21 @@ async fn main() -> Result<()> {
                 };
                 ekos::commands::eval::run(&config, &cwd, opts).await
             }
+            EvalCommands::Regrade {
+                report,
+                datasets_dir,
+                json,
+                output,
+            } => ekos::commands::eval::regrade(
+                &cwd,
+                &config,
+                ekos::commands::eval::EvalRegradeOpts {
+                    report,
+                    datasets_dir,
+                    json,
+                    output,
+                },
+            ),
             EvalCommands::History {
                 reports_dir,
                 limit,

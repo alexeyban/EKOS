@@ -142,3 +142,51 @@ pub fn history(cwd: &Path, opts: EvalHistoryOpts) -> Result<()> {
     }
     Ok(())
 }
+
+pub struct EvalRegradeOpts {
+    pub report: PathBuf,
+    pub datasets_dir: Option<PathBuf>,
+    pub json: bool,
+    pub output: Option<PathBuf>,
+}
+
+/// Re-score a saved report under the *current* evaluators, with no LLM calls (RFC 0139 §2).
+///
+/// This is how a grading change gets published honestly: run it over the same saved answers before
+/// and after, and whatever moves is the ruler rather than the system. Without it, a ruler change
+/// and a real improvement are indistinguishable in the trend table.
+pub fn regrade(cwd: &Path, config: &EkosConfig, opts: EvalRegradeOpts) -> Result<()> {
+    let raw = std::fs::read_to_string(&opts.report)
+        .map_err(|e| anyhow::anyhow!("reading {}: {e}", opts.report.display()))?;
+    let saved: report::Report = serde_json::from_str(&raw)
+        .map_err(|e| anyhow::anyhow!("parsing {}: {e}", opts.report.display()))?;
+
+    let datasets_dir = opts
+        .datasets_dir
+        .clone()
+        .unwrap_or_else(|| cwd.join("evals").join("datasets"));
+    // Grade against the dataset as it stands now: a dataset edit is a ruler change too, and this
+    // command exists to measure exactly that.
+    let (_, scenarios) = load_dataset(Some(saved.dataset.as_str()), &datasets_dir)
+        .or_else(|_| load_dataset(None, &datasets_dir))
+        .map_err(|e| anyhow::anyhow!("loading datasets from {}: {e}", datasets_dir.display()))?;
+
+    let ledger = open_store_read_only(config, cwd)?;
+    let regraded = ekos_evals::regrade::regrade(&saved, &scenarios, &*ledger)?;
+
+    if let Some(output) = &opts.output {
+        std::fs::write(output, serde_json::to_string_pretty(&regraded)?)?;
+    }
+    if opts.json {
+        println!("{}", serde_json::to_string_pretty(&regraded)?);
+    } else {
+        println!(
+            "Re-graded {} under ruler v{} (was v{}) — no LLM calls.\n",
+            opts.report.display(),
+            regraded.ruler_version,
+            saved.ruler_version
+        );
+        println!("{}", report::render_text(&regraded));
+    }
+    Ok(())
+}
