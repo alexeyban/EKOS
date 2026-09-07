@@ -249,6 +249,21 @@ this is sequenced ahead of every generation-side fix.
    backfill only when `strict.is_empty()`) rather than widening the tolerance. Re-baseline only
    upward-or-equal metrics, documented in the style `retrieval_eval.rs:294-310` already sets.
 
+   **Measured result (implemented 2026-09-07).** The residual risk did not materialise — every RFC
+   0126 metric improved and none regressed, so no re-baselining was required:
+
+   | RFC 0126 metric | Baseline | After relaxation |
+   |---|---|---|
+   | recall@10 | 0.84 | **0.98** |
+   | MRR | 0.73 | **0.85** |
+   | nDCG@10 | 0.74 | **0.87** |
+   | intent accuracy | 0.83 | 0.83 (unchanged) |
+
+   Full workspace green (114 suites), plus four new tests pinning the behaviour that matters: a
+   multi-term natural-language question now retrieves rather than returning nothing; a document
+   matching every term still outranks every relaxed hit; a single-term query is untouched; and a
+   strict hit is never duplicated as a relaxed one.
+
    **Documented divergence, not a bug:** the SQLite/FTS5 backend (`ledger/src/lib.rs:1023-1046`) is a
    separate query path and does not get relaxation. New workspaces use the fact engine (RFC 0016), so
    the eval measures the path that matters.

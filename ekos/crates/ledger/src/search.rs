@@ -313,24 +313,32 @@ impl SearchIndex {
             }
         };
 
-        let mut must: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-        for (term, prefix) in &terms {
+        // One term's clause: a disjunction over the three fields, boosted name > kind > content.
+        // Built here rather than inline because the relaxed pass below needs the identical clause
+        // with only its `Occur` changed — if the two ever drifted, a relaxed hit could score on
+        // different criteria than a strict one.
+        let mut term_clause = |term: &str, prefix: bool| -> Box<dyn Query> {
             let stemmed_term = stem(&mut stemmer, term);
             let mut fields: Vec<(Occur, Box<dyn Query>)> = Vec::new();
             for (field, boost, text) in [
                 (self.f_name, 10.0f32, &stemmed_term),
-                (self.f_kind, 4.0, term),
+                (self.f_kind, 4.0, &term.to_string()),
                 (self.f_content, 1.0, &stemmed_term),
             ] {
                 let t = Term::from_field_text(field, text);
-                let q: Box<dyn Query> = if *prefix {
+                let q: Box<dyn Query> = if prefix {
                     Box::new(PhrasePrefixQuery::new(vec![t]))
                 } else {
                     Box::new(TermQuery::new(t, IndexRecordOption::WithFreqs))
                 };
                 fields.push((Occur::Should, Box::new(BoostQuery::new(q, boost))));
             }
-            must.push((Occur::Must, Box::new(BooleanQuery::new(fields))));
+            Box::new(BooleanQuery::new(fields))
+        };
+
+        let mut must: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+        for (term, prefix) in &terms {
+            must.push((Occur::Must, term_clause(term, *prefix)));
         }
         // RFC 0101: an unconditional Should clause, outside the per-term
         // Must array — it never gates which documents match (a document
@@ -348,9 +356,67 @@ impl SearchIndex {
                 MEMORY_PATH_BOOST,
             )),
         ));
-        let query = BooleanQuery::new(must);
+        let memory_boost: Box<dyn Query> = Box::new(BoostQuery::new(
+            Box::new(TermQuery::new(
+                Term::from_field_text(self.f_memory_path, MEMORY_PATH_TOKEN),
+                IndexRecordOption::Basic,
+            )),
+            MEMORY_PATH_BOOST,
+        ));
+        must.push((Occur::Should, memory_boost));
 
         let searcher = self.reader.searcher();
+        let mut out = self.run_query(&searcher, BooleanQuery::new(must), limit)?;
+
+        // RFC 0139 §3.1 — progressive relaxation. Every term above is `Occur::Must`, so a
+        // natural-language question ("what crate implements the SQL DDL recovery analyzer?")
+        // requires *every* content word to co-occur in one document. Measured on the RFC 0138
+        // suite, that returned nothing at all for 80 of 89 scenarios, leaving the answer pipeline
+        // with only graph-neighbourhood filler to reason from.
+        //
+        // The relaxed pass is **append-only**: strict hits keep their exact order and scores, and
+        // OR-matched hits are appended strictly below them. Recall@k, MRR and nDCG@k over this
+        // list are therefore monotonically non-decreasing versus the strict-only behaviour — which
+        // is what lets this ship without re-baselining RFC 0126's CI gate. (tantivy 0.22 has no
+        // `minimum_number_should_match`, so a coverage-ratio query isn't available here.)
+        if out.len() < limit && terms.len() > 1 {
+            let mut should: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+            for (term, prefix) in &terms {
+                should.push((Occur::Should, term_clause(term, *prefix)));
+            }
+            let relaxed = self.run_query(&searcher, BooleanQuery::new(should), limit)?;
+
+            let seen: std::collections::HashSet<Uuid> = out.iter().map(|(id, _, _)| *id).collect();
+            // Anchor the appended band strictly below the weakest strict hit so the result list
+            // stays strictly decreasing (`retrieval::RankedResults` documents that invariant).
+            let floor = out.last().map(|(_, _, s)| *s).unwrap_or(f32::MAX);
+            for (i, (id, name, _)) in relaxed.into_iter().enumerate() {
+                if out.len() >= limit {
+                    break;
+                }
+                if seen.contains(&id) {
+                    continue;
+                }
+                let score = if floor == f32::MAX {
+                    // No strict hits at all — nothing to sit below, so keep a plain descending
+                    // band rather than inventing a relationship to a score that doesn't exist.
+                    1.0 / (i + 1) as f32
+                } else {
+                    floor * (0.999 - (i as f32 * 1e-4)).max(0.0)
+                };
+                out.push((id, name, score));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Execute one built query and hydrate `(id, name, score)` triples, best first.
+    fn run_query(
+        &self,
+        searcher: &tantivy::Searcher,
+        query: BooleanQuery,
+        limit: usize,
+    ) -> Result<Vec<(Uuid, String, f32)>, LedgerError> {
         let top = searcher
             .search(&query, &TopDocs::with_limit(limit))
             .map_err(terr)?;
@@ -461,5 +527,81 @@ mod tests {
             "genuine corruption must still surface as an error, not be swallowed as a \
              self-healable schema mismatch"
         );
+    }
+
+    /// RFC 0139 §3.1 — the relaxation pass.
+    mod relaxation {
+        use super::*;
+
+        fn index_with(objects: &[(&str, &str)]) -> (tempfile::TempDir, SearchIndex) {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut index, _) = SearchIndex::open(dir.path()).unwrap();
+            for (name, content) in objects {
+                index.upsert(Uuid::new_v4(), name, "Doc", content, false);
+            }
+            index.commit(Some(crate::fact::TxId(1))).unwrap();
+            (dir, index)
+        }
+
+        #[test]
+        fn a_multi_term_question_no_longer_returns_nothing() {
+            // The measured pathology: every term was `Occur::Must`, so a natural-language
+            // question found nothing unless one document contained *every* content word.
+            let (_d, index) =
+                index_with(&[("sql_analyzer", "parses SQL DDL into structural form")]);
+            let hits = index
+                .query_scored("what crate implements the sql ddl recovery analyzer", 10)
+                .unwrap();
+            assert!(
+                !hits.is_empty(),
+                "a question whose terms don't all co-occur must still retrieve the \
+                 relevant document; got nothing"
+            );
+            assert_eq!(hits[0].1, "sql_analyzer");
+        }
+
+        #[test]
+        fn strict_hits_keep_their_rank_and_outrank_every_relaxed_hit() {
+            // The safety property the RFC 0126 gate rests on: relaxation is append-only, so a
+            // document matching all terms can never be displaced by one matching only some.
+            let (_d, index) = index_with(&[
+                ("alpha", "widget gadget"),   // matches both terms
+                ("beta", "widget only here"), // matches one
+                ("gamma", "gadget only here"),
+            ]);
+            let hits = index.query_scored("widget gadget", 10).unwrap();
+            assert_eq!(
+                hits[0].1, "alpha",
+                "the document matching every term must rank first"
+            );
+            assert!(hits.len() > 1, "relaxed hits should still be appended");
+            for w in hits.windows(2) {
+                assert!(
+                    w[0].2 >= w[1].2,
+                    "scores must stay non-increasing so RankedResults' invariant holds: {hits:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_single_term_query_is_untouched_by_relaxation() {
+            // Nothing to relax with one term — this guards against the relaxed pass firing and
+            // widening a query that was already precise.
+            let (_d, index) = index_with(&[("alpha", "widget"), ("beta", "unrelated")]);
+            let hits = index.query_scored("widget", 10).unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].1, "alpha");
+        }
+
+        #[test]
+        fn relaxation_does_not_duplicate_a_document_already_matched_strictly() {
+            let (_d, index) = index_with(&[("alpha", "widget gadget")]);
+            let hits = index.query_scored("widget gadget", 10).unwrap();
+            assert_eq!(
+                hits.len(),
+                1,
+                "the strict hit must not reappear as a relaxed one: {hits:?}"
+            );
+        }
     }
 }
