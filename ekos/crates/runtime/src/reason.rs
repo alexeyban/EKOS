@@ -16,6 +16,12 @@ use std::collections::HashMap;
 
 /// Default cap on [`EvidenceSet`] items — keeps a hub entity from flooding the set.
 pub const DEFAULT_EVIDENCE_CAP: usize = 60;
+/// Most neighbours a *supporting* (planner-added) neighbourhood may contribute before it is
+/// skipped entirely as hub noise (RFC 0139 §3.0). Sized well under [`DEFAULT_EVIDENCE_CAP`]: this
+/// is background context around a search, so if it alone would dominate the evidence budget it is
+/// describing the corpus rather than the question. Never applies to a traversal the question
+/// actually asked for.
+const MAX_SUPPORTING_NEIGHBORS: usize = 12;
 /// Hop depth a `Structural` plan traverses.
 const STRUCTURAL_HOPS: u32 = 2;
 /// The `attr` sentinel meaning "every fact about this entity" (→ [`Runtime::facts_of`]).
@@ -449,37 +455,46 @@ fn exec_node(
                 .map(|o| o.name)
                 .unwrap_or_else(|| "?".to_string());
             let label = op_label(*op);
-            for obj in runtime.graph_op(*op, &id, *hops)? {
+            let neighbors = runtime.graph_op(*op, &id, *hops)?;
+
+            // RFC 0139 §3.0 — the entity gate.
+            //
+            // A *supporting* neighbourhood is context the planner attached around a search, not
+            // something the reader asked for. When the entity it expands is a hub, that context
+            // stops being informative: in an EKOS workspace the token "ekos" appears in nearly
+            // every question, resolves to the `ekos` object, and its 1-hop neighbourhood is the
+            // whole crate graph. Measured on the RFC 0138 suite, that made **26 completely
+            // different questions receive byte-identical evidence**, and gave adversarial
+            // questions ("what port does the message broker listen on?") a list of real crates to
+            // fabricate from.
+            //
+            // Gating on neighbourhood size rather than on a name-blocklist keeps it
+            // self-justifying: if one expansion would consume most of the evidence budget, it is
+            // describing the corpus, not the question. A *requested* traversal ("what depends on
+            // X") is never gated — there the size is the answer.
+            if *supporting && neighbors.len() > MAX_SUPPORTING_NEIGHBORS {
+                diagnostics.push(Diagnostic::warning(
+                    "RSN007",
+                    format!(
+                        "skipped supporting neighbourhood of {seed_name} — {} neighbours exceeds \
+                         the {MAX_SUPPORTING_NEIGHBORS}-item budget for background context; a hub \
+                         entity's neighbourhood describes the corpus, not this question",
+                        neighbors.len()
+                    ),
+                ));
+                return Ok(());
+            }
+
+            for obj in neighbors {
                 let item = entity_item(
                     runtime,
                     obj.id,
                     format!("{} — {label} {seed_name}", obj.name),
                     serde_json::Value::String(obj.id.0.to_string()),
                 )?;
-                // RFC 0139 §3.6/§3.7: a planner-added neighbourhood is background, not support for
-                // the question's premise, so it cannot make an otherwise-unanswerable question look
-                // answerable.
-                //
-                // This was tried once on the binary relaxed flag and reverted: it drove adversarial
-                // fabrications to 0/18 while collapsing `code` answer correctness 72.7% -> 18.2%,
-                // because relaxation meant honest questions were *also* all-relaxed. With
-                // §3.7's coverage threshold the search side is now graded rather than binary, so a
-                // genuine question keeps real (high-coverage) claims and only a question nothing
-                // answers ends up all-weak.
-                // Deliberately NOT `item.weak = *supporting`. Tried twice, measured twice,
-                // reverted twice: marking planner-added neighbourhoods weak drives adversarial
-                // fabrications to 0/18 and simultaneously collapses `code` answer correctness
-                // (72.7% -> 18.2%, 6-8 legitimate questions refused). §3.7's coverage grading did
-                // not rescue it — long natural-language questions legitimately produce
-                // sub-threshold coverage, so an honest question still ends up all-weak.
-                //
-                // The mechanism is wrong, not the threshold: `is_all_weak` cannot separate
-                // "nothing answers this" from "the match was loose but right" while a spurious
-                // neighbourhood is attached at all. The real lever is not attaching it — §3.0's
-                // entity gate, stopping a corpus-wide hub name ("ekos", present in nearly every
-                // question) from driving expansion. Until that lands, `supporting` is rendering
-                // information only.
-                let _ = supporting;
+                // `weak` stays false here: an ungated supporting neighbourhood is small enough to
+                // be real context, and marking it weak was measured twice to collapse legitimate
+                // answers (`code` correctness 72.7% -> 18.2%). The gate above is the lever instead.
                 items.push(item);
             }
         }
@@ -806,6 +821,80 @@ mod tests {
         assert!(set.items.iter().all(|i| i.location == "schema.sql:12"));
         assert!(set.items.iter().all(|i| i.extracted_by == "sql"));
         assert_eq!(set.source_ids().len(), 1);
+    }
+
+    /// RFC 0139 §3.0 — the entity gate. A hub's neighbourhood describes the corpus, not the
+    /// question; on the real suite an ungated one made 26 different questions receive
+    /// byte-identical evidence and handed adversarial questions a list of real objects to
+    /// fabricate from.
+    #[test]
+    fn a_supporting_neighbourhood_of_a_hub_entity_is_skipped() {
+        let (l, _d) = temp();
+        let hub = KirObject::new("hub", ObjectKind::Custom("Crate".into()));
+        l.append_object(&hub).unwrap();
+        for i in 0..(MAX_SUPPORTING_NEIGHBORS + 5) {
+            let leaf = KirObject::new(format!("leaf_{i}"), ObjectKind::Custom("Symbol".into()));
+            l.append_object(&leaf).unwrap();
+            l.append_relationship(&KirRelationship::new(
+                RelationshipKind::DependsOn,
+                leaf.id,
+                hub.id,
+            ))
+            .unwrap();
+        }
+        let rt = Runtime::new(&l);
+        let graph = |supporting| QueryPlan {
+            raw: "hub".into(),
+            query_type: QueryType::Lexical,
+            root: PlanNode::Graph {
+                op: StructuralOp::Neighborhood,
+                seed: EntityRef::Resolved(hub.id),
+                hops: 1,
+                supporting,
+            },
+            confidence: 1.0,
+        };
+
+        let gated = execute(&graph(true), &rt).unwrap();
+        assert!(
+            gated.items.is_empty(),
+            "a hub's *supporting* neighbourhood must contribute nothing: {:?}",
+            gated.items.iter().map(|i| &i.claim).collect::<Vec<_>>()
+        );
+        assert!(
+            gated.diagnostics.iter().any(|d| d.code == "RSN007"),
+            "the skip must be visible as a diagnostic, not silent"
+        );
+
+        // The same traversal, when the question actually asked for it, is the answer — never gated.
+        let requested = execute(&graph(false), &rt).unwrap();
+        assert!(
+            requested.items.len() > MAX_SUPPORTING_NEIGHBORS,
+            "a requested traversal must not be gated by size — there the size is the answer"
+        );
+    }
+
+    #[test]
+    fn a_small_supporting_neighbourhood_is_still_kept_as_context() {
+        let (l, _d) = temp();
+        let (_orders, a, b, _c) = seed(&l);
+        let rt = Runtime::new(&l);
+        let plan = QueryPlan {
+            raw: "beta_fn".into(),
+            query_type: QueryType::Lexical,
+            root: PlanNode::Graph {
+                op: StructuralOp::Neighborhood,
+                seed: EntityRef::Resolved(b),
+                hops: 1,
+                supporting: true,
+            },
+            confidence: 1.0,
+        };
+        let set = execute(&plan, &rt).unwrap();
+        assert!(
+            set.items.iter().any(|i| i.entity == Some(a)),
+            "a specific entity's small neighbourhood is real context and must survive the gate"
+        );
     }
 
     #[test]
