@@ -473,6 +473,36 @@ a system change, not a grading artifact. R0 reproduces the published baseline ex
 | scenarios with zero search claims | 80/89 | **25/90** | 25/90 |
 | largest identical-evidence cluster | 26 | **4** | 4 |
 
+### The ruler, measured against itself
+
+`ekos eval regrade` re-scores **R0's saved answers** under each ruler version — identical answers,
+no LLM calls, so every delta here is grading and nothing else:
+
+| ruler | passed | answer correctness | groundedness | completeness |
+|---|---|---|---|---|
+| v1 (RFC 0138 as shipped) | 48/101 | 37.6% | 78.3% | 36.8% |
+| v2 (§2.1 normalisation + `any_of`) | 48/101 | 37.1% | 78.3% | 35.4% |
+| v3 (§2.2 composite + §2.3 groundedness) | **31/101** | 37.1% | **39.6%** | 35.4% |
+
+**The published 48/101 was inflated.** The honest baseline for the same answers is **31/101**. The
+system did not get worse between these rows — only the ruler's willingness to score what it had
+been quietly excluding.
+
+Two findings worth keeping:
+
+- **v2 went *down*, and that inverted this RFC's premise.** §2.1 was written to fix false negatives
+  — and it did fix two (`sec-001` "redacted" vs `"redaction"`, `lin-005` "tombstones" vs
+  `"tombstone"`). But it also removed **three false positives** the old substring matcher had been
+  awarding: `arch-006` matched `"runtime"` inside "Ai**Runtime**" on an answer that says
+  "AiRuntime.kind = RustSymbol"; `code-008` matched `"kir"` inside "**Kir**Object" on an answer
+  naming the wrong crate; `arch-002` matched `"compile"` inside "ekos-**compile**r-core" on an
+  answer that is nonsense. The old ruler was not merely too strict — it was **also too loose, in the
+  direction that flatters the system**, and part of the published 37.6% was credit for wrong
+  answers. All three are now regression tests.
+- **v3's groundedness drop is the predicted correction, not a regression.** §2.3 forecast ~35.6%;
+  it measured 39.6%. 59 of 101 scenarios answered while citing nothing, and those were being
+  excluded from the metric rather than scored.
+
 **What this says, plainly.** §3.1 is a clear win on the primary metric (+10.5pp answer correctness)
 and it removed the structural pathology — evidence sets stopped being interchangeable. §4.2 cut
 unreadable citation blocks 16 → 6. Neither §3.6 attempt reduced fabrication without an unacceptable

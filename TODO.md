@@ -5021,7 +5021,22 @@ are excluded — see the full exclusion list in the planning history if needed.
       this" from "the match was loose but correct". **Next step — term-coverage scoring**: record
       *how many* query terms each hit matched (not just relaxed-vs-strict) and refuse only below a
       coverage floor. `supporting`/`weak` currently ship for rendering only.
-    - [ ] **Phase 1 — fair ruler (deterministic, no LLM judge)**: `any_of` alternates +
+    - [x] **Phase 1 — fair ruler (done: rulers v2 + v3, `9c7252f`/`3dd2ba4`/`2abb959`).**
+      `ekos eval regrade` re-scores saved answers offline (no LLM calls) so a grading change can
+      never be mistaken for a system change; verified to reproduce R0 exactly. v2 added token
+      matching with separator/word-ending normalisation + `any_of` alternates; v3 stopped
+      `completeness` voting twice in the composite (one missed keyword cost 2 of 3 slots), made an
+      answered-but-uncited scenario score 0 for groundedness instead of vanishing from the
+      denominator, and made a non-gradable scenario fail visibly instead of scoring a silent 1.0.
+      **Measured on identical R0 answers: v1 48/101 (37.6%/78.3%) → v2 48/101 (37.1%/78.3%) → v3
+      31/101 (37.1%/39.6%).** The published 48/101 was inflated; the honest baseline is 31/101.
+      v2 *lowered* correctness because it removed 3 false positives the substring matcher had been
+      awarding (`"runtime"` inside "AiRuntime", `"kir"` inside "KirObject", `"compile"` inside
+      "ekos-compiler-core") — the old ruler was too loose as well as too strict.
+      **Still open from Phase 1**: degenerate keys (`adv-014`'s `refusal_phrases` includes bare
+      `"not"`; near-free-pass `expected_facts` like `"ledger"`/`"ekos"`), and raising metric power
+      (only 10 of 101 scenarios carry `expected_objects`, so recall@10 is a 10-sample mean).
+    - [ ] **Phase 1 remainder — dataset hygiene**: `any_of` alternates +
       normalisation (hyphen/underscore/space) + `en_stem` stemming so "redacted" matches
       `"redaction"` and "CKM" matches `"Canonical Knowledge Model"`; stop `completeness`
       double-counting a missed fact (it costs 2 of 3 composite slots today, so one substring miss
