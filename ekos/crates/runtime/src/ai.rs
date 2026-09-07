@@ -496,32 +496,89 @@ pub(crate) fn extract_search_terms(question: &str) -> Vec<String> {
 /// empty-diagnostics shape as a genuinely well-cited answer — a caller (CLI/MCP/demo-server) had
 /// no way to tell "this answer is ungrounded" from "this answer is well-grounded" without
 /// separately checking `evidence_refs.is_empty()` itself.
+/// Every balanced `{…}` span in `content`, as `(start, end)` byte offsets, outermost-first at each
+/// nesting root. String literals are tracked so a brace inside `"…"` never opens or closes a span.
+///
+/// RFC 0139 §4.2: the previous implementation split on the *last* `{` in the whole response, which
+/// meant a citation block followed by any prose, a pretty-printed block whose last `{` opened a
+/// nested object, or a fenced block with trailing text all failed to parse. Measured on the RFC
+/// 0138 suite, 24 of the 36 zero-scoring scenarios raised `AI001` — so a parser fragility was
+/// being counted as the model failing to cite.
+fn balanced_json_spans(content: &str) -> Vec<(usize, usize)> {
+    let bytes = content.as_bytes();
+    let mut spans = Vec::new();
+    let (mut depth, mut start) = (0usize, 0usize);
+    let (mut in_string, mut escaped) = (false, false);
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_string {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => {
+                if depth == 0 {
+                    start = i;
+                }
+                depth += 1;
+            }
+            b'}' => match depth {
+                0 => {}
+                1 => {
+                    depth = 0;
+                    spans.push((start, i + 1));
+                }
+                _ => depth -= 1,
+            },
+            _ => {}
+        }
+    }
+    spans
+}
+
 fn extract_citations(
     content: &str,
     known_evidence: &HashSet<KirId>,
 ) -> (String, Vec<KirId>, Vec<Diagnostic>) {
-    if let Some(idx) = content.rfind('{') {
-        let (answer_part, json_part) = content.split_at(idx);
-        let json_part = json_part.trim().trim_end_matches("```").trim();
-        if let Ok(block) = serde_json::from_str::<CitationBlock>(json_part) {
-            let evidence_refs: Vec<KirId> = block
-                .cited_evidence
-                .iter()
-                .filter_map(|s| s.parse::<KirId>().ok())
-                .filter(|id| known_evidence.contains(id))
-                .collect();
-            let diagnostics = if evidence_refs.is_empty() {
-                vec![Diagnostic::warning(
-                    "AI002",
-                    "LLM response included a cited_evidence block, but no citations survived it \
-                     (empty array, or none of the ids matched evidence actually supplied in \
-                     context) — treat this answer as ungrounded even though it parsed cleanly",
-                )]
-            } else {
-                Vec::new()
-            };
-            return (answer_part.trim().to_string(), evidence_refs, diagnostics);
+    // Try the last block first — the prompt asks for it at the end — but fall back through any
+    // earlier one, so a model that narrates after citing is still read correctly.
+    let mut parsed_but_unusable: Option<(usize, usize)> = None;
+    for (start, end) in balanced_json_spans(content).into_iter().rev() {
+        let Ok(block) = serde_json::from_str::<CitationBlock>(&content[start..end]) else {
+            continue;
+        };
+        let evidence_refs: Vec<KirId> = block
+            .cited_evidence
+            .iter()
+            .filter_map(|s| s.parse::<KirId>().ok())
+            .filter(|id| known_evidence.contains(id))
+            .collect();
+        if evidence_refs.is_empty() {
+            // Keep looking: an earlier block may carry real ids. Remember this one so that if
+            // nothing better turns up, the answer still reports AI002 rather than AI001 — the
+            // model *did* emit a block, and conflating the two hides which defect this was.
+            parsed_but_unusable.get_or_insert((start, end));
+            continue;
         }
+        return (strip_span(content, start, end), evidence_refs, Vec::new());
+    }
+
+    if let Some((start, end)) = parsed_but_unusable {
+        return (
+            strip_span(content, start, end),
+            Vec::new(),
+            vec![Diagnostic::warning(
+                "AI002",
+                "LLM response included a cited_evidence block, but no citations survived it \
+                 (empty array, or none of the ids matched evidence actually supplied in \
+                 context) — treat this answer as ungrounded even though it parsed cleanly",
+            )],
+        );
     }
 
     let warning = Diagnostic::warning(
@@ -529,6 +586,25 @@ fn extract_citations(
         "LLM response did not include a valid cited_evidence block",
     );
     (content.trim().to_string(), Vec::new(), vec![warning])
+}
+
+/// Remove the citation block from the visible answer, including a fence it sits inside. Left in,
+/// raw JSON pollutes the answer a reader sees and the text an evaluator matches against — observed
+/// live on `arch-001`, whose answer carried its own `{"cited_evidence": [...]}` tail.
+fn strip_span(content: &str, start: usize, end: usize) -> String {
+    let mut out = String::with_capacity(content.len());
+    out.push_str(
+        content[..start]
+            .trim_end()
+            .trim_end_matches("```json")
+            .trim_end(),
+    );
+    let tail = content[end..].trim_start().trim_start_matches("```").trim();
+    if !tail.is_empty() {
+        out.push('\n');
+        out.push_str(tail);
+    }
+    out.trim().to_string()
 }
 
 #[cfg(test)]
@@ -540,6 +616,94 @@ mod tests {
     use ekos_ledger::Ledger;
     use ekos_recovery::MockLlmProvider;
     use tempfile::TempDir;
+
+    /// RFC 0139 §4.2 — the response shapes a real local model actually produces. Each of these
+    /// previously fell through to `AI001` ("no valid cited_evidence block") because the parser
+    /// split on the last `{` in the whole response.
+    mod citation_parsing {
+        use super::*;
+
+        fn known(id: KirId) -> HashSet<KirId> {
+            HashSet::from([id])
+        }
+
+        #[test]
+        fn a_block_followed_by_prose_is_still_parsed() {
+            let id = KirId::new();
+            let content =
+                format!("The answer is X.\n{{\"cited_evidence\": [\"{id}\"]}}\nHope that helps.");
+            let (answer, refs, diags) = extract_citations(&content, &known(id));
+            assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
+            assert!(diags.is_empty());
+            assert!(
+                !answer.contains("cited_evidence"),
+                "the JSON must not leak into the visible answer: {answer:?}"
+            );
+            assert!(answer.contains("Hope that helps."));
+        }
+
+        #[test]
+        fn a_pretty_printed_block_is_parsed_despite_a_nested_last_brace() {
+            let id = KirId::new();
+            let content = format!("Answer.\n{{\n  \"cited_evidence\": [\n    \"{id}\"\n  ]\n}}");
+            let (_, refs, diags) = extract_citations(&content, &known(id));
+            assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
+        }
+
+        #[test]
+        fn a_fenced_block_is_parsed_and_the_fence_is_stripped() {
+            let id = KirId::new();
+            let content = format!("Answer.\n```json\n{{\"cited_evidence\": [\"{id}\"]}}\n```");
+            let (answer, refs, _) = extract_citations(&content, &known(id));
+            assert_eq!(refs, vec![id]);
+            assert!(
+                !answer.contains("```") && !answer.contains("cited_evidence"),
+                "fence and block should both be gone: {answer:?}"
+            );
+        }
+
+        #[test]
+        fn a_brace_inside_prose_does_not_defeat_the_real_block() {
+            let id = KirId::new();
+            let content = format!(
+                "The config uses {{ braces }} in its syntax.\n{{\"cited_evidence\": [\"{id}\"]}}"
+            );
+            let (_, refs, diags) = extract_citations(&content, &known(id));
+            assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
+        }
+
+        #[test]
+        fn an_earlier_block_is_used_when_a_later_one_carries_no_usable_ids() {
+            let id = KirId::new();
+            let content = format!(
+                "{{\"cited_evidence\": [\"{id}\"]}}\nSome trailing note.\n{{\"cited_evidence\": []}}"
+            );
+            let (_, refs, diags) = extract_citations(&content, &known(id));
+            assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
+        }
+
+        #[test]
+        fn an_empty_block_still_reports_ai002_not_ai001() {
+            // The distinction matters: AI002 means "it cited nothing", AI001 means "we could not
+            // read what it emitted". Collapsing them hides which defect is being fixed.
+            let (_, refs, diags) = extract_citations(
+                "Answer.\n{\"cited_evidence\": []}",
+                &HashSet::from([KirId::new()]),
+            );
+            assert!(refs.is_empty());
+            assert_eq!(diags.len(), 1);
+            assert_eq!(diags[0].code, "AI002");
+        }
+
+        #[test]
+        fn a_response_with_no_block_at_all_still_reports_ai001() {
+            let (answer, refs, diags) =
+                extract_citations("Just prose, no citations.", &HashSet::from([KirId::new()]));
+            assert!(refs.is_empty());
+            assert_eq!(diags[0].code, "AI001");
+            assert_eq!(answer, "Just prose, no citations.");
+        }
+    }
 
     fn temp_ledger() -> (Ledger, TempDir) {
         let dir = TempDir::new().unwrap();
