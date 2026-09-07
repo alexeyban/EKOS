@@ -42,6 +42,14 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
             answer: Some(answer.answer),
             evidence_refs: answer.evidence_refs,
             token_usage: Some(answer.token_usage),
+            // RFC 0139 §1: keep the pipeline's own diagnostics (AI001 "no valid cited_evidence
+            // block", RSN001 "evidence set truncated", …) instead of discarding them — without
+            // these, an uncited answer is indistinguishable from a citation-parse failure.
+            diagnostics: answer
+                .diagnostics
+                .iter()
+                .map(|d| format!("{}: {}", d.code, d.message))
+                .collect(),
             latency,
             cache_hit,
             resource: resource_delta,
@@ -59,6 +67,24 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
     // Trajectory signal — offline, cheap, independent of whether the LLM call above succeeded.
     if let Ok(plan) = ai.plan(&scenario.question) {
         run.planned_query_type = Some(format!("{:?}", plan.query_type).to_lowercase());
+    }
+
+    // RFC 0139 §1: capture what the model was *shown*. `gather_evidence` is the same offline
+    // `plan` + `execute` pair `reason` runs internally (no LLM call, deterministic), so this
+    // reproduces the evidence set the answer above was generated from. Without it, a failure
+    // cannot be attributed to retrieval versus generation.
+    if let Ok(evidence) = ai.gather_evidence(&scenario.question) {
+        let mut text = String::new();
+        for item in &evidence.items {
+            text.push_str(&item.claim);
+            if !item.location.is_empty() {
+                text.push_str(" [");
+                text.push_str(&item.location);
+                text.push(']');
+            }
+            text.push('\n');
+        }
+        run.evidence_text = Some(text);
     }
 
     // Recall@k needs a ranked id list even for an LLM-answered scenario (RFC 0138 §2.2) — reuse

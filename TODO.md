@@ -4961,6 +4961,74 @@ are excluded — see the full exclusion list in the planning history if needed.
     dropped (75.0%→65.0%, not yet root-caused — retrieval-ranking shift from a smaller corpus, or
     `ollama` sampling noise). **Conclusion**: contamination was a real, worth-fixing bug but not
     the dominant cause of the weak scores — `llama3:latest`'s own answer-generation quality is.
+  - [ ] **RFC 0139 — answer quality (`ekos/docs/rfcs/0139-answer-quality.md`, accepted 2026-09-06).**
+    Investigating the 48/101 baseline found defects in three independent layers, not one. Two
+    findings reshaped the work: (a) "retrieval starves the model" is **false** by evidence volume —
+    median input tokens are 670 for zero-scoring scenarios vs 428 for perfect ones, and 11 of 22
+    *correct* answers came from <300 tokens; (b) two of the five headline metrics are measured over
+    a minority of the suite — **69 of 101 scenarios cited nothing**, so groundedness 78.3% is a mean
+    over 46 scenarios (`(11 refusals + 25 cited)/46 = 0.7826` exactly), and `hallucination_rate`
+    divides by 101 for a phenomenon defined only on the 21 `should_refuse` scenarios (the honest
+    number is **10/21 = 47.6%**). One genuinely good result was buried: **zero invalid citation ids
+    in the whole run**.
+    - [x] **Phase 0 — failure attribution (done).** `ekos eval run --save-answers` now persists the
+      answer, the evidence the model was *shown* (via the offline `gather_evidence`, no LLM call),
+      the cited/retrieved ids, and the pipeline diagnostics (`AI001`/`RSN001`…) that were previously
+      dropped. Each scenario is attributed deterministically to `retrieval` (the fact never reached
+      the model) vs `generation` (it was shown and the answer omitted it) — the question the RFC 0138
+      baseline could not answer. Report also now prints `fabrication_rate`, `invalid_citation_rate`
+      and the "answered but uncited" count, and carries a `ruler_version` so a grading change can
+      never be confused with a system change. First signal from a 6-scenario smoke run: **4 of 4
+      failures attributed to retrieval, 0 to generation** — the opposite of what the token-volume
+      proxy suggested, which is exactly why this phase came first. Full-suite R0
+      (`evals/reports/20260906T215630Z-ekos-full-R0.json`) reproduces the published baseline exactly
+      (48/101, 37.6/78.3/36.8/65.0/9.9) — transcript capture changed no grading — and attributes
+      **36 of 38 gradeable failures to retrieval, 2 to generation**.
+    - [x] **Root cause found by Phase 0 — neighbourhood flooding (RFC 0139 §3.0).** **26 completely
+      different questions received byte-identical evidence** (`ekos-semantic — related to ekos`,
+      `walkdir — related to ekos`, …): all classified `QueryType::Lexical`, all resolved the token
+      **"ekos"** — which appears in nearly every question — to the `ekos` object, after which
+      `Compose[Search(20), Graph{Neighborhood, hops:1}]` (`reason.rs:151-160`) flooded the evidence
+      set with that object's neighbours, and the prefix-truncating 60-item cap (`reason.rs:307`)
+      crowded out whatever `Search` had actually found. **35 of 89 scenarios (39%) got evidence
+      that is >80% generic `related to ekos` noise; they score 32.1% answer correctness vs 41.9%
+      for the rest**, and 9 are adversarial (4 fabricated — being handed a list of real EKOS crates
+      as "evidence" for *"what port does the message broker listen on"* is exactly what converts a
+      refusal into a fabrication). This also resolves the Motivation paradox: evidence *volume*
+      never separated right from wrong answers because 26 scenarios got the same ~1,500 chars of the
+      same irrelevant context. **No prompt change can fix this** — the answer isn't in the context.
+    - [ ] **Phase 1 — fair ruler (deterministic, no LLM judge)**: `any_of` alternates +
+      normalisation (hyphen/underscore/space) + `en_stem` stemming so "redacted" matches
+      `"redaction"` and "CKM" matches `"Canonical Knowledge Model"`; stop `completeness`
+      double-counting a missed fact (it costs 2 of 3 composite slots today, so one substring miss
+      fails a scenario at 0.33 against a 0.7 bar); score an answered-but-uncited scenario 0 for
+      groundedness instead of dropping it from the denominator (**this moves published groundedness
+      78.3% → ~35.6% on identical answers — a correction, not a regression**); remove degenerate
+      keys (`adv-014`'s `refusal_phrases` includes bare `"not"`); broaden `expected_objects` beyond
+      the current 10 so recall@10 stops being a 10-sample metric. Publish v1/v2 columns on the same
+      saved answers via `ekos eval regrade` — no new LLM calls.
+    - [ ] **Phase 2 — retrieval**: `search.rs:333` makes every query term `Occur::Must`, so a
+      natural-language question requires every content word in one document. **tantivy 0.22 has no
+      `minimum_number_should_match`** (verified against the vendored source), so the design is
+      progressive relaxation with **append-only backfill** — strict hits keep their exact ranks and
+      relaxed hits are appended below, which makes recall/MRR/nDCG over the BM25 list provably
+      non-decreasing and protects RFC 0126's CI gate. Plus the CamelCase tokenisation mismatch
+      (`sql_analyzer` → `sql`+`analyzer` vs the indexed `sqlanalyzerpass`, why `code-006` scores 0),
+      the broken `terms.join(" OR ")` ladder (it adds a *required* `or` term), and grading recall on
+      the query the pipeline actually issues rather than the raw question.
+    - [ ] **Phase 3 — generation**: `extract_citations` splits on the **last `{`** in the response,
+      so prose containing `{`, pretty-printed JSON, or a fenced block all fail into `AI001` — with
+      24 of 36 zero-scorers hitting `AI001`, this is the highest-yield single fix; make
+      `REASON_SYSTEM_PROMPT` config-overridable (today the tunable prompt is the one the suite never
+      exercises: 91 `reason`, 10 `retrieval`, **0 `ask`** scenarios); state the refusal contract in
+      the words the grader actually looks for. **Coupling to watch**: relaxed retrieval makes
+      adversarial evidence sets non-empty, which disarms the empty-evidence refusal short-circuit —
+      relaxed hits must be marked, and the two phases measured together.
+    - [ ] **Phase 4 — provider choice + docs**: keep `[llm]` user-selectable (already true) and
+      **hard-fail `ekos eval` when `build_llm_provider` silently degrades to `MockLlmProvider`** on a
+      missing API key — today that would produce a fully-formed, publishable report of stub answers.
+      Document that a local model needs a powerful server (this repo's own P95 is 36 s/scenario on
+      `llama3:latest`) and that the published reference baseline should come from a cloud model.
   - [ ] **Follow-up from the above, still open**: (1) A/B a stronger provider (`--agent claude`/
     `--agent openai`) once an API key is available in this environment — still the highest-leverage
     unexplored lever; (2) root-cause the recall@10 regression (75.0%→65.0%) the contamination fix

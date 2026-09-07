@@ -22,16 +22,21 @@ pub struct EvalRunOpts<'a> {
     pub limit: Option<usize>,
     pub json: bool,
     pub output: Option<PathBuf>,
+    /// Persist each scenario's answer text and the evidence it was shown into the saved report
+    /// (RFC 0139 §1). Off by default because a 101-scenario suite's transcripts are ~1MB of JSON;
+    /// on, a saved report can be re-graded offline instead of re-run against the LLM.
+    pub save_answers: bool,
 }
 
+/// Human label for what actually answered. Records the resolved model for every provider, not just
+/// ollama — a report that says only `"claude"` cannot be compared against a later run on a
+/// different model (RFC 0139 §5).
 fn agent_label(config: &EkosConfig) -> String {
+    let model = config.llm.model.as_deref().unwrap_or("default");
     match config.llm.provider.as_deref() {
-        Some("ollama") => format!(
-            "ollama ({})",
-            config.llm.model.as_deref().unwrap_or("default")
-        ),
-        Some("openai") => "openai".to_string(),
-        _ => "claude".to_string(),
+        Some("ollama") => format!("ollama ({model})"),
+        Some("openai") => format!("openai ({model})"),
+        _ => format!("claude ({model})"),
     }
 }
 
@@ -72,12 +77,13 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
     let ai = AiRuntime::new(&runtime, llm, super::ask::ai_config(&run_config));
 
     let outcomes = ekos_evals::run_all(&ai, &runtime, &*ledger, &scenarios).await;
-    let report = report::build(
+    let report = report::build_with_transcripts(
         &dataset_name,
         &agent_label(&run_config),
         "local",
         &outcomes,
         GateThresholds::default(),
+        opts.save_answers,
     );
 
     if let Some(output) = &opts.output {

@@ -249,6 +249,10 @@ enum EvalCommands {
         /// Save the JSON report here instead of evals/reports/<timestamp>-<dataset>.json
         #[arg(long, value_name = "FILE")]
         output: Option<PathBuf>,
+        /// Persist each answer and the evidence behind it into the report, so failures can be
+        /// attributed and the run re-graded offline later (RFC 0139). Adds ~1MB per full run.
+        #[arg(long)]
+        save_answers: bool,
     },
     /// List saved eval runs (evals/reports/*.json) as a trend table
     History {
@@ -964,6 +968,7 @@ async fn main() -> Result<()> {
                 limit,
                 json,
                 output,
+                save_answers,
             } => {
                 let opts = ekos::commands::eval::EvalRunOpts {
                     dataset: dataset.as_deref(),
@@ -973,6 +978,7 @@ async fn main() -> Result<()> {
                     limit,
                     json,
                     output,
+                    save_answers,
                 };
                 ekos::commands::eval::run(&config, &cwd, opts).await
             }

@@ -59,9 +59,32 @@ pub struct ScenarioReport {
     pub cpu_time_ms: Option<f64>,
     pub latency_ms: f64,
     pub error: Option<String>,
+    /// RFC 0139 §1 — which layer this scenario's miss belongs to (`retrieval`/`generation`/
+    /// `passed`/`n/a`). Always recorded: it is one short string and it is the whole point of the
+    /// attribution pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<String>,
+    /// RFC 0139 §1 — pipeline diagnostic codes (`AI001`, `RSN001`, …). Always recorded; these are
+    /// small and are the direct evidence for citation-parse failures.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
+    /// The answer text, the evidence the model was shown, and the ids it cited — written only
+    /// under `--save-answers`, because 101 answers plus their evidence is ~1MB of JSON and most
+    /// runs don't need it. Without it a saved report cannot be re-graded offline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retrieved_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_query_type: Option<String>,
 }
 
 impl From<&EvalOutcome> for ScenarioReport {
+    /// Scores plus attribution and diagnostics — the cheap fields, always written.
     fn from(o: &EvalOutcome) -> Self {
         Self {
             id: o.scenario_id.clone(),
@@ -80,6 +103,30 @@ impl From<&EvalOutcome> for ScenarioReport {
             cpu_time_ms: cpu_time_ms(o.resource.cpu_time),
             latency_ms: o.latency.as_secs_f64() * 1000.0,
             error: o.error.clone(),
+            attribution: o.transcript.attribution.map(|a| a.as_str().to_string()),
+            diagnostics: o.transcript.diagnostics.clone(),
+            answer: None,
+            evidence_text: None,
+            evidence_refs: Vec::new(),
+            retrieved_ids: Vec::new(),
+            planned_query_type: None,
+        }
+    }
+}
+
+impl ScenarioReport {
+    /// The full transcript form (RFC 0139 §1) — everything [`From`] writes, plus the answer text,
+    /// the evidence the model was shown, and the ids it cited/retrieved. This is what makes a saved
+    /// report re-gradable offline by `ekos eval regrade`; it is opt-in via `--save-answers` because
+    /// a 101-scenario suite's transcripts are roughly a megabyte of JSON.
+    pub fn with_transcript(o: &EvalOutcome) -> Self {
+        Self {
+            answer: o.transcript.answer.clone(),
+            evidence_text: o.transcript.evidence_text.clone(),
+            evidence_refs: o.transcript.evidence_refs.clone(),
+            retrieved_ids: o.transcript.retrieved_ids.clone(),
+            planned_query_type: o.transcript.planned_query_type.clone(),
+            ..Self::from(o)
         }
     }
 }
@@ -93,7 +140,24 @@ pub struct Metrics {
     pub evidence_groundedness: Option<f32>,
     pub completeness: Option<f32>,
     pub recall_at_10: Option<f64>,
+    /// Fabrications over **all** scenarios. Kept for continuity with RFC 0138's gate, but see
+    /// `fabrication_rate` — this denominator counts scenarios where fabrication isn't even
+    /// definable, so it understates the real behaviour by roughly 5x (RFC 0139 §2.4).
     pub hallucination_rate: f32,
+    /// Fabrications over the `should_refuse` scenarios only — the denominator on which
+    /// "did it refuse when it should have?" is actually defined (RFC 0139 §2.4). `None` when the
+    /// dataset has no refusal scenarios at all.
+    #[serde(default)]
+    pub fabrication_rate: Option<f32>,
+    /// Scenarios that cited at least one unresolvable evidence id, over those that cited anything
+    /// (RFC 0139 §2.4). Separated from `hallucination_rate` because a refusal miss and a fabricated
+    /// citation are different defects with different fixes — and this one currently measures 0.
+    #[serde(default)]
+    pub invalid_citation_rate: Option<f32>,
+    /// How many scenarios produced an answer but cited nothing — the population `groundedness`
+    /// silently excludes today (RFC 0139 §2.3). Reported so the metric's coverage is visible.
+    #[serde(default)]
+    pub uncited_answers: usize,
     pub avg_tokens: Option<f64>,
     pub p95_latency_ms: f64,
     /// Scenarios whose LLM call was served from the disk cache — no fresh network call.
@@ -126,7 +190,22 @@ pub struct Report {
     pub gates: GateThresholds,
     pub metrics: Metrics,
     pub scenarios: Vec<ScenarioReport>,
+    /// Which grading semantics produced these numbers (RFC 0139 §1). Bumped by any change to
+    /// matching, denominators, composite weights, the alias table, or the datasets — so that two
+    /// reports are only ever compared directly when this matches. Without it, a ruler change and a
+    /// system change are indistinguishable in the trend table.
+    #[serde(default = "default_ruler_version")]
+    pub ruler_version: u32,
 }
+
+/// Reports written before `ruler_version` existed were all produced by the original RFC 0138
+/// ruler, which is version 1 by definition.
+fn default_ruler_version() -> u32 {
+    1
+}
+
+/// The current grading semantics. **Bump this whenever grading changes** — see [`Report::ruler_version`].
+pub const RULER_VERSION: u32 = 1;
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
     let (sum, n) = values.fold((0.0f32, 0usize), |(s, n), v| (s + v, n + 1));
@@ -158,7 +237,30 @@ pub fn build(
     outcomes: &[EvalOutcome],
     gates: GateThresholds,
 ) -> Report {
-    let scenarios: Vec<ScenarioReport> = outcomes.iter().map(ScenarioReport::from).collect();
+    build_with_transcripts(dataset, agent, runtime, outcomes, gates, false)
+}
+
+/// [`build`], with control over whether each scenario's transcript is written into the report
+/// (RFC 0139 §1 — `ekos eval run --save-answers`). Transcripts are what make a saved report
+/// re-gradable offline; they are opt-in only because of their size.
+pub fn build_with_transcripts(
+    dataset: &str,
+    agent: &str,
+    runtime: &str,
+    outcomes: &[EvalOutcome],
+    gates: GateThresholds,
+    save_transcripts: bool,
+) -> Report {
+    let scenarios: Vec<ScenarioReport> = outcomes
+        .iter()
+        .map(|o| {
+            if save_transcripts {
+                ScenarioReport::with_transcript(o)
+            } else {
+                ScenarioReport::from(o)
+            }
+        })
+        .collect();
 
     let passed = outcomes.iter().filter(|o| o.passed).count();
     let failed = outcomes.len() - passed;
@@ -168,6 +270,25 @@ pub fn build(
     } else {
         hallucinated as f32 / outcomes.len() as f32
     };
+
+    // RFC 0139 §2.4 — the same numerator over the denominators it is actually defined on.
+    let refusal_scenarios = outcomes.iter().filter(|o| o.should_refuse).count();
+    let fabrication_rate = (refusal_scenarios > 0).then(|| {
+        let fabricated = outcomes
+            .iter()
+            .filter(|o| o.should_refuse && o.hallucinated)
+            .count();
+        fabricated as f32 / refusal_scenarios as f32
+    });
+    let citing_scenarios = outcomes.iter().filter(|o| o.cited_count > 0).count();
+    let invalid_citation_rate = (citing_scenarios > 0).then(|| {
+        let bad = outcomes
+            .iter()
+            .filter(|o| o.invalid_citation_count > 0)
+            .count();
+        bad as f32 / citing_scenarios as f32
+    });
+    let uncited_answers = outcomes.iter().filter(|o| o.answered_uncited).count();
 
     let answer_correctness = mean_f32(outcomes.iter().filter_map(|o| o.answer_score));
     let evidence_groundedness = mean_f32(outcomes.iter().filter_map(|o| o.groundedness_score));
@@ -224,6 +345,9 @@ pub fn build(
             completeness,
             recall_at_10,
             hallucination_rate,
+            fabrication_rate,
+            invalid_citation_rate,
+            uncited_answers,
             avg_tokens,
             p95_latency_ms,
             cache_hits,
@@ -234,6 +358,7 @@ pub fn build(
             status_pass,
         },
         scenarios,
+        ruler_version: RULER_VERSION,
     }
 }
 
@@ -347,8 +472,32 @@ pub fn render_text(report: &Report) -> String {
         row("Recall@10:", &fmt_pct64(m.recall_at_10))
     ));
     out.push_str(&format!(
-        "{}\n\n",
+        "{}\n",
         row("Hallucination rate:", &fmt_pct(Some(m.hallucination_rate)))
+    ));
+    // RFC 0139 §2.4 — the same failures over the denominators they're actually defined on. Printed
+    // next to the headline rate rather than replacing it, so the gate number stays visible while
+    // the honest one is impossible to miss.
+    out.push_str(&format!(
+        "{}\n",
+        row(
+            "  ├─ fabrication rate:",
+            &format!("{} (of should_refuse only)", fmt_pct(m.fabrication_rate))
+        )
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        row(
+            "  └─ invalid citations:",
+            &format!("{} (of scenarios citing)", fmt_pct(m.invalid_citation_rate))
+        )
+    ));
+    out.push_str(&format!(
+        "{}\n\n",
+        row(
+            "Answered but uncited:",
+            &format!("{} (excluded from groundedness)", m.uncited_answers)
+        )
     ));
     out.push_str(&format!(
         "{}\n",
@@ -371,6 +520,33 @@ pub fn render_text(report: &Report) -> String {
         "{}\n\n",
         row("CPU time:", &fmt_duration_opt(m.total_cpu_time_ms))
     ));
+    // RFC 0139 §1 — where the failures live. A pass rate says how bad things are; this says which
+    // layer to fix, which is the question the RFC 0138 baseline could not answer.
+    let attributed = |want: &str| {
+        report
+            .scenarios
+            .iter()
+            .filter(|s| s.attribution.as_deref() == Some(want))
+            .count()
+    };
+    let (retrieval, generation) = (attributed("retrieval"), attributed("generation"));
+    if retrieval + generation > 0 {
+        out.push_str("Failure attribution (scenarios with expected_facts):\n");
+        out.push_str(&format!(
+            "{}\n",
+            row(
+                "  retrieval:",
+                &format!("{retrieval} (fact never reached the model)")
+            )
+        ));
+        out.push_str(&format!(
+            "{}\n\n",
+            row(
+                "  generation:",
+                &format!("{generation} (fact was shown, answer omitted it)")
+            )
+        ));
+    }
     out.push_str(&format!(
         "Status: {}\n",
         if m.status_pass { "PASS" } else { "FAIL" }
@@ -395,6 +571,11 @@ mod tests {
             groundedness_score: Some(0.95),
             trajectory_score: None,
             hallucinated,
+            should_refuse: false,
+            cited_count: 1,
+            invalid_citation_count: 0,
+            answered_uncited: false,
+            transcript: Default::default(),
             tokens: Some(TokenUsage {
                 input_tokens: 100,
                 output_tokens: 50,

@@ -37,4 +37,15 @@ pub struct ScenarioRun {
     /// Set when the runner itself errored (LLM call failed, store error, …) — a scenario with an
     /// error is always a hard fail, never silently scored.
     pub error: Option<String>,
+    /// The evidence claims actually assembled for this question, joined into one searchable blob
+    /// (RFC 0139 §1). This is what the model was *shown*, not merely what it cited — the two differ,
+    /// and only the former can distinguish "retrieval never found the fact" from "the model was
+    /// shown the fact and didn't use it". Gathered offline via `AiRuntime::gather_evidence`, which
+    /// makes no LLM call.
+    pub evidence_text: Option<String>,
+    /// Pipeline diagnostic codes raised while producing this answer (`AI001`/`AI002`/`RSN001`…),
+    /// rendered `"<code>: <message>"` (RFC 0139 §1). Previously dropped on the floor — they are
+    /// the direct evidence for *why* an answer came back uncited, which is the difference between
+    /// "the model ignored the evidence" and "the citation block failed to parse".
+    pub diagnostics: Vec<String>,
 }
