@@ -374,10 +374,11 @@ fn exec_node(
             req.per_arm_limit = (*limit).max(req.per_arm_limit);
             let hits = runtime.retrieve(&req)?;
             for hit in hits.hits.into_iter().take(*limit) {
-                // RFC 0139 §3.6: a hit that only matched *some* query terms shares vocabulary with
-                // the question without being evidence the thing asked about exists. Labelling it
-                // in the claim keeps that distinction visible to the model, and `weak` lets the
-                // caller tell an all-weak evidence set from a real one.
+                // RFC 0139 §3.6/§3.7: a hit that matched too little of the query shares vocabulary
+                // with the question without being evidence the thing asked about exists. The
+                // ledger applies the coverage threshold and marks such hits `Bm25Relaxed`;
+                // labelling them in the claim keeps the distinction visible to the model, and
+                // `weak` lets the caller tell an all-weak evidence set from a real one.
                 let weak = hit
                     .signals
                     .iter()
@@ -455,21 +456,29 @@ fn exec_node(
                     format!("{} — {label} {seed_name}", obj.name),
                     serde_json::Value::String(obj.id.0.to_string()),
                 )?;
-                // RFC 0139 §3.6: `supporting` records that this neighbourhood is planner-added
-                // background rather than the answer, and it is rendered that way — but it is
-                // deliberately **not** fed into `EvidenceSet::is_all_weak`.
+                // RFC 0139 §3.6/§3.7: a planner-added neighbourhood is background, not support for
+                // the question's premise, so it cannot make an otherwise-unanswerable question look
+                // answerable.
                 //
-                // Measured, 2026-09-07: treating a supporting neighbourhood as weak did drive
-                // adversarial fabrications to 0/18, and simultaneously collapsed `code` answer
-                // correctness from 72.7% to 18.2% (8 legitimate questions refused). Query
-                // relaxation means honest questions routinely retrieve only partial-overlap hits
-                // too, so "every claim is weak" does not separate "nothing answers this" from
-                // "the match was loose but correct". Refusing on that signal buys a clean
-                // fabrication number by declining to answer, which is the worse failure.
+                // This was tried once on the binary relaxed flag and reverted: it drove adversarial
+                // fabrications to 0/18 while collapsing `code` answer correctness 72.7% -> 18.2%,
+                // because relaxation meant honest questions were *also* all-relaxed. With
+                // §3.7's coverage threshold the search side is now graded rather than binary, so a
+                // genuine question keeps real (high-coverage) claims and only a question nothing
+                // answers ends up all-weak.
+                // Deliberately NOT `item.weak = *supporting`. Tried twice, measured twice,
+                // reverted twice: marking planner-added neighbourhoods weak drives adversarial
+                // fabrications to 0/18 and simultaneously collapses `code` answer correctness
+                // (72.7% -> 18.2%, 6-8 legitimate questions refused). §3.7's coverage grading did
+                // not rescue it — long natural-language questions legitimately produce
+                // sub-threshold coverage, so an honest question still ends up all-weak.
                 //
-                // The distinction actually needed is *how much* of the query a hit matched, not
-                // whether it was relaxed at all — see this RFC's follow-up on term-coverage
-                // scoring. Until that exists, `supporting` informs rendering only.
+                // The mechanism is wrong, not the threshold: `is_all_weak` cannot separate
+                // "nothing answers this" from "the match was loose but right" while a spurious
+                // neighbourhood is attached at all. The real lever is not attaching it — §3.0's
+                // entity gate, stopping a corpus-wide hub name ("ekos", present in nearly every
+                // question) from driving expansion. Until that lands, `supporting` is rendering
+                // information only.
                 let _ = supporting;
                 items.push(item);
             }

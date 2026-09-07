@@ -10,7 +10,7 @@ pub mod vector;
 
 pub use retrieval::{
     ArmSet, ArmTiming, Hit, RRF_K, RankedResults, RetrievalRequest, ScoredCandidate, Signal,
-    SignalSource, exact_name_matches, rrf_fuse,
+    SignalSource, WEAK_COVERAGE, exact_name_matches, rrf_fuse,
 };
 
 /// RFC 0113 — the storage-backend seam. Re-exported so `ekos_ledger::SegmentBackend` stays the

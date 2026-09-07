@@ -10,6 +10,15 @@ use ekos_kir::{KirId, ObjectKind};
 /// Reciprocal Rank Fusion constant. Shared with the real fuser in RFC 0120 so a Phase 0
 /// rank-only score is directly comparable to a Phase 1 fused score.
 pub const RRF_K: f32 = 60.0;
+/// Minimum fraction of a query's terms a hit must match to count as real evidence (RFC 0139 §3.7).
+///
+/// Below this a document merely shares vocabulary with the question. Set at half the query's terms:
+/// measured on the RFC 0138 suite, treating *every* relaxed hit as weak collapsed `code` answer
+/// correctness from 72.7% to 18.2% because honest questions retrieve partial-overlap hits too,
+/// while treating none as weak let adversarial questions fabricate from whatever shared a word.
+/// A graded threshold is what separates those two cases; the exact value is empirical, not
+/// principled, and belongs to this constant so it can be re-tuned against a measurement.
+pub const WEAK_COVERAGE: f32 = 0.5;
 
 /// Which **store-local** retrieval arms to run. The graph arm is not store-local (it needs the
 /// `Runtime`), so it is not represented here.

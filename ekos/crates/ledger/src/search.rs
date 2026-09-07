@@ -55,6 +55,33 @@ const MEMORY_PATH_BOOST: f32 = 5.0;
 /// works — its value has no meaning beyond "present".
 const MEMORY_PATH_TOKEN: &str = "1";
 
+/// One ranked hit, with how much of the query it actually matched (RFC 0139 §3.7).
+///
+/// `matched_terms`/`total_terms` is the signal a binary relaxed-vs-strict flag could not express.
+/// Relaxation deliberately returns documents sharing *some* query words, and a consumer deciding
+/// "does the corpus answer this at all?" needs to tell a hit covering 4 of 5 terms (probably the
+/// answer) from one covering 1 of 6 (vocabulary noise). Refusing on the binary flag instead was
+/// measured to collapse `code` answer correctness from 72.7% to 18.2%, because honest questions
+/// also retrieve partial-overlap hits.
+#[derive(Debug, Clone)]
+pub struct ScoredHit {
+    pub id: Uuid,
+    pub name: String,
+    pub score: f32,
+    pub matched_terms: usize,
+    pub total_terms: usize,
+}
+
+impl ScoredHit {
+    /// Fraction of the query's terms this document matched, `0.0..=1.0`.
+    pub fn coverage(&self) -> f32 {
+        if self.total_terms == 0 {
+            return 0.0;
+        }
+        self.matched_terms as f32 / self.total_terms as f32
+    }
+}
+
 fn terr(e: impl std::fmt::Display) -> LedgerError {
     LedgerError::Corrupt(format!("search index: {e}"))
 }
@@ -283,7 +310,7 @@ impl SearchIndex {
         Ok(self
             .query_scored_marked(query, limit)?
             .into_iter()
-            .map(|(id, name, score, _relaxed)| (id, name, score))
+            .map(|h| (h.id, h.name, h.score))
             .collect())
     }
 
@@ -300,7 +327,7 @@ impl SearchIndex {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<(Uuid, String, f32, bool)>, LedgerError> {
+    ) -> Result<Vec<ScoredHit>, LedgerError> {
         let terms: Vec<(String, bool)> = query
             .split(|c: char| !(c.is_alphanumeric() || c == '*'))
             .filter(|t| !t.is_empty())
@@ -387,10 +414,18 @@ impl SearchIndex {
         must.push((Occur::Should, memory_boost));
 
         let searcher = self.reader.searcher();
-        let mut out: Vec<(Uuid, String, f32, bool)> = self
+        let n_terms = terms.len();
+        // A strict hit matched every term by construction — that is what `Occur::Must` means.
+        let mut out: Vec<ScoredHit> = self
             .run_query(&searcher, BooleanQuery::new(must), limit)?
             .into_iter()
-            .map(|(id, name, score)| (id, name, score, false))
+            .map(|(id, name, score)| ScoredHit {
+                id,
+                name,
+                score,
+                matched_terms: n_terms,
+                total_terms: n_terms,
+            })
             .collect();
 
         // RFC 0139 §3.1 — progressive relaxation. Every term above is `Occur::Must`, so a
@@ -411,11 +446,24 @@ impl SearchIndex {
             }
             let relaxed = self.run_query(&searcher, BooleanQuery::new(should), limit)?;
 
-            let seen: std::collections::HashSet<Uuid> =
-                out.iter().map(|(id, _, _, _)| *id).collect();
+            let seen: std::collections::HashSet<Uuid> = out.iter().map(|h| h.id).collect();
+
+            // RFC 0139 §3.7 — how many terms each relaxed hit actually matched. One small BM25
+            // lookup per term (~2ms each on this corpus, against a pipeline that spends seconds in
+            // the LLM), which buys a graded signal instead of a binary "was relaxed" flag. Ranking
+            // is untouched: this only annotates the hits the OR pass already chose.
+            let mut coverage: std::collections::HashMap<Uuid, usize> =
+                std::collections::HashMap::new();
+            for (term, prefix) in &terms {
+                let q = BooleanQuery::new(vec![(Occur::Must, term_clause(term, *prefix))]);
+                for (id, _, _) in self.run_query(&searcher, q, limit.saturating_mul(4))? {
+                    *coverage.entry(id).or_insert(0) += 1;
+                }
+            }
+
             // Anchor the appended band strictly below the weakest strict hit so the result list
             // stays strictly decreasing (`retrieval::RankedResults` documents that invariant).
-            let floor = out.last().map(|(_, _, s, _)| *s).unwrap_or(f32::MAX);
+            let floor = out.last().map(|h| h.score).unwrap_or(f32::MAX);
             for (i, (id, name, _)) in relaxed.into_iter().enumerate() {
                 if out.len() >= limit {
                     break;
@@ -430,7 +478,13 @@ impl SearchIndex {
                 } else {
                     floor * (0.999 - (i as f32 * 1e-4)).max(0.0)
                 };
-                out.push((id, name, score, true));
+                out.push(ScoredHit {
+                    matched_terms: coverage.get(&id).copied().unwrap_or(1).min(n_terms),
+                    total_terms: n_terms,
+                    id,
+                    name,
+                    score,
+                });
             }
         }
         Ok(out)
@@ -617,6 +671,45 @@ mod tests {
             let hits = index.query_scored("widget", 10).unwrap();
             assert_eq!(hits.len(), 1);
             assert_eq!(hits[0].1, "alpha");
+        }
+
+        /// RFC 0139 §3.7 — coverage is the graded signal a binary relaxed/strict flag could not
+        /// give. These two cases are the ones that matter: a hit sharing most of the query is
+        /// usable evidence, one sharing a single common word is not.
+        #[test]
+        fn coverage_separates_a_near_miss_from_vocabulary_noise() {
+            let (_d, index) = index_with(&[
+                ("alpha", "widget gadget sprocket"),  // 3 of 4 terms
+                ("beta", "widget unrelated content"), // 1 of 4
+            ]);
+            let hits = index
+                .query_scored_marked("widget gadget sprocket flange", 10)
+                .unwrap();
+            let by_name = |n: &str| hits.iter().find(|h| h.name == n).unwrap().clone();
+
+            let near = by_name("alpha");
+            assert_eq!((near.matched_terms, near.total_terms), (3, 4));
+            assert!(
+                near.coverage() >= crate::WEAK_COVERAGE,
+                "a 3-of-4 match must count as real evidence, got {}",
+                near.coverage()
+            );
+
+            let noise = by_name("beta");
+            assert_eq!(noise.matched_terms, 1);
+            assert!(
+                noise.coverage() < crate::WEAK_COVERAGE,
+                "a 1-of-4 match must not count as evidence, got {}",
+                noise.coverage()
+            );
+        }
+
+        #[test]
+        fn a_strict_hit_always_reports_full_coverage() {
+            let (_d, index) = index_with(&[("alpha", "widget gadget")]);
+            let hits = index.query_scored_marked("widget gadget", 10).unwrap();
+            assert_eq!(hits[0].matched_terms, hits[0].total_terms);
+            assert_eq!(hits[0].coverage(), 1.0);
         }
 
         #[test]

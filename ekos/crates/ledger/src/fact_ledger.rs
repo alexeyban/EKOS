@@ -930,7 +930,9 @@ impl FactLedger {
         // hit the same rank contribution as the best strict one, destroying the append-only
         // ordering the relaxation's safety argument rests on. Instead the ids are remembered and
         // annotated onto the fused hits below.
-        let mut relaxed_ids: std::collections::HashSet<KirId> = std::collections::HashSet::new();
+        // RFC 0139 §3.7 — hits whose term coverage is below `WEAK_COVERAGE`: they share some
+        // vocabulary with the question without plausibly answering it.
+        let mut weak_ids: std::collections::HashSet<KirId> = std::collections::HashSet::new();
         let bm25: Vec<crate::ScoredCandidate> = if run_bm25 {
             let mut inner = self.inner.lock().unwrap();
             let last_tx = inner.batch_times.last().map(|(t, _)| *t);
@@ -941,12 +943,12 @@ impl FactLedger {
             drop(inner);
             marked
                 .into_iter()
-                .map(|(id, name, score, relaxed)| {
-                    let id = KirId(id);
-                    if relaxed {
-                        relaxed_ids.insert(id);
+                .map(|h| {
+                    let id = KirId(h.id);
+                    if h.coverage() < crate::WEAK_COVERAGE {
+                        weak_ids.insert(id);
                     }
-                    crate::ScoredCandidate::new(id, name, score)
+                    crate::ScoredCandidate::new(id, h.name, h.score)
                 })
                 .collect()
         } else {
@@ -1015,9 +1017,9 @@ impl FactLedger {
         // Annotate after fusion so ranking is untouched: a hit that only ever matched *some* query
         // terms carries a `Bm25Relaxed` signal, letting the answer pipeline tell "the corpus
         // answers this" from "the corpus merely shares vocabulary with the question".
-        if !relaxed_ids.is_empty() {
+        if !weak_ids.is_empty() {
             for hit in &mut hits {
-                if relaxed_ids.contains(&hit.id)
+                if weak_ids.contains(&hit.id)
                     && hit
                         .signals
                         .iter()
