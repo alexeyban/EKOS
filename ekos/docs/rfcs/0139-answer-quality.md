@@ -215,6 +215,20 @@ the same largely irrelevant context.
 **No prompt change can repair this** — the answer is not in the context to be found. That is why
 this is sequenced ahead of every generation-side fix.
 
+**Correction found while fixing it (2026-09-07): this is a symptom, not the disease.** Before
+building the entity gate proposed above, the causal chain was tested — and **80 of 89 scenarios
+received *zero* search results**. The `Search` step returns nothing for ~90% of questions, so the
+neighbourhood is not out-competing search; it is all that remains when search finds nothing. Where
+search did return hits, answer correctness was **57.1% against 35.1%**. §3.1 is therefore the real
+fix, and the entity gate is deferred until the measured picture after relaxation says whether it is
+still needed. Recorded because the tempting fix here — gating the neighbourhood — would have
+treated the symptom and left the cause in place.
+
+**Measured after §3.1 landed** (5 of 7 categories, 71 scenarios, `ollama llama3:latest`, §3.1 only):
+the largest byte-identical evidence cluster fell from **14 to 4**, and scenarios receiving zero
+search claims fell from **54/62 to 24/62**. Flooding was substantially dissolved by fixing the
+query, exactly as the corrected diagnosis predicted — no entity gate required so far.
+
 1. **Stop requiring every query term — via append-only backfill.** `ledger/src/search.rs:316-334`
    pushes each term as `Occur::Must` — a pure conjunctive AND, so *"What crate implements the SQL DDL
    recovery analyzer?"* requires every content word to co-occur in one document.
@@ -263,6 +277,23 @@ this is sequenced ahead of every generation-side fix.
    multi-term natural-language question now retrieves rather than returning nothing; a document
    matching every term still outranks every relaxed hit; a single-term query is untouched; and a
    strict hit is never duplicated as a relaxed one.
+
+   **End-to-end effect on the RFC 0138 suite** (5 of 7 categories, 71 scenarios, §3.1 alone, same
+   agent and same ruler as R0 — so this is a system change measured against an unchanged ruler):
+
+   | | R0 | after §3.1 |
+   |---|---|---|
+   | passed | 35/71 | **39/71** |
+   | answer correctness | 40.4% | **48.7%** |
+   | completeness | 40.4% | **47.7%** |
+   | scenarios with zero search claims | 54/62 | **24/62** |
+   | largest identical-evidence cluster | 14 | **4** |
+
+   Attribution moved the way a genuine retrieval fix should: `retrieval` 29 → 23, `passed` 20 → 24,
+   and `generation` 2 → 4. More generation failures is *progress* — those are scenarios where the
+   fact now reaches the model and the answer still omits it, i.e. the bottleneck has moved into
+   §4's territory. 24 scenarios still see no search hits, so §3.1 is an improvement, not a
+   completed job.
 
    **Documented divergence, not a bug:** the SQLite/FTS5 backend (`ledger/src/lib.rs:1023-1046`) is a
    separate query path and does not get relaxation. New workspaces use the fact engine (RFC 0016), so
