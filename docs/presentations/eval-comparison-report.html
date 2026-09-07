@@ -168,7 +168,7 @@ Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a sou
       <tr><td class="tool">Answer correctness</td><td class="desc">39.3%</td><td class="desc">37.6%</td><td class="bad">−1.7pp</td></tr>
       <tr><td class="tool">Evidence groundedness</td><td class="desc">75.5%</td><td class="desc">78.3%</td><td class="good">+2.8pp</td></tr>
       <tr><td class="tool">Completeness</td><td class="desc">37.6%</td><td class="desc">36.8%</td><td class="bad">−0.8pp</td></tr>
-      <tr><td class="tool">Recall@10</td><td class="desc">75.0%</td><td class="desc">65.0%</td><td class="bad">−10pp</td></tr>
+      <tr><td class="tool">Recall@10 <span style="opacity:.7">(see correction below)</span></td><td class="desc">75.0%</td><td class="desc">65.0%</td><td class="desc">−10pp*</td></tr>
       <tr><td class="tool">Hallucination rate</td><td class="desc">12.9%</td><td class="desc">9.9%</td><td class="good">−3.0pp (better)</td></tr>
     </tbody>
   </table>
@@ -176,6 +176,15 @@ Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a sou
   7→10/18, architecture 9→8/20, code 8→7/15, dependencies 11→11/12, history 2→2/12, lineage 6→7/12,
   security 4→3/12. No gate passes in either run — both are still
   <code class="mono">Status: FAIL</code>.</p>
+  <p class="lede" style="margin-top:1rem;"><strong>* Correction (2026-09-07).</strong> The −10pp
+  recall@10 line above was reported here as a regression. It is not one — it is
+  <strong>noise</strong>, and the follow-up work says so plainly. Only <strong>10 of the 101
+  scenarios</strong> carry <code class="mono">expected_objects</code>, so recall@10 is a mean over
+  ten values and the "10-point drop" is <strong>exactly one scenario flipping</strong> from 1.0 to
+  0.0. The right response is to raise the metric's statistical power, not to tune ranking against a
+  single data point — which is what <a href="https://github.com/alexeyban/EKOS/blob/main/ekos/docs/rfcs/0139-answer-quality.md" style="color:var(--accent-a);">RFC 0139</a>
+  does. Left visible rather than quietly edited out, because a published number that turned out to
+  be over-read is worth more as a correction than as a deletion.</p>
   <div class="tag" style="margin-top:0.8rem;">Open the real report JSON:
     <a href="examples/eval-comparison/20260906T132949Z-ekos-full-baseline.json" style="color:var(--accent-a);">contaminated baseline</a>,
     <a href="examples/eval-comparison/20260906T182532Z-ekos-full-clean.json" style="color:var(--accent-a);">clean baseline</a></div>
@@ -189,7 +198,7 @@ Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a sou
     <thead><tr><th>This report shows</th><th>Does not claim</th></tr></thead>
     <tbody>
       <tr><td class="tool">A real, confirmed ledger-contamination bug, with a live repro and a zero-hits verification after the fix</td><td class="desc">That fixing it explains the original 45%-correctness finding — it doesn't</td></tr>
-      <tr><td class="tool">A real, modest improvement in hallucination rate (−3.0pp) and evidence groundedness (+2.8pp)</td><td class="desc">A win across every metric — answer correctness and completeness are flat, and recall@10 dropped 10pp, not yet root-caused</td></tr>
+      <tr><td class="tool">A real, modest improvement in hallucination rate (−3.0pp) and evidence groundedness (+2.8pp)</td><td class="desc">A win across every metric — answer correctness and completeness are flat, and the recall@10 line is one scenario of ten flipping, not a regression (see the correction in §05)</td></tr>
       <tr><td class="tool">The RFC 0016 fact-ledger's WAL surviving an OOM-kill mid-commit with zero corruption, confirmed under a real failure</td><td class="desc">A performance benchmark — the from-scratch debug-build rebuild took roughly 1.5-2 hours at this corpus size</td></tr>
     </tbody>
   </table>
@@ -198,7 +207,19 @@ Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a sou
   weak answer quality. <code class="mono">llama3:latest</code>'s own answer-generation quality
   (see <code class="mono">arch-001</code>, §03) remains the primary open gap. The original TODO's
   next steps are now the clearer priority: A/B a stronger provider once an API key is available,
-  root-cause the recall@10 regression, and only after that, revisit prompt/retrieval tuning.</p>
+  raise the recall@10 metric's statistical power, and only after that, revisit prompt/retrieval
+  tuning.</p>
+  <p class="lede"><strong>What happened next (2026-09-07).</strong> Following that conclusion led
+  to <a href="https://github.com/alexeyban/EKOS/blob/main/ekos/docs/rfcs/0139-answer-quality.md" style="color:var(--accent-a);">RFC 0139</a>,
+  and the conclusion above turned out to be <em>half</em> right. "The model is the primary gap" was
+  the wrong headline: capturing what the model was actually shown revealed that lexical search
+  returned <strong>nothing at all for 80 of 89 scenarios</strong>, and that 26 completely different
+  questions were being answered from <strong>byte-identical evidence</strong>. The answer was
+  usually not in the context to find. Relaxing the query lifted answer correctness
+  <strong>37.6% → 48.1%</strong> — and, exactly as that RFC predicted it might, briefly made
+  fabrication worse (10 → 15) until a weak-evidence refusal guard was added. The lesson worth
+  keeping: this page's own numbers were honest but under-diagnosed, and only capturing the
+  transcripts settled it.</p>
 </section>
 
 <section class="slide cta" id="s8">
