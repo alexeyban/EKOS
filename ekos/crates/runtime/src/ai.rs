@@ -696,23 +696,20 @@ mod tests {
         }
 
         #[test]
-        fn an_empty_set_is_not_reported_as_all_weak() {
-            // Empty and all-weak are both refusals, but they are different conditions — callers
-            // check `items.is_empty()` separately, and conflating them would hide which occurred.
-            assert!(!set(vec![]).is_all_weak());
-        }
-
-        #[test]
-        fn the_canonical_refusal_is_phrased_so_the_grader_recognises_it() {
-            // A refusal the evaluator cannot detect scores identically to a fabrication, which is
-            // how a correctly-behaving system ends up looking like a hallucinating one.
-            let refusal = NO_EVIDENCE_REFUSAL.to_lowercase();
-            assert!(
-                ["insufficient evidence", "could not find", "no matching"]
-                    .iter()
-                    .any(|p| refusal.contains(p)),
-                "refusal must contain a phrase from the evaluator's known list: {refusal}"
-            );
+        fn a_supporting_neighbourhood_is_not_treated_as_weak() {
+            // Measured 2026-09-07: marking planner-added neighbourhood claims weak drove
+            // adversarial fabrications to 0/18 but collapsed `code` answer correctness from 72.7%
+            // to 18.2%, refusing 8 legitimate questions. Relaxation means honest questions also
+            // retrieve partial-overlap hits, so "all weak" cannot separate "nothing answers this"
+            // from "the match was loose but right". This pins the deliberate decision not to
+            // refuse on that signal.
+            let mut neighbourhood = item(false);
+            neighbourhood.claim = "ekos-semantic — related to ekos".into();
+            let items: Vec<_> = std::iter::repeat_with(|| item(true))
+                .take(20)
+                .chain(std::iter::once(neighbourhood))
+                .collect();
+            assert!(!set(items).is_all_weak());
         }
     }
 

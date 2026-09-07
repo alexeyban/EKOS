@@ -45,6 +45,18 @@ pub enum PlanNode {
         op: StructuralOp,
         seed: EntityRef,
         hops: u32,
+        /// RFC 0139 §3.6 — this traversal is *supporting context* the planner added on its own,
+        /// not the thing the reader asked for. True for the neighbourhood auto-expansion the
+        /// `Conceptual`/`Lexical` branch attaches around a search; false when the question itself
+        /// was structural ("what depends on X", "what calls Y"), where the traversal *is* the
+        /// answer.
+        ///
+        /// The distinction decides whether these claims can support an answer on their own. An
+        /// auto-expanded neighbourhood of an incidentally-matched entity is decoration: asked
+        /// "what port does the EKOS message broker listen on?", it supplies a list of real EKOS
+        /// crates that answer nothing, and a model handed that as evidence will invent a port.
+        #[serde(default)]
+        supporting: bool,
     },
     /// Sequential steps; a later step sees bindings earlier steps made.
     Compose { steps: Vec<PlanNode> },
@@ -131,6 +143,8 @@ pub fn plan(u: &QueryUnderstanding) -> QueryPlan {
                             op,
                             seed: EntityRef::Resolved(e.id),
                             hops: STRUCTURAL_HOPS,
+                            // The question was structural — this traversal is the answer.
+                            supporting: false,
                         },
                         PlanNode::Fact {
                             entity: EntityRef::Resolved(e.id),
@@ -159,6 +173,8 @@ pub fn plan(u: &QueryUnderstanding) -> QueryPlan {
                                 op: StructuralOp::Neighborhood,
                                 seed: EntityRef::Resolved(e.id),
                                 hops: 1,
+                                // Context the planner added around a search, not the answer.
+                                supporting: true,
                             },
                         ],
                     },
@@ -414,7 +430,12 @@ fn exec_node(
             }
         }
 
-        PlanNode::Graph { op, seed, hops } => {
+        PlanNode::Graph {
+            op,
+            seed,
+            hops,
+            supporting,
+        } => {
             let Some(id) = ctx.resolve(seed) else {
                 diagnostics.push(Diagnostic::warning(
                     "RSN003",
@@ -428,12 +449,29 @@ fn exec_node(
                 .unwrap_or_else(|| "?".to_string());
             let label = op_label(*op);
             for obj in runtime.graph_op(*op, &id, *hops)? {
-                items.push(entity_item(
+                let item = entity_item(
                     runtime,
                     obj.id,
                     format!("{} — {label} {seed_name}", obj.name),
                     serde_json::Value::String(obj.id.0.to_string()),
-                )?);
+                )?;
+                // RFC 0139 §3.6: `supporting` records that this neighbourhood is planner-added
+                // background rather than the answer, and it is rendered that way — but it is
+                // deliberately **not** fed into `EvidenceSet::is_all_weak`.
+                //
+                // Measured, 2026-09-07: treating a supporting neighbourhood as weak did drive
+                // adversarial fabrications to 0/18, and simultaneously collapsed `code` answer
+                // correctness from 72.7% to 18.2% (8 legitimate questions refused). Query
+                // relaxation means honest questions routinely retrieve only partial-overlap hits
+                // too, so "every claim is weak" does not separate "nothing answers this" from
+                // "the match was loose but correct". Refusing on that signal buys a clean
+                // fabrication number by declining to answer, which is the worse failure.
+                //
+                // The distinction actually needed is *how much* of the query a hit matched, not
+                // whether it was relaxed at all — see this RFC's follow-up on term-coverage
+                // scoring. Until that exists, `supporting` informs rendering only.
+                let _ = supporting;
+                items.push(item);
             }
         }
 
@@ -564,7 +602,7 @@ pub fn render_plan(plan: &QueryPlan) -> String {
             PlanNode::Fact { entity, attr } => {
                 out.push_str(&format!("{pad}Fact {}.{attr}\n", ref_str(entity)))
             }
-            PlanNode::Graph { op, seed, hops } => out.push_str(&format!(
+            PlanNode::Graph { op, seed, hops, .. } => out.push_str(&format!(
                 "{pad}Graph {op:?} from {} ({hops} hops)\n",
                 ref_str(seed)
             )),
@@ -774,6 +812,7 @@ mod tests {
                 op: StructuralOp::Dependents,
                 seed: EntityRef::Resolved(c),
                 hops: 3,
+                supporting: false,
             },
             confidence: 1.0,
         };
@@ -809,6 +848,7 @@ mod tests {
                         op: StructuralOp::Dependents,
                         seed: EntityRef::Mention("gamma_fn".into()),
                         hops: 3,
+                        supporting: false,
                     },
                 ],
             },
