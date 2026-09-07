@@ -4997,6 +4997,30 @@ are excluded — see the full exclusion list in the planning history if needed.
       refusal into a fabrication). This also resolves the Motivation paradox: evidence *volume*
       never separated right from wrong answers because 26 scenarios got the same ~1,500 chars of the
       same irrelevant context. **No prompt change can fix this** — the answer isn't in the context.
+    - [x] **§3.1 — search relaxation (done, `691bd8f`).** Every query term was `Occur::Must`, so a
+      natural-language question required every content word in one document — search returned
+      *nothing* for 80 of 89 scenarios, and the `ekos` neighbourhood was simply what remained.
+      **tantivy 0.22 has no `minimum_number_should_match`** (verified against vendored source), so
+      the design is append-only backfill: strict hits keep their exact ranks, relaxed hits append
+      below, making recall/MRR/nDCG over the BM25 list provably non-decreasing. RFC 0126 gate
+      **improved** (recall@10 0.84 → 0.98) with no re-baselining. Suite: answer correctness
+      **37.6% → 48.1%**, zero-search scenarios 80/89 → 25/90, identical-evidence cluster 26 → 4.
+    - [x] **§4.2 — robust citation parsing (done, `57a291e`).** `extract_citations` split on the
+      last `{` in the response, so block-then-prose, pretty-printed, and fenced blocks all fell to
+      `AI001` — which returns empty refs, which makes groundedness `None`, silently removing the
+      scenario from the metric. Now scans balanced spans last-first and strips the block from the
+      visible answer. `AI001` **16 → 6**.
+    - [ ] **§3.6 — fabrication regression: OPEN, two failed fixes (`0c63dc9`, `3e74863`).** §3.1
+      pushed fabrications **10 → 15** exactly as this RFC's warning box predicted: relaxation makes
+      evidence sets non-empty for questions about things that don't exist. *Attempt 1* (mark relaxed
+      search hits weak, refuse when all-weak) never fired — graph-neighbourhood claims kept the set
+      from being all-weak. *Attempt 2* (also mark planner-added neighbourhoods weak) hit 18/18
+      adversarial with 0 fabrications **but collapsed `code` answer correctness 72.7% → 18.2%**,
+      refusing 8 legitimate questions; reverted. **Root design flaw**: relaxation means honest
+      questions also retrieve partial-overlap hits, so "all weak" cannot separate "nothing answers
+      this" from "the match was loose but correct". **Next step — term-coverage scoring**: record
+      *how many* query terms each hit matched (not just relaxed-vs-strict) and refuse only below a
+      coverage floor. `supporting`/`weak` currently ship for rendering only.
     - [ ] **Phase 1 — fair ruler (deterministic, no LLM judge)**: `any_of` alternates +
       normalisation (hyphen/underscore/space) + `en_stem` stemming so "redacted" matches
       `"redaction"` and "CKM" matches `"Canonical Knowledge Model"`; stop `completeness`
