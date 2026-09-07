@@ -210,7 +210,12 @@ fn default_ruler_version() -> u32 {
 /// - **v2** — RFC 0139 §2.1: token matching with separator/word-ending normalisation
 ///   (`crate::evaluators::normalize`) and `any_of` alternates. Removes false negatives where a
 ///   correct answer used a different word form, without loosening what counts as a fact.
-pub const RULER_VERSION: u32 = 2;
+/// - **v3** — RFC 0139 §2.2/§2.3: `completeness` no longer votes twice in the composite (it
+///   re-uses `answer`'s match count, so one missed keyword cost two of three slots); the composite
+///   is weighted rather than an unweighted mean; a scenario with no gradable signal fails visibly
+///   instead of scoring a silent 1.0; and an answered-but-uncited scenario scores 0 for
+///   groundedness instead of vanishing from its denominator.
+pub const RULER_VERSION: u32 = 3;
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
     let (sum, n) = values.fold((0.0f32, 0usize), |(s, n), v| (s + v, n + 1));
@@ -580,6 +585,7 @@ mod tests {
             cited_count: 1,
             invalid_citation_count: 0,
             answered_uncited: false,
+            not_gradable: false,
             transcript: Default::default(),
             tokens: Some(TokenUsage {
                 input_tokens: 100,

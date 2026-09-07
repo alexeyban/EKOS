@@ -48,6 +48,10 @@ pub struct EvalOutcome {
     /// An answer was produced but cited nothing — the population `groundedness` silently excludes
     /// (RFC 0139 §2.3).
     pub answered_uncited: bool,
+    /// RFC 0139 §2.2 — the scenario carried no applicable check at all. Previously such a scenario
+    /// scored a silent 1.0 and passed; now it fails visibly, because a suite that cannot grade a
+    /// question should say so rather than count it as a success.
+    pub not_gradable: bool,
     /// RFC 0139 §1 — the transcript, carried through so a saved report can be re-graded offline
     /// (`ekos eval regrade`) and so a failure can be attributed to retrieval, generation, or the
     /// ruler without re-running the scenario by hand.
@@ -162,6 +166,7 @@ pub fn evaluate(
             cited_count: 0,
             invalid_citation_count: 0,
             answered_uncited: false,
+            not_gradable: false,
             transcript: transcript_of(run, Attribution::NotApplicable),
         };
     }
@@ -179,23 +184,33 @@ pub fn evaluate(
     let hallucinated = !evidence_check.invalid_ids.is_empty()
         || (scenario.should_refuse && groundedness_score.is_some_and(|s| s < 1.0));
 
-    let applicable_scores: Vec<f32> = [
-        answer_score,
-        completeness_score,
-        groundedness_score,
-        trajectory_score,
+    // RFC 0139 §2.2 — a weighted composite over the axes that carry independent information.
+    //
+    // `completeness_score` is deliberately absent. It reuses `answer::matched_count`, so for the
+    // 55 scenarios with `expected_facts` but no `expected_evidence_contains` it is a near-copy of
+    // `answer_score` — and in an unweighted mean both slots moved together, meaning one missed
+    // keyword cost *two of three* slots. A typical reason scenario therefore landed at
+    // (0 + 0 + 1.0)/3 = 0.33 against a 0.7 threshold and failed on a single substring miss.
+    // Completeness is still computed, reported and gated; it just no longer votes twice.
+    let weighted: Vec<(f32, f32)> = [
+        (answer_score, 0.45),
+        (groundedness_score, 0.30),
+        (retrieval_recall.map(|r| r as f32), 0.15),
+        (trajectory_score, 0.10),
     ]
     .into_iter()
-    .flatten()
-    .chain(retrieval_recall.map(|r| r as f32))
+    .filter_map(|(score, weight)| score.map(|s| (s, weight)))
     .collect();
-    let composite = if applicable_scores.is_empty() {
-        1.0 // nothing was gradable (e.g. a bare retrieval scenario whose only signal is recall,
-    // already folded in above) — don't fail a scenario for having no applicable checks
-    } else {
-        applicable_scores.iter().sum::<f32>() / applicable_scores.len() as f32
-    };
-    let passed = composite >= scenario.pass_threshold && !hallucinated;
+    // Renormalise over whichever axes applied, so a scenario is judged only on what it actually
+    // measures rather than being penalised for the checks it doesn't carry.
+    let total_weight: f32 = weighted.iter().map(|(_, w)| w).sum();
+    let composite = (total_weight > 0.0)
+        .then(|| weighted.iter().map(|(s, w)| s * w).sum::<f32>() / total_weight);
+    // RFC 0139 §2.2 — no gradable signal used to mean `composite = 1.0`, i.e. a free pass. The
+    // dataset test at `schema.rs` should make this unreachable, which is exactly why it must be
+    // loud rather than silently inflate the pass rate if it ever happens.
+    let not_gradable = composite.is_none();
+    let passed = composite.is_some_and(|c| c >= scenario.pass_threshold) && !hallucinated;
 
     EvalOutcome {
         scenario_id: scenario.id.clone(),
@@ -216,6 +231,7 @@ pub fn evaluate(
         cited_count: evidence_check.cited,
         invalid_citation_count: evidence_check.invalid_ids.len(),
         answered_uncited: run.answer.is_some() && evidence_check.cited == 0,
+        not_gradable,
         transcript: transcript_of(run, attribute(scenario, run)),
     }
 }

@@ -103,6 +103,7 @@ mod tests {
             cited_count: 0,
             invalid_citation_count: 0,
             answered_uncited: false,
+            not_gradable: false,
             transcript: Default::default(),
             tokens: None,
             cache_hit: None,

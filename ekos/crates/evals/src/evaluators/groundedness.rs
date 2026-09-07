@@ -59,10 +59,16 @@ pub fn score(scenario: &Scenario, answer: Option<&str>, evidence: &EvidenceCheck
             0.0
         });
     }
-    if evidence.cited == 0 {
-        None
-    } else {
-        Some(evidence.valid as f32 / evidence.cited as f32)
+    match (evidence.cited, answer) {
+        // RFC 0139 §2.3 — an answer that cites nothing is the *definition* of ungrounded, not a
+        // scenario this metric doesn't apply to. Returning `None` here removed it from the
+        // denominator instead of scoring it: measured on the R0 baseline, 59 of 101 scenarios
+        // produced an answer and cited nothing, so the published 78.3% groundedness was a mean
+        // over 46 scenarios — a metric mostly reporting on the scenarios that behaved.
+        (0, Some(_)) => Some(0.0),
+        // No answer at all (a runner error) genuinely has nothing to grade.
+        (0, None) => None,
+        (cited, _) => Some(evidence.valid as f32 / cited as f32),
     }
 }
 
@@ -127,10 +133,23 @@ mod tests {
         );
     }
 
+    /// RFC 0139 §2.3 changed this deliberately. An answered scenario that cites nothing used to
+    /// return `None` — "not applicable" — which quietly removed it from groundedness's denominator
+    /// instead of scoring it. On the R0 baseline that was 59 of 101 scenarios, so a published
+    /// 78.3% was really a mean over the 46 that behaved. Citing nothing *is* ungrounded.
     #[test]
-    fn normal_scenario_no_citation_not_applicable() {
+    fn an_answered_scenario_that_cites_nothing_scores_zero_not_not_applicable() {
         let s = scenario(false);
         let e = EvidenceCheck::default();
-        assert_eq!(score(&s, Some("anything"), &e), None);
+        assert_eq!(score(&s, Some("anything"), &e), Some(0.0));
+    }
+
+    #[test]
+    fn a_scenario_with_no_answer_at_all_remains_not_applicable() {
+        // A runner error genuinely has nothing to grade — distinct from an answer that chose not
+        // to cite.
+        let s = scenario(false);
+        let e = EvidenceCheck::default();
+        assert_eq!(score(&s, None, &e), None);
     }
 }
