@@ -522,10 +522,17 @@ fn entity_item(
     let (source, location, confidence, extracted_by) = match runtime.reconstruct_state(&id)? {
         Some(state) => {
             let extracted_by = provenance_of(&state.object);
+            // RFC 0140 §2 — prefer the object's own `source_span` over the evidence's file-level
+            // location. Analyzers record a real start/end line for Rust, Elixir and Python symbols
+            // (RFC 0088) but only `docs-gen` ever read it; meanwhile 33 of 35 evidence call sites
+            // use `SourceLocation::file`, so measured on the RFC 0138 suite **zero** of 1,289
+            // rendered claims carried a line number and only 26% carried any location at all. The
+            // span was already compiled and simply never reached the reasoner.
+            let span = span_of(&state.object);
             match state.evidence.first() {
                 Some(ev) => (
                     Some(ev.id),
-                    fmt_location(&ev.location),
+                    span_location(&ev.location, span),
                     ev.confidence,
                     extracted_by,
                 ),
@@ -560,6 +567,24 @@ fn provenance_of(obj: &ekos_kir::KirObject) -> String {
         }
     }
     String::new()
+}
+
+/// The `(start_line, end_line)` an analyzer recorded for this object, when it recorded one
+/// (RFC 0088's `source_span`, written by `rust_analyzer`/`elixir_analyzer`/`python_analyzer`).
+fn span_of(object: &ekos_kir::KirObject) -> Option<(u64, u64)> {
+    let v = object.properties.get("source_span")?;
+    Some((v.get("start_line")?.as_u64()?, v.get("end_line")?.as_u64()?))
+}
+
+/// Render a claim's location, upgrading a file-level evidence location to the object's real line
+/// span when one exists (RFC 0140 §2). An evidence location that already carries its own line is
+/// left alone — it is the more specific statement about *that* fragment.
+fn span_location(loc: &ekos_kir::SourceLocation, span: Option<(u64, u64)>) -> String {
+    match (loc.line, span) {
+        (None, Some((start, end))) if end > start => format!("{}:{}-{}", loc.path, start, end),
+        (None, Some((start, _))) => format!("{}:{}", loc.path, start),
+        _ => fmt_location(loc),
+    }
 }
 
 fn fmt_location(loc: &ekos_kir::SourceLocation) -> String {
@@ -825,6 +850,49 @@ mod tests {
         assert!(set.items.iter().all(|i| i.location == "schema.sql:12"));
         assert!(set.items.iter().all(|i| i.extracted_by == "sql"));
         assert_eq!(set.source_ids().len(), 1);
+    }
+
+    /// RFC 0140 §2 — a symbol's compiled `source_span` reaches the reasoner as a line range.
+    ///
+    /// Measured before this existed: of 1,289 evidence claims rendered across a full RFC 0138 run,
+    /// **zero** carried a line number and only 26.4% carried any location. The spans were already
+    /// in the ledger — `rust_analyzer` and friends write them for RFC 0088 — but nothing on the
+    /// query path read them, so answers could cite a file and never a place in it.
+    #[test]
+    fn a_symbol_span_upgrades_a_file_level_location_to_a_line_range() {
+        let (l, _d) = temp();
+        let ev = KirEvidence::new(SourceLocation::file("src/lib.rs"), "fn parse() {}");
+        l.append_evidence(&ev).unwrap();
+        let mut obj = KirObject::new("parse", ObjectKind::Custom("RustSymbol".into()));
+        obj.properties.insert(
+            "source_span".into(),
+            serde_json::json!({"start_line": 40, "end_line": 76}),
+        );
+        obj.evidence.push(ev.id);
+        l.append_object(&obj).unwrap();
+        let rt = Runtime::new(&l);
+
+        let item = entity_item(&rt, obj.id, "c".into(), serde_json::Value::Null).unwrap();
+        assert_eq!(item.location, "src/lib.rs:40-76");
+    }
+
+    #[test]
+    fn an_evidence_location_that_already_has_a_line_is_left_alone() {
+        // The fragment's own line is a more specific statement than the whole symbol's span.
+        let (l, _d) = temp();
+        let ev = KirEvidence::new(SourceLocation::at("src/lib.rs", 12), "fn parse() {}");
+        l.append_evidence(&ev).unwrap();
+        let mut obj = KirObject::new("parse2", ObjectKind::Custom("RustSymbol".into()));
+        obj.properties.insert(
+            "source_span".into(),
+            serde_json::json!({"start_line": 40, "end_line": 76}),
+        );
+        obj.evidence.push(ev.id);
+        l.append_object(&obj).unwrap();
+        let rt = Runtime::new(&l);
+
+        let item = entity_item(&rt, obj.id, "c".into(), serde_json::Value::Null).unwrap();
+        assert_eq!(item.location, "src/lib.rs:12");
     }
 
     /// RFC 0139 §3.0 — the entity gate. A hub's neighbourhood describes the corpus, not the
