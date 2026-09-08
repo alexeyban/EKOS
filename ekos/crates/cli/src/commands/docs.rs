@@ -1181,7 +1181,7 @@ mod tests {
             "build_object_page_model",
             ObjectKind::Custom("RustSymbol".to_string()),
         )
-        .with_property("kind", serde_json::json!("function"));
+        .with_property("symbol_kind", serde_json::json!("function"));
         ledger.append_object(&file).unwrap();
         ledger.append_object(&function).unwrap();
         let contains = KirRelationship::new(RelationshipKind::Contains, file.id, function.id);

@@ -97,8 +97,9 @@ impl CompilerPass for ElixirAnalyzerPass {
     /// `cache_inputs` alone cannot catch a logic change, and what it cost when it didn't.
     ///
     /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
+    /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -472,7 +473,7 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                             // property convention (`docs-gen`'s `render_api` reads it for the
                             // displayed entity kind) — every symbol this analyzer recognizes is a
                             // function (`def`/`defp`), no other Elixir declaration shape yet.
-                            .with_property("kind", serde_json::json!("function"))
+                            .with_property("symbol_kind", serde_json::json!("function"))
                             .with_property("arity", serde_json::json!(arity))
                             .with_property(
                                 "visibility",
@@ -849,7 +850,7 @@ mod tests {
         assert_eq!(module.kind, ObjectKind::Custom("ElixirModule".to_string()));
         let symbol = result.objects.iter().find(|o| o.name == "hash").unwrap();
         assert_eq!(symbol.kind, ObjectKind::Custom("ElixirSymbol".to_string()));
-        assert_eq!(symbol.properties["kind"], "function");
+        assert_eq!(symbol.properties["symbol_kind"], "function");
         assert_eq!(symbol.properties["arity"], 1);
         assert_eq!(symbol.properties["visibility"], "public");
         assert!(

@@ -679,6 +679,40 @@ mod tests {
         assert!(rt.facts_of(&KirId::new()).unwrap().is_empty());
     }
 
+    /// RFC 0141 §4 — a property must never collide with a built-in fact name.
+    ///
+    /// `facts_of` emits `name` and `kind` from the object's own fields and then appends every
+    /// property, so a property literally called `kind` produced **two** facts named `kind` with
+    /// different values. Observed live before the fix: one evidence set showed the model both
+    /// `parse_ddl_structural.kind = RustSymbol` and `parse_ddl_structural.kind = function`, and
+    /// asked what kind of thing a symbol was, the model answered "RustSymbol" — true of the
+    /// storage model, useless to the reader. `resolve_fact` also hard-codes `kind` to the
+    /// `ObjectKind`, so the property was unreachable through the fact path anyway.
+    #[test]
+    fn an_objects_facts_never_contain_a_duplicate_key() {
+        let (ledger, _dir) = temp_ledger();
+        let mut sym = KirObject::new(
+            "parse_ddl_structural",
+            ObjectKind::Custom("RustSymbol".into()),
+        );
+        sym.properties
+            .insert("symbol_kind".into(), serde_json::json!("function"));
+        ledger.append_object(&sym).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let facts = rt.facts_of(&sym.id).unwrap();
+
+        let mut keys: Vec<&str> = facts.iter().map(|(k, _)| k.as_str()).collect();
+        keys.sort_unstable();
+        let before = keys.len();
+        keys.dedup();
+        assert_eq!(
+            keys.len(),
+            before,
+            "duplicate fact key in {facts:?} — a property is shadowing a built-in fact name"
+        );
+    }
+
     #[test]
     fn named_graph_ops_respect_direction_edge_kind_and_hops() {
         let (ledger, _dir) = temp_ledger();

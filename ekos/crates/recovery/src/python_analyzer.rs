@@ -95,8 +95,9 @@ impl CompilerPass for PythonAnalyzerPass {
     /// `cache_inputs` alone cannot catch a logic change, and what it cost when it didn't.
     ///
     /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
+    /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -332,7 +333,7 @@ fn add_symbol(
 ) {
     let target_id = python_symbol_kir_id(path, name);
     let mut obj = KirObject::new(name, ObjectKind::Custom("PythonSymbol".to_string()))
-        .with_property("kind", serde_json::Value::String(kind.to_string()));
+        .with_property("symbol_kind", serde_json::Value::String(kind.to_string()));
     obj.id = target_id;
     // Real, only when the body's own first statement is a real string-literal docstring — never
     // fabricated.
@@ -1052,7 +1053,7 @@ mod tests {
         assert!(names.contains(&"foo"));
         assert!(names.contains(&"Bar"));
         let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
-        assert_eq!(foo.properties["kind"], "function");
+        assert_eq!(foo.properties["symbol_kind"], "function");
     }
 
     // ── RFC 0091 — SQLAlchemy ORM model recognition ─────────────────────────

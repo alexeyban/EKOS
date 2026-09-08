@@ -3024,9 +3024,14 @@ pub fn render_api(objects: &[KirObject], relationships: &[KirRelationship]) -> R
         out.push_str(&format!("## {module_name}\n\n"));
         syms.sort_by(|a, b| a.name.cmp(&b.name));
         for sym in syms {
+            // RFC 0141 §4 renamed this property `kind` -> `symbol_kind`; `kind` is still read as
+            // a fallback so a ledger compiled before the rename keeps rendering `fn`/`struct`
+            // rather than silently degrading every symbol to the generic "symbol". The ledger is
+            // append-only, so both spellings can coexist indefinitely.
             let entity_kind = sym
                 .properties
-                .get("kind")
+                .get("symbol_kind")
+                .or_else(|| sym.properties.get("kind"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("symbol");
             match page_names.get(&sym.id) {
@@ -5353,7 +5358,7 @@ mod tests {
             "build_object_page_model",
             ObjectKind::Custom("RustSymbol".to_string()),
         )
-        .with_property("kind", serde_json::json!("function"));
+        .with_property("symbol_kind", serde_json::json!("function"));
         let contains = KirRelationship::new(RelationshipKind::Contains, file.id, function.id);
 
         let page = render_api(&[file.clone(), function], &[contains]);
@@ -5375,7 +5380,7 @@ mod tests {
             ObjectKind::Custom("ElixirModule".to_string()),
         );
         let function = KirObject::new("hash", ObjectKind::Custom("ElixirSymbol".to_string()))
-            .with_property("kind", serde_json::json!("function"));
+            .with_property("symbol_kind", serde_json::json!("function"));
         let file_contains_module =
             KirRelationship::new(RelationshipKind::Contains, file.id, module.id);
         let module_contains_symbol =

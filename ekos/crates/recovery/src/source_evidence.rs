@@ -112,9 +112,14 @@ mod tests {
     /// `Rust symbols recovered: 0` — the ledger was faithfully rebuilt from pre-change KIR, so
     /// nothing looked wrong until the output was actually inspected.
     ///
-    /// This asserts only that the three `attach`-calling analyzers have moved off the default.
-    /// It cannot verify the version was bumped for the *right* reason — that stays a review
-    /// matter — but it does catch the specific case of never having bumped at all.
+    /// This asserts only that the source-emitting analyzers have moved off the default. It cannot
+    /// verify the version was bumped for the *right* reason — that stays a review matter — but it
+    /// does catch the specific case of never having bumped at all.
+    ///
+    /// `javascript_analyzer` is included even though it emits no `source_span` (so it has no
+    /// RFC 0140 §1 change): it writes the same `symbol_kind` property the other three do, and it
+    /// was found sitting on the default `"v1"` during RFC 0141 §4 — the identical trap, one
+    /// analyzer over.
     #[test]
     fn analyzers_emitting_source_evidence_declare_a_non_default_pass_version() {
         use ekos_compiler_core::pass::CompilerPass;
@@ -122,11 +127,13 @@ mod tests {
         let rust = crate::rust_analyzer::RustAnalyzerPass::new("w", vec![]);
         let python = crate::python_analyzer::PythonAnalyzerPass::new("w", vec![]);
         let elixir = crate::elixir_analyzer::ElixirAnalyzerPass::new("w", vec![]);
+        let js = crate::javascript_analyzer::JavaScriptAnalyzerPass::new("w", vec![]);
 
         for pass in [
             &rust as &dyn CompilerPass,
             &python as &dyn CompilerPass,
             &elixir as &dyn CompilerPass,
+            &js as &dyn CompilerPass,
         ] {
             assert_ne!(
                 pass.version(),

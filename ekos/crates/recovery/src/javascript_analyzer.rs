@@ -97,6 +97,15 @@ impl CompilerPass for JavaScriptAnalyzerPass {
         &self.pass_id
     }
 
+    /// Bump on any change to this pass's output shape — see `rust_analyzer`'s `version` for why
+    /// `cache_inputs` alone cannot catch a logic change, and what it cost when it didn't.
+    ///
+    /// `v2` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`). This pass emits no
+    /// `source_span`, so it had no RFC 0140 §1 change and skips that generation's `v2`.
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
         ids.sort();
@@ -381,7 +390,7 @@ fn emit_symbol(
     let sym_id = js_symbol_kir_id(fc.file_id, &qualified);
     if fc.seen.insert(sym_id) {
         let mut obj = KirObject::new(name.to_string(), ObjectKind::Custom("JsSymbol".to_string()))
-            .with_property("kind", serde_json::json!(kind))
+            .with_property("symbol_kind", serde_json::json!(kind))
             .with_property(
                 "visibility",
                 serde_json::json!(if exported { "exported" } else { "local" }),
@@ -487,7 +496,7 @@ mod tests {
         assert_eq!(result.symbol_count, 1);
         let sym = &result.objects[0];
         assert_eq!(sym.name, "greet");
-        assert_eq!(sym.properties["kind"], "function");
+        assert_eq!(sym.properties["symbol_kind"], "function");
         assert_eq!(sym.properties["visibility"], "local");
     }
 
@@ -556,14 +565,14 @@ mod tests {
     fn recognizes_a_class_declaration() {
         let result = extract("class Widget {}\n", "a.js");
         assert_eq!(result.objects[0].name, "Widget");
-        assert_eq!(result.objects[0].properties["kind"], "class");
+        assert_eq!(result.objects[0].properties["symbol_kind"], "class");
     }
 
     #[test]
     fn recognizes_an_arrow_function_component_assigned_to_const() {
         let result = extract("export const App = () => { return null; };\n", "a.jsx");
         assert_eq!(result.objects[0].name, "App");
-        assert_eq!(result.objects[0].properties["kind"], "function");
+        assert_eq!(result.objects[0].properties["symbol_kind"], "function");
         assert_eq!(result.objects[0].properties["visibility"], "exported");
     }
 

@@ -88,8 +88,9 @@ impl CompilerPass for RustAnalyzerPass {
     /// exited 0, so the run looked clean while rebuilding the ledger from pre-change KIR.
     ///
     /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
+    /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -441,7 +442,7 @@ fn add_symbol(
         format!("rust-symbol:{path}:{name}").as_bytes(),
     ));
     let mut obj = KirObject::new(name, ObjectKind::Custom("RustSymbol".to_string()))
-        .with_property("kind", serde_json::Value::String(kind.to_string()));
+        .with_property("symbol_kind", serde_json::Value::String(kind.to_string()));
     obj.id = target_id;
     // Real, only when the item actually has a real `///` doc comment — never fabricated.
     if let Some(doc) = doc {
@@ -589,7 +590,7 @@ mod tests {
         assert!(names.contains(&"Baz"));
         assert!(names.contains(&"Qux"));
         let foo = result.objects.iter().find(|o| o.name == "foo").unwrap();
-        assert_eq!(foo.properties["kind"], "function");
+        assert_eq!(foo.properties["symbol_kind"], "function");
     }
 
     #[test]
