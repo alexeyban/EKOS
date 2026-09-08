@@ -110,9 +110,16 @@ fn main() -> anyhow::Result<()> {
                         t.with_any_location += 1;
                         if has_line(&item.location) {
                             t.with_line += 1;
-                            if samples.len() < 5 {
-                                samples.push(format!("{} [{}]", item.claim, item.location));
-                            }
+                        }
+                        // Sampled unconditionally: sampling only line-carrying claims made the
+                        // report print nothing precisely when the count was 0 — i.e. exactly when
+                        // an example was needed to tell a real regression from a broken measure.
+                        if samples.len() < 8 {
+                            samples.push(format!(
+                                "line={} loc={:?}",
+                                has_line(&item.location),
+                                item.location
+                            ));
                         }
                     }
                 }

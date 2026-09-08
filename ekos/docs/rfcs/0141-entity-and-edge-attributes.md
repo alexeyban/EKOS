@@ -105,7 +105,7 @@ symbol is dominated by whatever excerpt its file contributed.
 The attribute this RFC does add is the **basis text**, which is `signature` from §1 plus the
 `description` that already exists. The vector follows from those.
 
-### 4. Disambiguate `kind` before adding more
+### 4. Disambiguate `kind` before adding more — **implemented 2026-09-08**
 
 `parse_ddl_structural` carries two facts named `kind`: the `ObjectKind` (`RustSymbol`) and a
 property (`function`). That ambiguity produced a real wrong answer — asked what kind of thing
@@ -115,6 +115,21 @@ storage model and useless to the reader.
 Rename the property to `symbol_kind`. This is a small change with a real migration cost (a
 `recover` + `commit`), and it should land **before** §1-§3 rather than after, because every
 attribute added on top of an ambiguous one inherits the ambiguity.
+
+**Shipped.** Confirmed worse than a display nuisance once implemented: `resolve_fact` hard-codes
+`"kind"` to the `ObjectKind`, so `properties.kind` was **unreachable through the fact path
+entirely** — `FIND Object WHERE kind = 'function'` could never have matched, and the duplicate was
+visible only in a rendered evidence set.
+
+- `rust`/`python`/`elixir`/`javascript` analyzers write `symbol_kind`.
+- `docs-gen` reads `symbol_kind` and falls back to `kind`, so a ledger compiled before the rename
+  keeps rendering `fn`/`struct` rather than degrading every symbol to the generic `"symbol"`. The
+  ledger is append-only, so both spellings coexist indefinitely — this fallback is permanent, not
+  transitional.
+- A test asserts an object's facts contain no duplicate key, verified to fail under the old name.
+- `javascript_analyzer` was found still on the default `version()` of `"v1"` while making this
+  change — the same permanently-cached trap RFC 0140 records, one analyzer over. Now `"v2"` and
+  covered by the pass-version guard.
 
 ---
 

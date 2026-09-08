@@ -63,6 +63,23 @@ ignore-patterns = [
     "venv",
     "site-packages",
     "__pycache__",
+    # Found 2026-09-08 in the same measurement, one layer down: after the venv fix, `build` still
+    # observed 9964 files — and 9107 of them (91%) were SonarCloud scanner output in
+    # `./.scannerwork` (422) and `./web/api/.scannerwork` (8685). These compile to almost nothing
+    # (4 CKM objects, being `.ucfg` intermediates rather than source), but `ekos build` writes a
+    # real `File` object per observed file straight to the ledger, so 8685 of the ledger's 9964
+    # `File` objects were scanner artifacts — all indexed and searchable, competing with real code
+    # in every retrieval.
+    #
+    # Self-inflicted, like the `evals/` case: these directories exist because this project runs
+    # `sonar-scanner` on itself. Deliberately NOT adding the generic `build`/`dist`/`coverage`
+    # names — patterns match a bare path component, so those would risk pruning real source
+    # directories in this or any other workspace; the `build` hits here are all under `target/`,
+    # which is already excluded.
+    ".scannerwork",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
 ]
 
 [llm]
