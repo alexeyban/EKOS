@@ -161,7 +161,9 @@ impl CompilerPass for PythonAnalyzerPass {
                     .count();
                 merge_graphs(&mut combined, lower_to_kir(graph));
             }
-            for obj in result.objects {
+            for mut obj in result.objects {
+                // RFC 0140 §1 — a symbol's span is useless without the file it belongs to.
+                crate::source_evidence::attach(&mut obj, &data.source, &data.path, &mut combined);
                 if seen_modules.insert(obj.id)
                     || !matches!(obj.kind, ObjectKind::Custom(ref k) if k == "PythonModule")
                 {

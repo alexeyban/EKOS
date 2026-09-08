@@ -32,6 +32,7 @@ pub mod pentaho_analyzer;
 pub mod python_analyzer;
 pub mod requirements_analyzer;
 pub mod rust_analyzer;
+mod source_evidence;
 pub mod sql_analyzer;
 pub mod sql_dialect_registry;
 pub mod sql_transform_analyzer;

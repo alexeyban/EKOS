@@ -24,10 +24,7 @@
 use async_trait::async_trait;
 use ekos_artifact::ArtifactId;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
-use ekos_kir::{
-    KirEvidence, KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind,
-    SourceLocation,
-};
+use ekos_kir::{KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -71,26 +68,6 @@ impl RustAnalyzerPass {
     pub fn stats_handle(&self) -> Arc<Mutex<RustStats>> {
         Arc::clone(&self.stats)
     }
-}
-
-/// The `(start, end)` lines RFC 0088's `source_span` recorded for this object, if any.
-fn span_lines(obj: &KirObject) -> Option<(u64, u64)> {
-    let v = obj.properties.get("source_span")?;
-    Some((v.get("start_line")?.as_u64()?, v.get("end_line")?.as_u64()?))
-}
-
-/// The source text of a 1-indexed, inclusive line range, capped so one enormous item cannot
-/// dominate the ledger. The cap is on the *fragment*, not the span: `source_span` still records
-/// the true range, so a consumer that wants the whole body can still go and read it.
-fn slice_lines(source: &str, start: u64, end: u64) -> String {
-    const MAX_FRAGMENT_LINES: u64 = 40;
-    let take = (end.saturating_sub(start) + 1).min(MAX_FRAGMENT_LINES) as usize;
-    source
-        .lines()
-        .skip(start.saturating_sub(1) as usize)
-        .take(take)
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[async_trait]
@@ -177,13 +154,7 @@ impl CompilerPass for RustAnalyzerPass {
                 // that already passed RFC 0043 redaction on the way in, which is why it is safe
                 // to persist here and why RFC 0140 §3 insists query-time reads come from the
                 // artifact store rather than the live filesystem.
-                if let Some((start, end)) = span_lines(&obj) {
-                    let fragment = slice_lines(&data.source, start, end);
-                    let ev =
-                        KirEvidence::new(SourceLocation::at(&data.path, start as u32), fragment);
-                    obj.evidence.push(ev.id);
-                    combined.add_evidence(ev);
-                }
+                crate::source_evidence::attach(&mut obj, &data.source, &data.path, &mut combined);
                 if seen_modules.insert(obj.id)
                     || !matches!(obj.kind, ObjectKind::Custom(ref k) if k == "RustModule")
                 {
@@ -765,46 +736,5 @@ mod tests {
                 .iter()
                 .all(|r| r.kind != RelationshipKind::Calls)
         );
-    }
-
-    /// RFC 0140 §1 — a Rust symbol must be traceable to the text it came from.
-    ///
-    /// Before this, the analyzer emitted no evidence at all: a symbol carried
-    /// `source_span {start_line, end_line}` but no file path, so the range pointed nowhere. The
-    /// path was only ever an id-hash ingredient.
-    #[test]
-    fn a_symbol_carries_evidence_naming_its_file_and_line() {
-        let src = "fn alpha() {}\n\nfn beta() {\n    let x = 1;\n}\n";
-        let g = parse_rust_file("src/demo.rs", src, KirId::new()).unwrap();
-        let beta = g
-            .objects
-            .iter()
-            .find(|o| o.name == "beta")
-            .expect("beta symbol");
-        assert!(
-            span_lines(beta).is_some(),
-            "RFC 0088 span must still be recorded"
-        );
-    }
-
-    #[test]
-    fn a_fragment_is_the_real_source_of_the_span_and_is_capped() {
-        let src: String = (1..=100).map(|i| format!("line{i}\n")).collect();
-        let frag = slice_lines(&src, 3, 90);
-        assert!(
-            frag.starts_with("line3"),
-            "starts at the span, got: {frag:.20}"
-        );
-        assert_eq!(
-            frag.lines().count(),
-            40,
-            "one enormous item must not dominate the ledger"
-        );
-    }
-
-    #[test]
-    fn slicing_a_short_span_returns_exactly_that_span() {
-        let src = "a\nb\nc\nd\n";
-        assert_eq!(slice_lines(src, 2, 3), "b\nc");
     }
 }
