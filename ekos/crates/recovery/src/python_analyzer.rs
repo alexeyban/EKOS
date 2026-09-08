@@ -91,6 +91,14 @@ impl CompilerPass for PythonAnalyzerPass {
         &self.pass_id
     }
 
+    /// Bump on any change to this pass's output shape — see `rust_analyzer`'s `version` for why
+    /// `cache_inputs` alone cannot catch a logic change, and what it cost when it didn't.
+    ///
+    /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
         ids.sort();

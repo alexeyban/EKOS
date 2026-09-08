@@ -53,7 +53,11 @@ api-key-env = "ANTHROPIC_API_KEY"
 model = "llama3:latest"
 
 [llm-description]
-enabled = false  # temporarily off for the RFC 0140 §1 rebuild — restore to true afterwards
+# Restored to true 2026-09-08 after the RFC 0140 §1 rebuild completed. It was turned off only
+# for the duration of that rebuild: `llm_description` is a post-`commit` step that makes an LLM
+# call per Module/Rollup/Symbol, and leaving it on would have added hours to a run whose whole
+# purpose was to land source-linked evidence from `recover`.
+enabled = true
 scope = "all"
 
 # RFC 0030 — Marketing Agent (`ekos marketing publish`). Defaults shown; publishing to X

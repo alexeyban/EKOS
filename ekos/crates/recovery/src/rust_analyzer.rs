@@ -76,6 +76,22 @@ impl CompilerPass for RustAnalyzerPass {
         &self.pass_id
     }
 
+    /// **Bump this whenever this pass's output shape changes.** `cache_inputs` covers the
+    /// *artifacts* being analyzed, never the analyzer's own logic, so an unchanged corpus plus
+    /// changed code is exactly the case `should_recompute` misses: it compares
+    /// `manifest.version != pass.version()`, and the trait default pins every pass at `"v1"`
+    /// forever.
+    ///
+    /// Found the hard way on 2026-09-08: RFC 0140 §1 taught this analyzer to emit source-linked
+    /// evidence, and a full `recover`/`resolve`/`compile`/`commit` then reported
+    /// `Passes run: 0, Passes skipped (cached): 9` and `Rust symbols recovered: 0`. Every stage
+    /// exited 0, so the run looked clean while rebuilding the ledger from pre-change KIR.
+    ///
+    /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
         ids.sort();

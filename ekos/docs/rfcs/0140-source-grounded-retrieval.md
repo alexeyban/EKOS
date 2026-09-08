@@ -68,8 +68,55 @@ The fragment is safe to persist precisely because `data.source` reached the anal
 observation layer and has already passed RFC 0043 redaction — the same reasoning that makes §3
 insist query-time reads come from the artifact store rather than the live filesystem.
 
-**Status: implemented for `rust_analyzer`.** `elixir_analyzer` and `python_analyzer` record spans
-the same way and need the same treatment; they are unchanged so far.
+**Status: implemented for `rust_analyzer`, `python_analyzer` and `elixir_analyzer`.**
+
+**A change to this code does not take effect until the pass version is bumped.** Learned by losing
+a full 42-minute `recover`/`resolve`/`compile`/`commit` to it on 2026-09-08. `PassManager::run_all`
+skips a pass when `manifest.version == pass.version()` (`compiler-core/src/cache.rs`'s
+`should_recompute`), and `CompilerPass::version` has a **trait default of `"v1"`** that none of
+these three analyzers overrode. `cache_inputs` fingerprints the *artifacts being read*, never the
+logic reading them — so with an unchanged corpus, the analyzers were permanently cached and no code
+change could ever invalidate them.
+
+The failure is silent and looks like success: every stage exited 0, and `recover` reported
+
+```
+Passes run: 0
+Passes skipped (cached): 9
+Rust symbols recovered: 0 total, 0 Calls edges
+```
+
+while faithfully rebuilding the ledger from pre-change KIR. Note RFC 0135 Part A fixed exactly this
+hazard for the `build`/observation stage (`PIPELINE_LOGIC_VERSION`); the `recover` pass cache had
+the same hazard unaddressed.
+
+Fixed by giving all three analyzers an explicit `version()` of `"v2"`, plus a guard test
+(`source_evidence.rs::analyzers_emitting_source_evidence_declare_a_non_default_pass_version`)
+asserting they have moved off the default — verified to fail when a version is reverted, not merely
+to pass. The guard cannot check that a bump happened for the *right* reason; that stays review's
+job.
+
+#### The CKM discards evidence line numbers (found 2026-09-08, not yet fixed)
+
+`semantic/src/lib.rs:377` flattens `KirEvidence` into `EvidenceRecord` with:
+
+```rust
+source: ev.location.path.clone(),
+```
+
+`SourceLocation` carries `path`, `line` and `column`; **only `path` survives compilation.** So §1
+attaches a line at `recover` time and `compile` throws it away.
+
+For a span-carrying symbol this is masked — §2 re-derives `path:start-end` from the object's own
+`source_span`, so the rendered claim still gets a line. It is **not** masked for the two analyzers
+that set a real evidence line with no corresponding span, `dbt_analyzer` (`line_at(content, …)` for
+a Jinja `ref()`/`source()` macro) and `llm_description`: for those the line is destroyed
+permanently and no downstream consumer can recover it.
+
+Fix (deferred to the next batched rebuild, per this RFC's own Verification note): add
+`line: Option<u32>` to `EvidenceRecord` as an **additive** `#[serde(default)]` field rather than
+reformatting `source` into `"path:line"` — `source` is an established string contract, and
+`source_artifact_ids` set the precedent for evolving this struct additively.
 
 ### 2. Surface the span through the answer path
 

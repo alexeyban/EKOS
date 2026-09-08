@@ -100,6 +100,45 @@ mod tests {
         assert!(g.evidence.is_empty());
     }
 
+    /// Guard for the failure that made RFC 0140 §1 silently not ship.
+    ///
+    /// `PassManager::run_all` skips a pass when `manifest.version == pass.version()`, and
+    /// `CompilerPass::version` has a trait default of `"v1"`. An analyzer that never overrides it
+    /// is therefore **permanently cached**: changing its code cannot invalidate it, because
+    /// `cache_inputs` only fingerprints the artifacts being read, not the logic reading them.
+    ///
+    /// On 2026-09-08 that cost a full 42-minute `recover`/`resolve`/`compile`/`commit`. Every
+    /// stage exited 0 while `recover` reported `Passes run: 0, Passes skipped (cached): 9` and
+    /// `Rust symbols recovered: 0` — the ledger was faithfully rebuilt from pre-change KIR, so
+    /// nothing looked wrong until the output was actually inspected.
+    ///
+    /// This asserts only that the three `attach`-calling analyzers have moved off the default.
+    /// It cannot verify the version was bumped for the *right* reason — that stays a review
+    /// matter — but it does catch the specific case of never having bumped at all.
+    #[test]
+    fn analyzers_emitting_source_evidence_declare_a_non_default_pass_version() {
+        use ekos_compiler_core::pass::CompilerPass;
+
+        let rust = crate::rust_analyzer::RustAnalyzerPass::new("w", vec![]);
+        let python = crate::python_analyzer::PythonAnalyzerPass::new("w", vec![]);
+        let elixir = crate::elixir_analyzer::ElixirAnalyzerPass::new("w", vec![]);
+
+        for pass in [
+            &rust as &dyn CompilerPass,
+            &python as &dyn CompilerPass,
+            &elixir as &dyn CompilerPass,
+        ] {
+            assert_ne!(
+                pass.version(),
+                "v1",
+                "{} still returns the default pass version, so the pass cache can never be \
+                 invalidated by a change to its logic — bump `version()` when you change what \
+                 the analyzer emits",
+                pass.name(),
+            );
+        }
+    }
+
     #[test]
     fn an_enormous_span_is_capped_but_still_starts_at_the_span() {
         let src: String = (1..=500).map(|i| format!("line{i}\n")).collect();
