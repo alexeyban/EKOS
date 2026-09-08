@@ -8,12 +8,22 @@ scenarios:
     mode: reason
     expected_facts:
       - "parse_ddl_structural"
+    # RFC 0139 §2.6 — verified against the live ledger before being written down. Only
+    # specific identifiers are used here: generic words like "ledger" or "build" also
+    # resolve to *an* object, but not to the one the question is about.
+    expected_objects:
+      - "parse_ddl_structural"
     difficulty: medium
 
   - id: code-002
     question: "What function builds the LlmProvider used by ekos ask, choosing between Anthropic, OpenAI, and Ollama?"
     mode: reason
     expected_facts:
+      - "build_llm_provider"
+    # RFC 0139 §2.6 — verified against the live ledger before being written down. Only
+    # specific identifiers are used here: generic words like "ledger" or "build" also
+    # resolve to *an* object, but not to the one the question is about.
+    expected_objects:
       - "build_llm_provider"
     difficulty: medium
 
@@ -64,6 +74,11 @@ scenarios:
     question: "What function in ekos_common performs secrets/PII redaction on raw content?"
     mode: reason
     expected_facts:
+      - "redact"
+    # RFC 0139 §2.6 — verified against the live ledger before being written down. Only
+    # specific identifiers are used here: generic words like "ledger" or "build" also
+    # resolve to *an* object, but not to the one the question is about.
+    expected_objects:
       - "redact"
     difficulty: easy
 

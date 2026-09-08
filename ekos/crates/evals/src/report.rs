@@ -220,7 +220,12 @@ fn default_ruler_version() -> u32 {
 ///   replaced with discriminating ones, and an unresolvable `expected_objects` name now scores 0
 ///   instead of silently shrinking the relevant set. A dataset edit changes grading, so it gets a
 ///   version like any evaluator change.
-pub const RULER_VERSION: u32 = 4;
+/// - **v5** — RFC 0139 §2.6 metric power: `expected_objects` added to 6 more scenarios (11 → 17),
+///   so recall@10 stops being an ~11-sample mean where one scenario moves it 10 points. Only
+///   specific identifiers were used; generic words like `ledger` or `build` also resolve to *an*
+///   object, but not to the one their question is about — adding those would have manufactured
+///   coverage rather than signal.
+pub const RULER_VERSION: u32 = 5;
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
     let (sum, n) = values.fold((0.0f32, 0usize), |(s, n), v| (s + v, n + 1));

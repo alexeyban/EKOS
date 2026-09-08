@@ -61,6 +61,11 @@ scenarios:
       - "Observer"
     expected_evidence_contains:
       - "observation-sdk"
+    # RFC 0139 §2.6 — verified against the live ledger before being written down. Only
+    # specific identifiers are used here: generic words like "ledger" or "build" also
+    # resolve to *an* object, but not to the one the question is about.
+    expected_objects:
+      - "Observer"
     difficulty: medium
 
   - id: arch-008
@@ -136,6 +141,11 @@ scenarios:
     question: "What kind of thing does an EKOS Observer connector return after observing a source system?"
     mode: reason
     expected_facts:
+      - "ObservationPackage"
+    # RFC 0139 §2.6 — verified against the live ledger before being written down. Only
+    # specific identifiers are used here: generic words like "ledger" or "build" also
+    # resolve to *an* object, but not to the one the question is about.
+    expected_objects:
       - "ObservationPackage"
     difficulty: hard
 

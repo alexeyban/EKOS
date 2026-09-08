@@ -77,6 +77,11 @@ scenarios:
     mode: reason
     expected_facts:
       - "ObservationArtifact"
+    # RFC 0139 §2.6 — verified against the live ledger before being written down. Only
+    # specific identifiers are used here: generic words like "ledger" or "build" also
+    # resolve to *an* object, but not to the one the question is about.
+    expected_objects:
+      - "ObservationArtifact"
     difficulty: hard
 
   - id: lin-010
