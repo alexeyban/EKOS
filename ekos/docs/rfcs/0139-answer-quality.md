@@ -317,7 +317,24 @@ query, exactly as the corrected diagnosis predicted — no entity gate required 
    `upsert` instead is easier but produces *no* schema change, so stale indexes would silently serve
    old tokens forever.
 
-   **Measured 2026-09-08 — this is NOT the cause of the remaining recall misses.** With
+   **Implemented 2026-09-08, query-side only.** A question saying "LlmProvider" produces the single
+   token `llmprovider`, while the identifier it names is indexed as `build`/`llm`/`provider` — the
+   two never meet. Searching `"LlmProvider"` returned only objects literally named that; searching
+   `"build llm provider"` ranked `build_llm_provider` first, second and third. `query_scored` now
+   expands a query term on case/digit transitions and matches *either* the whole token *or* all of
+   its subwords (an `Or` over subwords would let a document containing just "llm" satisfy
+   "LlmProvider"). Index-side expansion stays unimplemented: it would shift BM25 for every query
+   with no monotonicity argument, and the query-side half was sufficient. RFC 0126 gate **improved**
+   — recall@10 0.98 → **1.00**, nDCG 0.87 → 0.879. On the suite: recall@10 0.367 → 0.433, `code-002`
+   0.0 → 1.0, nothing regressed.
+
+   **The remaining misses are not lexical failures.** Of the six identifier-lookup scenarios, three
+   expect retrieval to surface an object whose name the question never uses and whose words do not
+   appear — `ObservationArtifact` from *"the content-addressable, checksummed unit of raw observed
+   data"*. No lexical index can do that; it is what the vector arm (RFC 0125, disabled here) exists
+   for. Those expectations currently measure a capability that is switched off.
+
+   **Earlier note, now superseded:** With
    `expected_objects` added to six identifier-lookup scenarios, five still miss at recall@10. Direct
    probing shows tokenisation is not why: `parse_ddl_structural` ranks **first and second** for its
    own question, and `build_llm_provider` tokenises correctly but loses on *ranking* — the query's

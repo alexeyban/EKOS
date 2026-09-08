@@ -328,14 +328,19 @@ impl SearchIndex {
         query: &str,
         limit: usize,
     ) -> Result<Vec<ScoredHit>, LedgerError> {
-        let terms: Vec<(String, bool)> = query
+        // `(raw, lowercased, is_prefix)` — the original casing is kept because RFC 0139 §3.2's
+        // subword expansion needs case transitions, which lowercasing destroys.
+        let terms: Vec<(String, String, bool)> = query
             .split(|c: char| !(c.is_alphanumeric() || c == '*'))
             .filter(|t| !t.is_empty())
             .map(|t| match t.strip_suffix('*') {
-                Some(stem) => (stem.to_lowercase(), true),
-                None => (t.trim_matches('*').to_lowercase(), false),
+                Some(stem) => (stem.to_string(), stem.to_lowercase(), true),
+                None => {
+                    let t = t.trim_matches('*');
+                    (t.to_string(), t.to_lowercase(), false)
+                }
             })
-            .filter(|(t, _)| !t.is_empty())
+            .filter(|(_, t, _)| !t.is_empty())
             .collect();
         if terms.is_empty() {
             return Ok(Vec::new());
@@ -365,6 +370,45 @@ impl SearchIndex {
         // Built here rather than inline because the relaxed pass below needs the identical clause
         // with only its `Occur` changed — if the two ever drifted, a relaxed hit could score on
         // different criteria than a strict one.
+        // RFC 0139 §3.2 — a CamelCase query token is one token, but the identifier it names is
+        // usually indexed as several. `SimpleTokenizer` splits `build_llm_provider` on `_`, so the
+        // index holds `build`/`llm`/`provider`; a question saying "LlmProvider" produces the single
+        // token `llmprovider`, and the two never meet. Measured: searching "LlmProvider" returns
+        // only objects literally named that, while "build llm provider" ranks
+        // `build_llm_provider` first, second and third.
+        //
+        // Query-time only, deliberately. The index-side half of §3.2 would change document lengths
+        // and term frequencies, shifting BM25 for every query and putting RFC 0126's CI gate at
+        // risk with no monotonicity argument available. This has neither cost: no schema change,
+        // no reindex, and a term can only match *more* documents than before.
+        fn subwords(raw: &str) -> Vec<String> {
+            let mut out: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            let mut prev: Option<char> = None;
+            for c in raw.chars() {
+                let boundary = match prev {
+                    // camelCase / XMLHttp / letter->digit transitions all start a new subword.
+                    Some(p) => {
+                        (p.is_lowercase() && c.is_uppercase())
+                            || (p.is_alphabetic() && c.is_ascii_digit())
+                            || (p.is_ascii_digit() && c.is_alphabetic())
+                    }
+                    None => false,
+                };
+                if boundary && !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+                cur.push(c.to_ascii_lowercase());
+                prev = Some(c);
+            }
+            if !cur.is_empty() {
+                out.push(cur);
+            }
+            // Single-character fragments carry no signal and would loosen the clause for nothing.
+            out.retain(|w| w.len() > 1);
+            out
+        }
+
         let mut term_clause = |term: &str, prefix: bool| -> Box<dyn Query> {
             let stemmed_term = stem(&mut stemmer, term);
             let mut fields: Vec<(Occur, Box<dyn Query>)> = Vec::new();
@@ -384,9 +428,27 @@ impl SearchIndex {
             Box::new(BooleanQuery::new(fields))
         };
 
+        // Either the whole token matches, or *every* one of its subwords does. The inner `Must`
+        // matters: an `Or` over subwords would let a document containing only "llm" satisfy the
+        // term "LlmProvider", which widens far past the intent.
+        let mut expanded = |raw: &str, term: &str, prefix: bool| -> Box<dyn Query> {
+            let parts = subwords(raw);
+            if parts.len() < 2 {
+                return term_clause(term, prefix);
+            }
+            let all_parts: Vec<(Occur, Box<dyn Query>)> = parts
+                .iter()
+                .map(|w| (Occur::Must, term_clause(w, false)))
+                .collect();
+            Box::new(BooleanQuery::new(vec![
+                (Occur::Should, term_clause(term, prefix)),
+                (Occur::Should, Box::new(BooleanQuery::new(all_parts))),
+            ]))
+        };
+
         let mut must: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-        for (term, prefix) in &terms {
-            must.push((Occur::Must, term_clause(term, *prefix)));
+        for (raw, term, prefix) in &terms {
+            must.push((Occur::Must, expanded(raw, term, *prefix)));
         }
         // RFC 0101: an unconditional Should clause, outside the per-term
         // Must array — it never gates which documents match (a document
@@ -441,8 +503,8 @@ impl SearchIndex {
         // `minimum_number_should_match`, so a coverage-ratio query isn't available here.)
         if out.len() < limit && terms.len() > 1 {
             let mut should: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-            for (term, prefix) in &terms {
-                should.push((Occur::Should, term_clause(term, *prefix)));
+            for (raw, term, prefix) in &terms {
+                should.push((Occur::Should, expanded(raw, term, *prefix)));
             }
             let relaxed = self.run_query(&searcher, BooleanQuery::new(should), limit)?;
 
@@ -454,8 +516,8 @@ impl SearchIndex {
             // is untouched: this only annotates the hits the OR pass already chose.
             let mut coverage: std::collections::HashMap<Uuid, usize> =
                 std::collections::HashMap::new();
-            for (term, prefix) in &terms {
-                let q = BooleanQuery::new(vec![(Occur::Must, term_clause(term, *prefix))]);
+            for (raw, term, prefix) in &terms {
+                let q = BooleanQuery::new(vec![(Occur::Must, expanded(raw, term, *prefix))]);
                 for (id, _, _) in self.run_query(&searcher, q, limit.saturating_mul(4))? {
                     *coverage.entry(id).or_insert(0) += 1;
                 }
@@ -701,6 +763,45 @@ mod tests {
                 noise.coverage() < crate::WEAK_COVERAGE,
                 "a 1-of-4 match must not count as evidence, got {}",
                 noise.coverage()
+            );
+        }
+
+        /// RFC 0139 §3.2 — the measured failure: a question saying "LlmProvider" produced the
+        /// single token `llmprovider`, while the identifier it names is indexed as
+        /// `build`/`llm`/`provider`. The two never met, so the function ranked nowhere while
+        /// objects literally named `LlmProvider` took the top slots.
+        #[test]
+        fn a_camelcase_query_token_finds_the_underscored_identifier() {
+            let (_d, index) = index_with(&[
+                ("build_llm_provider", "constructs the provider"),
+                ("LlmProvider", "the provider trait"),
+            ]);
+            let names: Vec<String> = index
+                .query_scored("LlmProvider", 10)
+                .unwrap()
+                .into_iter()
+                .map(|(_, n, _)| n)
+                .collect();
+            assert!(
+                names.iter().any(|n| n == "build_llm_provider"),
+                "subword expansion should reach the underscored identifier: {names:?}"
+            );
+        }
+
+        #[test]
+        fn subword_expansion_requires_every_part_not_just_one() {
+            // An `Or` over subwords would let a document containing only "llm" satisfy
+            // "LlmProvider". The inner `Must` is what keeps the expansion honest.
+            let (_d, index) = index_with(&[("llm_only", "llm and nothing else here")]);
+            let names: Vec<String> = index
+                .query_scored("LlmProvider", 10)
+                .unwrap()
+                .into_iter()
+                .map(|(_, n, _)| n)
+                .collect();
+            assert!(
+                !names.iter().any(|n| n == "llm_only"),
+                "a document with only one subword must not match: {names:?}"
             );
         }
 
