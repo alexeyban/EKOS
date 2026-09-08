@@ -317,6 +317,16 @@ query, exactly as the corrected diagnosis predicted — no entity gate required 
    `upsert` instead is easier but produces *no* schema change, so stale indexes would silently serve
    old tokens forever.
 
+   **Measured 2026-09-08 — this is NOT the cause of the remaining recall misses.** With
+   `expected_objects` added to six identifier-lookup scenarios, five still miss at recall@10. Direct
+   probing shows tokenisation is not why: `parse_ddl_structural` ranks **first and second** for its
+   own question, and `build_llm_provider` tokenises correctly but loses on *ranking* — the query's
+   strongest terms (`LlmProvider`, `Anthropic`, `Ollama`) match those objects' **names** at the 10×
+   name boost, so the provider types outrank the function that builds them. That is a precision
+   problem in field weighting, not a tokenizer problem, and the change below would not fix it.
+   Left un-implemented on that basis; a future attempt should target ranking (e.g. demoting a name
+   hit that is a strict substring of the query's own vocabulary) rather than the index tokenizer.
+
    **This is the riskiest change in the RFC** — emitting sub-tokens alters document lengths and term
    frequencies, so BM25 scores shift for *every* query, with no monotonicity argument available.
    Sequence it last, verify with the same protocol, and budget for a justified re-baseline. Fallback

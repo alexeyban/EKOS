@@ -89,9 +89,14 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
 
     // Recall@k needs a ranked id list even for an LLM-answered scenario (RFC 0138 §2.2) — reuse
     // the same lexical retrieval a pure `retrieval`-mode scenario would run.
-    if !scenario.expected_objects.is_empty()
-        && let Ok(results) = runtime.retrieve(&RetrievalRequest::lexical(&scenario.question))
-    {
+    //
+    // Captured unconditionally, not just when the scenario currently declares `expected_objects`
+    // (RFC 0139 §2.6). Gating on that made transcripts un-regradable against a *later* dataset
+    // change: adding `expected_objects` to six scenarios scored them 0.0 on re-grade — not
+    // because retrieval missed, but because no ranked list had been recorded. Retrieval in fact
+    // ranked the expected object first or second. A saved transcript has to hold everything a
+    // future ruler might ask about, or `regrade` quietly manufactures failures.
+    if let Ok(results) = runtime.retrieve(&RetrievalRequest::lexical(&scenario.question)) {
         run.retrieved_ids = results.hits.into_iter().map(|h| h.id).collect();
     }
 

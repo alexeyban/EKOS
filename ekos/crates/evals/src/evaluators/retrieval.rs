@@ -20,6 +20,14 @@ pub fn recall_at_10(
     if scenario.expected_objects.is_empty() {
         return None;
     }
+    // No ranked list was recorded at all — the scenario cannot be scored on retrieval, which is
+    // different from retrieval having found nothing. Scoring it 0.0 would invent a failure; this
+    // is exactly the "missing data graded as a failed claim" mistake RFC 0139 §2.3 fixed in
+    // groundedness, and it shows up here whenever an older transcript is re-graded against a
+    // dataset that has since gained `expected_objects`.
+    if ranked_ids.is_empty() {
+        return None;
+    }
     let name_to_id: HashMap<String, KirId> = ledger
         .all_objects()
         .unwrap_or_default()
