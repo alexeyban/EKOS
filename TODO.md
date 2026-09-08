@@ -5144,3 +5144,31 @@ are excluded — see the full exclusion list in the planning history if needed.
   RFC 0125's `VectorIndex`, since the ledger is append-only); and renaming `properties.kind` →
   `symbol_kind` **first**, now confirmed live: one evidence set shows
   `parse_ddl_structural.kind = RustSymbol` and `= function` as two separate claims to the model.
+
+- [x] **Corpus contamination — 94% of the observed corpus was not EKOS (devlog_174, 2026-09-08).**
+  Found by RFC 0140's claim-location measurement, whose sample output showed every cited claim
+  pointing into `web/api/.venv/.../site-packages/`. Two separate sources, found one after the other:
+  - [x] **Python virtualenv** — 3,758 of 3,797 Python files analysed (98.7%) were third-party;
+    27,408 of 53,830 CKM objects (50.9%) were site-packages, vs 3,838 (7.1%) from `ekos/` itself.
+  - [x] **SonarCloud scanner output** — 9,107 files (91% of what remained). Invisible at the CKM
+    layer (4 objects, `.ucfg` intermediates) but **8,685 of the ledger's 9,964 `File` objects**,
+    because `ekos build` writes `File` objects straight to the ledger without passing through the
+    CKM. Any contamination check that only looks at compiled output misses this whole class.
+  - [x] Result: files observed ~13,700 → **834**; CKM objects 53,830 → **12,283**; EKOS's own source
+    7.1% → **31.6%**; identity conflicts 223 → **25**; pipeline through `compile` ~1 hr → **53 s**.
+    Claims carrying a location 26.4% → **67.3%**, carrying a line 0/1,289 → **29.8%**.
+  - [x] **Verified non-destructive**: after dropping 9,130 files, `recover` produced *identical*
+    symbol counts (2,623 Rust symbols / 1,734 `Calls` / 128 JS modules / 2,518 JS symbols). All
+    signal retained.
+  - [ ] **Re-run `ekos eval run`** — every published answer-quality number so far was measured
+    against a corpus that was ~94% not our code.
+  - [ ] **`[llm-description]` still unrun**: enabled, but both rebuilds declined the cost prompt
+    (6,471 calls on the clean corpus, was 44,257), so the ledger has no `ai_overview`/`ai_usage`.
+- [x] **RFC 0141 §4 — `properties.kind` → `symbol_kind` (devlog_174).** A symbol carried two facts
+  both named `kind` (`RustSymbol` from the header, `function` from properties), both shown to the
+  model. Implementation revealed it was worse than a duplicate: `resolve_fact` hard-codes `"kind"`
+  to the `ObjectKind`, so the property was unreachable through the fact path entirely and
+  `FIND Object WHERE kind = 'function'` could never match. `docs-gen` keeps a permanent `kind`
+  fallback (append-only ledger → both spellings coexist forever). `javascript_analyzer` was found
+  still on the default pass `version()` of `"v1"` during this work — same trap as devlog_173, one
+  analyzer over.

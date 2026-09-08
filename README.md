@@ -846,6 +846,15 @@ matches nothing. `ekos config preview-scan [--json]` counts what `ekos build` wo
 the current `paths` / `ignore-patterns` (files, by extension, and how many directories each
 ignore pattern actually pruned) without reading or compiling anything.
 
+**`ignore-patterns` is the only filter — `.gitignore` excludes nothing from the observation walk.**
+A git-ignored virtualenv, build cache, or scanner working directory is still fully observed unless
+you name it here. Measured on this repo (devlog_174): a `.venv/` and two `.scannerwork/` directories
+made **94%** of the observed corpus third-party code — over half the compiled knowledge model
+described numpy and pytest internals, and every query ranked the project's own code against 27k
+foreign objects. Run `preview-scan` before the first `build` on a new workspace, and prefer specific
+directory names over generic ones like `build`/`dist`, which match a bare path component and can
+prune real source.
+
 ### Bulk graph export (RFC 0127)
 
 `ekos graph export` writes the whole compiled graph — every object and relationship — as one JSON

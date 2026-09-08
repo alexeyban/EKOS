@@ -130,7 +130,7 @@
     <h2>Connectors</h2>
     <p class="lede">Each connector implements the same <code class="mono">Observer</code> trait — pull raw facts, no interpretation. Real and tested unless noted.</p>
     <div class="feat-grid">
-      <div class="feat"><h3>File</h3><p>Any local filesystem tree, respecting <code class="mono">[observe] ignore-patterns</code>.</p></div>
+      <div class="feat"><h3>File</h3><p>Any local filesystem tree, respecting <code class="mono">[observe] ignore-patterns</code> — which is the <em>only</em> filter: <code class="mono">.gitignore</code> excludes nothing from the observation walk, so a git-ignored virtualenv or tool cache is still fully ingested unless named here. Use <code class="mono">ekos config preview-scan</code> to see what would actually be observed before compiling.</p></div>
       <div class="feat"><h3>Git</h3><p>Full commit/contributor history as real <code class="mono">KirEvent</code>s.</p></div>
       <div class="feat"><h3>GitHub</h3><p>Issues and PRs, live-verified against a real repo — 1,600 real items in one run.<span class="rfc">RFC 0020 / RFC 0062</span></p></div>
       <div class="feat"><h3>Confluence</h3><p>Space/page content via the REST API.</p></div>
