@@ -530,7 +530,14 @@ fn evidence_record_to_kir(ev: &EvidenceRecord) -> KirEvidence {
     use chrono::Utc;
     KirEvidence {
         id: ev.id,
-        location: SourceLocation::file(ev.source.clone()),
+        // RFC 0140: carry the line back out when the CKM has one. This used to be an
+        // unconditional `SourceLocation::file`, which silently flattened every location to
+        // file-level on the way into the ledger — the second half of a two-hop loss that began
+        // with `compile` dropping the line in the first place.
+        location: match ev.line {
+            Some(line) => SourceLocation::at(ev.source.clone(), line),
+            None => SourceLocation::file(ev.source.clone()),
+        },
         fragment: ev.fragment.clone(),
         confidence: ev.confidence,
         created_at: Utc::now(),
@@ -542,6 +549,62 @@ mod tests {
     use super::*;
     use ekos_kir::{KirId, ObjectKind};
     use ekos_ledger::FactLedger;
+
+    /// RFC 0140 — a line recorded by an analyzer must survive `recover` → `compile` → `commit`.
+    ///
+    /// It used to be destroyed in two hops that had to be fixed together, which is why this test
+    /// asserts on the round trip rather than on either end: `compile` flattened evidence to
+    /// `source: ev.location.path` (dropping the line), and `commit` then rebuilt the location with
+    /// an unconditional `SourceLocation::file` (unable to restore it). Fixing only one hop would
+    /// have left the line just as lost while looking correct in isolation.
+    #[test]
+    fn an_analyzer_recorded_line_survives_the_round_trip_into_the_ledger() {
+        use ekos_kir::{KirEvidence, SourceLocation};
+        use ekos_semantic::EvidenceRecord;
+
+        let original =
+            KirEvidence::new(SourceLocation::at("crates/recovery/src/x.rs", 200), "fn f");
+
+        // The `compile` hop (mirrors semantic::…'s evidence_index construction).
+        let compiled = EvidenceRecord {
+            id: original.id,
+            source: original.location.path.clone(),
+            line: original.location.line,
+            fragment: original.fragment.clone(),
+            confidence: original.confidence,
+        };
+
+        // The `commit` hop.
+        let restored = evidence_record_to_kir(&compiled);
+
+        assert_eq!(restored.location.path, "crates/recovery/src/x.rs");
+        assert_eq!(
+            restored.location.line,
+            Some(200),
+            "the line must reach the ledger — a file-level location cannot be re-narrowed later, \
+             and analyzers like dbt/llm_description have no `source_span` to recover it from"
+        );
+    }
+
+    /// The other half of the contract: evidence that genuinely has no line must not acquire one.
+    #[test]
+    fn evidence_without_a_line_stays_file_level() {
+        use ekos_kir::{KirEvidence, SourceLocation};
+        use ekos_semantic::EvidenceRecord;
+
+        let original = KirEvidence::new(SourceLocation::file("schema.sql"), "CREATE TABLE orders");
+        let compiled = EvidenceRecord {
+            id: original.id,
+            source: original.location.path.clone(),
+            line: original.location.line,
+            fragment: original.fragment.clone(),
+            confidence: original.confidence,
+        };
+
+        let restored = evidence_record_to_kir(&compiled);
+        assert_eq!(restored.location.path, "schema.sql");
+        assert_eq!(restored.location.line, None, "no line must be invented");
+    }
 
     /// RFC 0135 Part B follow-up — a `commit` stamps each entry with its CKM object's own
     /// `source_artifact_ids` (`ka:…`), and falls back to the run-level `ckm:` hash for anything

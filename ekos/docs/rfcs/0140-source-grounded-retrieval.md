@@ -96,16 +96,22 @@ asserting they have moved off the default — verified to fail when a version is
 to pass. The guard cannot check that a bump happened for the *right* reason; that stays review's
 job.
 
-#### The CKM discards evidence line numbers (found 2026-09-08, not yet fixed)
+#### The pipeline discarded evidence line numbers in two places (found and fixed 2026-09-08)
 
-`semantic/src/lib.rs:377` flattens `KirEvidence` into `EvidenceRecord` with:
+`semantic/src/lib.rs:377` flattened `KirEvidence` into `EvidenceRecord` with:
 
 ```rust
 source: ev.location.path.clone(),
 ```
 
-`SourceLocation` carries `path`, `line` and `column`; **only `path` survives compilation.** So §1
-attaches a line at `recover` time and `compile` throws it away.
+`SourceLocation` carries `path`, `line` and `column`; **only `path` survived compilation.** So §1
+attached a line at `recover` time and `compile` threw it away.
+
+It was a **two-hop** loss, and either hop alone would have kept the line just as lost while looking
+correct in isolation — `commit.rs:533` then rebuilt the location with an unconditional
+`SourceLocation::file(ev.source)`, which cannot re-narrow a file-level location no matter what
+`compile` had done. This is why the regression test asserts on the full
+`recover → compile → commit` round trip rather than on either conversion.
 
 For a span-carrying symbol this is masked — §2 re-derives `path:start-end` from the object's own
 `source_span`, so the rendered claim still gets a line. It is **not** masked for the two analyzers
@@ -113,10 +119,17 @@ that set a real evidence line with no corresponding span, `dbt_analyzer` (`line_
 a Jinja `ref()`/`source()` macro) and `llm_description`: for those the line is destroyed
 permanently and no downstream consumer can recover it.
 
-Fix (deferred to the next batched rebuild, per this RFC's own Verification note): add
-`line: Option<u32>` to `EvidenceRecord` as an **additive** `#[serde(default)]` field rather than
-reformatting `source` into `"path:line"` — `source` is an established string contract, and
-`source_artifact_ids` set the precedent for evolving this struct additively.
+**Fixed:** `EvidenceRecord` gained `line: Option<u32>` as an **additive** `#[serde(default)]` field
+rather than reformatting `source` into `"path:line"` — `source` is an established string contract,
+and `source_artifact_ids` set the precedent for evolving this struct additively. `compile` now
+carries `ev.location.line` across, and `commit` restores `SourceLocation::at(path, line)` when one
+is present, `::file` otherwise (a missing line must never be invented — the second test covers
+that). `SemanticCompilerPass::version` is bumped to `"v2"` accordingly, since a CKM compiled by
+`v1` carries no line on any evidence record and must not be reused from cache.
+
+**Not yet re-measured.** The code is correct and tested, but the line only reaches the ledger after
+a `compile` + `commit`, which this change has not yet had. Per this RFC's Verification note it
+should ride the next batched rebuild alongside RFC 0141's work rather than pay a third rebuild.
 
 ### 2. Surface the span through the answer path
 

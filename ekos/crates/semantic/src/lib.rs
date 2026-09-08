@@ -30,6 +30,21 @@ use std::{
 pub struct EvidenceRecord {
     pub id: KirId,
     pub source: String,
+    /// The line within `source`, when the analyzer recorded one (RFC 0140).
+    ///
+    /// Added additively rather than by reformatting `source` into `"path:line"`: `source` is an
+    /// established string contract, and `source_artifact_ids` set the precedent for evolving this
+    /// struct with a `#[serde(default)]` field so already-compiled models still deserialize.
+    ///
+    /// Before this existed, `source: ev.location.path.clone()` was the whole conversion, so a
+    /// `SourceLocation`'s `line` died at the KIR→CKM boundary and `commit`'s
+    /// `SourceLocation::file(ev.source)` could only ever rebuild a file-level location. For a
+    /// span-carrying symbol that loss is masked — `reason.rs::span_location` re-derives
+    /// `path:start-end` from the object's own `source_span` — but `dbt_analyzer` (a Jinja
+    /// `ref()`/`source()` macro line) and `llm_description` record a real line with **no** span
+    /// behind it, and for those the line was destroyed with nothing able to recover it.
+    #[serde(default)]
+    pub line: Option<u32>,
     pub fragment: String,
     pub confidence: f32,
 }
@@ -375,6 +390,7 @@ pub fn build_ckm_with_provenance(
             EvidenceRecord {
                 id: ev.id,
                 source: ev.location.path.clone(),
+                line: ev.location.line,
                 fragment: ev.fragment.clone(),
                 confidence: ev.confidence,
             },
@@ -557,6 +573,16 @@ fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -
 impl CompilerPass for SemanticCompilerPass {
     fn name(&self) -> &str {
         "semantic-compiler"
+    }
+
+    /// Bump whenever this pass's output shape changes — `cache_inputs` fingerprints the artifacts
+    /// read, never the logic reading them, so without this a code change is silently served from
+    /// the pass cache. See `rust_analyzer::version` for the rebuild that lesson cost.
+    ///
+    /// `v2` = RFC 0140: `EvidenceRecord` gained `line`, so a CKM compiled by `v1` carries no line
+    /// on any evidence record and must be recompiled rather than reused.
+    fn version(&self) -> &str {
+        "v2"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
