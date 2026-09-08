@@ -522,6 +522,25 @@ Two findings worth keeping:
   it measured 39.6%. 59 of 101 scenarios answered while citing nothing, and those were being
   excluded from the metric rather than scored.
 
+### Final state (2026-09-08)
+
+Every row ruler v4 over 101 scenarios, so all are directly comparable:
+
+| | passed | answer | groundedness | fabricated | legit self-refusals |
+|---|---|---|---|---|---|
+| R0 original system | 31/101 | 36.2% | 39.6% | 10 | 0 |
+| R2 +relaxation +citations | 32/101 | 44.3% | 39.6% | 15 | 0 |
+| R12 +entity gate | 35/101 | 44.3% | 46.2% | 14 | 0 |
+| **R15 +refusal contract (shipped)** | **39/101** | **42.5%** | **44.0%** | **3** | **9/83** |
+
+Against the original system: **+8 passes, +6.3pp answer correctness, +4.4pp groundedness, and 70%
+less fabrication** — better on every axis at once, which none of the five earlier attempts managed.
+
+The fabrication regression §3.1 introduced is closed, and the mechanism that closed it is the
+opposite of the five that failed: stop making the *system* refuse on the model's behalf, and tell
+the model the rubric it is graded against (§4.3). See devlog_172 for the full attempt-by-attempt
+record.
+
 **What this says, plainly.** §3.1 is a clear win on the primary metric (+10.5pp answer correctness)
 and it removed the structural pathology — evidence sets stopped being interchangeable. §4.2 cut
 unreadable citation blocks 16 → 6. Neither §3.6 attempt reduced fabrication without an unacceptable

@@ -5048,8 +5048,16 @@ are excluded — see the full exclusion list in the planning history if needed.
       shrinking the relevant set (all 12 existing entries verified against the live ledger).
       Measured on identical R0 answers: v3 31/101 → v4 31/101, correctness 37.1% → 36.2%,
       recall@10 65.0% → 59.1%.
-    - [ ] **§3.7 term-coverage scoring landed as infrastructure but did NOT close the fabrication
-      regression (`ebd26b2`).** Third failed attempt on the same mechanism: attempt 1 (relaxed
+    - [x] **Fabrication regression CLOSED (`43f352c`, devlog_172).** Six attempts; five failed the
+      same way (fixing fabrication by refusing, which never stayed confined to questions that
+      deserved it — three of them reached a perfect adversarial score while collapsing `code`
+      answer correctness to 18.2%). The sixth worked by doing the opposite: stop making the system
+      refuse on the model's behalf and tell the model the rubric. The prompt said "say so
+      explicitly" while the grader looked for 22 specific phrases. Final, ruler v4, 101 scenarios:
+      **passed 31 → 39, answer 36.2% → 42.5%, groundedness 39.6% → 44.0%, fabrication 10 → 3** —
+      better than the original system on every axis.
+    - [ ] **Superseded note — §3.7 term-coverage scoring landed as infrastructure only
+      (`ebd26b2`).** Third failed attempt on the same mechanism: attempt 1 (relaxed
       search hits weak) never fired; attempts 2 and 3 (neighbourhood weak; coverage-graded
       neighbourhood weak) both reached adversarial 18/18 with 0 fabrications while collapsing
       `code` answer correctness 72.7% → 18.2%. Both reverted. **The threshold was never the
