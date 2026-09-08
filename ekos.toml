@@ -45,6 +45,24 @@ ignore-patterns = [
     # workspace), and a much bigger contamination source for `ekos ask`/eval answers than the
     # `evals/` gap alone.
     "test-runs",
+    # Found live 2026-09-08 by the RFC 0140 claim-location measurement, which surfaced cited
+    # claims pointing at `web/api/.venv/lib/python3.13/site-packages/{numpy,scipy,networkx,
+    # _pytest}/…`. This is by far the largest contamination source found so far — bigger than
+    # `evals/`, `test-runs/` and `doc/` combined:
+    #
+    #   3758 of the 3797 Python files analysed (98.7%) were third-party venv code, not EKOS's own
+    #   (the whole repo has just 49 real .py files outside it), and
+    #   27408 of 53830 compiled CKM objects (50.9%) came from site-packages, against 3838 (7.1%)
+    #   from EKOS's own `ekos/` source.
+    #
+    # So over half the knowledge model described numpy/scipy/pytest internals, and every `ekos ask`
+    # retrieval ranked EKOS's own code against 27k third-party objects. `__pycache__` is listed for
+    # the same reason at a smaller scale. Note `.gitignore` does not exclude anything from `ekos
+    # build`'s observation walk — that is precisely how `test-runs/` was missed too.
+    ".venv",
+    "venv",
+    "site-packages",
+    "__pycache__",
 ]
 
 [llm]
