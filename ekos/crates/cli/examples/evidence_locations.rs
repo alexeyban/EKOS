@@ -13,6 +13,18 @@
 //! cargo run -p ekos --example evidence_locations
 //! cargo run -p ekos --example evidence_locations -- --dataset ekos-full --workspace /path/to/ws
 //! ```
+//!
+//! **Do not run this immediately after `ekos commit` finishes.** Observed 2026-09-08: chained
+//! straight onto a commit in one script, it reported `100.0%` of claims with a location and
+//! `0.0%` with a line, uniformly across all seven categories. Run by hand a minute later against
+//! the *same* ledger it reported `67.3%` / `29.8%`, twice, identically. `commit`'s tantivy writer
+//! has committed by the time the process exits, but a fresh searcher does not necessarily see the
+//! new segments yet, so retrieval returns file-level hits instead of the symbols that carry
+//! spans — a plausible-looking table built on a half-visible index.
+//!
+//! Two tells that it is this and not a real regression: a suspiciously *uniform* number across
+//! every category, and `100%` any-location (bare file paths are exactly what a file-level-only
+//! result set looks like).
 
 use ekos_compiler_core::EkosConfig;
 use ekos_runtime::Runtime;
