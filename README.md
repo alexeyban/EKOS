@@ -410,7 +410,10 @@ three operations, built as RFCs 0119–0126 (`devlog_143`–`devlog_149`):
   carries its provenance, and the model's job shrinks to "explain this evidence, cite each item."
   `--explain` prints the plan and evidence; `--classic` selects the pre-0123 retrieve-and-dump
   path. A citation not backed by a source id in the evidence set is a reported finding, not a
-  formatting detail.
+  formatting detail. Claims cite **a place in a file, not just a file** (RFC 0140): every
+  Rust/Python/Elixir symbol with a `source_span` carries real evidence naming its path, its line,
+  and the source text itself, rendered as `path:start-end` — so asking what a function does shows
+  the model the function body, not only its name.
 
 EKL gains `FIND Object SEMANTIC 'text' [LIMIT k]` — the retriever as a candidate-set strategy.
 Retrieval quality is CI-gated: `ekos_runtime::retrieval_eval` holds a checked-in graded query set

@@ -5109,3 +5109,38 @@ are excluded — see the full exclusion list in the planning history if needed.
     currently stale/absent for most objects) and re-enabled in `ekos.toml` afterward, but the
     regeneration itself (a slow, LLM-call-heavy pass over ~5,000+ symbols) was deferred, not run;
     (4) only after (1)-(2), revisit prompt/retrieval tuning per the original step (3) above.
+
+- [x] **RFC 0140 — source-grounded retrieval, §1/§2 (devlog_173, 2026-09-08).** Every span-carrying
+  Rust/Python/Elixir symbol now emits a real `KirEvidence` with `SourceLocation::at(path, line)` and
+  the actual source text; `reason.rs::span_location` renders `path:start-end`. Baseline was **0 of
+  1,289** rendered claims carrying a line and 26.4% carrying any location — RFC 0140's own worked
+  example (`parse_ddl_structural`) now shows **10 of 10 claims with `path:line-range`** and the real
+  function body. Ledger evidence records 9,928 → **36,109**.
+  - [x] **Two silent caches found on the way, both of which fail as success.** (1) `62a98cf` — the
+    analyzer pass cache could *never* be invalidated by a code change: `CompilerPass::version`
+    defaults to `"v1"` and only `git_analyzer` overrode it, so a full rebuild reported
+    `Passes run: 0 / Rust symbols recovered: 0` with every stage exiting 0. Same hazard RFC 0135
+    Part A fixed for `build`; now fixed for `recover` with a guard test verified by reverting a
+    version. (2) `ad29056` — evidence lines were destroyed in **two hops** (`compile` flattened to
+    `source: ev.location.path`, `commit` rebuilt with `SourceLocation::file`); masked for
+    span-carrying symbols by §2, but permanent data loss for `dbt_analyzer`/`llm_description`, which
+    record a real line with no span behind it.
+  - [ ] **Not yet measured**: `ad29056`'s `EvidenceRecord.line` reaches the ledger only after a
+    `compile` + `commit`, which it has not had. Batch it with RFC 0141's rebuild rather than paying a
+    third one (RFC 0140 Verification).
+  - [ ] **Claim-level rate still unmeasured**: 10/10 is one probe, not a suite-wide percentage. The
+    `0/1,289` and `26.4%` baselines came from a full eval run and need the same to be comparable.
+  - [ ] **RFC 0140 §3/§4 unstarted**: on-demand source text in the evidence set (**from the artifact
+    store, never the live filesystem** — a query-time disk read is a new raw-content entry point that
+    bypasses RFC 0043 redaction), then the opt-in LLM rerank, measured on fabrication *and* answer
+    correctness together.
+- [ ] **RFC 0141 — entity/edge attributes (`ekos/docs/rfcs/0141-entity-and-edge-attributes.md`,
+  proposed 2026-09-08, not accepted).** Each item is tied to a measured RFC 0138 failure:
+  `signature` on symbols (`code-002` ranks the *type* `LlmProvider` above the *function* that
+  returns one — the discriminating term lives in the return type and is recorded nowhere);
+  attributes on `Calls` edges (today a bare `HashSet<(from, to)>` with no properties at all —
+  `caller_is_test` would make impact analysis a weighting rather than a list); the embedding basis
+  text (`description` + `signature` + `name`, **not** vectors as object properties — those belong in
+  RFC 0125's `VectorIndex`, since the ledger is append-only); and renaming `properties.kind` →
+  `symbol_kind` **first**, now confirmed live: one evidence set shows
+  `parse_ddl_structural.kind = RustSymbol` and `= function` as two separate claims to the model.
