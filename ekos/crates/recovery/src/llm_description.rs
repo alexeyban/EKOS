@@ -24,7 +24,7 @@
 //! through the same `## Evidence` section every other object already uses.
 
 use crate::llm::{LlmProvider, LlmRequest};
-use crate::llm_json::strip_json_fences;
+use crate::llm_json::json_body;
 use ekos_common::redaction::{RedactionConfig, redact};
 use ekos_kir::{
     KirEvidence, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
@@ -36,6 +36,25 @@ use std::collections::HashMap;
 use std::path::Path;
 
 const PROMPT_VERSION: &str = "llm-description-v1";
+
+/// A bounded, single-line excerpt of an LLM response for an error message.
+///
+/// Bounded because a failing model can return a wall of text, and this ends up in a `tracing::warn`
+/// line; single-line because a multi-line dump would break up the log. An empty response is said
+/// so explicitly — `response was: ` with nothing after it reads like a truncation bug, and "the
+/// model returned nothing" is the single most useful thing to know here.
+fn snippet(s: &str) -> String {
+    let one_line = s.trim().replace('\n', " ");
+    if one_line.is_empty() {
+        return "<empty response>".to_string();
+    }
+    let truncated: String = one_line.chars().take(160).collect();
+    if truncated.chars().count() < one_line.chars().count() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
 const MAX_SOURCE_LINES: usize = 400;
 
 const MODULE_KINDS: &[&str] = &[
@@ -310,8 +329,12 @@ async fn call_and_apply(
         history: &[],
     };
     let resp = llm.complete(&req).await.map_err(|e| e.to_string())?;
-    let output: LlmOutput =
-        serde_json::from_str(strip_json_fences(&resp.content)).map_err(|e| e.to_string())?;
+    // `json_body` tolerates a preamble ("Here is the JSON: {...}"), which local models produce
+    // routinely and which a bare `from_str` rejects with the useless `expected value at line 1
+    // column 1`. On a genuine failure the error now quotes what actually arrived — otherwise the
+    // warning names the object but gives no way to tell an empty response from a chatty one.
+    let output: LlmOutput = serde_json::from_str(json_body(&resp.content))
+        .map_err(|e| format!("{e} — response was: {}", snippet(&resp.content)))?;
 
     if output.overview.trim().is_empty() {
         return Err("empty overview".to_string());
@@ -673,8 +696,8 @@ pub async fn describe_project(
         history: &[],
     };
     let resp = llm.complete(&req).await.map_err(|e| e.to_string())?;
-    let output: ProjectSummaryOutput =
-        serde_json::from_str(strip_json_fences(&resp.content)).map_err(|e| e.to_string())?;
+    let output: ProjectSummaryOutput = serde_json::from_str(json_body(&resp.content))
+        .map_err(|e| format!("{e} — response was: {}", snippet(&resp.content)))?;
 
     if output.purpose.is_none() && output.architecture_style.is_none() {
         return Ok(false);
@@ -796,6 +819,81 @@ mod tests {
         graph.objects.push(module.clone());
         graph.objects.push(symbol.clone());
         (file, module, symbol, graph)
+    }
+
+    /// Reported live 2026-09-09 against a real Elixir workspace:
+    ///
+    /// ```text
+    /// WARN llm_description: module call failed object=priv/repo/migrations
+    ///      error=expected value at line 1 column 1
+    /// ```
+    ///
+    /// That is serde's message for "this did not begin with JSON" — `llama3:latest` had answered
+    /// correctly but opened with a sentence. The whole paid call was discarded over a preamble.
+    #[tokio::test]
+    async fn a_preamble_before_the_json_does_not_waste_the_call() {
+        let (store, _dir) = temp_store();
+        let (_file, module, _symbol, graph) = module_with_symbol();
+        seed(&store, graph);
+        let workspace = tempdir().unwrap();
+
+        let llm = RecordingLlmProvider::new(
+            "Sure! Here is the JSON you asked for:\n\n\
+             {\"overview\": \"Database migrations for the Plausible schema.\", \
+             \"usage\": \"Run by Ecto at deploy time.\", \"comment_check\": null}\n\n\
+             Let me know if you'd like more detail.",
+        );
+
+        let stats = describe_objects(
+            &store,
+            &llm,
+            DescriptionScope::Modules,
+            workspace.path(),
+            &RedactionConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            stats.llm_errors, 0,
+            "a chatty-but-correct answer is not an error"
+        );
+        assert_eq!(stats.modules_described, 1);
+        assert_eq!(
+            store.get_object(&module.id).unwrap().unwrap().properties["ai_overview"],
+            "Database migrations for the Plausible schema."
+        );
+    }
+
+    /// A genuinely unusable response must still fail — and must say what arrived, because
+    /// `expected value at line 1 column 1` alone cannot distinguish an empty response from a
+    /// chatty one, and those need opposite fixes.
+    #[tokio::test]
+    async fn an_unparseable_response_reports_what_actually_came_back() {
+        let (store, _dir) = temp_store();
+        let (_file, _module, _symbol, graph) = module_with_symbol();
+        seed(&store, graph);
+        let workspace = tempdir().unwrap();
+
+        let llm = RecordingLlmProvider::new("I'm sorry, I can't help with that.");
+        let stats = describe_objects(
+            &store,
+            &llm,
+            DescriptionScope::Modules,
+            workspace.path(),
+            &RedactionConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stats.llm_errors, 1, "a real non-answer is still an error");
+        assert_eq!(stats.modules_described, 0);
+
+        assert_eq!(snippet(""), "<empty response>");
+        assert_eq!(snippet("  \n  "), "<empty response>");
+        assert!(snippet("a\nb").contains("a b"), "must stay on one log line");
+        let long = "x".repeat(500);
+        assert!(snippet(&long).chars().count() <= 161, "must be bounded");
     }
 
     /// RFC 0142 — the callback must fire once per object *visited*, not once per LLM call.
