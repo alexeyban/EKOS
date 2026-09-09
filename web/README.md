@@ -47,21 +47,36 @@ restart. Writes (`build`/`recover`/`resolve`/`compile`/`commit`, a chained `pipe
 # 1. build the CLI once
 (cd ../ekos && cargo build --release -p ekos)
 
-# 2. start the API — token auth (no OIDC issuer configured => token mode)
-cd api
-EKOS_BIN=../../ekos/target/release/ekos \
-EKOS_CONSOLE_CONSOLE_TOKEN=dev-read EKOS_CONSOLE_CONSOLE_WRITE_TOKEN=dev-write \
-EKOS_CONSOLE_SESSION_SECRET=$(openssl rand -hex 16) \
-uv run uvicorn app.main:create_app --factory --reload
+# 2. credentials — one file, used by BOTH the local and Compose paths below
+cp api/.env.example api/.env      # gitignored; edit if you want different tokens
 
-# 3. UI (another shell)
+# 3. start the API — token auth (no OIDC issuer configured => token mode)
+cd api && uv run uvicorn app.main:create_app --factory --reload
+
+# 4. UI (another shell)
 cd ui && npm ci && npm run dev
 # open http://localhost:5173, sign in with dev-write (or dev-read), then register a real
 # workspace directory from the Workspaces page — the supervisor spawns its MCP server for you.
 ```
 
+`app/settings.py` reads `api/.env` via pydantic's `env_file`, so step 2 replaces the wall of
+inline `EKOS_CONSOLE_…=` prefixes this used to need. Those prefixes apply only to the single
+command they are attached to, which made "I set the token and it still says invalid" the most
+common way to get stuck here — the API silently kept its built-in defaults (`dev-console-token`
+for read, and *no* write token at all).
+
+Verify before opening the browser:
+
+```sh
+curl -s -X POST localhost:8000/api/auth/token-login \
+  -H 'Content-Type: application/json' -d '{"token":"dev-write"}'   # => {"role":"write"}
+```
+
 Or `EKOS_WS=/path/to/workspace docker compose up` (see `docker-compose.yml`'s own header for what
-it seeds). OIDC (Authorization Code + PKCE) is the other auth mode — set `EKOS_CONSOLE_OIDC_ISSUER`
+it seeds). Compose passes the same `api/.env` to the container via `env_file:` — read on the host
+at start-up, never copied into the image (`api/.dockerignore` keeps it out of the build context
+regardless). The file is optional there: without it the API falls back to its defaults and stays
+read-only. OIDC (Authorization Code + PKCE) is the other auth mode — set `EKOS_CONSOLE_OIDC_ISSUER`
 (+ `_OIDC_CLIENT_ID`/`_OIDC_CLIENT_SECRET`/`_OIDC_ROLE_CLAIM`/`_OIDC_WRITE_VALUES`) instead of the
 two static tokens; both modes end in the same signed session cookie.
 

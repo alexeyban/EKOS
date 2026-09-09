@@ -1,0 +1,19 @@
+# Credentials must never enter a built image layer. The Dockerfile does not COPY them today, but
+# a later `COPY . .` would, and a layer that once held a secret keeps holding it.
+.env
+.env.*
+!.env.example
+
+# Runtime state created under the CWD at run time (SQLite registry + job logs, app/models.py) —
+# copying a developer's local registry into the image would ship their workspace paths.
+.ekos-web/
+
+# Local dev noise with no business in the image.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage

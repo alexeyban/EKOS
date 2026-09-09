@@ -13,22 +13,49 @@
 # workspace registry on first start (its `mcp_host`/`mcp_port` fields, if present, are ignored —
 # see `app/settings.py::WorkspaceSeed`'s own docstring); the seed here carries none.
 #
-# Read-only by default: set WRITE_TOKEN to enable the write role (running commands, scheduling) —
-# unset, this Compose config only ever grants the read role, matching the API's own
+# Read-only by default: set a write token to enable the write role (running commands, scheduling)
+# — unset, this Compose config only ever grants the read role, matching the API's own
 # never-grant-write-when-unset default in token mode.
+#
+# ## Credentials: `api/.env`
+#
+# Put credentials in `web/api/.env` (gitignored; copy `api/.env.example`). That one file serves
+# **both** ways of running the console, which is the point of it:
+#
+#   - locally, `app/settings.py`'s pydantic `env_file=".env"` reads it directly when you run
+#     `uv run uvicorn …` from `web/api`;
+#   - here, `env_file:` below hands the same values to the container as environment variables.
+#     The file is read on the host at `compose up` time and is never copied into the image, so
+#     credentials stay out of any built layer (`api/.dockerignore` enforces that too).
+#
+# The file is optional — without it the API falls back to `settings.py`'s own defaults, which
+# grant read with `dev-console-token` and never grant write.
+#
+# These used to be `${CONSOLE_TOKEN:-dev-console-token}`-style entries under `environment:`.
+# That was removed deliberately: Compose applies `environment:` *after* `env_file:`, so those
+# defaults silently won over anything in `api/.env` and the file appeared to do nothing.
+#
+# `api/.env` is therefore the only place to change these. Exporting a variable in your shell does
+# **not** override it — verified, not assumed: a host variable is not passed into a container
+# unless it is named in `environment:`, so `EKOS_CONSOLE_CONSOLE_WRITE_TOKEN=x docker compose up`
+# has no effect here. For a genuine one-off, use `docker compose run -e VAR=value api`.
 
 services:
   api:
     build: ./api
     ports:
       - "8000:8000"
+    env_file:
+      - path: ./api/.env
+        required: false
     environment:
-      EKOS_CONSOLE_CONSOLE_TOKEN: ${CONSOLE_TOKEN:-dev-console-token}
-      EKOS_CONSOLE_CONSOLE_WRITE_TOKEN: ${WRITE_TOKEN:-}
-      EKOS_CONSOLE_SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-me}
+      # Container-specific only. Anything a human sets belongs in `api/.env` above — adding it
+      # here would override that file (see the header).
       EKOS_CONSOLE_WORKSPACES_JSON: >-
         [{"id":"self","name":"workspace","path":"/workspace"}]
       EKOS_CONSOLE_DEV_ORIGIN: http://localhost:5173
+      # Absolute path to the bind-mounted binary below; a relative `EKOS_BIN` from `api/.env`
+      # (correct for local dev) would not resolve inside the container.
       EKOS_BIN: /usr/local/bin/ekos
     volumes:
       - ../ekos/target/release/ekos:/usr/local/bin/ekos:ro
