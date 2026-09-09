@@ -503,9 +503,37 @@ CPU time:                 14.7s
 Status: FAIL
 ```
 
-That's a real run against this repo's own live, currently ~28,000-object self-analysis ledger with
+That's a real run against this repo's own live self-analysis ledger (12,283 compiled objects) with
 the local `llama3:latest` model already configured in this repo's `ekos.toml` — not a simulated
-example. Beyond the five headline scores, every run also captures real resource usage: **tokens
+example.
+
+**Current full-suite results** (`ekos-full`, 101 scenarios, `llama3:latest`, same ruler across
+both columns — the "before" column is the same suite against the corpus as it stood before
+RFC 0140/0141's fixes):
+
+| Metric | Before | Now |
+|---|---|---|
+| Passed | 39/101 | **43/101** |
+| Answer correctness | 42.5% | **49.7%** |
+| Evidence groundedness | 44.0% | **51.6%** |
+| Completeness | — | 45.6% |
+| Invalid citations | — | **0.0%** |
+| Claims citing a precise `file:line` | 0 of 1,289 | **29.8%** |
+| Claims citing any source location | 26.4% | **67.3%** |
+| Fabrications on adversarial questions | 3 | **6 — worse** |
+
+The last row is not a typo and is not buried. With third-party noise gone, adversarial questions
+now retrieve *real* objects that read as more convincing evidence, which appears to make the model
+likelier to answer than refuse — a hypothesis awaiting the transcripts, not a finding. The suite
+still reports `Status: FAIL` against its own gates, and will keep saying so until it doesn't.
+
+Those numbers moved mostly because the harness found something unflattering: **94% of what this
+repo was compiling wasn't its own code.** A Python virtualenv and two `.scannerwork/` directories
+had never been excluded from the observation walk — `.gitignore` does not filter it. Excluding
+them took the corpus from ~13,700 files to 834 and the model from 53,830 objects to 12,283, while
+`recover` produced *identical* symbol counts (2,623 Rust symbols, 1,734 `Calls` edges) — all
+signal kept, all noise gone. See [devlog_174](devlogs/devlog_174.md) and the
+[eval comparison report](https://alexeyban.github.io/EKOS/presentations/eval-comparison-report.html). Beyond the five headline scores, every run also captures real resource usage: **tokens
 saved** is genuine cache-hit attribution (`CachedLlmProvider` tracks hits/misses; a scenario whose
 answer came from the disk cache instead of a fresh network call is diffed and counted, not
 estimated), and **CPU time / peak RSS** are best-effort, Linux-only, read straight from

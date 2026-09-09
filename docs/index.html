@@ -502,7 +502,33 @@ footer a:hover{ color:var(--accent-a); }
     <div class="stat"><div class="num">2</div><div class="label">GitHub issues filed and closed on real gaps</div></div>
     <div class="stat"><div class="num">1,600</div><div class="label">real GitHub issues/PRs fetched live — <a href="presentations/github-live-cross-system.html" style="color:inherit;">see the run</a></div></div>
     <div class="stat"><div class="num">0</div><div class="label">fabricated facts — <code class="mono">Unmapped</code> is a citizen, not a failure</div></div>
+    <div class="stat"><div class="num">101</div><div class="label">graded scenarios run against the real ledger every release — <a href="presentations/eval-comparison-report.html" style="color:inherit;">see the report</a></div></div>
+    <div class="stat"><div class="num">53s</div><div class="label">full <code class="mono">build → compile</code> on this repo, 834 files</div></div>
   </div>
+</section>
+
+<section>
+  <div class="eyebrow">Answer quality, measured</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem); max-width:26ch;">We grade our own agent. The failing numbers stay on the page.</h2>
+  <p class="lede">A 101-scenario suite across seven categories, graded by six deterministic
+  evaluators — no LLM judge. It is run against the real compiled ledger, and it is the reason the
+  numbers below moved: the harness found that <strong>94% of what we were compiling wasn't our own
+  code</strong> (a Python virtualenv and two scanner-output directories nobody had excluded).</p>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">49.7%</div><div class="label">answer correctness — up from 42.5%</div></div>
+    <div class="stat"><div class="num">51.6%</div><div class="label">evidence groundedness — up from 44.0%</div></div>
+    <div class="stat"><div class="num">0.0%</div><div class="label">invalid citations — every cited id resolves to real evidence</div></div>
+    <div class="stat"><div class="num">29.8%</div><div class="label">claims citing a precise <code class="mono">file:line</code> — up from <strong>0 of 1,289</strong></div></div>
+    <div class="stat"><div class="num">12,283</div><div class="label">compiled objects, down from 53,830 once the foreign code was excluded</div></div>
+    <div class="stat"><div class="num">6</div><div class="label">fabrications on adversarial questions — <strong>worse</strong>, up from 3, and being investigated</div></div>
+  </div>
+  <p class="lede" style="margin-top:1.6rem;">That last tile is the point. A benchmark you publish
+  only when it flatters you is marketing, not measurement — so the regression ships alongside the
+  gains, and the suite still reports <code class="mono">Status: FAIL</code> against its own gates.
+  The <a href="presentations/eval-comparison-report.html" style="color:var(--accent-a);">full
+  report</a> keeps every superseded number visible as a correction rather than editing it out.</p>
+  <div class="tag" style="margin-top:0.8rem;">101 scenarios · <code class="mono">llama3:latest</code>
+    local · deterministic grading, no LLM judge · <code class="mono">ekos eval run --dataset ekos-full</code></div>
 </section>
 
 <section>
