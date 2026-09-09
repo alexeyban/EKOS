@@ -54,14 +54,25 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
         },
     };
 
+    // RFC 0142 — these three loops are the phase that actually takes the time on a real workspace
+    // (tens of thousands of ledger appends, each one indexed), and they used to print nothing at
+    // all. Measured here: a `commit` that *declined* the LLM step still spent 12-25 minutes in
+    // silence, which is what makes a healthy run indistinguishable from a hang.
+
     // Write evidence first (objects may reference evidence IDs).
+    let ev_total = model.evidence_index.len();
+    let ev_progress = ProgressLine::for_phase("writing evidence");
     for ev_record in model.evidence_index.values() {
         let kir_ev = evidence_record_to_kir(ev_record);
         ledger.append_evidence(&kir_ev)?;
         evidence_written += 1;
+        ev_progress.tick(evidence_written, ev_total);
     }
+    ev_progress.finish();
 
     // Write canonical objects.
+    let obj_total = model.objects.len();
+    let obj_progress = ProgressLine::for_phase("writing objects");
     for ckm_obj in &model.objects {
         ledger.set_write_context(Some(per_source_ctx(&ckm_obj.source_artifact_ids)));
         let mut kir_obj = ckm_object_to_kir(ckm_obj);
@@ -71,16 +82,24 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
         } else {
             objects_skipped += 1;
         }
+        obj_progress.tick(objects_written + objects_skipped, obj_total);
     }
+    obj_progress.finish();
 
     // Write canonical relationships.
-    for ckm_rel in &model.relationships {
+    let rel_total = model.relationships.len();
+    let rel_progress = ProgressLine::for_phase("writing relationships");
+    for (i, ckm_rel) in model.relationships.iter().enumerate() {
         ledger.set_write_context(Some(per_source_ctx(&ckm_rel.source_artifact_ids)));
         let kir_rel = ckm_rel_to_kir(ckm_rel);
         if ledger.append_relationship(&kir_rel)? {
             rels_written += 1;
         }
+        // Counts iterations, not writes: a re-run skips already-known ids, and a bar that stalled
+        // while the loop was still churning would recreate the exact problem this fixes.
+        rel_progress.tick(i + 1, rel_total);
     }
+    rel_progress.finish();
 
     ledger.set_write_context(Some(write_ctx("commit:rollup")));
 
@@ -89,7 +108,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     // by `ekos build`, never through a `KnowledgeArtifact` the compiler reads. This is the first
     // point in the pipeline where `File` objects (just-committed-or-earlier) and CKM-derived
     // objects (just committed above) coexist in one place.
+    // No item count to iterate — this is one whole-ledger scan — so it gets a status line rather
+    // than a bar. The point is only that the screen never goes quiet for minutes at a time.
+    let step = phase_note("computing subsystem rollups");
     let rollups_added = commit_rollups(&*ledger)?;
+    step.done();
 
     // RFC 0075: links `TransformNode` Source/Sink nodes to the real `Table`/`Dataset` object they
     // read/write, closing the Data Architecture cross-reference gap RFC 0074 found. Run after
@@ -97,7 +120,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     // pipeline where every kind of object involved (CKM-derived `TransformNode`s and `Table`s,
     // just committed above) coexists in one ledger read.
     ledger.set_write_context(Some(write_ctx("commit:lineage")));
+    let step = phase_note("linking data lineage");
     let lineage_links_added = commit_data_lineage(&*ledger)?;
+    step.done();
     ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
@@ -266,6 +291,7 @@ fn preserve_claim_review_status(ledger: &dyn KnowledgeStore, obj: &mut KirObject
 /// practical case, since runs this long are usually started under `nohup` — `\r` would produce a
 /// single unreadable mega-line, so it emits an ordinary newline-terminated line every 5% instead.
 struct ProgressLine {
+    phase: &'static str,
     is_tty: bool,
     started: std::time::Instant,
     last_pct: std::cell::Cell<usize>,
@@ -273,12 +299,35 @@ struct ProgressLine {
 
 impl ProgressLine {
     fn new() -> Self {
+        Self::for_phase("describing")
+    }
+
+    /// A progress line for one named phase — `"writing objects"`, `"describing"`, …
+    fn for_phase(phase: &'static str) -> Self {
         use std::io::IsTerminal;
         Self {
+            phase,
             is_tty: std::io::stderr().is_terminal(),
             started: std::time::Instant::now(),
             last_pct: std::cell::Cell::new(usize::MAX),
         }
+    }
+
+    /// Progress for a plain counted loop with no per-item detail to show.
+    ///
+    /// Rate-limited to whole percents on a TTY as well as when piped: the bulk write loops run
+    /// tens of thousands of iterations, and a terminal write per item would cost more than the
+    /// work being measured.
+    fn tick(&self, done: usize, total: usize) {
+        if total == 0 {
+            return;
+        }
+        let pct = done * 100 / total;
+        if pct == self.last_pct.get() && done != total {
+            return;
+        }
+        self.last_pct.set(pct);
+        self.render_inner(done, total, pct, "", "");
     }
 
     fn render(
@@ -290,11 +339,21 @@ impl ProgressLine {
         errors: usize,
         current: &str,
     ) {
-        use std::io::Write;
         if total == 0 {
             return;
         }
         let pct = done * 100 / total;
+        let errs = if errors > 0 {
+            format!(", {errors} error(s)")
+        } else {
+            String::new()
+        };
+        let detail = format!(" · {described} described, {cached} cached{errs}");
+        self.render_inner(done, total, pct, &detail, current);
+    }
+
+    fn render_inner(&self, done: usize, total: usize, pct: usize, detail: &str, current: &str) {
+        use std::io::Write;
         let elapsed = self.started.elapsed().as_secs_f64();
         // Mean-so-far ETA. Wrong early and settling as it goes, which is why it is labelled an
         // estimate rather than presented as a deadline.
@@ -304,31 +363,25 @@ impl ProgressLine {
         } else {
             "--".to_string()
         };
-        let errs = if errors > 0 {
-            format!(", {errors} error(s)")
-        } else {
-            String::new()
-        };
 
         let body = progress_text(
+            self.phase,
             done,
             total,
             pct,
-            described,
-            cached,
-            &errs,
+            detail,
             &format_secs(elapsed),
             &eta,
         );
 
         let mut err = std::io::stderr();
         if self.is_tty {
-            // Truncate the object name so the line cannot wrap; a wrapped line defeats `\r`.
-            let name: String = current.chars().take(38).collect();
-            let _ = write!(err, "\r\x1b[2K{body} · {name}");
+            // Truncate the trailing name so the line cannot wrap; a wrapped line defeats `\r`.
+            let tail: String = current.chars().take(38).collect();
+            let sep = if tail.is_empty() { "" } else { " · " };
+            let _ = write!(err, "\r\x1b[2K{body}{sep}{tail}");
             let _ = err.flush();
-        } else if pct != self.last_pct.get() && pct.is_multiple_of(5) {
-            self.last_pct.set(pct);
+        } else if pct.is_multiple_of(5) {
             let _ = writeln!(err, "{body}");
         }
     }
@@ -343,22 +396,58 @@ impl ProgressLine {
     }
 }
 
+/// An un-countable phase: announce it, then report how long it took.
+///
+/// `commit_rollups` and `commit_data_lineage` are each a single whole-ledger scan with no item
+/// loop to hook, but they are not instant on a real workspace. A bar would be a lie; silence was
+/// the original complaint. So: a line on entry, the elapsed time on exit.
+struct PhaseNote {
+    label: &'static str,
+    started: std::time::Instant,
+    is_tty: bool,
+}
+
+fn phase_note(label: &'static str) -> PhaseNote {
+    use std::io::{IsTerminal, Write};
+    let is_tty = std::io::stderr().is_terminal();
+    let mut err = std::io::stderr();
+    let _ = write!(err, "  {label}…");
+    if !is_tty {
+        let _ = writeln!(err);
+    }
+    let _ = err.flush();
+    PhaseNote {
+        label,
+        started: std::time::Instant::now(),
+        is_tty,
+    }
+}
+
+impl PhaseNote {
+    fn done(self) {
+        use std::io::Write;
+        let secs = format_secs(self.started.elapsed().as_secs_f64());
+        let mut err = std::io::stderr();
+        if self.is_tty {
+            let _ = write!(err, "\r\x1b[2K  {} — {secs}\n", self.label);
+        } else {
+            let _ = writeln!(err, "  {} — {secs}", self.label);
+        }
+        let _ = err.flush();
+    }
+}
+
 /// The progress text itself, kept pure so it can be asserted on without a terminal.
-#[allow(clippy::too_many_arguments)]
 fn progress_text(
+    phase: &str,
     done: usize,
     total: usize,
     pct: usize,
-    described: usize,
-    cached: usize,
-    errs: &str,
+    detail: &str,
     elapsed: &str,
     eta: &str,
 ) -> String {
-    format!(
-        "  describing {done}/{total} ({pct}%) · {described} described, {cached} cached{errs} \
-         · {elapsed} elapsed, ~{eta} left (est.)"
-    )
+    format!("  {phase} {done}/{total} ({pct}%){detail} · {elapsed} elapsed, ~{eta} left (est.)")
 }
 
 fn format_secs(s: f64) -> String {
@@ -691,8 +780,16 @@ mod tests {
     /// RFC 0142 — the progress line has to stay readable and honest.
     #[test]
     fn progress_text_reports_counts_and_labels_the_eta_an_estimate() {
-        let line = progress_text(7, 1186, 0, 5, 2, "", "3m20s", "8h12m");
-        assert!(line.contains("7/1186"), "{line}");
+        let line = progress_text(
+            "describing",
+            7,
+            1186,
+            0,
+            " · 5 described, 2 cached",
+            "3m20s",
+            "8h12m",
+        );
+        assert!(line.contains("describing 7/1186"), "{line}");
         assert!(line.contains("5 described, 2 cached"), "{line}");
         assert!(
             line.contains("(est.)"),
@@ -703,10 +800,11 @@ mod tests {
             "must stay one line for \\r rewriting: {line}"
         );
 
-        // Errors appear only when there are some — a permanent ", 0 error(s)" would read as
-        // noise on every healthy run.
-        assert!(!progress_text(1, 2, 50, 1, 0, "", "1s", "1s").contains("error"));
-        assert!(progress_text(1, 2, 50, 0, 0, ", 1 error(s)", "1s", "1s").contains("1 error(s)"));
+        // The bulk-write phases have no per-item detail — the line must still read cleanly with
+        // an empty detail section rather than leaving a dangling separator.
+        let bulk = progress_text("writing objects", 500, 12283, 4, "", "12s", "4m50s");
+        assert!(bulk.contains("writing objects 500/12283 (4%)"), "{bulk}");
+        assert!(!bulk.contains("·  ·"), "no empty detail section: {bulk}");
     }
 
     #[test]

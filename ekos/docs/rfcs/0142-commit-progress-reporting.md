@@ -48,10 +48,29 @@ so `EKOS_LOG=info,tantivy=info` restores the old behaviour for anyone debugging 
 Deliberately narrow: this silences one named dependency's routine bookkeeping, not warnings, not
 errors, and nothing EKOS itself logs.
 
-### 2. Report progress through the long phase
+### 2. Report progress through every long phase
 
-`describe_objects` is the only unbounded-duration phase, and it already knows exactly how many
-objects it will visit before it starts.
+**Correction (2026-09-09), after the first implementation shipped.** This section originally said
+`describe_objects` was "the only unbounded-duration phase" and the Non-goals below called the rest
+"fast and already summarised". Both were wrong, and the user's next message after that build was
+still *"nothing is demonstrating"* — because the LLM phase is **opt-in and usually declined**,
+while the phases that always run print nothing.
+
+Measured on this repo, a `commit` that *declined* the LLM step:
+
+| phase | items | wall time |
+|---|---|---|
+| writing evidence | 8,765 | ~28 s |
+| writing objects | 12,283 | ~30 s |
+| writing relationships | 17,531 | ~56 s |
+| computing subsystem rollups | (one whole-ledger scan) | 26 s |
+| linking data lineage | (one whole-ledger scan) | 3 s |
+
+That is well over two minutes of silence on a small workspace, and 12-25 minutes on the larger
+runs measured in devlog_174 — all before the LLM phase is even reached. Every one of these now
+reports.
+
+`describe_objects` already knows exactly how many objects it will visit before it starts.
 
 **A progress callback, not a progress bar in the library.** `ekos-recovery` must not learn about
 terminals, cursors, or TTY detection — that is the CLI's concern, and the crate is also used by
@@ -96,8 +115,11 @@ interleaved into it would corrupt anything parsing that output.
 
 ## Non-goals
 
-- **A progress bar for the whole `commit`.** The other phases (evidence, objects, relationships,
-  rollups, lineage) are fast and already summarised. Only the LLM phase is unbounded.
+- ~~**A progress bar for the whole `commit`.** The other phases are fast and already summarised.~~
+  **Retracted** — see §2's correction. They are not fast, and "already summarised" described a
+  summary printed only *after* the silence. Every counted loop now reports, and the two
+  whole-ledger scans (`commit_rollups`, `commit_data_lineage`) get a status line with their
+  elapsed time, since neither has an item loop to hook and a fabricated bar would be a lie.
 - **Parallelising the LLM calls.** Real speedup, genuinely wanted, and entirely separate work —
   it changes ordering, error handling, and rate-limit behaviour. Progress reporting must not be
   bundled with it.
@@ -115,4 +137,9 @@ interleaved into it would corrupt anything parsing that output.
   stretch is exactly when the user suspects a hang.
 - A test that the no-op delegation preserves `describe_objects`' existing behaviour.
 - Manual check of both render paths: a TTY (single rewritten line) and a pipe (periodic lines),
-  since the whole point of §3 is that these differ.
+  since the whole point of §3 is that these differ. **Done** — verified against a real `commit`,
+  not inferred from the code. That run also confirmed a design choice worth keeping: the
+  relationship bar counts **iterations, not writes**. It reported `Relationships written: 0` (a
+  re-run skips already-known ids) while the bar still advanced 0→17,531 over 56 seconds. Had it
+  counted writes, it would have sat frozen at `0/17531` for the entire phase — reproducing the
+  exact failure this RFC exists to fix.
