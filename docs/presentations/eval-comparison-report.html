@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Eval Comparison: Fixing a Self-Contaminated Ledger</title>
-<meta name="description" content="RFC 0138's eval harness flagged weak agent answer quality. Diagnosing it live found a real bug -- evals/ and a 2.3GB test-runs/ directory were self-contaminating the ledger the eval harness grades answers against. Fixed, rebuilt the pipeline from scratch, and re-ran the full 101-scenario suite for an honest before/after comparison -- including where the fix did NOT move the number.">
+<meta name="description" content="RFC 0138's eval harness flagged weak agent answer quality. Diagnosing it found four contamination sources -- ending with the discovery that 94% of the observed corpus was not our code at all -- plus three bugs that made fixes ship and silently do nothing. Full 101-scenario before/after comparisons at each stage, with the superseded numbers left visible as corrections and the open regressions named plainly.">
 <link rel="stylesheet" href="../assets/theme.css">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 </head>
@@ -13,6 +13,7 @@
 <nav class="rail" aria-hidden="true">
   <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
   <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+  <a href="#s9"></a><a href="#s10"></a><a href="#s11"></a>
 </nav>
 
 <div class="deck">
@@ -185,6 +186,14 @@ Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a sou
   single data point — which is what <a href="https://github.com/alexeyban/EKOS/blob/main/ekos/docs/rfcs/0139-answer-quality.md" style="color:var(--accent-a);">RFC 0139</a>
   does. Left visible rather than quietly edited out, because a published number that turned out to
   be over-read is worth more as a correction than as a deletion.</p>
+  <p class="lede" style="margin-top:1rem;"><strong>Second correction (2026-09-08).</strong> The
+  column headed <em>Clean</em> above is not clean. Both runs in this table were compiled from a
+  corpus that was <strong>94% not our code</strong> — a Python virtualenv and two scanner-output
+  directories that neither exclusion covered. <a href="#s8" style="color:var(--accent-a);">§07</a>
+  has the measurements, and <a href="#s10" style="color:var(--accent-a);">§09</a> has the run
+  against a genuinely clean ledger. Kept in place for the same reason as the first correction: a
+  published number that turned out to be over-read is worth more as a correction than as a
+  deletion.</p>
   <div class="tag" style="margin-top:0.8rem;">Open the real report JSON:
     <a href="examples/eval-comparison/20260906T132949Z-ekos-full-baseline.json" style="color:var(--accent-a);">contaminated baseline</a>,
     <a href="examples/eval-comparison/20260906T182532Z-ekos-full-clean.json" style="color:var(--accent-a);">clean baseline</a></div>
@@ -222,7 +231,112 @@ Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a sou
   transcripts settled it.</p>
 </section>
 
-<section class="slide cta" id="s8">
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / correction — the "clean" ledger wasn't</div>
+  <div class="eyebrow">Found 2026-09-08, two days after this deck first published</div>
+  <h2>The ledger this deck called clean was <span class="arrow-word">94% not our code.</span></h2>
+  <p class="lede">§04 and §05 above are built on a run labelled <em>clean</em> because
+  <code class="mono">evals/</code> and a 2.3&nbsp;GB <code class="mono">test-runs/</code> directory
+  had been excluded. Both exclusions were real. Neither was close to sufficient — and nothing in
+  the metrics said so. What eventually said so was a <em>sample of cited claims</em>: every one
+  pointed into <code class="mono">web/api/.venv/lib/python3.13/site-packages/</code>.</p>
+  <table class="ttable">
+    <thead><tr><th>Contaminant</th><th>Scale</th><th>Why it hid</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Python virtualenv</td><td class="desc"><strong>3,758 of 3,797</strong> Python files analysed (98.7%) were third-party; <strong>27,408 of 53,830</strong> CKM objects (50.9%) were site-packages, vs 3,838 (7.1%) from EKOS itself</td><td class="desc">Git-ignored — but <code class="mono">.gitignore</code> excludes nothing from the observation walk. Same way <code class="mono">test-runs/</code> was missed.</td></tr>
+      <tr><td class="tool">SonarCloud scanner output</td><td class="desc"><strong>9,107 files</strong> (91% of what remained) in two <code class="mono">.scannerwork/</code> directories</td><td class="desc">Invisible at the CKM layer — just 4 objects, being <code class="mono">.ucfg</code> intermediates. But <code class="mono">ekos build</code> writes a <code class="mono">File</code> object per observed file <em>straight to the ledger</em>, bypassing the CKM: <strong>8,685 of 9,964</strong> ledger <code class="mono">File</code> objects, all indexed, all competing with real code in every retrieval.</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;">Both were self-inflicted, like <code class="mono">evals/</code>:
+  they exist because this project runs its own tooling on itself. A compiler that reads its own
+  workspace keeps eating its own exhaust.</p>
+  <table class="ttable" style="margin-top:1rem;">
+    <thead><tr><th>After both exclusions</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Files observed</td><td class="desc">~13,700</td><td class="good">834</td></tr>
+      <tr><td class="tool">CKM objects</td><td class="desc">53,830</td><td class="good">12,283</td></tr>
+      <tr><td class="tool">EKOS's own source, as a share of the model</td><td class="desc">7.1%</td><td class="good">31.6%</td></tr>
+      <tr><td class="tool">Identity conflicts</td><td class="desc">223</td><td class="good">25</td></tr>
+      <tr><td class="tool">Pipeline through <code class="mono">compile</code></td><td class="desc">~1 hour</td><td class="good">53 seconds</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;"><strong>The exclusions removed no knowledge.</strong>
+  After dropping 9,130 files, <code class="mono">recover</code> produced <em>identical</em> counts:
+  2,623 Rust symbols, 1,734 <code class="mono">Calls</code> edges, 128 JS modules, 2,518 JS symbols.
+  That equality is the check that separates a correct exclusion from an over-aggressive one — "fewer
+  objects" on its own is indistinguishable from "lost knowledge."</p>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / RFC 0140 — evidence that points somewhere</div>
+  <div class="eyebrow">And two silent caches that made it ship and do nothing</div>
+  <h2>Claims now cite a place in a file, not just a file.</h2>
+  <p class="lede">Every claim the reasoner saw was a name and, at best, a file path. Measured across
+  a full run: <strong>0 of 1,289</strong> rendered claims carried a line number; 26.4% carried any
+  location at all. Analyzers had recorded a <code class="mono">source_span</code> per symbol since
+  RFC 0088 — but never attached a <em>file</em> to it. A symbol knew it lived at lines 200-322 of an
+  unnamed file.</p>
+  <table class="ttable">
+    <thead><tr><th>Claim locations</th><th>Before</th><th>After</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Carrying any source location</td><td class="desc">26.4%</td><td class="good">67.3%</td></tr>
+      <tr><td class="tool">Carrying a precise <code class="mono">path:line</code></td><td class="desc">0 of 1,289</td><td class="good">29.8%</td></tr>
+      <tr><td class="tool">Evidence records in the ledger</td><td class="desc">9,928</td><td class="good">36,109 → 8,774 (clean corpus)</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;"><strong>The feature shipped, was verified, and did
+  nothing — twice.</strong> Both failures presented as success, which is the part worth keeping:</p>
+  <table class="ttable">
+    <thead><tr><th>Silent failure</th><th>What it looked like</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">The analyzer pass cache could <em>never</em> be invalidated by a code change. <code class="mono">CompilerPass::version</code> defaults to <code class="mono">"v1"</code> and almost no analyzer overrode it; <code class="mono">cache_inputs</code> fingerprints the artifacts read, never the logic reading them.</td><td class="desc">A 42-minute rebuild, every stage exit 0, a healthy-looking summary — rebuilding the ledger from pre-change data. The only tell: <code class="mono">Passes run: 0</code> buried in a log.</td></tr>
+      <tr><td class="tool">Evidence line numbers were destroyed in <em>two</em> hops — <code class="mono">compile</code> flattened them away, <code class="mono">commit</code> could not restore them.</td><td class="desc">Masked for span-carrying symbols, which re-derive a range. Permanent data loss for the two analyzers that record a real line with no span behind it. Fixing either hop alone would look correct and stay just as broken.</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;">Both now carry guard tests — each verified by
+  <em>breaking what it guards</em> and watching it fail. For a bug class defined by looking correct,
+  a passing test is not evidence.</p>
+</section>
+
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / results — the clean-corpus run</div>
+  <div class="eyebrow"><code class="mono">ekos-full</code>, 101 scenarios, <code class="mono">ollama llama3:latest</code>, ruler v5</div>
+  <h2>Real gains. And one real regression.</h2>
+  <table class="ttable">
+    <thead><tr><th>Metric</th><th>Contaminated (post-RFC&nbsp;0139)</th><th>Clean corpus</th><th>Δ</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Passed</td><td class="desc">39/101</td><td class="desc">43/101</td><td class="good">+4</td></tr>
+      <tr><td class="tool">Answer correctness</td><td class="desc">42.5%</td><td class="desc">49.7%</td><td class="good">+7.2pp</td></tr>
+      <tr><td class="tool">Evidence groundedness</td><td class="desc">44.0%</td><td class="desc">51.6%</td><td class="good">+7.6pp</td></tr>
+      <tr><td class="tool">Completeness</td><td class="desc">—</td><td class="desc">45.6%</td><td class="desc">—</td></tr>
+      <tr><td class="tool">Invalid citations</td><td class="desc">—</td><td class="desc">0.0%</td><td class="good">clean</td></tr>
+      <tr><td class="tool">Fabrications (of <code class="mono">should_refuse</code>)</td><td class="desc">3</td><td class="desc">6 — 30% rate</td><td class="bad">worse</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;"><strong>The regression is stated, not buried.</strong>
+  Six scenarios fabricated where three did before. A plausible mechanism: with third-party noise
+  gone, an adversarial question now retrieves <em>real</em> EKOS objects, which read as more
+  convincing evidence and make the model likelier to answer than refuse. That is a hypothesis
+  awaiting the transcripts, not a finding.</p>
+  <p class="lede" style="margin-top:1rem;"><strong>The flattering baseline we did not use.</strong>
+  Re-grading the original saved answers under the current ruler reports <strong>20/101</strong>,
+  which would let this deck claim 20&nbsp;→&nbsp;43. It is invalid: that report recorded a ranked
+  result list for only <strong>10 of 101</strong> scenarios (today's records 101/101), so re-grading
+  it penalises 91 scenarios that never captured the data the newer ruler asks for. The comparison
+  above uses the post-RFC&nbsp;0139 run instead — same ruler, same provider, so only the corpus
+  differs.</p>
+  <p class="lede" style="margin-top:1rem;">Two measurement defects found in the harness itself while
+  reading this run: the report line <em>"Answered but uncited: 57 (excluded from groundedness)"</em>
+  is mislabelled — only 10 are excluded, 44 score 0.0, so the metric is more honest than its own
+  caption claims. And recall@10 is still a mean over just <strong>17</strong> scenarios carrying
+  <code class="mono">expected_objects</code>, so it remains too low-powered to compare across runs —
+  the same statistical-power problem §05's correction named, only partly addressed.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real report JSON, with every answer and the
+  evidence behind it saved verbatim:
+    <a href="examples/eval-comparison/20260909T102121Z-ekos-full-CLEAN.json" style="color:var(--accent-a);">clean-corpus run</a></div>
+</section>
+
+<section class="slide cta" id="s11">
   <div class="eyebrow">Reproduce it yourself</div>
   <h2>Same suite. Same agent. Same gates.</h2>
   <div class="codeblock">
@@ -236,10 +350,17 @@ $ ekos eval history   # trend table across every saved run</pre>
     <tbody>
       <tr><td class="tool">Real <code>ekos ask</code>/<code>ekos query find</code> transcripts</td><td class="desc"><code>docs/presentations/examples/eval-comparison/</code></td></tr>
       <tr><td class="tool">Full contaminated + clean report JSON</td><td class="desc">same folder, both saved verbatim</td></tr>
-      <tr><td class="tool">Write-up with full "Knowledge Captured" section</td><td class="desc"><code>devlogs/devlog_170.md</code></td></tr>
+      <tr><td class="tool">Write-up with full "Knowledge Captured" section</td><td class="desc"><code>devlogs/devlog_170.md</code>, then <code>172</code> (honest ruler), <code>173</code> (RFC 0140 + the silent caches), <code>174</code> (the 94% corpus finding)</td></tr>
+      <tr><td class="tool">Claim-location measurement — offline, deterministic, no LLM calls</td><td class="desc"><code>cargo run -p ekos --example evidence_locations</code></td></tr>
     </tbody>
   </table>
-  <div class="fineprint">EKOS · RFC 0138 eval harness · 2 ledger-contamination bugs found and fixed, one open follow-up named plainly · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+  <p class="lede" style="max-width:44rem; margin-left:auto; margin-right:auto;">If one thing from
+  this page is worth carrying elsewhere: <strong>verify a build by measuring its output, not its
+  exit status.</strong> Three separate times here, a run exited 0, printed a plausible summary, and
+  was wrong — a cache that served stale data, a corpus that was 94% foreign, and a measurement read
+  off a search index that had not become visible yet. Each was caught by a quantity check on the
+  artifact, never by a green status.</p>
+  <div class="fineprint">EKOS · RFC 0138 eval harness · 4 contamination sources and 3 silent-failure bugs found and fixed; the open regressions named plainly · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
 </section>
 
 </div>

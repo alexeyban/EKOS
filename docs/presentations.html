@@ -199,12 +199,12 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
     </li>
     <li>
       <a class="deck" href="presentations/eval-comparison-report.html">Eval Comparison: Fixing a Self-Contaminated Ledger</a>
-      <p class="desc">RFC 0138's eval harness flagged weak agent answer quality. Diagnosing it live
-      found a real bug — the harness's own scenario files and a 2.3GB leftover test directory were
-      self-contaminating the ledger it grades answers against. Fixed, rebuilt from scratch, and
-      re-ran the full 101-scenario suite for an honest before/after — including where the fix
-      didn't move the number.</p>
-      <div class="rfc">RFC 0138 · devlog_170</div>
+      <p class="desc">RFC 0138's eval harness flagged weak agent answer quality. Chasing it found
+      four contamination sources — ending with the discovery that <strong>94% of the observed
+      corpus was not our code at all</strong> — plus three bugs that let fixes ship and silently do
+      nothing while every stage exited 0. Full 101-scenario before/after at each stage, with the
+      superseded numbers left visible as corrections and the open regressions named plainly.</p>
+      <div class="rfc">RFC 0138 · 0139 · 0140 · 0141 · devlog_170–174</div>
     </li>
     <li>
       <a class="deck" href="presentations/vision-and-token-utility.html">Vision &amp; Token Utility</a>
