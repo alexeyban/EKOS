@@ -1071,6 +1071,35 @@ the canonical facts in [TOKENOMICS.md](TOKENOMICS.md); the phased utility roadma
 | v0.7 | AI Layer |
 | v1.0 | Enterprise Knowledge Compiler |
 
+## Team
+
+### Alexey Banaev — Founder & Lead Developer
+
+<img src="docs/assets/team-alexey-banaev.jpg" alt="Portrait of Alexey Banaev" width="140" align="left" hspace="16" vspace="4">
+
+Alexey is a Data Engineer and Solution Architect with extensive experience designing data
+platforms, analytics solutions, and distributed systems. He founded EKOS to address a fundamental
+challenge in modern data environments: making complex, fragmented data ecosystems understandable,
+traceable, and usable.
+
+As EKOS's founder and main developer, Alexey leads the product architecture and engineering,
+combining data engineering, software development, and AI-driven approaches to build a practical
+solution for modern data teams.
+
+<br clear="left">
+
+### Omid Ahmadi — Core Team, Ecosystem & Growth
+
+**AI Researcher & Agentic Systems Engineer**
+
+<img src="docs/assets/team-omid-ahmadi.jpg" alt="Portrait of Omid Ahmadi" width="140" align="left" hspace="16" vspace="4">
+
+Researcher focused on sustainable AI applications across the oil, gas, and petrochemical
+industries, with a focus on intelligent agents, autonomous systems, and reliable AI infrastructure
+for industrial environments.
+
+<br clear="left">
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

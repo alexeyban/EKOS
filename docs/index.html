@@ -179,6 +179,61 @@ ul.checklist .check{
 .demo-card .btn{ margin-top:1.6rem; align-self:flex-start; }
 
 /* ---------- community ---------- */
+/* ---------- Team ---------- */
+.team-grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:2rem;
+  margin-top:2.6rem;
+  max-width:62rem;
+  align-items:start;
+}
+@media (max-width:820px){ .team-grid{ grid-template-columns:1fr; } }
+.team-card{
+  display:flex;
+  gap:1.5rem;
+  border:1px solid var(--rule);
+  background:var(--ground-raised);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius:10px;
+  padding:1.6rem;
+  box-shadow:var(--shadow);
+}
+/* Stack on narrow screens so the bio never squeezes to a sliver beside the portrait. */
+@media (max-width:520px){ .team-card{ flex-direction:column; gap:1.1rem; } }
+.team-photo{
+  flex:0 0 auto;
+  width:6.5rem;
+  height:6.5rem;
+  border-radius:50%;
+  object-fit:cover;
+  /* The source portraits are framed with the face high, so bias the visible circle upward
+     rather than centring on the torso. */
+  object-position:50% 22%;
+  border:1px solid var(--rule);
+}
+.team-body h3{ margin:0; font-size:1.12rem; }
+.team-role{
+  margin:0.25rem 0 0.9rem 0;
+  font-size:0.86rem;
+  font-weight:700;
+  line-height:1.45;
+  /* Gradient text, with a plain-colour fallback for engines that ignore background-clip. */
+  color:var(--accent-a);
+  background:var(--accent-gradient);
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.team-body p{
+  margin:0 0 0.8rem 0;
+  color:var(--ink-soft);
+  font-size:0.93rem;
+  line-height:1.65;
+}
+.team-body p:last-child{ margin-bottom:0; }
+
 .community-grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
@@ -609,6 +664,42 @@ footer a:hover{ color:var(--accent-a); }
       <div class="rfc-tag">VISION.md</div>
     </li>
   </ul>
+</section>
+
+<section>
+  <div class="eyebrow">Team</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.6rem); max-width:24ch;">The people building EKOS.</h2>
+  <div class="team-grid">
+
+    <article class="team-card">
+      <img class="team-photo" src="assets/team-alexey-banaev.jpg" width="440" height="440"
+           alt="Portrait of Alexey Banaev" loading="lazy" decoding="async">
+      <div class="team-body">
+        <h3>Alexey Banaev</h3>
+        <div class="team-role">Founder &amp; Lead Developer</div>
+        <p>Alexey is a Data Engineer and Solution Architect with extensive experience designing
+        data platforms, analytics solutions, and distributed systems. He founded EKOS to address a
+        fundamental challenge in modern data environments: making complex, fragmented data
+        ecosystems understandable, traceable, and usable.</p>
+        <p>As EKOS's founder and main developer, Alexey leads the product architecture and
+        engineering, combining data engineering, software development, and AI-driven approaches to
+        build a practical solution for modern data teams.</p>
+      </div>
+    </article>
+
+    <article class="team-card">
+      <img class="team-photo" src="assets/team-omid-ahmadi.jpg" width="440" height="440"
+           alt="Portrait of Omid Ahmadi" loading="lazy" decoding="async">
+      <div class="team-body">
+        <h3>Omid Ahmadi</h3>
+        <div class="team-role">Core Team, Ecosystem &amp; Growth · AI Researcher &amp; Agentic Systems Engineer</div>
+        <p>Researcher focused on sustainable AI applications across the oil, gas, and petrochemical
+        industries, with a focus on intelligent agents, autonomous systems, and reliable AI
+        infrastructure for industrial environments.</p>
+      </div>
+    </article>
+
+  </div>
 </section>
 
 <footer>
