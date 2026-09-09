@@ -20,7 +20,7 @@ pub fn status(config: &EkosConfig, cwd: &Path, storage: bool, json: bool) -> Res
     // single ledger file. `uses_fact_engine` only checks for a `facts/manifest.json`, which a
     // partitioned store doesn't have, so this branch must come first.
     if config.storage.distributed.is_enabled() || super::store::uses_partitioned(config, cwd) {
-        let store = super::store::open_store(config, cwd)?;
+        let store = super::store::open_store_read_only(config, cwd)?;
         let kind = if config.storage.distributed.is_enabled() {
             "distributed cluster, RFC 0113"
         } else {
@@ -45,7 +45,7 @@ pub fn status(config: &EkosConfig, cwd: &Path, storage: bool, json: bool) -> Res
     }
 
     if super::store::uses_fact_engine(config, cwd) {
-        let store = super::store::open_store(config, cwd)?;
+        let store = super::store::open_store_read_only(config, cwd)?;
         println!(
             "Ledger: {} (fact engine, RFC 0016)",
             super::store::store_display(config, cwd)
@@ -145,7 +145,7 @@ pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> 
         usize,
         Option<usize>,
     ) = if distributed || partitioned {
-        let store = super::store::open_store(config, cwd)?;
+        let store = super::store::open_store_read_only(config, cwd)?;
         let backend = if distributed {
             "distributed"
         } else {
@@ -159,7 +159,7 @@ pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> 
             store.evidence_count().ok(),
         )
     } else if fact {
-        let store = super::store::open_store(config, cwd)?;
+        let store = super::store::open_store_read_only(config, cwd)?;
         (
             "fact-segment",
             store.entry_count()?,

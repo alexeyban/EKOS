@@ -1,5 +1,5 @@
 use super::recover::build_llm_provider;
-use super::store::open_store;
+use super::store::open_store_read_only;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_runtime::ai::ConversationTurn;
@@ -59,7 +59,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<
     let artifact_dir = config.artifact_dir(cwd);
     let llm = build_llm_provider(config, &artifact_dir);
 
-    let ledger = open_store(config, cwd)?;
+    let ledger = open_store_read_only(config, cwd)?;
     let runtime = Runtime::over(&*ledger);
     let ai = AiRuntime::new(&runtime, llm, ai_config);
 

@@ -1,5 +1,5 @@
 use super::query_log;
-use super::store::open_store;
+use super::store::open_store_read_only;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse, interpreter::default_returns};
@@ -17,7 +17,7 @@ pub fn run(config: &EkosConfig, cwd: &Path, query: &str, json: bool) -> Result<(
         }
     };
 
-    let ledger = open_store(config, cwd)?;
+    let ledger = open_store_read_only(config, cwd)?;
     let runtime = Runtime::over(&*ledger);
     let interpreter = EklInterpreter::new(&runtime);
 

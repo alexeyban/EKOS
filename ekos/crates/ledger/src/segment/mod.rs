@@ -145,7 +145,12 @@ pub struct SegmentStore {
     backend: Arc<dyn SegmentBackend>,
     pub manifest: Manifest,
     head: Head,
-    active: File,
+    /// Write handle on the unsealed active segment. `None` on a read-only open: opening it
+    /// `.create(true).append(true)` needs a writable filesystem, and a reader has no business
+    /// holding one. Reads never use it — [`Self::read_active_committed`] reopens the path
+    /// read-only — so every use site here is an append/seal path, reachable only on a writable
+    /// store.
+    active: Option<File>,
     next_tx: u64,
     seal_bytes: u64,
     dict: Option<SegDict>,
@@ -195,8 +200,43 @@ impl SegmentStore {
         backend: Arc<dyn SegmentBackend>,
         seal_bytes: u64,
     ) -> Result<Self, SegmentError> {
+        Self::open_inner(root, backend, seal_bytes, false)
+    }
+
+    /// [`Self::open_with_backend`] that touches nothing on disk.
+    ///
+    /// The writable open creates the `segments/` directory, opens the active segment
+    /// `.create(true).append(true)`, and rewrites `HEAD` — three writes a reader does not need
+    /// and cannot perform on a read-only filesystem. That is not hypothetical: every stats
+    /// endpoint of the web console failed with `Read-only file system (os error 30)` against a
+    /// `:ro`-mounted workspace, because `FactLedger::open_read_only` reached this constructor.
+    pub fn open_read_only_with_backend(
+        root: impl Into<PathBuf>,
+        backend: Arc<dyn SegmentBackend>,
+        seal_bytes: u64,
+    ) -> Result<Self, SegmentError> {
+        Self::open_inner(root, backend, seal_bytes, true)
+    }
+
+    fn open_inner(
+        root: impl Into<PathBuf>,
+        backend: Arc<dyn SegmentBackend>,
+        seal_bytes: u64,
+        read_only: bool,
+    ) -> Result<Self, SegmentError> {
         let root = root.into();
-        std::fs::create_dir_all(root.join("segments"))?;
+        if read_only {
+            // Best-effort, because a read-only open serves two different situations. A
+            // backend-served partition (RFC 0113 B4) materialises sealed/active segments into a
+            // *local cache* under `root`, which must exist — so this genuinely needs to run. A
+            // `:ro`-mounted local workspace, by contrast, cannot create anything, but already has
+            // the directory. Failing hard would break the first case; skipping entirely broke it
+            // too (the backend pull below then hit `NotFound`). Ignoring the error serves both:
+            // if the directory is truly needed and truly absent, the very next operation says so.
+            let _ = std::fs::create_dir_all(root.join("segments"));
+        } else {
+            std::fs::create_dir_all(root.join("segments"))?;
+        }
 
         // `manifest.json` and `dict.bin` live with the backend (RFC 0113 B4) — local disk for
         // `LocalFsBackend`, object storage for `ObjectStoreBackend` — so a reader on another
@@ -243,34 +283,56 @@ impl SegmentStore {
         }
 
         let active_path = segment_path(&root, active_seq);
-        let mut active = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&active_path)?;
 
         // Recovery: scan the whole active file. Every valid frame — including
         // ones committed after the last HEAD publish — is kept; the first
         // invalid byte truncates the rest. The active segment is read, never
         // mapped (it is the one file that grows and can be truncated here).
         let mut bytes = Vec::new();
-        active.read_to_end(&mut bytes)?;
+        let mut active = if read_only {
+            // A reader takes no write handle. A missing active segment is normal here — a store
+            // whose batches are all sealed, or one being read before its first write — and must
+            // read as empty rather than being created.
+            match File::open(&active_path) {
+                Ok(mut f) => {
+                    f.read_to_end(&mut bytes)?;
+                    None
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(e.into()),
+            }
+        } else {
+            let mut f = OpenOptions::new()
+                .create(true)
+                .read(true)
+                .append(true)
+                .open(&active_path)?;
+            f.read_to_end(&mut bytes)?;
+            Some(f)
+        };
+
         let (valid_len, batches) = scan_slice(&bytes, dict.as_ref());
-        if valid_len < active.metadata()?.len() {
+        // Crash recovery truncates a torn tail — a write, so writable opens only. A reader simply
+        // stops at `valid_len`, which `head.committed_len` below already enforces for every read.
+        if let Some(f) = active.as_mut()
+            && valid_len < f.metadata()?.len()
+        {
             tracing::warn!(
                 segment = active_seq,
                 offset = valid_len,
                 "truncating torn batch frame at active segment tail (crash recovery)"
             );
-            active.set_len(valid_len)?;
-            active.sync_all()?;
+            f.set_len(valid_len)?;
+            f.sync_all()?;
         }
 
         let head = Head {
             active_seq,
             committed_len: valid_len,
         };
-        write_head(&root, head)?;
+        if !read_only {
+            write_head(&root, head)?;
+        }
 
         let sealed_tx_max = manifest.sealed.last().map(|s| s.tx_max.0);
         let active_tx_max = batches.last().map(|b| b.tx.0);
@@ -285,6 +347,21 @@ impl SegmentStore {
             next_tx,
             seal_bytes,
             dict,
+        })
+    }
+
+    /// The active segment's write handle, or a clear error on a read-only store.
+    ///
+    /// Every caller is an append/seal path that a reader cannot reach through any public API, so
+    /// this is defence in depth rather than an expected failure — but a diagnosable error beats a
+    /// panic if a future refactor does reach it.
+    fn active_mut(&mut self) -> Result<&mut File, SegmentError> {
+        self.active.as_mut().ok_or_else(|| {
+            SegmentError::Corrupt(
+                "attempted to write through a read-only segment store — this store was opened \
+                 with `open_read_only_with_backend` and holds no write handle"
+                    .to_string(),
+            )
         })
     }
 
@@ -329,8 +406,9 @@ impl SegmentStore {
         };
         let frame = self.encode_frame(&batch)?;
 
-        self.active.write_all(&frame)?;
-        self.active.sync_all()?;
+        let active = self.active_mut()?;
+        active.write_all(&frame)?;
+        active.sync_all()?;
         self.next_tx += 1;
         self.head.committed_len += frame.len() as u64;
         write_head(&self.root, self.head)?;
@@ -349,7 +427,7 @@ impl SegmentStore {
         if self.head.committed_len == 0 {
             return Ok(());
         }
-        self.active.sync_all()?;
+        self.active_mut()?.sync_all()?;
 
         let seq = self.head.active_seq;
         let path = segment_path(&self.root, seq);
@@ -387,11 +465,13 @@ impl SegmentStore {
         save_manifest(self.backend.as_ref(), &self.manifest)?;
 
         let new_seq = seq + 1;
-        self.active = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(segment_path(&self.root, new_seq))?;
+        self.active = Some(
+            OpenOptions::new()
+                .create(true)
+                .read(true)
+                .append(true)
+                .open(segment_path(&self.root, new_seq))?,
+        );
         self.head = Head {
             active_seq: new_seq,
             committed_len: 0,
@@ -454,7 +534,15 @@ impl SegmentStore {
     }
 
     fn read_active_committed(&self) -> Result<Vec<u8>, SegmentError> {
-        let mut file = File::open(segment_path(&self.root, self.head.active_seq))?;
+        // A missing active segment means no unsealed rows, not an error. The writable open always
+        // created this file (`.create(true)`), so this could not happen before; a read-only open
+        // deliberately does not, and a backend-served partition may legitimately have nothing
+        // unsealed to materialise locally.
+        let mut file = match File::open(segment_path(&self.root, self.head.active_seq)) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
         let mut bytes = Vec::with_capacity(self.head.committed_len as usize);
         file.read_to_end(&mut bytes)?;
         bytes.truncate(self.head.committed_len as usize);

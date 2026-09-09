@@ -427,9 +427,18 @@ impl FactLedger {
             return Err(LedgerError::NotFound(root.display().to_string()));
         }
         let has_backend = backend.is_some();
+        // A read-only open must not create `segments/`, take a write handle on the active
+        // segment, or rewrite `HEAD` — all three fail on a read-only filesystem, which is how
+        // this surfaced: the web console's stats endpoints returned
+        // `Read-only file system (os error 30)` against a `:ro`-mounted workspace despite only
+        // reading counts.
         let store = match backend {
-            Some(b) => SegmentStore::open_with_backend(root, b, SEGMENT_SEAL_BYTES)?,
-            None => SegmentStore::open_with_seal_threshold(root, SEGMENT_SEAL_BYTES)?,
+            Some(b) => SegmentStore::open_read_only_with_backend(root, b, SEGMENT_SEAL_BYTES)?,
+            None => SegmentStore::open_read_only_with_backend(
+                root,
+                Arc::new(ekos_segment_backend::LocalFsBackend::new(root)),
+                SEGMENT_SEAL_BYTES,
+            )?,
         };
         let (runs, runs_clean) = FactIndexes::open(root.join("indexes"))?;
         if !runs_clean {
@@ -1958,6 +1967,63 @@ mod tests {
     }
 
     #[test]
+    /// A read-only open must not write to the workspace at all.
+    ///
+    /// Reported live: every stats endpoint of the web console failed with
+    /// `Read-only file system (os error 30)` against a `:ro`-mounted workspace, despite each one
+    /// only reading counts. Three separate writes were happening on the read path — the segment
+    /// store created `segments/`, took a `.create(true).append(true)` handle on the active
+    /// segment, and rewrote `HEAD`.
+    ///
+    /// A real read-only mount needs root, so this asserts the observable property instead: a
+    /// read-only open leaves every mtime untouched. That catches all three, and anything similar
+    /// added later.
+    #[test]
+    fn open_read_only_writes_nothing_to_the_workspace() {
+        use std::collections::BTreeMap;
+
+        let dir = tempdir().unwrap();
+        {
+            let l = FactLedger::open(dir.path()).unwrap();
+            l.append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+
+        let snapshot = |root: &std::path::Path| -> BTreeMap<String, (u64, std::time::SystemTime)> {
+            let mut out = BTreeMap::new();
+            let mut stack = vec![root.to_path_buf()];
+            while let Some(d) = stack.pop() {
+                for e in std::fs::read_dir(&d).unwrap().flatten() {
+                    let p = e.path();
+                    let m = e.metadata().unwrap();
+                    if m.is_dir() {
+                        stack.push(p.clone());
+                    }
+                    out.insert(
+                        p.strip_prefix(root).unwrap().display().to_string(),
+                        (m.len(), m.modified().unwrap()),
+                    );
+                }
+            }
+            out
+        };
+
+        let before = snapshot(dir.path());
+        // Sleep past filesystem mtime granularity so a rewrite would actually be visible.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        let r = FactLedger::open_read_only(dir.path()).unwrap();
+        assert_eq!(r.object_count().unwrap(), 1, "the reader still reads");
+        drop(r);
+
+        let after = snapshot(dir.path());
+        assert_eq!(
+            before, after,
+            "a read-only open must not create, grow or touch any file — it has to work on a \
+             genuinely read-only filesystem"
+        );
+    }
+
     fn open_read_only_rejects_every_write_method() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("factledger");

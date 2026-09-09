@@ -149,7 +149,12 @@ impl SearchIndex {
         if fresh && !writable {
             return Err(LedgerError::NotFound(dir.display().to_string()));
         }
-        std::fs::create_dir_all(dir).map_err(LedgerError::Io)?;
+        // Only on a writable open. `create_dir_all` happens to return `Ok` for an existing
+        // directory even on a read-only filesystem, but relying on that is a trap — the read-only
+        // path should not be calling a mutating API at all.
+        if writable {
+            std::fs::create_dir_all(dir).map_err(LedgerError::Io)?;
+        }
 
         // F7 (test-runs/run-20260901T160842Z): plain BM25 `TEXT` uses tantivy's `"default"`
         // tokenizer (lowercase + split, no stemming) — a singular mention ("the customer table")
@@ -183,35 +188,98 @@ impl SearchIndex {
 
         let mmap_dir = tantivy::directory::MmapDirectory::open(dir).map_err(terr)?;
         let mut rebuilt = false;
-        let index = match Index::open_or_create(mmap_dir, schema.clone()) {
-            Ok(index) => index,
-            // RFC 0103: a schema field addition (e.g. RFC 0101's `memory_path`) leaves an
-            // already-built on-disk index with a stale schema — tantivy validates rather than
-            // upgrading. Self-heal on a writable open only: wipe and rebuild (see
-            // `rebuild_stale_schema`'s own doc comment for why this is safe), never on a
-            // read-only open, which must not mutate the directory (same reasoning
-            // `open_read_only` already documents for never acquiring the writer lock).
-            Err(tantivy::TantivyError::SchemaError(_)) if writable => {
-                rebuild_stale_schema(dir)?;
-                rebuilt = true;
-                let mmap_dir = tantivy::directory::MmapDirectory::open(dir).map_err(terr)?;
-                Index::open_or_create(mmap_dir, schema).map_err(terr)?
+
+        // A read-only open must use `Index::open`, never `open_or_create`. The latter takes
+        // tantivy's `META_LOCK` and will create the index if absent — both writes. On a genuinely
+        // read-only filesystem (a `:ro` container mount, an artifact volume, a snapshot) that
+        // fails with `Read-only file system (os error 30)`, which is how this surfaced: every
+        // stats endpoint of the web console 500'd against a `:ro`-mounted workspace even though
+        // each one only reads counts.
+        //
+        // The intent was already documented right below — "never on a read-only open, which must
+        // not mutate the directory" — but only the *rebuild* path honoured it; the open itself
+        // did not.
+        let index = if !writable {
+            match Index::open(mmap_dir) {
+                Ok(opened) => {
+                    // `Index::open` takes no expected schema and so, unlike `open_or_create`,
+                    // never validates one. Without this check a stale on-disk schema would open
+                    // "successfully" read-only and then mis-query — silently — where the writable
+                    // path reports it.
+                    if opened.schema() != schema {
+                        return Err(LedgerError::Corrupt(
+                            "search index schema is stale (a newer EKOS version added a new \
+                             indexed field) and a read-only open cannot rebuild it — open \
+                             writable (e.g. `ekos build`) once to self-heal, then reopen \
+                             read-only"
+                                .to_string(),
+                        ));
+                    }
+                    opened
+                }
+                Err(tantivy::TantivyError::SchemaError(msg)) => {
+                    return Err(LedgerError::Corrupt(format!(
+                        "search index schema is stale (a newer EKOS version added a new indexed \
+                         field) and a read-only open cannot rebuild it — open writable (e.g. \
+                         `ekos build`) once to self-heal, then reopen read-only: {msg}"
+                    )));
+                }
+                // No index on disk yet. The writable path would create one; a reader must not, so
+                // it serves an empty in-RAM index and every non-search read still works. This is
+                // the normal state for a backend-served partition whose `search/` has not been
+                // synced (RFC 0111 §7's accepted approximation), not an error.
+                Err(_) => Index::create_in_ram(schema.clone()),
             }
-            Err(tantivy::TantivyError::SchemaError(msg)) => {
-                return Err(LedgerError::Corrupt(format!(
-                    "search index schema is stale (a newer EKOS version added a new indexed \
-                     field) and a read-only open cannot rebuild it — open writable (e.g. `ekos \
-                     build`) once to self-heal, then reopen read-only: {msg}"
-                )));
+        } else {
+            match Index::open_or_create(mmap_dir, schema.clone()) {
+                Ok(index) => index,
+                // RFC 0103: a schema field addition (e.g. RFC 0101's `memory_path`) leaves an
+                // already-built on-disk index with a stale schema — tantivy validates rather than
+                // upgrading. Self-heal by wiping and rebuilding (see `rebuild_stale_schema`'s own
+                // doc comment for why this is safe). Only reachable here: the read-only arm above
+                // reports the stale schema instead, since rebuilding would mutate the directory.
+                Err(tantivy::TantivyError::SchemaError(_)) => {
+                    rebuild_stale_schema(dir)?;
+                    rebuilt = true;
+                    let mmap_dir = tantivy::directory::MmapDirectory::open(dir).map_err(terr)?;
+                    Index::open_or_create(mmap_dir, schema.clone()).map_err(terr)?
+                }
+                Err(e) => return Err(terr(e)),
             }
-            Err(e) => return Err(terr(e)),
         };
         let writer = if writable {
             Some(index.writer(WRITER_HEAP_BYTES).map_err(terr)?)
         } else {
             None
         };
-        let reader = index.reader().map_err(terr)?;
+        // Opening *any* tantivy reader acquires `META_LOCK` — `IndexReader::open_segment_readers`
+        // takes it to stop GC deleting segment files mid-open — and acquiring a lock writes a
+        // lockfile. There is no reload policy that avoids it, so a tantivy index on a read-only
+        // filesystem cannot be opened at all. That is an upstream constraint, not something this
+        // crate can configure away.
+        //
+        // Rather than fail the whole ledger open, degrade: fall back to an empty in-RAM index so
+        // every **non-search** read still works — counts, timelines, `FIND … COUNT GROUP BY`,
+        // object state, neighbourhoods. This is the same accepted approximation the backend-served
+        // partition path already makes when `search/` has not been synced (RFC 0111 §7). Search
+        // itself then returns no hits, so it is logged loudly rather than passing silently.
+        let mut index = index;
+        let reader = match index.reader() {
+            Ok(r) => r,
+            Err(e) if !writable => {
+                tracing::warn!(
+                    dir = %dir.display(),
+                    error = %e,
+                    "search index unavailable on a read-only filesystem (tantivy needs a lockfile \
+                     to open a reader) — continuing without search: counts, timelines and object \
+                     reads work, but `query find` will return no hits. Mount the workspace \
+                     writable to enable search."
+                );
+                index = Index::create_in_ram(schema.clone());
+                index.reader().map_err(terr)?
+            }
+            Err(e) => return Err(terr(e)),
+        };
 
         let marker_path = dir.join("last_tx");
         let marker = if fresh || rebuilt {

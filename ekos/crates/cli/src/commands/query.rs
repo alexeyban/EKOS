@@ -1,4 +1,4 @@
-use super::store::open_store;
+use super::store::open_store_read_only;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::KirId;
@@ -156,5 +156,5 @@ pub fn neighbourhood(config: &EkosConfig, cwd: &Path, id_str: &str, depth: u32) 
 }
 
 fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
-    open_store(config, cwd).map_err(|e| anyhow::anyhow!("{e}\nRun `ekos build` first."))
+    open_store_read_only(config, cwd).map_err(|e| anyhow::anyhow!("{e}\nRun `ekos build` first."))
 }

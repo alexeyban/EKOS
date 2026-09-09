@@ -1,4 +1,4 @@
-use super::store::open_store;
+use super::store::open_store_read_only;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
@@ -11,7 +11,7 @@ use std::str::FromStr;
 const MAX_LISTED: usize = 50;
 
 pub fn run(config: &EkosConfig, cwd: &Path, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<()> {
-    let ledger = open_store(config, cwd)?;
+    let ledger = open_store_read_only(config, cwd)?;
 
     let diff = ledger.diff(from, to)?;
 
