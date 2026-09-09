@@ -256,6 +256,122 @@ fn preserve_claim_review_status(ledger: &dyn KnowledgeStore, obj: &mut KirObject
 /// RFC 0088: shows a real cost estimate (an upper bound — a real run may skip some via caching
 /// or a missing `source_span`), asks for confirmation unless `yes`, then runs
 /// `ekos_recovery::describe_objects` against the real committed ledger.
+/// A one-line progress indicator for the LLM description phase (RFC 0142).
+///
+/// Writes to **stderr**, never stdout: `commit`'s stdout is its report, and interleaving a
+/// progress line into it would corrupt anything parsing that output.
+///
+/// Renders differently depending on where it is going, because the two destinations want opposite
+/// things. To a terminal, one line rewritten in place with `\r`. To a pipe or a log file — the
+/// practical case, since runs this long are usually started under `nohup` — `\r` would produce a
+/// single unreadable mega-line, so it emits an ordinary newline-terminated line every 5% instead.
+struct ProgressLine {
+    is_tty: bool,
+    started: std::time::Instant,
+    last_pct: std::cell::Cell<usize>,
+}
+
+impl ProgressLine {
+    fn new() -> Self {
+        use std::io::IsTerminal;
+        Self {
+            is_tty: std::io::stderr().is_terminal(),
+            started: std::time::Instant::now(),
+            last_pct: std::cell::Cell::new(usize::MAX),
+        }
+    }
+
+    fn render(
+        &self,
+        done: usize,
+        total: usize,
+        described: usize,
+        cached: usize,
+        errors: usize,
+        current: &str,
+    ) {
+        use std::io::Write;
+        if total == 0 {
+            return;
+        }
+        let pct = done * 100 / total;
+        let elapsed = self.started.elapsed().as_secs_f64();
+        // Mean-so-far ETA. Wrong early and settling as it goes, which is why it is labelled an
+        // estimate rather than presented as a deadline.
+        let eta = if done > 0 {
+            let remaining = (total - done) as f64 * (elapsed / done as f64);
+            format_secs(remaining)
+        } else {
+            "--".to_string()
+        };
+        let errs = if errors > 0 {
+            format!(", {errors} error(s)")
+        } else {
+            String::new()
+        };
+
+        let body = progress_text(
+            done,
+            total,
+            pct,
+            described,
+            cached,
+            &errs,
+            &format_secs(elapsed),
+            &eta,
+        );
+
+        let mut err = std::io::stderr();
+        if self.is_tty {
+            // Truncate the object name so the line cannot wrap; a wrapped line defeats `\r`.
+            let name: String = current.chars().take(38).collect();
+            let _ = write!(err, "\r\x1b[2K{body} · {name}");
+            let _ = err.flush();
+        } else if pct != self.last_pct.get() && pct.is_multiple_of(5) {
+            self.last_pct.set(pct);
+            let _ = writeln!(err, "{body}");
+        }
+    }
+
+    fn finish(&self) {
+        use std::io::Write;
+        if self.is_tty {
+            // Clear the in-place line so it does not collide with the report that follows.
+            let _ = write!(std::io::stderr(), "\r\x1b[2K");
+            let _ = std::io::stderr().flush();
+        }
+    }
+}
+
+/// The progress text itself, kept pure so it can be asserted on without a terminal.
+#[allow(clippy::too_many_arguments)]
+fn progress_text(
+    done: usize,
+    total: usize,
+    pct: usize,
+    described: usize,
+    cached: usize,
+    errs: &str,
+    elapsed: &str,
+    eta: &str,
+) -> String {
+    format!(
+        "  describing {done}/{total} ({pct}%) · {described} described, {cached} cached{errs} \
+         · {elapsed} elapsed, ~{eta} left (est.)"
+    )
+}
+
+fn format_secs(s: f64) -> String {
+    let s = s.max(0.0) as u64;
+    if s >= 3600 {
+        format!("{}h{:02}m", s / 3600, (s % 3600) / 60)
+    } else if s >= 60 {
+        format!("{}m{:02}s", s / 60, s % 60)
+    } else {
+        format!("{s}s")
+    }
+}
+
 async fn run_llm_description(
     config: &EkosConfig,
     cwd: &Path,
@@ -293,9 +409,32 @@ async fn run_llm_description(
 
     let llm = select_llm_provider_for_description(config, &config.artifact_dir(cwd))?;
     let redaction = config.redaction_config();
-    let stats = ekos_recovery::describe_objects(ledger, &*llm, scope, cwd, &redaction)
-        .await
-        .map_err(|e| anyhow::anyhow!("LLM description failed: {e}"))?;
+
+    // RFC 0142 — this is the pipeline's only unbounded-duration phase (one sequential LLM call per
+    // object), and it used to print nothing at all between the cost prompt above and the summary
+    // below. On a 1,186-module workspace that is hours indistinguishable from a hang, after the
+    // user has already accepted the cost.
+    let progress = ProgressLine::new();
+    let stats = ekos_recovery::describe_objects_with_progress(
+        ledger,
+        &*llm,
+        scope,
+        cwd,
+        &redaction,
+        &|p| {
+            progress.render(
+                p.done,
+                p.total,
+                p.described,
+                p.skipped_cached,
+                p.errors,
+                p.current,
+            )
+        },
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("LLM description failed: {e}"))?;
+    progress.finish();
 
     // Best-effort: a failed project-level summary shouldn't fail the whole `commit` run when the
     // real per-object work above already succeeded. `cwd`'s own directory name is a real, concrete
@@ -548,6 +687,37 @@ fn evidence_record_to_kir(ev: &EvidenceRecord) -> KirEvidence {
 mod tests {
     use super::*;
     use ekos_kir::{KirId, ObjectKind};
+
+    /// RFC 0142 — the progress line has to stay readable and honest.
+    #[test]
+    fn progress_text_reports_counts_and_labels_the_eta_an_estimate() {
+        let line = progress_text(7, 1186, 0, 5, 2, "", "3m20s", "8h12m");
+        assert!(line.contains("7/1186"), "{line}");
+        assert!(line.contains("5 described, 2 cached"), "{line}");
+        assert!(
+            line.contains("(est.)"),
+            "an ETA from a mean-so-far is a guess and must say so: {line}"
+        );
+        assert!(
+            !line.contains('\n'),
+            "must stay one line for \\r rewriting: {line}"
+        );
+
+        // Errors appear only when there are some — a permanent ", 0 error(s)" would read as
+        // noise on every healthy run.
+        assert!(!progress_text(1, 2, 50, 1, 0, "", "1s", "1s").contains("error"));
+        assert!(progress_text(1, 2, 50, 0, 0, ", 1 error(s)", "1s", "1s").contains("1 error(s)"));
+    }
+
+    #[test]
+    fn format_secs_scales_from_seconds_to_hours() {
+        assert_eq!(format_secs(9.0), "9s");
+        assert_eq!(format_secs(75.0), "1m15s");
+        assert_eq!(format_secs(3725.0), "1h02m");
+        // A negative elapsed is impossible but must not underflow into a huge number.
+        assert_eq!(format_secs(-5.0), "0s");
+    }
+
     use ekos_ledger::FactLedger;
 
     /// RFC 0140 — a line recorded by an analyzer must survive `recover` → `compile` → `commit`.

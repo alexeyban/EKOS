@@ -388,12 +388,48 @@ pub async fn describe_objects(
     workspace_root: &Path,
     redaction: &RedactionConfig,
 ) -> Result<DescriptionStats, String> {
+    describe_objects_with_progress(store, llm, scope, workspace_root, redaction, &|_| {}).await
+}
+
+/// One object finished, reported to the caller's progress callback (RFC 0142).
+///
+/// `done` counts every object this pass *visited*, cache-skips and failures included — not just
+/// the ones that made an LLM call. A counter that stalled through a long cached stretch would be
+/// worse than none, because that is exactly the moment a user starts suspecting a hang.
+#[derive(Debug, Clone, Copy)]
+pub struct DescriptionProgress<'a> {
+    pub done: usize,
+    pub total: usize,
+    pub described: usize,
+    pub skipped_cached: usize,
+    pub errors: usize,
+    /// The object just handled.
+    pub current: &'a str,
+}
+
+/// [`describe_objects`], reporting progress after each object.
+///
+/// Exists because this is the pipeline's only unbounded-duration phase: one sequential LLM call
+/// per module/symbol, which on a 1,186-module workspace against a local provider is hours of
+/// total silence after the user has already accepted a cost prompt.
+///
+/// The callback is deliberately the whole seam — this crate stays free of terminals, cursors and
+/// TTY detection, which belong to the CLI (the MCP server and tests link this code too).
+pub async fn describe_objects_with_progress(
+    store: &dyn KnowledgeStore,
+    llm: &dyn LlmProvider,
+    scope: DescriptionScope,
+    workspace_root: &Path,
+    redaction: &RedactionConfig,
+    progress: &dyn Fn(DescriptionProgress),
+) -> Result<DescriptionStats, String> {
     let objects = store.all_objects().map_err(|e| e.to_string())?;
     let relationships = store.all_relationships().map_err(|e| e.to_string())?;
     let neighbors = build_neighbors(&relationships);
     let by_id: HashMap<KirId, KirObject> = objects.iter().map(|o| (o.id, o.clone())).collect();
 
     let mut stats = DescriptionStats::default();
+    let mut done = 0usize;
 
     let mut module_targets: Vec<&KirObject> = objects
         .iter()
@@ -407,6 +443,27 @@ pub async fn describe_objects(
         .collect();
     symbol_targets.sort_by_key(|o| o.id.0);
 
+    // Total is what this scope will actually visit, so the denominator matches the counter.
+    let total = if scope.wants_modules() {
+        module_targets.len()
+    } else {
+        0
+    } + if scope.wants_symbols() {
+        symbol_targets.len()
+    } else {
+        0
+    };
+    let report = |done: usize, stats: &DescriptionStats, current: &str| {
+        progress(DescriptionProgress {
+            done,
+            total,
+            described: stats.modules_described + stats.symbols_described,
+            skipped_cached: stats.skipped_cached,
+            errors: stats.llm_errors,
+            current,
+        });
+    };
+
     if scope.wants_modules() {
         stats.modules_considered = module_targets.len();
         for obj in module_targets {
@@ -418,6 +475,8 @@ pub async fn describe_objects(
                 == Some(&hash)
             {
                 stats.skipped_cached += 1;
+                done += 1;
+                report(done, &stats, &obj.name);
                 continue;
             }
             let location = SourceLocation::file(format!("compiled dependency graph: {}", obj.name));
@@ -442,6 +501,8 @@ pub async fn describe_objects(
                     stats.llm_errors += 1;
                 }
             }
+            done += 1;
+            report(done, &stats, &obj.name);
         }
     }
 
@@ -452,6 +513,8 @@ pub async fn describe_objects(
                 build_symbol_prompt(obj, &by_id, &neighbors, workspace_root, redaction)
             else {
                 stats.symbols_without_span += 1;
+                done += 1;
+                report(done, &stats, &obj.name);
                 continue;
             };
             if obj
@@ -461,6 +524,8 @@ pub async fn describe_objects(
                 == Some(&hash)
             {
                 stats.skipped_cached += 1;
+                done += 1;
+                report(done, &stats, &obj.name);
                 continue;
             }
             let start_line = obj
@@ -491,6 +556,8 @@ pub async fn describe_objects(
                     stats.llm_errors += 1;
                 }
             }
+            done += 1;
+            report(done, &stats, &obj.name);
         }
     }
 
@@ -729,6 +796,103 @@ mod tests {
         graph.objects.push(module.clone());
         graph.objects.push(symbol.clone());
         (file, module, symbol, graph)
+    }
+
+    /// RFC 0142 — the callback must fire once per object *visited*, not once per LLM call.
+    ///
+    /// The cache-skip path is the one that matters. A run over an already-described workspace
+    /// skips every object without calling the LLM; if the counter only advanced on a real call it
+    /// would sit frozen at 0 through exactly the stretch where a user starts suspecting a hang.
+    #[tokio::test]
+    async fn progress_reports_every_visited_object_including_cache_skips() {
+        use std::sync::Mutex;
+
+        let (store, _dir) = temp_store();
+        let (_file, module, _symbol, graph) = module_with_symbol();
+        seed(&store, graph);
+        let workspace = tempdir().unwrap();
+        let body = r#"{"overview": "o", "usage": "u", "comment_check": null}"#;
+
+        let seen: Mutex<Vec<(usize, usize, usize)>> = Mutex::new(Vec::new());
+        let llm = RecordingLlmProvider::new(body);
+        describe_objects_with_progress(
+            &store,
+            &llm,
+            DescriptionScope::Modules,
+            workspace.path(),
+            &RedactionConfig::default(),
+            &|p| {
+                seen.lock()
+                    .unwrap()
+                    .push((p.done, p.total, p.skipped_cached))
+            },
+        )
+        .await
+        .unwrap();
+
+        let first = seen.lock().unwrap().clone();
+        assert_eq!(first.len(), 1, "one report per visited module");
+        assert_eq!(first[0].0, 1, "done counts up");
+        assert_eq!(first[0].1, 1, "total is what this scope will visit");
+        assert_eq!(first[0].2, 0, "nothing cached on the first pass");
+
+        // Second pass over the now-described object: the LLM is never called, but progress must
+        // still advance.
+        let seen2: Mutex<Vec<(usize, usize, usize)>> = Mutex::new(Vec::new());
+        let llm2 = RecordingLlmProvider::new(body);
+        let stats = describe_objects_with_progress(
+            &store,
+            &llm2,
+            DescriptionScope::Modules,
+            workspace.path(),
+            &RedactionConfig::default(),
+            &|p| {
+                seen2
+                    .lock()
+                    .unwrap()
+                    .push((p.done, p.total, p.skipped_cached))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stats.skipped_cached, 1, "second pass must hit the cache");
+        assert_eq!(stats.modules_described, 0, "and make no LLM call");
+        let second = seen2.lock().unwrap().clone();
+        assert_eq!(
+            second,
+            vec![(1, 1, 1)],
+            "a cache-skip must still report progress — a counter frozen through cached work is \
+             indistinguishable from a hang"
+        );
+        let _ = module;
+    }
+
+    /// The no-op delegation must not change what `describe_objects` does.
+    #[tokio::test]
+    async fn describe_objects_still_behaves_without_a_progress_callback() {
+        let (store, _dir) = temp_store();
+        let (_file, module, _symbol, graph) = module_with_symbol();
+        seed(&store, graph);
+        let llm =
+            RecordingLlmProvider::new(r#"{"overview": "o", "usage": "u", "comment_check": null}"#);
+        let workspace = tempdir().unwrap();
+
+        let stats = describe_objects(
+            &store,
+            &llm,
+            DescriptionScope::Modules,
+            workspace.path(),
+            &RedactionConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stats.modules_described, 1);
+        assert_eq!(
+            store.get_object(&module.id).unwrap().unwrap().properties["ai_overview"],
+            "o"
+        );
     }
 
     #[tokio::test]

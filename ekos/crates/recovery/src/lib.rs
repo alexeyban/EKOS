@@ -68,7 +68,8 @@ pub use github_analyzer::GitHubAnalyzerPass;
 pub use javascript_analyzer::{JavaScriptAnalyzerPass, JavaScriptStats};
 pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MockLlmProvider};
 pub use llm_description::{
-    DescriptionScope, DescriptionStats, describe_objects, describe_project, estimate_call_counts,
+    DescriptionProgress, DescriptionScope, DescriptionStats, describe_objects,
+    describe_objects_with_progress, describe_project, estimate_call_counts,
 };
 pub use llm_json::strip_json_fences;
 pub use local_docs_analyzer::LocalDocAnalyzerPass;
