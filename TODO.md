@@ -3045,9 +3045,22 @@ are excluded — see the full exclusion list in the planning history if needed.
   columns), never fabricated; unresolvable `ref()`s (cross-package, into gitignored
   `dbt_packages/`) are skipped, not guessed at.
 
+- [x] **MCP Streamable HTTP transport** — RFC 0143 (2026-09-10). `ekos mcp serve --http <addr>`
+  serves MCP's HTTP transport at one `POST /mcp` endpoint, for the many clients (VS Code / Copilot
+  agent mode, Visual Studio 2022, `mcp-remote`) that only take a URL. No SSE — EKOS has no
+  server-initiated messages, so every POST answers `application/json` and `GET /mcp` is `405`,
+  which the spec explicitly permits. `--http`/`--tcp` mutually exclusive; each replaces stdio. One
+  worker `std::thread` owns the non-`Send` `StoreCache` and serializes all requests over a
+  `tokio::sync::mpsc`/`oneshot` bridge — keeps the RFC 0097/0114 caches alive across requests
+  without needing `KnowledgeStore: Send`. `Authorization: Bearer` auth (the existing token, flag
+  renamed `--tcp-token-file` → `--token-file` with the old name kept as an alias); `Origin`
+  validation with `--http-allow-origin`. Verified end to end with `curl` against the real
+  `analytics` workspace (10,423-object ledger). Reported live: a user's `mcp.json` HTTP endpoint
+  against the RFC 0115 TCP socket silently exposed no tools.
 - [ ] **MCP / connector infrastructure**: MCP auth + multi-workspace routing, and MCP resources/prompts
-  capabilities beyond tools-only (RFC 0013); an HTTP/SSE transport as a *second* transport option
-  alongside RFC 0115's plain-TCP one, if a browser-based client ever needs it; generic
+  capabilities beyond tools-only (RFC 0013); server-initiated messages / an SSE `GET /mcp` stream
+  on top of RFC 0143's HTTP transport, if a future feature ever needs server push (progress on a
+  long `tools/call`, resource subscriptions); generic
   `ScanContext`/`ekos.toml [connectors.X]` config plumbing — confirmed missing for every
   connector, not just crypto (RFC 0017); dynamic/runtime plugin loading (`.so`/WASM) — RFC 0031
   itself calls this "a known limitation, not solved here" (RFC 0006, RFC 0031).

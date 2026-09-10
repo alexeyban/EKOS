@@ -584,7 +584,8 @@ correct), but live-question answer quality is unverified pending a real API key 
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
-server over stdio (RFC 0013) — tools: `ekos_search` (`limit` param — RFC 0124; `mode`
+server over stdio (RFC 0013), a raw TCP socket (`--tcp`, RFC 0115), or Streamable HTTP
+(`--http`, RFC 0143) — tools: `ekos_search` (`limit` param — RFC 0124; `mode`
 `lexical`/`vector`/`hybrid` for semantic matching, plus `arms_run` in the response — RFC 0125),
 `ekos_query` /
 `ekos_retrieve` (compiled fact + graph answers and the inspectable query plan / evidence set, no
@@ -652,17 +653,18 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 A one-line JSON-RPC response (`"serverInfo":{"name":"ekos", ...}`) confirms the server is up and
 speaking the protocol correctly.
 
-**Optional bearer-token auth (RFC 0128).** `--tcp-token-file <path>` (or, if that flag is absent,
-the `EKOS_MCP_TOKEN` env var) requires every TCP connection's **first** message to be an
-`initialize` request carrying a matching `params._meta.token` — anything else gets a single
-`-32001 unauthorized` and the socket closes before any tool is reachable. The comparison is
-constant-time. Token-less `--tcp` is unchanged (RFC 0115 back-compat); stdio is never gated. This
-is a plaintext-socket bearer token — defence against a second local process connecting casually,
-**not** against a network attacker who can read the wire; use the SSH tunnel below for that.
+**Optional bearer-token auth (RFC 0128).** `--token-file <path>` (or, if that flag is absent,
+the `EKOS_MCP_TOKEN` env var; `--tcp-token-file` is a back-compat alias) requires every TCP
+connection's **first** message to be an `initialize` request carrying a matching
+`params._meta.token` — anything else gets a single `-32001 unauthorized` and the socket closes
+before any tool is reachable. The comparison is constant-time. Token-less `--tcp` is unchanged
+(RFC 0115 back-compat); stdio is never gated. This is a plaintext-socket bearer token — defence
+against a second local process connecting casually, **not** against a network attacker who can
+read the wire; use the SSH tunnel below for that.
 
 ```bash
 ekos mcp serve --workspace /path/to/workspace --tcp 127.0.0.1:7331 \
-  --tcp-token-file /run/secrets/ekos-mcp-token
+  --token-file /run/secrets/ekos-mcp-token
 ```
 
 **Remote — a client on a different machine.** There is **no TLS** on this transport, and auth is
@@ -688,6 +690,45 @@ plus the two write-capable tools, to anyone who can reach it. Two safe ways to d
 
 Both `EKOS_WORKSPACE`/`EKOS_CONFIG` env vars and `--config` still apply the same way they do for
 stdio mode; `--tcp` only changes how clients connect, not which workspace is served.
+
+#### HTTP transport — for clients that only take a URL (RFC 0143)
+
+Many MCP clients (VS Code / GitHub Copilot agent mode, Visual Studio 2022, `mcp-remote`) only
+offer *stdio* (spawn a command) or *Streamable HTTP* (a URL) — they cannot speak the raw TCP
+socket above. `--http <addr>` serves MCP's HTTP transport at one endpoint, `POST /mcp`:
+
+```bash
+ekos mcp serve --workspace /path/to/workspace --http 127.0.0.1:7331
+```
+
+`--http` and `--tcp` are mutually exclusive (each *replaces* stdio). EKOS has no server-initiated
+messages, so there is **no SSE**: every `POST` answers `application/json` directly and `GET /mcp`
+returns `405`. Auth is the same token (`--token-file` / `EKOS_MCP_TOKEN`), presented over HTTP as
+an `Authorization: Bearer <token>` header checked on every request. The `Origin` header, when
+present, must be loopback or an explicit `--http-allow-origin <origin>` (DNS-rebinding defence);
+a request with no `Origin` (the normal case for editors) is allowed. All HTTP requests are
+serialized through one worker thread — a slow `tools/call` blocks the next request, matching the
+stdio loop.
+
+VS Code (`.vscode/mcp.json`) or Visual Studio (`.mcp.json`):
+
+```json
+{
+  "servers": {
+    "ekos": { "type": "http", "url": "http://127.0.0.1:7331/mcp" }
+  }
+}
+```
+
+Verify it is answering:
+
+```bash
+curl -s http://127.0.0.1:7331/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+```
+
+For a remote client, tunnel it the same way as the TCP transport (`ssh -N -L 7331:127.0.0.1:7331 …`);
+there is no TLS on `--http` — terminate it at a reverse proxy if a deployment needs it.
 
 ### Marketing agent (RFC 0030)
 

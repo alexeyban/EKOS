@@ -882,6 +882,7 @@ name = "ekos"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "chrono",
  "clap",
  "dotenvy",
@@ -917,6 +918,7 @@ dependencies = [
  "ekos-segment-backend",
  "ekos-semantic",
  "ekos-simulation",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "serde_yaml",

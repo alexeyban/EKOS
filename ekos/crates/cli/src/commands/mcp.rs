@@ -1,18 +1,23 @@
-//! MCP (Model Context Protocol) server over stdio or TCP — RFC 0013 / RFC 0115.
+//! MCP (Model Context Protocol) server over stdio, TCP, or Streamable HTTP — RFC 0013 / RFC 0115
+//! / RFC 0143.
 //!
 //! Speaks newline-delimited JSON-RPC 2.0 and exposes the read-only Runtime as MCP tools
 //! (`ekos_search`, `ekos_query`/`ekos_retrieve` — RFC 0124, `ekos_ekl`, `ekos_neighborhood`,
 //! `ekos_state`, `ekos_dependents`, `ekos_impact`, `ekos_graph_export` — RFC 0127, `ekos_diff`,
-//! `ekos_status`, `ekos_transformation_explain`, `ekos_transformation_diff` — RFC 0028). Two transports, one
-//! dispatch core:
+//! `ekos_status`, `ekos_transformation_explain`, `ekos_transformation_diff` — RFC 0028). Three
+//! transports, one dispatch core (`handle_message`):
 //!
 //! - **stdio** (default, unchanged since RFC 0013) — one client, spawned by an agent host that
 //!   owns the process's stdin/stdout itself (`claude mcp add ekos -- ekos mcp serve`). Stdout
 //!   carries protocol frames only; logging must go to stderr (see `init_logging_stderr`).
 //! - **TCP** (`--tcp <addr>`, RFC 0115) — a long-lived server multiple MCP-speaking tools can
 //!   connect to at once (Claude Code, PyCharm's AI chat, anything else), sharing one cached
-//!   read-only ledger handle instead of each cold-opening their own. Explicitly unauthenticated —
-//!   see the RFC's Security posture section; bind to a trusted network or `127.0.0.1` only.
+//!   read-only ledger handle instead of each cold-opening their own. Explicitly unauthenticated
+//!   unless a token is set — see the RFC's Security posture section; bind `127.0.0.1` only.
+//! - **Streamable HTTP** (`--http <addr>`, RFC 0143) — one `POST /mcp` endpoint speaking MCP's
+//!   HTTP transport, for clients that only offer a URL (VS Code / Copilot agent mode, Visual
+//!   Studio, `mcp-remote`). No SSE: EKOS has no server-initiated messages, so every POST answers
+//!   `application/json` and `GET` is `405`. `Authorization: Bearer` auth, `Origin` validation.
 //!
 //! The ledger is opened per `tools/call`, so the server starts before a first
 //! `ekos build` and returns a readable tool error until a ledger exists.
@@ -20,6 +25,13 @@
 use super::query_log;
 use super::store::{facts_dir, open_store, open_store_read_only, uses_fact_engine};
 use anyhow::{Context, Result};
+use axum::{
+    Router,
+    extract::State,
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
+    routing::post,
+};
 use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
@@ -35,6 +47,7 @@ use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// RFC 0097 — a per-server-process cache over a **read-only**-opened
@@ -148,17 +161,25 @@ fn store_fingerprint(root: &Path) -> Option<SystemTime> {
         .max()
 }
 
-/// Entry point for `ekos mcp serve`. `tcp`, when given, runs the RFC 0115 TCP transport at that
-/// address instead; `None` keeps the original RFC 0013 stdio-only behavior completely unchanged.
+/// Entry point for `ekos mcp serve`. Exactly one transport runs:
+/// - `tcp` given → RFC 0115 raw NDJSON/TCP transport;
+/// - `http` given → RFC 0143 Streamable HTTP transport (`clap` guarantees not both);
+/// - neither → the original RFC 0013 stdio-only behavior, completely unchanged.
 pub fn run(
     config: &EkosConfig,
     workspace: &Path,
     tcp: Option<&str>,
+    http: Option<&str>,
+    allow_origins: &[String],
     token: Option<String>,
 ) -> Result<()> {
-    match tcp {
-        Some(addr) => serve_tcp(config, workspace, addr, token),
-        None => {
+    match (tcp, http) {
+        (Some(_), Some(_)) => {
+            anyhow::bail!("`--tcp` and `--http` are mutually exclusive — pick one transport")
+        }
+        (Some(addr), None) => serve_tcp(config, workspace, addr, token),
+        (None, Some(addr)) => serve_http(config, workspace, addr, token, allow_origins),
+        (None, None) => {
             // stdio is a private pipe owned by the spawning host — never gated (RFC 0128 §1.1).
             let stdin = std::io::stdin();
             let stdout = std::io::stdout();
@@ -334,6 +355,223 @@ fn serve_tcp(
         });
     }
     Ok(())
+}
+
+// ── RFC 0143: MCP over Streamable HTTP ────────────────────────────────────────────────────────
+
+/// One unit of work for the MCP worker thread: a raw JSON-RPC line in, zero-or-one response line
+/// back over the `oneshot`.
+type McpJob = (String, tokio::sync::oneshot::Sender<Option<String>>);
+
+/// Shared state for the HTTP handlers. `Clone` (axum requirement) is cheap — a channel sender and
+/// two `Arc`s.
+#[derive(Clone)]
+struct HttpState {
+    /// Forwards each request line to the single worker thread that owns the (non-`Send`)
+    /// `StoreCache`. `tokio::sync::mpsc` specifically because axum state must be `Send + Sync` and
+    /// `std::sync::mpsc::Sender` is `!Sync`.
+    jobs: tokio::sync::mpsc::UnboundedSender<McpJob>,
+    /// `Some` → every request must carry `Authorization: Bearer <token>` (RFC 0128, extended to
+    /// HTTP). `None` → unauthenticated, same as a token-less `--tcp`.
+    token: Option<Arc<str>>,
+    /// Exact-match `Origin` values allowed on top of loopback (`--http-allow-origin`, repeatable).
+    allow_origins: Arc<[String]>,
+}
+
+/// RFC 0143. Binds an `axum` app on `addr` serving one route — `POST /mcp` — until killed. A
+/// single dedicated OS thread owns the `StoreCache` (`KnowledgeStore` is not `Send`, RFC 0115);
+/// requests are forwarded to it over a channel and serialized there. That matches
+/// `handle_message`'s blocking, one-message-at-a-time design and keeps the RFC 0097 store cache
+/// and RFC 0114 result cache alive across requests (a per-request `spawn_blocking` with a fresh
+/// `StoreCache` would defeat both). A slow `tools/call` blocks the next request for its duration
+/// — the same property the stdio loop has, acceptable for a single-user editor session.
+fn serve_http(
+    config: &EkosConfig,
+    workspace: &Path,
+    addr: &str,
+    token: Option<String>,
+    allow_origins: &[String],
+) -> Result<()> {
+    let socket: std::net::SocketAddr = addr
+        .parse()
+        .with_context(|| format!("parsing --http address {addr}"))?;
+
+    let app = build_http_router(config, workspace, token.clone(), allow_origins.to_vec());
+
+    let loopback = socket.ip().is_loopback();
+    let auth_note = if token.is_some() {
+        "bearer-token auth required (RFC 0128)"
+    } else if loopback {
+        "unauthenticated — loopback only"
+    } else {
+        "UNAUTHENTICATED on a non-loopback address — set --token-file / EKOS_MCP_TOKEN or bind 127.0.0.1"
+    };
+    if token.is_none() && !loopback {
+        tracing::warn!(%socket, "MCP HTTP server: {auth_note}");
+    }
+    tracing::info!(%socket, "MCP HTTP server listening — RFC 0143, {auth_note}");
+    eprintln!("ekos mcp serve: listening on http://{socket}/mcp ({auth_note})");
+
+    let serve = async move {
+        let listener = tokio::net::TcpListener::bind(socket)
+            .await
+            .with_context(|| format!("binding MCP HTTP listener on {socket}"))?;
+        axum::serve(listener, app).await?;
+        anyhow::Ok(())
+    };
+
+    // `mcp::run` is synchronous but is called from inside the CLI's `#[tokio::main]` runtime —
+    // the same `block_in_place` bridge `run_clickhouse_query_blocking` uses for the identical
+    // "already inside a runtime" situation.
+    match tokio::runtime::Handle::try_current() {
+        Ok(h) => tokio::task::block_in_place(|| h.block_on(serve)),
+        Err(_) => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(serve),
+    }
+}
+
+/// The testable seam: spawns the worker thread and returns the wired `Router` without binding a
+/// socket. `serve_http` binds and serves it; tests bind it on `127.0.0.1:0`.
+fn build_http_router(
+    config: &EkosConfig,
+    workspace: &Path,
+    token: Option<String>,
+    allow_origins: Vec<String>,
+) -> Router {
+    let (jobs, mut rx) = tokio::sync::mpsc::unbounded_channel::<McpJob>();
+    {
+        let config = config.clone();
+        let workspace = workspace.to_path_buf();
+        std::thread::spawn(move || {
+            let mut cache = StoreCache::new();
+            while let Some((line, reply)) = rx.blocking_recv() {
+                let response = handle_message(&config, &workspace, &line, &mut cache);
+                let _ = reply.send(response);
+            }
+        });
+    }
+
+    let state = HttpState {
+        jobs,
+        token: token.map(|t| Arc::from(t.as_str())),
+        allow_origins: Arc::from(allow_origins),
+    };
+
+    Router::new()
+        .route("/mcp", post(http_post).get(http_get).delete(http_delete))
+        .with_state(state)
+}
+
+/// `true` iff `origin` is loopback or one of the explicit `--http-allow-origin` values.
+/// DNS-rebinding defence (an MCP spec requirement). A *missing* `Origin` header is handled by the
+/// caller — the common case for editors and curl — not here.
+fn origin_allowed(origin: &str, extra: &[String]) -> bool {
+    if extra.iter().any(|o| o == origin) {
+        return true;
+    }
+    let rest = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+        .unwrap_or(origin);
+    let hostport = rest.split('/').next().unwrap_or(rest); // drop any path
+    let host = match hostport.strip_prefix('[') {
+        Some(after) => after.split(']').next().unwrap_or(after), // "[::1]" / "[::1]:5173"
+        None => hostport.rsplit_once(':').map_or(hostport, |(h, _)| h), // "host" / "host:port"
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+async fn http_post(State(st): State<HttpState>, headers: HeaderMap, body: String) -> Response {
+    // 1. Origin validation — only when the header is present (browsers send it; editors don't).
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
+        && !origin_allowed(origin, &st.allow_origins)
+    {
+        return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
+
+    // 2. Auth — checked on every request, not just `initialize` (RFC 0128 extended to HTTP).
+    if let Some(expected) = &st.token {
+        let presented = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        if !presented.is_some_and(|t| ct_eq(t.as_bytes(), expected.as_bytes())) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Bearer")],
+                error_response(Value::Null, -32001, "unauthorized"),
+            )
+                .into_response();
+        }
+    }
+
+    // 3. Parse. Malformed JSON → a JSON-RPC parse error inside a 200, same as stdio (not HTTP 400).
+    let parsed: Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return json_body(error_response(
+                Value::Null,
+                -32700,
+                &format!("parse error: {e}"),
+            ));
+        }
+    };
+
+    // 4. Dispatch. A top-level array is a pre-2025-06-18 JSON-RPC batch — handle each in order.
+    let messages: Vec<Value> = match parsed {
+        Value::Array(items) => items,
+        other => vec![other],
+    };
+    let mut responses: Vec<String> = Vec::new();
+    for msg in &messages {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if st.jobs.send((msg.to_string(), tx)).is_err() {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "mcp worker unavailable").into_response();
+        }
+        match rx.await {
+            Ok(Some(line)) => responses.push(line),
+            Ok(None) => {} // notification — never answered
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "mcp worker dropped the request",
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    match responses.len() {
+        0 => StatusCode::ACCEPTED.into_response(), // all notifications
+        1 if messages.len() == 1 => json_body(responses.pop().unwrap()),
+        _ => json_body(format!("[{}]", responses.join(","))),
+    }
+}
+
+/// MCP spec: `405` at the endpoint is the defined signal for "no server-initiated SSE stream
+/// here". EKOS has no server-initiated messages.
+async fn http_get() -> Response {
+    (
+        StatusCode::METHOD_NOT_ALLOWED,
+        [(header::ALLOW, "POST")],
+        "this MCP server has no server-initiated stream; use POST",
+    )
+        .into_response()
+}
+
+async fn http_delete() -> Response {
+    (
+        StatusCode::METHOD_NOT_ALLOWED,
+        [(header::ALLOW, "POST")],
+        "this MCP server is stateless; there is no session to delete",
+    )
+        .into_response()
+}
+
+fn json_body(line: String) -> Response {
+    ([(header::CONTENT_TYPE, "application/json")], line).into_response()
 }
 
 /// Dispatch one raw JSON-RPC line. Returns `None` for notifications (which
@@ -3304,5 +3542,230 @@ mod tests {
         );
         assert!(resp_a["result"]["tools"].is_array());
         assert!(resp_b["result"]["tools"].is_array());
+    }
+
+    // ── RFC 0143: MCP over Streamable HTTP ────────────────────────────────────────────────
+
+    /// Bind `build_http_router` on an ephemeral loopback port. Returns the `/mcp` URL and the
+    /// `TempDir` the caller must keep alive for the server's lifetime.
+    async fn spawn_http(
+        token: Option<&str>,
+        allow_origins: Vec<String>,
+    ) -> (String, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = build_http_router(
+            &EkosConfig::default(),
+            tmp.path(),
+            token.map(str::to_string),
+            allow_origins,
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (format!("http://{addr}/mcp"), tmp)
+    }
+
+    fn init_msg() -> Value {
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18" } })
+    }
+
+    #[tokio::test]
+    async fn http_initialize_returns_an_application_json_response() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let res = reqwest::Client::new()
+            .post(url.as_str())
+            .json(&init_msg())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        assert!(
+            res.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("application/json")
+        );
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["result"]["protocolVersion"], "2025-06-18");
+        assert_eq!(body["result"]["serverInfo"]["name"], "ekos");
+    }
+
+    #[tokio::test]
+    async fn http_tools_list_returns_the_tool_array() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let body: Value = reqwest::Client::new()
+            .post(url.as_str())
+            .json(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(
+            body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["name"] == "ekos_status")
+        );
+    }
+
+    #[tokio::test]
+    async fn http_a_notification_gets_202_and_an_empty_body() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let res = reqwest::Client::new()
+            .post(url.as_str())
+            .json(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 202);
+        assert!(res.bytes().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn http_malformed_json_is_a_jsonrpc_parse_error_inside_a_200() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let res = reqwest::Client::new()
+            .post(url.as_str())
+            .header("content-type", "application/json")
+            .body("{ not json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["error"]["code"], -32700);
+    }
+
+    #[tokio::test]
+    async fn http_get_and_delete_are_405() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let c = reqwest::Client::new();
+        assert_eq!(c.get(url.as_str()).send().await.unwrap().status(), 405);
+        assert_eq!(c.delete(url.as_str()).send().await.unwrap().status(), 405);
+    }
+
+    #[tokio::test]
+    async fn http_bearer_token_is_enforced_on_every_request() {
+        let (url, _tmp) = spawn_http(Some("s3cr3t"), vec![]).await;
+        let c = reqwest::Client::new();
+        assert_eq!(
+            c.post(url.as_str())
+                .json(&init_msg())
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401,
+            "no Authorization header"
+        );
+        assert_eq!(
+            c.post(url.as_str())
+                .bearer_auth("wrong")
+                .json(&init_msg())
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401,
+            "wrong token"
+        );
+        assert_eq!(
+            c.post(url.as_str())
+                .bearer_auth("s3cr3t")
+                .json(&init_msg())
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200,
+            "correct token"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_origin_header_is_validated() {
+        let (url, _tmp) = spawn_http(None, vec!["https://good.example".to_string()]).await;
+        let c = reqwest::Client::new();
+        let status = |o: Option<&'static str>| {
+            let (c, url) = (c.clone(), url.clone());
+            async move {
+                let mut r = c.post(url.as_str()).json(&init_msg());
+                if let Some(o) = o {
+                    r = r.header("origin", o);
+                }
+                r.send().await.unwrap().status().as_u16()
+            }
+        };
+        assert_eq!(status(None).await, 200, "no Origin header — allowed");
+        assert_eq!(
+            status(Some("http://localhost:5173")).await,
+            200,
+            "loopback Origin — allowed"
+        );
+        assert_eq!(
+            status(Some("https://evil.example")).await,
+            403,
+            "foreign Origin — rejected"
+        );
+        assert_eq!(
+            status(Some("https://good.example")).await,
+            200,
+            "explicitly allowed Origin"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_tools_call_round_trips_a_real_ledger_read() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let tmp = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let facts = facts_dir(&config, tmp.path());
+        {
+            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
+            ledger
+                .append_object(&KirObject::new("orders", ObjectKind::Table))
+                .unwrap();
+        }
+        let app = build_http_router(&config, tmp.path(), None, vec![]);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let body: Value = reqwest::Client::new()
+            .post(format!("http://{addr}/mcp"))
+            .json(&json!({
+                "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                "params": { "name": "ekos_status", "arguments": {} }
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(body["id"], 9);
+        assert!(
+            body.get("result").is_some(),
+            "expected a tools/call result, got {body}"
+        );
+    }
+
+    #[test]
+    fn origin_allowed_covers_the_shapes_that_matter() {
+        let extra = vec!["https://good.example".to_string()];
+        assert!(origin_allowed("http://localhost", &extra));
+        assert!(origin_allowed("http://localhost:5173", &extra));
+        assert!(origin_allowed("http://127.0.0.1:8000", &extra));
+        assert!(origin_allowed("http://[::1]:5173", &extra));
+        assert!(origin_allowed("https://good.example", &extra));
+        assert!(!origin_allowed("https://evil.example", &extra));
+        assert!(
+            !origin_allowed("http://localhost.evil.example", &extra),
+            "a subdomain of localhost is not localhost"
+        );
+        assert!(!origin_allowed("http://10.0.0.5", &extra));
     }
 }

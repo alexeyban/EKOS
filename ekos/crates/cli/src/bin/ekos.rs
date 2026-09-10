@@ -494,20 +494,30 @@ enum ArtifactCommands {
 
 #[derive(Subcommand)]
 enum McpCommands {
-    /// Serve MCP over stdio (newline-delimited JSON-RPC 2.0), or optionally also over TCP
+    /// Serve MCP over stdio (default), or over TCP (`--tcp`) or Streamable HTTP (`--http`)
     Serve {
         /// Workspace directory containing .ekos/ (default: current directory)
         #[arg(long, value_name = "DIR")]
         workspace: Option<PathBuf>,
-        /// Also/instead serve over TCP at this address (RFC 0115), e.g. 127.0.0.1:7331 —
-        /// bind a trusted network/loopback only
+        /// Serve over raw NDJSON/TCP at this address instead of stdio (RFC 0115),
+        /// e.g. 127.0.0.1:7331 — bind loopback / a trusted network only
         #[arg(long, value_name = "ADDR")]
         tcp: Option<String>,
-        /// Require a bearer token on every TCP connection (RFC 0128): the first message must be an
-        /// `initialize` request carrying a matching `params._meta.token`. Read from this file
-        /// (whitespace-trimmed) or, if absent, the `EKOS_MCP_TOKEN` env var. No effect on stdio.
-        #[arg(long, value_name = "FILE")]
-        tcp_token_file: Option<PathBuf>,
+        /// Serve MCP over Streamable HTTP at this address instead of stdio (RFC 0143) — one
+        /// `POST /mcp` endpoint, for clients that take a URL (VS Code / Copilot, Visual Studio).
+        /// Bind loopback / a trusted network only
+        #[arg(long, value_name = "ADDR", conflicts_with = "tcp")]
+        http: Option<String>,
+        /// Extra `Origin` value to allow on `--http` beyond loopback (repeatable)
+        #[arg(long = "http-allow-origin", value_name = "ORIGIN", requires = "http")]
+        http_allow_origin: Vec<String>,
+        /// Require a bearer token on every `--tcp` / `--http` connection (RFC 0128). For `--tcp`
+        /// the first message must be an `initialize` carrying a matching `params._meta.token`;
+        /// for `--http` it is an `Authorization: Bearer <token>` header on every request. Read
+        /// from this file (whitespace-trimmed) or, if absent, the `EKOS_MCP_TOKEN` env var. No
+        /// effect on stdio.
+        #[arg(long, value_name = "FILE", alias = "tcp-token-file")]
+        token_file: Option<PathBuf>,
     },
 }
 
@@ -814,16 +824,16 @@ async fn main() -> Result<()> {
             McpCommands::Serve {
                 workspace,
                 tcp,
-                tcp_token_file,
+                http,
+                http_allow_origin,
+                token_file,
             } => {
                 let workspace = workspace.or(env_workspace).unwrap_or_else(|| cwd.clone());
-                // RFC 0128 §1.1: `--tcp-token-file` wins over `EKOS_MCP_TOKEN`; neither → no auth.
-                let token = match tcp_token_file {
+                // RFC 0128 §1.1: `--token-file` wins over `EKOS_MCP_TOKEN`; neither → no auth.
+                let token = match token_file {
                     Some(path) => Some(
                         std::fs::read_to_string(&path)
-                            .with_context(|| {
-                                format!("reading --tcp-token-file {}", path.display())
-                            })?
+                            .with_context(|| format!("reading --token-file {}", path.display()))?
                             .trim()
                             .to_string(),
                     ),
@@ -831,7 +841,14 @@ async fn main() -> Result<()> {
                         .ok()
                         .filter(|t| !t.is_empty()),
                 };
-                ekos::commands::mcp::run(&config, &workspace, tcp.as_deref(), token)
+                ekos::commands::mcp::run(
+                    &config,
+                    &workspace,
+                    tcp.as_deref(),
+                    http.as_deref(),
+                    &http_allow_origin,
+                    token,
+                )
             }
         },
         Commands::Artifact { subcommand } => match subcommand {

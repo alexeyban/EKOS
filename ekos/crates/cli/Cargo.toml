@@ -55,6 +55,7 @@ ekos-plugin-javascript = { path = "../../plugins/javascript" }
 clap.workspace = true
 uuid.workspace = true
 tokio.workspace = true
+axum.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
@@ -68,3 +69,4 @@ dotenvy.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+reqwest = { workspace = true }
