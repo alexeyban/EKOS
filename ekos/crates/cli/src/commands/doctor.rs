@@ -130,6 +130,28 @@ fn build_doctor_json(checks: &[Check]) -> DoctorJson {
     }
 }
 
+/// `rustc` is a **build-time** dependency, never a runtime one — so its absence is reported, not
+/// failed.
+///
+/// If `ekos doctor` is running at all, the binary already exists; nothing in the entire codebase
+/// shells out to `rustc` or `cargo` outside of this very check. Failing here made `doctor` report
+/// a perfectly healthy workspace as broken in the two most normal deployments: the web console's
+/// container (a `python:3.12-slim` image with the `ekos` binary bind-mounted, no toolchain) and
+/// anyone running a prebuilt binary rather than building from source. It also poisoned
+/// `doctor --json`'s `ok` field, which the console reads as its verdict.
+///
+/// Same reasoning as [`llm_provider_check`]'s not-configured case right below: an absent optional
+/// thing is a fact to state, not a failure to raise.
+fn rust_toolchain_check(rust_version: Option<String>) -> Check {
+    match rust_version {
+        Some(v) => Check::ok("Rust toolchain", v),
+        None => Check::ok(
+            "Rust toolchain",
+            "not installed (only needed to build EKOS from source)",
+        ),
+    }
+}
+
 fn collect_checks(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Vec<Check> {
     let mut checks = Vec::new();
 
@@ -141,10 +163,7 @@ fn collect_checks(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Vec<Ch
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string());
 
-    match rust_version {
-        Some(v) => checks.push(Check::ok("Rust toolchain", v)),
-        None => checks.push(Check::fail("Rust toolchain", "rustc not found in PATH")),
-    }
+    checks.push(rust_toolchain_check(rust_version));
 
     // Workspace root
     checks.push(Check::ok("Working directory", cwd.display().to_string()));
@@ -230,6 +249,44 @@ mod tests {
         let check = llm_provider_check(Some("anthropic"), Some("MY_KEY"), |var| var == "MY_KEY");
         assert!(check.ok);
         assert!(check.detail.contains("MY_KEY"));
+    }
+
+    /// Reported live from the web console's own Doctor page:
+    /// `[FAIL] Rust toolchain  rustc not found in PATH`.
+    ///
+    /// The console runs `ekos` inside a `python:3.12-slim` container with the binary
+    /// bind-mounted, so there is no toolchain and there does not need to be one — a prebuilt
+    /// binary never invokes `rustc`. Failing made a healthy workspace look broken and flipped
+    /// `doctor --json`'s `ok` field, which the console reads as its verdict.
+    #[test]
+    fn a_missing_rust_toolchain_is_reported_not_failed() {
+        let check = rust_toolchain_check(None);
+        assert!(
+            check.ok,
+            "a prebuilt binary needs no compiler — this must not fail a healthy workspace"
+        );
+        assert!(
+            check.detail.contains("build EKOS from source"),
+            "the detail must say why it is absent-but-fine, got: {}",
+            check.detail
+        );
+
+        // The whole point of `doctor --json` for a machine consumer is its `ok` verdict.
+        let out = build_doctor_json(&[rust_toolchain_check(None)]);
+        assert!(
+            out.ok,
+            "a missing toolchain must not poison the JSON verdict"
+        );
+    }
+
+    #[test]
+    fn a_present_rust_toolchain_still_reports_its_version() {
+        let check = rust_toolchain_check(Some("rustc 1.98.0 (88d9e12ae 2026-08-18)".to_string()));
+        assert!(check.ok);
+        assert!(
+            check.detail.contains("1.98.0"),
+            "the version is useful information and must survive"
+        );
     }
 
     #[test]

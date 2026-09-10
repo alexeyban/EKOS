@@ -1966,7 +1966,6 @@ mod tests {
         assert_eq!(reader.get_object(&id).unwrap().unwrap().name, "orders");
     }
 
-    #[test]
     /// A read-only open must not write to the workspace at all.
     ///
     /// Reported live: every stats endpoint of the web console failed with
@@ -2024,6 +2023,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn open_read_only_rejects_every_write_method() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("factledger");
