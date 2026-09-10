@@ -1,7 +1,7 @@
 # Devlog 175 — the web console met a real read-only container
 
 **Date:** 2026-09-10
-**Commits:** `216cae9`, `903b93d`, plus this session's `doctor`/`fact_ledger` fix
+**Commits:** `216cae9`, `903b93d`, plus this session's `doctor`/`fact_ledger`/`Layout` fix
 **Branch:** main (local)
 
 ---
@@ -88,6 +88,33 @@ tests are back to 5 (were 4). The identical slip was in this session's own in-pr
 
 ---
 
+## This session — "sign out" did nothing in the console
+
+### Problem
+
+Clicking **sign out** in the console left you signed in. The button's handler did the right
+things server-side — `POST /api/auth/logout` pops `session["user"]`, Starlette sends the
+cookie-deletion header — and the `me` query refetched and `/api/auth/me` correctly returned
+`401`. But `Layout` decided the auth state from `me.data` alone, and React Query v5 **keeps the
+last successful `data` on a failed refetch** (it sets `error` alongside, it does not clear
+`data`). So `me.data` still held the old `{mode, email, role}` and the console stayed on the
+authenticated view. The `Layout` component had no test.
+
+### Fix (`web/ui/src/Layout.tsx`)
+
+```ts
+const unauthorized = me.error instanceof ApiError && me.error.status === 401;
+const identity = unauthorized ? undefined : me.data;
+```
+
+A **401** is the definitive not-signed-in signal and collapses `identity` to `undefined` →
+the sign-in screen. Any *other* error (500, network blip) is left as-is: the stale `me.data`
+keeps a still-authenticated operator in place rather than bouncing them to sign-in on a
+transient failure. The logout handler now `await`s `qc.invalidateQueries()` so the `me` refetch
+(and its 401) lands before the click settles. New `web/ui/src/Layout.test.tsx` covers it.
+
+---
+
 ## Knowledge Captured
 
 - **`ekos doctor` runs in environments that never built EKOS.** The console ships the binary into
@@ -106,6 +133,15 @@ tests are back to 5 (were 4). The identical slip was in this session's own in-pr
 - **docker-compose applies `environment:` after `env_file:`.** A hardcoded `${VAR:-default}` in
   `environment:` silently overrides the same key from an `env_file`, so adding the file changes
   nothing until the `environment:` entry is also removed.
+- **React Query v5 keeps `data` on a failed refetch.** A query that succeeded once, then errors
+  on refetch, has *both* `data` (stale, last-good) and `error` set. Any component that gates on
+  `query.data` alone will not react to the failure — for auth state that means "sign out" or a
+  session expiry does nothing visible. Gate on the error too (here: specifically a 401).
+- **The Compose `ui` service writes root-owned files into the host tree.** `image: node:20-slim`
+  runs `npm ci` as root over the `./ui` bind mount, leaving `node_modules/.vite/` (and `.deps`)
+  owned by root — after which a host-side `vitest`/`vite` run fails with `EACCES` on the cache
+  dir. Workaround for a host run: `--config` a throwaway vite config with `cacheDir` pointed
+  outside the tree. Worth a proper fix (a named volume for `node_modules`, or a non-root user).
 
 ---
 
@@ -115,3 +151,5 @@ tests are back to 5 (were 4). The identical slip was in this session's own in-pr
 |---|---|
 | `ekos/crates/cli/src/commands/doctor.rs` | New `rust_toolchain_check`; a missing toolchain is `ok`, not `fail`; two tests |
 | `ekos/crates/ledger/src/fact_ledger.rs` | Removed a duplicate `#[test]`, restored the one on `open_read_only_rejects_every_write_method` |
+| `web/ui/src/Layout.tsx` | Auth state now collapses to signed-out on a 401 from `/auth/me`, not just on absent `me.data`; logout awaits the refetch |
+| `web/ui/src/Layout.test.tsx` | New — covers the sign-out → sign-in transition |

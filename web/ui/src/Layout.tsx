@@ -16,21 +16,30 @@ export function Layout() {
     retry: false,
   });
 
+  // A 401 is the definitive "not signed in" signal — the session cookie is gone or invalid, which
+  // is exactly the state `sign out` produces. Any other error (a 500, a network blip) is treated
+  // as transient: React Query keeps the last successful `me.data`, and we keep trusting it rather
+  // than bouncing a still-authenticated operator to the sign-in screen. Without the `unauthorized`
+  // check, `sign out` looked broken: logout clears the cookie server-side and the `me` refetch
+  // 401s, but the stale `me.data` lingered and the console stayed on the authenticated view.
+  const unauthorized = me.error instanceof ApiError && me.error.status === 401;
+  const identity = unauthorized ? undefined : me.data;
+
   return (
     <>
       <header>
         <Link to="/" className="brand">
           <span>EKOS</span> Console
         </Link>
-        {me.data?.role === "write" && (
+        {identity?.role === "write" && (
           <Link to="/schedules" className="hdr-link">
             Schedules
           </Link>
         )}
         <span style={{ flex: 1 }} />
-        {me.data && <Identity me={me.data} />}
+        {identity && <Identity me={identity} />}
       </header>
-      <main>{me.data ? <Outlet context={me.data} /> : <SignIn error={me.error} />}</main>
+      <main>{identity ? <Outlet context={identity} /> : <SignIn error={me.error} />}</main>
     </>
   );
 }
@@ -44,7 +53,10 @@ function Identity({ me }: { me: Me }) {
         className="linkish"
         onClick={async () => {
           await logout();
-          qc.invalidateQueries();
+          // Refetch every active query under the now-cleared session. The `me` query 401s, which
+          // `Layout`'s `unauthorized` check turns into the sign-in screen — without this refetch
+          // the stale `me.data` would keep the console looking signed in.
+          await qc.invalidateQueries();
         }}
       >
         sign out
