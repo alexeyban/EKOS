@@ -16,8 +16,10 @@
 //!   unless a token is set — see the RFC's Security posture section; bind `127.0.0.1` only.
 //! - **Streamable HTTP** (`--http <addr>`, RFC 0143) — one `POST /mcp` endpoint speaking MCP's
 //!   HTTP transport, for clients that only offer a URL (VS Code / Copilot agent mode, Visual
-//!   Studio, `mcp-remote`). No SSE: EKOS has no server-initiated messages, so every POST answers
-//!   `application/json` and `GET` is `405`. `Authorization: Bearer` auth, `Origin` validation.
+//!   Studio, ChatGPT Developer Mode, `mcp-remote`). The POST response is `application/json` or,
+//!   when the client's `Accept` asks for it, a single-shot `text/event-stream` (ChatGPT requires
+//!   the latter). No server push and `GET` is `405` — EKOS has no server-initiated messages.
+//!   `Authorization: Bearer` auth, `Origin` validation.
 //!
 //! The ledger is opened per `tools/call`, so the server starts before a first
 //! `ekos build` and returns a readable tool error until a ledger exists.
@@ -543,15 +545,61 @@ async fn http_post(State(st): State<HttpState>, headers: HeaderMap, body: String
         }
     }
 
-    match responses.len() {
-        0 => StatusCode::ACCEPTED.into_response(), // all notifications
-        1 if messages.len() == 1 => json_body(responses.pop().unwrap()),
-        _ => json_body(format!("[{}]", responses.join(","))),
+    if responses.is_empty() {
+        return StatusCode::ACCEPTED.into_response(); // all notifications
+    }
+
+    // 5. Encode. Content negotiation (RFC 0143 amendment): ChatGPT's connector requires
+    // `text/event-stream`; VS Code / Copilot accept either; `curl` / `*/*` get JSON. Both forms
+    // carry the same JSON-RPC response bytes — the SSE one is written in full and the stream ends
+    // (no server push, no `GET` stream).
+    if wants_sse(&headers) {
+        return sse_response(responses);
+    }
+    if responses.len() == 1 && messages.len() == 1 {
+        json_body(responses.pop().unwrap())
+    } else {
+        json_body(format!("[{}]", responses.join(",")))
     }
 }
 
-/// MCP spec: `405` at the endpoint is the defined signal for "no server-initiated SSE stream
-/// here". EKOS has no server-initiated messages.
+/// `true` iff the request's `Accept` header explicitly lists `text/event-stream`. A bare `*/*`
+/// (plain `curl`) does not count — the switch to SSE is opt-in by the client, so JSON stays the
+/// default for anything that does not ask.
+fn wants_sse(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|a| a.contains("text/event-stream"))
+}
+
+/// One SSE `event: message` / `data:` frame per JSON-RPC response line, then the body ends. Each
+/// line is split on any embedded `\n` into multiple `data:` fields per the SSE grammar (defensive
+/// — `handle_message` emits compact single-line JSON).
+fn sse_response(response_lines: Vec<String>) -> Response {
+    let mut body = String::new();
+    for line in response_lines {
+        body.push_str("event: message\n");
+        for field in line.split('\n') {
+            body.push_str("data: ");
+            body.push_str(field);
+            body.push('\n');
+        }
+        body.push('\n'); // blank line terminates the event
+    }
+    (
+        [
+            (header::CONTENT_TYPE, "text/event-stream"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// MCP spec: `405` on `GET` is the defined signal for "no server-initiated SSE stream here" —
+/// distinct from an SSE *response* to a `POST`, which this server does negotiate (RFC 0143
+/// amendment). EKOS has no server-initiated messages.
 async fn http_get() -> Response {
     (
         StatusCode::METHOD_NOT_ALLOWED,
@@ -3588,6 +3636,103 @@ mod tests {
         let body: Value = res.json().await.unwrap();
         assert_eq!(body["result"]["protocolVersion"], "2025-06-18");
         assert_eq!(body["result"]["serverInfo"]["name"], "ekos");
+    }
+
+    /// Extract the `data:` payload of each SSE `event: message` frame from a response body.
+    fn sse_data_frames(body: &str) -> Vec<String> {
+        let mut frames = Vec::new();
+        let mut cur: Option<String> = None;
+        for line in body.split('\n') {
+            if let Some(rest) = line.strip_prefix("data: ") {
+                cur.get_or_insert_with(String::new).push_str(rest);
+            } else if line.is_empty()
+                && let Some(f) = cur.take()
+            {
+                frames.push(f);
+            }
+        }
+        if let Some(f) = cur.take() {
+            frames.push(f);
+        }
+        frames
+    }
+
+    #[tokio::test]
+    async fn http_returns_sse_when_the_client_accepts_event_stream() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let res = reqwest::Client::new()
+            .post(url.as_str())
+            .header("accept", "application/json, text/event-stream")
+            .json(&init_msg())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        assert!(
+            res.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .starts_with("text/event-stream")
+        );
+        let frames = sse_data_frames(&res.text().await.unwrap());
+        assert_eq!(frames.len(), 1, "one frame for one request");
+        let msg: Value = serde_json::from_str(&frames[0]).unwrap();
+        assert_eq!(msg["id"], 1);
+        assert_eq!(msg["result"]["serverInfo"]["name"], "ekos");
+    }
+
+    #[tokio::test]
+    async fn http_sse_batch_yields_one_frame_per_response_in_order() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let batch = json!([
+            { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} },
+            { "jsonrpc": "2.0", "id": 2, "method": "ping" },
+        ]);
+        let text = reqwest::Client::new()
+            .post(url.as_str())
+            .header("accept", "text/event-stream")
+            .json(&batch)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        let ids: Vec<Value> = sse_data_frames(&text)
+            .iter()
+            .map(|f| serde_json::from_str::<Value>(f).unwrap()["id"].clone())
+            .collect();
+        assert_eq!(ids, vec![json!(1), json!(2)]);
+    }
+
+    #[tokio::test]
+    async fn http_a_notification_is_202_even_when_sse_is_accepted() {
+        let (url, _tmp) = spawn_http(None, vec![]).await;
+        let res = reqwest::Client::new()
+            .post(url.as_str())
+            .header("accept", "text/event-stream")
+            .json(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 202);
+        assert!(res.bytes().await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn wants_sse_needs_an_explicit_event_stream() {
+        use axum::http::HeaderValue;
+        let mut h = HeaderMap::new();
+        assert!(!wants_sse(&h), "no Accept header");
+        h.insert(header::ACCEPT, HeaderValue::from_static("*/*"));
+        assert!(!wants_sse(&h), "*/* alone does not opt in");
+        h.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        assert!(!wants_sse(&h));
+        h.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        assert!(wants_sse(&h));
     }
 
     #[tokio::test]

@@ -693,22 +693,24 @@ stdio mode; `--tcp` only changes how clients connect, not which workspace is ser
 
 #### HTTP transport — for clients that only take a URL (RFC 0143)
 
-Many MCP clients (VS Code / GitHub Copilot agent mode, Visual Studio 2022, `mcp-remote`) only
-offer *stdio* (spawn a command) or *Streamable HTTP* (a URL) — they cannot speak the raw TCP
-socket above. `--http <addr>` serves MCP's HTTP transport at one endpoint, `POST /mcp`:
+Many MCP clients (VS Code / GitHub Copilot agent mode, Visual Studio 2022, ChatGPT Developer
+Mode, `mcp-remote`) only offer *stdio* (spawn a command) or *Streamable HTTP* (a URL) — they
+cannot speak the raw TCP socket above. `--http <addr>` serves MCP's HTTP transport at one
+endpoint, `POST /mcp`:
 
 ```bash
 ekos mcp serve --workspace /path/to/workspace --http 127.0.0.1:7331
 ```
 
-`--http` and `--tcp` are mutually exclusive (each *replaces* stdio). EKOS has no server-initiated
-messages, so there is **no SSE**: every `POST` answers `application/json` directly and `GET /mcp`
-returns `405`. Auth is the same token (`--token-file` / `EKOS_MCP_TOKEN`), presented over HTTP as
-an `Authorization: Bearer <token>` header checked on every request. The `Origin` header, when
-present, must be loopback or an explicit `--http-allow-origin <origin>` (DNS-rebinding defence);
-a request with no `Origin` (the normal case for editors) is allowed. All HTTP requests are
-serialized through one worker thread — a slow `tools/call` blocks the next request, matching the
-stdio loop.
+`--http` and `--tcp` are mutually exclusive (each *replaces* stdio). The `POST` response is
+`application/json`, or a single-shot `text/event-stream` when the client's `Accept` header asks
+for it (ChatGPT's connector requires the latter); either way the response bytes are the same
+JSON-RPC. There is **no server push** — `GET /mcp` returns `405`, no sessions. Auth is the same
+token (`--token-file` / `EKOS_MCP_TOKEN`), presented over HTTP as an `Authorization: Bearer
+<token>` header checked on every request. The `Origin` header, when present, must be loopback or
+an explicit `--http-allow-origin <origin>` (DNS-rebinding defence); a request with no `Origin`
+(the normal case for editors) is allowed. All HTTP requests are serialized through one worker
+thread — a slow `tools/call` blocks the next request, matching the stdio loop.
 
 VS Code (`.vscode/mcp.json`) or Visual Studio (`.mcp.json`):
 
@@ -729,6 +731,13 @@ curl -s http://127.0.0.1:7331/mcp -H 'content-type: application/json' \
 
 For a remote client, tunnel it the same way as the TCP transport (`ssh -N -L 7331:127.0.0.1:7331 …`);
 there is no TLS on `--http` — terminate it at a reverse proxy if a deployment needs it.
+
+**ChatGPT** (Developer Mode connector, Plus/Pro) is cloud-hosted and cannot reach `127.0.0.1`, so
+it needs a public HTTPS URL — put a tunnel in front (`cloudflared tunnel --url
+http://127.0.0.1:7331`, then use `https://<name>.trycloudflare.com/mcp`). The tunnel URL is
+world-reachable and exposes the two write tools too, so protect it (Cloudflare Access / Tailscale,
+or a short supervised session). ChatGPT's *Deep Research* connector won't work — it requires
+tools named exactly `search`/`fetch`; only Developer Mode (full MCP) does.
 
 ### Marketing agent (RFC 0030)
 

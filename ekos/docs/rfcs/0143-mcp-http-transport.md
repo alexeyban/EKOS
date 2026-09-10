@@ -97,11 +97,18 @@ Same opt-in model as `--tcp`, plus two HTTP-specific additions:
 write-capable review tools (`ekos_identity_review`, `ekos_architecture_review`). No new tools, no
 change to any tool.
 
-### Not in scope (unchanged from RFC 0115's list)
+### SSE responses on POST (amendment 2026-09-10 — see below)
 
-- **SSE / server-initiated messages.** No `text/event-stream` responses, no `GET` stream. If a
-  future feature needs server push (progress on a long `tools/call`, resource subscriptions), the
-  `GET /mcp` handler becomes a real SSE stream then — the POST path already returns
+> The original design shipped `application/json`-only. ChatGPT's connector client requires the
+> `text/event-stream` response form. The **Amendment** section at the end of this RFC adds SSE as
+> a *response encoding* chosen by content negotiation, still with no `GET` stream and no server
+> push.
+
+### Not in scope
+
+- **Server-initiated messages / a `GET /mcp` stream.** No server push (progress on a long
+  `tools/call`, resource subscriptions). If a future feature needs that, the `GET /mcp` handler
+  becomes a real long-lived SSE stream then — the POST path already returns
   `application/json` and stays valid.
 - **Sessions / `Mcp-Session-Id`.** The server issues none and requires none; each POST is
   self-contained. The spec permits this.
@@ -181,3 +188,58 @@ addition.
 | `crates/cli/Cargo.toml` | `axum` dep (was demo-server only); `reqwest` dev-dep |
 | `TODO.md` | HTTP transport marked landed; multi-workspace routing + SSE/server-push remain open |
 | `README.md`, `docs/generated/ekos-self-documentation.html` | `--http` in the AI-agent-access section; VS Code / Visual Studio `mcp.json` example |
+
+---
+
+## Amendment (2026-09-10) — SSE responses on POST, for ChatGPT
+
+### Why
+
+ChatGPT's Developer-Mode connector (the only way to attach an arbitrary-tool MCP server to
+ChatGPT — the Deep Research connector needs `search`/`fetch` tools EKOS doesn't have) drives the
+Streamable HTTP transport with `Accept: text/event-stream` and **requires** the response to be an
+SSE stream. Against the `application/json`-only server it fails to connect. The MCP spec has
+always allowed the server to answer a POST with *either* `application/json` *or*
+`text/event-stream` — the original design just picked one. This adds the other, chosen by content
+negotiation.
+
+### Design
+
+`http_post`, after it has collected the response line(s) from the worker, picks the encoding:
+
+| Condition | Response |
+|---|---|
+| no response lines (all notifications) | `202 Accepted`, empty — **unchanged** |
+| request's `Accept` header contains `text/event-stream` | `200`, `Content-Type: text/event-stream`, body = one SSE `event: message` / `data: <json>` frame per response line, then the stream ends |
+| otherwise (`application/json`, `*/*`, absent) | `200`, `Content-Type: application/json` — **unchanged** |
+
+Still **no** long-lived stream: every response line is already computed before the reply starts,
+so the SSE body is written in full and the connection closes — the spec's prescribed behaviour
+once "all JSON-RPC responses have been sent". No `GET /mcp` stream, no keep-alive pings, no
+sessions. `data:` values are split on any embedded newline into multiple `data:` lines per the
+SSE grammar (defensive — `handle_message` emits compact single-line JSON).
+
+A client that sends `Accept: */*` (e.g. plain `curl`) still gets `application/json` — the switch
+is only on an explicit `text/event-stream`, so existing behaviour and every existing test is
+unchanged. VS Code / Copilot send `application/json, text/event-stream` and now get SSE; their
+client handles both.
+
+### Interface delta
+
+```rust
+fn wants_sse(headers: &HeaderMap) -> bool;      // Accept contains "text/event-stream"
+fn sse_response(response_lines: Vec<String>) -> Response;   // text/event-stream body
+```
+
+No CLI change. No new dependency (the body is a plain `String`; `axum::response::sse` is not
+needed for a non-streaming reply).
+
+### Testing delta
+
+- `POST` with `Accept: text/event-stream` → `200`, `content-type: text/event-stream`; the body
+  parses as SSE and its single `data:` frame is the JSON-RPC `initialize` result.
+- Batch (`[initialize, ping]`) + SSE `Accept` → two `data:` frames, ids preserved.
+- Notification + SSE `Accept` → still `202`, empty (SSE not used when there is nothing to send).
+- `POST` with `Accept: application/json` and with no `Accept` → still `application/json` (the
+  existing tests, unchanged).
+- `wants_sse` unit table.

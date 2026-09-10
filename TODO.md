@@ -3047,9 +3047,10 @@ are excluded — see the full exclusion list in the planning history if needed.
 
 - [x] **MCP Streamable HTTP transport** — RFC 0143 (2026-09-10). `ekos mcp serve --http <addr>`
   serves MCP's HTTP transport at one `POST /mcp` endpoint, for the many clients (VS Code / Copilot
-  agent mode, Visual Studio 2022, `mcp-remote`) that only take a URL. No SSE — EKOS has no
-  server-initiated messages, so every POST answers `application/json` and `GET /mcp` is `405`,
-  which the spec explicitly permits. `--http`/`--tcp` mutually exclusive; each replaces stdio. One
+  agent mode, Visual Studio 2022, ChatGPT Developer Mode, `mcp-remote`) that only take a URL. The
+  POST response is `application/json` or a single-shot `text/event-stream` by content negotiation
+  (ChatGPT's connector requires the SSE form) — same JSON-RPC bytes; no server push, `GET /mcp` is
+  `405`, no sessions. `--http`/`--tcp` mutually exclusive; each replaces stdio. One
   worker `std::thread` owns the non-`Send` `StoreCache` and serializes all requests over a
   `tokio::sync::mpsc`/`oneshot` bridge — keeps the RFC 0097/0114 caches alive across requests
   without needing `KnowledgeStore: Send`. `Authorization: Bearer` auth (the existing token, flag

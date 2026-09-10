@@ -1,7 +1,7 @@
 # Devlog 176 — MCP over Streamable HTTP
 
 **Date:** 2026-09-10
-**PRs:** (local) `feat(cli): RFC 0143 — MCP over Streamable HTTP`
+**PRs:** (local) `feat(cli): RFC 0143 — MCP over Streamable HTTP`, `feat(cli): RFC 0143 — SSE responses for ChatGPT`
 **Branch:** main (local)
 
 ---
@@ -14,8 +14,10 @@ http://127.0.0.1:7331`) against the RFC 0115 TCP server and got **no tools at al
 speaks MCP-over-HTTP, the socket answers bare JSON-RPC lines, and nothing bridges them. RFC 0143
 adds `ekos mcp serve --http <addr>` — MCP's Streamable HTTP transport at one `POST /mcp`
 endpoint. It is far smaller than RFC 0115's non-goals framing suggested, because EKOS has **no
-server-initiated messages**, so the entire SSE half of the spec (event streams, sessions,
-resumption) is out of scope: every POST answers `application/json`, `GET /mcp` is `405`.
+server-initiated messages**, so the *server-push* half of the spec (a long-lived `GET /mcp`
+stream, sessions, resumption) is out of scope: `GET /mcp` is `405`. A same-day follow-up (PR 2)
+adds `text/event-stream` as a POST *response encoding* — ChatGPT's connector requires it — chosen
+by content negotiation; still no server push.
 
 ---
 
@@ -74,15 +76,65 @@ implementation.
 
 ---
 
+## PR 2 — RFC 0143 amendment: SSE responses on POST, for ChatGPT
+
+### Problem / motivation
+
+ChatGPT is cloud-hosted and cannot reach `127.0.0.1`, so a ChatGPT connection needs a public
+HTTPS tunnel — but even with that, ChatGPT's Developer-Mode connector (the only route for an
+arbitrary-tool MCP server; the Deep Research connector needs `search`/`fetch` tools EKOS lacks)
+drives the transport with `Accept: text/event-stream` and **requires** the POST response to be an
+SSE stream. Against the `application/json`-only server from PR 1 it never connects.
+
+### What was built
+
+`http_post` now negotiates the response encoding:
+
+| Condition | Response |
+|---|---|
+| no response lines (all notifications) | `202`, empty — unchanged |
+| `Accept` contains `text/event-stream` | `200` `text/event-stream`; one `event: message` / `data: <json>` frame per response line; body written in full, stream ends |
+| otherwise (`application/json`, `*/*`, absent) | `200` `application/json` — unchanged |
+
+`wants_sse(&HeaderMap)` and `sse_response(Vec<String>)` are the only new functions. No CLI flag,
+no new dependency — the SSE body is a plain `String` (every response line is computed before the
+reply starts, so there is nothing to stream; `axum::response::sse` is for real streams). `data:`
+values are split on any `\n` per the SSE grammar, though `handle_message` emits single-line JSON.
+
+Still no `GET /mcp` stream, no sessions, no keep-alive. A `*/*` client (plain `curl`) keeps
+getting JSON, so every PR 1 test is unchanged; VS Code / Copilot send
+`application/json, text/event-stream` and now get SSE (their client handles both).
+
+Verified with `curl`: `-H 'accept: text/event-stream'` → `content-type: text/event-stream` +
+`event: message\ndata: {…}`; no `Accept` → `application/json`; `tools/call ekos_status` over SSE
+returns the real 10,423-object status.
+
+### Decision
+
+- **A `--http-force-sse` flag** vs content negotiation — negotiation is the spec mechanism and
+  every compliant client (ChatGPT included) sends the `Accept` header, so a flag is unneeded
+  complexity. If a real client is found that requires SSE *without* advertising it, the flag is a
+  one-line add then.
+- **Switch to SSE on `*/*` too** — rejected; keeps JSON as the zero-config default for `curl` and
+  scripts, and makes the PR 1 tests a genuine regression guard for the JSON path.
+
+---
+
 ## Knowledge Captured
 
 - **MCP has two standard transports and clients pick one arbitrarily.** stdio = spawn a command;
   Streamable HTTP = a URL. A raw TCP socket (RFC 0115) is *neither* — pointing an HTTP client at
   it fails silently with zero tools, no error. If a user reports "the MCP connection exposes no
   `ekos_*` tools" and their config has a `url:`, they need `--http`, not `--tcp`.
-- **Streamable HTTP without SSE is a legitimate, minimal implementation.** The spec's SSE
-  machinery is only needed for server-initiated messages. `POST → application/json`, `GET → 405`
-  is a complete compliant server when there is no server push.
+- **Streamable HTTP without a `GET` stream is a legitimate, minimal implementation** — server push
+  is what needs the long-lived stream. But the POST *response* still has to offer
+  `text/event-stream` by content negotiation: **ChatGPT's connector requires it** and refuses a
+  JSON-only server. The SSE body for a request/response is finite (all frames, then the stream
+  ends) — no different bytes from a "streamed" one, just sent at once.
+- **ChatGPT MCP specifics.** (1) Cloud-hosted — cannot reach localhost, needs a public HTTPS
+  tunnel. (2) Deep Research connectors need tools named exactly `search`/`fetch` with a fixed
+  schema — EKOS's `ekos_*` tools only work through **Developer Mode** (full MCP, Plus/Pro).
+  (3) Requires the SSE response form.
 - **axum `State` must be `Send + Sync`; `std::sync::mpsc::Sender` is `Send` but `!Sync`.** Use
   `tokio::sync::mpsc` for a channel that lives in axum state, even when the receiving end is a
   blocking `std::thread` (`blocking_recv` covers that).
@@ -97,11 +149,11 @@ implementation.
 
 | File | Change summary |
 |---|---|
-| `ekos/docs/rfcs/0143-mcp-http-transport.md` | New RFC (Accepted per user direction) |
-| `ekos/crates/cli/src/commands/mcp.rs` | `serve_http`, `build_http_router`, `http_post`/`http_get`/`http_delete`, `origin_allowed`, worker-thread bridge; 9 transport tests |
+| `ekos/docs/rfcs/0143-mcp-http-transport.md` | New RFC + a same-day Amendment section (SSE responses) |
+| `ekos/crates/cli/src/commands/mcp.rs` | PR 1: `serve_http`, `build_http_router`, `http_post`/`http_get`/`http_delete`, `origin_allowed`, worker-thread bridge. PR 2: `wants_sse`, `sse_response`, content negotiation in `http_post`. 13 transport tests |
 | `ekos/crates/cli/src/bin/ekos.rs` | `--http`, `--http-allow-origin`, `--token-file` (alias `tcp-token-file`); dispatch |
 | `ekos/crates/cli/Cargo.toml` | `axum` dep; `reqwest` dev-dep |
 | `ekos/Cargo.lock` | axum/reqwest pulled into the `ekos` crate's graph |
-| `TODO.md` | HTTP transport marked landed; SSE/server-push split out as the remaining open item |
-| `README.md` | New "HTTP transport" subsection under AI agent access; `--token-file` rename noted |
-| `docs/generated/ekos-self-documentation.html` | `--http` + auth paragraph in the MCP section |
+| `TODO.md` | HTTP transport (incl. SSE responses) marked landed; server-push / `GET` stream remains open |
+| `README.md` | New "HTTP transport" subsection; SSE + ChatGPT notes; `--token-file` rename |
+| `docs/generated/ekos-self-documentation.html` | `--http` + SSE + auth paragraphs in the MCP section |
