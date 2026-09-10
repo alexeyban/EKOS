@@ -235,6 +235,30 @@ irreversible auto-merge isn't a safe default for that case.
 
 ### Real schema and class structure from source (RFC 0091/0092)
 
+**File-based SQL schema needs a dialect.** `.sql` files parse under the `generic` (ANSI) dialect
+unless `ekos.toml` routes them somewhere real:
+
+```toml
+[recover.sql]
+default-dialect = "generic"
+
+[[recover.sql.dialect-rules]]           # first path-glob match wins
+path-glob = "priv/repo/**"
+dialect = "postgres"
+[[recover.sql.dialect-rules]]
+path-glob = "priv/ingest_repo/**"
+dialect = "clickhouse"
+```
+
+This matters for any real schema **dump** — `pg_dump` output, a ClickHouse `structure.sql`, or
+hand-written DDL past plain ANSI. `parse_ddl_structural` parses the whole file in one pass, so a
+single statement the dialect can't handle (`CREATE TYPE … AS ENUM`, `CREATE SEQUENCE`,
+`ENGINE = MergeTree`, `CODEC(...)`, …) discards *every* table in that file — reported only as a
+buried `SQL001: no tables found` warning, never an error. The `postgres` / `clickhouse` dialects
+carry the preprocessing (RFC 0057/0058/0059) that makes real dumps parse; `generic` does not. If
+`ekos ekl "FIND Object WHERE kind = 'Table' COUNT"` returns 0 for a repo that clearly has a
+schema, this rule is missing.
+
 Beyond raw SQL DDL, `ekos recover`'s Python analyzer recognizes a real SQLAlchemy declarative
 model (`__tablename__` present on a class) and compiles it into the same `Table` object shape as a
 `CREATE TABLE` statement — real column names, best-effort data-type hints, and `ForeignKey` edges

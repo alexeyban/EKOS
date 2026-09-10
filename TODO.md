@@ -3066,6 +3066,18 @@ are excluded — see the full exclusion list in the planning history if needed.
   connector, not just crypto (RFC 0017); dynamic/runtime plugin loading (`.so`/WASM) — RFC 0031
   itself calls this "a known limitation, not solved here" (RFC 0006, RFC 0031).
 
+- [ ] **`SQL001` should be actionable, not just "no tables found".** When `parse_ddl_structural`
+  produces zero tables but the file text contains `CREATE TABLE`, that is almost always a dialect
+  misconfiguration (wrong / missing `[[recover.sql.dialect-rules]]`), not an empty schema. The
+  warning currently reads like the file has no schema. Found live (devlog_177): the `analytics`
+  workspace's `ekos.toml` lost its `[recover.sql]` rules in the devlog_174 cleanup and its entire
+  56-table Postgres + ClickHouse schema silently vanished from the ledger, surfacing only as two
+  buried `SQL001` lines. Related: `parse_ddl_structural` has no per-statement fallback — one
+  unsupported statement discards every table in the file (the whole-file `Parser::parse_sql`);
+  a skip-bad-statement retry would make a partially-unsupported dump degrade gracefully instead.
+  Also: Ecto `schema`/migration → `Table` promotion (no Elixir equivalent of RFC 0091's
+  SQLAlchemy support), and `pg_dump` `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` statements are
+  not attached to their table so a Postgres dump yields 0 cross-table `ForeignKey` edges.
 - [ ] **Connector-specific gaps**: GitHub GraphQL client upgrade (RFC 0020); GitHub secondary
   (abuse-detection) rate-limit backoff/retry — accepted real risk from the RFC 0062 live run;
   Confluence cross-space title resolution, LLM-based topic/concept extraction, API v1→v2
