@@ -274,6 +274,17 @@ impl<'a> Runtime<'a> {
         Ok(self.ledger.retrieve(req)?)
     }
 
+    /// Every write this entity's current state descends from — run id, stage, and (RFC 0135 Part
+    /// B) the artifact each write's KIR was compiled from, oldest first. Thin passthrough to
+    /// [`KnowledgeStore::audit_trail`]; RFC 0140 §3 uses the `source_artifact_id` on the most
+    /// recent record to read an entity's own real source text back from the artifact store.
+    pub fn audit_trail(
+        &self,
+        id: &KirId,
+    ) -> Result<Vec<ekos_ledger::provenance::AuditRecord>, RuntimeError> {
+        Ok(self.ledger.audit_trail(id)?)
+    }
+
     // ── QUERY surface (RFC 0122) — direct fact + graph lookup, zero LLM ───────
 
     /// Read one attribute of one compiled object — `"name"` / `"kind"` or a dotted path into

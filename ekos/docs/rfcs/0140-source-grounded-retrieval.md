@@ -1,6 +1,6 @@
 # RFC 0140 — Source-grounded retrieval: precise spans, and reading the source on demand
 
-**Status:** Proposed
+**Status:** Accepted — §1/§2 shipped devlog_173 (2026-09-08); §3/§4 shipped 2026-09-14
 **Author:** EKOS team
 **Created:** 2026-09-08
 **Relationship to RFC 0139:** RFC 0139 raised answer correctness 36.2% → 42.5% by fixing the ruler,
@@ -159,6 +159,33 @@ redaction entirely — an answer could surface a secret that the ledger correctl
 That is a violation of RFC 0043's prevention model, not a performance trade-off, and §5 lists it as
 a non-goal for that reason.
 
+**Shipped 2026-09-14.** `source_artifact_ids` turned out to reach the ledger only through
+`WriteContext`/the audit trail (`commit.rs`'s `per_source_ctx`), not as a directly queryable
+object property — so `Runtime` gained a thin `audit_trail(id)` passthrough
+(`KnowledgeStore::audit_trail`, RFC 0135 Part B), and the most recent record's
+`source_artifact_id` is what `ArtifactStore::read` is keyed on. `reason.rs::attach_source_text`
+takes the first `top_k` *distinct* entities already named in an assembled `EvidenceSet`
+(deduplicated, so the same entity referenced by two items is only read once), and for each one
+with a `source_span` (RFC 0088 — Rust/Python/Elixir symbols only, per this RFC's own Non-goals),
+appends one additional `EvidenceItem` carrying the real, uncapped (well, capped at a generous 400
+lines — `MAX_SOURCE_TEXT_LINES` — rather than `source_evidence`'s 40-line compile-time cap) span
+text. An entity with no span, no recorded artifact, or an unreadable/wrong-shaped artifact is
+silently skipped — best-effort, never a hard error.
+
+Wired into `AiRuntime` as an opt-in builder (`AiRuntime::with_artifact_store`), not a required
+constructor argument — every pre-existing `AiRuntime::new` call site (17+ of them, mostly tests)
+is unaffected, since `artifact_store` defaults to `None` and the enrichment is then simply
+inert. `ask.rs`/`eval.rs` both wire it in by best-effort (`if let Ok(store) = ...`), so a
+workspace with no artifact store yet still answers exactly as before this RFC. `gather_evidence`'s
+own "offline, no LLM" doc-stated contract is preserved — reading from the artifact store is a
+local disk read, not a network/LLM call, so §3 does not turn `gather_evidence` into something
+`agent_runner.rs`'s trajectory logic or `ekos ask --explain` can no longer call synchronously.
+
+**Not yet measured** against the RFC 0138 suite (would need `[llm]` credentials and a real
+`recover`/`compile`/`commit` this pass did not run) — implemented and unit-tested (5 new tests in
+`reason.rs`), including the specific failure modes this section's own text calls out: no span, no
+recorded artifact, an unreadable artifact, and the dedup-by-entity behavior.
+
 ### 4. LLM-assisted rerank (opt-in, measured, off by default)
 
 With real source text available, a second-stage rerank becomes possible: ask the model which of the
@@ -178,6 +205,29 @@ Constraints, each of which has bitten this project before:
 - **Measure both directions.** RFC 0139 established the pattern the hard way: three separate
   changes reached a perfect adversarial score while collapsing legitimate answer correctness.
   A rerank must be evaluated on fabrication *and* on answer correctness, not the metric it targets.
+
+**Shipped 2026-09-14.** `[retrieval] rerank = "llm"` (a string, not a bool — same shape as
+`[embeddings] provider`, leaving room for a future non-LLM reranker with no breaking config
+change) gates a new `AiRuntime::rerank_evidence`, called from `reason_with_history` — never from
+`gather_evidence`, `retrieve()`, or anywhere RFC 0126's CI gate or `agent_runner.rs`'s offline
+trajectory capture can reach it, so the determinism constraint above is structural, not just a
+config default. The call shows the model a numbered list of the top `rerank_candidates` (default
+10) evidence claims and asks for `{"relevant_indices": [...]}` in relevance order — reordering
+only, never dropping an item, matching this section's own "reorder... assembling the evidence
+set" framing rather than a filter. Parses the response with the same last-block-first,
+brace-depth-aware scanner `extract_citations` already uses (`balanced_json_spans`), for the same
+reason: a rerank response wrapped in prose or a fenced block must not be mistaken for a parse
+failure. **Best-effort by construction**: an LLM error or an unparseable/all-out-of-range response
+leaves the evidence set completely untouched — a failed rerank degrades to exactly this RFC's own
+`rerank_llm: false` default, never surfaces as an error the caller must handle.
+
+**Not yet measured** on fabrication and answer correctness together, per this section's own
+"measure both directions" requirement — that needs a real `[llm]` provider and a full `ekos eval
+run`, neither available in this pass. Implemented and unit-tested (10 new tests in `ai.rs`):
+response parsing (valid, prose-wrapped, out-of-range/duplicate indices, unparseable), reorder
+semantics (named items move to front in order, unmentioned items keep relative position, empty
+order is a no-op), and the two integration paths (off by default never calls the model; on,
+reorders using the model's real response; on, a bad response leaves the set unchanged).
 
 ---
 
@@ -202,3 +252,11 @@ Constraints, each of which has bitten this project before:
   be judged on answer correctness *and* fabrication together.
 - Direct check on the three vector-dependent scenarios (`arch-017`, `lin-009`, `arch-007`) that
   RFC 0139 identified as unreachable lexically — they are this RFC's clearest success signal.
+
+**Done as of 2026-09-14**: `cargo test --workspace` (including RFC 0126's retrieval gate — §4
+confirmed structurally unable to enter it, not merely tested against it once) / `clippy -D
+warnings` / `fmt --check` all clean, with 15 new unit tests across §3/§4 covering the specific
+failure modes each section's own text calls out. **Not yet done**: re-measuring the RFC 0138 suite
+per phase under a fixed ruler version, and the direct check on `arch-017`/`lin-009`/`arch-007` —
+both need a real `[llm]` provider and a full `recover`/`compile`/`commit` this pass did not run.
+Treat §3/§4 as implemented and unit-tested, not yet as measured against the suite they target.

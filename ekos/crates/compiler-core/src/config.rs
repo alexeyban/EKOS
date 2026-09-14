@@ -32,6 +32,8 @@ pub struct EkosConfig {
     pub architecture: ArchitectureConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub retrieval: RetrievalConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +112,10 @@ pub struct AiConfig {
     /// which only affects the pre-RFC-0123 `--classic` path (RFC 0139 §4.1).
     pub reason_system_prompt: Option<String>,
     pub max_context_chars: Option<u32>,
+    /// RFC 0140 §3 — how many distinct evidence-set entities get real, on-demand source text
+    /// attached. Only takes effect when the caller also wires up an `ArtifactStore`
+    /// (`AiRuntime::with_artifact_store`); has no effect otherwise.
+    pub source_text_top_k: Option<u32>,
 }
 
 /// Gating for RFC 0026's `DocumentSemanticsAnalyzerPass`. Opt-in because the
@@ -173,6 +179,25 @@ pub struct EmbeddingsConfig {
 
 fn default_true() -> bool {
     true
+}
+
+/// RFC 0140 §4: `[retrieval]` — the opt-in LLM-assisted rerank. Off by default: an ordinary
+/// `ekos ask`/`ekos eval` run is byte-identical to before this RFC, and RFC 0126's CI gate (which
+/// assumes reproducible ranking) never exercises this at all, since it tests `retrieve()`
+/// directly and never builds an `AiRuntime`. Same opt-in-table shape as `[embeddings]`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RetrievalConfig {
+    /// `Some("llm")` turns the rerank on; anything else (including absent) leaves it off. A
+    /// string rather than a bool leaves room for a future non-LLM reranker with no breaking
+    /// config change, matching `[embeddings] provider`'s own shape.
+    #[serde(default)]
+    pub rerank: Option<String>,
+    /// How many of the top evidence items the rerank call considers — RFC 0140 §4's own "top
+    /// *n*, bounded" framing, since cost and latency scale with it. Falls back to
+    /// `AiRuntimeConfig`'s own default when unset.
+    #[serde(default)]
+    pub rerank_candidates: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -483,6 +508,7 @@ impl Default for EkosConfig {
             clickhouse: ClickHouseConfig::default(),
             architecture: ArchitectureConfig::default(),
             storage: StorageConfig::default(),
+            retrieval: RetrievalConfig::default(),
         }
     }
 }

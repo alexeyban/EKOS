@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+ekos-artifact.workspace = true
 ekos-kir.workspace = true
 ekos-ledger.workspace = true
 ekos-identity.workspace = true

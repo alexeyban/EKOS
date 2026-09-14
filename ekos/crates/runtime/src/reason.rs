@@ -603,6 +603,108 @@ fn fmt_location(loc: &ekos_kir::SourceLocation) -> String {
     }
 }
 
+// ── RFC 0140 §3: on-demand source text ──────────────────────────────────────
+
+/// Cap on how many lines [`attach_source_text`] attaches per entity — generous relative to
+/// `source_evidence`'s 40-line compile-time cap on every span-carrying symbol (this is RFC 0140's
+/// deliberately "expensive tier": bounded to a handful of already-retrieved entities, not applied
+/// to all of them), but still bounded — nothing stops a real function from spanning thousands of
+/// lines, and no single item should be able to consume the whole evidence budget on its own.
+const MAX_SOURCE_TEXT_LINES: u64 = 400;
+
+/// RFC 0140 §3 — on-demand, (near-)uncapped source text for the first `top_k` *distinct* entities
+/// already named in `set.items`, read from the artifact store rather than the live filesystem
+/// (RFC 0043: artifact content already passed redaction at observation time; a disk read at query
+/// time would be a new raw-content entry point that never did). Each entity that yields real text
+/// gets exactly one additional [`EvidenceItem`] appended — nothing already in `set` is modified or
+/// removed, and `set`'s existing item order/count is untouched below `top_k` appended items.
+///
+/// This is a best-effort enrichment, not a required one: an entity with no `source_span` (RFC
+/// 0088 — only Rust/Python/Elixir symbols have one), no recorded `source_artifact_id` (RFC 0135
+/// Part B), or whose backing artifact can't be read or doesn't have the expected
+/// `{"data": {"source": "..."}}` shape is silently skipped, exactly as if it were never
+/// considered — never a hard error, since the evidence set it enriches must still be usable
+/// without it.
+pub(crate) fn attach_source_text(
+    set: &mut EvidenceSet,
+    runtime: &Runtime,
+    store: &dyn ekos_artifact::ArtifactStore,
+    top_k: usize,
+) {
+    let mut seen = std::collections::HashSet::new();
+    let mut additions = Vec::new();
+    for item in &set.items {
+        if seen.len() >= top_k {
+            break;
+        }
+        let Some(id) = item.entity else { continue };
+        if !seen.insert(id) {
+            continue;
+        }
+        if let Some(addition) = source_text_item(runtime, store, id) {
+            additions.push(addition);
+        }
+    }
+    set.items.extend(additions);
+}
+
+fn source_text_item(
+    runtime: &Runtime,
+    store: &dyn ekos_artifact::ArtifactStore,
+    id: KirId,
+) -> Option<EvidenceItem> {
+    let state = runtime.reconstruct_state(&id).ok()??;
+    let (start, end) = span_of(&state.object)?;
+    let path = state.evidence.first()?.location.path.clone();
+    let artifact_id = latest_source_artifact_id(runtime, &id)?;
+    let artifact = store.read(&artifact_id).ok()??;
+    let source = artifact.get("data")?.get("source")?.as_str()?;
+    let end_capped = end.min(start + MAX_SOURCE_TEXT_LINES - 1);
+    let text = full_span_text(source, start, end_capped);
+    if text.is_empty() {
+        return None;
+    }
+    Some(EvidenceItem {
+        claim: format!(
+            "full source text of `{}` ({path}:{start}-{end_capped}):\n{text}",
+            state.object.name
+        ),
+        value: serde_json::Value::String(text),
+        source: state.evidence.first().map(|e| e.id),
+        location: format!("{path}:{start}-{end_capped}"),
+        confidence: 1.0,
+        extracted_by: provenance_of(&state.object),
+        entity: Some(id),
+        weak: false,
+    })
+}
+
+/// The artifact a symbol's *most recent* write descends from — `audit_trail` is ordered oldest
+/// first, so the last record carrying a `source_artifact_id` is the one to trust if the entity was
+/// ever re-recovered from a changed file.
+fn latest_source_artifact_id(runtime: &Runtime, id: &KirId) -> Option<ekos_artifact::ArtifactId> {
+    runtime
+        .audit_trail(id)
+        .ok()?
+        .into_iter()
+        .rev()
+        .find_map(|r| r.source_artifact_id)
+        .map(ekos_artifact::ArtifactId)
+}
+
+/// The text of a 1-indexed, inclusive line range — same slicing as
+/// `ekos_recovery::source_evidence::slice_lines`, duplicated rather than reused: that helper is
+/// private to the `recovery` crate and caps at 40 lines, the wrong cap for this on-demand read.
+fn full_span_text(source: &str, start: u64, end: u64) -> String {
+    let take = (end.saturating_sub(start) + 1) as usize;
+    source
+        .lines()
+        .skip(start.saturating_sub(1) as usize)
+        .take(take)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn render_value(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),
@@ -1076,5 +1178,209 @@ mod tests {
         assert_eq!(plan.query_type, QueryType::Aggregate);
         let set = execute(&plan, &rt).unwrap();
         assert!(set.diagnostics.iter().any(|d| d.code == "RSN005"));
+    }
+
+    // ── RFC 0140 §3: on-demand source text ──────────────────────────────────
+
+    mod source_text {
+        use super::*;
+        use ekos_artifact::{ArtifactId, ArtifactStore, FileSystemArtifactStore};
+        use ekos_ledger::provenance::WriteContext;
+
+        fn empty_plan() -> QueryPlan {
+            QueryPlan {
+                raw: String::new(),
+                query_type: QueryType::Lexical,
+                root: PlanNode::Search {
+                    query: String::new(),
+                    limit: 1,
+                },
+                confidence: 0.0,
+            }
+        }
+
+        fn evidence_set_for(entities: &[KirId]) -> EvidenceSet {
+            EvidenceSet {
+                items: entities
+                    .iter()
+                    .map(|&id| EvidenceItem {
+                        claim: "search match".into(),
+                        value: serde_json::Value::Null,
+                        source: None,
+                        location: String::new(),
+                        confidence: 0.5,
+                        extracted_by: String::new(),
+                        entity: Some(id),
+                        weak: false,
+                    })
+                    .collect(),
+                plan: empty_plan(),
+                diagnostics: Vec::new(),
+            }
+        }
+
+        /// Writes a real Rust symbol (a `source_span`-carrying object, matching what
+        /// `rust_analyzer.rs` produces) whose write is attributed to a real artifact via
+        /// `WriteContext` — the same mechanism `commit.rs` uses in production — and stashes that
+        /// artifact's real source text under a matching id in a real, on-disk `ArtifactStore`.
+        fn seed_span_carrying_symbol(
+            l: &Ledger,
+            store_dir: &std::path::Path,
+            artifact_id: &str,
+            source: &str,
+        ) -> KirId {
+            let ev = KirEvidence::new(SourceLocation::at("src/lib.rs", 2), "fn parse_thing() {");
+            l.append_evidence(&ev).unwrap();
+            let mut obj = KirObject::new("parse_thing", ObjectKind::Custom("RustSymbol".into()));
+            obj.properties.insert(
+                "source_span".into(),
+                serde_json::json!({"start_line": 2, "end_line": 4}),
+            );
+            obj.evidence.push(ev.id);
+            let id = obj.id;
+            l.set_write_context(Some(WriteContext {
+                run_id: "run-1".into(),
+                stage: "recover".into(),
+                source_artifact_id: Some(artifact_id.to_string()),
+            }));
+            l.append_object(&obj).unwrap();
+            l.set_write_context(None);
+
+            let store = FileSystemArtifactStore::new(store_dir);
+            store
+                .write(
+                    &ArtifactId(artifact_id.to_string()),
+                    &serde_json::json!({"data": {"path": "src/lib.rs", "source": source}}),
+                )
+                .unwrap();
+            id
+        }
+
+        #[test]
+        fn attaches_real_source_text_for_a_span_carrying_entity() {
+            let (l, _d) = temp();
+            let store_dir = TempDir::new().unwrap();
+            let id = seed_span_carrying_symbol(
+                &l,
+                store_dir.path(),
+                "art-1",
+                "fn unrelated() {}\nfn parse_thing() {\n    1\n}\n",
+            );
+            let rt = Runtime::new(&l);
+            let store = FileSystemArtifactStore::new(store_dir.path());
+
+            let mut set = evidence_set_for(&[id]);
+            let before = set.items.len();
+            attach_source_text(&mut set, &rt, &store, 3);
+
+            assert_eq!(
+                set.items.len(),
+                before + 1,
+                "one item appended, none removed"
+            );
+            let added = set.items.last().unwrap();
+            assert_eq!(added.entity, Some(id));
+            assert!(
+                added.claim.contains("fn parse_thing() {\n    1\n}"),
+                "must contain the real sliced source text: {}",
+                added.claim
+            );
+            assert!(
+                !added.claim.contains("fn unrelated"),
+                "must not include lines outside the recorded span: {}",
+                added.claim
+            );
+            assert_eq!(added.location, "src/lib.rs:2-4");
+        }
+
+        #[test]
+        fn an_entity_with_no_source_span_is_silently_skipped() {
+            let (l, _d) = temp();
+            let store_dir = TempDir::new().unwrap();
+            // A Table object never carries `source_span` (RFC 0088 is Rust/Python/Elixir-only).
+            let obj = KirObject::new("orders", ObjectKind::Table);
+            let id = obj.id;
+            l.append_object(&obj).unwrap();
+            let rt = Runtime::new(&l);
+            let store = FileSystemArtifactStore::new(store_dir.path());
+
+            let mut set = evidence_set_for(&[id]);
+            let before = set.items.len();
+            attach_source_text(&mut set, &rt, &store, 3);
+            assert_eq!(
+                set.items.len(),
+                before,
+                "nothing to attach — must not fabricate an item"
+            );
+        }
+
+        #[test]
+        fn an_entity_with_no_recorded_source_artifact_is_silently_skipped() {
+            let (l, _d) = temp();
+            let store_dir = TempDir::new().unwrap();
+            // Span-carrying, but written with no WriteContext at all (pre-RFC-0135 shape).
+            let mut obj = KirObject::new("parse_thing", ObjectKind::Custom("RustSymbol".into()));
+            obj.properties.insert(
+                "source_span".into(),
+                serde_json::json!({"start_line": 1, "end_line": 1}),
+            );
+            let id = obj.id;
+            l.append_object(&obj).unwrap();
+            let rt = Runtime::new(&l);
+            let store = FileSystemArtifactStore::new(store_dir.path());
+
+            let mut set = evidence_set_for(&[id]);
+            let before = set.items.len();
+            attach_source_text(&mut set, &rt, &store, 3);
+            assert_eq!(set.items.len(), before);
+        }
+
+        #[test]
+        fn top_k_bounds_how_many_distinct_entities_are_attempted() {
+            let (l, _d) = temp();
+            let store_dir = TempDir::new().unwrap();
+            let ids: Vec<KirId> = (0..5)
+                .map(|i| {
+                    seed_span_carrying_symbol(
+                        &l,
+                        store_dir.path(),
+                        &format!("art-{i}"),
+                        "fn parse_thing() {\n    1\n}\n",
+                    )
+                })
+                .collect();
+            let rt = Runtime::new(&l);
+            let store = FileSystemArtifactStore::new(store_dir.path());
+
+            let mut set = evidence_set_for(&ids);
+            let before = set.items.len();
+            attach_source_text(&mut set, &rt, &store, 2);
+            assert_eq!(
+                set.items.len(),
+                before + 2,
+                "top_k=2 must attempt exactly 2 distinct entities, not all 5"
+            );
+        }
+
+        #[test]
+        fn the_same_entity_referenced_by_multiple_items_is_only_attempted_once() {
+            let (l, _d) = temp();
+            let store_dir = TempDir::new().unwrap();
+            let id = seed_span_carrying_symbol(
+                &l,
+                store_dir.path(),
+                "art-1",
+                "fn parse_thing() {\n    1\n}\n",
+            );
+            let rt = Runtime::new(&l);
+            let store = FileSystemArtifactStore::new(store_dir.path());
+
+            // The same entity named by two separate evidence items (e.g. a search hit and a
+            // dependents claim) must still only cost one artifact read / one appended item.
+            let mut set = evidence_set_for(&[id, id]);
+            let before = set.items.len();
+            attach_source_text(&mut set, &rt, &store, 3);
+            assert_eq!(set.items.len(), before + 1);
+        }
     }
 }

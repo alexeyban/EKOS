@@ -6,12 +6,14 @@
 use super::recover::{build_llm_provider, resolved_key_env};
 use super::store::open_store_read_only;
 use anyhow::Result;
+use ekos_artifact::PackArtifactStore;
 use ekos_compiler_core::EkosConfig;
 use ekos_evals::report::{self, GateThresholds};
 use ekos_evals::schema::load_dataset;
 use ekos_recovery::{LlmProvider, MOCK_MODEL_NAME};
 use ekos_runtime::{AiRuntime, Runtime};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub struct EvalRunOpts<'a> {
     pub dataset: Option<&'a str>,
@@ -102,7 +104,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
     )?;
     let ledger = open_store_read_only(&run_config, cwd)?;
     let runtime = Runtime::over(&*ledger);
-    let ai = AiRuntime::new(&runtime, llm, super::ask::ai_config(&run_config));
+    let mut ai = AiRuntime::new(&runtime, llm, super::ask::ai_config(&run_config));
+    // RFC 0140 §3 — same best-effort wiring as `ask.rs`: grading must not depend on the artifact
+    // store being present, only benefit from it when it is.
+    if let Ok(store) = PackArtifactStore::open(&artifact_dir) {
+        ai = ai.with_artifact_store(Arc::new(store));
+    }
 
     let outcomes = ekos_evals::run_all(&ai, &runtime, &*ledger, &scenarios).await;
     let report = report::build_with_transcripts(

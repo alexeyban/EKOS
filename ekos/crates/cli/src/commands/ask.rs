@@ -1,12 +1,14 @@
 use super::recover::build_llm_provider;
 use super::store::open_store_read_only;
 use anyhow::Result;
+use ekos_artifact::PackArtifactStore;
 use ekos_compiler_core::EkosConfig;
 use ekos_runtime::ai::ConversationTurn;
 use ekos_runtime::reason::{render_evidence, render_plan};
 use ekos_runtime::{AiRuntime, AiRuntimeConfig, Runtime};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Flags for [`run`]. `ekos ask` routes through the REASON planner (RFC 0123/0124) by default;
 /// `classic` selects the pre-0123 `gather_context` path, and `stream` implies it.
@@ -61,7 +63,13 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<
 
     let ledger = open_store_read_only(config, cwd)?;
     let runtime = Runtime::over(&*ledger);
-    let ai = AiRuntime::new(&runtime, llm, ai_config);
+    let mut ai = AiRuntime::new(&runtime, llm, ai_config);
+    // RFC 0140 §3: best-effort — a workspace with no artifact store yet (or one that fails to
+    // open for some other reason) must still answer questions exactly as before this RFC, just
+    // without the on-demand source-text enrichment.
+    if let Ok(store) = PackArtifactStore::open(&artifact_dir) {
+        ai = ai.with_artifact_store(Arc::new(store));
+    }
 
     // `--explain` (REASON only): assemble the plan + evidence once, for the text block and --json.
     let explain_data = if explain {
@@ -215,6 +223,15 @@ pub fn ai_config(config: &EkosConfig) -> AiRuntimeConfig {
             .ai
             .max_context_chars
             .unwrap_or(default.max_context_chars),
+        source_text_top_k: config
+            .ai
+            .source_text_top_k
+            .unwrap_or(default.source_text_top_k),
+        rerank_llm: config.retrieval.rerank.as_deref() == Some("llm"),
+        rerank_candidates: config
+            .retrieval
+            .rerank_candidates
+            .unwrap_or(default.rerank_candidates),
     }
 }
 

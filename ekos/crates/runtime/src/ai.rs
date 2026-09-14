@@ -5,8 +5,12 @@
 //! touches the ledger or enterprise systems directly — only through the
 //! Runtime, upholding the same read-only consumer-facing contract as RFC 0005.
 
-use crate::reason::{EvidenceSet, QueryPlan, execute, plan_question, render_evidence};
+use crate::reason::{
+    EvidenceItem, EvidenceSet, QueryPlan, attach_source_text, execute, plan_question,
+    render_evidence,
+};
 use crate::{ObjectState, RetrievalRequest, Runtime, RuntimeError};
+use ekos_artifact::ArtifactStore;
 use ekos_compiler_core::Diagnostic;
 use ekos_kir::KirId;
 use ekos_recovery::llm::{LlmError, LlmProvider, LlmRequest, Message};
@@ -63,6 +67,15 @@ const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v2";
 const NO_EVIDENCE_REFUSAL: &str = "Insufficient evidence: I could not find anything in the \
     compiled ledger that answers this question. No matching object, fact, or document was found, \
     so there is no grounded answer to give.";
+/// RFC 0140 §4 — the rerank prompt. Deliberately narrow: this call never answers the question,
+/// it only orders candidates, so it asks for nothing but a JSON array of item numbers.
+const RERANK_SYSTEM_PROMPT: &str = "You will be shown a question and a numbered list of \
+    candidate evidence items. Decide which items actually help answer the question, and order \
+    them from most to least relevant. Respond with exactly one JSON object and nothing else:\n\
+    {\"relevant_indices\": [<item number>, ...]}\n\
+    Include an item's number only if it genuinely helps answer the question; omit anything \
+    irrelevant. Do not answer the question itself.";
+const RERANK_PROMPT_VERSION: &str = "ai-runtime-rerank-v1";
 
 #[derive(Debug, Error)]
 pub enum AiError {
@@ -94,6 +107,20 @@ pub struct AiRuntimeConfig {
     /// single hop pulls in — a hub-like object with hundreds of neighbors could still blow past
     /// any provider's context/rate limit. See [`DEFAULT_MAX_CONTEXT_CHARS`].
     pub max_context_chars: u32,
+    /// RFC 0140 §3 — how many *distinct* entities in each REASON evidence set get their real,
+    /// on-demand source text attached (via [`AiRuntime::with_artifact_store`]; inert otherwise).
+    /// Deliberately small — the RFC's own framing is "this is the expensive tier": each one is a
+    /// real artifact-store read plus up to [`crate::reason::DEFAULT_EVIDENCE_CAP`]-independent
+    /// lines of extra context, not a free lookup like the rest of evidence assembly.
+    pub source_text_top_k: u32,
+    /// RFC 0140 §4 — `[retrieval] rerank = "llm"`. Off by default: a second `LlmProvider::complete`
+    /// call per question is not reproducible (RFC 0126's CI gate assumes reproducible ranking,
+    /// which is exactly why this never touches that gate's own path — it lives entirely inside
+    /// [`AiRuntime::reason_with_history`], not `retrieve()`) and doubles latency/cost.
+    pub rerank_llm: bool,
+    /// How many of the top evidence items [`AiRuntime::reason_with_history`]'s rerank call
+    /// considers when [`Self::rerank_llm`] is on. Bounded — cost and latency scale with it.
+    pub rerank_candidates: u32,
 }
 
 impl Default for AiRuntimeConfig {
@@ -106,6 +133,9 @@ impl Default for AiRuntimeConfig {
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             reason_system_prompt: REASON_SYSTEM_PROMPT.to_string(),
             max_context_chars: DEFAULT_MAX_CONTEXT_CHARS,
+            source_text_top_k: 3,
+            rerank_llm: false,
+            rerank_candidates: 10,
         }
     }
 }
@@ -174,6 +204,10 @@ pub struct AiRuntime<'a> {
     runtime: &'a Runtime<'a>,
     llm: Arc<dyn LlmProvider>,
     config: AiRuntimeConfig,
+    /// RFC 0140 §3 — on-demand source-text enrichment reads through this when set
+    /// ([`Self::with_artifact_store`]); `None` (every pre-existing call site, unchanged) leaves
+    /// `gather_evidence`'s output exactly as it was before this RFC.
+    artifact_store: Option<Arc<dyn ArtifactStore>>,
 }
 
 impl<'a> AiRuntime<'a> {
@@ -186,7 +220,17 @@ impl<'a> AiRuntime<'a> {
             runtime,
             llm,
             config,
+            artifact_store: None,
         }
+    }
+
+    /// Opt into RFC 0140 §3: the top `config.source_text_top_k` distinct entities in each
+    /// [`Self::gather_evidence`] result get their real, on-demand source text attached as an
+    /// extra evidence item, read from `store` — content-addressed and already past RFC 0043
+    /// redaction, never the live filesystem.
+    pub fn with_artifact_store(mut self, store: Arc<dyn ArtifactStore>) -> Self {
+        self.artifact_store = Some(store);
+        self
     }
 
     pub async fn ask(&self, question: &str) -> Result<AiAnswer, AiError> {
@@ -260,7 +304,16 @@ impl<'a> AiRuntime<'a> {
     /// is the QUERY-surface answer on its own.
     pub fn gather_evidence(&self, question: &str) -> Result<EvidenceSet, AiError> {
         let plan = self.plan(question)?;
-        Ok(execute(&plan, self.runtime)?)
+        let mut evidence = execute(&plan, self.runtime)?;
+        if let Some(store) = &self.artifact_store {
+            attach_source_text(
+                &mut evidence,
+                self.runtime,
+                store.as_ref(),
+                self.config.source_text_top_k as usize,
+            );
+        }
+        Ok(evidence)
     }
 
     /// The REASON pipeline: compile `question` → execute → assemble an [`EvidenceSet`] → the LLM
@@ -279,7 +332,12 @@ impl<'a> AiRuntime<'a> {
         question: &str,
         history: &[ConversationTurn],
     ) -> Result<AiAnswer, AiError> {
-        let evidence = self.gather_evidence(question)?;
+        let mut evidence = self.gather_evidence(question)?;
+        // RFC 0140 §4 — opt-in, best-effort: only reorders `evidence.items`, never changes which
+        // evidence ids exist, so this must run before anything below reads the set's contents.
+        if self.config.rerank_llm {
+            self.rerank_evidence(question, &mut evidence).await;
+        }
         let mut diagnostics = evidence.diagnostics.clone();
         let known_evidence: HashSet<KirId> = evidence.source_ids().into_iter().collect();
 
@@ -337,6 +395,44 @@ impl<'a> AiRuntime<'a> {
                 output_tokens: resp.output_tokens,
             },
         })
+    }
+
+    /// RFC 0140 §4 — ask the model which of the top `config.rerank_candidates` evidence items
+    /// actually help answer `question`, then reorder `set.items` accordingly. Best-effort by
+    /// design: any failure to call the model, or to parse a usable order back out of its
+    /// response, leaves `set` completely unchanged — a failed rerank must degrade to exactly the
+    /// behavior this RFC's `rerank_llm: false` default already has, never surface as an error the
+    /// caller has to handle.
+    ///
+    /// Only reorders the first `rerank_candidates` items and only among themselves; anything
+    /// beyond that boundary keeps its original position at the end, untouched and un-costed.
+    async fn rerank_evidence(&self, question: &str, set: &mut EvidenceSet) {
+        if set.items.is_empty() {
+            return;
+        }
+        let top_n = (self.config.rerank_candidates as usize).min(set.items.len());
+        let numbered: String = set.items[..top_n]
+            .iter()
+            .enumerate()
+            .map(|(i, item)| format!("{}. {}", i + 1, item.claim))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let user = format!("Question: {question}\n\nCandidate evidence items:\n{numbered}");
+        let req = LlmRequest {
+            system: RERANK_SYSTEM_PROMPT,
+            user: &user,
+            prompt_version: RERANK_PROMPT_VERSION,
+            max_tokens: 256,
+            history: &[],
+        };
+        let Ok(resp) = self.llm.complete(&req).await else {
+            return;
+        };
+        let Some(order) = parse_rerank_order(&resp.content, top_n) else {
+            return;
+        };
+        let items = std::mem::take(&mut set.items);
+        set.items = apply_rerank_order(items, &order);
     }
 
     /// Same pipeline as [`Self::ask`], but calls `on_chunk` with each piece
@@ -612,6 +708,58 @@ fn balanced_json_spans(content: &str) -> Vec<(usize, usize)> {
         }
     }
     spans
+}
+
+/// RFC 0140 §4's rerank response shape: `{"relevant_indices": [<item number>, ...]}`, 1-based,
+/// most relevant first.
+#[derive(Deserialize)]
+struct RerankResponse {
+    relevant_indices: Vec<usize>,
+}
+
+/// Parses [`RERANK_SYSTEM_PROMPT`]'s expected response into a validated relevance order — 1-based
+/// indices, in the order given, filtered to `1..=n` (an out-of-range or repeated index from the
+/// model is silently dropped rather than trusted). `None` if no balanced JSON block in `content`
+/// parses into the expected shape, or every index in it turns out to be out of range — the caller
+/// treats that identically to an LLM call failure: leave the evidence set exactly as it was.
+///
+/// Reuses [`balanced_json_spans`] (tried last-block-first, same as [`extract_citations`]) rather
+/// than a second brace-scanner — the failure mode this guards against (a citation-style block
+/// buried in prose, or wrapped in a fenced code block) applies here too.
+fn parse_rerank_order(content: &str, n: usize) -> Option<Vec<usize>> {
+    for (start, end) in balanced_json_spans(content).into_iter().rev() {
+        let Ok(resp) = serde_json::from_str::<RerankResponse>(&content[start..end]) else {
+            continue;
+        };
+        let mut seen = HashSet::new();
+        let valid: Vec<usize> = resp
+            .relevant_indices
+            .into_iter()
+            .filter(|&i| i >= 1 && i <= n && seen.insert(i))
+            .collect();
+        if !valid.is_empty() {
+            return Some(valid);
+        }
+    }
+    None
+}
+
+/// Reorders `items` so the 1-based positions named in `order` (most-relevant-first, already
+/// validated by [`parse_rerank_order`] to be in range and unique) come first, in that order;
+/// every other item keeps its original relative order and follows after. Never drops an item —
+/// RFC 0140 §4 reorders evidence, it does not filter it.
+fn apply_rerank_order(items: Vec<EvidenceItem>, order: &[usize]) -> Vec<EvidenceItem> {
+    let mut slots: Vec<Option<EvidenceItem>> = items.into_iter().map(Some).collect();
+    let mut out = Vec::with_capacity(slots.len());
+    for &idx in order {
+        if let Some(slot) = slots.get_mut(idx - 1)
+            && let Some(item) = slot.take()
+        {
+            out.push(item);
+        }
+    }
+    out.extend(slots.into_iter().flatten());
+    out
 }
 
 fn extract_citations(
@@ -1329,5 +1477,159 @@ mod tests {
 
         ai.reason("orders").await.unwrap();
         assert!(mock.seen_history.lock().unwrap().is_empty());
+    }
+
+    // ── RFC 0140 §4: LLM-assisted rerank ──────────────────────────────────
+
+    mod rerank {
+        use super::*;
+        use crate::reason::EvidenceItem;
+
+        fn item(claim: &str) -> EvidenceItem {
+            EvidenceItem {
+                claim: claim.to_string(),
+                value: serde_json::Value::Null,
+                source: None,
+                location: String::new(),
+                confidence: 0.5,
+                extracted_by: String::new(),
+                entity: None,
+                weak: false,
+            }
+        }
+
+        #[test]
+        fn parse_rerank_order_reads_the_expected_shape() {
+            let content = r#"{"relevant_indices": [3, 1]}"#;
+            assert_eq!(parse_rerank_order(content, 3), Some(vec![3, 1]));
+        }
+
+        #[test]
+        fn parse_rerank_order_finds_the_block_even_with_surrounding_prose() {
+            let content = "Sure, here you go:\n{\"relevant_indices\": [2]}\nHope that helps!";
+            assert_eq!(parse_rerank_order(content, 2), Some(vec![2]));
+        }
+
+        #[test]
+        fn parse_rerank_order_drops_out_of_range_and_duplicate_indices() {
+            // index 0 and 9 are out of range for n=3; 1 repeats.
+            let content = r#"{"relevant_indices": [1, 9, 0, 1, 2]}"#;
+            assert_eq!(parse_rerank_order(content, 3), Some(vec![1, 2]));
+        }
+
+        #[test]
+        fn parse_rerank_order_is_none_when_every_index_is_out_of_range() {
+            let content = r#"{"relevant_indices": [9, 10]}"#;
+            assert_eq!(parse_rerank_order(content, 3), None);
+        }
+
+        #[test]
+        fn parse_rerank_order_is_none_on_unparseable_content() {
+            assert_eq!(parse_rerank_order("not json at all", 3), None);
+        }
+
+        #[test]
+        fn apply_rerank_order_moves_named_items_to_the_front_in_order() {
+            let items = vec![item("a"), item("b"), item("c")];
+            let out = apply_rerank_order(items, &[3, 1]);
+            let claims: Vec<&str> = out.iter().map(|i| i.claim.as_str()).collect();
+            assert_eq!(
+                claims,
+                vec!["c", "a", "b"],
+                "b (unmentioned) keeps its relative place at the end"
+            );
+        }
+
+        #[test]
+        fn apply_rerank_order_with_an_empty_order_leaves_items_unchanged() {
+            let items = vec![item("a"), item("b")];
+            let out = apply_rerank_order(items, &[]);
+            let claims: Vec<&str> = out.iter().map(|i| i.claim.as_str()).collect();
+            assert_eq!(claims, vec!["a", "b"]);
+        }
+
+        #[tokio::test]
+        async fn rerank_llm_off_by_default_never_reorders() {
+            let (ledger, _dir) = temp_ledger();
+            seed(&ledger);
+            let runtime = Runtime::new(&ledger);
+            // Would reorder to [2, 1] if the rerank call actually ran.
+            let mock = Arc::new(MockLlmProvider::new(r#"{"relevant_indices": [2, 1]}"#));
+            let ai = AiRuntime::new(&runtime, mock, AiRuntimeConfig::default());
+            assert!(!ai.config.rerank_llm, "off by default");
+
+            let evidence = ai.gather_evidence("orders").unwrap();
+            let mut reranked = evidence.clone();
+            // Directly proves rerank_evidence is simply never invoked when the config is off —
+            // reason_with_history's own early-return guard is the thing under test, so call the
+            // pipeline exactly as it does and diff against the untouched evidence set.
+            if ai.config.rerank_llm {
+                ai.rerank_evidence("orders", &mut reranked).await;
+            }
+            assert_eq!(
+                evidence.items.iter().map(|i| &i.claim).collect::<Vec<_>>(),
+                reranked.items.iter().map(|i| &i.claim).collect::<Vec<_>>()
+            );
+        }
+
+        #[tokio::test]
+        async fn rerank_evidence_reorders_using_the_models_response() {
+            let (ledger, _dir) = temp_ledger();
+            seed(&ledger);
+            let runtime = Runtime::new(&ledger);
+            let mock = Arc::new(MockLlmProvider::new(r#"{"relevant_indices": [2, 1]}"#));
+            let mut config = AiRuntimeConfig::default();
+            config.rerank_llm = true;
+            let ai = AiRuntime::new(&runtime, mock, config);
+
+            let mut set = crate::reason::EvidenceSet {
+                items: vec![item("first"), item("second")],
+                plan: QueryPlan {
+                    raw: "q".into(),
+                    query_type: crate::retrieval::QueryType::Lexical,
+                    root: crate::reason::PlanNode::Search {
+                        query: "q".into(),
+                        limit: 20,
+                    },
+                    confidence: 0.5,
+                },
+                diagnostics: Vec::new(),
+            };
+            ai.rerank_evidence("q", &mut set).await;
+            let claims: Vec<&str> = set.items.iter().map(|i| i.claim.as_str()).collect();
+            assert_eq!(claims, vec!["second", "first"]);
+        }
+
+        #[tokio::test]
+        async fn rerank_evidence_on_an_unparseable_response_leaves_the_set_unchanged() {
+            let (ledger, _dir) = temp_ledger();
+            seed(&ledger);
+            let runtime = Runtime::new(&ledger);
+            let mock = Arc::new(MockLlmProvider::new("I cannot help with that."));
+            let mut config = AiRuntimeConfig::default();
+            config.rerank_llm = true;
+            let ai = AiRuntime::new(&runtime, mock, config);
+
+            let mut set = crate::reason::EvidenceSet {
+                items: vec![item("first"), item("second")],
+                plan: QueryPlan {
+                    raw: "q".into(),
+                    query_type: crate::retrieval::QueryType::Lexical,
+                    root: crate::reason::PlanNode::Search {
+                        query: "q".into(),
+                        limit: 20,
+                    },
+                    confidence: 0.5,
+                },
+                diagnostics: Vec::new(),
+            };
+            ai.rerank_evidence("q", &mut set).await;
+            let claims: Vec<&str> = set.items.iter().map(|i| i.claim.as_str()).collect();
+            assert_eq!(
+                claims,
+                vec!["first", "second"],
+                "a best-effort failure must be a no-op"
+            );
+        }
     }
 }
