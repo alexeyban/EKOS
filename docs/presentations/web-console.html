@@ -662,25 +662,32 @@ footer { margin-top:5rem; padding-top:2rem; border-top:1px solid var(--rule); fo
 <hr class="rule">
 
 <section id="next">
-  <div class="sec-head"><span class="sec-num">§</span><h2>Next</h2></div>
+  <div class="sec-head"><span class="sec-num">§</span><h2>Shipped since this deck</h2></div>
   <div class="two">
     <div>
-      <h4>Phase 6 — graph v2</h4>
-      <p>Neighbourhood isolation (<code>ekos_neighborhood</code> at depth 1–3), the
-      <b>impact-mode trace</b> (<code>ekos_impact</code> — "the visual form of the claim that
-      currently has none"), server-side ForceAtlas2 with cached coordinates, and PNG / glTF export.</p>
+      <h4>Phase 6 — graph v2 (RFC 0136, <code>devlog_164</code>)</h4>
+      <p>Neighbourhood isolation (real BFS sub-graph via the existing, unmodified
+      <code>ekos_neighborhood</code> at depth 1–3), the <b>impact-mode trace</b>
+      (<code>ekos_impact</code>'s hop-distance results as node coloring plus highlighted
+      edges — "the visual form of the claim that currently has none"), a server-side
+      ForceAtlas2 layout (Python <code>networkx</code> + <code>fa2_modified</code>, cached per
+      graph structure) for graphs past ~2,000 nodes, and one-click PNG / glTF export, entirely
+      client-side. Zero Rust-side changes needed — both MCP tools already existed.</p>
     </div>
     <div>
-      <h4>Phase 7 — hardening</h4>
-      <p>Performance passes, a stable cross-workspace kind→colour table, run-log retention, a
-      CI gate on generated TypeScript drift, and packaging.</p>
+      <h4>Phase 7 — hardening (<code>devlog_165</code>)</h4>
+      <p>Per-route code-splitting (<code>react-router-dom</code> lazy routes, isolating the
+      charting dependency to its own chunk), deep-linkable graph time-travel
+      (<code>?as_of=&amp;focus=</code> plus a one-click "copy link"), a real
+      <code>evidence_count</code> RPC for distributed workspaces, and <code>docker-compose.yml</code>
+      cleanup — the console's last named phase.</p>
     </div>
   </div>
 </section>
 
 <footer>
-  EKOS web console · RFC 0128–0133 · <code>web/api</code> + <code>web/ui</code> · generated
-  from the phase devlogs and the running console.
+  EKOS web console · RFC 0128–0134 · RFC 0136 · <code>web/api</code> + <code>web/ui</code> ·
+  generated from the phase devlogs and the running console.
 </footer>
 
 </main>

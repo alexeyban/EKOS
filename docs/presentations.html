@@ -91,6 +91,13 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
       <div class="rfc">RFC 0035</div>
     </li>
     <li>
+      <a class="deck" href="presentations/cross-project-documentation.html">Cross-Project Generated Documentation</a>
+      <p class="desc">The same doc-generation loop run cold against three real, unrelated
+      codebases — EKOS itself, a Databricks Asset Bundle repo, and an Azure Data Factory repo —
+      including the honest "no ADF connector yet" gap, stated plainly rather than hidden.</p>
+      <div class="rfc">RFC 0035 · RFC 0037 · RFC 0040 · RFC 0041 · RFC 0042 · RFC 0043</div>
+    </li>
+    <li>
       <a class="deck" href="presentations/dbt-transformation.html">Pentaho → dbt</a>
       <p class="desc">Real Pentaho ETL steps compiled into real dbt SQL models — ref()/source()
       chained via the Transformation IR, honest passthrough for Filter/Calculate/Unmapped, and
@@ -190,12 +197,21 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
     </li>
     <li>
       <a class="deck" href="presentations/web-console.html">EKOS Web Console</a>
-      <p class="desc">Six shipped increments take EKOS from a terminal-and-MCP-only compiler to
+      <p class="desc">Shipped increments take EKOS from a terminal-and-MCP-only compiler to
       a running browser console — workspace supervision, a statistics dashboard, an
       <code>ekos.toml</code> editor, an allowlisted job runner with live logs, cron/interval
-      scheduling, and an interactive evidence graph. Architecture diagrams, real screenshots, the
-      read/write auth split, and the bugs each phase surfaced.</p>
-      <div class="rfc">RFC 0128–0133 · devlog 151–156</div>
+      scheduling, and an interactive evidence graph with time-travel, neighbourhood isolation,
+      and impact-mode tracing. Architecture diagrams, real screenshots, the read/write auth
+      split, and the bugs each phase surfaced.</p>
+      <div class="rfc">RFC 0128–0134 · 0136 · devlog 151–156, 164–165</div>
+    </li>
+    <li>
+      <a class="deck" href="presentations/self-hosted-benchmark.html">EKOS Compiles Itself</a>
+      <p class="desc">The compiler compiled itself — EKOS's own ~50-crate workspace run through
+      the full pipeline with real timing, CPU, memory, and storage numbers from
+      <code>/usr/bin/time -v</code> and its own RFC 0114 query log, three real bugs found live
+      along the way.</p>
+      <div class="rfc">RFC 0114</div>
     </li>
     <li>
       <a class="deck" href="presentations/eval-comparison-report.html">Eval Comparison: Fixing a Self-Contaminated Ledger</a>

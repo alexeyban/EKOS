@@ -2,7 +2,10 @@
 
 **As of:** 2026-08-27 (devlogs 1–127, RFCs 0001–0109). **Not re-synthesized since** — treat the
 body below as a 2026-08-27 snapshot. Deltas known as of 2026-09-01 (devlogs 128–148, RFCs
-0110–0126) are folded in as dated **UPDATE** notes at the top of each affected section; `TODO.md`
+0110–0126) are folded in as dated **UPDATE** notes at the top of each affected section; a further
+delta pass as of 2026-09-12 (devlogs 149–177, RFCs 0127–0143) adds the MCP HTTP transport UPDATE in
+§2, the SQL-dialect-routing bug in §4, the SonarCloud tooling bug in §14, and two new sections (§15
+Web Console, §16 Eval harness) for subsystems that didn't exist at the prior passes. `TODO.md`
 remains the always-current backlog.
 **Author's method:** This is a synthesis, not a fresh re-derivation. EKOS already tracks this
 continuously in `TODO.md`'s `## Ongoing / Cross-cutting` section — a 2026-08-21 full read-through
@@ -84,8 +87,18 @@ graph+state structure" framing to keep `Runtime` read-only and avoid a second st
 
 ## 2. MCP / Connector infrastructure
 
-**Gap.** MCP server (RFC 0013) is stdio-only — no HTTP/SSE transport, no auth, no multi-workspace
-routing. MCP exposes tools only; resources/prompts capabilities are unbuilt. Every connector lacks
+**UPDATE (2026-09-12):** the "stdio-only, no HTTP/SSE transport, no auth" half of the gap below is
+closed. RFC 0143 (`devlog_176`) added `ekos mcp serve --http <addr>` — MCP's Streamable HTTP
+transport (`POST /mcp`, JSON or single-shot SSE by `Accept` negotiation, for VS Code/Copilot/Visual
+Studio/ChatGPT Developer Mode) with the same bearer-token auth as `--tcp` (`--token-file`, alias of
+the renamed `--tcp-token-file`) now checked on every HTTP request, plus an `Origin` check
+(loopback or an explicit `--http-allow-origin`) as DNS-rebinding defence. Still genuinely open:
+resources/prompts capabilities remain unbuilt (tools only), and there is still no *multi-workspace
+routing inside one server process* — each `--http`/`--tcp` process still serves exactly one
+workspace; the web console's `McpSupervisor` (RFC 0129) papers over this by spawning one process
+per workspace rather than the MCP layer itself routing.
+
+**Gap.** MCP exposes tools only; resources/prompts capabilities are unbuilt. Every connector lacks
 generic `ScanContext`/`ekos.toml [connectors.X]` config plumbing (confirmed missing project-wide,
 not just for one connector, RFC 0017). Dynamic/runtime plugin loading (`.so`/WASM) is explicitly
 named "a known limitation, not solved here" by RFC 0031 itself (also RFC 0006).
@@ -116,6 +129,18 @@ every other multi-project analyzer.
 ---
 
 ## 4. Analyzers
+
+**Real bug found live and fixed (`devlog_177`, 2026-09-10).** `[recover.sql]` dialect routing rules
+are load-bearing, not cosmetic: `.sql` files parse under the `generic` ANSI dialect unless
+`ekos.toml`'s `[[recover.sql.dialect-rules]]` routes them to `postgres`/`clickhouse`/etc., and
+`parse_ddl_structural` parses a whole file in one pass — one statement the routed dialect can't
+handle discards *every* table in that file, surfaced only as a buried `SQL001: no tables found`
+warning, never an error. Found live when a real workspace (`analytics`) lost its `[recover.sql]`
+rules in an unrelated cleanup and silently dropped its entire DB schema (0 `Table` objects) with no
+visible failure. Fixed by restoring the rules; **still open** per `TODO.md`: `SQL001` should name
+the specific unparseable statement instead of reading like the file has no schema at all, and
+`parse_ddl_structural` still has no per-statement fallback to salvage the rest of a file after one
+bad statement.
 
 **Gap.** No interprocedural/cross-file call-chain tracing for either Python (RFC 0040) or Rust (RFC
 0041) — same underlying limitation, named separately per language. Python: no `.ipynb` notebook
@@ -495,6 +520,56 @@ documented in the crate map, and exercised in dozens of devlogs since (`ekos bui
 entirely in the `## Ongoing / Cross-cutting` section (line 1745 onward) — the original phase
 checklist was never updated once real work superseded it. Not a functional gap, but worth a cleanup
 pass so a future reader doesn't mistake `TODO.md`'s top half for current status.
+
+**Real bug found live, tooling not code (`devlog_167`, 2026-09-05).** A SonarCloud scan reported a
+clean, green Quality Gate on the first attempt while `sonar.tests` was set without a matching
+`sonar.sources` — the scan silently analyzed close to none of the actual repo, and a "clean" result
+gave false confidence. Fixed by pinning `sonar.sources=.` alongside `sonar.tests` in
+`sonar-project.properties`; the durable lesson is to verify `ncloc`/file counts are non-trivial
+before trusting a green Sonar result, not just read the gate's pass/fail.
+
+---
+
+## 15. Web Console (RFC 0127–0136) — a whole subsystem this document predates
+
+This entire subsystem did not exist when this document's body (§1–14 above) was written
+(2026-08-27) and was still incomplete at the 2026-09-01 delta pass. As of `devlog_165`
+(2026-09-05), all seven of RFC 0127's named phases have shipped: Phase 0 skeleton; Phase 1 (RFC
+0129) workspace registry + `McpSupervisor` + stats dashboard; Phase 2 (RFC 0130) `ekos.toml`
+editor; Phase 3 (RFC 0131) command/job runner with OIDC-or-static-token auth and a read/write role
+split; Phase 4 (RFC 0132) cron/interval scheduled runs; Phase 5 (RFC 0133) the 2D graph view; Phase
+6 (RFC 0134, RFC 0136) graph time-travel plus "graph v2" (neighbourhood isolation, impact-mode
+tracing, server-side ForceAtlas2 layout, PNG/glTF export); Phase 7 hardening (code-splitting,
+deep-linkable graph state, a real distributed `evidence_count` RPC, packaging cleanup) — explicitly
+called the console's last *named* phase. **Gap, by absence of a plan rather than a stated
+non-goal:** no RFC 0127 Phase 8 exists; anything past hardening (the console's own tests reportedly
+still thin per `devlog_165`, no documented load-testing against a large multi-tenant deployment) is
+untracked as a numbered phase and would need a fresh RFC (0135+) to scope. See `devlog_175` for a
+real-container hardening pass (`ekos doctor` failing without a Rust toolchain, a `fact_ledger`/
+`Layout` bug) found once the console ran against a genuinely read-only-mounted deployment rather
+than a developer's own machine — the kind of gap a "runs on my machine" phase sign-off cannot catch.
+
+---
+
+## 16. Eval harness (RFC 0138–0141) — measuring answer quality found ledger bugs, not just scores
+
+**Not a gap in the harness's design — a gap the harness *found*.** RFC 0138 built `ekos eval run` to
+grade whole `ekos ask` answers (deterministic keyword/id matching, no LLM judge) across a
+101-scenario, 7-category suite, deliberately kept out of CI (real LLM calls, not yet fast/free/
+deterministic enough per-PR). The first real run reported `48/101` and every gate failing;
+chasing why (`devlog_170`–`devlog_174`) found the harness had been grading a **self-contaminated
+ledger** — the eval scenarios and the corpus scanned to answer them overlapped, and a deeper look
+found 94% of the "corpus" being scanned was not the project's own code at all (a stray `.venv/` and
+two `.scannerwork/` directories pulled in by an over-broad `[observe] paths`). Also found along the
+way: RFC 0139's own search-relaxation fix introduced a fabrication regression (10 → 15 of 101
+answers inventing evidence) before being caught and fixed, and claims that cited "a file" but not
+"a place in a file" (0% of 1,289 rendered claims carried a line number) — closed by RFC 0140's
+`source_span`-to-evidence wiring. **Current honest state, after every fix through the newest saved
+report (`evals/reports/20260909T102121Z-ekos-full-CLEAN.json`, 2026-09-09):** 43/101 on a
+genuinely clean corpus — a real, load-bearing measurement now, but still well under half, and the
+gap between 43/101 and "good" is tracked in `TODO.md`, not resolved by this document. **Still open,
+by deliberate choice:** the harness is not CI-gated (RFC 0126's separate, narrower, LLM-free
+retrieval-ranking check remains the only eval that blocks a PR).
 
 ---
 
