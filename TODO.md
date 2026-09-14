@@ -5160,16 +5160,42 @@ are excluded — see the full exclusion list in the planning history if needed.
     store, never the live filesystem** — a query-time disk read is a new raw-content entry point that
     bypasses RFC 0043 redaction), then the opt-in LLM rerank, measured on fabrication *and* answer
     correctness together.
-- [ ] **RFC 0141 — entity/edge attributes (`ekos/docs/rfcs/0141-entity-and-edge-attributes.md`,
-  proposed 2026-09-08, not accepted).** Each item is tied to a measured RFC 0138 failure:
-  `signature` on symbols (`code-002` ranks the *type* `LlmProvider` above the *function* that
-  returns one — the discriminating term lives in the return type and is recorded nowhere);
-  attributes on `Calls` edges (today a bare `HashSet<(from, to)>` with no properties at all —
-  `caller_is_test` would make impact analysis a weighting rather than a list); the embedding basis
-  text (`description` + `signature` + `name`, **not** vectors as object properties — those belong in
-  RFC 0125's `VectorIndex`, since the ledger is append-only); and renaming `properties.kind` →
-  `symbol_kind` **first**, now confirmed live: one evidence set shows
-  `parse_ddl_structural.kind = RustSymbol` and `= function` as two separate claims to the model.
+- [x] **RFC 0141 — entity/edge attributes (`ekos/docs/rfcs/0141-entity-and-edge-attributes.md`),
+  §1/§2/§3 accepted and shipped 2026-09-14 (§4 already shipped, devlog_174).** Each item is tied
+  to a measured RFC 0138 failure.
+  - [x] **§1 `signature` on symbols** — `rust_analyzer`/`python_analyzer`/`elixir_analyzer` now
+    write real declaration text (real source slice, not re-synthesized) onto `function`/`method`
+    symbols; `struct`/`enum`/`trait`/`class` symbols still get none. `code-002`'s own case
+    (`build_llm_provider`'s discriminating term living in its return type,
+    `Arc<dyn LlmProvider>`, invisible until now) is the direct target. `javascript_analyzer`
+    deliberately left out — the RFC's own prose names only Rust/Python/Elixir. Async Python
+    top-level functions are out of scope, not merely unhandled: `rustpython_parser` represents
+    them as the separate `Stmt::AsyncFunctionDef` variant, which the analyzer has never matched at
+    all (pre-existing gap, not touched here).
+  - [x] **§2 `call_count`/`call_site_line`/`caller_is_test` on `Calls` edges** — `rust_analyzer`
+    only: grepped before writing anything and confirmed `RelationshipKind::Calls` is built by
+    exactly one analyzer in the codebase, contra the crate map's older "Calls recovery" phrasing
+    for Elixir/JS — both of those analyzers' own doc comments state "not a call graph" outright.
+    `CallVisitor`'s edge set moved from `HashSet<(KirId, KirId)>` to a `HashMap` aggregating
+    `count` and an explicitly-`.min()`'d `first_line` (never "whichever `Visit` saw first" —
+    the RFC 0135 Part C determinism hazard this exact file already documents for edge ids).
+    `caller_is_test` is real but narrower than the RFC's "40 dependents of which 35 are tests"
+    framing implied: it fires for a bare top-level `#[test] fn` or a `tests/`-directory caller,
+    not for the idiomatic inline `#[cfg(test)] mod tests { ... }` pattern, which `rust_analyzer`
+    has never walked into as a symbol source at all (separate, pre-existing limitation).
+  - [x] **§3 embedding basis** — the real target was `embed.rs`'s `embedding_text` (what
+    `EmbeddingProvider::embed` actually receives), a close cousin of
+    `KirObject::indexed_content()` rather than that function itself, which is unchanged and still
+    correctly serves the BM25 lexical index. Any object carrying `symbol_kind` now embeds from
+    `name` + `signature` (if present) + `description` (if present), never the
+    `kind`/`ai_overview`/`excerpt` fallback every other object kind keeps.
+  - [x] `cargo test --workspace` / `clippy -D warnings` / `fmt --check` all clean, with new unit
+    tests per item.
+  - [ ] **Not yet done**: the actual `recover`/`resolve`/`compile`/`commit` rebuild against a real
+    multi-language workspace, and a fresh `ekos eval run` — §1's `code-002` attribution flip, §2's
+    `ekos impact` spot-check, and §3's three-scenario (`arch-017`/`lin-009`/`arch-007`) measurement
+    all need that real rebuild, none of which this pass ran. Implemented and unit-tested, not yet
+    measured against the suite it was written to fix.
 
 - [x] **Corpus contamination — 94% of the observed corpus was not EKOS (devlog_174, 2026-09-08).**
   Found by RFC 0140's claim-location measurement, whose sample output showed every cited claim

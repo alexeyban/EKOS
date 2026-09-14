@@ -437,7 +437,12 @@ three operations, built as RFCs 0119–0126 (`devlog_143`–`devlog_149`):
   formatting detail. Claims cite **a place in a file, not just a file** (RFC 0140): every
   Rust/Python/Elixir symbol with a `source_span` carries real evidence naming its path, its line,
   and the source text itself, rendered as `path:start-end` — so asking what a function does shows
-  the model the function body, not only its name.
+  the model the function body, not only its name. Each Rust/Python/Elixir function or method also
+  carries a real `signature` (RFC 0141) — the discriminating term for "what builds an
+  `Arc<dyn LlmProvider>`" often lives in a return type, not the function's own name — and a Rust
+  `Calls` edge carries `call_count`, `call_site_line`, and `caller_is_test`, so impact analysis can
+  weigh 40 production call sites differently from 40 mostly-test ones instead of returning an
+  undifferentiated list.
 
 EKL gains `FIND Object SEMANTIC 'text' [LIMIT k]` — the retriever as a candidate-set strategy.
 Retrieval quality is CI-gated: `ekos_runtime::retrieval_eval` holds a checked-in graded query set
