@@ -5149,11 +5149,21 @@ are excluded — see the full exclusion list in the planning history if needed.
       (`weak: true`) rather than a confident `"search match"`, and refusal is gated on *empty*
       evidence specifically (§3.6), not on evidence being partly weak — so relaxed hits reaching
       an adversarial scenario's evidence set don't silently disarm the refusal short-circuit.
-    - [ ] **Phase 4 — provider choice + docs**: keep `[llm]` user-selectable (already true) and
-      **hard-fail `ekos eval` when `build_llm_provider` silently degrades to `MockLlmProvider`** on a
-      missing API key — today that would produce a fully-formed, publishable report of stub answers.
-      Document that a local model needs a powerful server (this repo's own P95 is 36 s/scenario on
-      `llama3:latest`) and that the published reference baseline should come from a cloud model.
+    - [x] **Phase 4 — provider choice + docs, DONE 2026-09-14.** `[llm]` was already
+      user-selectable. Added the hard-fail: `ekos eval run` now calls `check_not_mock` right after
+      `build_llm_provider` and refuses (rather than running) when `llm.model_name() ==
+      MOCK_MODEL_NAME` — there is no `--agent mock` option, so reaching the mock can only mean a
+      missing API key silently degraded the run, never a deliberate choice. The error names the
+      actual environment variable via a new `resolved_key_env` helper, and suggests `--agent
+      ollama`. Found a real, separate bug while wiring that helper up: `build_llm_provider`
+      computed one literal `"ANTHROPIC_API_KEY"` default *before* branching on provider, reused
+      unchanged for the `openai` branch — an `openai`-configured workspace with a real
+      `OPENAI_API_KEY` set but no explicit `[llm] api-key-env` override checked the wrong variable
+      and silently degraded to the mock. Fixed via a per-provider `default_key_env`. Documented in
+      the README's eval-harness section: a local model is real and free to run but not the
+      reference — it needs a genuinely powerful server to keep pace with a 101-scenario suite (this
+      repo's own measured P95: 49.4s/scenario on `llama3:latest`), so a published baseline should
+      come from `--agent claude`/`--agent openai`.
   - [ ] **Follow-up from the above, still open**: (1) A/B a stronger provider (`--agent claude`/
     `--agent openai`) once an API key is available in this environment — still the highest-leverage
     unexplored lever; (2) root-cause the recall@10 regression (75.0%→65.0%) the contamination fix

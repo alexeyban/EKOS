@@ -564,6 +564,14 @@ now retrieve *real* objects that read as more convincing evidence, which appears
 likelier to answer than refuse — a hypothesis awaiting the transcripts, not a finding. The suite
 still reports `Status: FAIL` against its own gates, and will keep saying so until it doesn't.
 
+A local model is real and free to run, but it is not the reference: `ekos eval run` refuses outright
+rather than silently grading against the stub `MockLlmProvider` when the configured provider's API
+key isn't set (there is no `--agent mock` option), and a local model still needs a genuinely
+powerful server to keep pace with a 101-scenario suite — P95 latency above was measured at 49.4s per
+scenario on `llama3:latest`, and per-scenario latency this high compounds fast across a full run.
+Any published reference baseline should come from `--agent claude`/`--agent openai` against a
+cloud model, not from whatever happened to be configured locally.
+
 Those numbers moved mostly because the harness found something unflattering: **94% of what this
 repo was compiling wasn't its own code.** A Python virtualenv and two `.scannerwork/` directories
 had never been excluded from the observation walk — `.gitignore` does not filter it. Excluding
