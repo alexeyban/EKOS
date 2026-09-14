@@ -142,6 +142,12 @@ pub(crate) async fn stream_lines(
     Ok(())
 }
 
+/// [`MockLlmProvider::model_name`]'s fixed value — `pub` so a caller that needs to detect "this
+/// is the stub, not a real model" (`ekos eval`'s hard-fail on a silent provider-selection
+/// fallback, RFC 0138 Phase 4) can compare against this constant instead of a duplicated string
+/// literal that could silently drift out of sync with it.
+pub const MOCK_MODEL_NAME: &str = "mock-v1";
+
 /// In-process no-op provider for unit tests. Returns a fixed response without network calls.
 pub struct MockLlmProvider {
     pub model: String,
@@ -151,7 +157,7 @@ pub struct MockLlmProvider {
 impl MockLlmProvider {
     pub fn new(response: impl Into<String>) -> Self {
         Self {
-            model: "mock-v1".into(),
+            model: MOCK_MODEL_NAME.into(),
             response: response.into(),
         }
     }

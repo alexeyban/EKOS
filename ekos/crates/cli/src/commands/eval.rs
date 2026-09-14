@@ -3,12 +3,13 @@
 //! building the `LlmProvider`, exactly like `ask.rs` — `ekos-evals` itself never touches
 //! configuration or credentials.
 
-use super::recover::build_llm_provider;
+use super::recover::{build_llm_provider, resolved_key_env};
 use super::store::open_store_read_only;
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_evals::report::{self, GateThresholds};
 use ekos_evals::schema::load_dataset;
+use ekos_recovery::{LlmProvider, MOCK_MODEL_NAME};
 use ekos_runtime::{AiRuntime, Runtime};
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,28 @@ fn agent_label(config: &EkosConfig) -> String {
         Some("openai") => format!("openai ({model})"),
         _ => format!("claude ({model})"),
     }
+}
+
+/// RFC 0138 Phase 4: `build_llm_provider` silently degrades to the stub `MockLlmProvider` when
+/// the configured provider's API key isn't set — a reasonable default for `recover`/`commit`
+/// (structural analysis without LLM enrichment is a legitimate degraded mode there), but for
+/// `ekos eval` it would produce a fully-formed, publishable report scoring canned stub answers as
+/// if a real model generated them. There is no `--agent mock` option (`run`'s own match above
+/// only accepts claude/anthropic/ollama/openai), so reaching the mock here can only mean the
+/// fallback fired, never a deliberate choice.
+fn check_not_mock(llm: &dyn LlmProvider, agent: &str, key_env: &str) -> Result<()> {
+    if llm.model_name() != MOCK_MODEL_NAME {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "no usable LLM provider is configured for agent {agent:?} — refusing to run `ekos eval` \
+         against the stub MockLlmProvider, which would silently produce a fully-formed, \
+         publishable report scoring answers no model actually generated.\n\nSet {key_env} in the \
+         environment, or pass `--agent ollama` to grade against a local model instead. A local \
+         model needs a genuinely powerful server to keep pace with this suite — this repo's own \
+         measured P95 is 36s/scenario on `llama3:latest` — so a published reference baseline \
+         should still come from a cloud model."
+    )
 }
 
 pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Result<()> {
@@ -72,6 +95,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
 
     let artifact_dir = run_config.artifact_dir(cwd);
     let llm = build_llm_provider(&run_config, &artifact_dir);
+    check_not_mock(
+        llm.as_ref(),
+        &agent_label(&run_config),
+        resolved_key_env(&run_config),
+    )?;
     let ledger = open_store_read_only(&run_config, cwd)?;
     let runtime = Runtime::over(&*ledger);
     let ai = AiRuntime::new(&runtime, llm, super::ask::ai_config(&run_config));
@@ -189,4 +217,59 @@ pub fn regrade(cwd: &Path, config: &EkosConfig, opts: EvalRegradeOpts) -> Result
         println!("{}", report::render_text(&regraded));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ekos_recovery::MockLlmProvider;
+
+    #[test]
+    fn a_real_provider_passes_the_mock_check() {
+        // Any `model_name()` other than the mock's fixed value must pass — a real provider's
+        // actual model name is never known statically here (it depends on config/env), so this
+        // stands in for "anything that isn't the stub".
+        let provider = MockLlmProvider {
+            model: "claude-opus-5".to_string(),
+            response: String::new(),
+        };
+        assert!(check_not_mock(&provider, "claude (default)", "ANTHROPIC_API_KEY").is_ok());
+    }
+
+    #[test]
+    fn the_stub_mock_provider_is_refused_with_an_actionable_message() {
+        let provider = MockLlmProvider::new("{}");
+        let err = check_not_mock(&provider, "openai (gpt-4o-mini)", "OPENAI_API_KEY")
+            .expect_err("the fixed mock model name must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("OPENAI_API_KEY"),
+            "must name the actual key the caller's provider needs, not a hardcoded one: {msg}"
+        );
+        assert!(
+            msg.contains("--agent ollama"),
+            "must point at a real way out: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolved_key_env_defaults_per_provider_not_one_shared_default() {
+        let mut config = EkosConfig::default();
+        assert_eq!(resolved_key_env(&config), "ANTHROPIC_API_KEY");
+
+        config.llm.provider = Some("openai".to_string());
+        assert_eq!(
+            resolved_key_env(&config),
+            "OPENAI_API_KEY",
+            "an openai-configured workspace with no explicit api-key-env override must check \
+             OPENAI_API_KEY, not silently fall back to ANTHROPIC_API_KEY"
+        );
+
+        config.llm.api_key_env = Some("CUSTOM_KEY".to_string());
+        assert_eq!(
+            resolved_key_env(&config),
+            "CUSTOM_KEY",
+            "an explicit [llm] api-key-env override must always win"
+        );
+    }
 }

@@ -1083,6 +1083,37 @@ fn should_register_architecture_reasoning(config: &EkosConfig, crate_count: usiz
     config.architecture_reasoning.enabled && crate_count > 0
 }
 
+/// The API-key environment variable name `build_llm_provider` falls back to when `[llm]
+/// api-key-env` isn't set explicitly, per provider.
+///
+/// Found live while adding RFC 0138 Phase 4's hard-fail-on-mock check: this used to be one
+/// literal `"ANTHROPIC_API_KEY"` computed before branching on provider, reused unchanged for the
+/// `openai` branch too. A workspace configured with `[llm] provider = "openai"` and a real
+/// `OPENAI_API_KEY` set, but no explicit `api-key-env` override, silently degraded to the stub
+/// `MockLlmProvider` — `OpenAiProvider::from_env_var("ANTHROPIC_API_KEY")` checked the wrong
+/// variable — and warned about the wrong key ever being missing.
+fn default_key_env(provider: Option<&str>) -> &'static str {
+    match provider {
+        Some("openai") => "OPENAI_API_KEY",
+        _ => "ANTHROPIC_API_KEY",
+    }
+}
+
+/// The API-key environment variable name `build_llm_provider` will actually check for this
+/// config: `[llm] api-key-env` if set, else [`default_key_env`] for the configured provider.
+///
+/// `pub` so a caller that needs to explain *why* provider selection fell back to the stub
+/// `MockLlmProvider` — `ekos eval`'s hard-fail (RFC 0138 Phase 4) — can name the real variable
+/// instead of duplicating this resolution logic or guessing at "ANTHROPIC_API_KEY" regardless of
+/// provider.
+pub fn resolved_key_env(config: &EkosConfig) -> &str {
+    config
+        .llm
+        .api_key_env
+        .as_deref()
+        .unwrap_or_else(|| default_key_env(config.llm.provider.as_deref()))
+}
+
 /// Choose LLM provider (RFC 0021, RFC 0046): `[llm] provider = "ollama"` in
 /// `ekos.toml` routes to a local Ollama daemon (no key required —
 /// unreachability surfaces as an ordinary error on first use, not here);
@@ -1108,11 +1139,7 @@ pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn L
         ));
     }
 
-    let key_env = config
-        .llm
-        .api_key_env
-        .as_deref()
-        .unwrap_or("ANTHROPIC_API_KEY");
+    let key_env = resolved_key_env(config);
 
     if config.llm.provider.as_deref() == Some("openai") {
         return match OpenAiProvider::from_env_var(key_env) {
@@ -1341,5 +1368,42 @@ mod tests {
         // Without ANTHROPIC_API_KEY set in the test environment this lands
         // on the mock; either way it must not be the Ollama default model.
         assert_ne!(provider.model_name(), "llama3.1:8b");
+    }
+
+    /// Real bug, found live 2026-09-14 while adding RFC 0138 Phase 4's hard-fail-on-mock check:
+    /// `key_env` used to be one literal `"ANTHROPIC_API_KEY"` computed before branching on
+    /// provider, reused unchanged for the `openai` branch too — so an `openai`-configured
+    /// workspace with a real `OPENAI_API_KEY` set but no explicit `api-key-env` override checked
+    /// the wrong variable and silently degraded to the mock.
+    #[test]
+    fn openai_provider_defaults_to_its_own_key_env_not_anthropics() {
+        let config = EkosConfig {
+            llm: LlmConfig {
+                provider: Some("openai".to_string()),
+                api_key_env: None,
+                model: None,
+            },
+            ..Default::default()
+        };
+        assert_eq!(resolved_key_env(&config), "OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn an_explicit_api_key_env_override_always_wins() {
+        let config = EkosConfig {
+            llm: LlmConfig {
+                provider: Some("openai".to_string()),
+                api_key_env: Some("MY_CUSTOM_KEY".to_string()),
+                model: None,
+            },
+            ..Default::default()
+        };
+        assert_eq!(resolved_key_env(&config), "MY_CUSTOM_KEY");
+    }
+
+    #[test]
+    fn non_openai_providers_still_default_to_anthropics_key_env() {
+        let config = EkosConfig::default();
+        assert_eq!(resolved_key_env(&config), "ANTHROPIC_API_KEY");
     }
 }

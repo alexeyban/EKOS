@@ -66,7 +66,7 @@ pub use embed::{
 pub use git_analyzer::GitAnalyzerPass;
 pub use github_analyzer::GitHubAnalyzerPass;
 pub use javascript_analyzer::{JavaScriptAnalyzerPass, JavaScriptStats};
-pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MockLlmProvider};
+pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MOCK_MODEL_NAME, MockLlmProvider};
 pub use llm_description::{
     DescriptionProgress, DescriptionScope, DescriptionStats, describe_objects,
     describe_objects_with_progress, describe_project, estimate_call_counts,
