@@ -442,7 +442,13 @@ three operations, built as RFCs 0119–0126 (`devlog_143`–`devlog_149`):
   `Arc<dyn LlmProvider>`" often lives in a return type, not the function's own name — and a Rust
   `Calls` edge carries `call_count`, `call_site_line`, and `caller_is_test`, so impact analysis can
   weigh 40 production call sites differently from 40 mostly-test ones instead of returning an
-  undifferentiated list.
+  undifferentiated list. For the top few entities in each answer's evidence set, `ekos ask` also
+  reads the entity's real, on-demand source text straight from the artifact store — never the live
+  filesystem, so it never bypasses redaction (RFC 0140 §3) — giving the model the actual code
+  behind a claim, not just a name and a short excerpt. An opt-in `[retrieval] rerank = "llm"`
+  (off by default) asks the model to reorder the top candidate evidence items by real relevance
+  before it answers (RFC 0140 §4) — never on the deterministic retrieval-ranking path RFC 0126's
+  CI gate checks, only inside the REASON answer pipeline itself.
 
 EKL gains `FIND Object SEMANTIC 'text' [LIMIT k]` — the retriever as a candidate-set strategy.
 Retrieval quality is CI-gated: `ekos_runtime::retrieval_eval` holds a checked-in graded query set

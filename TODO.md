@@ -5196,10 +5196,30 @@ are excluded — see the full exclusion list in the planning history if needed.
     third one (RFC 0140 Verification).
   - [ ] **Claim-level rate still unmeasured**: 10/10 is one probe, not a suite-wide percentage. The
     `0/1,289` and `26.4%` baselines came from a full eval run and need the same to be comparable.
-  - [ ] **RFC 0140 §3/§4 unstarted**: on-demand source text in the evidence set (**from the artifact
-    store, never the live filesystem** — a query-time disk read is a new raw-content entry point that
-    bypasses RFC 0043 redaction), then the opt-in LLM rerank, measured on fabrication *and* answer
-    correctness together.
+  - [x] **RFC 0140 §3/§4, DONE 2026-09-14.**
+    - [x] **§3 on-demand source text.** `source_artifact_ids` reaches the ledger only through the
+      audit trail (`WriteContext`, RFC 0135 Part B), not a queryable property, so `Runtime` gained
+      an `audit_trail(id)` passthrough. `reason.rs::attach_source_text` takes the first `top_k`
+      distinct entities already in an assembled `EvidenceSet`, and for each `source_span`-carrying
+      one, reads its real, near-uncapped span text (400-line safety cap, vs. `source_evidence`'s
+      40-line compile-time one) from the **artifact store** — never the live filesystem, per RFC
+      0043 — and appends it as one additional `EvidenceItem`. Wired into `AiRuntime` as an opt-in
+      builder (`with_artifact_store`), not a required constructor arg, so all 17+ pre-existing
+      `AiRuntime::new` call sites are unaffected; `ask.rs`/`eval.rs` wire it in best-effort.
+    - [x] **§4 opt-in LLM rerank.** `[retrieval] rerank = "llm"` (default off) gates
+      `AiRuntime::rerank_evidence`, called only from `reason_with_history` — never from
+      `gather_evidence`/`retrieve()`, so RFC 0126's CI gate and `agent_runner.rs`'s offline
+      trajectory capture structurally cannot reach it. Reorders the top `rerank_candidates`
+      (default 10) evidence items by the model's own `{"relevant_indices": [...]}` response
+      (reorders only, never drops an item); best-effort — any LLM error or unparseable response
+      leaves the evidence set completely untouched.
+    - [x] `cargo test --workspace` / `clippy -D warnings` / `fmt --check` all clean; 15 new unit
+      tests (5 for §3, 10 for §4) covering the failure modes each section's own RFC text names.
+    - [ ] **Not yet measured**: re-running the RFC 0138 suite under a fixed ruler version (§3
+      should move citation precision/answer correctness without touching fabrication; §4 must be
+      judged on fabrication *and* answer correctness together, per RFC 0139's own repeated
+      lesson), and the direct check on `arch-017`/`lin-009`/`arch-007`. Needs a real `[llm]`
+      provider and a full `recover`/`compile`/`commit`, neither run this pass.
 - [x] **RFC 0141 — entity/edge attributes (`ekos/docs/rfcs/0141-entity-and-edge-attributes.md`),
   §1/§2/§3 accepted and shipped 2026-09-14 (§4 already shipped, devlog_174).** Each item is tied
   to a measured RFC 0138 failure.
