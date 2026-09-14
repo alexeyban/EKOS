@@ -386,7 +386,39 @@ pub struct EmbedStats {
 /// The text an object is embedded from — the same signal `SearchIndex` indexes, so a vector hit
 /// and a BM25 hit describe the same document: `name`, kind, its `ai_overview` (RFC 0088) if it
 /// has one, else a redacted content excerpt.
+///
+/// RFC 0141 §3: a code symbol (any object carrying `symbol_kind` — `RustSymbol`/`PythonSymbol`/
+/// `ElixirSymbol`/`JsSymbol`) is the one documented exception, embedded from `name` + `signature`
+/// (RFC 0141 §1) + `description` instead. Three scenarios in the RFC 0138 suite fail because the
+/// question never names the object it wants (*"the content-addressable, checksummed unit of raw
+/// observed data that an EKOS Observer returns"* → `ObservationArtifact`) — no lexical index can
+/// bridge that, but the type's own doc comment (`description`) or a function's own return type
+/// (`signature`) already does, in nearly the same words the question uses. `kind`/`ai_overview`/
+/// `excerpt` are the wrong basis for a symbol specifically: `excerpt` and `content` are never set
+/// on a symbol object at all (only on `File`/`Document`), and `ai_overview` is a separate,
+/// opt-in-generated enrichment this RFC's own basis doesn't need to wait on.
 fn embedding_text(obj: &KirObject, redaction: &RedactionConfig) -> String {
+    if obj.properties.contains_key("symbol_kind") {
+        let mut parts = vec![obj.name.clone()];
+        if let Some(sig) = obj
+            .properties
+            .get("signature")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(sig.to_string());
+        }
+        if let Some(desc) = obj
+            .properties
+            .get("description")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(desc.to_string());
+        }
+        return parts.join("\n");
+    }
+
     let mut parts = vec![obj.name.clone(), obj.kind.to_string()];
     if let Some(s) = obj
         .properties
@@ -478,6 +510,51 @@ pub async fn embed_objects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_symbols_embedding_basis_is_name_signature_and_description() {
+        use ekos_kir::ObjectKind;
+        let mut obj = KirObject::new(
+            "build_llm_provider",
+            ObjectKind::Custom("RustSymbol".into()),
+        );
+        obj.properties
+            .insert("symbol_kind".into(), serde_json::json!("function"));
+        obj.properties.insert(
+            "signature".into(),
+            serde_json::json!("fn build_llm_provider(config: &EkosConfig) -> Arc<dyn LlmProvider>"),
+        );
+        obj.properties.insert(
+            "description".into(),
+            serde_json::json!("Chooses between Anthropic, OpenAI, and Ollama."),
+        );
+        let text = embedding_text(&obj, &RedactionConfig::default());
+        assert_eq!(
+            text,
+            "build_llm_provider\nfn build_llm_provider(config: &EkosConfig) -> Arc<dyn LlmProvider>\nChooses between Anthropic, OpenAI, and Ollama."
+        );
+    }
+
+    #[test]
+    fn a_symbol_with_no_signature_or_description_embeds_from_its_name_alone() {
+        use ekos_kir::ObjectKind;
+        let mut obj = KirObject::new("plain", ObjectKind::Custom("RustSymbol".into()));
+        obj.properties
+            .insert("symbol_kind".into(), serde_json::json!("struct"));
+        assert_eq!(embedding_text(&obj, &RedactionConfig::default()), "plain");
+    }
+
+    #[test]
+    fn a_non_symbol_object_keeps_the_kind_and_excerpt_basis() {
+        use ekos_kir::ObjectKind;
+        let mut obj = KirObject::new("orders", ObjectKind::Table);
+        obj.properties.insert(
+            "excerpt".into(),
+            serde_json::json!("CREATE TABLE orders (id INT)"),
+        );
+        let text = embedding_text(&obj, &RedactionConfig::default());
+        assert_eq!(text, "orders\nTable\nCREATE TABLE orders (id INT)");
+    }
 
     #[tokio::test]
     async fn mock_is_deterministic_and_token_additive() {

@@ -96,8 +96,9 @@ impl CompilerPass for PythonAnalyzerPass {
     ///
     /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
     /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
+    /// `v4` = RFC 0141 §1 (`signature` on function symbols).
     fn version(&self) -> &str {
-        "v3"
+        "v4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -322,6 +323,7 @@ fn extends_kir_id(from: KirId, to: KirId) -> KirId {
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_symbol(
     name: &str,
     kind: &str,
@@ -330,6 +332,7 @@ fn add_symbol(
     result: &mut PythonFileResult,
     doc: Option<String>,
     span: Option<(u32, u32)>,
+    signature: Option<String>,
 ) {
     let target_id = python_symbol_kir_id(path, name);
     let mut obj = KirObject::new(name, ObjectKind::Custom("PythonSymbol".to_string()))
@@ -340,6 +343,13 @@ fn add_symbol(
     if let Some(doc) = doc {
         obj.properties
             .insert("description".into(), serde_json::json!(doc));
+    }
+    // RFC 0141 §1 — same reasoning as `rust_analyzer.rs`: always present for a function whose
+    // `def`/return type could be located, unlike `description`, which is `None` for most
+    // real-world functions.
+    if let Some(sig) = signature {
+        obj.properties
+            .insert("signature".into(), serde_json::json!(sig));
     }
     // RFC 0088 (fast-follow — Rust/Elixir only at launch): the real `def`/`class` statement's own
     // byte range, converted to 1-indexed lines via `line_number` below, so `llm_description.rs`
@@ -607,6 +617,44 @@ fn python_docstring(body: &[ast::Stmt]) -> Option<String> {
     }
 }
 
+/// RFC 0141 §1 — real Python declaration text: `def` through the return-type annotation, the
+/// body-opening `:` excluded (same reasoning as `rust_analyzer.rs` excluding the opening `{`).
+/// Built by slicing `source` between two points `rustpython_parser`'s AST already gives: past the
+/// last decorator (if any — `StmtFunctionDef::range` includes decorators, and a signature is not
+/// one), and the first body statement's own start. No new parsing.
+///
+/// `Identifier` (the AST's `name` field) carries no span of its own, so the exact position of the
+/// `def` keyword is found by a forward text search starting right after the decorators — a false
+/// match is not realistically reachable here, since nothing between a decorator's end and the
+/// keyword itself but whitespace/newlines is valid Python syntax.
+///
+/// **`async def` is out of scope, not merely unhandled**: `rustpython_parser` represents an async
+/// function as the wholly separate `Stmt::AsyncFunctionDef` variant, which `walk_top_level_statement`
+/// never matches at all — an async top-level function is not recovered as a `PythonSymbol` today,
+/// signature or no. This function is only ever called for the `Stmt::FunctionDef` case, so it never
+/// needs to look for `async`.
+fn python_signature(f: &ast::StmtFunctionDef, source: &str) -> Option<String> {
+    let search_start = f
+        .decorator_list
+        .last()
+        .map(|d| d.range().end().to_usize())
+        .unwrap_or_else(|| f.range().start().to_usize());
+    let def_rel = source.get(search_start..)?.find("def")?;
+    let def_start = search_start + def_rel;
+    let body_start = f.body.first()?.range().start().to_usize();
+    if body_start <= def_start || body_start > source.len() {
+        return None;
+    }
+    let window = &source[def_start..body_start];
+    let colon_idx = window.rfind(':')?;
+    let text = window[..colon_idx].trim_end();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn walk_top_level_statement(
     stmt: &ast::Stmt,
@@ -647,6 +695,7 @@ fn walk_top_level_statement(
         ast::Stmt::FunctionDef(f) => {
             let doc = python_docstring(&f.body);
             let span = item_span(f, source);
+            let signature = python_signature(f, source);
             add_symbol(
                 f.name.as_str(),
                 "function",
@@ -655,6 +704,7 @@ fn walk_top_level_statement(
                 result,
                 doc,
                 Some(span),
+                signature,
             );
             for inner in &f.body {
                 try_recognize_chain_statement(inner, path, source, result, graph_index);
@@ -671,6 +721,7 @@ fn walk_top_level_statement(
                 result,
                 doc,
                 Some(span),
+                None,
             );
             // RFC 0091: a real SQLAlchemy declarative model (`__tablename__` present) is *also*
             // compiled as a real `Table` object, alongside its existing `PythonSymbol` — the class
@@ -1203,6 +1254,40 @@ mod tests {
         let result = parse("def f():\n    1 + 1\n    return None\n");
         let f = result.objects.iter().find(|o| o.name == "f").unwrap();
         assert!(!f.properties.contains_key("description"));
+    }
+
+    // ── RFC 0141 §1 — real signature capture for Python ─────────────────────────────────────────
+
+    #[test]
+    fn a_function_gets_a_real_signature() {
+        let result =
+            parse("def build_llm_provider(config, artifact_dir) -> LlmProvider:\n    pass\n");
+        let f = result
+            .objects
+            .iter()
+            .find(|o| o.name == "build_llm_provider")
+            .unwrap();
+        assert_eq!(
+            f.properties["signature"],
+            "def build_llm_provider(config, artifact_dir) -> LlmProvider"
+        );
+    }
+
+    #[test]
+    fn a_decorator_is_not_part_of_the_signature() {
+        let result = parse("@app.route(\"/x\")\ndef handler(request) -> Response:\n    pass\n");
+        let f = result.objects.iter().find(|o| o.name == "handler").unwrap();
+        assert_eq!(
+            f.properties["signature"],
+            "def handler(request) -> Response"
+        );
+    }
+
+    #[test]
+    fn a_class_has_no_signature_property() {
+        let result = parse("class Widget:\n    pass\n");
+        let widget = result.objects.iter().find(|o| o.name == "Widget").unwrap();
+        assert!(!widget.properties.contains_key("signature"));
     }
 
     // ── RFC 0088 (fast-follow) — real source_span capture for Python ───────────────────────────

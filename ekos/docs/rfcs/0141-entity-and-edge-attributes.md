@@ -1,6 +1,7 @@
 # RFC 0141 — What entities and edges should carry
 
-**Status:** Proposed
+**Status:** Accepted — §1, §2, §4 shipped 2026-09-14; §3 shipped 2026-09-14 for the embedding
+basis, vector index itself still opt-in per RFC 0125
 **Author:** EKOS team
 **Created:** 2026-09-08
 **Relationship to RFC 0140:** RFC 0140 gave a symbol a link *back* to its source text. This RFC is
@@ -51,6 +52,27 @@ match it; the function that produces one does not, because nothing about its int
 `syn` already has the full item at the point `description` and `source_span` are written, so this is
 recovery-time work with no new parsing. The same applies to `elixir_analyzer` and `python_analyzer`.
 
+**Shipped 2026-09-14.** `rust_analyzer`/`python_analyzer`/`elixir_analyzer` all now write a real
+`signature` property for `function`/`method` symbols — `struct`/`enum`/`trait`/`class` symbols
+still get none, matching the RFC's own function-centric motivation and keeping the change to real
+declaration text (no re-synthesis):
+- **Rust**: sliced from the real source between `syn`'s own joined `Signature` span and the body's
+  opening `{` (`DelimSpan::open()`), so it is the literal source text, indentation included, not a
+  `quote!`-rendered re-print — `quote` was never added as a dependency.
+- **Python**: sliced between the real `def` keyword (found by a forward text search starting past
+  any decorators — `rustpython_parser`'s `Identifier` carries no span of its own to anchor on
+  directly) and the first body statement's start, trimmed at the last `:` before it. Confirmed
+  out of scope, not merely unhandled: `async def` is parsed as the wholly separate
+  `Stmt::AsyncFunctionDef` AST variant, which `walk_top_level_statement` has never matched at all
+  — an async top-level function gets no `PythonSymbol`, signature or not, both before and after
+  this change.
+- **Elixir**: the real `def`/`defp` line the hand-written scanner already reads for
+  `def_kind`/`parse_def_line`, with the block-opening `do` (or the compact `, do:` one-line form)
+  stripped — a guard clause is kept.
+- **`javascript_analyzer` deliberately left out** — the RFC's own §1 prose names only
+  `elixir_analyzer` and `python_analyzer` alongside Rust; extending to JS would be scope the RFC
+  never asked for, not an oversight.
+
 Unlike a doc comment, a signature is always present — `description` is `None` for every undocumented
 symbol, which is most of them in any real codebase.
 
@@ -83,6 +105,24 @@ site (`min`) so the value is order-independent and stable under `HashSet` iterat
 That last point matters — it is a determinism requirement (RFC 0135 Part C), not a style
 preference.
 
+**Shipped 2026-09-14, `rust_analyzer` only.** `RelationshipKind::Calls` is real for exactly one
+analyzer in this codebase — confirmed by grep before writing any of this, not assumed from the
+crate map's older "Calls recovery" phrasing — so this section had exactly one place to land.
+`elixir_analyzer`'s own module doc comment states its scope as "not interprocedural call tracing"
+outright, and `javascript_analyzer`'s states "Not a call graph"; neither builds a `Calls` edge at
+all, so §2 does not apply to either. `CallVisitor`'s edge set moved from a bare
+`HashSet<(KirId, KirId)>` to a `HashMap<(KirId, KirId), CallSiteAgg { count, first_line }>`, with
+`first_line` always taken as an explicit `.min()` over recorded lines rather than "whichever `Visit`
+reached first" — the determinism property above, verified by a dedicated test
+(`a_calls_edge_carries_call_count_and_the_first_call_site_line`). `caller_is_test` is `path.
+contains("tests/")` OR the specific `def`/`method`'s own `#[test]`/`#[cfg(test)]` attribute —
+*not* a recursive walk into `#[cfg(test)] mod tests { ... }` bodies, which `rust_analyzer` has
+never walked into at all (an existing, separate limitation this RFC does not fix): unit tests
+written the idiomatic inline way are invisible as `RustSymbol`s today, so `caller_is_test` is real
+but only fires for a bare top-level `#[test] fn` or an integration test under a `tests/`
+directory — narrower coverage than the RFC's own "40 dependents of which 35 are tests" framing
+implied, an honest gap rather than a silent one.
+
 ### 3. What gets embedded (not: vectors as attributes)
 
 Three RFC 0138 scenarios fail because the question never names the object it wants:
@@ -93,6 +133,19 @@ almost those words.
 So the embedding basis for a symbol should be **`description` + `signature` + `name`**, not the
 current `indexed_content` (`excerpt + symbols + ocr_text + ai_overview + ai_usage`), which for a
 symbol is dominated by whatever excerpt its file contributed.
+
+**Shipped 2026-09-14.** The actual target was `embed.rs`'s `embedding_text` (the real function fed
+to `EmbeddingProvider::embed`), a close cousin of `KirObject::indexed_content()` rather than that
+function itself — `indexed_content()` remains unchanged and still serves the BM25 lexical index,
+which is correct: `excerpt`/`symbols`/`ocr_text` never exist on a symbol object regardless. Any
+object carrying `symbol_kind` (`RustSymbol`/`PythonSymbol`/`ElixirSymbol`/`JsSymbol`, function or
+otherwise) now embeds from `name` + `signature` (when present) + `description` (when present),
+never falling back to `kind`/`ai_overview`/`excerpt` the way every other object kind still does —
+`ai_overview` is a separate, opt-in-generated enrichment this basis doesn't need to wait on, and
+`excerpt`/`content` are never set on a symbol object at all. Everything else (`Table`, `File`,
+`Document`, …) is unaffected. Not yet done, and out of scope for this pass: turning `[embeddings]`
+on and re-measuring `arch-017`/`lin-009`/`arch-007` per this RFC's own Verification section — §3
+lands the basis text only, gated the same as before by RFC 0125's opt-in vector arm.
 
 **Vectors are not stored as entity attributes.** RFC 0125 already keeps them in a dedicated
 `VectorIndex`, and that is where they belong:
@@ -167,3 +220,12 @@ minutes into a rebuild saved a second two-hour run.
 - §3 is measured only with `[embeddings]` enabled, on the three named semantic scenarios
   (`arch-017`, `lin-009`, `arch-007`), and — per RFC 0139's repeated lesson — on answer correctness
   *and* fabrication together, never on the metric it targets alone.
+
+**Done as of 2026-09-14**: `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and
+`cargo fmt --check` all clean, plus new unit tests per item (signature extraction per language,
+`call_count`/`call_site_line`/`caller_is_test` on a real `Calls` edge, the symbol vs. non-symbol
+embedding-basis split). **Not yet done**: the actual `recover`/`resolve`/`compile`/`commit` rebuild
+against a real multi-language workspace and a fresh `ekos eval run` — §1's own `code-002`
+attribution flip, §2's `ekos impact` spot-check, and §3's three-scenario measurement all need that
+real rebuild, which this pass did not run. Treat the RFC as implemented and unit-tested, not yet as
+measured against the suite it was written to fix.

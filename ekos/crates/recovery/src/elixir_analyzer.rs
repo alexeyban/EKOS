@@ -98,8 +98,9 @@ impl CompilerPass for ElixirAnalyzerPass {
     ///
     /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
     /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
+    /// `v4` = RFC 0141 §1 (`signature` on function symbols).
     fn version(&self) -> &str {
-        "v3"
+        "v4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -493,6 +494,14 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                         obj.properties
                             .insert("description".into(), serde_json::json!(doc));
                     }
+                    // RFC 0141 §1 — the real `def`/`defp` head (name, args, guard), the same
+                    // first-clause-wins rule this block already applies to `arity`/`visibility`.
+                    // Unlike `description`, present for every recognized function regardless of
+                    // whether it carries a real `@doc`.
+                    if let Some(sig) = elixir_signature(trimmed) {
+                        obj.properties
+                            .insert("signature".into(), serde_json::json!(sig));
+                    }
                     result.objects.push(obj);
                     result.symbol_count += 1;
                     // RFC 0088: arm the source-span tracker on this, the first (and only
@@ -632,6 +641,30 @@ fn parse_def_line(line: &str, kind: &str) -> Option<(String, usize)> {
         0
     };
     Some((name.to_string(), arity))
+}
+
+/// RFC 0141 §1 — the real function head text (`def`/`defp`, name, args, guard clause), the
+/// block-opening `do` and anything after it stripped. Reuses the exact `line` (already
+/// comment-stripped and trimmed) `def_kind`/`parse_def_line` already read — no new parsing.
+///
+/// Handles the two real block-opening shapes: a trailing bare `do` (`def foo(a) do`, guard
+/// included), and the compact one-line form (`def foo(a), do: expr`). When neither is on this
+/// line — a guard clause whose `do` lands on a later real line — the real, if incomplete, text of
+/// this line is kept rather than fabricating the rest; `source_span`'s own generic `do`/`end`
+/// tracking already accepts that same multi-line shape.
+fn elixir_signature(line: &str) -> Option<String> {
+    let text = if let Some(idx) = line.find(", do:") {
+        line[..idx].trim_end()
+    } else if let Some(stripped) = line.strip_suffix(" do") {
+        stripped.trim_end()
+    } else {
+        line.trim_end()
+    };
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
 }
 
 /// Counts top-level commas inside the first `(...)` span, bracket-depth-aware (`()`/`[]`/`{}`, so
@@ -869,6 +902,33 @@ mod tests {
         let symbol = result.objects.iter().find(|o| o.name == "dummy").unwrap();
         assert_eq!(symbol.properties["visibility"], "private");
         assert_eq!(symbol.properties["arity"], 0);
+    }
+
+    #[test]
+    fn a_function_with_a_trailing_do_gets_a_real_signature() {
+        let result = parse(
+            "defmodule Plausible.Auth.Password do\n  def hash(password) do\n    Bcrypt.hash_pwd_salt(password)\n  end\nend\n",
+        );
+        let symbol = result.objects.iter().find(|o| o.name == "hash").unwrap();
+        assert_eq!(symbol.properties["signature"], "def hash(password)");
+    }
+
+    #[test]
+    fn a_one_line_do_colon_function_gets_a_real_signature() {
+        let result = parse("defmodule M do\n  def foo(x), do: x\nend\n");
+        let symbol = result.objects.iter().find(|o| o.name == "foo").unwrap();
+        assert_eq!(symbol.properties["signature"], "def foo(x)");
+    }
+
+    #[test]
+    fn a_guard_clause_is_kept_in_the_signature() {
+        let result =
+            parse("defmodule M do\n  def foo(x) when is_binary(x) do\n    x\n  end\nend\n");
+        let symbol = result.objects.iter().find(|o| o.name == "foo").unwrap();
+        assert_eq!(
+            symbol.properties["signature"],
+            "def foo(x) when is_binary(x)"
+        );
     }
 
     #[test]

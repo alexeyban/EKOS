@@ -28,6 +28,7 @@ use ekos_kir::{KirGraph, KirId, KirObject, KirRelationship, ObjectKind, Relation
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{ImplItem, Item, UseTree};
 use uuid::Uuid;
@@ -89,8 +90,10 @@ impl CompilerPass for RustAnalyzerPass {
     ///
     /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
     /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
+    /// `v4` = RFC 0141 §1/§2 (`signature` on function/method symbols; `call_count` /
+    /// `call_site_line` / `caller_is_test` on `Calls` edges).
     fn version(&self) -> &str {
-        "v3"
+        "v4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -231,8 +234,13 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
     // (Type, method) -> KirId, for resolving `Type::method(...)`/`Self::method(...)` calls.
     let mut methods_exact: HashMap<(String, String), KirId> = HashMap::new();
     // Function/method bodies to walk for Calls edges once every symbol in the file is known,
-    // so a call to a symbol defined later in the file still resolves.
-    let mut bodies: Vec<(KirId, &syn::Block, Option<String>)> = Vec::new();
+    // so a call to a symbol defined later in the file still resolves. RFC 0141 §2: the caller's
+    // own test-ness travels with its body so the edges built from it can carry `caller_is_test`.
+    let mut bodies: Vec<(KirId, &syn::Block, Option<String>, bool)> = Vec::new();
+
+    // RFC 0141 §2: a caller's file path is one of the two "no new analysis" signals for
+    // `caller_is_test` — the analyzer already has `path` in hand for every symbol in the file.
+    let file_is_test_path = path_looks_like_test(path);
 
     for item in &file.items {
         match item {
@@ -246,6 +254,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
             Item::Fn(f) => {
                 let name = f.sig.ident.to_string();
                 let doc = extract_doc_comment(&f.attrs);
+                let signature = signature_text(source, &f.sig, &f.block.brace_token);
                 let id = add_symbol(
                     &name,
                     "function",
@@ -254,10 +263,12 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     &mut result,
                     doc,
                     item_span(f),
+                    signature,
                 );
                 result.symbol_count += 1;
                 functions.insert(name, id);
-                bodies.push((id, f.block.as_ref(), None));
+                let caller_is_test = file_is_test_path || is_test_attr(&f.attrs);
+                bodies.push((id, f.block.as_ref(), None, caller_is_test));
             }
             Item::Struct(s) => {
                 let doc = extract_doc_comment(&s.attrs);
@@ -269,6 +280,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     &mut result,
                     doc,
                     item_span(s),
+                    None,
                 );
                 result.symbol_count += 1;
             }
@@ -282,6 +294,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     &mut result,
                     doc,
                     item_span(e),
+                    None,
                 );
                 result.symbol_count += 1;
             }
@@ -295,6 +308,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     &mut result,
                     doc,
                     item_span(t),
+                    None,
                 );
                 result.symbol_count += 1;
             }
@@ -307,6 +321,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                         let method_name = m.sig.ident.to_string();
                         let qualified = format!("{type_name}::{method_name}");
                         let doc = extract_doc_comment(&m.attrs);
+                        let signature = signature_text(source, &m.sig, &m.block.brace_token);
                         let id = add_symbol(
                             &qualified,
                             "method",
@@ -315,6 +330,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                             &mut result,
                             doc,
                             item_span(m),
+                            signature,
                         );
                         result.symbol_count += 1;
                         methods_by_name
@@ -322,7 +338,8 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                             .or_default()
                             .push((qualified, id));
                         methods_exact.insert((type_name.clone(), method_name), id);
-                        bodies.push((id, &m.block, Some(type_name.clone())));
+                        let caller_is_test = file_is_test_path || is_test_attr(&m.attrs);
+                        bodies.push((id, &m.block, Some(type_name.clone()), caller_is_test));
                     }
                 }
             }
@@ -330,27 +347,65 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
         }
     }
 
-    for (caller_id, block, self_type) in bodies {
+    for (caller_id, block, self_type, caller_is_test) in bodies {
         let mut visitor = CallVisitor {
             caller_id,
             self_type,
             functions: &functions,
             methods_by_name: &methods_by_name,
             methods_exact: &methods_exact,
-            edges: HashSet::new(),
+            edges: HashMap::new(),
         };
         visitor.visit_block(block);
-        for (from, to) in visitor.edges {
-            result.relationships.push(KirRelationship::deterministic(
-                RelationshipKind::Calls,
-                from,
-                to,
-                "",
-            ));
+        for ((from, to), agg) in visitor.edges {
+            let mut rel = KirRelationship::deterministic(RelationshipKind::Calls, from, to, "");
+            rel.properties
+                .insert("call_count".into(), serde_json::json!(agg.count));
+            // RFC 0141 §2: the *first* (min) call site, never "whichever the visitor saw first" —
+            // `HashMap`/`HashSet` iteration order is not stable, so an id-adjacent value derived
+            // from iteration order would be a second copy of the RFC 0135 Part C hazard this same
+            // file already documents for relationship ids.
+            if let Some(line) = agg.first_line {
+                rel.properties
+                    .insert("call_site_line".into(), serde_json::json!(line));
+            }
+            rel.properties
+                .insert("caller_is_test".into(), serde_json::json!(caller_is_test));
+            result.relationships.push(rel);
         }
     }
 
     Ok(result)
+}
+
+/// RFC 0141 §2's file-path half of `caller_is_test` — a caller under a `tests/` directory (Rust's
+/// own integration-test convention) rather than the language-agnostic `#[cfg(test)]`/`#[test]`
+/// half, which is attribute-based (`is_test_attr`).
+fn path_looks_like_test(path: &str) -> bool {
+    path.contains("tests/")
+}
+
+/// RFC 0141 §2's attribute half of `caller_is_test`: a bare `#[test]` function, or one compiled
+/// only under `#[cfg(test)]` (including the common `#[cfg(test)] mod tests { ... }` idiom's own
+/// inner attributes, when a function repeats the attribute itself). Ignores `cfg(not(test))` and
+/// any other predicate that isn't literally `test`.
+fn is_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| {
+        if a.path().is_ident("test") {
+            return true;
+        }
+        if !a.path().is_ident("cfg") {
+            return false;
+        }
+        let mut found = false;
+        let _ = a.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                found = true;
+            }
+            Ok(())
+        });
+        found
+    })
 }
 
 fn type_name(ty: &syn::Type) -> Option<String> {
@@ -428,6 +483,34 @@ fn item_span<T: syn::spanned::Spanned>(item: &T) -> (u32, u32) {
     (span.start().line as u32, span.end().line as u32)
 }
 
+/// RFC 0141 §1 — the real declaration text of a function/method: from its first token (`fn`, or
+/// `pub`/`async`/etc. are not part of `Signature` so they're excluded same as a doc comment) through
+/// the return type / where-clause, with the body's opening `{` and everything after it stripped.
+/// `syn` already parsed all of this; this only slices the same source text `description` and
+/// `source_span` already read, so this is real declaration text, never a re-synthesized one.
+///
+/// `None` when either span can't be resolved (mirrors `item_span`'s `(0, 0)` sentinel) or the
+/// brace's line precedes the signature's — a malformed slice this defends against rather than
+/// producing.
+fn signature_text(source: &str, sig: &syn::Signature, brace: &syn::token::Brace) -> Option<String> {
+    let start_line = sig.span().start().line as u32;
+    let brace_line = brace.span.open().start().line as u32;
+    if start_line == 0 || brace_line == 0 || brace_line < start_line {
+        return None;
+    }
+    let raw = crate::source_evidence::slice_lines(source, start_line as u64, brace_line as u64);
+    let text = match raw.rfind('{') {
+        Some(idx) => raw[..idx].trim_end(),
+        None => raw.trim_end(),
+    };
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn add_symbol(
     name: &str,
     kind: &str,
@@ -436,6 +519,7 @@ fn add_symbol(
     result: &mut RustFileResult,
     doc: Option<String>,
     span: (u32, u32),
+    signature: Option<String>,
 ) -> KirId {
     let target_id = KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
@@ -448,6 +532,14 @@ fn add_symbol(
     if let Some(doc) = doc {
         obj.properties
             .insert("description".into(), serde_json::json!(doc));
+    }
+    // RFC 0141 §1: unlike `description`, always present for a function/method whose brace could
+    // be located — the discriminating term for a retrieval query is often in the return type
+    // (`code-002`'s `build_llm_provider` returns `Arc<dyn LlmProvider>`), which nothing else here
+    // records.
+    if let Some(sig) = signature {
+        obj.properties
+            .insert("signature".into(), serde_json::json!(sig));
     }
     // RFC 0088: real source span from `syn`'s own joined item span (`proc-macro2`'s
     // `span-locations` feature — without it every span silently reports line 0). `(0, 0)` (real
@@ -504,6 +596,17 @@ fn extract_doc_comment(attrs: &[syn::Attribute]) -> Option<String> {
 
 // ── Call-expression recognition ─────────────────────────────────────────────
 
+/// RFC 0141 §2: per-`(caller, callee)` pair, not per call site — see the `for ((from, to), agg)`
+/// loop in `parse_rust_file` for why the edge id itself must stay call-site-independent.
+#[derive(Default)]
+struct CallSiteAgg {
+    count: u32,
+    /// The minimum line seen so far, computed explicitly rather than "whichever call `Visit`
+    /// happened to reach first" — `syn::visit::Visit`'s traversal order is real but incidental,
+    /// and iterating `HashMap`/`HashSet` afterwards is not order-preserving regardless.
+    first_line: Option<u32>,
+}
+
 struct CallVisitor<'a> {
     caller_id: KirId,
     /// The `impl Self`'s own type name, for resolving `Self::method(...)` calls; `None` for a
@@ -512,11 +615,27 @@ struct CallVisitor<'a> {
     functions: &'a HashMap<String, KirId>,
     methods_by_name: &'a HashMap<String, Vec<(String, KirId)>>,
     methods_exact: &'a HashMap<(String, String), KirId>,
-    edges: HashSet<(KirId, KirId)>,
+    edges: HashMap<(KirId, KirId), CallSiteAgg>,
+}
+
+impl<'a> CallVisitor<'a> {
+    fn record(&mut self, to: KirId, line: u32) {
+        let agg = self.edges.entry((self.caller_id, to)).or_default();
+        agg.count += 1;
+        // `0` is `item_span`'s own sentinel for "span could not be resolved" — never recorded as
+        // a fabricated line.
+        if line != 0 {
+            agg.first_line = Some(match agg.first_line {
+                Some(l) => l.min(line),
+                None => line,
+            });
+        }
+    }
 }
 
 impl<'a, 'ast> Visit<'ast> for CallVisitor<'a> {
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        let line = node.span().start().line as u32;
         if let syn::Expr::Path(p) = node.func.as_ref() {
             let segs: Vec<String> = p
                 .path
@@ -527,7 +646,7 @@ impl<'a, 'ast> Visit<'ast> for CallVisitor<'a> {
             match segs.len() {
                 1 => {
                     if let Some(&id) = self.functions.get(&segs[0]) {
-                        self.edges.insert((self.caller_id, id));
+                        self.record(id, line);
                     }
                 }
                 2 => {
@@ -537,7 +656,7 @@ impl<'a, 'ast> Visit<'ast> for CallVisitor<'a> {
                         segs[0].clone()
                     };
                     if let Some(&id) = self.methods_exact.get(&(ty, segs[1].clone())) {
-                        self.edges.insert((self.caller_id, id));
+                        self.record(id, line);
                     }
                 }
                 _ => {}
@@ -547,11 +666,12 @@ impl<'a, 'ast> Visit<'ast> for CallVisitor<'a> {
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        let line = node.span().start().line as u32;
         let name = node.method.to_string();
         if let Some(candidates) = self.methods_by_name.get(&name)
             && candidates.len() == 1
         {
-            self.edges.insert((self.caller_id, candidates[0].1));
+            self.record(candidates[0].1, line);
         }
         syn::visit::visit_expr_method_call(self, node);
     }
@@ -738,6 +858,129 @@ mod tests {
                 .all(|r| r.kind != RelationshipKind::Calls),
             "method name `run` is ambiguous between A::run and B::run in this file"
         );
+    }
+
+    #[test]
+    fn a_function_gets_a_real_signature() {
+        // RFC 0141 §1 — `code-002`'s own worked example: the discriminating term
+        // (`Arc<dyn LlmProvider>`) lives in the return type, which only a signature records.
+        let result = parse(
+            "fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {\n    todo!()\n}\n",
+        );
+        let f = result
+            .objects
+            .iter()
+            .find(|o| o.name == "build_llm_provider")
+            .unwrap();
+        assert_eq!(
+            f.properties["signature"],
+            "fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider>"
+        );
+    }
+
+    #[test]
+    fn a_method_gets_a_real_signature() {
+        let result = parse(
+            "struct Foo;\nimpl Foo {\n    fn new(x: i32) -> Self {\n        Self\n    }\n}\n",
+        );
+        let m = result
+            .objects
+            .iter()
+            .find(|o| o.name == "Foo::new")
+            .unwrap();
+        // Real source text, indentation included — same discipline as `source_evidence`'s
+        // fragments, not a reformatted/re-synthesized signature.
+        assert_eq!(m.properties["signature"], "    fn new(x: i32) -> Self");
+    }
+
+    #[test]
+    fn a_doc_comment_is_not_part_of_the_signature() {
+        let result =
+            parse("/// Hashes a password.\nfn hash(pw: &str) -> String {\n    pw.to_string()\n}\n");
+        let f = result.objects.iter().find(|o| o.name == "hash").unwrap();
+        assert_eq!(f.properties["signature"], "fn hash(pw: &str) -> String");
+    }
+
+    #[test]
+    fn a_struct_has_no_signature_property() {
+        let result = parse("struct Bar;\n");
+        let bar = result.objects.iter().find(|o| o.name == "Bar").unwrap();
+        assert!(!bar.properties.contains_key("signature"));
+    }
+
+    #[test]
+    fn a_calls_edge_carries_call_count_and_the_first_call_site_line() {
+        let result =
+            parse("fn helper() {}\nfn main() {\n    helper();\n    helper();\n    helper();\n}\n");
+        let calls: Vec<&KirRelationship> = result
+            .relationships
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Calls)
+            .collect();
+        assert_eq!(calls.len(), 1, "one edge per pair, not per call site");
+        assert_eq!(calls[0].properties["call_count"], 3);
+        assert_eq!(calls[0].properties["call_site_line"], 3);
+    }
+
+    #[test]
+    fn a_production_caller_is_not_marked_as_a_test() {
+        let result = parse("fn helper() {}\nfn main() {\n    helper();\n}\n");
+        let call = result
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Calls)
+            .unwrap();
+        assert_eq!(call.properties["caller_is_test"], false);
+    }
+
+    #[test]
+    fn a_hash_test_attribute_marks_the_caller_as_a_test() {
+        let result = parse("fn helper() {}\n#[test]\nfn it_works() {\n    helper();\n}\n");
+        let call = result
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Calls)
+            .unwrap();
+        assert_eq!(call.properties["caller_is_test"], true);
+    }
+
+    #[test]
+    fn a_cfg_test_attribute_marks_the_caller_as_a_test() {
+        let result = parse("fn helper() {}\n#[cfg(test)]\nfn scaffold() {\n    helper();\n}\n");
+        let call = result
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Calls)
+            .unwrap();
+        assert_eq!(call.properties["caller_is_test"], true);
+    }
+
+    #[test]
+    fn cfg_not_test_does_not_mark_the_caller_as_a_test() {
+        let result =
+            parse("fn helper() {}\n#[cfg(not(test))]\nfn real_only() {\n    helper();\n}\n");
+        let call = result
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Calls)
+            .unwrap();
+        assert_eq!(call.properties["caller_is_test"], false);
+    }
+
+    #[test]
+    fn a_caller_under_a_tests_directory_is_marked_as_a_test() {
+        let result = parse_rust_file(
+            "crates/foo/tests/integration.rs",
+            "fn helper() {}\nfn scenario() {\n    helper();\n}\n",
+            KirId(Uuid::new_v4()),
+        )
+        .unwrap();
+        let call = result
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Calls)
+            .unwrap();
+        assert_eq!(call.properties["caller_is_test"], true);
     }
 
     #[test]
