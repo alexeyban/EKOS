@@ -495,6 +495,14 @@ every scenario in it expects a refusal, and an answer that invents a plausible-s
 (a database name, a version number, a person) counts as a hallucination regardless of how
 confidently it reads.
 
+Recall@10 is graded against the exact keyword-only query `reason::plan()` actually searches with
+(RFC 0139), not the raw natural-language question a `reason`/`ask` scenario asks — the two can rank
+differently, so grading the wrong one could pass or fail a scenario for a reason unrelated to what
+the model was shown. Lexical search itself also treats a bareword `and`/`or` as connector noise,
+not a literal word a document must contain — the same two words this codebase already treats as
+English stopwords everywhere else — so an "A or B" style query can match on either real term
+without silently requiring the word "or" itself to appear.
+
 ```bash
 cd ekos
 cargo run -p ekos -- eval run --dataset ekos-full   # every category, "evals/" at the repo root

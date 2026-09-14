@@ -5102,23 +5102,53 @@ are excluded — see the full exclusion list in the planning history if needed.
       keys (`adv-014`'s `refusal_phrases` includes bare `"not"`); broaden `expected_objects` beyond
       the current 10 so recall@10 stops being a 10-sample metric. Publish v1/v2 columns on the same
       saved answers via `ekos eval regrade` — no new LLM calls.
-    - [ ] **Phase 2 — retrieval**: `search.rs:333` makes every query term `Occur::Must`, so a
-      natural-language question requires every content word in one document. **tantivy 0.22 has no
-      `minimum_number_should_match`** (verified against the vendored source), so the design is
-      progressive relaxation with **append-only backfill** — strict hits keep their exact ranks and
-      relaxed hits are appended below, which makes recall/MRR/nDCG over the BM25 list provably
-      non-decreasing and protects RFC 0126's CI gate. Plus the CamelCase tokenisation mismatch
-      (`sql_analyzer` → `sql`+`analyzer` vs the indexed `sqlanalyzerpass`, why `code-006` scores 0),
-      the broken `terms.join(" OR ")` ladder (it adds a *required* `or` term), and grading recall on
-      the query the pipeline actually issues rather than the raw question.
-    - [ ] **Phase 3 — generation**: `extract_citations` splits on the **last `{`** in the response,
-      so prose containing `{`, pretty-printed JSON, or a fenced block all fail into `AI001` — with
-      24 of 36 zero-scorers hitting `AI001`, this is the highest-yield single fix; make
-      `REASON_SYSTEM_PROMPT` config-overridable (today the tunable prompt is the one the suite never
-      exercises: 91 `reason`, 10 `retrieval`, **0 `ask`** scenarios); state the refusal contract in
-      the words the grader actually looks for. **Coupling to watch**: relaxed retrieval makes
-      adversarial evidence sets non-empty, which disarms the empty-evidence refusal short-circuit —
-      relaxed hits must be marked, and the two phases measured together.
+    - [x] **Phase 2 — retrieval, DONE 2026-09-14 (reconciled — most of it had already shipped
+      under RFC 0139 §3.1/§3.2, this bullet just never got checked off).** `search.rs`'s every
+      query term being `Occur::Must` was fixed by §3.1's progressive relaxation with
+      **append-only backfill** (`691bd8f`) — strict hits keep their exact ranks and relaxed hits
+      are appended below, so recall/MRR/nDCG over the BM25 list is provably non-decreasing versus
+      strict-only, protecting RFC 0126's CI gate with no re-baselining needed. §3.2's CamelCase
+      subword expansion (`6637592`) fixed `code-006` (`sql_analyzer` → `sql`+`analyzer` vs the
+      indexed `sqlanalyzerpass`). Two items were still genuinely open and fixed this session:
+      - [x] **The broken `terms.join(" OR ")` ladder.** `ai.rs::search_for_question`'s AND→OR→raw
+        fallback joins terms with a literal `" OR "` — real boolean syntax on the SQLite FTS5
+        backend this comment was written for, but the same string also reaches the tantivy
+        backend through the same `retrieve` seam, whose tokenizer had no such keyword: "widget OR
+        gadget" became three literal terms `widget`/`or`/`gadget`, all `Occur::Must` on the strict
+        pass. A document matching both real terms but never containing the literal word "or"
+        failed the strict pass on that phantom third term and surfaced only as a weak,
+        partial-overlap relaxed hit instead of a full, confident match. Fixed by teaching
+        `search.rs`'s tokenizer to drop bareword `and`/`or` as connector noise, never content —
+        the same two words are already treated as English stopwords everywhere else in this
+        codebase (`ai.rs::QUESTION_STOPWORDS`), so this brings both backends into agreement on
+        what the same query string means rather than patching just the one caller that tripped
+        over it. Regression-tested (confirmed to fail without the fix before being verified fixed).
+      - [x] **Grading recall on the raw question instead of the query the pipeline actually
+        issues.** `ekos-evals`' `agent_runner.rs` captured `retrieved_ids` by searching
+        `RetrievalRequest::lexical(&scenario.question)` — the bare, punctuated, stopword-laden
+        sentence — while `reason::plan()` (what the `ai.reason()` call two lines above it just
+        ran) searches with `search_query(&understand(question, ..))`, a keyword-only string with
+        stopwords and punctuation already stripped. The two queries can rank differently, so a
+        saved transcript's recall@10 didn't always reflect what the model was actually shown.
+        Fixed by exposing `reason::search_query` from `ekos_runtime` and having `agent_runner`
+        call `understand` + `search_query` itself before capturing the ranked list, falling back
+        to the raw question only if `understand` errors. `retrieval_runner.rs` (pure `mode:
+        retrieval` scenarios) is unaffected — its own scenarios are already written as bare
+        keyword strings (`"sql_analyzer pass"`, `"redaction"`), not natural-language sentences, so
+        there is no pipeline-vs-grading query mismatch to fix there.
+    - [x] **Phase 3 — generation, DONE (already shipped under RFC 0139 §4.1/§4.2/§4.3, this
+      bullet also just never got checked off).** `extract_citations` splitting on the **last `{`**
+      was replaced by `balanced_json_spans` — a real brace-depth-aware scanner, string-literal-safe
+      (`57a291e`/`43f352c`) — closing the single highest-yield fix named here (24 of 36
+      zero-scorers were hitting `AI001` on this alone). `reason_system_prompt` is a real
+      `[ai]`-overridable `AiRuntimeConfig` field (§4.1), and `REASON_SYSTEM_PROMPT` states the
+      exact refusal opening words (`"Insufficient evidence."`) and weak-claim marker phrase the
+      grader looks for (§4.3) — closing the "refusal in the model's own wording scored identically
+      to a fabrication" gap. The coupling to Phase 2 was also already handled: `PlanNode::Search`
+      marks a `Bm25Relaxed` hit's claim as `"possible search match (partial term overlap)"`
+      (`weak: true`) rather than a confident `"search match"`, and refusal is gated on *empty*
+      evidence specifically (§3.6), not on evidence being partly weak — so relaxed hits reaching
+      an adversarial scenario's evidence set don't silently disarm the refusal short-circuit.
     - [ ] **Phase 4 — provider choice + docs**: keep `[llm]` user-selectable (already true) and
       **hard-fail `ekos eval` when `build_llm_provider` silently degrades to `MockLlmProvider`** on a
       missing API key — today that would produce a fully-formed, publishable report of stub answers.
