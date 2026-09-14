@@ -212,7 +212,16 @@ pub fn plan(u: &QueryUnderstanding) -> QueryPlan {
 
 /// The BM25 query a plan should search with: the significant keywords if any survived, else the
 /// raw question.
-fn search_query(u: &QueryUnderstanding) -> String {
+///
+/// `pub` (RFC 0139 Phase 2's last open item) so a caller that needs to know what the *pipeline
+/// itself* would search with — not the raw question — can ask this directly instead of
+/// re-deriving it. `ekos-evals`' `agent_runner` is the motivating caller: it used to grade
+/// `recall_at_10` against `RetrievalRequest::lexical(&scenario.question)`, a plain, unprocessed
+/// sentence, while `plan()` above searches with exactly this function's output — a keyword-only
+/// string with stopwords and punctuation already stripped by `understand()`. The two queries can
+/// rank differently, so the recorded "what did retrieval find" list didn't always match what the
+/// model was actually shown.
+pub fn search_query(u: &QueryUnderstanding) -> String {
     if u.keywords.is_empty() {
         u.raw.clone()
     } else {

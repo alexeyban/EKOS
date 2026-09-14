@@ -5,7 +5,8 @@
 use super::ScenarioRun;
 use crate::resource::{self, ResourceDelta};
 use crate::schema::{Mode, Scenario};
-use ekos_runtime::{AiRuntime, RetrievalRequest, Runtime};
+use ekos_runtime::retrieval::understand;
+use ekos_runtime::{AiRuntime, RetrievalRequest, Runtime, search_query};
 use std::time::Instant;
 
 /// Run one scenario. `runtime` is the same store handle `ai` was built over — the CLI command
@@ -87,8 +88,7 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
         run.evidence_text = Some(text);
     }
 
-    // Recall@k needs a ranked id list even for an LLM-answered scenario (RFC 0138 §2.2) — reuse
-    // the same lexical retrieval a pure `retrieval`-mode scenario would run.
+    // Recall@k needs a ranked id list even for an LLM-answered scenario (RFC 0138 §2.2).
     //
     // Captured unconditionally, not just when the scenario currently declares `expected_objects`
     // (RFC 0139 §2.6). Gating on that made transcripts un-regradable against a *later* dataset
@@ -96,7 +96,18 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
     // because retrieval missed, but because no ranked list had been recorded. Retrieval in fact
     // ranked the expected object first or second. A saved transcript has to hold everything a
     // future ruler might ask about, or `regrade` quietly manufactures failures.
-    if let Ok(results) = runtime.retrieve(&RetrievalRequest::lexical(&scenario.question)) {
+    //
+    // RFC 0139 Phase 2's last open item: this used to search with the raw `scenario.question` —
+    // a full natural-language sentence — while `reason::plan()` (what `ai.reason()` above just
+    // ran) searches with `search_query(&understand(question, ..))`, a keyword-only string with
+    // stopwords/punctuation already stripped. The two queries can rank differently, so the
+    // recorded ranked list didn't always match what the model was actually shown. Falls back to
+    // the raw question only if `understand` itself errors — recall is still worth measuring on
+    // *something* rather than left absent (RFC 0139 §2.6's own reasoning against a `None`).
+    let recall_query = understand(&scenario.question, runtime)
+        .map(|u| search_query(&u))
+        .unwrap_or_else(|_| scenario.question.clone());
+    if let Ok(results) = runtime.retrieve(&RetrievalRequest::lexical(&recall_query)) {
         run.retrieved_ids = results.hits.into_iter().map(|h| h.id).collect();
     }
 

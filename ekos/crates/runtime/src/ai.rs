@@ -492,6 +492,14 @@ impl<'a> AiRuntime<'a> {
     /// keyword) for recall if AND finds nothing, and fall back to the original raw question as a
     /// last resort so no previously-working query (e.g. one that was already just a bare name or
     /// a handful of keywords) can regress.
+    ///
+    /// The literal `" OR "` join in the middle rung is real, meaningful FTS5 boolean syntax on
+    /// the SQLite backend this comment names — but the same string also reaches the tantivy
+    /// backend through the same `retrieve` seam, whose tokenizer had no such keyword until RFC
+    /// 0139 Phase 2 taught `search.rs` to drop bareword `and`/`or` as connector noise rather than
+    /// index vocabulary. Before that fix, a document matching every *real* keyword but never
+    /// containing the literal word "or" failed this rung's strict pass on tantivy and surfaced
+    /// only as a weak, partial-overlap relaxed hit — a real match downgraded by a phantom term.
     fn search_for_question(&self, question: &str) -> Result<Vec<(KirId, String)>, AiError> {
         // RFC 0119: route each rung of the AND→OR→raw ladder through the retrieval seam. Phase 0
         // = BM25, byte-identical; RFC 0121 replaces the whole hand-rolled ladder with `understand`.

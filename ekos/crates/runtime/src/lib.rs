@@ -24,6 +24,10 @@ pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig, ConversationTurn};
 pub use ekos_ledger::{ArmSet, Hit, RankedResults, RetrievalRequest, Signal, SignalSource};
 /// RFC 0127 R1 — bulk graph extraction.
 pub use graph_export::{ExportLevel, GraphExport, GraphExportOptions, GroupBy, export_graph};
+/// RFC 0139 Phase 2 — the exact BM25 query string `plan()` searches with, given an already-
+/// understood question. Exposed so a caller (`ekos-evals`' `agent_runner`) can grade retrieval
+/// against the query the pipeline actually issues, not the raw question text.
+pub use reason::search_query;
 /// RFC 0123 — the REASON layer: Query Plan IR + typed Evidence Set.
 pub use reason::{EntityRef, EvidenceItem, EvidenceSet, PlanNode, PlannerTier, QueryPlan};
 

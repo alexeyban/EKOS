@@ -398,6 +398,19 @@ impl SearchIndex {
     ) -> Result<Vec<ScoredHit>, LedgerError> {
         // `(raw, lowercased, is_prefix)` — the original casing is kept because RFC 0139 §3.2's
         // subword expansion needs case transitions, which lowercasing destroys.
+        //
+        // RFC 0139 Phase 2: a bareword `and`/`or` is dropped as connector noise, never a content
+        // term. SQLite FTS5 (the other `KnowledgeStore::retrieve` backend, `crates/ledger/src/
+        // lib.rs`) treats unescaped `AND`/`OR` in a MATCH string as real boolean-query keywords,
+        // not indexed vocabulary — `ai.rs::search_for_question`'s AND→OR→raw ladder is built on
+        // exactly that FTS5 behavior. This tokenizer had no equivalent: `"a OR b"` became three
+        // literal terms `a`/`or`/`b`, all `Occur::Must` on the strict pass — the ladder's whole
+        // point was to search for *either* real term, and instead it silently added a spurious
+        // requirement that the literal word "or" also appear. The same two words are already
+        // treated as English stopwords carrying no search-discriminating value everywhere else in
+        // this codebase (`ai.rs::QUESTION_STOPWORDS`), so dropping them here brings both backends
+        // into agreement on what the same query string means, rather than papering over the gap
+        // in just the one caller that happened to trip over it.
         let terms: Vec<(String, String, bool)> = query
             .split(|c: char| !(c.is_alphanumeric() || c == '*'))
             .filter(|t| !t.is_empty())
@@ -408,7 +421,7 @@ impl SearchIndex {
                     (t.to_string(), t.to_lowercase(), false)
                 }
             })
-            .filter(|(_, t, _)| !t.is_empty())
+            .filter(|(_, t, _)| !t.is_empty() && t != "and" && t != "or")
             .collect();
         if terms.is_empty() {
             return Ok(Vec::new());
@@ -768,6 +781,31 @@ mod tests {
                  relevant document; got nothing"
             );
             assert_eq!(hits[0].1, "sql_analyzer");
+        }
+
+        #[test]
+        fn a_bareword_or_is_dropped_as_connector_noise_not_a_required_content_term() {
+            // RFC 0139 Phase 2: `ai.rs::search_for_question`'s AND->OR->raw ladder joins terms
+            // with a literal " OR " for SQLite FTS5, which understands that as boolean syntax.
+            // This tokenizer didn't — "widget OR gadget" used to become *three* literal terms
+            // (`widget`/`or`/`gadget`), all `Occur::Must` on the strict pass. A document matching
+            // both real terms but never containing the literal word "or" then failed the strict
+            // pass on that spurious third term and only surfaced via relaxation — downgraded to
+            // a "possible search match (partial term overlap)" claim in `reason.rs`, when it is
+            // in fact a full, confident match for the user's real OR intent.
+            let (_d, index) = index_with(&[("gizmo", "a real widget and a real gadget")]);
+            let hits = index.query_scored_marked("widget OR gadget", 10).unwrap();
+            assert_eq!(hits[0].name, "gizmo");
+            assert_eq!(
+                hits[0].total_terms, 2,
+                "\"or\" must not be counted as a query term at all"
+            );
+            assert_eq!(
+                hits[0].coverage(),
+                1.0,
+                "matching both real terms must be a full-coverage strict hit, not a relaxed one \
+                 downgraded by a phantom third term"
+            );
         }
 
         #[test]
