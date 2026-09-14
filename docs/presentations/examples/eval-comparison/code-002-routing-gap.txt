@@ -1,0 +1,57 @@
+$ ./ekos/target/debug/ekos query find "LlmProvider" --mode lexical
+50 result(s) for 'LlmProvider':
+  35d66bca-9810-586e-ab21-06379463afaf  LlmProvider
+  e25e2683-0aaa-5c31-be81-60bb65c2b911  llm_provider_check
+  a83c0280-990b-556c-b375-0073c876d6af  build_llm_provider
+  824776cf-1030-5c02-acf6-961e14b329e1  select_llm_provider
+  4e00ba45-3f6a-5701-9ffa-2c01779f5c75  super::recover::build_llm_provider
+  ad5ff481-0a53-5d17-ad67-4ea5abc38211  select_llm_provider_for_description
+  e9f6c656-18e6-51d4-a612-415a39136d77  select_llm_provider_for_prose
+
+$ ./ekos/target/debug/ekos query object a83c0280-990b-556c-b375-0073c876d6af
+Object: build_llm_provider (RustSymbol)
+  ID:   a83c0280-990b-556c-b375-0073c876d6af
+  Properties:
+    symbol_kind: "function"
+    source_span: {"end_line":1175,"start_line":1117}
+    signature: "pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider>"
+    description: "Choose LLM provider (RFC 0021, RFC 0046): ..."
+
+# RFC 0141's own motivating example: "build_llm_provider ... appeared nowhere in the top ten"
+# before the signature fix. It now ranks #3 for a bare "LlmProvider" query -- the fix works.
+
+$ ./ekos/target/debug/ekos ask --explain "What function builds the LlmProvider used by ekos ask, \
+    choosing between Anthropic, OpenAI, and Ollama?"
+
+-- plan --
+query type: Structural
+routing confidence: 1.00
+plan:
+  Compose
+    Graph Dependents from #35d66bca-9810-586e-ab21-06379463afaf (2 hops)
+    Fact #35d66bca-9810-586e-ab21-06379463afaf.*
+
+-- evidence --
+1. LlmProvider.name = LlmProvider [ekos/crates/recovery/src/llm.rs:69]
+2. LlmProvider.kind = RustSymbol [ekos/crates/recovery/src/llm.rs:69]
+3. LlmProvider.description = Provider-agnostic interface for LLM completions. ...
+4. LlmProvider.source_span = {"end_line":113,"start_line":69} [ekos/crates/recovery/src/llm.rs:69]
+5. LlmProvider.symbol_kind = trait [ekos/crates/recovery/src/llm.rs:69]
+
+Insufficient evidence.
+I looked for a claim that describes the function responsible for building the LlmProvider.
+
+The provided claims do not mention the specific function responsible for choosing between
+Anthropic, OpenAI, and Ollama. They only describe the properties of the LlmProvider itself.
+Therefore, I cannot provide an answer to this question based on the available evidence.
+warning: LLM response did not include a valid cited_evidence block
+
+# code-002 asks the exact question RFC 0141's signature fix targets, and the fix works --
+# demonstrated above, independent of this scenario. But "LlmProvider" resolves as an exact-name
+# entity match with confidence 1.00, so the REASON planner routes to a direct dependents-graph +
+# fact dump on the *trait itself* -- 2 hops of Dependents, then every fact -- and never calls
+# Search at all. build_llm_provider (the function, id a83c0280...) never appears in either the
+# Graph traversal or the Fact dump, so it never reaches the model regardless of how good lexical
+# ranking now is. The refusal above is honest and correct given what it was shown -- this is a
+# retrieval-*routing* gap (the planner should fall back to Search when a resolved entity's own
+# facts/dependents don't answer the question), not the retrieval-*ranking* gap RFC 0141 fixed.

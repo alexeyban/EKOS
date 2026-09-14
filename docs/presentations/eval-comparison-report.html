@@ -13,7 +13,7 @@
 <nav class="rail" aria-hidden="true">
   <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
   <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
-  <a href="#s9"></a><a href="#s10"></a><a href="#s11"></a>
+  <a href="#s9"></a><a href="#s10"></a><a href="#s11"></a><a href="#s12"></a>
 </nav>
 
 <div class="deck">
@@ -336,7 +336,76 @@ Sources:  evals/datasets/security.yaml  <span class="bad">(should never be a sou
     <a href="examples/eval-comparison/20260909T102121Z-ekos-full-CLEAN.json" style="color:var(--accent-a);">clean-corpus run</a></div>
 </section>
 
-<section class="slide cta" id="s11">
+<section class="slide" id="s11">
+  <div class="stage-num mono">§ 10 / results — the RFC 0139/0140/0141 rebuild</div>
+  <div class="eyebrow">Same suite, same agent, a further round of fixes</div>
+  <h2>Bit-identical headline scores. That's a good sign.</h2>
+  <p class="lede">Five days later (2026-09-14), a further round of fixes shipped — RFC 0139 Phase
+  2 (a bareword "or" in a fallback search treated as a required literal word; recall@10 graded
+  against the raw question instead of the query the REASON pipeline actually issues), RFC 0140
+  §3/§4 (on-demand source text; an opt-in LLM rerank, off by default), and RFC 0141 (a real
+  <code class="mono">signature</code> property on Rust/Python/Elixir functions; attributes on
+  <code class="mono">Calls</code> edges). Same procedure as every prior section: real
+  <code class="mono">recover</code>/<code class="mono">resolve --force</code>/<code class="mono">compile</code>/<code class="mono">commit</code>
+  rebuild, then the identical 101-scenario suite, same agent, same gates.</p>
+  <table class="ttable">
+    <thead><tr><th>Metric</th><th>§09 clean corpus</th><th>This rebuild</th><th>Δ</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Passed</td><td class="desc">43/101</td><td class="desc">42/101</td><td class="bad">−1</td></tr>
+      <tr><td class="tool">Answer correctness</td><td class="desc">49.7%</td><td class="desc">49.7%</td><td class="desc">bit-identical</td></tr>
+      <tr><td class="tool">Evidence groundedness</td><td class="desc">51.6%</td><td class="desc">51.6%</td><td class="desc">bit-identical</td></tr>
+      <tr><td class="tool">Completeness</td><td class="desc">45.6%</td><td class="desc">46.4%</td><td class="good">+0.8pp</td></tr>
+      <tr><td class="tool">Recall@10</td><td class="desc">52.9%</td><td class="desc">47.1%</td><td class="bad">−5.8pp*</td></tr>
+      <tr><td class="tool">Hallucination rate</td><td class="desc">5.9%</td><td class="desc">7.9%</td><td class="bad">+2.0pp</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;"><strong>The bit-identical scores are a real finding, not
+  a stalled measurement.</strong> Every <code class="mono">LlmProvider</code> implementation is
+  contractually required to run at <code class="mono">temperature: 0</code> (RFC 0008) — an
+  unchanged prompt has no source of entropy left to produce a different completion from a local
+  model. Landing on the exact same 8-significant-figure score twice confirms this comparison is
+  measuring like-for-like, not noise.</p>
+  <p class="lede" style="margin-top:1rem;"><strong>* The recall@10 line is a correction, not a
+  regression — the same class of finding as §05's.</strong> Diffing every scenario's own
+  <code class="mono">retrieval_recall</code> between the two reports: exactly <strong>one</strong>
+  scenario changed. <code class="mono">code-002</code> flipped from <strong>1.0 → 0.0</strong>.
+  Before today, the harness graded recall against the <em>raw question sentence</em> — a different,
+  unrelated query from what the REASON pipeline actually searches with — and that raw-question
+  probe happened to retrieve the right object for this one scenario, reporting a perfect score for
+  a search the pipeline never ran. RFC 0139 Phase 2 fixed the harness to grade the pipeline's real
+  query instead, and it now honestly reports zero.</p>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos query find "LlmProvider" --mode lexical
+  a83c0280...  build_llm_provider   <span class="s">← now ranks #3, was outside the top ten</span>
+
+$ ekos ask --explain "What function builds the LlmProvider used by ekos ask, ..."
+query type: Structural, routing confidence: 1.00
+plan: Compose[ Graph Dependents from LlmProvider (2 hops), Fact LlmProvider.* ]
+<span class="bad">Insufficient evidence.</span> ... does not mention the specific function ...</pre>
+  </div>
+  <p class="lede" style="margin-top:1rem;"><strong><code class="mono">code-002</code> still fails —
+  and it is a new, separate, real finding, not a failed fix.</strong> RFC 0141's signature property
+  demonstrably works: <code class="mono">build_llm_provider</code> moved from outside the top ten to
+  <strong>#3</strong> for a bare lexical search, verified directly above, independent of the eval
+  score. But <code class="mono">code-002</code>'s own question resolves "LlmProvider" as an
+  exact-name entity match with confidence 1.00, so the planner routes to a direct dependents-graph
+  and fact dump on the <em>trait itself</em> and never calls <code class="mono">Search</code> at
+  all — the function the fix made rankable never gets a chance to surface, regardless of ranking
+  quality. A retrieval-<em>routing</em> gap, not the retrieval-<em>ranking</em> gap RFC 0141 closed.
+  The refusal shown above is honest and correct given what the model was actually shown.</p>
+  <p class="lede" style="margin-top:1rem;">13 scenarios flipped pass/fail (6 to pass, 7 to fail, net
+  −1). Spot-checked the two adversarial flips: one answer opens "REFUSING." instead of the prompt's
+  required exact opening ("Insufficient evidence.") — a real refusal in intent, graded as a
+  fabrication on wording; the other hedges rather than committing. Neither traces cleanly to a
+  specific fix shipped this round — read as local-model wording variance on borderline prompts, not
+  concluded further here.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real report JSON and transcripts:
+    <a href="examples/eval-comparison/20260914T154459Z-ekos-full.json" style="color:var(--accent-a);">this rebuild's full report</a>,
+    <a href="examples/eval-comparison/code-002-routing-gap.txt" style="color:var(--accent-a);">code-002-routing-gap.txt</a></div>
+</section>
+
+<section class="slide cta" id="s12">
   <div class="eyebrow">Reproduce it yourself</div>
   <h2>Same suite. Same agent. Same gates.</h2>
   <div class="codeblock">
