@@ -181,10 +181,15 @@ own "offline, no LLM" doc-stated contract is preserved — reading from the arti
 local disk read, not a network/LLM call, so §3 does not turn `gather_evidence` into something
 `agent_runner.rs`'s trajectory logic or `ekos ask --explain` can no longer call synchronously.
 
-**Not yet measured** against the RFC 0138 suite (would need `[llm]` credentials and a real
-`recover`/`compile`/`commit` this pass did not run) — implemented and unit-tested (5 new tests in
-`reason.rs`), including the specific failure modes this section's own text calls out: no span, no
-recorded artifact, an unreadable artifact, and the dedup-by-entity behavior.
+**Measured 2026-09-14 (devlog_182)**: real `recover`/`resolve --force`/`compile`/`commit` +
+`ekos eval run --agent ollama` (`evals/reports/20260914T154459Z-ekos-full.json`). Answer
+correctness/groundedness landed bit-identical to the pre-fix baseline (expected — `temperature: 0`
+means an unchanged prompt produces an unchanged completion locally); the one metric that moved,
+`recall_at_10` (52.9% → 47.1%), traces to a single scenario (`code-002`) whose recall flipped from
+a false 1.0 to an honest 0.0 — RFC 0139 Phase 2's fix correcting a metric that had been grading
+the wrong query. §3 itself (this section) is unit-tested (5 new tests in `reason.rs`) but its
+real-world effect on the suite is entangled with everything else changed this session; no scenario
+was isolated as "won because of §3 specifically."
 
 ### 4. LLM-assisted rerank (opt-in, measured, off by default)
 
@@ -221,9 +226,10 @@ failure. **Best-effort by construction**: an LLM error or an unparseable/all-out
 leaves the evidence set completely untouched — a failed rerank degrades to exactly this RFC's own
 `rerank_llm: false` default, never surfaces as an error the caller must handle.
 
-**Not yet measured** on fabrication and answer correctness together, per this section's own
-"measure both directions" requirement — that needs a real `[llm]` provider and a full `ekos eval
-run`, neither available in this pass. Implemented and unit-tested (10 new tests in `ai.rs`):
+**Still genuinely not measured.** A real `[llm]` provider and a full `ekos eval run` are both now
+available and were used for §1-§3 (devlog_182, 2026-09-14), but `[retrieval] rerank` was left
+unset for that run — §4 is off by default and nothing in this pass turned it on, so it was never
+exercised against the suite. Implemented and unit-tested (10 new tests in `ai.rs`):
 response parsing (valid, prose-wrapped, out-of-range/duplicate indices, unparseable), reorder
 semantics (named items move to front in order, unmentioned items keep relative position, empty
 order is a no-op), and the two integration paths (off by default never calls the model; on,
@@ -256,7 +262,11 @@ reorders using the model's real response; on, a bad response leaves the set unch
 **Done as of 2026-09-14**: `cargo test --workspace` (including RFC 0126's retrieval gate — §4
 confirmed structurally unable to enter it, not merely tested against it once) / `clippy -D
 warnings` / `fmt --check` all clean, with 15 new unit tests across §3/§4 covering the specific
-failure modes each section's own text calls out. **Not yet done**: re-measuring the RFC 0138 suite
-per phase under a fixed ruler version, and the direct check on `arch-017`/`lin-009`/`arch-007` —
-both need a real `[llm]` provider and a full `recover`/`compile`/`commit` this pass did not run.
-Treat §3/§4 as implemented and unit-tested, not yet as measured against the suite they target.
+failure modes each section's own text calls out. A real `recover`/`resolve --force`/`compile`/
+`commit` + `ekos eval run --agent ollama` ran the same day (devlog_182) — the suite result is
+entangled across everything shipped this session (see RFC 0141's own Verification note for the
+one scenario, `code-002`, whose retrieval was directly traced), and per-phase attribution under a
+fixed ruler version was not done separately. **Still not done**: §4 was never turned on for that
+run (`[retrieval] rerank` unset), so it remains genuinely unmeasured; the direct
+`arch-017`/`lin-009`/`arch-007` check needs `[embeddings]` enabled, also not configured in the
+workspace that was measured.

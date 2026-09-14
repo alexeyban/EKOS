@@ -224,8 +224,13 @@ minutes into a rebuild saved a second two-hour run.
 **Done as of 2026-09-14**: `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and
 `cargo fmt --check` all clean, plus new unit tests per item (signature extraction per language,
 `call_count`/`call_site_line`/`caller_is_test` on a real `Calls` edge, the symbol vs. non-symbol
-embedding-basis split). **Not yet done**: the actual `recover`/`resolve`/`compile`/`commit` rebuild
-against a real multi-language workspace and a fresh `ekos eval run` — §1's own `code-002`
-attribution flip, §2's `ekos impact` spot-check, and §3's three-scenario measurement all need that
-real rebuild, which this pass did not run. Treat the RFC as implemented and unit-tested, not yet as
-measured against the suite it was written to fix.
+embedding-basis split). The real rebuild also ran the same day (devlog_182): `recover`/
+`resolve --force`/`compile`/`commit` against EKOS's own workspace, then `ekos eval run --agent
+ollama`. **§1 verified directly, independent of the eval score**: `ekos query find "LlmProvider"`
+now ranks `build_llm_provider` **#3** (was outside the top ten before this RFC) — the fix
+demonstrably works. `code-002`'s own attribution did *not* flip, but not because the fix failed:
+the question resolves "LlmProvider" as an exact-name entity match, so the REASON planner routes to
+a direct `Fact` lookup on the trait and never calls `Search` at all — a separate, real,
+retrieval-*routing* gap (recorded in TODO.md), not a ranking one. **Still not done**: §2's
+`ekos impact` spot-check, and §3's three-scenario measurement (needs `[embeddings]` enabled, not
+configured in the workspace that was measured).

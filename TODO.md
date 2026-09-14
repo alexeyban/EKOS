@@ -5191,11 +5191,11 @@ are excluded — see the full exclusion list in the planning history if needed.
     `source: ev.location.path`, `commit` rebuilt with `SourceLocation::file`); masked for
     span-carrying symbols by §2, but permanent data loss for `dbt_analyzer`/`llm_description`, which
     record a real line with no span behind it.
-  - [ ] **Not yet measured**: `ad29056`'s `EvidenceRecord.line` reaches the ledger only after a
-    `compile` + `commit`, which it has not had. Batch it with RFC 0141's rebuild rather than paying a
-    third one (RFC 0140 Verification).
-  - [ ] **Claim-level rate still unmeasured**: 10/10 is one probe, not a suite-wide percentage. The
-    `0/1,289` and `26.4%` baselines came from a full eval run and need the same to be comparable.
+  - [x] **Measured 2026-09-14 (devlog_182)**, batched with the RFC 0141/0139/0140 §3/§4 rebuild.
+    `ad29056`'s `EvidenceRecord.line` has now been through a real `compile` + `commit`. Full-suite
+    claim-level rate not separately re-measured (the harness reports aggregate scores, not the raw
+    340/1,289-style claim count) — the real, load-bearing result is the eval numbers below and the
+    directly-verified `build_llm_provider` ranking improvement (RFC 0141 §1).
   - [x] **RFC 0140 §3/§4, DONE 2026-09-14.**
     - [x] **§3 on-demand source text.** `source_artifact_ids` reaches the ledger only through the
       audit trail (`WriteContext`, RFC 0135 Part B), not a queryable property, so `Runtime` gained
@@ -5215,11 +5215,35 @@ are excluded — see the full exclusion list in the planning history if needed.
       leaves the evidence set completely untouched.
     - [x] `cargo test --workspace` / `clippy -D warnings` / `fmt --check` all clean; 15 new unit
       tests (5 for §3, 10 for §4) covering the failure modes each section's own RFC text names.
-    - [ ] **Not yet measured**: re-running the RFC 0138 suite under a fixed ruler version (§3
-      should move citation precision/answer correctness without touching fabrication; §4 must be
-      judged on fabrication *and* answer correctness together, per RFC 0139's own repeated
-      lesson), and the direct check on `arch-017`/`lin-009`/`arch-007`. Needs a real `[llm]`
-      provider and a full `recover`/`compile`/`commit`, neither run this pass.
+    - [x] **Measured 2026-09-14 (devlog_182)**: real `recover`/`resolve --force`/`compile`/
+      `commit` + `ekos eval run --agent ollama` against EKOS's own workspace
+      (`evals/reports/20260914T154459Z-ekos-full.json`, vs. the `20260909T102121Z-ekos-full-CLEAN`
+      baseline). `answer_correctness`/`evidence_groundedness` landed **bit-identical** (49.7%/
+      51.6%) — expected and confirmed sound: `[llm]`'s RFC 0008 `temperature: 0` contract means an
+      unchanged prompt has no source of entropy to produce a different completion locally.
+      `recall_at_10` moved 52.9% → 47.1%, but diffing per-scenario `retrieval_recall` shows that
+      move is **entirely one scenario** (`code-002`, 1.0 → 0.0) — RFC 0139 Phase 2's fix correctly
+      replacing a false perfect score (graded against the raw question) with an honest zero
+      (graded against the real pipeline query). §4 (rerank) was not exercised — off by default,
+      not enabled for this run; still genuinely unmeasured. Direct check on `arch-017`/`lin-009`/
+      `arch-007` (the RFC 0139-identified vector-only ceiling) not run — needs `[embeddings]`
+      enabled, which this workspace doesn't have configured.
+    - [x] **`code-002` still fails, and it's a *new*, separate, real finding**: RFC 0141's
+      signature fix demonstrably works (`ekos query find "LlmProvider"` now ranks
+      `build_llm_provider` **#3**, was outside the top ten before) — but `code-002`'s own question
+      resolves "LlmProvider" as an exact-name entity match, so the REASON planner routes to a
+      direct `Fact`/`Structural` lookup on the *trait* and never invokes `Search` at all. The
+      function RFC 0141 made rankable never gets a chance to surface for this specific question,
+      regardless of ranking quality. Not a retrieval-ranking bug (that's fixed); a
+      retrieval-*routing* gap — the planner should fall back to `Search` when a resolved entity's
+      own facts don't actually answer the question. Not fixed here.
+    - [ ] **13 scenarios flipped pass/fail (6 to pass, 7 to fail, net −1)** — spot-checked the two
+      adversarial flips (`adv-010`, `adv-014`): `adv-010`'s answer opens "REFUSING." instead of the
+      prompt's required exact "Insufficient evidence." (a real refusal in intent, graded as
+      fabrication on wording); `adv-014` hedges rather than committing. Neither traces cleanly to
+      a specific fix shipped today; plausibly local-model wording variance on borderline prompts,
+      possibly influenced by richer evidence text (`signature`/`description` now present shifting
+      prompt content). Worth a dedicated investigation, not concluded.
 - [x] **RFC 0141 — entity/edge attributes (`ekos/docs/rfcs/0141-entity-and-edge-attributes.md`),
   §1/§2/§3 accepted and shipped 2026-09-14 (§4 already shipped, devlog_174).** Each item is tied
   to a measured RFC 0138 failure.
@@ -5251,11 +5275,15 @@ are excluded — see the full exclusion list in the planning history if needed.
     `kind`/`ai_overview`/`excerpt` fallback every other object kind keeps.
   - [x] `cargo test --workspace` / `clippy -D warnings` / `fmt --check` all clean, with new unit
     tests per item.
-  - [ ] **Not yet done**: the actual `recover`/`resolve`/`compile`/`commit` rebuild against a real
-    multi-language workspace, and a fresh `ekos eval run` — §1's `code-002` attribution flip, §2's
-    `ekos impact` spot-check, and §3's three-scenario (`arch-017`/`lin-009`/`arch-007`) measurement
-    all need that real rebuild, none of which this pass ran. Implemented and unit-tested, not yet
-    measured against the suite it was written to fix.
+  - [x] **Measured 2026-09-14 (devlog_182)**: real `recover`/`resolve --force`/`compile`/`commit`
+    + `ekos eval run --agent ollama` ran. **§1 verified directly and independently of the eval
+    score**: `ekos query find "LlmProvider"` now ranks `build_llm_provider` **#3** (was outside
+    the top ten). `code-002`'s own attribution did **not** flip to non-`retrieval` — traced to a
+    separate, newly-found planner-routing gap (the question resolves "LlmProvider" as an exact
+    entity match, so the planner routes to a direct `Fact` lookup and never calls `Search` at all,
+    regardless of ranking quality) — recorded above under RFC 0140. §2's `ekos impact` spot-check
+    and §3's `arch-017`/`lin-009`/`arch-007` three-scenario check (needs `[embeddings]` enabled,
+    not configured in this workspace) still not done.
 
 - [x] **Corpus contamination — 94% of the observed corpus was not EKOS (devlog_174, 2026-09-08).**
   Found by RFC 0140's claim-location measurement, whose sample output showed every cited claim

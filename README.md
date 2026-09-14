@@ -570,6 +570,17 @@ now retrieve *real* objects that read as more convincing evidence, which appears
 likelier to answer than refuse — a hypothesis awaiting the transcripts, not a finding. The suite
 still reports `Status: FAIL` against its own gates, and will keep saying so until it doesn't.
 
+**A further round of fixes (RFC 0139 Phase 2/4, RFC 0140 §3/§4, RFC 0141) was measured the same
+way on 2026-09-14** (devlog_182) and landed **bit-identical** on the two headline scores — 49.7%/
+51.6%, unchanged — which is a real, useful confirmation, not a null result: `[llm]`'s
+`temperature: 0` contract (RFC 0008) means an unchanged prompt produces an unchanged completion
+locally, so anything that *did* move is attributable to a real change, not run-to-run noise.
+`recall@10` moved (52.9% → 47.1%), and it traces to exactly one scenario whose score flipped from
+a false 1.0 to an honest 0.0 — RFC 0139 Phase 2's recall-grading fix correcting a metric that had
+been silently grading the wrong query. Separately verified outside the eval score entirely: RFC
+0141's signature fix moved `build_llm_provider` from outside the top ten to **#3** for a bare
+"LlmProvider" search — real, reproducible, and independent of anything above.
+
 A local model is real and free to run, but it is not the reference: `ekos eval run` refuses outright
 rather than silently grading against the stub `MockLlmProvider` when the configured provider's API
 key isn't set (there is no `--agent mock` option), and a local model still needs a genuinely
