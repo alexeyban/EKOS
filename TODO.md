@@ -5237,13 +5237,46 @@ are excluded — see the full exclusion list in the planning history if needed.
       regardless of ranking quality. Not a retrieval-ranking bug (that's fixed); a
       retrieval-*routing* gap — the planner should fall back to `Search` when a resolved entity's
       own facts don't actually answer the question. Not fixed here.
-    - [ ] **13 scenarios flipped pass/fail (6 to pass, 7 to fail, net −1)** — spot-checked the two
+    - [x] **13 scenarios flipped pass/fail (6 to pass, 7 to fail, net −1)** — spot-checked the two
       adversarial flips (`adv-010`, `adv-014`): `adv-010`'s answer opens "REFUSING." instead of the
       prompt's required exact "Insufficient evidence." (a real refusal in intent, graded as
       fabrication on wording); `adv-014` hedges rather than committing. Neither traces cleanly to
       a specific fix shipped today; plausibly local-model wording variance on borderline prompts,
       possibly influenced by richer evidence text (`signature`/`description` now present shifting
-      prompt content). Worth a dedicated investigation, not concluded.
+      prompt content). **Superseded 2026-09-15 (devlog_183)** — a full 59-failing-scenario
+      classification traced `adv-010`'s exact shape to a systemic prompt-header-echo bug
+      (E-wording), fixed as part of Phase 1 below.
+  - [x] **Phase 1 of the eval-improvement plan — E-wording + C-cite + B1 + B2 + D1/D3/D4 fixes,
+    measured 2026-09-15 (devlog_183).** A 7-subagent research pass over the 59 failing scenarios in
+    the `20260914T154459Z` baseline found the REASON-planner routing gap above was *not* the
+    biggest lever: a bigger, cheaper bug (`Search`/`Graph` claims rendered only an object's name,
+    discarding its retrieved excerpt — "B1") plus a citation-parsing bug ("C-cite") and a
+    refusal-wording mismatch ("E-wording") were both cheaper and higher-yield. Fixed all four plus
+    three grading/ruler defects (D1/D3/D4) that would otherwise have inflated the measured gain;
+    audited two more suspected dataset bugs (D5) and found neither was real (see devlog_183).
+    - [x] **Real result: 42/101 → 53/101 (+11)**, measured via 7 category-scoped
+      `ekos eval run --agent ollama --save-answers` runs (a single full-suite background run was
+      OOM-killed twice by the host — see devlog_183's Knowledge Captured for the workaround).
+      Groundedness 51.6% → 65.9%, recall@10 47.1% → 64.7%, hallucination count 8 → 7. 22 scenarios
+      flipped to pass, 11 flipped to fail.
+    - [x] **Two real, measured side effects, not hidden**: (1) B1's richer excerpt text on
+      weak/partial-overlap claims made the model fabricate on 4 adversarial false-premise questions
+      it previously refused correctly (`adv-007/013/015/018`) — exactly offset by 4 different
+      adversarial scenarios E-wording fixed (`adv-010/011/016/017`), net zero for that category but
+      a real trade-off; (2) the prompt's bracketed-header restyling (part of E-wording) coincided
+      with 3 scenarios (`code-003`, `hist-003`, `hist-009`) where the model wrote
+      `Cited evidence: [...]` in prose instead of the required JSON block — `history`'s only net
+      regression. Neither pursued further this pass (user decision: ship as-is).
+    - [ ] **Phase 2 (the REASON-planner routing-gap fix itself, `code-002`'s underlying cause) —
+      not yet implemented.** Full near-diff-ready design exists (two-line phrase-table fix, then
+      provenance-tagged entity resolution + a unified supporting-`Search` fallback with
+      reserved-tail truncation); re-sequenced to run *after* Phase 1 so it inherits B1's fix (a
+      re-routed plan only helps if the evidence it surfaces can render its content, not just a
+      name). Re-verify line numbers before implementing — Phase 1 already shifted them in
+      `ai.rs`/`reason.rs`.
+    - [ ] **Phase 3 (optional) — embeddings wiring for `lin-009`'s genuine BM25 gap, and a
+      cloud-provider A/B once an API key with covered usage is available.** Both fully designed,
+      lower priority than Phase 2.
 - [x] **RFC 0141 — entity/edge attributes (`ekos/docs/rfcs/0141-entity-and-edge-attributes.md`),
   §1/§2/§3 accepted and shipped 2026-09-14 (§4 already shipped, devlog_174).** Each item is tied
   to a measured RFC 0138 failure.

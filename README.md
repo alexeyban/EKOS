@@ -581,6 +581,19 @@ been silently grading the wrong query. Separately verified outside the eval scor
 0141's signature fix moved `build_llm_provider` from outside the top ten to **#3** for a bare
 "LlmProvider" search — real, reproducible, and independent of anything above.
 
+**Phase 1 of a follow-up eval-improvement pass landed 2026-09-15** (devlog_183): a multi-round
+classification of every one of the 59 then-failing scenarios found the biggest lever wasn't a
+retrieval-ranking or routing fix, but three cheaper bugs — evidence claims rendering only an
+object's *name* and discarding its retrieved text, broken citation-block parsing, and a
+refusal-wording mismatch where the model's own echoed prompt header wasn't recognised as a refusal
+— plus grading-ruler defects that would otherwise have inflated the measured gain. Real result,
+measured against the `20260914T154459Z` baseline: **42/101 → 53/101**, groundedness 51.6% → 65.9%,
+recall@10 47.1% → 64.7%, hallucination count 8 → 7. Two side effects measured and documented rather
+than hidden: richer evidence text made the model fabricate on 4 adversarial questions it previously
+refused correctly (offset by 4 different adversarial scenarios a wording fix corrected — net zero
+for that category), and a prompt-header restyling coincided with 3 scenarios where the model wrote
+a citation in prose instead of the required JSON block.
+
 A local model is real and free to run, but it is not the reference: `ekos eval run` refuses outright
 rather than silently grading against the stub `MockLlmProvider` when the configured provider's API
 key isn't set (there is no `--agent mock` option), and a local model still needs a genuinely
