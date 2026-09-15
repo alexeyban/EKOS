@@ -43,6 +43,24 @@ fn cache_key(model: &str, namespace: Option<&str>, req: &LlmRequest<'_>) -> Stri
     hex::encode(h.finalize())
 }
 
+/// `max_tokens` is deliberately **not** part of the cache key (that would invalidate every
+/// existing entry, re-spending real money on analyzer passes). Instead each entry records the
+/// limit it was generated under, and [`truncated_below`] refuses to replay an entry that hit that
+/// limit when the caller now allows more. Found live 2026-09-15: raising `[ai] max-tokens` from
+/// 1024 to 2048 for a more verbose cloud model kept replaying the same answer cut off mid-word,
+/// missing its `cited_evidence` block.
+const MAX_TOKENS_FIELD: &str = "request_max_tokens";
+
+/// `true` when `entry` was cut off at its own generation limit and `wanted` is larger — replaying
+/// it would return an answer truncated shorter than the caller asked for. Entries written before
+/// the limit was recorded have no field and always replay (unchanged behavior).
+fn truncated_below(entry: &serde_json::Value, resp: &LlmResponse, wanted: u32) -> bool {
+    entry
+        .get(MAX_TOKENS_FIELD)
+        .and_then(|v| v.as_u64())
+        .is_some_and(|limit| resp.output_tokens as u64 >= limit && (wanted as u64) > limit)
+}
+
 fn cache_path(root: &Path, key: &str) -> PathBuf {
     root.join(&key[..2]).join(format!("{key}.json"))
 }
@@ -84,10 +102,15 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
         // Cache hit.
         if path.exists() {
             let bytes = tokio::fs::read(&path).await?;
-            let resp: LlmResponse = serde_json::from_slice(&bytes)?;
-            tracing::debug!(key = %key[..8], "llm cache hit");
-            self.hits.fetch_add(1, Ordering::Relaxed);
-            return Ok(resp);
+            let entry: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let resp: LlmResponse = serde_json::from_value(entry.clone())?;
+            if truncated_below(&entry, &resp, req.max_tokens) {
+                tracing::debug!(key = %key[..8], "llm cache entry truncated below the new max_tokens — refreshing");
+            } else {
+                tracing::debug!(key = %key[..8], "llm cache hit");
+                self.hits.fetch_add(1, Ordering::Relaxed);
+                return Ok(resp);
+            }
         }
 
         // Cache miss — call inner provider.
@@ -97,7 +120,9 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
 
         // Persist to cache.
         tokio::fs::create_dir_all(path.parent().unwrap()).await?;
-        let json = serde_json::to_string_pretty(&resp)?;
+        let mut entry = serde_json::to_value(&resp)?;
+        entry[MAX_TOKENS_FIELD] = serde_json::json!(req.max_tokens);
+        let json = serde_json::to_string_pretty(&entry)?;
         tokio::fs::write(&path, json.as_bytes()).await?;
 
         Ok(resp)
@@ -181,6 +206,70 @@ mod tests {
         let b = cache_key("m", Some("num_ctx=8192"), &req);
         assert_ne!(a, legacy);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn truncated_entries_only_refresh_when_the_limit_grows() {
+        let resp = |out| LlmResponse {
+            content: String::new(),
+            model: "m".into(),
+            input_tokens: 0,
+            output_tokens: out,
+        };
+        let entry = |limit: Option<u32>| match limit {
+            Some(l) => serde_json::json!({ MAX_TOKENS_FIELD: l }),
+            None => serde_json::json!({}),
+        };
+        assert!(truncated_below(&entry(Some(1024)), &resp(1024), 2048));
+        assert!(!truncated_below(&entry(Some(1024)), &resp(1024), 1024));
+        assert!(
+            !truncated_below(&entry(Some(1024)), &resp(300), 2048),
+            "complete answer"
+        );
+        assert!(
+            !truncated_below(&entry(None), &resp(1024), 2048),
+            "legacy entry replays"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_response_truncated_at_a_lower_limit_is_regenerated_not_replayed() {
+        struct Capped(Arc<AtomicU32>);
+        #[async_trait]
+        impl LlmProvider for Capped {
+            fn model_name(&self) -> &str {
+                "capped"
+            }
+            async fn complete(&self, req: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(LlmResponse {
+                    content: "x".repeat(req.max_tokens as usize),
+                    model: "capped".into(),
+                    input_tokens: 1,
+                    output_tokens: req.max_tokens,
+                })
+            }
+        }
+        let dir = TempDir::new().unwrap();
+        let calls = Arc::new(AtomicU32::new(0));
+        let provider = CachedLlmProvider::new(Capped(calls.clone()), dir.path());
+        let req = |max_tokens| LlmRequest {
+            system: "s",
+            user: "u",
+            prompt_version: "v1",
+            max_tokens,
+            history: &[],
+        };
+        provider.complete(&req(10)).await.unwrap();
+        provider.complete(&req(10)).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "same limit replays");
+        let longer = provider.complete(&req(20)).await.unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "a larger limit regenerates"
+        );
+        assert_eq!(longer.output_tokens, 20);
     }
 
     #[tokio::test]
