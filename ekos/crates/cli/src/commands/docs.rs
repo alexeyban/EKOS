@@ -151,7 +151,8 @@ pub async fn generate(
     let all_relationships = ledger.all_relationships()?;
     let parent_of = ekos_docs_gen::build_contains_parent_map(&all_relationships);
 
-    std::fs::create_dir_all(output)
+    tokio::fs::create_dir_all(output)
+        .await
         .with_context(|| format!("cannot create output dir {}", output.display()))?;
 
     // Pass 1: build every model (kind, name, and file name all live on the model already, so the
@@ -594,7 +595,8 @@ async fn generate_solution_architect(
     let objects = ledger.all_objects()?;
     let relationships = ledger.all_relationships()?;
 
-    std::fs::create_dir_all(output)
+    tokio::fs::create_dir_all(output)
+        .await
         .with_context(|| format!("cannot create output dir {}", output.display()))?;
 
     let risk_report = ekos_docs_gen::render_dependency_risk_report(&objects, &relationships);

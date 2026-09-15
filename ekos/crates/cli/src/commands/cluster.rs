@@ -309,7 +309,8 @@ pub async fn serve_query_worker(
     listen: &str,
     cache: &std::path::Path,
 ) -> Result<()> {
-    std::fs::create_dir_all(cache)
+    tokio::fs::create_dir_all(cache)
+        .await
         .with_context(|| format!("creating query-worker cache dir {cache:?}"))?;
     let (bound, handle) =
         ekos_distributed::spawn_ephemeral_worker(listen, coordinator, cache.to_path_buf())

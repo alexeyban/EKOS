@@ -832,7 +832,8 @@ async fn main() -> Result<()> {
                 // RFC 0128 §1.1: `--token-file` wins over `EKOS_MCP_TOKEN`; neither → no auth.
                 let token = match token_file {
                     Some(path) => Some(
-                        std::fs::read_to_string(&path)
+                        tokio::fs::read_to_string(&path)
+                            .await
                             .with_context(|| format!("reading --token-file {}", path.display()))?
                             .trim()
                             .to_string(),

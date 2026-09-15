@@ -106,7 +106,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 continue;
             }
 
-            let sql = match std::fs::read_to_string(path) {
+            let sql = match tokio::fs::read_to_string(path).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("cannot read {}: {e}", path.display());
@@ -203,7 +203,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 continue;
             }
 
-            let content = match std::fs::read_to_string(path) {
+            let content = match tokio::fs::read_to_string(path).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("cannot read {}: {e}", path.display());
@@ -441,7 +441,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
             }
-            let content = match std::fs::read_to_string(path) {
+            let content = match tokio::fs::read_to_string(path).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("cannot read {}: {e}", path.display());
@@ -495,7 +495,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
             }
-            let content = match std::fs::read_to_string(path) {
+            let content = match tokio::fs::read_to_string(path).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("cannot read {}: {e}", path.display());
@@ -554,7 +554,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
             }
-            let content = match std::fs::read_to_string(path) {
+            let content = match tokio::fs::read_to_string(path).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("cannot read {}: {e}", path.display());
@@ -649,7 +649,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
             }
-            let content = match std::fs::read_to_string(path) {
+            let content = match tokio::fs::read_to_string(path).await {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("cannot read {}: {e}", path.display());
@@ -748,7 +748,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                     tracing::debug!(path = %rel_str, "skipping: matched security exclusion pattern");
                     continue;
                 }
-                let content = match std::fs::read_to_string(path) {
+                let content = match tokio::fs::read_to_string(path).await {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::warn!("cannot read {}: {e}", path.display());

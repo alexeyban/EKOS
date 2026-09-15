@@ -37,7 +37,8 @@ pub async fn publish(
         .file_name()
         .and_then(|n| n.to_str())
         .map(str::to_string);
-    let content = std::fs::read_to_string(&devlog_path)
+    let content = tokio::fs::read_to_string(&devlog_path)
+        .await
         .with_context(|| format!("cannot read {}", devlog_path.display()))?;
     let devlog = ekos_marketing::devlog::parse(&content, filename.as_deref())
         .with_context(|| format!("cannot parse {}", devlog_path.display()))?;

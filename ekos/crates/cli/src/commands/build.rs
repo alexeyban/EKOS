@@ -443,7 +443,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     artifact_store.write(&index.id, &index_json)?;
 
     let snapshot_dir = config.ekos_dir(cwd).join("snapshots");
-    std::fs::create_dir_all(&snapshot_dir)?;
+    tokio::fs::create_dir_all(&snapshot_dir).await?;
     // RFC 0015: snapshots are compressed and pruned; the full history stays
     // available through the content-addressed IndexArtifacts written above.
     let snapshot_path = snapshot_dir.join(format!("{build_id}.json.zst"));

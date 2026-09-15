@@ -46,7 +46,8 @@ pub async fn generate(
         .map(|o| (o.id, ekos_dbt_gen::dbt_model_name(o)))
         .collect();
 
-    std::fs::create_dir_all(output)
+    tokio::fs::create_dir_all(output)
+        .await
         .with_context(|| format!("cannot create output dir {}", output.display()))?;
 
     let mut written_models: Vec<DbtModelFile> = Vec::with_capacity(nodes.len());
@@ -76,7 +77,8 @@ pub async fn generate(
         .collect();
     let schema_yml =
         ekos_dbt_gen::render_schema_yml(SOURCE_GROUP, &source_tables, &model_name_list);
-    std::fs::write(output.join("schema.yml"), &schema_yml)
+    tokio::fs::write(output.join("schema.yml"), &schema_yml)
+        .await
         .with_context(|| format!("cannot write {}", output.join("schema.yml").display()))?;
 
     println!("dbt models generated.");

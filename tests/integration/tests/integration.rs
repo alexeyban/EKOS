@@ -122,13 +122,14 @@ async fn odoo_git_fixture_pipeline_end_to_end() -> Result<()> {
     // this is the whole point of vendoring it as a bundle (see git_fixture/NOTICE.md).
     let dir = tempfile::tempdir()?;
     let bundle = fixtures_dir().join("git_fixture/odoo_utm.bundle");
-    let status = std::process::Command::new("git")
+    let status = tokio::process::Command::new("git")
         .args([
             "clone",
             &bundle.to_string_lossy(),
             &dir.path().to_string_lossy(),
         ])
-        .status()?;
+        .status()
+        .await?;
     assert!(
         status.success(),
         "git clone of the vendored bundle must succeed"

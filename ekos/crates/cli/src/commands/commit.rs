@@ -25,9 +25,13 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     // The CKM content hash stands in for per-`KnowledgeArtifact` provenance until `compile`
     // propagates that (RFC 0135 §B scope line).
     let run_id = ekos_ledger::provenance::new_run_id();
-    let ckm_hash = ekos_common::compress::resolve_auto(&model_path)
-        .and_then(|p| std::fs::read(p).ok())
-        .map(|b| format!("ckm:{}", ekos_common::ContentHash::of(&b).as_str()));
+    let ckm_hash = match ekos_common::compress::resolve_auto(&model_path) {
+        Some(p) => tokio::fs::read(p)
+            .await
+            .ok()
+            .map(|b| format!("ckm:{}", ekos_common::ContentHash::of(&b).as_str())),
+        None => None,
+    };
     let write_ctx = |stage: &'static str| ekos_ledger::provenance::WriteContext {
         run_id: run_id.clone(),
         stage: stage.to_string(),

@@ -722,7 +722,8 @@ impl CompilerPass for SemanticCompilerPass {
         }
 
         // ── Write to disk ─────────────────────────────────────────────────────
-        std::fs::create_dir_all(&self.output_dir)
+        tokio::fs::create_dir_all(&self.output_dir)
+            .await
             .map_err(|e| PassError::failed(format!("cannot create ckm dir: {e}")))?;
 
         // RFC 0015: compact JSON in a zstd frame (`model.json.zst`); a stale
@@ -732,7 +733,7 @@ impl CompilerPass for SemanticCompilerPass {
         let model_path = ekos_common::compress::zst_sibling(&plain_path);
         ekos_common::compress::write_json_zst(&model_path, &model)
             .map_err(|e| PassError::failed(format!("cannot write CKM: {e}")))?;
-        std::fs::remove_file(&plain_path).ok();
+        tokio::fs::remove_file(&plain_path).await.ok();
 
         tracing::info!(
             objects = model.objects.len(),
