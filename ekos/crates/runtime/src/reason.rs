@@ -26,6 +26,8 @@ pub const DEFAULT_EVIDENCE_CAP: usize = 60;
 /// hub, i.e. the whole crate graph) and only 5 were smaller. An earlier value of 12 also gated
 /// those 5 mid-size neighbourhoods, costing legitimate questions their context for no benefit.
 const MAX_SUPPORTING_NEIGHBORS: usize = DEFAULT_EVIDENCE_CAP * 2 / 3;
+/// Search hits appended to a `Lookup`'s facts — context, not the answer.
+const LOOKUP_SEARCH_LIMIT: usize = 5;
 /// Hop depth a `Structural` plan traverses.
 const STRUCTURAL_HOPS: u32 = 2;
 /// The `attr` sentinel meaning "every fact about this entity" (→ [`Runtime::facts_of`]).
@@ -113,7 +115,18 @@ pub fn plan(u: &QueryUnderstanding) -> QueryPlan {
     // A fact-attribute question ("what does X return", "X's columns") is routed on the keyword,
     // ahead of the RFC 0121 intent class — "what does …" otherwise classifies `Structural`
     // (`Dependencies`), which is not what the reader asked for.
-    if let (Some(e), Some(attr)) = (primary, fact_attr(&u.keywords)) {
+    // …but only when the question is really about that entity: it names it as an identifier, or
+    // it is a short query built around its exact name ("orders columns"). A keyword-guessed entity
+    // in a long descriptive question ("…EKOS Observer connector return…" → the `ekos` crate) sent
+    // it to a `returns` fact of an unrelated object instead of searching.
+    let named = |e: &crate::retrieval::ResolvedEntity| {
+        let short_exact = e.confidence >= 0.999 && u.raw.split_whitespace().count() <= 5;
+        short_exact
+            || crate::retrieval::extract_mentions(&u.raw)
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case(&e.mention))
+    };
+    if let (Some(e), Some(attr)) = (primary.filter(|e| named(e)), fact_attr(&u.keywords)) {
         return QueryPlan {
             raw: u.raw.clone(),
             query_type: u.query_type,
@@ -135,10 +148,22 @@ pub fn plan(u: &QueryUnderstanding) -> QueryPlan {
 
     let (root, confidence) = match u.query_type {
         QueryType::Lookup => match primary {
+            // `Compose[Fact "*", Search]`: the exact-name object can be a bare stub — a Rust import
+            // path (`sql_analyzer::SqlAnalyzerPass` as a `RustModule` with only name + kind, no
+            // evidence) — leaving the answer nothing to cite. A small search after the facts brings
+            // the real definition along.
             Some(e) => (
-                PlanNode::Fact {
-                    entity: EntityRef::Resolved(e.id),
-                    attr: ALL_FACTS.to_string(),
+                PlanNode::Compose {
+                    steps: vec![
+                        PlanNode::Fact {
+                            entity: EntityRef::Resolved(e.id),
+                            attr: ALL_FACTS.to_string(),
+                        },
+                        PlanNode::Search {
+                            query,
+                            limit: LOOKUP_SEARCH_LIMIT,
+                        },
+                    ],
                 },
                 e.confidence,
             ),
@@ -909,8 +934,10 @@ mod tests {
     }
 
     /// Shape assertions against a `PlanNode` — enough to pin every planner rule.
+    /// `Compose[Fact "*", Search]` — the `Lookup` shape.
     fn root_is_fact_star(root: &PlanNode) -> bool {
-        matches!(root, PlanNode::Fact { attr, .. } if attr == ALL_FACTS)
+        matches!(root, PlanNode::Compose { steps }
+            if matches!(&steps[..], [PlanNode::Fact { attr, .. }, PlanNode::Search { .. }] if attr == ALL_FACTS))
     }
     fn root_is_search(root: &PlanNode) -> bool {
         matches!(root, PlanNode::Search { .. })
@@ -941,7 +968,7 @@ mod tests {
         let rt = Runtime::new(&l);
         let p = |q: &str| plan(&understand(q, &rt).unwrap());
 
-        // ── Lookup: a bare exact name → Fact "*", high confidence ──
+        // ── Lookup: a bare exact name → Compose[Fact "*", Search], high confidence ──
         let lk = p("orders");
         assert_eq!(lk.query_type, QueryType::Lookup);
         assert!(root_is_fact_star(&lk.root));

@@ -11,6 +11,7 @@ use crate::{RetrievalRequest, Runtime, RuntimeError};
 use ekos_identity::similarity::{jaro_winkler, normalize};
 use ekos_kir::{KirId, ObjectKind};
 use serde::Serialize;
+use std::collections::HashSet;
 
 /// A resolved-name confidence at or above this counts as "the query names this entity".
 pub const RESOLVE_THRESHOLD: f32 = 0.82;
@@ -82,8 +83,23 @@ pub fn understand(raw: &str, runtime: &Runtime) -> Result<QueryUnderstanding, Ru
     // to the significant keywords as weaker candidates so a bare-word entity ("the orders table")
     // still resolves. Resolution's confidence threshold drops the non-entity words.
     let mut candidates = extract_mentions(raw);
+    // Fragments of a qualified mention (`ekos`, `common` out of `ekos_common::redaction`) are not
+    // separate entities — `ekos` resolved exactly to the `ekos` crate and outranked the real one.
+    let mention_segments: HashSet<String> = candidates
+        .iter()
+        .flat_map(|m| {
+            m.split([':', '_', '-', '.'])
+                .map(str::to_lowercase)
+                .collect::<Vec<_>>()
+        })
+        .collect();
     for kw in &keywords {
-        if kw.len() >= 3 && !candidates.iter().any(|c| c.eq_ignore_ascii_case(kw)) {
+        if kw.len() >= 3
+            && !GENERIC_NOUNS.contains(&kw.as_str())
+            && !QUESTION_VERBS.contains(&kw.as_str())
+            && !mention_segments.contains(kw)
+            && !candidates.iter().any(|c| c.eq_ignore_ascii_case(kw))
+        {
             candidates.push(kw.clone());
         }
     }
@@ -98,6 +114,72 @@ pub fn understand(raw: &str, runtime: &Runtime) -> Result<QueryUnderstanding, Ru
         structural_op,
     })
 }
+
+/// Words that name a *kind* of thing, not a thing. As a bare keyword candidate they resolve to
+/// whatever object happens to carry that name — "the recovery crate" resolved `crate` to
+/// `crate::ArmSet`, "an Evidence record" resolved `record` to an unrelated local symbol.
+const GENERIC_NOUNS: &[&str] = &[
+    "crate",
+    "crates",
+    "module",
+    "modules",
+    "function",
+    "functions",
+    "method",
+    "struct",
+    "enum",
+    "trait",
+    "type",
+    "field",
+    "fields",
+    "record",
+    "records",
+    "file",
+    "files",
+    "table",
+    "tables",
+    "section",
+    "pass",
+    "passes",
+    "command",
+    "connector",
+    "analyzer",
+    "object",
+    "objects",
+    "thing",
+    "kind",
+    "name",
+    "value",
+    "system",
+    "project",
+    "workspace",
+];
+
+/// The relation words of a structural question. They name the *question*, never an entity —
+/// `depends` resolved (by last segment) to `fastapi.Depends` for "what depends on the recovery crate".
+const QUESTION_VERBS: &[&str] = &[
+    "depends",
+    "depend",
+    "dependents",
+    "dependencies",
+    "calls",
+    "call",
+    "callers",
+    "called",
+    "uses",
+    "use",
+    "used",
+    "breaks",
+    "break",
+    "change",
+    "changes",
+    "impact",
+    "affected",
+    "related",
+    "returns",
+    "return",
+    "returned",
+];
 
 // ── mention extraction ─────────────────────────────────────────────────────
 
@@ -144,11 +226,17 @@ pub fn extract_mentions(text: &str) -> Vec<String> {
     // 2. whitespace tokens: dotted paths, CamelCase, snake/kebab
     for tok in text.split_whitespace() {
         let t =
-            tok.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
+            tok.trim_matches(|c: char| !c.is_alphanumeric() && !matches!(c, '.' | '_' | '-' | ':'));
         if t.len() < 2 || !rfc_numbers(t).is_empty() {
             continue;
         }
         let has_dot = t.contains('.') && t.split('.').all(|p| !p.is_empty());
+        // `ekos_common::redaction`, `AiRuntime::ask` — before this, the `:` failed every shape
+        // test below, the path was dropped, and only its keyword fragment `ekos` got resolved
+        // (to the `ekos` crate).
+        let is_path = t.contains("::")
+            && t.split("::")
+                .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_alphanumeric() || c == '_'));
         let is_camel = {
             let mut chars = t.chars();
             let first_upper = chars.next().is_some_and(|c| c.is_uppercase());
@@ -162,7 +250,7 @@ pub fn extract_mentions(text: &str) -> Vec<String> {
         let is_ident = (t.contains('_') || t.contains('-'))
             && t.chars()
                 .all(|c| c.is_alphanumeric() || c == '_' || c == '-');
-        if has_dot || is_camel || is_ident {
+        if is_path || (!t.contains(':') && (has_dot || is_camel || is_ident)) {
             push(t);
         }
     }
@@ -204,6 +292,32 @@ fn rfc_numbers(text: &str) -> Vec<String> {
     }
     out
 }
+
+/// A name whose last `-`/`_`/`::`/`/`/`.` segment equals the mention — structural, but weaker than
+/// an exact name.
+const SEGMENT_MATCH_CONFIDENCE: f32 = 0.9;
+
+/// Fuzzy (Jaro-Winkler) matching only between strings of comparable length.
+const MIN_FUZZY_LENGTH_RATIO: f32 = 0.6;
+
+fn last_segment(name: &str) -> &str {
+    name.rsplit(['-', '_', ':', '/', '.'])
+        .find(|s| !s.is_empty())
+        .unwrap_or(name)
+}
+
+fn length_ratio(a: &str, b: &str) -> f32 {
+    let (a, b) = (a.chars().count(), b.chars().count());
+    if a == 0 || b == 0 {
+        return 0.0;
+    }
+    a.min(b) as f32 / a.max(b) as f32
+}
+
+/// A structural cue must open the question — within this many words of the start. Deeper in the
+/// sentence it is a descriptive clause, not the question being asked: "What function builds the
+/// LlmProvider **used by** ekos ask" was walked as `Dependents of LlmProvider` and never searched.
+const STRUCTURAL_CUE_MAX_WORD: usize = 3;
 
 /// Confidence given to an RFC mention matched by `rfc_number` — a structural, not fuzzy, match,
 /// but kept below 1.0 so a question merely *containing* "RFC 0013" is never classified as a bare
@@ -258,8 +372,27 @@ fn resolve_entities(
             .into_iter()
             .take(RESOLVE_CANDIDATES)
             .map(|h| {
-                let conf = if h.name.trim().to_lowercase() == mention_lc {
+                let name_lc = h.name.trim().to_lowercase();
+                let conf = if name_lc == mention_lc {
                     1.0
+                } else if mention_lc.contains("::")
+                    && name_lc.starts_with(&format!("{mention_lc}::"))
+                {
+                    // Rust import paths are recorded per item (`ekos_common::redaction::redact`,
+                    // `…::self`); a module path names that whole family. Prefer `::self`.
+                    if name_lc.ends_with("::self") {
+                        SEGMENT_MATCH_CONFIDENCE + 0.01
+                    } else {
+                        SEGMENT_MATCH_CONFIDENCE
+                    }
+                } else if last_segment(&name_lc) == mention_lc && mention_lc.len() >= 4 {
+                    // "the recovery crate" → `ekos-recovery`; `redaction` → `ekos_common::redaction`.
+                    SEGMENT_MATCH_CONFIDENCE
+                } else if length_ratio(&mention_norm, &normalize(&h.name)) < MIN_FUZZY_LENGTH_RATIO
+                {
+                    // Jaro-Winkler rewards a shared prefix, so `crate` scored ~0.9 against
+                    // `crate::ArmSet` and `ekos` against `ekos_common::redaction`.
+                    0.0
                 } else {
                     jaro_winkler(&mention_norm, &normalize(&h.name))
                 };
@@ -331,12 +464,17 @@ fn classify_intent(raw: &str, resolved: &[ResolvedEntity]) -> (QueryType, Option
             StructuralOp::Callers,
         ),
         (
-            &["dependencies of", "what does", "depends on what"],
+            &[
+                "dependencies of",
+                "depends on what",
+                "what does it depend on",
+            ],
             StructuralOp::Dependencies,
         ),
         (
             &[
                 "depends on",
+                "depend on",
                 "dependents of",
                 "what uses",
                 "used by",
@@ -355,8 +493,15 @@ fn classify_intent(raw: &str, resolved: &[ResolvedEntity]) -> (QueryType, Option
             StructuralOp::Neighborhood,
         ),
     ];
+    if q.starts_with("what does ") && (q.contains(" depend on") || q.ends_with(" depend on?")) {
+        return (QueryType::Structural, Some(StructuralOp::Dependencies));
+    }
+    let opens_question = |phrase: &str| {
+        q.match_indices(phrase)
+            .any(|(i, _)| q[..i].split_whitespace().count() <= STRUCTURAL_CUE_MAX_WORD)
+    };
     for (phrases, op) in structural {
-        if phrases.iter().any(|p| q.contains(*p)) {
+        if phrases.iter().any(|p| opens_question(p)) {
             return (QueryType::Structural, Some(*op));
         }
     }
@@ -402,6 +547,10 @@ mod tests {
             ),
             ("the order_items rows", &["order_items"]),
             ("how does the system work", &[]),
+            (
+                "what depends on ekos_common::redaction?",
+                &["ekos_common::redaction"],
+            ),
             // RFC 0144: acronyms are not CamelCase identifiers; RFC numbers are canonicalized.
             ("what does it expose to AI agents over MCP", &[]),
             (
@@ -435,6 +584,60 @@ mod tests {
 
         let none = resolve_entities(&["totally_unrelated_xyz".into()], &rt).unwrap();
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn generic_nouns_prefix_fuzz_and_segment_matches() {
+        let (l, _d) = temp_ledger();
+        for (n, k) in [
+            ("crate::ArmSet", "RustSymbol"),
+            ("ekos-recovery", "Crate"),
+            ("ekos", "Crate"),
+            ("record", "RustSymbol"),
+        ] {
+            l.append_object(&KirObject::new(n, ObjectKind::Custom(k.into())))
+                .unwrap();
+        }
+        let rt = Runtime::new(&l);
+
+        let u = understand("what depends on the recovery crate", &rt).unwrap();
+        assert_eq!(
+            u.resolved_entities[0].name, "ekos-recovery",
+            "{:?}",
+            u.resolved_entities
+        );
+        assert_eq!(u.resolved_entities[0].confidence, SEGMENT_MATCH_CONFIDENCE);
+        assert!(
+            !u.resolved_entities
+                .iter()
+                .any(|e| e.name == "crate::ArmSet")
+        );
+
+        let u = understand("what does an Evidence record carry?", &rt).unwrap();
+        assert!(!u.resolved_entities.iter().any(|e| e.name == "record"));
+
+        // `ekos` must not win for a qualified path it is merely a prefix of; the module family does.
+        for n in [
+            "ekos_common::redaction::redact",
+            "ekos_common::redaction::self",
+            "fastapi.Depends",
+        ] {
+            l.append_object(&KirObject::new(n, ObjectKind::Custom("RustModule".into())))
+                .unwrap();
+        }
+        let u = understand("what depends on ekos_common::redaction", &rt).unwrap();
+        assert_eq!(
+            u.resolved_entities[0].name, "ekos_common::redaction::self",
+            "{:?}",
+            u.resolved_entities
+        );
+        assert!(!u.resolved_entities.iter().any(|e| e.name == "ekos"));
+        let u = understand("what depends on the recovery crate", &rt).unwrap();
+        assert_eq!(
+            u.resolved_entities[0].name, "ekos-recovery",
+            "{:?}",
+            u.resolved_entities
+        );
     }
 
     #[test]
@@ -505,6 +708,32 @@ mod tests {
                 "what is related to the session store",
                 QueryType::Structural,
                 Some(StructuralOp::Neighborhood),
+            ),
+            (
+                "which crates depend on the ledger",
+                QueryType::Structural,
+                Some(StructuralOp::Dependents),
+            ),
+            (
+                "what does the billing module depend on",
+                QueryType::Structural,
+                Some(StructuralOp::Dependencies),
+            ),
+            // A structural phrase inside a descriptive clause is not the question.
+            (
+                "what function builds the provider used by the ask command?",
+                QueryType::Conceptual,
+                None,
+            ),
+            (
+                "which rfc's own motivation section says it depends on the storage rfc?",
+                QueryType::Conceptual,
+                None,
+            ),
+            (
+                "what does an evidence record carry?",
+                QueryType::Conceptual,
+                None,
             ),
             ("how does authentication work", QueryType::Conceptual, None),
             ("why is the report slow?", QueryType::Conceptual, None),

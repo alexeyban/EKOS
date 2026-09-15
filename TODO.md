@@ -5363,4 +5363,10 @@ are excluded — see the full exclusion list in the planning history if needed.
   truncated below a raised `max_tokens` regenerate.
   - [ ] Re-measure local Ollama at `context-window = 8192` vs 4096 on a host with free RAM (killed 3× here).
   - [ ] `ekos doctor`'s key check still defaults to `ANTHROPIC_API_KEY` for `provider = "openai"` (devlog_180's bug, other call site).
+- [x] **REASON planner routing + entity resolution (devlog_186, 2026-09-15).** Structural cues must open the question;
+  `::` paths are mentions; generic nouns / question verbs never resolve; path-family + last-segment matching; fuzzy
+  match length guard; fact-attribute route gated; Lookup adds a small Search. Same Zen model: **79 → 87/101**,
+  groundedness 86.8% → 95.6%.
+  - [ ] Adversarial premise rejections ("the evidence does not confirm…") aren't counted as refusals (adv-004/011/015) — decide grader vs prompt.
+  - [ ] `code-004`: workspace `[workspace.package] edition` isn't surfaced as a fact.
 
