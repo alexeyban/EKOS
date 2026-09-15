@@ -5345,3 +5345,20 @@ are excluded — see the full exclusion list in the planning history if needed.
   fallback (append-only ledger → both spellings coexist forever). `javascript_analyzer` was found
   still on the default pass `version()` of `"v1"` during this work — same trap as devlog_173, one
   analyzer over.
+
+- [x] **RFC 0144 — document structure, section attributes, deterministic doc links (devlog_185, 2026-09-15).**
+  Markdown split per heading with heading path + line range; `doc_type`/`rfc_number`/`rfc_title`/`rfc_status`;
+  section excerpt cap 1,200 → 3,000; RFC→RFC and unique-name doc→code `References` edges (7,377 + 3,420 on EKOS);
+  `RFC NNNN` resolves to its Document; doc mentions excluded from dependents/impact.
+  - [x] **Stale search index after `ekos commit`** (since `903b93d`) — fixed with `Drop for FactLedger`.
+  - [x] Measured on the same Zen `deepseek-v4-flash` model: **70/101 → 84/101** (old vs new ledger).
+  - [ ] Doc → file-path links (`` `transform_ir.rs` ``) — needs a post-`commit` step, `File` objects aren't in the semantic graph.
+  - [ ] Recall@10 fell 64.7% → 55.9% while answers improved — look at ranking whole Documents vs their Sections.
+  - [ ] `web/ui/coverage/` (lcov HTML/JS) is ingested — add to `[observe] ignore-patterns` (2,519 junk `JsSymbol`s).
+  - [ ] `arch-001`-style evidence (crate-dependency facts with no evidence ids) can never be cited — give those claims a source.
+- [x] **RFC 0145 — OpenAI-compatible `base-url` + explicit Ollama `context-window` (devlog_185).** `[llm] model` now
+  respected by the OpenAI provider; cache namespace keeps truncated Ollama answers from replaying; cached answers
+  truncated below a raised `max_tokens` regenerate.
+  - [ ] Re-measure local Ollama at `context-window = 8192` vs 4096 on a host with free RAM (killed 3× here).
+  - [ ] `ekos doctor`'s key check still defaults to `ANTHROPIC_API_KEY` for `provider = "openai"` (devlog_180's bug, other call site).
+

@@ -293,6 +293,33 @@ talk to. `ekos ask` honors `[llm] provider = "ollama"` the same way `ekos recove
 commands select the LLM provider through one shared function, so a workspace configured for local
 Ollama works identically for recovery and for querying.
 
+**Markdown is split by heading (RFC 0144).** Each heading becomes its own searchable `Section` named by
+its heading path (`docs/rfcs/0013-mcp-server.md § RFC 0013 — MCP Server › Motivation`) with a real
+line range, `doc_type` (`rfc`/`devlog`/`readme`/`claude_md`/`doc`) and, for RFCs, `rfc_number`/`rfc_status`.
+`compile` also links docs deterministically: an `RFC NNNN` mention becomes a `References` edge to that RFC,
+and a backticked identifier that names exactly one code symbol becomes an edge to it. `ekos ask "what does
+RFC 0013 …"` resolves the RFC by number. These edges show up in neighbourhoods but never count as
+dependents in `ekos_dependents`/`ekos_impact`.
+
+**Using a hosted OpenAI-compatible model (RFC 0145).** Any Chat Completions host works — OpenCode Zen,
+OpenRouter, DeepSeek, Groq, vLLM:
+
+```toml
+[llm]
+provider = "openai"
+base-url = "https://opencode.ai/zen/v1"
+model = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+[ai]
+max-tokens = 2048            # verbose cloud models get cut off at the 1024 default
+```
+
+For local Ollama, `[llm] context-window = 8192` (the default; also `OLLAMA_NUM_CTX`) is sent as `num_ctx` —
+without it Ollama silently truncated long prompts — and EKOS warns when a prompt fills the window.
+`ekos doctor` shows the effective window or custom endpoint. Hosted models bill per token; a full
+101-scenario `ekos eval run` on DeepSeek V4 Flash costs about $0.08.
+
 ### Documentation generation (RFC 0035/0037/0042/0090/0094/0095)
 
 `ekos docs generate` renders the compiled ledger straight into Markdown/HTML documentation —
