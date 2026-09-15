@@ -119,8 +119,18 @@ pub fn attribute(scenario: &Scenario, run: &ScenarioRun) -> Attribution {
     // appeared in the evidence at all is a retrieval failure. When both kinds are present, the
     // retrieval gap is the more fundamental one — report it.
     // Same normalisation the ruler uses, so attribution and grading never disagree about whether
-    // a fact is "present" (RFC 0139 §2.1).
-    let evidence_tokens = normalize::tokens(run.evidence_text.as_deref().unwrap_or(""));
+    // a fact is "present" (RFC 0139 §2.1). Scoped to claim prose only (RFC 0139-followup "D4"
+    // fix) — see `claim_prose_only`'s doc comment for why the bracketed location/evidence-id
+    // suffix must not count as "shown".
+    let evidence_prose: String = run
+        .evidence_text
+        .as_deref()
+        .unwrap_or("")
+        .lines()
+        .map(claim_prose_only)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let evidence_tokens = normalize::tokens(&evidence_prose);
     let answer_tokens = normalize::tokens(run.answer.as_deref().unwrap_or(""));
     let present = |tokens: &[String], fact: &crate::schema::ExpectedFact| {
         fact.alternates()
@@ -137,6 +147,22 @@ pub fn attribute(scenario: &Scenario, run: &ScenarioRun) -> Attribution {
     } else {
         Attribution::Generation
     }
+}
+
+/// Strips `render_evidence`'s trailing ` [location]` and ` (evidence <id>)` annotations from one
+/// rendered claim line, leaving just the claim prose (RFC 0139-followup "D4" fix). Without this, a
+/// fact whose name is a substring of a file path in the location suffix (e.g. "rust_analyzer"
+/// inside `.../rust_analyzer.rs`) looked "shown" to the model even though it never appeared in any
+/// claim's actual content — real observed effect on `arch-015`/`code-014`, mislabelled `generation`
+/// when the fact never reached the model as prose.
+fn claim_prose_only(line: &str) -> &str {
+    let line = line
+        .strip_suffix(')')
+        .and_then(|s| s.rfind(" (evidence ").map(|i| &s[..i]))
+        .unwrap_or(line);
+    line.strip_suffix(']')
+        .and_then(|s| s.rfind(" [").map(|i| &s[..i]))
+        .unwrap_or(line)
 }
 
 /// Grade one scenario's [`ScenarioRun`] against its own expectations. `ledger` is used only for
@@ -331,5 +357,43 @@ mod attribution_tests {
         let s = scenario(&["shown_fact", "missing_fact"]);
         let r = run("neither stated here", "shown_fact [x.rs]");
         assert_eq!(attribute(&s, &r), Attribution::Retrieval);
+    }
+
+    /// RFC 0139-followup "D4" fix: a fact name that only appears inside the bracketed source
+    /// location of an unrelated claim (not in any claim's own prose) must not be mistaken for a
+    /// fact the model was actually shown — real shape from `arch-015`/`code-014`, where
+    /// "rust_analyzer" surfaced only inside a `.../rust_analyzer.rs` location suffix.
+    #[test]
+    fn a_fact_only_present_in_a_location_path_is_a_retrieval_failure_not_generation() {
+        let s = scenario(&["rust_analyzer"]);
+        let r = run(
+            "It parses the file.",
+            "1. some claim about parsing [ekos/crates/recovery/src/rust_analyzer.rs] \
+             (evidence 11111111-1111-1111-1111-111111111111)",
+        );
+        assert_eq!(attribute(&s, &r), Attribution::Retrieval);
+    }
+
+    #[test]
+    fn a_fact_present_in_claim_prose_is_still_a_generation_failure() {
+        let s = scenario(&["rust_analyzer"]);
+        let r = run(
+            "It parses the file.",
+            "1. rust_analyzer walks the AST [some/other/path.rs] \
+             (evidence 11111111-1111-1111-1111-111111111111)",
+        );
+        assert_eq!(attribute(&s, &r), Attribution::Generation);
+    }
+
+    #[test]
+    fn claim_prose_only_strips_both_trailing_annotations() {
+        let line = "1. redact scrubs secrets [ekos/crates/common/src/redaction.rs:10-20] \
+                     (evidence 11111111-1111-1111-1111-111111111111)";
+        assert_eq!(claim_prose_only(line), "1. redact scrubs secrets");
+    }
+
+    #[test]
+    fn claim_prose_only_leaves_a_line_with_neither_annotation_unchanged() {
+        assert_eq!(claim_prose_only("plain claim text"), "plain claim text");
     }
 }

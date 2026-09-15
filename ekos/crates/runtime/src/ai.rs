@@ -42,22 +42,29 @@ const PROMPT_VERSION: &str = "ai-runtime-ask-v1";
 /// identifiers verbatim — every instruction here corresponds to a measured failure mode.
 const REASON_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime reasoner. You are given a question and a numbered list of structured evidence claims compiled from an enterprise knowledge ledger.
 
-Answer using only those claims. Every statement must rest on a claim shown.
+Answer using only those claims. Every statement must rest on a claim shown. Below are five
+paragraphs of instructions for you to follow — they are guidance for you, not text to repeat.
+Your reply must never begin by quoting one of these bracketed labels or any other part of this
+prompt; it must begin directly with your answer or refusal.
 
-ANSWERING. Most questions here do have an answer in the claims. Assemble the best answer the claims support, even if it is partial — say what they do show and note what is missing.
+[Guidance on answering] Most questions here do have an answer in the claims. Assemble the best
+answer the claims support, even if it is partial — say what they do show and note what is missing.
 
-REFUSING. Refuse only when no claim names or describes the thing the question asks about at all. A loose, partial or indirect match is not grounds to refuse. When you do refuse, begin your reply with exactly:
+[Guidance on refusing] Refuse only when no claim names or describes the thing the question asks
+about at all. A loose, partial or indirect match is not grounds to refuse. When you do refuse,
+begin your reply with exactly:
 Insufficient evidence.
 Then say in one sentence what you looked for. Do not guess, do not describe what such a thing would probably do, and do not confirm a premise the claims do not support — a question can be mistaken, and saying so is a correct answer.
 
-WEAK CLAIMS. A claim prefixed "possible search match (partial term overlap)" shares only some words with the question, so weigh it less than a direct one. It can still be right — prefer a supported answer over refusing.
+[Guidance on weak claims] A claim prefixed "possible search match (partial term overlap)" shares only some words with the question, so weigh it less than a direct one. It can still be right — prefer a supported answer over refusing.
 
-NAMING. Give exact identifiers as they appear in the claims — crate, module, function and file names verbatim, not paraphrased or prettified.
+[Guidance on naming] Give exact identifiers as they appear in the claims — crate, module, function and file names verbatim, not paraphrased or prettified.
 
-CITING. End your response with a JSON block and nothing after it:
+[Guidance on citing] End your response with a JSON block and nothing after it:
 {"cited_evidence": ["<evidence id>", ...]}
-listing the `evidence <id>` value of every claim you relied on."#;
-const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v2";
+listing the `evidence <id>` value of every claim you relied on. Use the exact evidence id shown
+for each claim you cite — never a claim's position number in this list."#;
+const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v3";
 /// The refusal returned when the ledger holds nothing that answers a question (RFC 0139 §3.6).
 ///
 /// Worded to contain phrases the groundedness evaluator already recognises
@@ -272,7 +279,7 @@ impl<'a> AiRuntime<'a> {
         let resp = self.llm.complete(&req).await?;
 
         let (answer, evidence_refs, citation_diagnostics) =
-            extract_citations(&resp.content, &known_evidence);
+            extract_citations(&resp.content, &known_evidence, &[]);
         diagnostics.extend(citation_diagnostics);
 
         Ok(AiAnswer {
@@ -382,8 +389,9 @@ impl<'a> AiRuntime<'a> {
         };
         let resp = self.llm.complete(&req).await?;
 
+        let claim_order: Vec<Option<KirId>> = evidence.items.iter().map(|i| i.source).collect();
         let (answer, evidence_refs, citation_diagnostics) =
-            extract_citations(&resp.content, &known_evidence);
+            extract_citations(&resp.content, &known_evidence, &claim_order);
         diagnostics.extend(citation_diagnostics);
 
         Ok(AiAnswer {
@@ -482,7 +490,7 @@ impl<'a> AiRuntime<'a> {
         let resp = self.llm.complete_stream(&req, on_chunk).await?;
 
         let (answer, evidence_refs, citation_diagnostics) =
-            extract_citations(&resp.content, &known_evidence);
+            extract_citations(&resp.content, &known_evidence, &[]);
         diagnostics.extend(citation_diagnostics);
 
         Ok(AiAnswer {
@@ -762,9 +770,47 @@ fn apply_rerank_order(items: Vec<EvidenceItem>, order: &[usize]) -> Vec<Evidence
     out
 }
 
+/// Resolves one `cited_evidence` array entry against real evidence (RFC 0139/0141 "C-cite" fix).
+/// Tolerates three shapes observed in real model output: a bare evidence uuid; a uuid wrapped in
+/// an `"evidence <id>"`/`"evidence: <id>"` prefix (the model echoing the prompt's own `evidence
+/// <id>` phrasing back as part of the citation string); and a bare 1-based claim *position* in
+/// the numbered list (e.g. `"1"`, `"2"`) — some completions cite where a claim sat in the list
+/// rather than its id. A position is resolved against `claim_order`, which mirrors
+/// [`render_evidence`]'s own numbering (`claim_order[i]` is the source id of the `i+1`-th claim,
+/// or `None` for a claim with no single source id).
+fn resolve_citation_ref(
+    raw: &str,
+    known_evidence: &HashSet<KirId>,
+    claim_order: &[Option<KirId>],
+) -> Option<KirId> {
+    let trimmed = raw.trim();
+    if let Ok(id) = trimmed.parse::<KirId>()
+        && known_evidence.contains(&id)
+    {
+        return Some(id);
+    }
+    for prefix in ["evidence ", "evidence: ", "Evidence ", "Evidence: "] {
+        if let Some(rest) = trimmed.strip_prefix(prefix)
+            && let Ok(id) = rest.trim().parse::<KirId>()
+            && known_evidence.contains(&id)
+        {
+            return Some(id);
+        }
+    }
+    if let Ok(pos) = trimmed.parse::<usize>()
+        && pos >= 1
+        && let Some(Some(id)) = claim_order.get(pos - 1)
+        && known_evidence.contains(id)
+    {
+        return Some(*id);
+    }
+    None
+}
+
 fn extract_citations(
     content: &str,
     known_evidence: &HashSet<KirId>,
+    claim_order: &[Option<KirId>],
 ) -> (String, Vec<KirId>, Vec<Diagnostic>) {
     // Try the last block first — the prompt asks for it at the end — but fall back through any
     // earlier one, so a model that narrates after citing is still read correctly.
@@ -773,11 +819,12 @@ fn extract_citations(
         let Ok(block) = serde_json::from_str::<CitationBlock>(&content[start..end]) else {
             continue;
         };
+        let mut seen = HashSet::new();
         let evidence_refs: Vec<KirId> = block
             .cited_evidence
             .iter()
-            .filter_map(|s| s.parse::<KirId>().ok())
-            .filter(|id| known_evidence.contains(id))
+            .filter_map(|s| resolve_citation_ref(s, known_evidence, claim_order))
+            .filter(|id| seen.insert(*id))
             .collect();
         if evidence_refs.is_empty() {
             // Keep looking: an earlier block may carry real ids. Remember this one so that if
@@ -917,7 +964,7 @@ mod tests {
             let id = KirId::new();
             let content =
                 format!("The answer is X.\n{{\"cited_evidence\": [\"{id}\"]}}\nHope that helps.");
-            let (answer, refs, diags) = extract_citations(&content, &known(id));
+            let (answer, refs, diags) = extract_citations(&content, &known(id), &[]);
             assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
             assert!(diags.is_empty());
             assert!(
@@ -931,7 +978,7 @@ mod tests {
         fn a_pretty_printed_block_is_parsed_despite_a_nested_last_brace() {
             let id = KirId::new();
             let content = format!("Answer.\n{{\n  \"cited_evidence\": [\n    \"{id}\"\n  ]\n}}");
-            let (_, refs, diags) = extract_citations(&content, &known(id));
+            let (_, refs, diags) = extract_citations(&content, &known(id), &[]);
             assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
         }
 
@@ -939,7 +986,7 @@ mod tests {
         fn a_fenced_block_is_parsed_and_the_fence_is_stripped() {
             let id = KirId::new();
             let content = format!("Answer.\n```json\n{{\"cited_evidence\": [\"{id}\"]}}\n```");
-            let (answer, refs, _) = extract_citations(&content, &known(id));
+            let (answer, refs, _) = extract_citations(&content, &known(id), &[]);
             assert_eq!(refs, vec![id]);
             assert!(
                 !answer.contains("```") && !answer.contains("cited_evidence"),
@@ -953,7 +1000,7 @@ mod tests {
             let content = format!(
                 "The config uses {{ braces }} in its syntax.\n{{\"cited_evidence\": [\"{id}\"]}}"
             );
-            let (_, refs, diags) = extract_citations(&content, &known(id));
+            let (_, refs, diags) = extract_citations(&content, &known(id), &[]);
             assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
         }
 
@@ -963,7 +1010,7 @@ mod tests {
             let content = format!(
                 "{{\"cited_evidence\": [\"{id}\"]}}\nSome trailing note.\n{{\"cited_evidence\": []}}"
             );
-            let (_, refs, diags) = extract_citations(&content, &known(id));
+            let (_, refs, diags) = extract_citations(&content, &known(id), &[]);
             assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
         }
 
@@ -974,6 +1021,7 @@ mod tests {
             let (_, refs, diags) = extract_citations(
                 "Answer.\n{\"cited_evidence\": []}",
                 &HashSet::from([KirId::new()]),
+                &[],
             );
             assert!(refs.is_empty());
             assert_eq!(diags.len(), 1);
@@ -982,11 +1030,52 @@ mod tests {
 
         #[test]
         fn a_response_with_no_block_at_all_still_reports_ai001() {
-            let (answer, refs, diags) =
-                extract_citations("Just prose, no citations.", &HashSet::from([KirId::new()]));
+            let (answer, refs, diags) = extract_citations(
+                "Just prose, no citations.",
+                &HashSet::from([KirId::new()]),
+                &[],
+            );
             assert!(refs.is_empty());
             assert_eq!(diags[0].code, "AI001");
             assert_eq!(answer, "Just prose, no citations.");
+        }
+
+        /// RFC "C-cite" fix (`dep-006`/`dep-007`): the model sometimes cites where a claim sat in
+        /// the numbered evidence list (`"1"`, `"2"`) instead of its uuid. Resolved against
+        /// `claim_order`, which mirrors `render_evidence`'s own 1-based numbering.
+        #[test]
+        fn a_bare_claim_position_resolves_via_claim_order() {
+            let id_one = KirId::new();
+            let id_two = KirId::new();
+            let claim_order = vec![Some(id_one), Some(id_two)];
+            let content = "The answer is X.\n{\"cited_evidence\": [\"2\"]}";
+            let (_, refs, diags) =
+                extract_citations(content, &HashSet::from([id_one, id_two]), &claim_order);
+            assert_eq!(refs, vec![id_two], "diagnostics: {diags:?}");
+            assert!(diags.is_empty());
+        }
+
+        /// A claim position past the end of `claim_order`, or one pointing at a claim with no
+        /// single source id, resolves to nothing rather than panicking or matching wrong.
+        #[test]
+        fn a_claim_position_out_of_range_resolves_to_nothing() {
+            let id = KirId::new();
+            let claim_order = vec![Some(id)];
+            let content = "Answer.\n{\"cited_evidence\": [\"5\"]}";
+            let (_, refs, diags) = extract_citations(content, &known(id), &claim_order);
+            assert!(refs.is_empty());
+            assert_eq!(diags[0].code, "AI002");
+        }
+
+        /// RFC "C-cite" fix (`sec-004`): the model sometimes wraps a real uuid in an
+        /// `"evidence <id>"` prefix inside the citation array instead of the bare id.
+        #[test]
+        fn an_evidence_prefixed_id_is_unwrapped() {
+            let id = KirId::new();
+            let content = format!("Answer.\n{{\"cited_evidence\": [\"evidence {id}\"]}}");
+            let (_, refs, diags) = extract_citations(&content, &known(id), &[]);
+            assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
+            assert!(diags.is_empty());
         }
     }
 

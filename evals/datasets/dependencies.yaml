@@ -30,6 +30,13 @@ scenarios:
     question: "what depends on ekos_common::redaction"
     mode: reason
     expected_query_type: structural
+    # RFC 0139-followup "D3" fix — previously ungraded on content (no `expected_facts`), so a
+    # flatly wrong answer ("ekos_common::redaction depends on the CLI") could still pass on the
+    # other axes. Verified against `ekos/crates/recovery/Cargo.toml`'s real declared dependency on
+    # `ekos-common` before being written down — a real, stable dependent, not derived from any
+    # answer this pipeline has produced.
+    expected_facts:
+      - "recovery"
     difficulty: medium
 
   - id: dep-005
@@ -42,12 +49,22 @@ scenarios:
     question: "what depends on ekos_kir"
     mode: reason
     expected_query_type: structural
+    # RFC 0139-followup "D3" fix — verified live via `ekos ask --explain "what depends on
+    # ekos_kir"`: the compiled Dependents traversal from `ekos-kir` real names `ekos-semantic`
+    # among its direct dependents.
+    expected_facts:
+      - "ekos-semantic"
     difficulty: medium
 
   - id: dep-007
     question: "what depends on ekos-ledger"
     mode: reason
     expected_query_type: structural
+    # RFC 0139-followup "D3" fix — verified live via `ekos ask --explain "what depends on
+    # ekos-ledger"`: the compiled Dependents traversal from `ekos-ledger` real names `ekos-runtime`
+    # among its direct dependents.
+    expected_facts:
+      - "ekos-runtime"
     difficulty: medium
 
   - id: dep-008

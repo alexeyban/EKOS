@@ -36,15 +36,30 @@ const DEFAULT_REFUSAL_PHRASES: &[&str] = &[
     "not enough information",
     "no mention",
     "not mentioned",
+    "refusing",
+    "no direct evidence",
+    "not possible to determine",
+    "claims mention",
 ];
 
-fn is_refusal(scenario: &Scenario, answer: &str) -> bool {
+/// Whether `answer` reads as a refusal by [`DEFAULT_REFUSAL_PHRASES`] alone, with no
+/// scenario-specific phrasing considered (RFC 0139-followup "D1" fix). Exposed to
+/// `evaluators::answer` so a scenario that isn't `should_refuse` but got refused anyway doesn't
+/// score a fact "matched" just because the refusal's own preamble echoes the fact's keyword (e.g.
+/// "I looked for a claim naming `Observer`" restating exactly the entity the question named) — a
+/// refusal never states a fact, regardless of what nouns it echoes while explaining what it
+/// couldn't find.
+pub(crate) fn looks_like_a_refusal(answer: &str) -> bool {
     let lower = answer.to_lowercase();
     DEFAULT_REFUSAL_PHRASES.iter().any(|p| lower.contains(p))
+}
+
+fn is_refusal(scenario: &Scenario, answer: &str) -> bool {
+    looks_like_a_refusal(answer)
         || scenario
             .refusal_phrases
             .iter()
-            .any(|p| lower.contains(&p.to_lowercase()))
+            .any(|p| answer.to_lowercase().contains(&p.to_lowercase()))
 }
 
 /// `None` for a normal scenario with nothing cited (same "not applicable" rule as

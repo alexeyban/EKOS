@@ -407,8 +407,12 @@ fn exec_node(
                 } else {
                     format!("search match: {}", hit.name)
                 };
-                let mut item =
-                    entity_item(runtime, hit.id, claim, serde_json::Value::String(hit.name))?;
+                let mut item = entity_item_with_excerpt(
+                    runtime,
+                    hit.id,
+                    claim,
+                    serde_json::Value::String(hit.name),
+                )?;
                 item.weak = weak;
                 items.push(item);
             }
@@ -499,7 +503,7 @@ fn exec_node(
             }
 
             for obj in neighbors {
-                let item = entity_item(
+                let item = entity_item_with_excerpt(
                     runtime,
                     obj.id,
                     format!("{} — {label} {seed_name}", obj.name),
@@ -521,6 +525,12 @@ fn exec_node(
     Ok(())
 }
 
+/// Bound on the extra descriptive text [`entity_item_with_excerpt`] appends to a claim (RFC
+/// 0139-followup "B1" fix). Deliberately smaller than RFC 0140 §3's [`MAX_SOURCE_TEXT_LINES`]:
+/// this is the always-on cheap path applied to every `Search`/`Graph` hit, not the opt-in
+/// per-question "expensive tier" full source-text enrichment.
+const CLAIM_EXCERPT_MAX_CHARS: usize = 280;
+
 /// Build an evidence item about `id`, pulling its first evidence fragment for provenance.
 fn entity_item(
     runtime: &Runtime,
@@ -528,7 +538,38 @@ fn entity_item(
     claim: String,
     value: serde_json::Value,
 ) -> Result<EvidenceItem, RuntimeError> {
-    let (source, location, confidence, extracted_by) = match runtime.reconstruct_state(&id)? {
+    entity_item_inner(runtime, id, claim, value, false)
+}
+
+/// Same as [`entity_item`], but for a `Search`/`Graph`-sourced claim: appends a bounded slice of
+/// the object's own retrieved/indexed prose (RFC 0139-followup "B1" fix — see [`excerpt_of`]) so
+/// the reasoner sees what retrieval actually surfaced, not just a bare name. `Fact`-sourced claims
+/// don't go through this path since they already render the fact's real value.
+fn entity_item_with_excerpt(
+    runtime: &Runtime,
+    id: KirId,
+    claim: String,
+    value: serde_json::Value,
+) -> Result<EvidenceItem, RuntimeError> {
+    entity_item_inner(runtime, id, claim, value, true)
+}
+
+fn entity_item_inner(
+    runtime: &Runtime,
+    id: KirId,
+    claim: String,
+    value: serde_json::Value,
+    with_excerpt: bool,
+) -> Result<EvidenceItem, RuntimeError> {
+    let state = runtime.reconstruct_state(&id)?;
+    let claim = match (
+        with_excerpt,
+        state.as_ref().and_then(|s| excerpt_of(&s.object)),
+    ) {
+        (true, Some(excerpt)) => format!("{claim} — {excerpt}"),
+        _ => claim,
+    };
+    let (source, location, confidence, extracted_by) = match state {
         Some(state) => {
             let extracted_by = provenance_of(&state.object);
             // RFC 0140 §2 — prefer the object's own `source_span` over the evidence's file-level
@@ -563,6 +604,41 @@ fn entity_item(
         // vocabulary similarity.
         weak: false,
     })
+}
+
+/// The retrieved/indexed prose for `object`, if it carries any (RFC 0139-followup "B1" fix): the
+/// `excerpt` property `local_docs_analyzer` writes on every Document/Section, or — for anything
+/// with a `symbol_kind` (a `RustSymbol`/`PythonSymbol`/`ElixirSymbol`) — its `description`. This
+/// is exactly the text BM25 indexed via `KirObject::indexed_content()`: previously matched,
+/// ranked, and then discarded one line before the claim was rendered. Truncated to
+/// [`CLAIM_EXCERPT_MAX_CHARS`], never longer.
+fn excerpt_of(object: &ekos_kir::KirObject) -> Option<String> {
+    let text = object
+        .properties
+        .get("excerpt")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            object
+                .properties
+                .get("description")
+                .and_then(|v| v.as_str())
+        })?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(truncate_chars(trimmed, CLAIM_EXCERPT_MAX_CHARS))
+}
+
+/// Truncates `s` to at most `max` chars (not bytes — safe on multi-byte UTF-8), appending an
+/// ellipsis when it actually cut something off.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max).collect();
+    out.push('…');
+    out
 }
 
 /// The analyzer / source kind an object was recovered by, from the first provenance property it
@@ -1004,6 +1080,127 @@ mod tests {
 
         let item = entity_item(&rt, obj.id, "c".into(), serde_json::Value::Null).unwrap();
         assert_eq!(item.location, "src/lib.rs:12");
+    }
+
+    // ── RFC 0139-followup "B1" fix: Search/Graph claims carry retrieved prose ───────────────
+
+    #[test]
+    fn excerpt_of_prefers_excerpt_over_description() {
+        let mut obj = KirObject::new("doc", ObjectKind::Custom("Section".into()));
+        obj.properties
+            .insert("description".into(), serde_json::json!("fallback text"));
+        obj.properties
+            .insert("excerpt".into(), serde_json::json!("real excerpt text"));
+        assert_eq!(excerpt_of(&obj).as_deref(), Some("real excerpt text"));
+    }
+
+    #[test]
+    fn excerpt_of_falls_back_to_description_for_a_symbol() {
+        let mut obj = KirObject::new("parse", ObjectKind::Custom("RustSymbol".into()));
+        obj.properties
+            .insert("description".into(), serde_json::json!("parses input"));
+        assert_eq!(excerpt_of(&obj).as_deref(), Some("parses input"));
+    }
+
+    #[test]
+    fn excerpt_of_is_none_for_an_object_with_neither_property() {
+        let obj = KirObject::new("bare", ObjectKind::Table);
+        assert_eq!(excerpt_of(&obj), None);
+    }
+
+    #[test]
+    fn excerpt_of_is_none_for_blank_text() {
+        let mut obj = KirObject::new("blank", ObjectKind::Custom("Section".into()));
+        obj.properties
+            .insert("excerpt".into(), serde_json::json!("   "));
+        assert_eq!(excerpt_of(&obj), None);
+    }
+
+    #[test]
+    fn excerpt_of_truncates_long_text_and_marks_the_cut() {
+        let mut obj = KirObject::new("long", ObjectKind::Custom("Section".into()));
+        let long_text = "x".repeat(CLAIM_EXCERPT_MAX_CHARS + 50);
+        obj.properties
+            .insert("excerpt".into(), serde_json::json!(long_text));
+        let excerpt = excerpt_of(&obj).unwrap();
+        assert_eq!(excerpt.chars().count(), CLAIM_EXCERPT_MAX_CHARS + 1); // +1 for the ellipsis
+        assert!(excerpt.ends_with('…'));
+    }
+
+    /// The single largest yield in a full 59-scenario failure classification: 21 real scenarios
+    /// failed purely because the compiled/indexed/retrieved excerpt was discarded one line before
+    /// the prompt was built, leaving the model nothing but a bare name to reason from.
+    #[test]
+    fn a_search_hit_carries_its_retrieved_excerpt_not_just_its_name() {
+        let (l, _d) = temp();
+        let mut obj = KirObject::new("widget_parser", ObjectKind::Custom("Section".into()));
+        obj.properties.insert(
+            "excerpt".into(),
+            serde_json::json!(
+                "widget_parser converts raw widget feeds into normalized gadget records."
+            ),
+        );
+        l.append_object(&obj).unwrap();
+        let rt = Runtime::new(&l);
+
+        let plan = QueryPlan {
+            raw: "widget_parser".into(),
+            query_type: QueryType::Lexical,
+            root: PlanNode::Search {
+                query: "widget_parser".into(),
+                limit: 5,
+            },
+            confidence: 0.5,
+        };
+        let set = execute(&plan, &rt).unwrap();
+        let item = set
+            .items
+            .iter()
+            .find(|i| i.entity == Some(obj.id))
+            .expect("widget_parser should be retrieved");
+        assert!(
+            item.claim.contains("normalized gadget records"),
+            "claim should carry the retrieved excerpt, not just the name: {:?}",
+            item.claim
+        );
+    }
+
+    #[test]
+    fn a_graph_traversal_hit_carries_its_retrieved_excerpt_too() {
+        let (l, _d) = temp();
+        let (_orders, _a, b, c) = seed(&l);
+        let mut beta = KirObject::new("beta_fn", ObjectKind::Custom("Symbol".into()));
+        beta.id = b;
+        beta.properties.insert(
+            "description".into(),
+            serde_json::json!("beta_fn aggregates results for the reporting job."),
+        );
+        l.append_object(&beta).unwrap();
+        let rt = Runtime::new(&l);
+
+        let plan = QueryPlan {
+            raw: "what depends on gamma_fn".into(),
+            query_type: QueryType::Structural,
+            root: PlanNode::Graph {
+                op: StructuralOp::Dependents,
+                seed: EntityRef::Resolved(c),
+                hops: 3,
+                supporting: false,
+            },
+            confidence: 1.0,
+        };
+        let set = execute(&plan, &rt).unwrap();
+        let item = set
+            .items
+            .iter()
+            .find(|i| i.entity == Some(b))
+            .expect("beta_fn should be in the traversal");
+        assert!(
+            item.claim
+                .contains("aggregates results for the reporting job"),
+            "graph claim should carry the retrieved excerpt too: {:?}",
+            item.claim
+        );
     }
 
     /// RFC 0139 §3.0 — the entity gate. A hub's neighbourhood describes the corpus, not the

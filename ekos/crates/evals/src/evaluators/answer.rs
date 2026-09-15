@@ -18,6 +18,10 @@ pub fn matched_count(scenario: &Scenario, answer: Option<&str>) -> (usize, usize
     }
     let matched = match answer {
         None => 0,
+        // RFC 0139-followup "D1" fix: a refusal never states a fact, no matter which of the
+        // question's own nouns its preamble echoes while explaining what it couldn't find — see
+        // `groundedness::looks_like_a_refusal`'s doc comment for the motivating real scenarios.
+        Some(text) if super::groundedness::looks_like_a_refusal(text) => 0,
         Some(text) => {
             let answer_tokens = normalize::tokens(text);
             scenario
@@ -97,5 +101,25 @@ mod tests {
     fn no_answer_scores_zero_not_none() {
         let s = scenario(vec!["x"]);
         assert_eq!(score(&s, None), Some(0.0));
+    }
+
+    /// RFC 0139-followup "D1" fix: a refusal that happens to name the expected fact while
+    /// explaining what it couldn't find must not score as a match — real observed shape from
+    /// `arch-007`/`code-007`/`hist-001`/`lin-007`/`sec-011`.
+    #[test]
+    fn a_refusal_naming_the_expected_fact_does_not_count_as_a_match() {
+        let s = scenario(vec!["Observer"]);
+        let answer = "Insufficient evidence. I looked for a claim naming Observer, but none of \
+                       the provided claims describe it.";
+        assert_eq!(score(&s, Some(answer)), Some(0.0));
+    }
+
+    #[test]
+    fn a_non_refusal_answer_still_matches_normally() {
+        let s = scenario(vec!["Observer"]);
+        assert_eq!(
+            score(&s, Some("It implements the Observer pattern.")),
+            Some(1.0)
+        );
     }
 }
