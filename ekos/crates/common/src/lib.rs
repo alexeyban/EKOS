@@ -27,7 +27,9 @@ use sha2::{Digest, Sha256};
 ///
 /// ## Changelog
 /// - **v1** (RFC 0135, 2026-09-04): introduced.
-pub const PIPELINE_LOGIC_VERSION: u32 = 1;
+/// - **v2** (RFC 0144, 2026-09-15): `ekos-plugin-localdocs` splits Markdown per heading and
+///   records heading path + line range on each section.
+pub const PIPELINE_LOGIC_VERSION: u32 = 2;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

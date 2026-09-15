@@ -31,6 +31,7 @@ impl DocumentParser for EmailParser {
             page: None,
             index: 0,
             text: header_text.chars().take(SECTION_TEXT_MAX_CHARS).collect(),
+            ..Default::default()
         });
         for mut section in chunk_text(&body_text, TEXT_CHUNK_CHAR_BUDGET) {
             if sections.len() >= SECTIONS_MAX {

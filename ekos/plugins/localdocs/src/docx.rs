@@ -49,6 +49,7 @@ impl DocumentParser for DocxParser {
                                 page: None,
                                 index: sections.len(),
                                 text: std::mem::take(&mut current_section),
+                                ..Default::default()
                             });
                         }
                     }
@@ -67,6 +68,7 @@ impl DocumentParser for DocxParser {
                 page: None,
                 index: sections.len(),
                 text: current_section,
+                ..Default::default()
             });
         }
 

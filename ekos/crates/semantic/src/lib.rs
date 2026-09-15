@@ -5,6 +5,7 @@
 //! read from the CKM, never from raw KIR.
 
 pub mod data_lineage;
+pub mod doc_links;
 pub mod rollup;
 pub mod transform_ir;
 
@@ -705,6 +706,15 @@ impl CompilerPass for SemanticCompilerPass {
         // fully present in `resolved` at this point, no `File`-object dependency to defer for.
         for (risk, rel) in concentration_risks(&resolved) {
             resolved.add_object(risk);
+            resolved.add_relationship(rel);
+        }
+
+        // ── Deterministic doc links (RFC 0144) ──────────────────────────────────
+        // Same placement reasoning as the risks above: needs Sections and code objects from every
+        // analyzer at once, nothing `commit`-only.
+        let links = doc_links::doc_links(&resolved);
+        tracing::debug!(links = links.len(), "doc links derived");
+        for rel in links {
             resolved.add_relationship(rel);
         }
 

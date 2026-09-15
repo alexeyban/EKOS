@@ -54,7 +54,7 @@ pub struct ExtractedTable {
 /// One page (PDF) or fixed-character-budget chunk (DOCX) of a document's
 /// text, small enough to be fully indexed rather than sharing one
 /// whole-document excerpt budget (RFC 0024).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DocumentSection {
     /// 1-indexed PDF page number; `None` for DOCX — pagination is a
     /// rendering-time concept the document model doesn't expose.
@@ -62,6 +62,16 @@ pub struct DocumentSection {
     /// 0-indexed position among this document's sections.
     pub index: usize,
     pub text: String,
+    /// RFC 0144: the nearest enclosing Markdown heading's text. `None` for
+    /// every non-Markdown format and for Markdown text before the first heading.
+    pub heading: Option<String>,
+    /// RFC 0144: the stack of enclosing Markdown headings, outermost first
+    /// (e.g. `["RFC 0016 — Fact segments", "Motivation"]`). Empty when `heading` is `None`.
+    pub heading_path: Vec<String>,
+    /// RFC 0144: real 1-indexed source line range of this section's text. Only
+    /// Markdown records it today.
+    pub line_start: Option<u32>,
+    pub line_end: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -334,7 +344,26 @@ impl Observer for LocalDocsObserver {
                     let clean = sanitize_text(&s.text);
                     sanitized_count += clean.removed;
                     let text: String = clean.text.chars().take(SECTION_TEXT_MAX_CHARS).collect();
-                    serde_json::json!({ "index": s.index, "page": s.page, "text": text })
+                    let mut section =
+                        serde_json::json!({ "index": s.index, "page": s.page, "text": text });
+                    // RFC 0144: structural fields only when present, so non-Markdown
+                    // artifacts stay byte-identical to before.
+                    if let Some(heading) = &s.heading {
+                        let clean_heading = sanitize_text(heading);
+                        sanitized_count += clean_heading.removed;
+                        let path: Vec<String> = s
+                            .heading_path
+                            .iter()
+                            .map(|h| sanitize_text(h).text)
+                            .collect();
+                        section["heading"] = serde_json::json!(clean_heading.text);
+                        section["heading_path"] = serde_json::json!(path);
+                    }
+                    if let (Some(start), Some(end)) = (s.line_start, s.line_end) {
+                        section["line_start"] = serde_json::json!(start);
+                        section["line_end"] = serde_json::json!(end);
+                    }
+                    section
                 })
                 .collect();
 
@@ -755,6 +784,7 @@ mod tests {
                 page: Some(i as u32 + 1),
                 index: i,
                 text: format!("page {i} text"),
+                ..Default::default()
             })
             .collect();
         let parser: Arc<dyn DocumentParser> = Arc::new(FixedParser {
@@ -794,6 +824,7 @@ mod tests {
                     page: Some(3),
                     index: 0,
                     text: "page three content".into(),
+                    ..Default::default()
                 }],
             },
         });
@@ -825,6 +856,7 @@ mod tests {
                     page: Some(1),
                     index: 0,
                     text: long_text,
+                    ..Default::default()
                 }],
             },
         });
@@ -961,6 +993,47 @@ mod tests {
                 .unwrap()
                 .contains("Exceptions expire")
         );
+    }
+
+    /// RFC 0144: Markdown sections carry heading structure + line range in the artifact;
+    /// a plain-text file's sections don't gain the new keys at all.
+    #[tokio::test]
+    async fn markdown_sections_carry_heading_path_and_line_range_in_the_artifact() {
+        let pkg = scan_temp(default_parsers(), silent_ocr(), |dir| {
+            std::fs::write(
+                dir.path().join("notes.md"),
+                include_bytes!("../tests/fixtures/notes.md"),
+            )
+            .unwrap();
+            std::fs::write(dir.path().join("plain.txt"), "# not a heading here\nbody").unwrap();
+        })
+        .await;
+        let md = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.data["doc_format"] == "md")
+            .unwrap();
+        let scope = md.content.data["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["heading"] == "Scope")
+            .expect("a Scope section");
+        assert_eq!(
+            scope["heading_path"],
+            serde_json::json!(["Retention Policy Notes", "Scope"])
+        );
+        assert_eq!(scope["line_start"], 6);
+        assert!(scope["line_end"].as_u64().unwrap() > 6);
+
+        let txt = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.data["doc_format"] == "txt")
+            .unwrap();
+        let section = &txt.content.data["sections"][0];
+        assert!(section.get("heading").is_none());
+        assert!(section.get("line_start").is_none());
     }
 
     #[tokio::test]

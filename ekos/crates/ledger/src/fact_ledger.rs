@@ -276,6 +276,31 @@ pub struct FactLedger {
     _write_lock: Option<std::fs::File>,
 }
 
+/// Commit buffered search-index upserts when a writable handle goes away.
+///
+/// Found live 2026-09-15 (RFC 0144's measurement rebuild): `SearchIndex::upsert` only buffers, and
+/// the buffer was committed lazily by the *next* search or writable open on the same handle, or
+/// by the catch-up step of a later writable open. Since `903b93d` moved `ask`/`query find`/`ekl`/
+/// `eval` to read-only opens, which skip catch-up by design, nothing did that after `ekos commit`
+/// exited. Every object `commit` re-versioned stayed indexed under its *old* name and content
+/// (watermark 70160 against a ledger at tx 90781), so a rebuild's changes were invisible to BM25
+/// search until some unrelated writable command happened to run. Best-effort: a `Drop` cannot
+/// return an error, and a missed commit still self-heals on the next writable open.
+impl Drop for FactLedger {
+    fn drop(&mut self) {
+        let Ok(inner) = self.inner.get_mut() else {
+            return;
+        };
+        if inner.read_only {
+            return;
+        }
+        let last_tx = inner.batch_times.last().map(|(t, _)| *t);
+        if let Err(e) = inner.search.commit(last_tx) {
+            tracing::warn!(error = %e, "failed to commit the search index on ledger close");
+        }
+    }
+}
+
 impl FactLedger {
     /// Open (or create) a fact ledger rooted at `root` (a directory).
     pub fn open(root: &Path) -> Result<Self, LedgerError> {
@@ -1827,6 +1852,34 @@ mod tests {
 
     // ── RFC 0100: index_object reuses indexed_content(), fixing a real ──────
     // ── ocr_text gap and adding ai_overview/ai_usage search coverage ────────
+
+    /// A write followed by a plain drop (what `ekos commit` does) must be visible to a later
+    /// *read-only* open's search, which skips the catch-up a writable open would do.
+    #[test]
+    fn search_updates_survive_a_writable_drop_for_read_only_readers() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let id = {
+            let ledger = FactLedger::open(&path).unwrap();
+            let obj = KirObject::new("old section name", ObjectKind::Custom("Section".into()));
+            ledger.append_object(&obj).unwrap();
+            // Force an index commit, as an earlier pipeline stage's search would.
+            ledger.find_objects("old").unwrap();
+            let mut renamed = obj.clone();
+            renamed.name = "renamed heading motivation".into();
+            ledger.append_object(&renamed).unwrap();
+            obj.id
+        };
+        let ro = FactLedger::open_read_only(&path).unwrap();
+        let hits = ro.find_objects("motivation").unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "the rename must be searchable after the writer dropped"
+        );
+        assert_eq!(hits[0].0, id);
+        assert_eq!(hits[0].1, "renamed heading motivation");
+    }
 
     #[test]
     fn find_objects_matches_ocr_text_a_real_regression_this_backend_had() {

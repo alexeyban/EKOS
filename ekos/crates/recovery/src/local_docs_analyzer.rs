@@ -29,7 +29,11 @@ use uuid::Uuid;
 /// artifact-storage bound): this crate doesn't depend on plugin crates,
 /// same as it doesn't import the Document-level `EXCERPT_MAX_CHARS`
 /// either — each layer re-truncates independently, defense in depth.
-const SECTION_EXCERPT_MAX_CHARS: usize = 1200;
+///
+/// RFC 0144: raised from 1,200 to the observer's own 3,000-char storage bound. At 1,200 more than
+/// half of every 2,500-char Markdown/text chunk never reached the search index — `excerpt` is the
+/// only property `KirObject::indexed_content` reads for a Section.
+const SECTION_EXCERPT_MAX_CHARS: usize = 3000;
 
 #[derive(Debug, Deserialize)]
 struct TableData {
@@ -42,6 +46,79 @@ struct SectionData {
     index: usize,
     page: Option<u32>,
     text: String,
+    /// RFC 0144 — Markdown only; absent from every older artifact and every other format.
+    #[serde(default)]
+    heading: Option<String>,
+    #[serde(default)]
+    heading_path: Vec<String>,
+    #[serde(default)]
+    line_start: Option<u32>,
+    #[serde(default)]
+    line_end: Option<u32>,
+}
+
+/// RFC 0144: coarse document classification from the path alone — lets retrieval and EKL tell an
+/// RFC's prose apart from a devlog's or the project's own agent instructions.
+fn doc_type_for(path: &str) -> &'static str {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    let file = lower.rsplit('/').next().unwrap_or(&lower);
+    if file == "claude.md" || file == "agents.md" {
+        "claude_md"
+    } else if file.starts_with("readme") {
+        "readme"
+    } else if lower.contains("rfcs/") || file.starts_with("rfc") {
+        "rfc"
+    } else if lower.contains("devlogs/") || file.starts_with("devlog") {
+        "devlog"
+    } else {
+        "doc"
+    }
+}
+
+/// RFC 0144: `(rfc_number, rfc_title, rfc_status)` read from an RFC's own header — the first
+/// `# RFC NNNN — Title` line, and either `**Status:** X` or `| **Status** | X |` (both forms exist
+/// in this repo). `rfc_number` is zero-padded to 4 digits so it matches however prose writes it.
+/// Status is cut at the first ` (` — `Accepted (per user direction…)` becomes `Accepted`.
+#[derive(Debug, Default, PartialEq)]
+struct RfcHeader {
+    number: Option<String>,
+    title: Option<String>,
+    status: Option<String>,
+}
+
+fn parse_rfc_header(text: &str) -> RfcHeader {
+    static TITLE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?m)^#\s+RFC[\s-]*(\d{1,4})\s*(?:[—–:-]\s*(.+?))?\s*$").unwrap()
+    });
+    static STATUS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?m)^(?:\*\*Status:\*\*\s*(.+?)|\|\s*\*\*Status\*\*\s*\|\s*(.+?)\s*\|)\s*$",
+        )
+        .unwrap()
+    });
+    let mut header = RfcHeader::default();
+    if let Some(c) = TITLE.captures(text) {
+        header.number = c[1].parse::<u32>().ok().map(|n| format!("{n:04}"));
+        header.title = c.get(2).map(|m| m.as_str().trim().to_string());
+    }
+    if let Some(c) = STATUS.captures(text) {
+        let raw = c
+            .get(1)
+            .or_else(|| c.get(2))
+            .map(|m| m.as_str())
+            .unwrap_or("");
+        let status = raw
+            .split(" (")
+            .next()
+            .unwrap_or(raw)
+            .trim()
+            .trim_matches('*')
+            .trim();
+        if !status.is_empty() {
+            header.status = Some(status.to_string());
+        }
+    }
+    header
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +245,35 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 .insert("page_count".into(), serde_json::json!(data.page_count));
             obj.properties
                 .insert("excerpt".into(), serde_json::json!(data.excerpt));
+            // RFC 0144: document classification + RFC header, shared onto every Section below.
+            let doc_type = doc_type_for(&data.path);
+            let rfc = if doc_type == "rfc" {
+                let head: String = data
+                    .sections
+                    .iter()
+                    .take(2)
+                    .map(|s| s.text.as_str())
+                    .chain(std::iter::once(data.excerpt.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                parse_rfc_header(&head)
+            } else {
+                RfcHeader::default()
+            };
+            let mut doc_attrs: Vec<(&str, serde_json::Value)> =
+                vec![("doc_type", serde_json::json!(doc_type))];
+            if let Some(n) = &rfc.number {
+                doc_attrs.push(("rfc_number", serde_json::json!(n)));
+            }
+            if let Some(t) = &rfc.title {
+                doc_attrs.push(("rfc_title", serde_json::json!(t)));
+            }
+            if let Some(st) = &rfc.status {
+                doc_attrs.push(("rfc_status", serde_json::json!(st)));
+            }
+            for (k, v) in &doc_attrs {
+                obj.properties.insert((*k).into(), v.clone());
+            }
             if let Some(artifact_id_str) = &data.artifact_id {
                 obj.properties
                     .insert("artifact_id".into(), serde_json::json!(artifact_id_str));
@@ -223,10 +329,29 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 graph.relationships.push(rel);
             }
 
+            let mut previous_path: Option<&[String]> = None;
+            let mut part = 0usize;
             for section in &data.sections {
                 let sec_id = section_kir_id(&id_path, section.index);
+                // RFC 0144: consecutive sub-chunks of one heading share its path; number them.
+                if !section.heading_path.is_empty()
+                    && previous_path == Some(section.heading_path.as_slice())
+                {
+                    part += 1;
+                } else {
+                    part = 1;
+                }
+                previous_path = Some(section.heading_path.as_slice());
                 let name = match section.page {
                     Some(p) => format!("{}: page {p}", data.path),
+                    None if !section.heading_path.is_empty() => {
+                        let path = section.heading_path.join(" › ");
+                        if part > 1 {
+                            format!("{} § {path} (part {part})", data.path)
+                        } else {
+                            format!("{} § {path}", data.path)
+                        }
+                    }
                     None => format!("{}: section {}", data.path, section.index + 1),
                 };
                 let mut sec_obj = KirObject::new(name, ObjectKind::Custom("Section".to_string()));
@@ -245,19 +370,51 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 sec_obj
                     .properties
                     .insert("section_index".into(), serde_json::json!(section.index));
+                for (k, v) in &doc_attrs {
+                    sec_obj.properties.insert((*k).into(), v.clone());
+                }
+                if let Some(heading) = &section.heading {
+                    sec_obj
+                        .properties
+                        .insert("heading".into(), serde_json::json!(heading));
+                    sec_obj.properties.insert(
+                        "heading_path".into(),
+                        serde_json::json!(section.heading_path),
+                    );
+                }
+                let line_range = section.line_start.zip(section.line_end);
+                if let Some((start, end)) = line_range {
+                    sec_obj
+                        .properties
+                        .insert("line_start".into(), serde_json::json!(start));
+                    sec_obj
+                        .properties
+                        .insert("line_end".into(), serde_json::json!(end));
+                }
 
                 let page_note = section
                     .page
                     .map(|p| format!(" (page {p})"))
                     .unwrap_or_default();
-                let sec_ev = KirEvidence::new(
-                    SourceLocation::file(data.path.clone()),
-                    format!(
-                        "section {}{page_note} extracted from {}",
-                        section.index + 1,
-                        data.path
+                // RFC 0144: a Markdown section's evidence points at its real line range.
+                let sec_ev = match line_range {
+                    Some((start, end)) => KirEvidence::new(
+                        SourceLocation::at(data.path.clone(), start),
+                        format!(
+                            "section {} extracted from {}:{start}-{end}",
+                            section.index + 1,
+                            data.path
+                        ),
                     ),
-                );
+                    None => KirEvidence::new(
+                        SourceLocation::file(data.path.clone()),
+                        format!(
+                            "section {}{page_note} extracted from {}",
+                            section.index + 1,
+                            data.path
+                        ),
+                    ),
+                };
                 let sec_ev_id = graph.add_evidence(sec_ev);
                 sec_obj.evidence.push(sec_ev_id);
                 graph.objects.push(sec_obj);
@@ -573,6 +730,137 @@ mod tests {
                 .to_lowercase()
                 .contains("replication")
         );
+    }
+
+    // ── RFC 0144: section attributes ────────────────────────────────────
+
+    #[test]
+    fn doc_type_is_derived_from_the_path() {
+        assert_eq!(doc_type_for("CLAUDE.md"), "claude_md");
+        assert_eq!(doc_type_for("ekos/README.md"), "readme");
+        assert_eq!(doc_type_for("docs/rfcs/0001-compiler-core.md"), "rfc");
+        assert_eq!(doc_type_for("devlogs/devlog_183.md"), "devlog");
+        assert_eq!(doc_type_for("notes/retention.md"), "doc");
+    }
+
+    #[test]
+    fn rfc_header_parses_both_status_forms() {
+        let bold =
+            "# RFC 0143 — MCP over Streamable HTTP\n\n**Status:** Accepted (per user direction)\n";
+        assert_eq!(
+            parse_rfc_header(bold),
+            RfcHeader {
+                number: Some("0143".into()),
+                title: Some("MCP over Streamable HTTP".into()),
+                status: Some("Accepted".into()),
+            }
+        );
+        let table = "# RFC 0001 — Compiler Core Architecture\n\n| Field | Value |\n|-------|-------|\n| **Status** | Accepted |\n";
+        let h = parse_rfc_header(table);
+        assert_eq!(h.number.as_deref(), Some("0001"));
+        assert_eq!(h.status.as_deref(), Some("Accepted"));
+        assert_eq!(parse_rfc_header("# Just a doc\n"), RfcHeader::default());
+    }
+
+    #[tokio::test]
+    async fn markdown_sections_get_heading_names_attributes_and_line_evidence() {
+        let (c, _dir) = ctx();
+        let long_motivation = format!(
+            "## Motivation\n{}",
+            "Define abstractions before domain logic to avoid API churn. ".repeat(40)
+        );
+        let sections = serde_json::json!([
+            { "index": 0, "page": null, "text": "# RFC 0001 — Compiler Core\n\n**Status:** Accepted",
+              "heading": "RFC 0001 — Compiler Core", "heading_path": ["RFC 0001 — Compiler Core"],
+              "line_start": 1, "line_end": 3 },
+            { "index": 1, "page": null, "text": long_motivation,
+              "heading": "Motivation", "heading_path": ["RFC 0001 — Compiler Core", "Motivation"],
+              "line_start": 4, "line_end": 9 },
+            { "index": 2, "page": null, "text": "more motivation",
+              "heading": "Motivation", "heading_path": ["RFC 0001 — Compiler Core", "Motivation"],
+              "line_start": 10, "line_end": 12 }
+        ]);
+        let path = "docs/rfcs/0001-compiler-core.md";
+        let id = seed_doc_with_sections(
+            &c,
+            path,
+            "md",
+            "# RFC 0001",
+            serde_json::json!([]),
+            sections,
+        );
+        let graph = run_pass(vec![id], c).await;
+
+        let doc = graph
+            .objects
+            .iter()
+            .find(|o| o.id == document_kir_id(path))
+            .unwrap();
+        assert_eq!(doc.properties["doc_type"], "rfc");
+        assert_eq!(doc.properties["rfc_number"], "0001");
+        assert_eq!(doc.properties["rfc_status"], "Accepted");
+
+        let motivation = graph
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id(path, 1))
+            .unwrap();
+        assert_eq!(
+            motivation.name,
+            "docs/rfcs/0001-compiler-core.md § RFC 0001 — Compiler Core › Motivation"
+        );
+        assert_eq!(motivation.properties["heading"], "Motivation");
+        assert_eq!(motivation.properties["rfc_number"], "0001");
+        assert_eq!(motivation.properties["line_start"], 4);
+        // Text past the old 1,200-char cap is now indexed.
+        assert!(
+            motivation.properties["excerpt"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count()
+                > 1200
+        );
+
+        let part2 = graph
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id(path, 2))
+            .unwrap();
+        assert!(
+            part2.name.ends_with("› Motivation (part 2)"),
+            "{}",
+            part2.name
+        );
+
+        let ev = graph
+            .evidence
+            .iter()
+            .find(|e| e.id == motivation.evidence[0])
+            .unwrap();
+        assert_eq!(ev.location.line, Some(4));
+        assert!(
+            ev.fragment.contains("docs/rfcs/0001-compiler-core.md:4-9"),
+            "{}",
+            ev.fragment
+        );
+    }
+
+    #[tokio::test]
+    async fn pre_rfc_0144_section_artifacts_still_parse_with_old_names() {
+        let (c, _dir) = ctx();
+        let sections = serde_json::json!([{ "index": 0, "page": null, "text": "old chunk" }]);
+        let id =
+            seed_doc_with_sections(&c, "notes.md", "md", "old", serde_json::json!([]), sections);
+        let graph = run_pass(vec![id], c).await;
+        let sec = graph
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id("notes.md", 0))
+            .unwrap();
+        assert_eq!(sec.name, "notes.md: section 1");
+        assert!(sec.properties.get("heading").is_none());
+        assert_eq!(sec.properties["doc_type"], "doc");
     }
 
     #[tokio::test]

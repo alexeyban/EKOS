@@ -137,6 +137,7 @@ fn extract_sections(bytes: &[u8], expected_page_count: usize) -> Vec<DocumentSec
             page: Some(i as u32 + 1),
             index: i,
             text: text.chars().take(SECTION_TEXT_MAX_CHARS).collect(),
+            ..Default::default()
         })
         .collect()
 }
