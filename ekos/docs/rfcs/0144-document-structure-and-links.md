@@ -14,13 +14,14 @@ Sorting the 48 failing scenarios of the devlog_183 eval run by their own `attrib
 **24 retrieval failures** and only 7 generation failures. The retrieval failures are overwhelmingly
 questions about *documentation*, not code:
 
-- *"What does RFC 0001's own Motivation section give as the reason…"* (hist-011)
-- *"Which RFC's own Motivation section says it depends on RFC 0015…"* (hist-012)
-- CLAUDE.md rules — can `[security]` disable redaction (sec-002/010), what must a conclusion be
-  traceable to (lin-001), what makes a pass reproducible (lin-011), the four primitives
-  (arch-010/lin-002), append-only deletes (arch-020)
-- *"What Rust module defines the shared Transformation IR"* (lin-003) — answered in prose in CLAUDE.md,
-  with the code object named in backticks
+- a specific RFC's Motivation section (hist-011), and which RFC builds on another (hist-012)
+- rules stated in CLAUDE.md (sec-002/010, lin-001, lin-011, arch-010, lin-002, arch-020)
+- which module owns a named concept (lin-003) — answered in CLAUDE.md prose, with the code object
+  named in backticks
+
+(Scenario ids only, never the question text: a design doc quoting eval questions verbatim is
+ingested into the very ledger the eval grades — `hist-012` was measured answering from an earlier
+draft of this RFC that did exactly that.)
 
 Three concrete, code-confirmed root causes:
 

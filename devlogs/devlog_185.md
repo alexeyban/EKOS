@@ -16,7 +16,8 @@ each chunk were indexed, and docs had no edges to code or to each other. RFC 014
 RFC 0145 adds an explicit Ollama `num_ctx` (it was never sent) and a configurable OpenAI-compatible `base-url`, so
 cheap hosted models (OpenCode Zen) work. Measuring it surfaced four more real bugs, the most serious being that
 **every `ekos commit` since 2026-09-10 left the search index stale** for read-only readers. Result, same cloud model
-(`deepseek-v4-flash` via Zen) on both sides: **70/101 → 84/101**.
+(`deepseek-v4-flash` via Zen) on both sides: **70/101 → 84/101** composite; a clean full re-run on the final state
+scored **79/101** (see Addendum).
 
 ---
 
@@ -78,7 +79,7 @@ model = "deepseek-v4-flash"
 api-key-env = "OPENCODE_API_KEY"
 
 [ai]
-max-tokens = 2048   # verbose cloud models hit the 1024 default mid-answer
+max-tokens = 8192   # reasoning model: hidden reasoning tokens count against this (see Addendum)
 ```
 
 ---
@@ -89,7 +90,7 @@ max-tokens = 2048   # verbose cloud models hit the 1024 default mid-answer
 unchanged.
 
 ## PR 52ef291 — doc mentions are not dependents
-The first Zen measurement showed dependencies regressing 10 → 7: "what depends on the ObjectKind enum" answered with
+The first Zen measurement showed dependencies regressing 10 → 7: a dependents question about an enum answered with
 devlog sections, reached through the new `References` edges. `KirRelationship::is_doc_mention()` (`link_type` =
 `code`/`rfc`); `trace_impact` skips it like an unreviewed `SameAs`. `Neighborhood` still walks them. Back to 9/12.
 
@@ -142,6 +143,33 @@ Reports: `evals/reports/zen-base/`, `evals/reports/zen-new/` (local, gitignored)
 
 ---
 
+## Addendum — full re-run on the final state (same day)
+
+The 84 above was a composite of per-category runs, most of them cache replays. A clean full run exposed three more things:
+
+| Run | State | Result |
+|---|---|---|
+| `zen-full` | code as committed above, mostly cache replays | 82/101 |
+| `zen-full2` | + appending "mentions X" doc sections to dependents plans | 80/101 — **reverted** |
+| `zen-final` | rebuilt ledger (de-quoted RFC 0144, new devlog/README/TODO sections), 80 fresh calls | 75/101 |
+| `zen-final-8k` | same, `[ai] max-tokens = 8192` | **79/101** |
+
+- **Reverted experiment:** adding doc sections as "mentions X" claims to dependents/impact plans helped nothing and
+  turned a correct refusal (dep-010) into speculation. Kept instead: RFC→RFC links whose `relation` is
+  `depends_on`/`supersedes` count as real dependents again. Only code mentions and bare RFC mentions are excluded.
+- **Eval contamination I introduced:** RFC 0144's Motivation quoted eval questions verbatim, and `hist-012` was
+  answered *from RFC 0144*. Rewritten to cite scenario ids only; code comments and this devlog de-quoted the same way.
+- **DeepSeek V4 Flash is a reasoning model.** Hidden reasoning tokens count against `max_tokens`. At 2048,
+  3 answers came back **empty** (the evidence was correct) and 8–17 per run were capped. 8192 fixed it: 75 → 79.
+  The baseline (70) was measured at 2048 with 17 capped answers and was not re-run at 8192, so the true gap is
+  probably smaller than 9.
+- **Heading-level sections make older eval-discussing devlogs findable.** `adv-001` now retrieves devlog_170, which
+  discusses that very scenario, and `adv-011` retrieves `LICENSE`. Adversarial scenarios then answer instead of refusing. This
+  corpus-hygiene problem (devlogs that talk about eval scenarios) predates RFC 0144, which made it visible.
+- Fresh-call cost for a full 101-scenario run: ≈ $0.05–0.08; median fresh latency 5 s.
+
+---
+
 ## Knowledge Captured
 
 - **`ekos commit` left the tantivy index stale for every read-only reader since `903b93d` (2026-09-10).**
@@ -153,7 +181,7 @@ Reports: `evals/reports/zen-base/`, `evals/reports/zen-new/` (local, gitignored)
   2026-09-10 and this fix (devlog_182/183 included) searched partly stale data.** Diagnose with: compare
   `.ekos/ledger/facts/search/last_tx` to the ledger's last tx.
 - **Short all-caps acronyms were CamelCase "mentions".** `AI` resolved exactly (confidence 1.0) to a minified JS
-  symbol `aI` from coverage output, and the planner answered "what does RFC 0013 expose to AI agents" about it.
+  symbol `aI` from coverage output, and the planner answered an arch-013-style RFC question about it.
 - **The LLM cache key has no `max_tokens`.** Raising `[ai] max-tokens` replayed the truncated answer until c05395a.
 - **The harness low-memory killer is system-wide.** It killed even ~100 MB cloud eval processes because
   browsers were using the RAM. Resume pattern: loop over categories with `[ -f out.json ] && continue`, one category per process.

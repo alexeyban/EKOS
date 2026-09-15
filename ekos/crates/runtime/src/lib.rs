@@ -1015,6 +1015,33 @@ mod tests {
     }
 
     #[test]
+    fn an_rfc_depends_on_link_is_a_real_dependent_but_a_bare_mention_is_not() {
+        let (ledger, _dir) = temp_ledger();
+        let rfc15 = obj("docs/rfcs/0015.md");
+        let builds_on = obj("docs/rfcs/0016.md § Motivation");
+        let mentions = obj("devlogs/devlog_1.md § Summary");
+        for o in [&rfc15, &builds_on, &mentions] {
+            ledger.append_object(o).unwrap();
+        }
+        for (from, relation) in [(builds_on.id, "depends_on"), (mentions.id, "mentions")] {
+            let mut rel = KirRelationship::new(RelationshipKind::References, from, rfc15.id);
+            rel.properties
+                .insert("link_type".into(), serde_json::json!("rfc"));
+            rel.properties
+                .insert("relation".into(), serde_json::json!(relation));
+            ledger.append_relationship(&rel).unwrap();
+        }
+        let rt = Runtime::new(&ledger);
+        let ids: Vec<_> = rt
+            .dependents(&rfc15.id, 2)
+            .unwrap()
+            .into_iter()
+            .map(|o| o.id)
+            .collect();
+        assert_eq!(ids, vec![builds_on.id]);
+    }
+
+    #[test]
     fn trace_impact_filters_by_kind() {
         let (ledger, _dir) = temp_ledger();
         let a = obj("a");

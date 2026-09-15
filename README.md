@@ -312,13 +312,14 @@ model = "deepseek-v4-flash"
 api-key-env = "OPENCODE_API_KEY"
 
 [ai]
-max-tokens = 2048            # verbose cloud models get cut off at the 1024 default
+max-tokens = 8192            # reasoning models spend hidden tokens; 1024/2048 truncate or empty answers
 ```
 
 For local Ollama, `[llm] context-window = 8192` (the default; also `OLLAMA_NUM_CTX`) is sent as `num_ctx` —
 without it Ollama silently truncated long prompts — and EKOS warns when a prompt fills the window.
 `ekos doctor` shows the effective window or custom endpoint. Hosted models bill per token; a full
-101-scenario `ekos eval run` on DeepSeek V4 Flash costs about $0.08.
+101-scenario `ekos eval run` on DeepSeek V4 Flash costs about $0.08. DeepSeek V4 Flash is a reasoning model whose
+hidden reasoning counts against `max-tokens` — use `[ai] max-tokens = 8192` or some answers come back empty.
 
 ### Documentation generation (RFC 0035/0037/0042/0090/0094/0095)
 

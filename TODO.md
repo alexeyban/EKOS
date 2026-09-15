@@ -5351,7 +5351,9 @@ are excluded — see the full exclusion list in the planning history if needed.
   section excerpt cap 1,200 → 3,000; RFC→RFC and unique-name doc→code `References` edges (7,377 + 3,420 on EKOS);
   `RFC NNNN` resolves to its Document; doc mentions excluded from dependents/impact.
   - [x] **Stale search index after `ekos commit`** (since `903b93d`) — fixed with `Drop for FactLedger`.
-  - [x] Measured on the same Zen `deepseek-v4-flash` model: **70/101 → 84/101** (old vs new ledger).
+  - [x] Measured on the same Zen `deepseek-v4-flash` model: **70/101 → 79/101** clean full run at `max-tokens = 8192` (84 in a cached composite; devlog_185 Addendum).
+  - [ ] Re-measure the baseline at `max-tokens = 8192` (it ran at 2048 with 17 capped answers).
+  - [ ] Devlogs that discuss eval scenarios by name (e.g. devlog_170 / adv-001) are now findable per section and pull adversarial answers off a refusal — exclude or tag eval-meta docs.
   - [ ] Doc → file-path links (`` `transform_ir.rs` ``) — needs a post-`commit` step, `File` objects aren't in the semantic graph.
   - [ ] Recall@10 fell 64.7% → 55.9% while answers improved — look at ranking whole Documents vs their Sections.
   - [ ] `web/ui/coverage/` (lcov HTML/JS) is ingested — add to `[observe] ignore-patterns` (2,519 junk `JsSymbol`s).
