@@ -17,7 +17,10 @@ use crate::llm::{LlmError, LlmProvider, LlmRequest, LlmResponse};
 /// the NL-to-SQL bridge, …) passes an empty `history`, so this is a no-op
 /// extension of the existing hash for every pre-RFC-0099 call site — same
 /// key as before, byte for byte, when `history` is empty.
-fn cache_key(model: &str, req: &LlmRequest<'_>) -> String {
+///
+/// RFC 0145: `namespace` (see `LlmProvider::cache_namespace`) is appended last, and only when
+/// `Some` — the same no-op-when-absent extension as `history`.
+fn cache_key(model: &str, namespace: Option<&str>, req: &LlmRequest<'_>) -> String {
     let mut h = Sha256::new();
     h.update(model.as_bytes());
     h.update([0u8]);
@@ -31,6 +34,11 @@ fn cache_key(model: &str, req: &LlmRequest<'_>) -> String {
         h.update(turn.role.as_bytes());
         h.update([0u8]);
         h.update(turn.content.as_bytes());
+    }
+    if let Some(ns) = namespace {
+        h.update([0u8]);
+        h.update(b"ns:");
+        h.update(ns.as_bytes());
     }
     hex::encode(h.finalize())
 }
@@ -69,7 +77,8 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
     }
 
     async fn complete(&self, req: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        let key = cache_key(self.inner.model_name(), req);
+        let namespace = self.inner.cache_namespace();
+        let key = cache_key(self.inner.model_name(), namespace.as_deref(), req);
         let path = cache_path(&self.cache_root, &key);
 
         // Cache hit.
@@ -92,6 +101,10 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
         tokio::fs::write(&path, json.as_bytes()).await?;
 
         Ok(resp)
+    }
+
+    fn cache_namespace(&self) -> Option<String> {
+        self.inner.cache_namespace()
     }
 
     fn cache_stats(&self) -> Option<(u64, u64)> {
@@ -143,6 +156,31 @@ mod tests {
                 output_tokens: 0,
             })
         }
+    }
+
+    /// RFC 0145: a `None` namespace must keep every pre-existing key byte-identical; `Some` must
+    /// separate entries.
+    #[test]
+    fn namespace_only_changes_the_key_when_present() {
+        let req = LlmRequest {
+            system: "s",
+            user: "u",
+            prompt_version: "v1",
+            max_tokens: 10,
+            history: &[],
+        };
+        let mut h = Sha256::new();
+        for part in ["m", "v1", "s"] {
+            h.update(part.as_bytes());
+            h.update([0u8]);
+        }
+        h.update(b"u");
+        let legacy = hex::encode(h.finalize());
+        assert_eq!(cache_key("m", None, &req), legacy);
+        let a = cache_key("m", Some("num_ctx=4096"), &req);
+        let b = cache_key("m", Some("num_ctx=8192"), &req);
+        assert_ne!(a, legacy);
+        assert_ne!(a, b);
     }
 
     #[tokio::test]

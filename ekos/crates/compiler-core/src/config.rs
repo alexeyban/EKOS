@@ -98,6 +98,14 @@ pub struct LlmConfig {
     pub provider: Option<String>,
     pub api_key_env: Option<String>,
     pub model: Option<String>,
+    /// RFC 0145: `provider = "openai"` only — any OpenAI-compatible Chat Completions host, e.g.
+    /// `https://opencode.ai/zen/v1`. Falls back to `OPENAI_BASE_URL`, then OpenAI itself.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// RFC 0145: `provider = "ollama"` only — sent as `num_ctx`. Falls back to `OLLAMA_NUM_CTX`,
+    /// then 8192.
+    #[serde(default)]
+    pub context_window: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

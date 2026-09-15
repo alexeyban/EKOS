@@ -690,7 +690,8 @@ fn select_llm_provider_for_description(
         // built-in `llama3.1:8b` default, the same real, pre-existing gap `recover.rs` already
         // fixed for its own Ollama call site but `docs.rs`/`marketing.rs` still have.
         return Ok(std::sync::Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref()),
+            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
+                .with_context_window(config.llm.context_window),
             cache_dir,
         )));
     }
@@ -704,7 +705,12 @@ fn select_llm_provider_for_description(
     // Mirror `recover.rs::build_llm_provider` — `[llm] provider = "openai"` must route here too,
     // not silently fall through to Anthropic (which then 401s on an OpenAI key).
     if config.llm.provider.as_deref() == Some("openai") {
-        let provider = OpenAiProvider::from_env_var(key_env).map_err(|_| {
+        let provider = OpenAiProvider::from_config(
+            key_env,
+            config.llm.model.as_deref(),
+            config.llm.base_url.as_deref(),
+        )
+        .map_err(|_| {
             anyhow::anyhow!(
                 "{key_env} not set — [llm] provider = \"openai\" needs it for [llm-description]"
             )

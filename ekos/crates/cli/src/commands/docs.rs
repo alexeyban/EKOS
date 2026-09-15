@@ -371,7 +371,8 @@ fn select_llm_provider_for_prose(
 
     if config.llm.provider.as_deref() == Some("ollama") {
         return Ok(std::sync::Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref()),
+            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
+                .with_context_window(config.llm.context_window),
             cache_dir,
         )));
     }

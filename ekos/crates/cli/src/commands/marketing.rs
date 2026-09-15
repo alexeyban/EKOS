@@ -140,7 +140,8 @@ fn select_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Result<Arc<d
 
     if config.llm.provider.as_deref() == Some("ollama") {
         return Ok(Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref()),
+            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
+                .with_context_window(config.llm.context_window),
             cache_dir,
         )));
     }

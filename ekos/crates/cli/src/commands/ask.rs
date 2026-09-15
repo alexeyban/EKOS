@@ -253,6 +253,7 @@ mod tests {
                 provider: Some("ollama".to_string()),
                 api_key_env: None,
                 model: None,
+                ..Default::default()
             },
             ..Default::default()
         };

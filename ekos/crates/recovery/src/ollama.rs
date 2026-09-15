@@ -1,7 +1,9 @@
 //! Local Ollama backend for `LlmProvider` (RFC 0021).
 //!
 //! No API key — reads `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-//! and `OLLAMA_MODEL` (default `llama3.1:8b`). Always sends
+//! and `OLLAMA_MODEL` (default `llama3.1:8b`). Sends an explicit `num_ctx` context window
+//! (RFC 0145: `[llm] context-window` > `OLLAMA_NUM_CTX` > 8192) — without it Ollama silently
+//! truncates the front of any prompt longer than its own small default. Always sends
 //! `temperature: 0`, same determinism guarantee as `AnthropicProvider`.
 //! Construction cannot fail (there is no key to be missing); an
 //! unreachable daemon surfaces as an ordinary `LlmError::Http` on the
@@ -14,11 +16,34 @@ use crate::llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, stream_lines};
 
 const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 const DEFAULT_MODEL: &str = "llama3.1:8b";
+/// RFC 0145: llama3's native window — safe for every model this project runs locally.
+pub const DEFAULT_NUM_CTX: u32 = 8192;
 
 pub struct OllamaProvider {
     model: String,
     base_url: String,
+    /// RFC 0145: sent as `options.num_ctx` on every request.
+    num_ctx: u32,
     client: reqwest::Client,
+}
+
+/// RFC 0145: `[llm] context-window` > `OLLAMA_NUM_CTX` > [`DEFAULT_NUM_CTX`]. Also what `ekos
+/// doctor` reports, so the two can never disagree.
+pub fn resolve_num_ctx(configured: Option<u32>) -> u32 {
+    configured
+        .or_else(|| {
+            std::env::var("OLLAMA_NUM_CTX")
+                .ok()
+                .and_then(|v| v.trim().parse().ok())
+        })
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_NUM_CTX)
+}
+
+/// RFC 0145: `true` when a response's prompt plus its generation budget filled the whole window —
+/// the signature of Ollama having silently dropped the front of the prompt.
+fn likely_truncated(prompt_tokens: u32, num_predict: u32, num_ctx: u32) -> bool {
+    prompt_tokens.saturating_add(num_predict) >= num_ctx
 }
 
 impl OllamaProvider {
@@ -46,7 +71,32 @@ impl OllamaProvider {
         Self {
             model: model.into(),
             base_url: base_url.into(),
+            num_ctx: resolve_num_ctx(None),
             client: reqwest::Client::new(),
+        }
+    }
+
+    /// RFC 0145: override the context window (`[llm] context-window`); `None` keeps
+    /// `OLLAMA_NUM_CTX` / the default.
+    pub fn with_context_window(mut self, configured: Option<u32>) -> Self {
+        self.num_ctx = resolve_num_ctx(configured);
+        self
+    }
+
+    pub fn num_ctx(&self) -> u32 {
+        self.num_ctx
+    }
+
+    fn warn_if_truncated(&self, prompt_tokens: u32, num_predict: u32) {
+        if likely_truncated(prompt_tokens, num_predict, self.num_ctx) {
+            tracing::warn!(
+                model = %self.model,
+                prompt_tokens,
+                num_predict,
+                num_ctx = self.num_ctx,
+                "Ollama prompt + generation budget filled the whole context window — the prompt \
+                 was probably truncated; raise `[llm] context-window` in ekos.toml"
+            );
         }
     }
 
@@ -74,6 +124,7 @@ impl OllamaProvider {
             options: ApiOptions {
                 temperature: 0.0,
                 num_predict: req.max_tokens,
+                num_ctx: self.num_ctx,
             },
         }
     }
@@ -101,6 +152,7 @@ struct ApiMessage<'a> {
 struct ApiOptions {
     temperature: f32,
     num_predict: u32,
+    num_ctx: u32,
 }
 
 #[derive(Deserialize)]
@@ -124,6 +176,10 @@ impl LlmProvider for OllamaProvider {
         &self.model
     }
 
+    fn cache_namespace(&self) -> Option<String> {
+        Some(format!("num_ctx={}", self.num_ctx))
+    }
+
     async fn complete(&self, req: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
         let body = self.build_request(req);
 
@@ -144,6 +200,7 @@ impl LlmProvider for OllamaProvider {
         }
 
         let api_resp: ApiResponse = http_resp.json().await?;
+        self.warn_if_truncated(api_resp.prompt_eval_count, req.max_tokens);
         Ok(LlmResponse {
             content: api_resp.message.content,
             model: api_resp.model,
@@ -189,6 +246,7 @@ impl LlmProvider for OllamaProvider {
             apply_stream_line(&mut acc, line, on_chunk)
         })
         .await?;
+        self.warn_if_truncated(acc.input_tokens, req.max_tokens);
 
         Ok(LlmResponse {
             content: acc.content,
@@ -336,9 +394,49 @@ mod tests {
         let body = provider.build_request(&req);
         assert_eq!(body.options.temperature, 0.0);
         assert_eq!(body.options.num_predict, 123);
+        assert_eq!(
+            serde_json::to_value(&body).unwrap()["options"]["num_ctx"],
+            provider.num_ctx()
+        );
         assert!(!body.stream);
         assert_eq!(body.messages[0].role, "system");
         assert_eq!(body.messages[1].role, "user");
+    }
+
+    // ── RFC 0145: explicit context window ───────────────────────────────
+
+    #[test]
+    fn context_window_precedence_and_cache_namespace() {
+        // One test function: `OLLAMA_NUM_CTX` is process-global (same race reasoning as
+        // `from_env_falls_back_to_defaults_when_unset`).
+        // SAFETY: test-local env mutation, no concurrent access to this var elsewhere.
+        unsafe {
+            std::env::remove_var("OLLAMA_NUM_CTX");
+        }
+        assert_eq!(resolve_num_ctx(None), DEFAULT_NUM_CTX);
+        unsafe {
+            std::env::set_var("OLLAMA_NUM_CTX", "16384");
+        }
+        assert_eq!(resolve_num_ctx(None), 16384);
+        assert_eq!(resolve_num_ctx(Some(32768)), 32768, "config wins over env");
+        unsafe {
+            std::env::set_var("OLLAMA_NUM_CTX", "not-a-number");
+        }
+        assert_eq!(resolve_num_ctx(None), DEFAULT_NUM_CTX);
+        unsafe {
+            std::env::remove_var("OLLAMA_NUM_CTX");
+        }
+
+        let provider = OllamaProvider::new("m", "http://x").with_context_window(Some(4096));
+        assert_eq!(provider.num_ctx(), 4096);
+        assert_eq!(provider.cache_namespace().as_deref(), Some("num_ctx=4096"));
+    }
+
+    #[test]
+    fn truncation_predicate() {
+        assert!(!likely_truncated(3000, 1000, 8192));
+        assert!(likely_truncated(3200, 1000, 4096));
+        assert!(likely_truncated(u32::MAX, 1, 8192));
     }
 
     // ── RFC 0098: streaming NDJSON line parsing ─────────────────────────

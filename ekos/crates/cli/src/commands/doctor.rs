@@ -216,13 +216,58 @@ fn collect_checks(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Vec<Ch
         config.llm.api_key_env.as_deref(),
         |key_var| std::env::var(key_var).is_ok(),
     ));
+    if let Some(check) = llm_endpoint_check(config) {
+        checks.push(check);
+    }
 
     checks
+}
+
+/// RFC 0145: the effective Ollama context window (the setting that silently truncated prompts
+/// before it existed) or the OpenAI-compatible endpoint a custom `base-url` points at.
+fn llm_endpoint_check(config: &EkosConfig) -> Option<Check> {
+    match config.llm.provider.as_deref() {
+        Some("ollama") => Some(Check::ok(
+            "LLM context window",
+            format!(
+                "{} tokens (num_ctx; set [llm] context-window to change)",
+                ekos_recovery::ollama::resolve_num_ctx(config.llm.context_window)
+            ),
+        )),
+        Some("openai") => config
+            .llm
+            .base_url
+            .as_deref()
+            .map(|url| Check::ok("LLM endpoint", format!("{url} (OpenAI-compatible)"))),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn endpoint_check_reports_ollama_context_window_and_custom_openai_base_url() {
+        let mut config = EkosConfig::default();
+        config.llm.provider = Some("ollama".into());
+        config.llm.context_window = Some(16384);
+        let check = llm_endpoint_check(&config).unwrap();
+        assert!(check.detail.starts_with("16384 tokens"), "{}", check.detail);
+
+        config.llm.provider = Some("openai".into());
+        assert!(
+            llm_endpoint_check(&config).is_none(),
+            "default OpenAI host needs no line"
+        );
+        config.llm.base_url = Some("https://opencode.ai/zen/v1".into());
+        assert!(
+            llm_endpoint_check(&config)
+                .unwrap()
+                .detail
+                .contains("opencode.ai")
+        );
+    }
 
     #[test]
     fn ollama_passes_regardless_of_any_api_key_env_var() {

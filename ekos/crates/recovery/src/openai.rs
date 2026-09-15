@@ -1,20 +1,25 @@
 //! OpenAI backend for `LlmProvider` (RFC 0046).
 //!
 //! Reads the API key from the given env var (default `OPENAI_API_KEY`). Always sends
-//! `temperature: 0`. Model defaults to `gpt-4o-mini`, overridable via `OPENAI_MODEL`.
+//! `temperature: 0`. Model: `[llm] model` > `OPENAI_MODEL` > `gpt-4o-mini`.
+//!
+//! RFC 0145: works against any OpenAI-compatible Chat Completions host — OpenCode Zen, OpenRouter,
+//! DeepSeek, Groq, vLLM — via `[llm] base-url` > `OPENAI_BASE_URL` > `https://api.openai.com/v1`.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, stream_lines};
 
-const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
+pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_MODEL: &str = "gpt-4o-mini";
 const DEFAULT_KEY_ENV: &str = "OPENAI_API_KEY";
 
 pub struct OpenAiProvider {
     model: String,
     api_key: String,
+    /// RFC 0145: without a trailing `/`; requests go to `{base_url}/chat/completions`.
+    base_url: String,
     client: reqwest::Client,
 }
 
@@ -25,18 +30,46 @@ impl OpenAiProvider {
     }
 
     pub fn from_env_var(env_var: &str) -> Result<Self, LlmError> {
+        Self::from_config(env_var, None, None)
+    }
+
+    /// RFC 0145: `model_override`/`base_url_override` are `[llm] model`/`[llm] base-url`, each
+    /// winning over its env var (`OPENAI_MODEL`/`OPENAI_BASE_URL`), which wins over the default.
+    pub fn from_config(
+        env_var: &str,
+        model_override: Option<&str>,
+        base_url_override: Option<&str>,
+    ) -> Result<Self, LlmError> {
         let api_key =
             std::env::var(env_var).map_err(|_| LlmError::NoApiKey(env_var.to_string()))?;
-        let model = std::env::var("OPENAI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-        Ok(Self::new(model, api_key))
+        let model = model_override
+            .map(str::to_string)
+            .or_else(|| std::env::var("OPENAI_MODEL").ok())
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let base_url = base_url_override
+            .map(str::to_string)
+            .or_else(|| std::env::var("OPENAI_BASE_URL").ok())
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        Ok(Self::new(model, api_key).with_base_url(base_url))
     }
 
     pub fn new(model: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
             model: model.into(),
             api_key: api_key.into(),
+            base_url: DEFAULT_BASE_URL.to_string(),
             client: reqwest::Client::new(),
         }
+    }
+
+    /// RFC 0145: point at any OpenAI-compatible host. A trailing `/` is tolerated.
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into().trim_end_matches('/').to_string();
+        self
+    }
+
+    fn endpoint(&self) -> String {
+        format!("{}/chat/completions", self.base_url)
     }
 }
 
@@ -117,6 +150,11 @@ impl LlmProvider for OpenAiProvider {
         &self.model
     }
 
+    /// RFC 0145: only a non-default host changes the key, so existing OpenAI cache entries stay valid.
+    fn cache_namespace(&self) -> Option<String> {
+        (self.base_url != DEFAULT_BASE_URL).then(|| self.base_url.clone())
+    }
+
     async fn complete(&self, req: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
         let body = ApiRequest {
             model: &self.model,
@@ -129,7 +167,7 @@ impl LlmProvider for OpenAiProvider {
 
         let http_resp = self
             .client
-            .post(OPENAI_API_URL)
+            .post(self.endpoint())
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
@@ -185,7 +223,7 @@ impl LlmProvider for OpenAiProvider {
 
         let http_resp = self
             .client
-            .post(OPENAI_API_URL)
+            .post(self.endpoint())
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
@@ -276,6 +314,62 @@ mod tests {
     fn model_name_returns_the_constructed_model() {
         let provider = OpenAiProvider::new("gpt-4o-mini", "test-key");
         assert_eq!(provider.model_name(), "gpt-4o-mini");
+    }
+
+    // ── RFC 0145: OpenAI-compatible endpoints ────────────────────────────
+
+    #[test]
+    fn base_url_builds_the_endpoint_and_only_a_custom_host_namespaces_the_cache() {
+        let default = OpenAiProvider::new("m", "k");
+        assert_eq!(
+            default.endpoint(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(default.cache_namespace(), None);
+
+        let zen = OpenAiProvider::new("deepseek-v4-flash", "k")
+            .with_base_url("https://opencode.ai/zen/v1/");
+        assert_eq!(
+            zen.endpoint(),
+            "https://opencode.ai/zen/v1/chat/completions"
+        );
+        assert_eq!(
+            zen.cache_namespace().as_deref(),
+            Some("https://opencode.ai/zen/v1")
+        );
+    }
+
+    #[test]
+    fn from_config_precedence() {
+        // One test function: OPENAI_MODEL / OPENAI_BASE_URL / the key var are process-global.
+        // SAFETY: test-local env mutation; these var names are used by no other test.
+        unsafe {
+            std::env::set_var("EKOS_TEST_RFC0145_KEY", "k");
+            std::env::set_var("OPENAI_MODEL", "env-model");
+            std::env::set_var("OPENAI_BASE_URL", "https://env.example/v1");
+        }
+        let from_env = OpenAiProvider::from_config("EKOS_TEST_RFC0145_KEY", None, None).unwrap();
+        assert_eq!(from_env.model_name(), "env-model");
+        assert_eq!(from_env.base_url, "https://env.example/v1");
+
+        let configured = OpenAiProvider::from_config(
+            "EKOS_TEST_RFC0145_KEY",
+            Some("cfg-model"),
+            Some("https://cfg.example/v1"),
+        )
+        .unwrap();
+        assert_eq!(configured.model_name(), "cfg-model");
+        assert_eq!(configured.base_url, "https://cfg.example/v1");
+
+        unsafe {
+            std::env::remove_var("OPENAI_MODEL");
+            std::env::remove_var("OPENAI_BASE_URL");
+            std::env::remove_var("EKOS_TEST_RFC0145_KEY");
+        }
+        assert!(matches!(
+            OpenAiProvider::from_config("EKOS_TEST_RFC0145_KEY", None, None),
+            Err(LlmError::NoApiKey(_))
+        ));
     }
 
     // ── RFC 0099: multi-turn history ─────────────────────────────────────

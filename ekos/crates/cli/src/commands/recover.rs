@@ -1134,7 +1134,8 @@ pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn L
     if config.llm.provider.as_deref() == Some("ollama") {
         tracing::info!("using local Ollama provider with disk cache");
         return Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref()),
+            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
+                .with_context_window(config.llm.context_window),
             cache_dir,
         ));
     }
@@ -1142,7 +1143,11 @@ pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn L
     let key_env = resolved_key_env(config);
 
     if config.llm.provider.as_deref() == Some("openai") {
-        return match OpenAiProvider::from_env_var(key_env) {
+        return match OpenAiProvider::from_config(
+            key_env,
+            config.llm.model.as_deref(),
+            config.llm.base_url.as_deref(),
+        ) {
             Ok(provider) => {
                 tracing::info!("using OpenAI provider with disk cache");
                 Arc::new(CachedLlmProvider::new(provider, cache_dir))
@@ -1351,6 +1356,7 @@ mod tests {
                 provider: Some("ollama".to_string()),
                 api_key_env: None,
                 model: None,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -1382,6 +1388,7 @@ mod tests {
                 provider: Some("openai".to_string()),
                 api_key_env: None,
                 model: None,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -1395,6 +1402,7 @@ mod tests {
                 provider: Some("openai".to_string()),
                 api_key_env: Some("MY_CUSTOM_KEY".to_string()),
                 model: None,
+                ..Default::default()
             },
             ..Default::default()
         };

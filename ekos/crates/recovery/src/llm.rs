@@ -110,6 +110,15 @@ pub trait LlmProvider: Send + Sync {
     fn cache_stats(&self) -> Option<(u64, u64)> {
         None
     }
+
+    /// RFC 0145: provider settings that change a response without changing the request — an
+    /// Ollama `num_ctx` (same prompt, truncated differently) or a non-default OpenAI-compatible
+    /// base URL (a same-named model on a different host). `CachedLlmProvider` folds it into the
+    /// cache key only when `Some`, so every provider returning the default `None` keeps its
+    /// pre-RFC-0145 keys byte-identical.
+    fn cache_namespace(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Reads an HTTP response body incrementally and calls `on_line` once per
