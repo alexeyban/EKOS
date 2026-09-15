@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Eval Comparison: Fixing a Self-Contaminated Ledger</title>
-<meta name="description" content="RFC 0138's eval harness flagged weak agent answer quality. Diagnosing it found four contamination sources -- ending with the discovery that 94% of the observed corpus was not our code at all -- plus three bugs that made fixes ship and silently do nothing. Full 101-scenario before/after comparisons at each stage, with the superseded numbers left visible as corrections and the open regressions named plainly.">
+<meta name="description" content="RFC 0138's eval harness flagged weak agent answer quality. Diagnosing it found four contamination sources -- ending with the discovery that 94% of the observed corpus was not our code at all -- plus three bugs that made fixes ship and silently do nothing. Full 101-scenario before/after comparisons at each stage, with the superseded numbers left visible as corrections and the open regressions named plainly -- through a later stage where classifying every failing scenario found a bigger, cheaper fix than the one it went looking for: 42/101 to 53/101, side effects reported alongside the gain.">
 <link rel="stylesheet" href="../assets/theme.css">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 </head>
@@ -13,7 +13,7 @@
 <nav class="rail" aria-hidden="true">
   <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
   <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
-  <a href="#s9"></a><a href="#s10"></a><a href="#s11"></a><a href="#s12"></a>
+  <a href="#s9"></a><a href="#s10"></a><a href="#s11"></a><a href="#s12"></a><a href="#s13"></a>
 </nav>
 
 <div class="deck">
@@ -405,7 +405,64 @@ plan: Compose[ Graph Dependents from LlmProvider (2 hops), Fact LlmProvider.* ]
     <a href="examples/eval-comparison/code-002-routing-gap.txt" style="color:var(--accent-a);">code-002-routing-gap.txt</a></div>
 </section>
 
-<section class="slide cta" id="s12">
+<section class="slide" id="s12">
+  <div class="stage-num mono">§ 11 / results — Phase 1: wording, citations, evidence content</div>
+  <div class="eyebrow">Same suite, same agent, a re-prioritised fix set</div>
+  <h2>Not the routing fix. Three cheaper bugs, found by classifying every failure.</h2>
+  <p class="lede">The <code class="mono">code-002</code> routing gap from §10 looked like the next
+  obvious fix. A multi-round classification of all 59 then-failing scenarios said otherwise: a
+  bigger, cheaper, previously-undiscovered bug was hiding in plain sight —
+  <code class="mono">Search</code>/<code class="mono">Graph</code> evidence claims rendered only an
+  object's <em>name</em>, discarding the exact text BM25 had already matched against. Alongside it,
+  a citation-block parser that rejected a bare claim position or an "evidence &lt;id&gt;"-wrapped
+  uuid, and a refusal-wording mismatch where the model's own echoed prompt header ("REFUSING.")
+  wasn't recognised as a refusal at all. Fixed all three, plus three grading-ruler defects that
+  would otherwise have inflated the measured gain. The routing fix from §10 is re-sequenced to run
+  after this, not before — a re-routed plan only helps if the evidence it finds can render its
+  content, not just a name.</p>
+  <table class="ttable">
+    <thead><tr><th>Metric</th><th>§10 rebuild</th><th>Phase 1</th><th>Δ</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Passed</td><td class="desc">42/101</td><td class="desc">53/101</td><td class="good">+11</td></tr>
+      <tr><td class="tool">Answer correctness</td><td class="desc">49.7%</td><td class="desc">50.1%</td><td class="good">+0.4pp</td></tr>
+      <tr><td class="tool">Evidence groundedness</td><td class="desc">51.6%</td><td class="desc">65.9%</td><td class="good">+14.3pp</td></tr>
+      <tr><td class="tool">Completeness</td><td class="desc">46.4%</td><td class="desc">50.1%</td><td class="good">+3.7pp</td></tr>
+      <tr><td class="tool">Recall@10</td><td class="desc">47.1%</td><td class="desc">64.7%</td><td class="good">+17.6pp</td></tr>
+      <tr><td class="tool">Hallucinated (count)</td><td class="desc">8/101</td><td class="desc">7/101</td><td class="good">−1</td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1rem;"><strong>Measured category-by-category, not in one run.</strong>
+  A single full-suite background run was OOM-killed twice by the host (real memory pressure, not a
+  fluke — confirmed via <code class="mono">free -h</code>). Each of the 7 categories runs
+  comfortably inside a single foreground call, and a fresh process per category releases memory
+  before the next one starts — that's what actually produced this number, at the cost of manually
+  diffing 7 report files afterward instead of one.</p>
+  <p class="lede" style="margin-top:1rem;"><strong>22 scenarios flipped to pass, 11 flipped to
+  fail — both reported, not just the net.</strong> The <code class="mono">code</code> category
+  alone went 3/15 → 8/15, the single largest jump, almost entirely the citation-parsing and
+  evidence-content fixes landing on scenarios whose answers were already correct and only the
+  citation mechanics were broken.</p>
+  <div class="codeblock">
+    <div class="tag">terminal — real, unedited</div>
+<pre style="margin:0;">$ ekos eval run --dataset ekos-full --category code --agent ollama --save-answers
+Scenarios: 15   Passed: 8   (was 3/15 before Phase 1)
+Evidence groundedness: 75.0%   Recall@10: 57.1%</pre>
+  </div>
+  <p class="lede" style="margin-top:1rem;"><strong>Two real side effects, measured and reported, not
+  hidden.</strong> Richer excerpt text on weak/partial-overlap claims made the model fabricate on 4
+  adversarial false-premise questions it previously refused correctly — exactly offset by 4
+  different adversarial scenarios the wording fix corrected, net zero for that category but a real
+  trade-off between generosity of evidence and adversarial safety. Separately, restyling the
+  prompt's headers to a bracketed form coincided with 3 scenarios where the model wrote
+  <code class="mono">Cited evidence: [...]</code> in prose instead of the required JSON block —
+  <code class="mono">history</code>'s only net regression (4/12 → 3/12). Neither pursued further
+  this pass; both are open follow-ups, not swept under the rug.</p>
+  <div class="tag" style="margin-top:0.8rem;">Open the real report JSON and transcripts:
+    <a href="examples/eval-comparison/20260914T193821Z-code-category.json" style="color:var(--accent-a);">code category (3/15 → 8/15)</a>,
+    <a href="examples/eval-comparison/20260915T060256Z-adversarial-category.json" style="color:var(--accent-a);">adversarial category (the recomposition)</a></div>
+</section>
+
+<section class="slide cta" id="s13">
   <div class="eyebrow">Reproduce it yourself</div>
   <h2>Same suite. Same agent. Same gates.</h2>
   <div class="codeblock">
@@ -419,7 +476,7 @@ $ ekos eval history   # trend table across every saved run</pre>
     <tbody>
       <tr><td class="tool">Real <code>ekos ask</code>/<code>ekos query find</code> transcripts</td><td class="desc"><code>docs/presentations/examples/eval-comparison/</code></td></tr>
       <tr><td class="tool">Full contaminated + clean report JSON</td><td class="desc">same folder, both saved verbatim</td></tr>
-      <tr><td class="tool">Write-up with full "Knowledge Captured" section</td><td class="desc"><code>devlogs/devlog_170.md</code>, then <code>172</code> (honest ruler), <code>173</code> (RFC 0140 + the silent caches), <code>174</code> (the 94% corpus finding)</td></tr>
+      <tr><td class="tool">Write-up with full "Knowledge Captured" section</td><td class="desc"><code>devlogs/devlog_170.md</code>, then <code>172</code> (honest ruler), <code>173</code> (RFC 0140 + the silent caches), <code>174</code> (the 94% corpus finding), <code>182</code> (RFC 0139/0140/0141 rebuild), <code>183</code> (Phase 1: wording/citations/evidence content)</td></tr>
       <tr><td class="tool">Claim-location measurement — offline, deterministic, no LLM calls</td><td class="desc"><code>cargo run -p ekos --example evidence_locations</code></td></tr>
     </tbody>
   </table>

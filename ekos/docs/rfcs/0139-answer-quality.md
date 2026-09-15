@@ -589,3 +589,27 @@ first half would be the kind of number this whole RFC exists to distrust.
   baseline.
 - `docs/presentations/eval-comparison-report.html` updated with the corrected recall@10
   interpretation.
+
+## 2026-09-15 update — Phase 1 follow-up (devlog_183)
+
+A separate multi-round classification of all 59 scenarios still failing after the 2026-09-14
+RFC 0139 Phase 2/4 + RFC 0140/0141 rebuild (devlog_182) found this RFC's own machinery still had
+headroom: a refusal-wording mismatch (the model's own echoed prompt header wasn't recognised as a
+refusal), a citation-block parser too strict about id format, and — the largest single lever —
+`Search`/`Graph` evidence claims rendering only an object's name and discarding its retrieved
+excerpt. Fixed all three plus three grading-ruler defects. Measured (category-by-category, a
+full-suite background run was OOM-killed twice by the host):
+
+| Metric | 2026-09-14 rebuild | Phase 1 |
+|---|---|---|
+| Passed | 42/101 | **53/101** |
+| Evidence groundedness | 51.6% | **65.9%** |
+| Recall@10 | 47.1% | **64.7%** |
+| Hallucination count | 8/101 | 7/101 |
+
+Two real side effects reported alongside the gain, not hidden: richer excerpt text on
+weak/partial-overlap claims made the model fabricate on 4 adversarial false-premise questions it
+previously refused correctly, exactly offset by 4 different adversarial scenarios the wording fix
+corrected; and the prompt's bracketed-header restyling coincided with 3 scenarios where the model
+wrote a citation in prose instead of the required JSON block. Full detail in devlog_183 and
+`docs/presentations/eval-comparison-report.html`'s §11.
