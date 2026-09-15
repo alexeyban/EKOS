@@ -451,6 +451,17 @@ impl KirRelationship {
             Some(status) => status != "confirmed",
         }
     }
+
+    /// RFC 0144: `true` for a documentation-mention edge (`semantic::doc_links` — a doc section
+    /// naming a symbol or another RFC). Real navigation for a neighbourhood, but a doc that
+    /// *mentions* `X` does not *depend on* `X`: dependency/impact traversals skip it. Found live:
+    /// "what depends on the ObjectKind enum" answered with a list of devlog sections.
+    pub fn is_doc_mention(&self) -> bool {
+        matches!(
+            self.properties.get("link_type").and_then(|v| v.as_str()),
+            Some("code" | "rfc")
+        )
+    }
 }
 
 /// Immutable change record — the only mechanism that mutates enterprise state.

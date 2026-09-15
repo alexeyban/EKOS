@@ -209,6 +209,10 @@ impl<'a> Runtime<'a> {
                 if rel.is_pending_review() {
                     continue;
                 }
+                // RFC 0144: a doc section mentioning an object is not its dependent.
+                if rel.is_doc_mention() {
+                    continue;
+                }
 
                 let neighbour_id = match direction {
                     ImpactDirection::Dependents if rel.to == current_id => rel.from,
@@ -965,6 +969,48 @@ mod tests {
         assert!(
             ids.contains(&reviewed.id),
             "confirmed SameAs candidate must still count as a dependent"
+        );
+    }
+
+    #[test]
+    fn trace_impact_skips_doc_mention_edges() {
+        let (ledger, _dir) = temp_ledger();
+        let symbol = obj("ObjectKind");
+        let caller = obj("compile");
+        let section = obj("devlogs/devlog_19.md § Knowledge Captured");
+        for o in [&symbol, &caller, &section] {
+            ledger.append_object(o).unwrap();
+        }
+        ledger
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::DependsOn,
+                caller.id,
+                symbol.id,
+            ))
+            .unwrap();
+        let mut mention = KirRelationship::new(RelationshipKind::References, section.id, symbol.id);
+        mention
+            .properties
+            .insert("link_type".into(), serde_json::json!("code"));
+        ledger.append_relationship(&mention).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let ids: Vec<_> = rt
+            .dependents(&symbol.id, 3)
+            .unwrap()
+            .into_iter()
+            .map(|o| o.id)
+            .collect();
+        assert_eq!(ids, vec![caller.id], "a doc mention is not a dependent");
+        let related: Vec<_> = rt
+            .related(&symbol.id, 1)
+            .unwrap()
+            .into_iter()
+            .map(|o| o.id)
+            .collect();
+        assert!(
+            related.contains(&section.id),
+            "but it stays navigable as a neighbour"
         );
     }
 
