@@ -122,7 +122,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
     );
 
     if let Some(output) = &opts.output {
-        std::fs::write(output, serde_json::to_string_pretty(&report)?)?;
+        tokio::fs::write(output, serde_json::to_string_pretty(&report)?).await?;
     } else {
         let default_dir = cwd.join("evals").join("reports");
         if default_dir.is_dir() {
@@ -131,10 +131,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
                 report.generated_at.format("%Y%m%dT%H%M%SZ"),
                 dataset_name
             );
-            std::fs::write(
+            tokio::fs::write(
                 default_dir.join(filename),
                 serde_json::to_string_pretty(&report)?,
             )
+            .await
             .ok();
         }
     }
