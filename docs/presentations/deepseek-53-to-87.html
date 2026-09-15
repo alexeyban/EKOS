@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS from 53 to 87</title>
+<meta name="description" content="EKOS moved its answering model from a local 8B llama3 on Ollama to DeepSeek V4 Flash via OpenCode Zen, then fixed document decomposition and query planning. Same 101-scenario suite: 53 → 70 (model only) → 79 (document structure) → 87 (planner). Why EKOS uses an LLM, where, why the cloud model wins, what it means for closed environments, and what still fails.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+  .ladder{ display:grid; gap:0.95rem; margin-top:2.4rem; max-width:44rem; }
+  .rung{ display:grid; grid-template-columns:3.4rem 1fr; gap:1rem; align-items:center; }
+  .rung .n{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:1.7rem; font-weight:700; text-align:right; font-variant-numeric:tabular-nums; color:var(--ink-soft); }
+  .rung.after .n{ background:var(--accent-gradient); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .rung .bar{ height:0.7rem; background:var(--rule); border-radius:3px; overflow:hidden; }
+  .rung .bar i{ display:block; height:100%; background:var(--ink-soft); opacity:0.6; border-radius:3px; }
+  .rung.after .bar i{ background:var(--accent-gradient); opacity:1; }
+  .rung .lbl{ font-size:0.9rem; color:var(--ink-soft); margin-top:0.3rem; }
+  .rung .lbl b{ color:var(--ink); font-weight:600; }
+  .rung .d{ font-family:ui-monospace,"SF Mono",Consolas,monospace; color:var(--accent-b); font-size:0.82rem; margin-left:0.35rem; }
+  .scale{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.7rem; color:var(--ink-soft); margin-top:0.7rem; padding-left:4.4rem; }
+  .cat-bar{ display:grid; gap:3px; min-width:7rem; }
+  .cat-bar span{ display:block; height:6px; border-radius:2px; }
+  .cat-bar .b{ background:var(--ink-soft); opacity:0.45; }
+  .cat-bar .a{ background:var(--accent-a); }
+  .ttable td.num, .ttable th.num{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; font-family:ui-monospace,"SF Mono",Consolas,monospace; }
+  .ttable tr.total td{ font-weight:700; color:var(--ink); }
+  .bullets{ margin:1.6rem 0 0; padding-left:1.1rem; max-width:52rem; }
+  .bullets li{ margin-top:0.8rem; color:var(--ink-soft); line-height:1.6; }
+  .bullets li strong{ color:var(--ink); }
+  .ids{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.78rem; color:var(--bad); white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+  <a href="#s9"></a><a href="#s10"></a><a href="#s11"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — eval, 101 scenarios</div>
+  <h1>From 53 to 87 correct answers.<br><span class="arrow-word">A bigger model, then better knowledge.</span></h1>
+  <p class="lede">We moved EKOS's answering model from a local 8B model on Ollama to DeepSeek V4 Flash through
+  OpenCode Zen, then fixed how EKOS decomposes documents and plans a query. The same checked-in 101-question
+  suite, graded deterministically, went from 53 to 87 passed. This deck separates what the model bought from
+  what the engineering bought, and names what still fails.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">53/101 — local llama3 8B</span><span class="sep mono">→</span>
+    <span class="chip">70/101 — model swap only</span><span class="sep mono">→</span>
+    <span class="chip">79/101 — document structure</span><span class="sep mono">→</span>
+    <span class="chip hot">87/101 — planner fixes</span>
+  </div>
+  <div class="byline"><span class="dot"></span> <code class="mono">ekos-full</code> dataset · agent: <code class="mono">deepseek-v4-flash</code> via OpenCode Zen · RFC 0144 · RFC 0145 · devlog_183–186 · 2026-09-15</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the ladder</div>
+  <div class="eyebrow">Same questions, one change at a time</div>
+  <h2>Seventeen points from the model. Seventeen from engineering.</h2>
+  <div class="ladder" role="list" aria-label="Scenarios passed out of 101 at each step">
+    <div class="rung" role="listitem"><div class="n">53</div><div><div class="bar"><i style="width:52.5%"></i></div>
+      <div class="lbl"><b>Before</b> — local <code class="mono">llama3:latest</code> (8B) on Ollama</div></div></div>
+    <div class="rung" role="listitem"><div class="n">70</div><div><div class="bar"><i style="width:69.3%"></i></div>
+      <div class="lbl"><b>Model swap only</b> — DeepSeek V4 Flash, pre-change knowledge<span class="d">+17</span></div></div></div>
+    <div class="rung" role="listitem"><div class="n">79</div><div><div class="bar"><i style="width:78.2%"></i></div>
+      <div class="lbl"><b>+ document structure</b> — heading-aware sections, doc links, 8k output limit<span class="d">+9</span></div></div></div>
+    <div class="rung after" role="listitem"><div class="n">87</div><div><div class="bar"><i style="width:86.1%"></i></div>
+      <div class="lbl"><b>+ query planner fixes</b> — routing and entity resolution<span class="d">+8</span></div></div></div>
+  </div>
+  <p class="scale">bars drawn to scale · full width = 101 scenarios</p>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / why an LLM</div>
+  <div class="eyebrow">The compiler doesn't need one. The answer does.</div>
+  <h2>Knowledge is compiled deterministically. The LLM only reads and cites it.</h2>
+  <p class="lede">The part of EKOS that builds knowledge — observing repositories, databases and documents,
+  recovering tables, symbols, call graphs and lineage, resolving identities, writing an append-only ledger — uses
+  <strong>no LLM</strong>, and every fact carries the evidence it came from.</p>
+  <p class="lede">People don't ask a ledger questions in EKL, though. They ask “what depends on the redaction
+  module?”. The LLM sits at the very end: it receives a small, typed evidence set the planner already assembled,
+  writes the answer in plain language, cites the claims it used, and must say “Insufficient evidence” when the
+  evidence doesn't answer. It never touches the source systems.</p>
+  <div class="hero-diagram">
+    <span class="chip">observe</span><span class="sep mono">→</span><span class="chip">recover</span><span class="sep mono">→</span>
+    <span class="chip">resolve</span><span class="sep mono">→</span><span class="chip">compile</span><span class="sep mono">→</span>
+    <span class="chip">ledger</span><span class="sep mono">→</span><span class="chip">planner + evidence</span><span class="sep mono">→</span>
+    <span class="chip hot">LLM answer + citations</span>
+  </div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / where</div>
+  <div class="eyebrow">Every LLM touchpoint in EKOS</div>
+  <h2>One required use, five opt-in ones.</h2>
+  <table class="ttable">
+    <thead><tr><th>Where</th><th>What the LLM does</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">ekos ask / REASON</td><td class="desc">Writes the final answer from the evidence set and cites it. This is what the 101-scenario eval grades.</td></tr>
+      <tr><td class="tool">ekos eval run</td><td class="desc">Drives the suite against a real workspace. Grading itself is deterministic keyword/id matching — no LLM judge.</td></tr>
+      <tr><td class="tool">document semantics · opt-in</td><td class="desc">Extracts <code class="mono">Concept</code> objects and their relationships from prose documents.</td></tr>
+      <tr><td class="tool">architecture reasoning · opt-in</td><td class="desc">Classifies crate roles; results are written as reviewable, never as fact.</td></tr>
+      <tr><td class="tool">llm-description · opt-in</td><td class="desc">Adds evidence-grounded <code class="mono">ai_overview</code> / <code class="mono">ai_usage</code> text to modules and symbols.</td></tr>
+      <tr><td class="tool">docs --prose · rerank · NL-to-SQL</td><td class="desc">Prose overviews in generated docs, an opt-in LLM rerank of evidence, and the gated ClickHouse query bridge.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / why DeepSeek wins</div>
+  <div class="eyebrow">Knowledge held fixed: 53 → 70</div>
+  <h2>The local model wasn't only smaller. It was reading a truncated prompt.</h2>
+  <ul class="bullets">
+    <li><strong>The context window was silently truncated.</strong> EKOS never sent <code class="mono">num_ctx</code>, so Ollama used its small default window and dropped the <em>start</em> of longer prompts — where the instructions live. The largest prompt recorded under llama3 was 3,875 tokens, right at that ceiling. Fixed in RFC 0145 (<code class="mono">[llm] context-window</code>).</li>
+    <li><strong>Model capacity.</strong> An 8B model reads a 60-claim evidence set shallowly: it misses the one claim that answers, or answers from an adjacent one.</li>
+    <li><strong>Format and refusal discipline.</strong> Answers must end in a machine-readable <code class="mono">cited_evidence</code> block and refuse false premises. llama3 drifted into prose citations and fabricated on adversarial questions; hallucinated answers fell from 7 to 3.</li>
+    <li><strong>It finishes.</strong> On the 15 GB workstation used, local answers took up to 79 s at p95 and the eval was killed three times for lack of memory. A fresh DeepSeek call took a median of 5 s; a full 101-question run costs about $0.05–0.08.</li>
+  </ul>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / before and after</div>
+  <div class="eyebrow">Before: local llama3 · After: DeepSeek V4 Flash + fixes</div>
+  <h2>Every category but one improved.</h2>
+  <table class="ttable">
+    <thead><tr><th>Category</th><th class="num">Before</th><th class="num">After</th><th>Passed share</th><th class="num">Change</th></tr></thead>
+    <tbody>
+      <tr><td>Architecture</td><td class="num">9/20</td><td class="num">18/20</td><td><div class="cat-bar"><span class="b" style="width:45%"></span><span class="a" style="width:90%"></span></div></td><td class="num good">+9</td></tr>
+      <tr><td>Code</td><td class="num">8/15</td><td class="num">13/15</td><td><div class="cat-bar"><span class="b" style="width:53.3%"></span><span class="a" style="width:86.7%"></span></div></td><td class="num good">+5</td></tr>
+      <tr><td>Dependencies</td><td class="num">10/12</td><td class="num">10/12</td><td><div class="cat-bar"><span class="b" style="width:83.3%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num">0</td></tr>
+      <tr><td>Lineage</td><td class="num">5/12</td><td class="num">10/12</td><td><div class="cat-bar"><span class="b" style="width:41.7%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num good">+5</td></tr>
+      <tr><td>History</td><td class="num">3/12</td><td class="num">11/12</td><td><div class="cat-bar"><span class="b" style="width:25%"></span><span class="a" style="width:91.7%"></span></div></td><td class="num good">+8</td></tr>
+      <tr><td>Security</td><td class="num">7/12</td><td class="num">10/12</td><td><div class="cat-bar"><span class="b" style="width:58.3%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num good">+3</td></tr>
+      <tr><td>Adversarial</td><td class="num">11/18</td><td class="num">15/18</td><td><div class="cat-bar"><span class="b" style="width:61.1%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num good">+4</td></tr>
+      <tr class="total"><td>Total</td><td class="num">53/101</td><td class="num">87/101</td><td><div class="cat-bar"><span class="b" style="width:52.5%"></span><span class="a" style="width:86.1%"></span></div></td><td class="num good">+34</td></tr>
+    </tbody>
+  </table>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">85.7%</div><div class="label">answer correctness (was 50.1%)</div></div>
+    <div class="stat"><div class="num">95.6%</div><div class="label">evidence groundedness (was 65.9%)</div></div>
+    <div class="stat"><div class="num">3</div><div class="label">hallucinated answers (was 7)</div></div>
+    <div class="stat"><div class="num"><span class="bad">55.9%</span></div><div class="label">recall@10 (was 64.7%) — see § 09</div></div>
+  </div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / what we built</div>
+  <div class="eyebrow">70 → 87 with the model held fixed</div>
+  <h2>Better decomposition, smarter relations, a planner that asks the right question.</h2>
+  <ul class="bullets">
+    <li><strong>Documents keep their structure (RFC 0144).</strong> Markdown was cut into blind 2,500-character chunks and only the first 1,200 characters of each were searchable. Each heading is now its own section — named by its heading path, with line ranges, document type and RFC number — and fully indexed.</li>
+    <li><strong>Docs link to code and to each other.</strong> A backticked identifier naming exactly one symbol, and an “RFC 0015” mention, become deterministic <code class="mono">References</code> edges — 7,377 doc→code and 3,420 RFC→RFC on EKOS's own repository. Ambiguous names never link.</li>
+    <li><strong>The planner asks the right question.</strong> A dependency phrase buried in a descriptive clause no longer triggers a graph walk; qualified paths like <code class="mono">ekos_common::redaction</code> resolve as one name; generic words (“crate”, “record”) no longer match unrelated objects.</li>
+    <li><strong>Bugs found by measuring.</strong> Every <code class="mono">ekos commit</code> since 10 September had left the search index stale for read-only queries; answers truncated at a lower token limit kept replaying from cache. Both fixed with regression tests.</li>
+  </ul>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / closed environments</div>
+  <div class="eyebrow">What this means for self-hosted, air-gapped use</div>
+  <h2>Compiling runs anywhere. Answering well needs real GPU servers.</h2>
+  <p class="lede">The compile side of EKOS needs no GPU, no network and no model. Answer quality tracks the class of
+  model you can serve: a workstation-sized local model gets roughly the “before” column. Reaching the “after”
+  column without a cloud API means hosting a much larger open-weights model on dedicated GPU servers, with a
+  context window of at least 32k tokens and enough throughput to answer in seconds rather than minutes.</p>
+  <div class="codeblock">
+    <div class="tag">ekos.toml — both shapes supported today</div>
+<pre style="margin:0;"><span class="c"># hosted, or a self-hosted OpenAI-compatible server (vLLM, llama.cpp) inside the network</span>
+<span class="k">[llm]</span>
+provider    = <span class="s">"openai"</span>
+base-url    = <span class="s">"https://opencode.ai/zen/v1"</span>
+model       = <span class="s">"deepseek-v4-flash"</span>
+api-key-env = <span class="s">"OPENCODE_API_KEY"</span>
+
+<span class="k">[ai]</span>
+max-tokens  = 8192   <span class="c"># reasoning model: hidden reasoning counts against this</span>
+
+<span class="c"># local Ollama — set the window explicitly, never truncate silently again</span>
+<span class="k">[llm]</span>
+provider       = <span class="s">"ollama"</span>
+context-window = 32768</pre>
+  </div>
+  <p class="lede">Another reason to self-host: prompts contain real source excerpts. EKOS redacts secrets and PII
+  before anything reaches the ledger, but a hosted model still sees your code. Zen's paid models are
+  zero-retention; its free models may use prompts for training.</p>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / what still fails</div>
+  <div class="eyebrow">14 of 101, grouped by cause</div>
+  <h2>The remaining failures are named, not averaged away.</h2>
+  <table class="ttable">
+    <thead><tr><th>Cause</th><th>Scenarios</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Premise rejected, not in refusal wording</td><td class="ids">adv-004 · adv-011 · adv-015</td><td class="desc">The model correctly rejects a false premise (“the evidence does not confirm…”, “EKOS is MIT-licensed, free of charge”), but the grader only accepts an explicit refusal. Widen the grader or tighten the prompt — an open decision.</td></tr>
+      <tr><td class="tool">Answer never reaches the top of the evidence</td><td class="ids">code-002 · lin-008 · dep-004</td><td class="desc">The function that builds the LLM provider ranks below the provider trait; the <code class="mono">cited_evidence</code> convention isn't in the evidence retrieved for that question; Rust import-path objects don't link back to the crate consuming the redaction module.</td></tr>
+      <tr><td class="tool">Facts not recorded yet</td><td class="ids">code-004 · lin-007 · dep-005</td><td class="desc">The Rust edition is set once in the workspace <code class="mono">Cargo.toml</code> and inherited; struct fields like <code class="mono">KirEvidence.confidence</code> aren't emitted as claims; no caller of <code class="mono">plan_question</code> reached the evidence, so the model correctly can't answer — scored as ungrounded.</td></tr>
+      <tr><td class="tool">Ranking, not answering</td><td class="ids">arch-009 · hist-007</td><td class="desc">Retrieval-only scenarios graded on recall@10. Documents are now many sections, which outrank the crate or file these scenarios expect — also why recall@10 fell while answers improved.</td></tr>
+      <tr><td class="tool">Right in substance, wrong keyword</td><td class="ids">arch-020 · sec-002 · sec-010</td><td class="desc">“Objects can't be deleted from the append-only ledger” without the word “tombstone”; “the security section is additive only” where the grader expects “extend”.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / caveats</div>
+  <div class="eyebrow">How to read these numbers</div>
+  <h2>Honest about what the comparison can and can't show.</h2>
+  <ul class="bullets">
+    <li><strong>The “before” run used a different ledger rebuild</strong>, likely partly affected by the stale-index bug found later.</li>
+    <li><strong>The model-swap run (70) used a 2,048-token output limit</strong> that cut off 17 answers — DeepSeek V4 Flash is a reasoning model whose hidden reasoning counts against the limit. The model's own contribution is, if anything, understated; the 79 step includes raising it to 8,192.</li>
+    <li><strong>Recall@10 fell</strong> (64.7% → 55.9%) because section-level documents compete for the top 10. Answers improved anyway; section-vs-document ranking is a tracked follow-up.</li>
+    <li><strong>Grading is deterministic</strong> keyword and id matching over the checked-in 101-scenario suite, answers generated at temperature 0, unchanged prompts replayed from the LLM cache.</li>
+  </ul>
+</section>
+
+<section class="slide cta" id="s11">
+  <div class="eyebrow">Reproduce it yourself</div>
+  <h2>Same suite. Your model.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ export OPENCODE_API_KEY=...
+$ ekos eval run --config ekos.zen.toml --dataset ekos-full --save-answers
+$ ekos eval history   <span class="c"># trend table across every saved run</span></pre>
+  </div>
+  <table class="ttable" style="max-width:38rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Everything behind this deck</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Document structure + doc links</td><td class="desc"><code>ekos/docs/rfcs/0144-document-structure-and-links.md</code></td></tr>
+      <tr><td class="tool">LLM endpoints + context window</td><td class="desc"><code>ekos/docs/rfcs/0145-llm-endpoints-and-context-window.md</code></td></tr>
+      <tr><td class="tool">Write-ups with measurements</td><td class="desc"><code>devlogs/devlog_183.md</code> (llama3 baseline), <code>185</code> (RFC 0144/0145, model comparison), <code>186</code> (planner fixes)</td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · 53 → 87 of 101 · deepseek-v4-flash via OpenCode Zen · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

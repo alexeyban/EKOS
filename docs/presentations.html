@@ -227,6 +227,16 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
       <div class="rfc">RFC 0138 · 0139 · 0140 · 0141 · devlog_170–174, 182–183</div>
     </li>
     <li>
+      <a class="deck" href="presentations/deepseek-53-to-87.html">EKOS from 53 to 87</a>
+      <p class="desc">EKOS moved its answering model from a local 8B llama3 on Ollama to
+      <strong>DeepSeek V4 Flash via OpenCode Zen</strong>, then fixed document decomposition and query
+      planning. Same 101-scenario suite: <strong>53 → 70</strong> from the model alone, <strong>→ 79</strong> with
+      heading-aware documents and doc links, <strong>→ 87</strong> with planner routing and entity-resolution
+      fixes. Why EKOS uses an LLM and where, why the cloud model wins, what it means for closed environments
+      (compile anywhere, answer well only on real GPU servers), and the 14 scenarios that still fail, by cause.</p>
+      <div class="rfc">RFC 0144 · 0145 · devlog_183–186</div>
+    </li>
+    <li>
       <a class="deck" href="presentations/vision-and-token-utility.html">Vision &amp; Token Utility</a>
       <p class="desc">Why the EKOS token's relevance is designed to grow as a consequence of
       platform adoption, not a promise of price — the phased ecosystem roadmap from contributor
