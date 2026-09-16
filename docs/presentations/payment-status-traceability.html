@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where payment status comes from</title>
+<meta name="description" content="A real question against a real codebase: when a payment's status changes, which code did it? EKOS compiled LedgerSMB — a Perl/PostgreSQL accounting ERP — and traced payment status to one column and one function, with every claim linked to a file and a line. Includes what EKOS could not do, and the measured cost against plain text search.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+  .trace-chain{ display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; margin-top:2rem;
+    font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.95rem; }
+  .trace-chain b{ color:var(--ink); font-weight:600; }
+  .trace-chain .hop{ color:var(--ink-soft); }
+  .trace-chain .conv{ color:var(--bad); }
+  .trace-chain .end{ background:var(--accent-gradient); -webkit-background-clip:text; background-clip:text; color:transparent; font-weight:700; }
+
+  figure.dia{ margin:2rem 0 0; }
+  figure.dia svg{ max-width:100%; height:auto; display:block; color:var(--ink-soft); }
+  figure.dia figcaption{ margin-top:0.9rem; font-size:0.82rem; color:var(--ink-soft); max-width:52rem; }
+
+  .fieldrow{ display:grid; grid-template-columns:minmax(10rem,14rem) 1fr; gap:1rem;
+    padding:0.95rem 0; border-top:1px solid var(--rule); align-items:baseline; }
+  .fieldrow:first-of-type{ border-top:none; }
+  .fieldrow .fname{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.86rem; color:var(--ink); font-weight:600; }
+  .fieldrow .fnote{ color:var(--ink-soft); font-size:0.92rem; line-height:1.55; }
+  .fieldrow .fnote em{ color:var(--ink); font-style:normal; font-weight:600; }
+
+  .ttable td.ref, .ttable th.ref{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.78rem; white-space:nowrap; }
+  .ttable td.num{ text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace,"SF Mono",Consolas,monospace; }
+  .vs td.a{ color:var(--bad); }
+  .vs td.b{ color:var(--ink); }
+  @media (max-width:640px){ .fieldrow{ grid-template-columns:1fr; gap:0.3rem; } }
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
+  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
+  <a href="#s9"></a><a href="#s10"></a>
+</nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — a real question, a real codebase</div>
+  <h1>“When a payment’s status changes,<br><span class="arrow-word">which code did it?”</span></h1>
+  <p class="lede">The everyday version of this question costs an afternoon: search the Postgres schema, search the
+  backend, search the invoice templates, and still not be sure. We pointed EKOS at
+  <strong>LedgerSMB</strong> — a real Perl 5 / PostgreSQL double-entry accounting ERP, 1,522 files — and asked
+  it. The answer is one column and one function, and every claim in it resolves to a file and a line.</p>
+  <div class="hero-diagram">
+    <span class="chip bad">3 places to search</span><span class="sep mono">→</span>
+    <span class="chip">202 candidate files</span><span class="sep mono">→</span>
+    <span class="chip">6 files that matter</span><span class="sep mono">→</span>
+    <span class="chip hot">1 function</span>
+  </div>
+  <div class="byline"><span class="dot"></span> workspace: <code class="mono">LedgerSMB</code> · 192 tables · 218 foreign keys · 7,677 evidence records · RFC 0146 · devlog_187 · 2026-09-16</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / the problem</div>
+  <div class="eyebrow">Why this takes an afternoon</div>
+  <h2>There is no <code class="mono">payment_status</code> column. There are three status fields, and two are decoys.</h2>
+  <p class="lede">Each of the three is described — by its own authors or its own schema — as holding payment state.
+  Only one is written by the engine that actually governs it.</p>
+  <div style="margin-top:1.6rem; max-width:52rem;">
+    <div class="fieldrow">
+      <div class="fname">workflow.state</div>
+      <div class="fnote"><em>Authoritative.</em> <code class="mono">varchar(30)</code>, written by exactly one function, with every past transition in <code class="mono">workflow_history</code>.</div>
+    </div>
+    <div class="fieldrow">
+      <div class="fname">payment.closed</div>
+      <div class="fnote"><em>Decoy.</em> The schema’s own comment: “This will store the current state of a payment/receipt order”. A boolean that predates the workflow engine.</div>
+    </div>
+    <div class="fieldrow">
+      <div class="fname">transactions.approved</div>
+      <div class="fnote"><em>Decoy.</em> A <code class="mono">bool</code> with <code class="mono">approved_by</code> and <code class="mono">approved_at</code>. Overlaps the <code class="mono">POSTED</code> state without being the same thing.</div>
+    </div>
+  </div>
+  <p class="lede" style="margin-top:1.8rem;">A search for “payment status” surfaces the two decoys first, because they carry the
+  words <em>payment</em> and <em>state</em>. <strong>The authoritative field carries neither.</strong></p>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / the answer</div>
+  <div class="eyebrow">One column, one function</div>
+  <h2>Payment status lives in the workflow engine, reached through the general ledger.</h2>
+  <div class="trace-chain">
+    <b>payment.gl_id</b><span class="hop">→</span><b>gl.id</b><span class="hop">→</span><b>transactions.id</b><span class="conv">⇢</span><b>workflow.workflow_id</b><span class="hop">→</span><span class="end">workflow.state</span>
+  </div>
+  <p class="lede" style="margin-top:1.4rem;">Three of those hops are declared foreign keys. The fourth
+  (<span class="mono conv" style="color:var(--bad)">⇢</span>) is <strong>not a constraint at all</strong> — it is the
+  attribute <code class="mono">extra_table="transactions"</code> in a persister configuration file. No schema
+  diagram can show it, and no grep for <em>payment</em> or <em>status</em> reaches it, because neither word appears.</p>
+  <div class="codeblock" style="margin-top:1.8rem;">
+    <div class="tag">lib/LedgerSMB/Workflow/Persister.pm:155</div>
+<pre style="margin:0;">sub update_workflow {
+    my ($self, $wf) = @_;
+    ...
+    <span class="c"># the only write to payment status anywhere in the system</span>
+    UPDATE workflow SET state = ?, last_update = ? WHERE workflow_id = ?</pre>
+  </div>
+  <p class="lede" style="margin-top:1.2rem;"><code class="mono">lib/LedgerSMB/Scripts/payment.pm</code> — the file whose
+  name promises exactly this — contains no status write at all. <strong>Searching for “payment” is what makes the
+  trace hard.</strong></p>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / lineage</div>
+  <div class="eyebrow">Requirement 1 — where the data comes from</div>
+  <h2>A payment reaches its status through the ledger, not directly.</h2>
+  <figure class="dia">
+    <svg viewBox="0 0 760 200" role="img" aria-label="payment joins through gl to transactions, which is keyed to workflow by convention rather than a foreign key; workflow holds state and workflow_history records each change.">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+        </marker>
+      </defs>
+      <rect x="0" y="26" width="128" height="50" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="64" y="47" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">payment</text>
+      <text x="64" y="64" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">gl_id, closed</text>
+
+      <line x1="128" y1="51" x2="190" y2="51" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="159" y="43" text-anchor="middle" font-family="sans-serif" font-size="10" fill="currentColor" opacity="0.75">FK</text>
+
+      <rect x="190" y="26" width="112" height="50" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="246" y="47" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">gl</text>
+      <text x="246" y="64" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">id</text>
+
+      <line x1="302" y1="51" x2="364" y2="51" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+      <text x="333" y="43" text-anchor="middle" font-family="sans-serif" font-size="10" fill="currentColor" opacity="0.75">FK</text>
+
+      <rect x="364" y="26" width="140" height="50" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="434" y="47" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">transactions</text>
+      <text x="434" y="64" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">id, approved</text>
+
+      <line x1="504" y1="51" x2="586" y2="51" stroke="#e0654f" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ar)" color="#e0654f"/>
+      <text x="545" y="39" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="600" fill="#e0654f">by convention</text>
+      <text x="545" y="69" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#e0654f" opacity="0.9">no FK</text>
+
+      <rect x="586" y="22" width="150" height="58" fill="none" stroke="#3ba776" stroke-width="2.5"/>
+      <text x="661" y="45" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" font-weight="600" fill="#3ba776">workflow</text>
+      <text x="661" y="65" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" font-weight="600" fill="#3ba776">state</text>
+
+      <line x1="661" y1="80" x2="661" y2="120" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+      <rect x="576" y="120" width="170" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="661" y="138" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">workflow_history</text>
+      <text x="661" y="154" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">every transition</text>
+
+      <line x1="64" y1="76" x2="64" y2="120" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+      <rect x="0" y="120" width="128" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="64" y="138" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">payment_links</text>
+      <text x="64" y="154" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">entry_id</text>
+
+      <line x1="128" y1="142" x2="190" y2="142" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+      <rect x="190" y="120" width="112" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text x="246" y="138" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">acc_trans</text>
+      <text x="246" y="154" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">trans_id</text>
+
+      <line x1="302" y1="142" x2="364" y2="84" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+    </svg>
+    <figcaption>Compiled from 218 recovered foreign keys. The dashed hop is the one a schema diagram cannot show —
+    it is configuration, declared in <code class="mono">workflows/persisters.xml:12</code>, and it is exactly the link that
+    makes this trace feel impossible from the database alone.</figcaption>
+  </figure>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / the state machine</div>
+  <div class="eyebrow">Why a payment “fails” to approve</div>
+  <h2>Five states, declared in XML — not in any Perl file.</h2>
+  <div class="hero-diagram" style="margin-top:1.8rem;">
+    <span class="chip">INITIAL</span><span class="sep mono">post →</span>
+    <span class="chip">SAVED</span><span class="sep mono">approve →</span>
+    <span class="chip hot">POSTED</span>
+    <span class="sep mono" style="margin-left:1.2rem;">batch-delete →</span><span class="chip bad">DELETED</span>
+  </div>
+  <p class="lede" style="margin-top:1.6rem;">Whether <code class="mono">approve</code> or <code class="mono">batch-approve</code>
+  fires is decided by one condition, <code class="mono">is-batch-member</code>, defined at
+  <code class="mono">workflows/payment.conditions.xml:2</code> as the test <code class="mono">$context-&gt;{'batch-id'}</code>,
+  evaluated against the JSON in <code class="mono">workflow_context</code>. <strong>That is the whole reason a payment
+  “fails” to approve individually: it belongs to a batch.</strong></p>
+  <p class="lede"><code class="mono">REVERSED</code> is declared as a state, but no action in
+  <code class="mono">payment.workflow.xml</code> transitions into it — a dead state the compiled model makes visible.</p>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / proof</div>
+  <div class="eyebrow">Requirement 3 — every claim, and where it came from</div>
+  <h2>Thirteen claims. Twelve resolve to a file and a line.</h2>
+  <table class="ttable">
+    <thead><tr><th>Claim</th><th class="ref">Evidence</th><th class="num">Line</th><th>Provenance</th></tr></thead>
+    <tbody>
+      <tr><td class="desc">Status column is <code class="mono">workflow.state</code></td><td class="ref">sql/changes/1.9/workflow-schema.sql</td><td class="num">5</td><td class="desc">source</td></tr>
+      <tr><td class="desc">The only status write</td><td class="ref">lib/LedgerSMB/Workflow/Persister.pm</td><td class="num">160</td><td class="desc">source</td></tr>
+      <tr><td class="desc">Audit row per transition</td><td class="ref">lib/LedgerSMB/Workflow/Persister.pm</td><td class="num">181</td><td class="desc">source</td></tr>
+      <tr><td class="desc"><code class="mono">payment.gl_id → gl.id</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">3408</td><td class="desc">compiled FK</td></tr>
+      <tr><td class="desc"><code class="mono">gl.id → transactions.id</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">982</td><td class="desc">compiled FK</td></tr>
+      <tr><td class="desc">workflow keyed to transactions</td><td class="ref">workflows/persisters.xml</td><td class="num">12</td><td class="desc"><span style="color:var(--bad)">convention</span></td></tr>
+      <tr><td class="desc">States and transitions</td><td class="ref">workflows/payment.workflow.xml</td><td class="num">5–21</td><td class="desc">source</td></tr>
+      <tr><td class="desc"><code class="mono">payment.closed</code> holds state</td><td class="ref">sql/Pg-database.sql</td><td class="num">3419</td><td class="desc">author comment</td></tr>
+      <tr><td class="desc"><code class="mono">workflow*</code> table purposes</td><td class="ref">—</td><td class="num">—</td><td class="desc"><span style="color:var(--bad)">model-written</span></td></tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1.4rem;">The distinction is kept visible on purpose. <strong>A traceability report
+  that cannot tell you which of its own statements are evidence is not traceability.</strong> Of 182 described tables
+  in this workspace, 127 carry the authors’ own <code class="mono">COMMENT ON</code> text rather than generated prose.</p>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / the economics</div>
+  <div class="eyebrow">Why a compiler, not a search</div>
+  <h2>A capable model with grep reaches this too. The question is what it costs — and whether it costs that again tomorrow.</h2>
+  <table class="ttable vs">
+    <thead><tr><th>Step</th><th>Text search</th><th>EKOS</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="tool">Find the candidates</td>
+        <td class="a"><code class="mono">grep -ril payment</code> → 202 files, 3.86 MB ≈ <strong>964,000 tokens</strong> to narrow by reading</td>
+        <td class="b">One query → <strong>≈ 938 tokens</strong>, ranked, each result carrying its kind and source path</td>
+      </tr>
+      <tr>
+        <td class="tool">Traverse the join path</td>
+        <td class="a"><strong>Not possible.</strong> Three foreign keys declared 2,400 lines apart in one 134 KB file — grep matches strings, not edges</td>
+        <td class="b">A graph query over <strong>218 compiled foreign keys</strong></td>
+      </tr>
+      <tr>
+        <td class="tool">Know what’s real</td>
+        <td class="a">No signal — a comment and a guess look identical</td>
+        <td class="b"><code class="mono">sql_comment</code> vs <code class="mono">llm_description</code> are separate properties</td>
+      </tr>
+      <tr>
+        <td class="tool">The second question</td>
+        <td class="a">Full re-exploration, same cost, every time</td>
+        <td class="b">The ledger already exists — another ≈ 1,000 tokens</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="lede" style="margin-top:1.4rem;"><strong>Amortisation is the real argument.</strong> Compiling LedgerSMB read
+  roughly 2.3 M tokens of source <em>once</em> and produced 6,807 objects, 3,114 relationships and 7,677 evidence
+  records. The first question is roughly break-even against a careful manual search. The tenth is not close.</p>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / honesty</div>
+  <div class="eyebrow">What EKOS did not do here</div>
+  <h2>Three parts of that report came from reading files by hand.</h2>
+  <div class="inv-grid">
+    <div class="inv warn"><h3>The convention hop</h3><p>The <code class="mono">transactions → workflow</code> link was read from <code class="mono">persisters.xml</code> by hand. EKOS does not model persister configuration, so it appears in the diagram as a convention, never as a compiled fact.</p></div>
+    <div class="inv warn"><h3>Perl line numbers</h3><p>There is no Perl analyzer. EKOS observes <code class="mono">.pm</code> files and harvests declaration symbols, but builds no call graph — the five functions were confirmed by reading the file.</p></div>
+    <div class="inv warn"><h3>This schema, yesterday</h3><p>The same compile returned <strong>8 tables instead of 192</strong> until RFC 0146 landed. One unparseable <code class="mono">COMMENT ON</code> was discarding an entire file, behind a single buried warning.</p></div>
+    <div class="inv"><h3>The honest division</h3><p>The ledger narrows 202 candidate files to six and supplies the graph. Direct reading confirms the lines. Neither half is sufficient alone — and a tool claiming otherwise is the wrong one to trust with an audit trail.</p></div>
+  </div>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / what made it work</div>
+  <div class="eyebrow">RFC 0146 — the dialect only ever understood pg_dump</div>
+  <h2>0 of 158 tables, with the dialect configured correctly.</h2>
+  <p class="lede">EKOS’s PostgreSQL dialect had been tuned entirely against <code class="mono">pg_dump</code> output, which
+  emits a narrow, mechanical subset of the language. A hand-maintained schema does not. LedgerSMB’s first
+  <code class="mono">COMMENT ON TABLE … IS $$…$$</code> failed the whole-file parse and took every table in the file with it —
+  reported only as one buried <code class="mono">SQL001</code> warning, never an error.</p>
+  <div class="stat-grid">
+    <div class="stat"><div class="num">8 → 192</div><div class="label">tables recovered</div></div>
+    <div class="stat"><div class="num">1 → 218</div><div class="label">foreign keys</div></div>
+    <div class="stat"><div class="num">0 → 127</div><div class="label">author-written descriptions</div></div>
+    <div class="stat"><div class="num">8 → 470</div><div class="label">data-lineage links</div></div>
+  </div>
+  <ul class="bullets">
+    <li><strong>Phase 1</strong> — eleven preprocessing transforms for what real schemas write: <code class="mono">COMMENT ON</code>, <code class="mono">INHERITS</code>, <code class="mono">SECURITY DEFINER</code>, <code class="mono">RETURNS SETOF</code>, <code class="mono">:=</code> named arguments, <code class="mono">DO</code> blocks, <code class="mono">CREATE RULE</code>, psql meta-commands, <code class="mono">COPY … FROM stdin</code> payloads.</li>
+    <li><strong>Phase 2</strong> — <code class="mono">COMMENT ON</code> text stopped being discarded and became evidence-backed descriptions with real source lines. The schema’s own words now outrank anything a model writes about the same table.</li>
+    <li><strong>Phase 3</strong> — an enrichment token budget computed per file, and a <code class="mono">SQL004</code> diagnostic, because partial coverage used to pass completely silently: 24 of 192 tables named, nothing reported.</li>
+  </ul>
+</section>
+
+<section class="slide cta" id="s10">
+  <div class="eyebrow">Reproduce it on your own repository</div>
+  <h2>Six commands. Your codebase.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;">$ ekos init
+$ ekos build      <span class="c"># observe files → content-addressed artifacts</span>
+$ ekos recover    <span class="c"># artifacts → typed KIR (SQL, git, JS/TS, docs)</span>
+$ ekos resolve    <span class="c"># merge duplicate identities</span>
+$ ekos compile    <span class="c"># KIR → Canonical Knowledge Model</span>
+$ ekos commit     <span class="c"># → append-only ledger + search index</span>
+
+$ ekos query find "payment status" --mode lexical
+$ ekos ekl "FIND Object WHERE kind = 'Table' COUNT"
+$ ekos mcp serve --workspace .   <span class="c"># hand the ledger to a coding agent</span></pre>
+  </div>
+  <table class="ttable" style="max-width:40rem; margin-left:auto; margin-right:auto; text-align:left;">
+    <thead><tr><th>Everything behind this deck</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Dialect coverage + COMMENT ON + budget</td><td class="desc"><code>ekos/docs/rfcs/0146-postgres-dialect-coverage.md</code></td></tr>
+      <tr><td class="tool">Write-up with measurements</td><td class="desc"><code>devlogs/devlog_187.md</code></td></tr>
+      <tr><td class="tool">Two settings that fail silently</td><td class="desc"><code>[observe] paths = ["."]</code> and <code>[recover.sql] default-dialect</code></td></tr>
+    </tbody>
+  </table>
+  <div class="fineprint">EKOS · LedgerSMB · 192 tables · 218 foreign keys · 7,677 evidence records · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>
