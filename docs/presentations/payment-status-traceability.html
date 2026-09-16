@@ -2,309 +2,719 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Where payment status comes from</title>
-<meta name="description" content="A real question against a real codebase: when a payment's status changes, which code did it? EKOS compiled LedgerSMB — a Perl/PostgreSQL accounting ERP — and traced payment status to one column and one function, with every claim linked to a file and a line. Includes what EKOS could not do, and the measured cost against plain text search.">
-<link rel="stylesheet" href="../assets/theme.css">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A real question against a real codebase: when a payment's status changes, which code did it? EKOS compiled LedgerSMB — a Perl 5 / PostgreSQL accounting ERP — and traced payment status to one column and one function, with every claim linked to a file and a line. Includes the measured cost against plain text search, what EKOS could not do, and a step-by-step runbook for your own repository.">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<title>Payment Status Trace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
 <style>
-  .trace-chain{ display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; margin-top:2rem;
-    font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.95rem; }
-  .trace-chain b{ color:var(--ink); font-weight:600; }
-  .trace-chain .hop{ color:var(--ink-soft); }
-  .trace-chain .conv{ color:var(--bad); }
-  .trace-chain .end{ background:var(--accent-gradient); -webkit-background-clip:text; background-clip:text; color:transparent; font-weight:700; }
+  :root{
+    color-scheme: light dark;
+    --ground:#F6F8F5; --surface:#FFFFFF; --surface-2:#EFF3EE;
+    --ink:#161E1A; --ink-soft:#5A6862; --rule:#D7DED8;
+    --accent:#2E6A4E; --accent-soft:#E3EFE7;
+    --warn:#8A5C06; --warn-soft:#F7EEDA;
+    --debit:#8E322D; --debit-soft:#F6E5E3;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#111613; --surface:#19201C; --surface-2:#1F2822;
+      --ink:#E4EAE6; --ink-soft:#93A09A; --rule:#2B352F;
+      --accent:#67BE92; --accent-soft:#1D2F26;
+      --warn:#D3A24A; --warn-soft:#2E2718;
+      --debit:#D98078; --debit-soft:#301E1C;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#111613; --surface:#19201C; --surface-2:#1F2822;
+    --ink:#E4EAE6; --ink-soft:#93A09A; --rule:#2B352F;
+    --accent:#67BE92; --accent-soft:#1D2F26;
+    --warn:#D3A24A; --warn-soft:#2E2718;
+    --debit:#D98078; --debit-soft:#301E1C;
+  }
 
-  figure.dia{ margin:2rem 0 0; }
-  figure.dia svg{ max-width:100%; height:auto; display:block; color:var(--ink-soft); }
-  figure.dia figcaption{ margin-top:0.9rem; font-size:0.82rem; color:var(--ink-soft); max-width:52rem; }
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground); color:var(--ink);
+    font-family:var(--serif); font-size:16px; line-height:1.6;
+    margin:0; padding-block:0; padding-left:20px; padding-right:20px;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding-block:48px 72px;}
 
-  .fieldrow{ display:grid; grid-template-columns:minmax(10rem,14rem) 1fr; gap:1rem;
-    padding:0.95rem 0; border-top:1px solid var(--rule); align-items:baseline; }
-  .fieldrow:first-of-type{ border-top:none; }
-  .fieldrow .fname{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.86rem; color:var(--ink); font-weight:600; }
-  .fieldrow .fnote{ color:var(--ink-soft); font-size:0.92rem; line-height:1.55; }
-  .fieldrow .fnote em{ color:var(--ink); font-style:normal; font-weight:600; }
+  h1,h2,h3,h4{font-family:var(--sans); text-wrap:balance; margin:0;}
+  h1{font-size:2.1rem; font-weight:700; line-height:1.15; letter-spacing:-0.02em;}
+  h2{font-size:1.28rem; font-weight:600; letter-spacing:-0.01em;}
+  h3{font-size:1rem; font-weight:600;}
+  p{margin:0;}
+  code,.mono{font-family:var(--mono); font-size:0.87em;}
 
-  .ttable td.ref, .ttable th.ref{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.78rem; white-space:nowrap; }
-  .ttable td.num{ text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace,"SF Mono",Consolas,monospace; }
-  .vs td.a{ color:var(--bad); }
-  .vs td.b{ color:var(--ink); }
-  @media (max-width:640px){ .fieldrow{ grid-template-columns:1fr; gap:0.3rem; } }
+  .eyebrow{
+    font-family:var(--sans); font-size:0.72rem; font-weight:600;
+    letter-spacing:0.13em; text-transform:uppercase; color:var(--ink-soft);
+  }
+
+  header.doc{border-bottom:2px solid var(--ink); padding-bottom:22px; display:flex; flex-direction:column; gap:12px;}
+  .subject{font-family:var(--mono); font-size:0.82rem; color:var(--ink-soft);}
+  .question{font-size:1.06rem; color:var(--ink-soft); font-style:italic; max-width:62ch;}
+
+  section{margin-top:52px; display:flex; flex-direction:column; gap:18px;}
+  section > p{max-width:66ch;}
+
+  /* The single answer — the one element that gets lifted */
+  .answer{
+    background:var(--accent-soft); border-left:4px solid var(--accent);
+    padding:24px 26px; display:flex; flex-direction:column; gap:14px;
+  }
+  .answer .lead{font-family:var(--sans); font-size:1.12rem; font-weight:500; line-height:1.45;}
+  .trace{
+    font-family:var(--mono); font-size:0.9rem; line-height:2.1;
+    overflow-x:auto; white-space:nowrap; padding-bottom:4px;
+  }
+  .trace b{font-weight:600; color:var(--accent);}
+  .trace span{color:var(--ink-soft); padding:0 6px;}
+
+  /* Provenance chips — encode how each fact was obtained */
+  .chip{
+    font-family:var(--sans); font-size:0.64rem; font-weight:600;
+    letter-spacing:0.07em; text-transform:uppercase;
+    padding:2px 7px; border-radius:2px; white-space:nowrap;
+    border:1px solid var(--rule); color:var(--ink-soft); background:var(--surface-2);
+  }
+  .chip.src{border-color:var(--accent); color:var(--accent); background:var(--accent-soft);}
+  .chip.author{border-color:var(--accent); color:var(--accent); background:transparent;}
+  .chip.model{border-color:var(--warn); color:var(--warn); background:var(--warn-soft);}
+
+  .grid3{display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:16px;}
+  .place{
+    background:var(--surface); border:1px solid var(--rule);
+    padding:18px; display:flex; flex-direction:column; gap:9px;
+  }
+  .place .where{font-family:var(--mono); font-size:0.78rem; color:var(--accent); word-break:break-all;}
+  .place p{font-size:0.92rem; color:var(--ink-soft);}
+
+  figure{margin:0; display:flex; flex-direction:column; gap:10px;}
+  figure svg{max-width:100%; height:auto; display:block;}
+  figcaption{font-family:var(--sans); font-size:0.82rem; color:var(--ink-soft); max-width:64ch;}
+  .figbox{background:var(--surface); border:1px solid var(--rule); padding:22px 18px; overflow-x:auto;}
+
+  .tablewrap{overflow-x:auto; border:1px solid var(--rule); background:var(--surface);}
+  table{border-collapse:collapse; width:100%; font-size:0.88rem; min-width:560px;}
+  th{
+    font-family:var(--sans); font-size:0.7rem; font-weight:600; letter-spacing:0.08em;
+    text-transform:uppercase; color:var(--ink-soft); text-align:left;
+    padding:11px 14px; border-bottom:1px solid var(--rule); background:var(--surface-2);
+    white-space:nowrap;
+  }
+  td{padding:12px 14px; border-bottom:1px solid var(--rule); vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  td.ref{font-family:var(--mono); font-size:0.8rem; white-space:nowrap; color:var(--accent);}
+  td.sql{font-family:var(--mono); font-size:0.78rem; color:var(--ink);}
+  td.num{font-variant-numeric:tabular-nums;}
+
+  .warnbox{
+    background:var(--warn-soft); border-left:4px solid var(--warn);
+    padding:22px 24px; display:flex; flex-direction:column; gap:14px;
+  }
+  .warnbox h2{color:var(--warn);}
+
+  .fields{display:flex; flex-direction:column; gap:12px;}
+  .field{
+    display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;
+    padding-bottom:12px; border-bottom:1px dashed var(--rule);
+  }
+  .field:last-child{border-bottom:none; padding-bottom:0;}
+  .field .name{font-family:var(--mono); font-size:0.85rem; font-weight:500; min-width:190px;}
+  .field .note{font-size:0.9rem; color:var(--ink-soft); flex:1; min-width:200px;}
+
+  footer.method{
+    margin-top:60px; padding-top:22px; border-top:1px solid var(--rule);
+    display:flex; flex-direction:column; gap:14px;
+  }
+  footer.method p{font-size:0.88rem; color:var(--ink-soft); max-width:68ch;}
+  .cmd{
+    font-family:var(--mono); font-size:0.78rem; background:var(--surface-2);
+    border:1px solid var(--rule); padding:12px 14px; overflow-x:auto; white-space:pre;
+    color:var(--ink-soft);
+  }
+  .legend{display:flex; gap:16px; flex-wrap:wrap; font-size:0.84rem; color:var(--ink-soft);}
+  .legend span{display:flex; gap:7px; align-items:center;}
+
+  /* Runbook — numbered because the pipeline genuinely is ordered */
+  ol.steps{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:30px; counter-reset:step;}
+  ol.steps > li{
+    counter-increment:step; display:grid; grid-template-columns:38px 1fr; gap:16px; align-items:start;
+  }
+  ol.steps > li::before{
+    content:counter(step); font-family:var(--mono); font-size:0.85rem; font-weight:600;
+    color:var(--accent); border:1px solid var(--accent); border-radius:50%;
+    width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+    margin-top:2px;
+  }
+  .step-body{display:flex; flex-direction:column; gap:11px; min-width:0;}
+  .step-body h3{font-family:var(--sans);}
+  .step-body p{font-size:0.94rem; max-width:62ch;}
+  pre{
+    margin:0; font-family:var(--mono); font-size:0.79rem; line-height:1.65;
+    background:var(--surface-2); border:1px solid var(--rule);
+    padding:14px 16px; overflow-x:auto; color:var(--ink);
+  }
+  pre .c{color:var(--ink-soft);}
+  .checkline{
+    display:flex; gap:10px; align-items:baseline; font-size:0.9rem;
+    padding:9px 0; border-bottom:1px dashed var(--rule);
+  }
+  .checkline:last-child{border-bottom:none;}
+  .checkline b{font-family:var(--mono); font-size:0.82rem; color:var(--accent); white-space:nowrap;}
 </style>
+
 </head>
 <body>
+<div class="wrap">
 
-<nav class="rail" aria-hidden="true">
-  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a>
-  <a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a>
-  <a href="#s9"></a><a href="#s10"></a>
-</nav>
+  <header class="doc">
+    <p class="eyebrow">Traceability report · compiled from source</p>
+    <h1>Where payment status comes from</h1>
+    <p class="subject">LedgerSMB · 1,522 files · 192 tables · 218 foreign keys · compiled 2026-09-16</p>
+    <p class="question">“When a payment fails or its status changes, I can’t trace where it comes from. I have to search three places — the Postgres schema, the backend code, and the invoice templates — and I still can’t tell which code updates payment status.”</p>
+  </header>
 
-<div class="deck">
-
-<section class="slide hero" id="s1">
-  <div class="eyebrow">EKOS — a real question, a real codebase</div>
-  <h1>“When a payment’s status changes,<br><span class="arrow-word">which code did it?”</span></h1>
-  <p class="lede">The everyday version of this question costs an afternoon: search the Postgres schema, search the
-  backend, search the invoice templates, and still not be sure. We pointed EKOS at
-  <strong>LedgerSMB</strong> — a real Perl 5 / PostgreSQL double-entry accounting ERP, 1,522 files — and asked
-  it. The answer is one column and one function, and every claim in it resolves to a file and a line.</p>
-  <div class="hero-diagram">
-    <span class="chip bad">3 places to search</span><span class="sep mono">→</span>
-    <span class="chip">202 candidate files</span><span class="sep mono">→</span>
-    <span class="chip">6 files that matter</span><span class="sep mono">→</span>
-    <span class="chip hot">1 function</span>
-  </div>
-  <div class="byline"><span class="dot"></span> workspace: <code class="mono">LedgerSMB</code> · 192 tables · 218 foreign keys · 7,677 evidence records · RFC 0146 · devlog_187 · 2026-09-16</div>
-</section>
-
-<section class="slide" id="s2">
-  <div class="stage-num mono">§ 01 / the problem</div>
-  <div class="eyebrow">Why this takes an afternoon</div>
-  <h2>There is no <code class="mono">payment_status</code> column. There are three status fields, and two are decoys.</h2>
-  <p class="lede">Each of the three is described — by its own authors or its own schema — as holding payment state.
-  Only one is written by the engine that actually governs it.</p>
-  <div style="margin-top:1.6rem; max-width:52rem;">
-    <div class="fieldrow">
-      <div class="fname">workflow.state</div>
-      <div class="fnote"><em>Authoritative.</em> <code class="mono">varchar(30)</code>, written by exactly one function, with every past transition in <code class="mono">workflow_history</code>.</div>
+  <section>
+    <div class="answer">
+      <p class="lead">Payment status is not a column on <code>payment</code>. It lives in <code>workflow.state</code>, and exactly one function in the codebase writes it.</p>
+      <div class="trace">
+        <b>payment.gl_id</b><span>→</span><b>gl.id</b><span>→</span><b>transactions.id</b><span>⇢</span><b>workflow.workflow_id</b><span>→</span><b>workflow.state</b>
+      </div>
+      <p style="font-size:0.9rem;">Three of those four hops are declared foreign keys. The fourth (<span class="mono">⇢</span>) is a convention, not a constraint — which is why no schema diagram would ever have shown you this path.</p>
     </div>
-    <div class="fieldrow">
-      <div class="fname">payment.closed</div>
-      <div class="fnote"><em>Decoy.</em> The schema’s own comment: “This will store the current state of a payment/receipt order”. A boolean that predates the workflow engine.</div>
+  </section>
+
+  <section>
+    <p class="eyebrow">The answer to “which code”</p>
+    <h2>One function, one statement</h2>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Location</th><th>Function</th><th>Statement</th><th>Effect</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ref">Persister.pm:155</td>
+            <td class="mono">update_workflow</td>
+            <td class="sql">UPDATE workflow SET state = ?, last_update = ? WHERE workflow_id = ?</td>
+            <td>The only write to payment status anywhere in the system.</td>
+          </tr>
+          <tr>
+            <td class="ref">Persister.pm:85</td>
+            <td class="mono">create_workflow</td>
+            <td class="sql">INSERT INTO workflow (workflow_id, type, state, last_update)</td>
+            <td>Sets the opening state when a payment first enters the workflow.</td>
+          </tr>
+          <tr>
+            <td class="ref">Persister.pm:181</td>
+            <td class="mono">create_history</td>
+            <td class="sql">INSERT INTO workflow_history (workflow_id, action, description, state, workflow_user, history_date)</td>
+            <td>Writes the audit row — who changed it, to what, and when.</td>
+          </tr>
+          <tr>
+            <td class="ref">Persister.pm:115</td>
+            <td class="mono">fetch_workflow</td>
+            <td class="sql">SELECT state, last_update FROM workflow WHERE workflow_id = ?</td>
+            <td>Every read of a payment’s current status.</td>
+          </tr>
+          <tr>
+            <td class="ref">Persister.pm:58</td>
+            <td class="mono">_persist_context</td>
+            <td class="sql">INSERT INTO workflow_context (workflow_id, context) … ON CONFLICT DO UPDATE</td>
+            <td>Stores the JSON context a transition was decided from.</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-    <div class="fieldrow">
-      <div class="fname">transactions.approved</div>
-      <div class="fnote"><em>Decoy.</em> A <code class="mono">bool</code> with <code class="mono">approved_by</code> and <code class="mono">approved_at</code>. Overlaps the <code class="mono">POSTED</code> state without being the same thing.</div>
+    <p style="font-size:0.9rem; color:var(--ink-soft);">All five in <code>lib/LedgerSMB/Workflow/Persister.pm</code>. Notably, <code>lib/LedgerSMB/Scripts/payment.pm</code> — the file whose name suggests it owns this — contains no status write at all. Searching for the word “payment” is what makes this trace hard.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Requirement 1</p>
+    <h2>Data lineage</h2>
+    <figure>
+      <div class="figbox">
+        <svg viewBox="0 0 760 290" role="img" aria-label="Payment status lineage: payment joins through gl to transactions, which is keyed to workflow by convention, where state is stored and workflow_history records each change.">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+            </marker>
+            <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,0 10,5 0,10" fill="#2E6A4E"/>
+            </marker>
+          </defs>
+
+          <text x="0" y="14" font-family="IBM Plex Sans, sans-serif" font-size="11" font-weight="600" fill="currentColor" opacity="0.55">POSTGRES SCHEMA</text>
+
+          <rect x="0" y="30" width="132" height="52" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="66" y="52" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" fill="currentColor">payment</text>
+          <text x="66" y="69" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.6">gl_id, closed</text>
+
+          <line x1="132" y1="56" x2="196" y2="56" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+          <text x="164" y="48" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="currentColor" opacity="0.7">FK</text>
+
+          <rect x="196" y="30" width="118" height="52" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="255" y="52" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" fill="currentColor">gl</text>
+          <text x="255" y="69" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.6">id</text>
+
+          <line x1="314" y1="56" x2="378" y2="56" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+          <text x="346" y="48" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="currentColor" opacity="0.7">FK</text>
+
+          <rect x="378" y="30" width="140" height="52" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="448" y="52" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" fill="currentColor">transactions</text>
+          <text x="448" y="69" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.6">id, approved</text>
+
+          <line x1="518" y1="56" x2="600" y2="56" stroke="#2E6A4E" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ar-a)"/>
+          <text x="559" y="44" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" font-weight="600" fill="#2E6A4E">by convention</text>
+          <text x="559" y="74" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="9" fill="#2E6A4E" opacity="0.85">no FK</text>
+
+          <rect x="600" y="26" width="150" height="60" fill="none" stroke="#2E6A4E" stroke-width="2.5"/>
+          <text x="675" y="50" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="#2E6A4E">workflow</text>
+          <text x="675" y="70" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="#2E6A4E">state</text>
+
+          <line x1="675" y1="86" x2="675" y2="128" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+          <text x="686" y="112" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="currentColor" opacity="0.7">FK</text>
+          <rect x="586" y="128" width="164" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="668" y="147" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">workflow_history</text>
+          <text x="668" y="163" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.6">every transition</text>
+
+          <line x1="66" y1="82" x2="66" y2="128" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+          <rect x="0" y="128" width="132" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="66" y="147" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">payment_links</text>
+          <text x="66" y="163" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.6">entry_id</text>
+
+          <line x1="132" y1="151" x2="196" y2="151" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+          <rect x="196" y="128" width="118" height="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="255" y="147" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">acc_trans</text>
+          <text x="255" y="163" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor" opacity="0.6">trans_id</text>
+
+          <line x1="314" y1="151" x2="378" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
+
+          <text x="0" y="222" font-family="IBM Plex Sans, sans-serif" font-size="11" font-weight="600" fill="currentColor" opacity="0.55">PERL BACKEND</text>
+          <rect x="0" y="234" width="380" height="48" fill="none" stroke="#2E6A4E" stroke-width="2.5"/>
+          <text x="14" y="253" font-family="IBM Plex Mono, monospace" font-size="11.5" font-weight="600" fill="#2E6A4E">Workflow::Persister::update_workflow</text>
+          <text x="14" y="270" font-family="IBM Plex Mono, monospace" font-size="10" fill="#2E6A4E" opacity="0.85">Persister.pm:155</text>
+
+          <path d="M 380 250 L 500 250 L 500 100" fill="none" stroke="#2E6A4E" stroke-width="2" marker-end="url(#ar-a)"/>
+          <text x="512" y="200" font-family="IBM Plex Sans, sans-serif" font-size="10.5" font-weight="600" fill="#2E6A4E">writes state</text>
+        </svg>
+      </div>
+      <figcaption>A payment reaches its status through the general ledger, not directly. The green path is the only write; the dashed hop is the one a schema diagram cannot show, because it is configuration rather than a constraint.</figcaption>
+    </figure>
+
+    <p>The dashed hop is declared in <code>workflows/persisters.xml:12</code> as <code>extra_table="transactions"</code>: the <span class="mono">ExtraData</span> persister keys each workflow row to a transaction id. Nothing in the database enforces it, so it is invisible to schema introspection — and it is precisely the link that makes the trace feel impossible from the DB side alone.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Requirement 3 · the three places, reconciled</p>
+    <h2>What each source actually holds</h2>
+    <div class="grid3">
+      <div class="place">
+        <span class="chip src">Postgres</span>
+        <p class="where">sql/changes/1.9/<br>workflow-schema.sql:5</p>
+        <p><code>workflow.state varchar(30)</code> — the authoritative current status, plus <code>workflow_history</code> for every past transition.</p>
+      </div>
+      <div class="place">
+        <span class="chip src">Perl backend</span>
+        <p class="where">lib/LedgerSMB/Workflow/<br>Persister.pm:155</p>
+        <p>The single <code>UPDATE</code>. Every status change in the product passes through this one statement.</p>
+      </div>
+      <div class="place">
+        <span class="chip src">Definition</span>
+        <p class="where">workflows/<br>payment.workflow.xml:5</p>
+        <p>The legal states and transitions — declarative XML, not code. No Perl file lists them.</p>
+      </div>
     </div>
-  </div>
-  <p class="lede" style="margin-top:1.8rem;">A search for “payment status” surfaces the two decoys first, because they carry the
-  words <em>payment</em> and <em>state</em>. <strong>The authoritative field carries neither.</strong></p>
-</section>
+    <p>The invoice templates under <code>templates/</code> are the fourth place people look and the one place status never lives: they render a posted transaction, and hold no state of their own.</p>
+  </section>
 
-<section class="slide" id="s3">
-  <div class="stage-num mono">§ 02 / the answer</div>
-  <div class="eyebrow">One column, one function</div>
-  <h2>Payment status lives in the workflow engine, reached through the general ledger.</h2>
-  <div class="trace-chain">
-    <b>payment.gl_id</b><span class="hop">→</span><b>gl.id</b><span class="hop">→</span><b>transactions.id</b><span class="conv">⇢</span><b>workflow.workflow_id</b><span class="hop">→</span><span class="end">workflow.state</span>
-  </div>
-  <p class="lede" style="margin-top:1.4rem;">Three of those hops are declared foreign keys. The fourth
-  (<span class="mono conv" style="color:var(--bad)">⇢</span>) is <strong>not a constraint at all</strong> — it is the
-  attribute <code class="mono">extra_table="transactions"</code> in a persister configuration file. No schema
-  diagram can show it, and no grep for <em>payment</em> or <em>status</em> reaches it, because neither word appears.</p>
-  <div class="codeblock" style="margin-top:1.8rem;">
-    <div class="tag">lib/LedgerSMB/Workflow/Persister.pm:155</div>
-<pre style="margin:0;">sub update_workflow {
-    my ($self, $wf) = @_;
-    ...
-    <span class="c"># the only write to payment status anywhere in the system</span>
-    UPDATE workflow SET state = ?, last_update = ? WHERE workflow_id = ?</pre>
-  </div>
-  <p class="lede" style="margin-top:1.2rem;"><code class="mono">lib/LedgerSMB/Scripts/payment.pm</code> — the file whose
-  name promises exactly this — contains no status write at all. <strong>Searching for “payment” is what makes the
-  trace hard.</strong></p>
-</section>
+  <section>
+    <p class="eyebrow">The allowed transitions</p>
+    <h2>Payment state machine</h2>
+    <figure>
+      <div class="figbox">
+        <svg viewBox="0 0 700 220" role="img" aria-label="Payment states: INITIAL posts to SAVED; SAVED approves to POSTED when not a batch member, batch-approves to POSTED when it is, or batch-deletes to DELETED. REVERSED is declared but unreachable.">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+            </marker>
+          </defs>
 
-<section class="slide" id="s4">
-  <div class="stage-num mono">§ 03 / lineage</div>
-  <div class="eyebrow">Requirement 1 — where the data comes from</div>
-  <h2>A payment reaches its status through the ledger, not directly.</h2>
-  <figure class="dia">
-    <svg viewBox="0 0 760 200" role="img" aria-label="payment joins through gl to transactions, which is keyed to workflow by convention rather than a foreign key; workflow holds state and workflow_history records each change.">
-      <defs>
-        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <polygon points="0,0 10,5 0,10" fill="currentColor"/>
-        </marker>
-      </defs>
-      <rect x="0" y="26" width="128" height="50" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text x="64" y="47" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">payment</text>
-      <text x="64" y="64" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">gl_id, closed</text>
+          <rect x="0" y="80" width="104" height="42" rx="21" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="52" y="106" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">INITIAL</text>
 
-      <line x1="128" y1="51" x2="190" y2="51" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
-      <text x="159" y="43" text-anchor="middle" font-family="sans-serif" font-size="10" fill="currentColor" opacity="0.75">FK</text>
+          <line x1="104" y1="101" x2="186" y2="101" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="145" y="93" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor">post</text>
 
-      <rect x="190" y="26" width="112" height="50" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text x="246" y="47" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">gl</text>
-      <text x="246" y="64" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">id</text>
+          <rect x="186" y="80" width="104" height="42" rx="21" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="238" y="106" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">SAVED</text>
 
-      <line x1="302" y1="51" x2="364" y2="51" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
-      <text x="333" y="43" text-anchor="middle" font-family="sans-serif" font-size="10" fill="currentColor" opacity="0.75">FK</text>
+          <path d="M 290 92 L 430 52" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="360" y="60" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor">approve</text>
+          <text x="360" y="46" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9" fill="currentColor" opacity="0.65">!is-batch-member</text>
 
-      <rect x="364" y="26" width="140" height="50" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text x="434" y="47" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" fill="currentColor">transactions</text>
-      <text x="434" y="64" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">id, approved</text>
+          <path d="M 290 106 L 430 82" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="360" y="104" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor">batch-approve</text>
+          <text x="360" y="117" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9" fill="currentColor" opacity="0.65">is-batch-member</text>
 
-      <line x1="504" y1="51" x2="586" y2="51" stroke="#e0654f" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ar)" color="#e0654f"/>
-      <text x="545" y="39" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="600" fill="#e0654f">by convention</text>
-      <text x="545" y="69" text-anchor="middle" font-family="sans-serif" font-size="9" fill="#e0654f" opacity="0.9">no FK</text>
+          <path d="M 290 116 L 430 158" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="362" y="152" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor">batch-delete</text>
+          <text x="362" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="9" fill="currentColor" opacity="0.65">is-batch-member</text>
 
-      <rect x="586" y="22" width="150" height="58" fill="none" stroke="#3ba776" stroke-width="2.5"/>
-      <text x="661" y="45" text-anchor="middle" font-family="ui-monospace,monospace" font-size="13" font-weight="600" fill="#3ba776">workflow</text>
-      <text x="661" y="65" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" font-weight="600" fill="#3ba776">state</text>
+          <rect x="434" y="44" width="104" height="42" rx="21" fill="none" stroke="currentColor" stroke-width="2.5"/>
+          <text x="486" y="70" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="600" fill="currentColor">POSTED</text>
 
-      <line x1="661" y1="80" x2="661" y2="120" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
-      <rect x="576" y="120" width="170" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text x="661" y="138" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">workflow_history</text>
-      <text x="661" y="154" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">every transition</text>
+          <rect x="434" y="140" width="104" height="42" rx="21" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="486" y="166" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">DELETED</text>
 
-      <line x1="64" y1="76" x2="64" y2="120" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
-      <rect x="0" y="120" width="128" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text x="64" y="138" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">payment_links</text>
-      <text x="64" y="154" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">entry_id</text>
+          <rect x="576" y="92" width="112" height="42" rx="21" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.5"/>
+          <text x="632" y="118" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor" opacity="0.55">REVERSED</text>
+          <text x="632" y="150" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="9.5" fill="currentColor" opacity="0.55">no inbound transition</text>
+        </svg>
+      </div>
+      <figcaption>Every legal payment status and the action that produces it, read from <code>workflows/payment.workflow.xml</code> lines 5–21. <code>REVERSED</code> is declared as a state but no action in this file transitions into it.</figcaption>
+    </figure>
+    <p>Whether <code>approve</code> or <code>batch-approve</code> fires is decided by one condition, <code>is-batch-member</code>, defined at <code>workflows/payment.conditions.xml:2</code> as the test <code>$context-&gt;{'batch-id'}</code> — evaluated against the JSON in <code>workflow_context</code>. That is the whole reason a payment “fails” to approve individually: it belongs to a batch.</p>
+  </section>
 
-      <line x1="128" y1="142" x2="190" y2="142" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
-      <rect x="190" y="120" width="112" height="44" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text x="246" y="138" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" fill="currentColor">acc_trans</text>
-      <text x="246" y="154" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="currentColor" opacity="0.65">trans_id</text>
+  <section>
+    <div class="warnbox">
+      <p class="eyebrow" style="color:var(--warn)">Why three places felt like three places</p>
+      <h2>There are three status fields, and two are decoys</h2>
+      <p>Each of these is described by its own authors, or by its own schema, as holding payment state. Only one is written by the workflow engine.</p>
+      <div class="fields">
+        <div class="field">
+          <span class="name">workflow.state</span>
+          <span class="chip src">authoritative</span>
+          <span class="note"><code>varchar(30)</code>. Written only by <code>update_workflow</code>. History in <code>workflow_history</code>.</span>
+        </div>
+        <div class="field">
+          <span class="name">payment.closed</span>
+          <span class="chip author">author comment</span>
+          <span class="note">“This will store the current state of a payment/receipt order” — the schema’s own words, <code>Pg-database.sql</code>. A boolean, predating the workflow engine.</span>
+        </div>
+        <div class="field">
+          <span class="name">transactions.approved</span>
+          <span class="chip src">schema</span>
+          <span class="note"><code>bool</code>, with <code>approved_by</code> and <code>approved_at</code>. Overlaps the <code>POSTED</code> state without being the same thing.</span>
+        </div>
+      </div>
+      <p style="font-size:0.92rem;">A search for “payment status” finds the two decoys first, because they carry the word <em>payment</em> and the word <em>state</em>. The authoritative field carries neither.</p>
+    </div>
+  </section>
 
-      <line x1="302" y1="142" x2="364" y2="84" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar)"/>
-    </svg>
-    <figcaption>Compiled from 218 recovered foreign keys. The dashed hop is the one a schema diagram cannot show —
-    it is configuration, declared in <code class="mono">workflows/persisters.xml:12</code>, and it is exactly the link that
-    makes this trace feel impossible from the database alone.</figcaption>
-  </figure>
-</section>
+  <section>
+    <p class="eyebrow">Requirement 3 · proof</p>
+    <h2>Every claim, and where it came from</h2>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Claim</th><th>Evidence</th><th class="num">Line</th><th>Provenance</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Status column is <code>workflow.state</code></td><td class="ref">sql/changes/1.9/workflow-schema.sql</td><td class="num">5</td><td><span class="chip src">source</span></td></tr>
+          <tr><td>Audit trail exists per transition</td><td class="ref">sql/changes/1.9/workflow-schema.sql</td><td class="num">12–22</td><td><span class="chip src">source</span></td></tr>
+          <tr><td>The only status write</td><td class="ref">lib/LedgerSMB/Workflow/Persister.pm</td><td class="num">160</td><td><span class="chip src">source</span></td></tr>
+          <tr><td>History insert</td><td class="ref">lib/LedgerSMB/Workflow/Persister.pm</td><td class="num">181</td><td><span class="chip src">source</span></td></tr>
+          <tr><td><code>payment.gl_id → gl.id</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">3408</td><td><span class="chip">compiled FK</span></td></tr>
+          <tr><td><code>gl.id → transactions.id</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">982</td><td><span class="chip">compiled FK</span></td></tr>
+          <tr><td><code>acc_trans.trans_id → transactions.id</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">1124</td><td><span class="chip">compiled FK</span></td></tr>
+          <tr><td>workflow keyed to transactions</td><td class="ref">workflows/persisters.xml</td><td class="num">12</td><td><span class="chip model">convention</span></td></tr>
+          <tr><td>States and transitions</td><td class="ref">workflows/payment.workflow.xml</td><td class="num">5–21</td><td><span class="chip src">source</span></td></tr>
+          <tr><td><code>is-batch-member</code> test</td><td class="ref">workflows/payment.conditions.xml</td><td class="num">2–4</td><td><span class="chip src">source</span></td></tr>
+          <tr><td><code>payment.closed</code> holds state</td><td class="ref">sql/Pg-database.sql</td><td class="num">3419</td><td><span class="chip author">author comment</span></td></tr>
+          <tr><td><code>transactions.approved</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">301</td><td><span class="chip">compiled</span></td></tr>
+          <tr><td>Table purpose descriptions</td><td class="ref">workflow, workflow_history, workflow_context</td><td class="num">—</td><td><span class="chip model">model-written</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span><span class="chip src">source</span> read directly from the file</span>
+      <span><span class="chip">compiled</span> a fact in the knowledge ledger</span>
+      <span><span class="chip author">author comment</span> the schema authors’ own words</span>
+      <span><span class="chip model">model-written</span> inferred, not stated anywhere</span>
+    </div>
+  </section>
 
-<section class="slide" id="s5">
-  <div class="stage-num mono">§ 04 / the state machine</div>
-  <div class="eyebrow">Why a payment “fails” to approve</div>
-  <h2>Five states, declared in XML — not in any Perl file.</h2>
-  <div class="hero-diagram" style="margin-top:1.8rem;">
-    <span class="chip">INITIAL</span><span class="sep mono">post →</span>
-    <span class="chip">SAVED</span><span class="sep mono">approve →</span>
-    <span class="chip hot">POSTED</span>
-    <span class="sep mono" style="margin-left:1.2rem;">batch-delete →</span><span class="chip bad">DELETED</span>
-  </div>
-  <p class="lede" style="margin-top:1.6rem;">Whether <code class="mono">approve</code> or <code class="mono">batch-approve</code>
-  fires is decided by one condition, <code class="mono">is-batch-member</code>, defined at
-  <code class="mono">workflows/payment.conditions.xml:2</code> as the test <code class="mono">$context-&gt;{'batch-id'}</code>,
-  evaluated against the JSON in <code class="mono">workflow_context</code>. <strong>That is the whole reason a payment
-  “fails” to approve individually: it belongs to a batch.</strong></p>
-  <p class="lede"><code class="mono">REVERSED</code> is declared as a state, but no action in
-  <code class="mono">payment.workflow.xml</code> transitions into it — a dead state the compiled model makes visible.</p>
-</section>
+  <section>
+    <p class="eyebrow">The economics</p>
+    <h2>Why this needed a compiler, not a search</h2>
+    <p>A capable model with <code>grep</code> can reach this answer. The question is what it costs to reach it, whether the same question costs that again tomorrow, and whether the answer arrives with its evidence attached or has to be re-verified by hand.</p>
 
-<section class="slide" id="s6">
-  <div class="stage-num mono">§ 05 / proof</div>
-  <div class="eyebrow">Requirement 3 — every claim, and where it came from</div>
-  <h2>Thirteen claims. Twelve resolve to a file and a line.</h2>
-  <table class="ttable">
-    <thead><tr><th>Claim</th><th class="ref">Evidence</th><th class="num">Line</th><th>Provenance</th></tr></thead>
-    <tbody>
-      <tr><td class="desc">Status column is <code class="mono">workflow.state</code></td><td class="ref">sql/changes/1.9/workflow-schema.sql</td><td class="num">5</td><td class="desc">source</td></tr>
-      <tr><td class="desc">The only status write</td><td class="ref">lib/LedgerSMB/Workflow/Persister.pm</td><td class="num">160</td><td class="desc">source</td></tr>
-      <tr><td class="desc">Audit row per transition</td><td class="ref">lib/LedgerSMB/Workflow/Persister.pm</td><td class="num">181</td><td class="desc">source</td></tr>
-      <tr><td class="desc"><code class="mono">payment.gl_id → gl.id</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">3408</td><td class="desc">compiled FK</td></tr>
-      <tr><td class="desc"><code class="mono">gl.id → transactions.id</code></td><td class="ref">sql/Pg-database.sql</td><td class="num">982</td><td class="desc">compiled FK</td></tr>
-      <tr><td class="desc">workflow keyed to transactions</td><td class="ref">workflows/persisters.xml</td><td class="num">12</td><td class="desc"><span style="color:var(--bad)">convention</span></td></tr>
-      <tr><td class="desc">States and transitions</td><td class="ref">workflows/payment.workflow.xml</td><td class="num">5–21</td><td class="desc">source</td></tr>
-      <tr><td class="desc"><code class="mono">payment.closed</code> holds state</td><td class="ref">sql/Pg-database.sql</td><td class="num">3419</td><td class="desc">author comment</td></tr>
-      <tr><td class="desc"><code class="mono">workflow*</code> table purposes</td><td class="ref">—</td><td class="num">—</td><td class="desc"><span style="color:var(--bad)">model-written</span></td></tr>
-    </tbody>
-  </table>
-  <p class="lede" style="margin-top:1.4rem;">The distinction is kept visible on purpose. <strong>A traceability report
-  that cannot tell you which of its own statements are evidence is not traceability.</strong> Of 182 described tables
-  in this workspace, 127 carry the authors’ own <code class="mono">COMMENT ON</code> text rather than generated prose.</p>
-</section>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Step</th><th>Text search</th><th>EKOS</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Find the candidate files</td>
+            <td><code>grep -ril payment</code> → <b>202 files, 3.86 MB</b> (~964,000 tokens of candidate text to narrow by reading)</td>
+            <td>One query → <b>~938 tokens</b> of ranked results, each already carrying its object kind and source path</td>
+          </tr>
+          <tr>
+            <td>Traverse <code>payment → gl → transactions</code></td>
+            <td>Not possible. Three foreign keys declared 2,400 lines apart in one 134 KB file; grep matches strings, not edges</td>
+            <td>A graph query over <b>218 compiled foreign keys</b> — the hops are edges, not text</td>
+          </tr>
+          <tr>
+            <td>Know which descriptions are real</td>
+            <td>No signal. A comment and a guess look identical in a diff</td>
+            <td><code>sql_comment</code> vs <code>llm_description</code> are separate properties — <b>127 of 182</b> descriptions are the authors’ own</td>
+          </tr>
+          <tr>
+            <td>Ask the second question</td>
+            <td>Full re-exploration, every time, at the same cost</td>
+            <td>The ledger is already built; each further question is another ~1,000 tokens</td>
+          </tr>
+          <tr>
+            <td>Repeatability</td>
+            <td>Depends on which patterns the model happens to try</td>
+            <td>Deterministic passes over content-addressed artifacts — same input, same answer</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
-<section class="slide" id="s7">
-  <div class="stage-num mono">§ 06 / the economics</div>
-  <div class="eyebrow">Why a compiler, not a search</div>
-  <h2>A capable model with grep reaches this too. The question is what it costs — and whether it costs that again tomorrow.</h2>
-  <table class="ttable vs">
-    <thead><tr><th>Step</th><th>Text search</th><th>EKOS</th></tr></thead>
-    <tbody>
-      <tr>
-        <td class="tool">Find the candidates</td>
-        <td class="a"><code class="mono">grep -ril payment</code> → 202 files, 3.86 MB ≈ <strong>964,000 tokens</strong> to narrow by reading</td>
-        <td class="b">One query → <strong>≈ 938 tokens</strong>, ranked, each result carrying its kind and source path</td>
-      </tr>
-      <tr>
-        <td class="tool">Traverse the join path</td>
-        <td class="a"><strong>Not possible.</strong> Three foreign keys declared 2,400 lines apart in one 134 KB file — grep matches strings, not edges</td>
-        <td class="b">A graph query over <strong>218 compiled foreign keys</strong></td>
-      </tr>
-      <tr>
-        <td class="tool">Know what’s real</td>
-        <td class="a">No signal — a comment and a guess look identical</td>
-        <td class="b"><code class="mono">sql_comment</code> vs <code class="mono">llm_description</code> are separate properties</td>
-      </tr>
-      <tr>
-        <td class="tool">The second question</td>
-        <td class="a">Full re-exploration, same cost, every time</td>
-        <td class="b">The ledger already exists — another ≈ 1,000 tokens</td>
-      </tr>
-    </tbody>
-  </table>
-  <p class="lede" style="margin-top:1.4rem;"><strong>Amortisation is the real argument.</strong> Compiling LedgerSMB read
-  roughly 2.3 M tokens of source <em>once</em> and produced 6,807 objects, 3,114 relationships and 7,677 evidence
-  records. The first question is roughly break-even against a careful manual search. The tenth is not close.</p>
-</section>
+    <p><b>The amortisation is the real argument.</b> Compiling LedgerSMB read roughly 2.3 M tokens’ worth of source once and produced 6,807 objects, 3,114 relationships and 7,677 evidence records. Every question after that is answered from the compiled model, not from the source. The first question is roughly break-even with a careful manual search; the tenth is not close.</p>
 
-<section class="slide" id="s8">
-  <div class="stage-num mono">§ 07 / honesty</div>
-  <div class="eyebrow">What EKOS did not do here</div>
-  <h2>Three parts of that report came from reading files by hand.</h2>
-  <div class="inv-grid">
-    <div class="inv warn"><h3>The convention hop</h3><p>The <code class="mono">transactions → workflow</code> link was read from <code class="mono">persisters.xml</code> by hand. EKOS does not model persister configuration, so it appears in the diagram as a convention, never as a compiled fact.</p></div>
-    <div class="inv warn"><h3>Perl line numbers</h3><p>There is no Perl analyzer. EKOS observes <code class="mono">.pm</code> files and harvests declaration symbols, but builds no call graph — the five functions were confirmed by reading the file.</p></div>
-    <div class="inv warn"><h3>This schema, yesterday</h3><p>The same compile returned <strong>8 tables instead of 192</strong> until RFC 0146 landed. One unparseable <code class="mono">COMMENT ON</code> was discarding an entire file, behind a single buried warning.</p></div>
-    <div class="inv"><h3>The honest division</h3><p>The ledger narrows 202 candidate files to six and supplies the graph. Direct reading confirms the lines. Neither half is sufficient alone — and a tool claiming otherwise is the wrong one to trust with an audit trail.</p></div>
-  </div>
-</section>
+    <p><b>And one hop is not findable by search at all.</b> The link from <code>transactions</code> to <code>workflow</code> is not a foreign key and not a string either side would match — it is the attribute <code>extra_table="transactions"</code> in a persister configuration file. No amount of grepping <code>payment</code> or <code>status</code> reaches it, because neither word appears. It is reachable only by knowing the workflow engine is involved, which is what the compiled graph tells you first.</p>
 
-<section class="slide" id="s9">
-  <div class="stage-num mono">§ 08 / what made it work</div>
-  <div class="eyebrow">RFC 0146 — the dialect only ever understood pg_dump</div>
-  <h2>0 of 158 tables, with the dialect configured correctly.</h2>
-  <p class="lede">EKOS’s PostgreSQL dialect had been tuned entirely against <code class="mono">pg_dump</code> output, which
-  emits a narrow, mechanical subset of the language. A hand-maintained schema does not. LedgerSMB’s first
-  <code class="mono">COMMENT ON TABLE … IS $$…$$</code> failed the whole-file parse and took every table in the file with it —
-  reported only as one buried <code class="mono">SQL001</code> warning, never an error.</p>
-  <div class="stat-grid">
-    <div class="stat"><div class="num">8 → 192</div><div class="label">tables recovered</div></div>
-    <div class="stat"><div class="num">1 → 218</div><div class="label">foreign keys</div></div>
-    <div class="stat"><div class="num">0 → 127</div><div class="label">author-written descriptions</div></div>
-    <div class="stat"><div class="num">8 → 470</div><div class="label">data-lineage links</div></div>
-  </div>
-  <ul class="bullets">
-    <li><strong>Phase 1</strong> — eleven preprocessing transforms for what real schemas write: <code class="mono">COMMENT ON</code>, <code class="mono">INHERITS</code>, <code class="mono">SECURITY DEFINER</code>, <code class="mono">RETURNS SETOF</code>, <code class="mono">:=</code> named arguments, <code class="mono">DO</code> blocks, <code class="mono">CREATE RULE</code>, psql meta-commands, <code class="mono">COPY … FROM stdin</code> payloads.</li>
-    <li><strong>Phase 2</strong> — <code class="mono">COMMENT ON</code> text stopped being discarded and became evidence-backed descriptions with real source lines. The schema’s own words now outrank anything a model writes about the same table.</li>
-    <li><strong>Phase 3</strong> — an enrichment token budget computed per file, and a <code class="mono">SQL004</code> diagnostic, because partial coverage used to pass completely silently: 24 of 192 tables named, nothing reported.</li>
-  </ul>
-</section>
+    <div class="warnbox" style="background:var(--surface-2); border-left-color:var(--ink-soft);">
+      <h2 style="color:var(--ink)">What EKOS did not do here</h2>
+      <p>Three parts of this report came from reading files directly, and saying so is the point of a traceability document:</p>
+      <div class="fields">
+        <div class="field">
+          <span class="name">The <code>extra_table</code> hop</span>
+          <span class="note">Read from <code>persisters.xml</code> by hand. EKOS does not model persister configuration, so this edge is in the diagram as a convention, not as a compiled fact.</span>
+        </div>
+        <div class="field">
+          <span class="name">Perl line numbers</span>
+          <span class="note">EKOS has no Perl analyzer. It observes <code>.pm</code> files and harvests declaration symbols, but there is no call graph — the five functions in the evidence table were confirmed by reading <code>Persister.pm</code>.</span>
+        </div>
+        <div class="field">
+          <span class="name">This schema, before today</span>
+          <span class="note">The same compile returned <b>8 tables instead of 192</b> until RFC 0146 landed: one unparseable <code>COMMENT ON</code> was discarding the entire file. A compiler is only as good as its front end, and it failed quietly.</span>
+        </div>
+      </div>
+      <p style="font-size:0.92rem;">The honest division of labour: the compiled ledger narrows 202 candidate files to six and supplies the graph; direct reading confirms the lines. Neither half is sufficient alone, and a tool that claimed otherwise would be the wrong tool to trust with an audit trail.</p>
+    </div>
+  </section>
 
-<section class="slide cta" id="s10">
-  <div class="eyebrow">Reproduce it on your own repository</div>
-  <h2>Six commands. Your codebase.</h2>
-  <div class="codeblock">
-    <div class="tag">terminal</div>
-<pre style="margin:0;">$ ekos init
-$ ekos build      <span class="c"># observe files → content-addressed artifacts</span>
-$ ekos recover    <span class="c"># artifacts → typed KIR (SQL, git, JS/TS, docs)</span>
-$ ekos resolve    <span class="c"># merge duplicate identities</span>
-$ ekos compile    <span class="c"># KIR → Canonical Knowledge Model</span>
-$ ekos commit     <span class="c"># → append-only ledger + search index</span>
+  <section>
+    <p class="eyebrow">Runbook</p>
+    <h2>Reproduce this on your own repository</h2>
+    <p>Six ordered steps. Each stage of the pipeline writes the artifacts the next one consumes, so the order is not a suggestion. Steps 2 and 4 exist because the two failures that matter most in this tool are silent ones.</p>
 
-$ ekos query find "payment status" --mode lexical
-$ ekos ekl "FIND Object WHERE kind = 'Table' COUNT"
-$ ekos mcp serve --workspace .   <span class="c"># hand the ledger to a coding agent</span></pre>
-  </div>
-  <table class="ttable" style="max-width:40rem; margin-left:auto; margin-right:auto; text-align:left;">
-    <thead><tr><th>Everything behind this deck</th><th>Where</th></tr></thead>
-    <tbody>
-      <tr><td class="tool">Dialect coverage + COMMENT ON + budget</td><td class="desc"><code>ekos/docs/rfcs/0146-postgres-dialect-coverage.md</code></td></tr>
-      <tr><td class="tool">Write-up with measurements</td><td class="desc"><code>devlogs/devlog_187.md</code></td></tr>
-      <tr><td class="tool">Two settings that fail silently</td><td class="desc"><code>[observe] paths = ["."]</code> and <code>[recover.sql] default-dialect</code></td></tr>
-    </tbody>
-  </table>
-  <div class="fineprint">EKOS · LedgerSMB · 192 tables · 218 foreign keys · 7,677 evidence records · <a href="https://github.com/alexeyban/EKOS">github.com/alexeyban/EKOS</a></div>
-</section>
+    <ol class="steps">
+
+      <li><div class="step-body">
+        <h3>Install</h3>
+        <p>Rust 2024 edition. The Cargo workspace root is <code>ekos/</code>, not the repository root.</p>
+<pre>git clone https://github.com/alexeyban/EKOS.git
+<span class="c"># the Cargo workspace root is the ekos/ subdirectory, not the repo root</span>
+cd EKOS/ekos
+cargo build --release
+
+<span class="c"># optional — put `ekos` on your PATH</span>
+cargo install --path crates/cli</pre>
+      </div></li>
+
+      <li><div class="step-body">
+        <h3>Write <code>ekos.toml</code> in your project root</h3>
+        <p>Three settings decide whether the compile succeeds. All three failed silently in this project before they were set correctly.</p>
+<pre><span class="c"># Scope of observation</span>
+[workspace]
+root = "."
+
+[observe]
+<span class="c"># Use "." — NOT a list of subdirectories. Observers run once per entry with that</span>
+<span class="c"># entry as their root, and the git connector only checks &lt;root&gt;/.git. A list like</span>
+<span class="c"># ["src", "sql"] silently yields ZERO commits.</span>
+paths = ["."]
+
+<span class="c"># Matched against exact path COMPONENTS — not globs. Filenames count too, so</span>
+<span class="c"># "favicon.ico" works but "*.png" never will. Prune binaries and generated output.</span>
+ignore-patterns = [
+    ".ekos", ".git", "node_modules", "target",
+    "images", "css", "img",          <span class="c"># binary assets</span>
+    "locale",                        <span class="c"># translation catalogues</span>
+    "dist", "build", "coverage",     <span class="c"># generated output</span>
+    ".venv", "site-packages",        <span class="c"># third-party code is NOT your architecture</span>
+]
+
+<span class="c"># Load-bearing. The wrong dialect fails the whole-file parse and your entire</span>
+<span class="c"># schema disappears behind one buried SQL001 warning.</span>
+[recover.sql]
+default-dialect = "postgres"   <span class="c"># or mysql / mssql / snowflake / databricks / clickhouse</span>
+
+<span class="c"># Per-folder override, first path-glob match wins:</span>
+<span class="c"># [[recover.sql.dialect-rules]]</span>
+<span class="c"># path-glob = "warehouse/**"</span>
+<span class="c"># dialect   = "snowflake"</span></pre>
+        <p>Two optional blocks. Without either, the pipeline makes no model calls at all and every structural fact in this report is still recovered — the schema, the foreign keys, the lineage and the author-written descriptions are all deterministic.</p>
+
+        <h4 style="font-family:var(--sans); font-size:0.82rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft); margin-top:6px;">A · Language model — pick one</h4>
+<pre><span class="c"># Local, free, no key. Slowest, and needs RAM.</span>
+[llm]
+provider = "ollama"
+model    = "llama3:latest"
+<span class="c"># context-window = 8192   # sent as num_ctx; Ollama otherwise truncates silently</span>
+
+<span class="c"># ── or ── OpenAI proper</span>
+[llm]
+provider    = "openai"
+model       = "gpt-4o-mini"
+api-key-env = "OPENAI_API_KEY"   <span class="c"># default; the key is read from the env, never stored here</span>
+
+<span class="c"># ── or ── any OpenAI-compatible host: OpenCode Zen, OpenRouter,</span>
+<span class="c">#         DeepSeek, Groq, a self-hosted vLLM or llama.cpp server</span>
+[llm]
+provider    = "openai"
+base-url    = "https://opencode.ai/zen/v1"
+model       = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+<span class="c"># Only if SQL004 reports a response hitting its ceiling. Unset = a budget</span>
+<span class="c"># computed per file from its own table and foreign-key count.</span>
+<span class="c"># max-tokens = 32768</span></pre>
+        <p style="font-size:0.9rem;">Precedence for each value is <code>[llm]</code> first, then the env var (<code>OPENAI_MODEL</code>, <code>OPENAI_BASE_URL</code>), then the built-in default. A <code>base-url</code> takes no trailing slash; requests go to <code>{base-url}/chat/completions</code>.</p>
+
+        <h4 style="font-family:var(--sans); font-size:0.82rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft); margin-top:18px;">B · Embeddings — what turns on <code>--mode vector</code> and <code>--mode hybrid</code></h4>
+<pre><span class="c"># Local, free. The safe default, and unrelated to which chat model you use.</span>
+[embeddings]
+enabled  = true
+provider = "ollama"
+model    = "nomic-embed-text"     <span class="c"># provider default</span>
+cache    = true                   <span class="c"># default — .ekos/embed-cache/</span>
+
+<span class="c"># ── or ── OpenAI embeddings</span>
+[embeddings]
+enabled     = true
+provider    = "openai"
+model       = "text-embedding-3-small"   <span class="c"># provider default</span>
+api-key-env = "OPENAI_API_KEY"</pre>
+        <p style="font-size:0.9rem;">Embeddings are built by a post-<code>commit</code> pass, so after adding this block re-run <code>ekos commit</code> — the vector index does not exist until you do. <code>commit</code> then prints <code>Vector embeddings: N embedded</code>.</p>
+
+        <div class="warnbox" style="margin-top:6px;">
+          <h2 style="font-size:1rem;">Two traps in this block specifically</h2>
+          <div class="fields">
+            <div class="field">
+              <span class="name">Omitting <code>provider</code></span>
+              <span class="note">It falls back to <code>[llm] provider</code>, and if that is also unset, to <b><code>mock</code></b> — deterministic nonsense vectors. Hybrid search will appear to work and rank meaninglessly. Always name the provider explicitly.</span>
+            </div>
+            <div class="field">
+              <span class="name">Cloud chat ≠ cloud embeddings</span>
+              <span class="note"><code>[embeddings] provider = "openai"</code> posts to <code>api.openai.com</code> and <b>ignores <code>[llm] base-url</code></b>. Running chat through Zen or OpenRouter and leaving embeddings to inherit means the embed pass hits OpenAI with the wrong key. Pair a non-OpenAI chat host with <code>provider = "ollama"</code> here.</span>
+            </div>
+          </div>
+        </div>
+      </div></li>
+
+      <li><div class="step-body">
+        <h3>Check the scope before you compile anything</h3>
+        <p>This reads no file contents and costs nothing. It is the cheapest place to catch a mis-scoped config.</p>
+<pre>ekos config validate
+ekos config preview-scan</pre>
+        <div>
+          <div class="checkline"><b>across 1 root(s)</b><span>git history will be observed. More than one root means it will not.</span></div>
+          <div class="checkline"><b>file count</b><span>Wildly higher than your source tree? Something generated is being ingested.</span></div>
+          <div class="checkline"><b>known false positive</b><span><code>validate</code> warns that a filename entry such as <code>favicon.ico</code> “matches nothing”. It does match — the check runs on every path component, filenames included. Verified against the compiled ledger; ignore the warning.</span></div>
+        </div>
+      </div></li>
+
+      <li><div class="step-body">
+        <h3>Run the pipeline, in order</h3>
+        <p>Each verb is a compiler stage. On a repository this size expect roughly ten minutes end to end, most of it in <code>commit</code>.</p>
+<pre>ekos init
+ekos build      <span class="c"># observe files → content-addressed artifacts</span>
+ekos recover    <span class="c"># artifacts → typed KIR (SQL, git, JS/TS, docs)</span>
+ekos resolve    <span class="c"># merge duplicate identities; candidates go to review</span>
+ekos compile    <span class="c"># KIR → Canonical Knowledge Model</span>
+ekos commit     <span class="c"># CKM → append-only ledger + search index</span></pre>
+      </div></li>
+
+      <li><div class="step-body">
+        <h3>Verify it actually worked</h3>
+        <p>A clean exit code is not success. Both failures this project hit exited zero.</p>
+<pre>ekos status
+ekos ekl "FIND Object WHERE kind = 'Table' COUNT"
+grep -c SQL001 .ekos/diagnostics/recover.log</pre>
+        <div>
+          <div class="checkline"><b>Table count</b><span>Zero for a repo that plainly has a schema means the dialect is wrong — fix <code>[recover.sql]</code> and re-run from <code>recover</code>.</span></div>
+          <div class="checkline"><b>Git commits analysed</b><span><code>recover</code> prints this. Zero means <code>paths</code> is not <code>["."]</code>.</span></div>
+          <div class="checkline"><b>SQL001</b><span>“no tables found”. Expected for migration and view files; suspicious on your main schema file.</span></div>
+          <div class="checkline"><b>SQL004</b><span>Enrichment named fewer tables than the file declares. Raise <code>[llm] max-tokens</code> if it names a ceiling.</span></div>
+        </div>
+      </div></li>
+
+      <li><div class="step-body">
+        <h3>Ask your question, then produce the document</h3>
+        <p>Search narrows; the graph traverses; EKL filters. Run these from inside the workspace — the ledger is resolved from the working directory.</p>
+<pre><span class="c"># 1 — which objects are even involved (lexical works with no extra setup;</span>
+<span class="c">#     --mode hybrid/vector needs [embeddings] enabled and a re-run of commit)</span>
+ekos query find "payment status" --mode lexical
+
+<span class="c"># 2 — what it touches, N hops out (this is the part grep cannot do).</span>
+<span class="c">#     Takes an object id from step 1, not a name.</span>
+ekos query neighbourhood c600e4f4-f88b-5d21-94ac-7d918d48dcf3 --depth 2
+
+<span class="c"># 3 — structured filters over the compiled model</span>
+<span class="c">#     entity is always Object/Relationship/Event; kind is a WHERE clause</span>
+ekos ekl "FIND Object WHERE kind = 'Table' AND name CONTAINS 'payment'"
+ekos ekl "FIND Object WHERE kind = 'Table' COUNT"
+
+<span class="c"># 4 — a grounded natural-language answer with citations</span>
+ekos ask "which code updates payment status?"</pre>
+        <p>For the document itself, either render one deterministically from the ledger — no model, no cost:</p>
+<pre>ekos docs generate --layout solution-architect
+<span class="c"># → DependencyRiskReport.md, OnboardingGuide.md, FindingsMemo.md</span>
+
+ekos docs generate --layout curated --format html --output doc
+<span class="c"># → README / Architecture / API / SequenceDiagrams</span></pre>
+        <p>…or expose the ledger to a coding agent over MCP and let it assemble a bespoke report, which is how this page was built:</p>
+<pre>ekos mcp serve --workspace /path/to/project        <span class="c"># stdio</span>
+ekos mcp serve --http 127.0.0.1:7331 --token-file .ekos/token</pre>
+        <p>The agent then has <code>ekos_search</code>, <code>ekos_query</code>, <code>ekos_neighborhood</code>, <code>ekos_dependents</code>, <code>ekos_impact</code> and <code>ekos_ekl</code> as read-only tools — it retrieves evidence instead of reading your repository.</p>
+      </div></li>
+
+    </ol>
+
+    <h3 style="margin-top:42px;">When it goes wrong</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td>0 tables, repo has a schema</td><td>Wrong or missing SQL dialect — one unparseable statement discards the whole file</td><td>Set <code>[recover.sql] default-dialect</code>; re-run from <code>recover</code></td></tr>
+          <tr><td>0 git commits</td><td><code>paths</code> lists subdirectories; the git connector only looks for <code>&lt;root&gt;/.git</code></td><td><code>paths = ["."]</code> plus <code>ignore-patterns</code></td></tr>
+          <tr><td>Answers cite vendored or generated files</td><td><code>.gitignore</code> does not exclude anything from observation</td><td>Add <code>.venv</code>, <code>site-packages</code>, <code>dist</code>, coverage output to <code>ignore-patterns</code></td></tr>
+          <tr><td>Descriptions look invented</td><td>Model-written, because the schema carries no <code>COMMENT ON</code></td><td>Check the <code>sql_comment</code> property — present means the authors wrote it</td></tr>
+          <tr><td>Enrichment empty on a big file</td><td>Reasoning models spend hidden tokens from the same budget</td><td>Raise <code>[llm] max-tokens</code>; <code>SQL004</code> names the ceiling when it is hit</td></tr>
+          <tr><td>Re-run changed nothing</td><td>Pass cache keys on preprocessed input; unchanged input means the pass is skipped</td><td>Move <code>.ekos/</code> aside and rebuild — keep <code>.ekos/llm-cache/</code> to avoid re-billing</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:0.92rem; color:var(--ink-soft);">The ledger is append-only. Re-running the pipeline adds a new version of every changed object rather than overwriting, so a rebuild is always safe and the previous state stays queryable with <code>ekos diff</code>.</p>
+  </section>
+
+  <footer class="method">
+    <p class="eyebrow">How this was produced</p>
+    <p>EKOS compiled the LedgerSMB repository into an append-only knowledge ledger — 1,522 files observed, 192 tables and 218 foreign keys recovered from the PostgreSQL schema, 500 commits of history, and 127 table descriptions taken from the schema authors’ own <code>COMMENT ON</code> statements rather than generated.</p>
+    <div class="cmd">ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve &amp;&amp; ekos compile &amp;&amp; ekos commit
+ekos query find "payment status" --mode hybrid
+ekos ekl "FIND Object WHERE kind = 'Table'"</div>
+    <p>The three <span class="chip model">model-written</span> rows above are the only inferred content in this document; every other claim resolves to a file and a line number you can open. The distinction is kept visible because a traceability report that cannot tell you which of its own statements are evidence is not traceability.</p>
+  </footer>
 
 </div>
-
-<script src="../assets/rail.js"></script>
 </body>
 </html>
