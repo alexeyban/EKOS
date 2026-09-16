@@ -132,7 +132,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
                 }
             };
 
-            let pass = SqlAnalyzerPass::new(&rel_str, sql.clone(), llm.clone(), dialect_parser);
+            let pass = SqlAnalyzerPass::new(&rel_str, sql.clone(), llm.clone(), dialect_parser)
+                .with_max_tokens(config.llm.max_tokens);
             pass_manager.register(Box::new(pass));
 
             // ── Transformation IR extraction (RFC 0027 Phase 2) ───────────

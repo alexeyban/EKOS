@@ -106,6 +106,17 @@ pub struct LlmConfig {
     /// then 8192.
     #[serde(default)]
     pub context_window: Option<u32>,
+    /// RFC 0146 Phase 3: output-token ceiling for **compiler-pass** LLM calls (`SqlAnalyzerPass`'s
+    /// semantic naming, and any later pass that opts in). Distinct from `[ai] max-tokens`, which
+    /// governs the read-side `ekos ask` runtime and never reached these passes — the confusion
+    /// that let `SqlAnalyzerPass` sit on a hardcoded 4096 while a workspace's `ekos.toml` plainly
+    /// said `max-tokens = 8192`.
+    ///
+    /// Leave unset (the default) to let each pass size its own budget from the work in front of
+    /// it; see `sql_analyzer::enrichment_token_budget`. Set it only to raise a ceiling a provider
+    /// or a bill requires.
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

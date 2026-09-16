@@ -8,6 +8,8 @@
 //! DDL/transform-graph construction stays in `ekos-recovery`, so this trait never needs to
 //! change when the IR it feeds does.
 
+pub mod lex;
+
 use sqlparser::dialect::Dialect;
 
 /// Implemented once per SQL dialect (generic/ANSI, MySQL, PostgreSQL, ...) and registered by

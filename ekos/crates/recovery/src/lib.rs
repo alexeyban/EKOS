@@ -34,6 +34,7 @@ pub mod requirements_analyzer;
 pub mod rust_analyzer;
 mod source_evidence;
 pub mod sql_analyzer;
+pub mod sql_comments;
 pub mod sql_dialect_registry;
 pub mod sql_transform_analyzer;
 mod statement_repair;

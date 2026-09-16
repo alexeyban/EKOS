@@ -55,6 +55,12 @@ pub struct SqlAnalyzerPass {
     /// Resolved at construction time from a `SqlDialectParser` (RFC 0031) — which
     /// `sqlparser` dialect grammar to parse `sql` with.
     dialect: Box<dyn Dialect + Send + Sync>,
+    /// `COMMENT ON TABLE`/`COLUMN` text lifted from the raw SQL before `preprocess` removed it
+    /// (RFC 0146 Phase 2). Applied to the graph after the structural parse, ahead of the LLM.
+    comments: Vec<crate::sql_comments::SqlComment>,
+    /// Explicit output-token ceiling from `[llm] max-tokens` (RFC 0146 Phase 3). `None` — the
+    /// normal case — means the budget is computed per file from the size of the graph.
+    max_tokens_override: Option<u32>,
 }
 
 impl SqlAnalyzerPass {
@@ -67,15 +73,62 @@ impl SqlAnalyzerPass {
         let source_path = source_path.into();
         let pass_id = format!("sql-analyzer:{source_path}");
         let raw_sql: String = sql.into();
+        // RFC 0146 Phase 2: harvest `COMMENT ON` text from the *raw* file first. Phase 1's
+        // `preprocess` strips those statements so the rest of the file can parse, so this is the
+        // only point at which the schema's own documentation is still present.
+        let comments = crate::sql_comments::extract_sql_comments(&raw_sql);
         let preprocessed = dialect_parser.preprocess(&raw_sql);
         Self {
             pass_id,
             sql: preprocessed,
+            comments,
             source_path,
             llm,
             dialect: dialect_parser.sqlparser_dialect(),
+            max_tokens_override: None,
         }
     }
+
+    /// Pins the LLM output-token ceiling instead of letting the pass size it per file
+    /// (`[llm] max-tokens`, RFC 0146 Phase 3). Additive so no existing caller changes.
+    pub fn with_max_tokens(mut self, max_tokens: Option<u32>) -> Self {
+        self.max_tokens_override = max_tokens;
+        self
+    }
+}
+
+/// Output-token ceiling for one file's semantic-enrichment call.
+///
+/// The response must carry one JSON object per table and one per foreign key, so the budget has to
+/// scale with the schema — a fixed ceiling is wrong in both directions at once. RFC 0146 Phase 3
+/// replaced a hardcoded 4,096, which was generous for a 3-table migration and far too small for
+/// LedgerSMB's `Pg-database.sql` (158 tables, 214 foreign keys): that file's enrichment came back
+/// empty or covering a fraction of the schema, with no diagnostic, on three separate real runs.
+///
+/// `PER_ITEM_TOKENS` is measured against the prompt's own output schema — an entity line
+/// (`{"table":…,"entity_name":…,"type":…,"description":"<one sentence>"}`) runs 40-60 tokens, so 80
+/// leaves room for a long table name and a wordy sentence. Reasoning models spend hidden tokens
+/// from the same budget, which the headroom also absorbs.
+///
+/// The floor keeps small files exactly where they were. The ceiling is a cost guard: a runaway
+/// response is capped, and a schema big enough to need more should say so explicitly via
+/// `[llm] max-tokens`.
+///
+/// `MAX_TOKENS` is calibrated against that same file rather than guessed. A first cut set it to
+/// 16,384, which silently clamped the formula's own 30,272 estimate to half and reproduced the
+/// original failure exactly — an empty response and `SQL002`. Re-running with an explicit
+/// `[llm] max-tokens = 32768` named 157 of the 158 tables, so the formula had been right and the
+/// guard was wrong. 32,768 is set here to let a schema of this size through untouched.
+pub fn enrichment_token_budget(tables: usize, relationships: usize) -> u32 {
+    const BASE_TOKENS: u32 = 512;
+    const PER_ITEM_TOKENS: u32 = 80;
+    const MIN_TOKENS: u32 = 4_096;
+    const MAX_TOKENS: u32 = 32_768;
+
+    let items = (tables + relationships) as u32;
+    BASE_TOKENS
+        .saturating_add(PER_ITEM_TOKENS.saturating_mul(items))
+        .clamp(MIN_TOKENS, MAX_TOKENS)
 }
 
 #[async_trait]
@@ -103,22 +156,77 @@ impl CompilerPass for SqlAnalyzerPass {
             return Ok(());
         }
 
+        // ── Author-written descriptions (RFC 0146 Phase 2) ──────────────────
+        // Applied before the LLM so generated prose can never displace the schema's own
+        // documentation — see `apply_sql_comments`.
+        let described = apply_sql_comments(&mut graph, &self.comments, &self.source_path);
+        if described > 0 {
+            tracing::debug!(
+                "sql-analyzer: {described} description(s) recovered from COMMENT ON in {}",
+                self.source_path
+            );
+        }
+
         // ── LLM semantic enrichment ─────────────────────────────────────────
+        let table_count = graph
+            .objects
+            .iter()
+            .filter(|o| o.kind == ObjectKind::Table)
+            .count();
+        let max_tokens = self
+            .max_tokens_override
+            .unwrap_or_else(|| enrichment_token_budget(table_count, graph.relationships.len()));
+
         let req = LlmRequest {
             system: SYSTEM_PROMPT,
             user: &self.sql,
             prompt_version: PROMPT_VERSION,
-            max_tokens: 4096,
+            max_tokens,
             history: &[],
         };
 
         match self.llm.complete(&req).await {
             Ok(resp) => {
-                if let Err(e) = apply_llm_enrichment(&mut graph, &resp.content) {
-                    ctx.diagnostics.lock().unwrap().warning(
-                        "SQL002",
-                        format!("LLM enrichment parse failed for {}: {e}", self.source_path),
-                    );
+                let hit_ceiling = resp.output_tokens >= max_tokens;
+                match apply_llm_enrichment(&mut graph, &resp.content) {
+                    Ok(named) => {
+                        // RFC 0146 Phase 3: partial enrichment used to be completely silent. On a
+                        // real LedgerSMB run the model described 24 of 192 tables and nothing
+                        // reported it — worse than an outright failure, because the gap looks
+                        // exactly like a schema that simply has no descriptions.
+                        if named < table_count {
+                            let cause = if hit_ceiling {
+                                format!(
+                                    " (response hit the {max_tokens}-token ceiling — raise `[llm] max-tokens`)"
+                                )
+                            } else {
+                                String::new()
+                            };
+                            ctx.diagnostics.lock().unwrap().warning(
+                                "SQL004",
+                                format!(
+                                    "LLM enrichment named {named} of {table_count} tables in {}{cause}",
+                                    self.source_path
+                                ),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        let cause = if hit_ceiling {
+                            format!(
+                                " (response hit the {max_tokens}-token ceiling — raise `[llm] max-tokens`)"
+                            )
+                        } else {
+                            String::new()
+                        };
+                        ctx.diagnostics.lock().unwrap().warning(
+                            "SQL002",
+                            format!(
+                                "LLM enrichment parse failed for {}: {e}{cause}",
+                                self.source_path
+                            ),
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -364,6 +472,105 @@ fn columns_json(ct: &sqlparser::ast::CreateTable) -> serde_json::Value {
     serde_json::Value::Array(cols)
 }
 
+// ── Author-written description application (RFC 0146 Phase 2) ────────────────
+
+/// Property carrying a description that came from the schema itself rather than from a model.
+/// Kept distinct from `description` so the provenance survives into the ledger and a consumer can
+/// tell an observed fact from an inferred one without consulting evidence records.
+const SQL_COMMENT_PROPERTY: &str = "sql_comment";
+
+/// Attaches `COMMENT ON` text to the matching `Table` objects and their columns, with a
+/// `KirEvidence` record pointing at the exact source line.
+///
+/// Returns how many descriptions were applied.
+///
+/// Table matching is case-insensitive and ignores schema qualification, because DDL recovery keys
+/// `Table` objects on the bare name `CREATE TABLE` used while `COMMENT ON` frequently qualifies it
+/// (`public.account`). A comment naming a table this file does not create is skipped rather than
+/// creating a bare object — the comment is evidence *about* a table, not evidence that one exists.
+fn apply_sql_comments(
+    graph: &mut KirGraph,
+    comments: &[crate::sql_comments::SqlComment],
+    source_path: &str,
+) -> usize {
+    use crate::sql_comments::CommentTarget;
+
+    let mut applied = 0;
+
+    for comment in comments {
+        let bare = comment.bare_table().to_lowercase();
+        let Some(obj_index) = graph.objects.iter().position(|o| {
+            o.kind == ObjectKind::Table
+                && o.name
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&o.name)
+                    .eq_ignore_ascii_case(&bare)
+        }) else {
+            continue;
+        };
+
+        let fragment = match &comment.target {
+            CommentTarget::Table(t) => format!("COMMENT ON TABLE {t}"),
+            CommentTarget::Column { table, column } => {
+                format!("COMMENT ON COLUMN {table}.{column}")
+            }
+        };
+        let ev = KirEvidence::new(
+            SourceLocation::at(source_path, comment.line),
+            format!("{fragment} IS {}", comment.text),
+        );
+        let ev_id = graph.add_evidence(ev);
+
+        let obj = &mut graph.objects[obj_index];
+        match &comment.target {
+            CommentTarget::Table(_) => {
+                obj.properties.insert(
+                    SQL_COMMENT_PROPERTY.into(),
+                    serde_json::Value::String(comment.text.clone()),
+                );
+                obj.properties.insert(
+                    "description".into(),
+                    serde_json::Value::String(comment.text.clone()),
+                );
+                obj.evidence.push(ev_id);
+                applied += 1;
+            }
+            CommentTarget::Column { column, .. } => {
+                if apply_column_comment(obj, column, &comment.text) {
+                    obj.evidence.push(ev_id);
+                    applied += 1;
+                }
+            }
+        }
+    }
+
+    applied
+}
+
+/// Writes `text` onto the matching entry of a `Table` object's `columns` property array, which is
+/// where `columns_json` records each column's name and data type. Returns whether a column
+/// matched — a comment on a column the DDL does not declare is dropped rather than inventing one.
+fn apply_column_comment(obj: &mut KirObject, column: &str, text: &str) -> bool {
+    let Some(serde_json::Value::Array(columns)) = obj.properties.get_mut("columns") else {
+        return false;
+    };
+    for entry in columns.iter_mut() {
+        let matches = entry
+            .get("name")
+            .and_then(|n| n.as_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case(column));
+        if matches && let Some(map) = entry.as_object_mut() {
+            map.insert(
+                "description".into(),
+                serde_json::Value::String(text.to_string()),
+            );
+            return true;
+        }
+    }
+    false
+}
+
 // ── LLM enrichment application ───────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
@@ -389,8 +596,13 @@ struct LlmRelationship {
     description: String,
 }
 
-fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<()> {
+/// Returns how many tables the model actually named, which the caller compares against the schema
+/// to detect partial coverage (RFC 0146 Phase 3). Counting matched tables rather than returned
+/// entities is deliberate: a model that invents a table this file never declared has not enriched
+/// anything, and must not make the coverage look complete.
+fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<usize> {
     let output: LlmOutput = serde_json::from_str(crate::llm_json::strip_json_fences(llm_text))?;
+    let mut named = 0usize;
 
     // Apply entity enrichment.
     for entity in &output.entities {
@@ -400,6 +612,7 @@ fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<
             .iter_mut()
             .find(|o| o.name.to_lowercase() == table_lc)
         {
+            named += 1;
             obj.properties.insert(
                 "entity_name".into(),
                 serde_json::Value::String(entity.entity_name.clone()),
@@ -408,10 +621,23 @@ fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<
                 "entity_type".into(),
                 serde_json::Value::String(entity.entity_type.clone()),
             );
-            obj.properties.insert(
-                "description".into(),
-                serde_json::Value::String(entity.description.clone()),
-            );
+            // RFC 0146 Phase 2: an author-written `COMMENT ON` description outranks a generated
+            // one. The model still contributes `entity_name`/`entity_type`, which the schema does
+            // not state anywhere, but it never overwrites text a human wrote about their own
+            // table — that would replace an observed fact with an inferred one, which is the
+            // opposite of what this compiler is for. Its version is kept under
+            // `llm_description` so the two remain comparable.
+            if obj.properties.contains_key(SQL_COMMENT_PROPERTY) {
+                obj.properties.insert(
+                    "llm_description".into(),
+                    serde_json::Value::String(entity.description.clone()),
+                );
+            } else {
+                obj.properties.insert(
+                    "description".into(),
+                    serde_json::Value::String(entity.description.clone()),
+                );
+            }
         }
     }
 
@@ -449,7 +675,7 @@ fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<
         }
     }
 
-    Ok(())
+    Ok(named)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -484,6 +710,306 @@ mod tests {
         let cwd = dir.path().to_path_buf();
         std::fs::create_dir_all(cwd.join(".ekos/artifacts")).unwrap();
         PassContext::new(Arc::new(config), cwd)
+    }
+
+    // ── RFC 0146 Phase 3: the enrichment token budget ──────────────────────────────────────
+
+    #[test]
+    fn small_schemas_keep_the_previous_fixed_budget() {
+        // A 3-table migration used to get 4096 and must still get it — this change is about
+        // large schemas, and must not quietly shrink anything that already worked.
+        assert_eq!(enrichment_token_budget(3, 2), 4_096);
+        assert_eq!(enrichment_token_budget(0, 0), 4_096);
+    }
+
+    #[test]
+    /// Calibration guard, measured rather than guessed. LedgerSMB's `Pg-database.sql` is 158
+    /// tables + 214 foreign keys, and the real results are unambiguous: at 16,384 the model
+    /// returns nothing (`SQL002`), at 32,768 it names 157 of 158. The computed budget for that
+    /// shape must therefore survive unclamped — a ceiling below it is not a cost guard, it is the
+    /// original bug wearing a different number.
+    fn the_real_ledgersmb_core_schema_gets_a_budget_that_actually_works() {
+        let budget = enrichment_token_budget(158, 214);
+        assert_eq!(budget, 30_272, "512 + 80 * 372");
+        assert!(
+            budget > 16_384,
+            "16384 was measured to fail on this exact schema, got {budget}"
+        );
+    }
+
+    #[test]
+    fn the_budget_is_bounded_so_a_runaway_schema_cannot_run_up_a_bill() {
+        assert_eq!(enrichment_token_budget(100_000, 100_000), 32_768);
+    }
+
+    #[test]
+    fn budget_grows_monotonically_between_the_floor_and_the_ceiling() {
+        let a = enrichment_token_budget(60, 60);
+        let b = enrichment_token_budget(120, 120);
+        assert!(
+            a > 4_096 && a < 32_768,
+            "expected a mid-range budget, got {a}"
+        );
+        assert!(
+            b > a,
+            "more tables must not get a smaller budget: {b} vs {a}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_explicit_config_ceiling_overrides_the_computed_one() {
+        let dir = TempDir::new().unwrap();
+        let mut ctx = make_ctx(&dir);
+        let llm = Arc::new(MockLlmProvider::new(
+            "{\"entities\":[],\"relationships\":[]}",
+        ));
+        let mut pass = SqlAnalyzerPass::new(
+            "s.sql",
+            "CREATE TABLE a (id INT);",
+            llm,
+            &GenericDialectParser,
+        )
+        .with_max_tokens(Some(123));
+        assert_eq!(pass.max_tokens_override, Some(123));
+        pass.run(&mut ctx).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn partial_enrichment_is_reported_instead_of_passing_silently() {
+        // The real LedgerSMB failure: the model named a fraction of the schema and nothing said
+        // so, which is indistinguishable from a schema that simply has no descriptions.
+        let dir = TempDir::new().unwrap();
+        let mut ctx = make_ctx(&dir);
+        let llm = Arc::new(MockLlmProvider::new(
+            r#"{"entities":[{"table":"a","entity_name":"A","type":"core","entity_type":"core","description":"d"}],"relationships":[]}"#,
+        ));
+        let mut pass = SqlAnalyzerPass::new(
+            "s.sql",
+            "CREATE TABLE a (id INT);\nCREATE TABLE b (id INT);\nCREATE TABLE c (id INT);",
+            llm,
+            &GenericDialectParser,
+        );
+        pass.run(&mut ctx).await.unwrap();
+
+        let diags = ctx.diagnostics.lock().unwrap();
+        let rendered = format!("{:?}", diags);
+        assert!(
+            rendered.contains("SQL004"),
+            "partial coverage must raise SQL004, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("1 of 3"),
+            "the diagnostic must say how short it fell, got: {rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn full_enrichment_raises_no_coverage_warning() {
+        let dir = TempDir::new().unwrap();
+        let mut ctx = make_ctx(&dir);
+        let llm = Arc::new(MockLlmProvider::new(
+            r#"{"entities":[{"table":"a","entity_name":"A","type":"core","entity_type":"core","description":"d"}],"relationships":[]}"#,
+        ));
+        let mut pass = SqlAnalyzerPass::new(
+            "s.sql",
+            "CREATE TABLE a (id INT);",
+            llm,
+            &GenericDialectParser,
+        );
+        pass.run(&mut ctx).await.unwrap();
+
+        let rendered = format!("{:?}", ctx.diagnostics.lock().unwrap());
+        assert!(
+            !rendered.contains("SQL004"),
+            "complete coverage must stay quiet, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn enrichment_count_ignores_tables_the_model_invented() {
+        // A hallucinated table must not make coverage look complete.
+        let mut graph = graph_with_comments("CREATE TABLE a (id INT);");
+        let json = r#"{"entities":[
+            {"table":"a","entity_name":"A","type":"core","entity_type":"core","description":"d"},
+            {"table":"ghost","entity_name":"Ghost","type":"core","entity_type":"core","description":"d"}
+        ],"relationships":[]}"#;
+        assert_eq!(
+            apply_llm_enrichment(&mut graph, json).unwrap(),
+            1,
+            "only the real table counts toward coverage"
+        );
+    }
+
+    // ── RFC 0146 Phase 2: COMMENT ON becomes an evidence-backed description ────────────────
+
+    /// Builds a graph from `sql` and applies its `COMMENT ON` statements the way
+    /// `SqlAnalyzerPass::run` does, without needing an LLM or a `PassContext`.
+    fn graph_with_comments(sql: &str) -> KirGraph {
+        let comments = crate::sql_comments::extract_sql_comments(sql);
+        let dialect = GenericDialect {};
+        let mut graph = parse_ddl_structural(sql, "schema.sql", &dialect);
+        apply_sql_comments(&mut graph, &comments, "schema.sql");
+        graph
+    }
+
+    fn table<'a>(graph: &'a KirGraph, name: &str) -> &'a KirObject {
+        graph
+            .objects
+            .iter()
+            .find(|o| o.name.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("no table {name} in graph"))
+    }
+
+    #[test]
+    fn table_comment_becomes_the_description() {
+        let graph = graph_with_comments(
+            "CREATE TABLE account (id INT);\nCOMMENT ON TABLE account IS 'The chart of accounts.';",
+        );
+        let t = table(&graph, "account");
+        assert_eq!(
+            t.properties.get("description").and_then(|v| v.as_str()),
+            Some("The chart of accounts.")
+        );
+        assert_eq!(
+            t.properties
+                .get(SQL_COMMENT_PROPERTY)
+                .and_then(|v| v.as_str()),
+            Some("The chart of accounts."),
+            "provenance must be recorded separately from the description itself"
+        );
+    }
+
+    #[test]
+    fn table_comment_carries_evidence_with_a_real_line_number() {
+        let graph = graph_with_comments(
+            "CREATE TABLE account (id INT);\n\nCOMMENT ON TABLE account IS 'desc';",
+        );
+        let t = table(&graph, "account");
+        // One evidence record for CREATE TABLE, one for the COMMENT ON.
+        assert_eq!(t.evidence.len(), 2, "comment must add its own evidence");
+        let ev = graph
+            .evidence
+            .iter()
+            .find(|e| e.fragment.starts_with("COMMENT ON TABLE"))
+            .expect("comment evidence missing");
+        assert_eq!(ev.location.line, Some(3));
+        assert_eq!(ev.location.path, "schema.sql");
+    }
+
+    #[test]
+    fn column_comment_lands_on_the_matching_column() {
+        let graph = graph_with_comments(
+            "CREATE TABLE language (code VARCHAR(6), description TEXT);\n\
+             COMMENT ON COLUMN language.code IS 'ISO 639 code.';",
+        );
+        let cols = table(&graph, "language")
+            .properties
+            .get("columns")
+            .and_then(|v| v.as_array())
+            .expect("columns property");
+        let code = cols
+            .iter()
+            .find(|c| c.get("name").and_then(|n| n.as_str()) == Some("code"))
+            .unwrap();
+        assert_eq!(
+            code.get("description").and_then(|v| v.as_str()),
+            Some("ISO 639 code.")
+        );
+        let other = cols
+            .iter()
+            .find(|c| c.get("name").and_then(|n| n.as_str()) == Some("description"))
+            .unwrap();
+        assert!(
+            other.get("description").is_none(),
+            "only the named column may be described"
+        );
+    }
+
+    #[test]
+    fn schema_qualified_comment_matches_the_bare_table() {
+        let graph = graph_with_comments(
+            "CREATE TABLE account (id INT);\nCOMMENT ON TABLE public.account IS 'desc';",
+        );
+        assert_eq!(
+            table(&graph, "account")
+                .properties
+                .get("description")
+                .and_then(|v| v.as_str()),
+            Some("desc")
+        );
+    }
+
+    #[test]
+    fn a_comment_on_an_undeclared_table_is_dropped_not_invented() {
+        let graph = graph_with_comments(
+            "CREATE TABLE account (id INT);\nCOMMENT ON TABLE nowhere IS 'desc';",
+        );
+        assert_eq!(
+            graph.objects.len(),
+            1,
+            "no object may be created by a comment"
+        );
+        assert!(
+            table(&graph, "account")
+                .properties
+                .get("description")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_comment_on_an_undeclared_column_is_dropped() {
+        let graph = graph_with_comments(
+            "CREATE TABLE account (id INT);\nCOMMENT ON COLUMN account.missing IS 'desc';",
+        );
+        let t = table(&graph, "account");
+        assert_eq!(
+            t.evidence.len(),
+            1,
+            "no evidence for a column that does not exist"
+        );
+    }
+
+    /// The point of Phase 2: a human-written description must outrank a generated one.
+    #[test]
+    fn llm_enrichment_does_not_overwrite_an_author_written_description() {
+        let mut graph = graph_with_comments(
+            "CREATE TABLE account (id INT);\nCOMMENT ON TABLE account IS 'Authoritative text.';",
+        );
+        let llm_json = r#"{"entities":[{"table":"account","entity_name":"Account","type":"core","entity_type":"core","description":"A generated guess."}],"relationships":[]}"#;
+        apply_llm_enrichment(&mut graph, llm_json).unwrap();
+
+        let t = table(&graph, "account");
+        assert_eq!(
+            t.properties.get("description").and_then(|v| v.as_str()),
+            Some("Authoritative text."),
+            "the schema's own words must win"
+        );
+        assert_eq!(
+            t.properties.get("llm_description").and_then(|v| v.as_str()),
+            Some("A generated guess."),
+            "the model's version is kept for comparison, not discarded"
+        );
+        assert_eq!(
+            t.properties.get("entity_name").and_then(|v| v.as_str()),
+            Some("Account"),
+            "the model still contributes what the schema does not state"
+        );
+    }
+
+    #[test]
+    fn llm_description_is_used_when_the_schema_says_nothing() {
+        let mut graph = graph_with_comments("CREATE TABLE account (id INT);");
+        let llm_json = r#"{"entities":[{"table":"account","entity_name":"Account","type":"core","entity_type":"core","description":"A generated guess."}],"relationships":[]}"#;
+        apply_llm_enrichment(&mut graph, llm_json).unwrap();
+        assert_eq!(
+            table(&graph, "account")
+                .properties
+                .get("description")
+                .and_then(|v| v.as_str()),
+            Some("A generated guess."),
+            "with no COMMENT ON, the model's description is the only one available"
+        );
     }
 
     #[test]
