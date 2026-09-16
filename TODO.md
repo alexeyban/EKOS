@@ -5370,3 +5370,25 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] Adversarial premise rejections ("the evidence does not confirm…") aren't counted as refusals (adv-004/011/015) — decide grader vs prompt.
   - [ ] `code-004`: workspace `[workspace.package] edition` isn't surfaced as a fact.
 
+- [x] **RFC 0146 — PostgreSQL dialect coverage for hand-written schemas (devlog_187, 2026-09-16).** The
+  `postgres` dialect was tuned entirely against `pg_dump`; a correctly-configured LedgerSMB recovered **0 of
+  158 tables**. Three phases, all measured on the real repo: eleven `preprocess` transforms (`COMMENT ON`,
+  `INHERITS`, `SECURITY DEFINER`, `RETURNS SETOF`, `:=`, `DO`, `CREATE RULE`, psql meta-commands, `COPY …
+  FROM stdin`, `ALTER TABLE … NO INHERIT`); `COMMENT ON TABLE`/`COLUMN` captured as evidence-backed
+  descriptions that outrank LLM-generated ones; an enrichment token budget scaled to the schema plus `[llm]
+  max-tokens` and a `SQL004` partial-coverage diagnostic. Lexing primitives shared via
+  `ekos-sql-dialect-sdk::lex` so the stripper and the extractor cannot drift.
+  **LedgerSMB: 8 → 192 `Table`, 1 → 218 `ForeignKey`, 0 → 182 described tables (127 author-written), 8 → 470
+  lineage links, IR 16% → 34% mapped.**
+  - [ ] `SQL004` exposed a shape the budget formula misses: small files (1-2 tables) with long PL/pgSQL bodies
+    hit the 4,096 floor. The budget scales with table count; reasoning cost scales with *input* size.
+  - [ ] Table inheritance as a real `RelationshipKind` — would recover the 21 `INHERITS` edges Phase 1 drops
+    and the 3 inherited-column comments that currently have nowhere to land.
+  - [ ] Residual parse blockers, same shape as fixes already shipped: `DROP OPERATOR`, `DROP AGGREGATE`,
+    `OVERRIDING SYSTEM VALUE`, `:'psql_var'` interpolation.
+  - [ ] Per-statement fallback for `parse_ddl_structural` (own RFC) — `sql_transform_analyzer` has one, the
+    DDL path does not. Note its existing splitter uses `sql.split(';')` (`sql_transform_analyzer.rs:322`),
+    wrong inside dollar-quoted bodies; reuse RFC 0146's scanner.
+  - [ ] LedgerSMB `SQL001` is 251 of 277 files — most legitimately declare no tables, but worth a pass to
+    confirm none are silent losses.
+

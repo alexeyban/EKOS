@@ -259,6 +259,25 @@ carry the preprocessing (RFC 0057/0058/0059) that makes real dumps parse; `gener
 `ekos ekl "FIND Object WHERE kind = 'Table' COUNT"` returns 0 for a repo that clearly has a
 schema, this rule is missing.
 
+**Hand-written schemas need more than the right dialect (RFC 0146).** Everything above was tuned
+against `pg_dump`, which emits a narrow, mechanical subset of PostgreSQL. A human-maintained schema
+does not: measured on LedgerSMB, a correctly-configured `dialect = "postgres"` still recovered
+**0 of 158 tables**, because the file's first `COMMENT ON TABLE … IS $$…$$` failed the whole-file
+parse and took every table with it. The `postgres` dialect now preprocesses `COMMENT ON`,
+`INHERITS`, `SECURITY DEFINER`, `RETURNS SETOF`, `:=` named arguments, `DO` blocks, `CREATE RULE`,
+psql meta-commands and `COPY … FROM stdin` payloads out of the way; the same file yields 158 tables
+and 214 foreign keys.
+
+`COMMENT ON TABLE` / `COMMENT ON COLUMN` text is no longer discarded either — it becomes an
+evidence-backed `description` on the `Table` object (and on the matching column), with the source
+line recorded. **Author-written text outranks the LLM's:** `description` is the schema's own words,
+the model's version is kept alongside as `llm_description`, and `sql_comment` marks the provenance.
+
+`[llm] max-tokens` caps compiler-pass LLM calls — distinct from `[ai] max-tokens`, which governs the
+read-side `ekos ask` runtime. Leave it unset and each file's budget is computed from its own schema
+size; a new `SQL004` diagnostic reports when enrichment named fewer tables than the file declares,
+and says so explicitly when the response hit its ceiling.
+
 Beyond raw SQL DDL, `ekos recover`'s Python analyzer recognizes a real SQLAlchemy declarative
 model (`__tablename__` present on a class) and compiles it into the same `Table` object shape as a
 `CREATE TABLE` statement — real column names, best-effort data-type hints, and `ForeignKey` edges
