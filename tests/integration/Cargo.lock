@@ -814,6 +814,7 @@ name = "ekos"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
  "clap",
@@ -843,6 +844,7 @@ dependencies = [
  "ekos-plugin-javascript",
  "ekos-plugin-localdocs",
  "ekos-plugin-pentaho",
+ "ekos-plugin-perl",
  "ekos-plugin-python",
  "ekos-plugin-rust",
  "ekos-recovery",
@@ -1270,6 +1272,23 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-pentaho"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "hex",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
+name = "ekos-plugin-perl"
 version = "0.1.0"
 dependencies = [
  "async-trait",
