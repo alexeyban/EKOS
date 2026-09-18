@@ -6,16 +6,16 @@ use ekos_compiler_core::{
     scheduler::FailureMode,
 };
 use ekos_recovery::{
-    ArchitectureReasoningPass, ArchitectureReasoningStats, CicdAnalyzerPass,
-    ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
-    DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
-    DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
-    JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
-    OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PerlAnalyzerPass,
-    PerlStats, PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass,
-    RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
-    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
-    llm::LlmProvider, resolve_dialect_name,
+    ArchitectureReasoningPass, ArchitectureReasoningStats, BinaryAnalyzerPass, BinaryStats,
+    CicdAnalyzerPass, ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass,
+    CryptoAnalyzerPass, DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule,
+    DocumentSemanticsAnalyzerPass, DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats,
+    GitAnalyzerPass, GitHubAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats,
+    LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider, OpenAiProvider, PackageJsonAnalyzerPass,
+    PentahoAnalyzerPass, PentahoStats, PerlAnalyzerPass, PerlStats, PythonAnalyzerPass,
+    PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
+    SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
+    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -408,6 +408,22 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         );
         perl_stats = Some(perl_pass.stats_handle());
         pass_manager.register(Box::new(perl_pass));
+    }
+
+    // ── Compiled .NET/JVM binaries (RFC 0148) ───────────────────────────────
+    let binary_artifact_ids = collect_binary_artifact_ids(&*artifact_store);
+    let binary_count = binary_artifact_ids.len();
+    let mut binary_stats: Option<Arc<std::sync::Mutex<BinaryStats>>> = None;
+    if !binary_artifact_ids.is_empty() {
+        let binary_pass = BinaryAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            binary_artifact_ids,
+        );
+        binary_stats = Some(binary_pass.stats_handle());
+        pass_manager.register(Box::new(binary_pass));
     }
 
     // ── JavaScript/TypeScript artifacts (RFC 0085) ──────────────────────────
@@ -895,6 +911,24 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             s.packages_total, s.symbols_total
         );
     }
+    if binary_count > 0 {
+        println!("  Compiled types analysed: {binary_count}");
+    }
+    if let Some(stats) = &binary_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Binary structure recovered: {} binaries, {} types, {} methods, {} fields, \
+             {} I/O boundaries",
+            s.binaries, s.types, s.methods, s.fields, s.io_boundaries
+        );
+        // Reported next to the resolved count on purpose: a call into framework or third-party
+        // code gets no edge (see `binary_analyzer`'s module docs), so a low edge count is a
+        // resolution outcome and must not read as a parse failure.
+        println!(
+            "  Binary call graph: {} edges resolved, {} call sites into code not compiled here",
+            s.calls_resolved, s.calls_unresolved
+        );
+    }
     if javascript_count > 0 {
         println!("  JavaScript/TypeScript files analysed: {javascript_count}");
     }
@@ -1090,6 +1124,10 @@ fn collect_rust_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
 
 fn collect_perl_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
     collect_artifact_ids_for_connector(store, "perl")
+}
+
+fn collect_binary_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    collect_artifact_ids_for_connector(store, "binary")
 }
 
 fn collect_elixir_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {

@@ -364,6 +364,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
+name = "cafebabe"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9dc1dc4d3a0a7a314b5dcaad4077be139cfa3fcaa8d237218dedc6b71835872"
+dependencies = [
+ "bitflags 1.3.2",
+ "cesu8",
+]
+
+[[package]]
 name = "castaway"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -407,6 +417,12 @@ name = "census"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f4c707c6a209cbe82d10abd08e1ea8995e9ea937d2550646e02798948992be0"
+
+[[package]]
+name = "cesu8"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cff-parser"
@@ -901,6 +917,7 @@ dependencies = [
  "ekos-ledger",
  "ekos-marketing",
  "ekos-observation-sdk",
+ "ekos-plugin-binary",
  "ekos-plugin-clickhouse",
  "ekos-plugin-confluence",
  "ekos-plugin-crypto",
@@ -948,6 +965,21 @@ dependencies = [
  "tracing",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "ekos-binary"
+version = "0.1.0"
+dependencies = [
+ "cafebabe",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -1212,6 +1244,23 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "walkdir",
+]
+
+[[package]]
+name = "ekos-plugin-binary"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-binary",
+ "ekos-observation-sdk",
+ "hex",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
  "walkdir",
 ]
 
@@ -1582,6 +1631,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "ekos-artifact",
+ "ekos-binary",
  "ekos-common",
  "ekos-compiler-core",
  "ekos-kir",

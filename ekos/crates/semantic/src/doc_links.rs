@@ -34,6 +34,8 @@ const CODE_KINDS: &[&str] = &[
     "ElixirSymbol",
     "PerlPackage",
     "PerlSymbol",
+    "BinaryType",
+    "BinaryMethod",
     "Crate",
 ];
 

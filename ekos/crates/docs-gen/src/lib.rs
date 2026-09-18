@@ -688,6 +688,9 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     | "PerlSymbol"
                     | "JsModule"
                     | "JsSymbol"
+                    | "BinaryAssembly"
+                    | "BinaryType"
+                    | "BinaryMethod"
                     | "Technology"
                     | "Rollup"
             )
@@ -2964,6 +2967,7 @@ fn is_symbol_kind(kind: &ObjectKind) -> bool {
                 || s == "ElixirSymbol"
                 || s == "JsSymbol"
                 || s == "PerlSymbol"
+                || s == "BinaryMethod"
     )
 }
 
@@ -3002,13 +3006,18 @@ pub fn render_api(objects: &[KirObject], relationships: &[KirRelationship]) -> R
         .filter(|o| o.kind == ObjectKind::File)
         .map(|o| (o.id, o))
         .collect();
-    // Elixir modules and Perl packages are both the direct `Contains` parent of their own
-    // functions (`File Contains Module Contains Symbol`), unlike Rust/Python where the `File` is.
-    // Grouping by the real container is more meaningful than forcing every language into
-    // file-shaped grouping. RFC 0147 adds Perl to the same branch rather than a parallel one.
+    // Elixir modules, Perl packages and compiled binary types are all the direct `Contains`
+    // parent of their own functions (`File Contains Module Contains Symbol`), unlike Rust/Python
+    // where the `File` is. Grouping by the real container is more meaningful than forcing every
+    // language into file-shaped grouping. RFC 0147 added Perl to this branch rather than a
+    // parallel one, and RFC 0148 adds `BinaryType` for the same reason — a compiled binary has no
+    // `File` object at all, so grouping by file would leave every recovered method orphaned.
     let elixir_module_by_id: HashMap<KirId, &KirObject> = objects
         .iter()
-        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ElixirModule" || s == "PerlPackage"))
+        .filter(|o| {
+            matches!(&o.kind, ObjectKind::Custom(s)
+                if s == "ElixirModule" || s == "PerlPackage" || s == "BinaryType")
+        })
         .map(|o| (o.id, o))
         .collect();
     let mut containing_context: HashMap<KirId, KirId> = HashMap::new();
@@ -3372,6 +3381,8 @@ const DOC_BEARING_CUSTOM_KINDS: &[&str] = &[
     "JsModule",
     "PerlSymbol",
     "PerlPackage",
+    "BinaryMethod",
+    "BinaryType",
 ];
 
 /// Render `DependencyRiskReport.md`: real declared versions (`Crate.version`, and npm

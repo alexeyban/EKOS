@@ -19,6 +19,8 @@ pub struct EkosConfig {
     #[serde(default)]
     pub llm_description: LlmDescriptionConfig,
     #[serde(default)]
+    pub binary_reconstruction: BinaryReconstructionConfig,
+    #[serde(default)]
     pub embeddings: EmbeddingsConfig,
     #[serde(default)]
     pub marketing: MarketingConfig,
@@ -172,6 +174,46 @@ pub struct LlmDescriptionConfig {
     pub enabled: bool,
     #[serde(default)]
     pub scope: DescriptionScope,
+}
+
+/// RFC 0148 stage 2: `[binary-reconstruction]` — the opt-in LLM reconstruction of business logic
+/// from compiled binaries. Same opt-in-table shape as `[llm-description]`: absent or
+/// `enabled = false` means no LLM is ever contacted about a binary, and `ekos recover`'s
+/// deterministic structural facts are the whole output.
+///
+/// `max-slices` is a declared cost ceiling rather than a tuning knob — one slice is one type and
+/// one LLM call, and a real legacy estate has thousands of types.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct BinaryReconstructionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_max_slices")]
+    pub max_slices: usize,
+    #[serde(default = "default_min_confidence")]
+    pub min_confidence: f32,
+    /// Reconstruct compiler-generated types (lambda closures, async state machines) too.
+    #[serde(default)]
+    pub include_compiler_generated: bool,
+}
+
+fn default_max_slices() -> usize {
+    50
+}
+
+fn default_min_confidence() -> f32 {
+    0.5
+}
+
+impl Default for BinaryReconstructionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_slices: default_max_slices(),
+            min_confidence: default_min_confidence(),
+            include_compiler_generated: false,
+        }
+    }
 }
 
 /// RFC 0125: `[embeddings]` — the opt-in vector-search arm. Same opt-in-table shape as
@@ -520,6 +562,7 @@ impl Default for EkosConfig {
             document_semantics: DocumentSemanticsConfig::default(),
             architecture_reasoning: ArchitectureReasoningConfig::default(),
             llm_description: LlmDescriptionConfig::default(),
+            binary_reconstruction: BinaryReconstructionConfig::default(),
             embeddings: EmbeddingsConfig::default(),
             marketing: MarketingConfig::default(),
             recover: RecoverConfig::default(),

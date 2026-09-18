@@ -1,0 +1,238 @@
+<title>EKOS from 53 to 87</title>
+<meta name="description" content="What changed when EKOS moved its answering model from local Ollama llama3 to DeepSeek V4 Flash via OpenCode Zen, and fixed its document knowledge and planner.">
+<style>
+:root{
+  --ground:#f6f4fc; --raised:#ffffff; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5;
+  --violet:#7c3aed; --green:#059669; --red:#dc2f57; --track:#ece7f8;
+  --code-bg:#130f22; --code-fg:#e9e4f7; --code-dim:#8f89b0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0b0a12; --raised:#14121f; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.11);
+    --violet:#a66bff; --green:#14f195; --red:#ff5c7a; --track:rgba(255,255,255,0.07);
+    --code-bg:#100d1c; --code-fg:#e9e4f7; --code-dim:#7f79a3;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0b0a12; --raised:#14121f; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.11);
+  --violet:#a66bff; --green:#14f195; --red:#ff5c7a; --track:rgba(255,255,255,0.07);
+  --code-bg:#100d1c; --code-fg:#e9e4f7; --code-dim:#7f79a3;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+.mono,code,.num{font-family:ui-monospace,"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace}
+.wrap{max-width:46rem;margin:0 auto;padding-block:3.5rem 6rem;padding-inline:clamp(16px,5vw,32px)}
+h1,h2,h3{text-wrap:balance;margin:0;line-height:1.15;letter-spacing:-0.012em}
+h1{font-size:clamp(2rem,5.2vw,2.9rem);font-weight:750}
+h2{font-size:1.5rem;font-weight:700;margin-top:3.6rem}
+h3{font-size:1.02rem;font-weight:650;margin-top:1.8rem}
+p{margin:1rem 0 0;max-width:65ch}
+.eyebrow{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;color:var(--violet);margin:0 0 1rem}
+.lede{font-size:1.14rem;color:var(--ink-soft);margin-top:1.1rem}
+a{color:var(--violet)}
+code{font-size:.86em;background:var(--track);padding:.1em .35em;border-radius:4px}
+ul{padding-left:1.2rem;margin:.8rem 0 0}
+li{margin-top:.45rem;max-width:63ch}
+strong{font-weight:650}
+
+/* score ladder */
+.ladder{margin-top:2.4rem;display:grid;gap:.9rem}
+.rung{display:grid;grid-template-columns:3.2rem 1fr;gap:.9rem;align-items:center}
+.rung .n{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:1.55rem;font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.rung .body{display:grid;gap:.3rem}
+.rung .bar{height:.7rem;background:var(--track);border-radius:3px;overflow:hidden}
+.rung .bar i{display:block;height:100%;border-radius:3px;background:var(--ink-soft)}
+.rung.after .bar i{background:var(--violet)}
+.rung.after .n{color:var(--violet)}
+.rung .lbl{font-size:.9rem;color:var(--ink-soft)}
+.rung .lbl b{color:var(--ink);font-weight:600}
+.rung .delta{font-family:ui-monospace,"SF Mono",Consolas,monospace;color:var(--green);font-size:.82rem;margin-left:.35rem}
+.scale-note{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.72rem;color:var(--ink-soft);margin-top:.6rem;padding-left:4.1rem}
+
+/* tables */
+.tbl{overflow-x:auto;margin-top:1.4rem;border:1px solid var(--rule);border-radius:8px;background:var(--raised)}
+table{border-collapse:collapse;width:100%;min-width:34rem;font-size:.9rem}
+th,td{padding:.62rem .85rem;text-align:left;border-top:1px solid var(--rule);vertical-align:middle}
+thead th{border-top:none;font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.total td{font-weight:700}
+.cell-bar{display:grid;grid-template-columns:1fr;gap:3px;min-width:7rem}
+.cell-bar span{display:block;height:6px;border-radius:2px}
+.cell-bar .b{background:var(--ink-soft);opacity:.55}
+.cell-bar .a{background:var(--violet)}
+.up{color:var(--green);font-family:ui-monospace,"SF Mono",Consolas,monospace}
+.dn{color:var(--red);font-family:ui-monospace,"SF Mono",Consolas,monospace}
+
+/* where the LLM sits */
+.flow{margin-top:1.4rem;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.76rem}
+.flow span{border:1px solid var(--rule);background:var(--raised);border-radius:5px;padding:.38rem .6rem;white-space:nowrap}
+.flow span.llm{border-color:var(--violet);color:var(--violet);font-weight:650}
+.flow em{font-style:normal;color:var(--ink-soft)}
+.uses{margin-top:1.2rem;display:grid;gap:0;border-top:1px solid var(--rule)}
+.uses div{display:grid;grid-template-columns:minmax(9rem,13rem) 1fr;gap:1rem;padding:.7rem 0;border-bottom:1px solid var(--rule);font-size:.92rem}
+.uses dt{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.8rem;color:var(--ink)}
+.uses dd{margin:0;color:var(--ink-soft)}
+.tag{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--rule);border-radius:4px;padding:.05rem .35rem;margin-left:.4rem;color:var(--ink-soft)}
+@media (max-width:560px){.uses div{grid-template-columns:1fr;gap:.2rem}}
+
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:8px;padding:1rem 1.1rem;overflow-x:auto;font-size:.82rem;line-height:1.55;margin-top:1.2rem}
+pre .c{color:var(--code-dim)}
+
+/* failures */
+.fail{margin-top:1.1rem;border-left:2px solid var(--red);padding:.15rem 0 .15rem 1rem}
+.fail h3{margin:0;font-size:.98rem}
+.fail .ids{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.74rem;color:var(--red);margin-top:.2rem}
+.fail p{margin-top:.35rem;font-size:.93rem;color:var(--ink-soft)}
+
+.note{margin-top:2.2rem;padding:1rem 1.15rem;border:1px dashed var(--rule);border-radius:8px;font-size:.86rem;color:var(--ink-soft)}
+footer{margin-top:4rem;font-size:.8rem;color:var(--ink-soft);border-top:1px solid var(--rule);padding-top:1.2rem}
+</style>
+
+<main class="wrap">
+  <p class="eyebrow">EKOS eval · 101 scenarios · 2026-09-15</p>
+  <h1>From 53 to 87 correct answers, and what it took</h1>
+  <p class="lede">We moved EKOS's answering model from a local 8B model on Ollama to DeepSeek V4 Flash through OpenCode Zen, then fixed how EKOS decomposes documents and plans a query. The same 101-question suite went from 53 to 87 passed. Here is what changed, why, and what still fails.</p>
+
+  <div class="ladder" role="list" aria-label="Scenarios passed out of 101 at each step">
+    <div class="rung" role="listitem">
+      <div class="n">53</div>
+      <div class="body"><div class="bar"><i style="width:52.5%"></i></div>
+      <div class="lbl"><b>Before</b> — local <code>llama3:latest</code> (8B) on Ollama</div></div>
+    </div>
+    <div class="rung" role="listitem">
+      <div class="n">70</div>
+      <div class="body"><div class="bar"><i style="width:69.3%"></i></div>
+      <div class="lbl"><b>Model swap only</b> — DeepSeek V4 Flash, pre-change knowledge <span class="delta">+17</span></div></div>
+    </div>
+    <div class="rung" role="listitem">
+      <div class="n">79</div>
+      <div class="body"><div class="bar"><i style="width:78.2%"></i></div>
+      <div class="lbl"><b>+ document structure</b> — heading-aware sections, doc links, 8k output limit <span class="delta">+9</span></div></div>
+    </div>
+    <div class="rung after" role="listitem">
+      <div class="n">87</div>
+      <div class="body"><div class="bar"><i style="width:86.1%"></i></div>
+      <div class="lbl"><b>+ query planner fixes</b> — routing and entity resolution <span class="delta">+8</span></div></div>
+    </div>
+  </div>
+  <p class="scale-note">bars drawn to scale · full width = 101 scenarios</p>
+
+  <h2>Why EKOS uses an LLM at all</h2>
+  <p>EKOS is a compiler for enterprise knowledge. The part that builds the knowledge — observing repositories, databases and documents, recovering tables, symbols, call graphs and lineage, resolving identities, writing an append-only ledger — is deterministic and uses <strong>no LLM</strong>. Every fact carries the evidence it came from.</p>
+  <p>People don't ask a ledger questions in EKL, though. They ask “what depends on the redaction module?” or “which RFC introduced the fact-segment engine?”. The LLM sits at the very end: it gets a small, typed evidence set the planner has already assembled, writes the answer in plain language, cites the claims it used, and is expected to say “Insufficient evidence” when the evidence doesn't answer the question. It never touches the source systems.</p>
+
+  <div class="flow" aria-label="Where the LLM sits in the pipeline">
+    <span>observe</span><em>→</em><span>recover</span><em>→</em><span>resolve</span><em>→</em><span>compile</span><em>→</em><span>ledger</span><em>→</em><span>planner + evidence</span><em>→</em><span class="llm">LLM answer + citations</span>
+  </div>
+
+  <h3>Where the LLM is used</h3>
+  <dl class="uses">
+    <div><dt>ekos ask / REASON</dt><dd>Writes the final answer from the evidence set and cites it. This is what the 101-scenario eval grades.</dd></div>
+    <div><dt>ekos eval run</dt><dd>Runs the suite against a real workspace; grading itself is deterministic keyword and id matching, no LLM judge.</dd></div>
+    <div><dt>document semantics <span class="tag">opt-in</span></dt><dd>Extracts <code>Concept</code> objects and their relationships from prose documents.</dd></div>
+    <div><dt>architecture reasoning <span class="tag">opt-in</span></dt><dd>Classifies crate roles; every result is written as reviewable, never as fact.</dd></div>
+    <div><dt>llm-description <span class="tag">opt-in</span></dt><dd>Adds evidence-grounded <code>ai_overview</code> / <code>ai_usage</code> text to modules and symbols.</dd></div>
+    <div><dt>docs --prose, rerank, NL-to-SQL <span class="tag">opt-in</span></dt><dd>Prose overviews in generated docs, an LLM rerank of evidence, and the gated ClickHouse query bridge.</dd></div>
+  </dl>
+
+  <h2>Why DeepSeek beats local Ollama here</h2>
+  <p>We changed the model with the knowledge held fixed: same pre-change ledger, same 101 questions, 53 → 70. Four things account for the gap.</p>
+  <ul>
+    <li><strong>The context window was silently truncated.</strong> EKOS never sent <code>num_ctx</code>, so Ollama used its small default window and dropped the <em>start</em> of any longer prompt — which is where the instructions live. The largest prompt recorded under llama3 was 3,875 tokens — right at that ceiling. DeepSeek's much larger window takes the same prompts whole.</li>
+    <li><strong>Model capacity.</strong> An 8B model reads a 60-claim evidence set shallowly: it misses the one claim that answers the question, or answers from an adjacent one.</li>
+    <li><strong>Format and refusal discipline.</strong> The answer must end in a machine-readable <code>cited_evidence</code> block and must refuse false premises. llama3 drifted into prose citations and fabricated on adversarial questions; hallucinated answers fell from 7 to 3.</li>
+    <li><strong>It actually finishes.</strong> On the 15 GB workstation used here, local answers took up to 79 s at p95 and the eval was killed three times for lack of memory. A fresh DeepSeek call took a median of 5 s; a full 101-question run costs about $0.05–0.08.</li>
+  </ul>
+
+  <h2>Before and after</h2>
+  <p>“Before” is the last local run (<code>llama3:latest</code> via Ollama). “After” is DeepSeek V4 Flash with the document and planner fixes.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Category</th><th class="num">Before</th><th class="num">After</th><th>Passed share</th><th class="num">Change</th></tr></thead>
+      <tbody>
+        <tr><td>Architecture</td><td class="num">9/20</td><td class="num">18/20</td><td><div class="cell-bar"><span class="b" style="width:45%"></span><span class="a" style="width:90%"></span></div></td><td class="num up">+9</td></tr>
+        <tr><td>Code</td><td class="num">8/15</td><td class="num">13/15</td><td><div class="cell-bar"><span class="b" style="width:53.3%"></span><span class="a" style="width:86.7%"></span></div></td><td class="num up">+5</td></tr>
+        <tr><td>Dependencies</td><td class="num">10/12</td><td class="num">10/12</td><td><div class="cell-bar"><span class="b" style="width:83.3%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num">0</td></tr>
+        <tr><td>Lineage</td><td class="num">5/12</td><td class="num">10/12</td><td><div class="cell-bar"><span class="b" style="width:41.7%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num up">+5</td></tr>
+        <tr><td>History</td><td class="num">3/12</td><td class="num">11/12</td><td><div class="cell-bar"><span class="b" style="width:25%"></span><span class="a" style="width:91.7%"></span></div></td><td class="num up">+8</td></tr>
+        <tr><td>Security</td><td class="num">7/12</td><td class="num">10/12</td><td><div class="cell-bar"><span class="b" style="width:58.3%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num up">+3</td></tr>
+        <tr><td>Adversarial</td><td class="num">11/18</td><td class="num">15/18</td><td><div class="cell-bar"><span class="b" style="width:61.1%"></span><span class="a" style="width:83.3%"></span></div></td><td class="num up">+4</td></tr>
+        <tr class="total"><td>Total</td><td class="num">53/101</td><td class="num">87/101</td><td><div class="cell-bar"><span class="b" style="width:52.5%"></span><span class="a" style="width:86.1%"></span></div></td><td class="num up">+34</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Metric</th><th class="num">Before</th><th class="num">After</th></tr></thead>
+      <tbody>
+        <tr><td>Answer correctness</td><td class="num">50.1%</td><td class="num">85.7%</td></tr>
+        <tr><td>Evidence groundedness (cited claims that are real)</td><td class="num">65.9%</td><td class="num">95.6%</td></tr>
+        <tr><td>Completeness</td><td class="num">50.1%</td><td class="num">85.7%</td></tr>
+        <tr><td>Recall@10 (retrieval ranking)</td><td class="num">64.7%</td><td class="num dn">55.9%</td></tr>
+        <tr><td>Hallucinated answers</td><td class="num">7</td><td class="num">3</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>What we built between 70 and 87</h3>
+  <ul>
+    <li><strong>Documents keep their structure.</strong> Markdown was cut into blind 2,500-character chunks and only the first 1,200 characters of each were searchable. Each heading is now its own section — named by its heading path, with line ranges, document type and RFC number — and fully indexed.</li>
+    <li><strong>Docs link to code and to each other.</strong> A backticked identifier that names exactly one symbol, and an “RFC 0015” mention, become deterministic <code>References</code> edges — 7,377 doc→code and 3,420 RFC→RFC on EKOS's own repository. Ambiguous names never link.</li>
+    <li><strong>The planner asks the right question.</strong> A dependency phrase buried in a descriptive clause no longer triggers a graph walk, qualified paths like <code>ekos_common::redaction</code> resolve as one name, and generic words (“crate”, “record”) no longer match unrelated objects.</li>
+    <li><strong>Bugs found by measuring.</strong> Every <code>ekos commit</code> since 10 September had left the search index stale for read-only queries; cached answers truncated at a lower token limit kept replaying. Both are fixed with regression tests.</li>
+  </ul>
+
+  <h2>What this means for closed environments</h2>
+  <p>The compile side of EKOS runs anywhere — no GPU, no network, no model. Answer quality is a different matter: it tracks the class of model you can serve. A workstation-sized local model gets you roughly the “before” column. Reaching the “after” column without a cloud API means hosting a much larger open-weights model on dedicated GPU servers, with a context window of at least 32k tokens and enough throughput to answer in seconds rather than minutes.</p>
+  <p>EKOS supports both shapes today. Point it at any OpenAI-compatible endpoint — a self-hosted vLLM or llama.cpp server inside the network, or a hosted provider — and set the context window explicitly for Ollama:</p>
+<pre><span class="c"># hosted (what this post measured)</span>
+[llm]
+provider    = "openai"
+base-url    = "https://opencode.ai/zen/v1"
+model       = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+[ai]
+max-tokens  = 8192   <span class="c"># reasoning model: hidden reasoning counts against this</span>
+
+<span class="c"># local Ollama — never truncate silently again</span>
+[llm]
+provider       = "ollama"
+context-window = 32768</pre>
+  <p>One more reason to self-host in a closed environment: prompts contain real source excerpts. EKOS redacts secrets and PII before anything reaches the ledger, but a hosted model still sees your code. Zen's paid models are zero-retention; its free models may use prompts for training.</p>
+
+  <h2>What still fails, and why</h2>
+  <p>14 of 101. Grouped by cause:</p>
+
+  <div class="fail">
+    <h3>Premise rejected, but not in refusal wording</h3>
+    <div class="ids">adv-004 · adv-011 · adv-015</div>
+    <p>Questions built on a false premise (“which vendor licenses the vector index to EKOS?”). The model correctly rejects the premise — “the evidence does not confirm…”, “EKOS is MIT-licensed, free of charge” — but the grader only accepts an explicit refusal. Whether to widen the grader or tighten the prompt is still an open decision.</p>
+  </div>
+  <div class="fail">
+    <h3>The answer never reaches the top of the evidence</h3>
+    <div class="ids">code-002 · lin-008 · dep-004</div>
+    <p>The function that builds the LLM provider ranks below the provider trait itself; the <code>cited_evidence</code> convention isn't in the evidence the planner retrieves for that question; Rust import-path objects don't link back to the crate that consumes the redaction module.</p>
+  </div>
+  <div class="fail">
+    <h3>Facts the compiler doesn't record yet</h3>
+    <div class="ids">code-004 · lin-007 · dep-005</div>
+    <p>The Rust edition is set once in the workspace <code>Cargo.toml</code> and inherited, so no per-crate fact carries “2024”. Struct fields such as <code>KirEvidence.confidence</code> aren't emitted as claims. No caller of <code>plan_question</code> reached the evidence set, so the model correctly says it can't answer — which the grader scores as ungrounded.</p>
+  </div>
+  <div class="fail">
+    <h3>Ranking, not answering</h3>
+    <div class="ids">arch-009 · hist-007</div>
+    <p>Retrieval-only scenarios graded on recall@10. With documents now split into many sections, those sections outrank the crate or file the scenario expects. This is also why recall@10 fell while answers improved.</p>
+  </div>
+  <div class="fail">
+    <h3>Right in substance, wrong keyword</h3>
+    <div class="ids">arch-020 · sec-002 · sec-010</div>
+    <p>“Objects can't be deleted from the append-only ledger” without the word “tombstone”; “the security section is additive only” where the grader expects “extend”.</p>
+  </div>
+
+  <p class="note">Measurement notes. The before run was measured on a different rebuild of the ledger, likely partly affected by the stale-index bug. The model-swap-only run (70) used a 2,048-token output limit that cut off 17 answers, so the model's own contribution is if anything understated. Every number is from the checked-in 101-scenario suite, graded deterministically; answers were generated at temperature 0.</p>
+
+  <footer>EKOS — Enterprise Knowledge Operating System · devlogs 183–186 · RFC 0144 (document structure and doc links), RFC 0145 (LLM endpoints and context window)</footer>
+</main>

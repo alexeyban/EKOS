@@ -7,6 +7,8 @@ pub mod architecture_diff;
 pub mod architecture_drift;
 pub mod architecture_evaluator;
 pub mod architecture_reasoning;
+pub mod binary_analyzer;
+pub mod binary_reconstruction;
 pub mod cache;
 pub mod cicd_analyzer;
 pub mod clickhouse_analyzer;
@@ -50,6 +52,10 @@ pub use architecture_evaluator::{
 pub use architecture_reasoning::{
     ArchitectureReasoningPass, ArchitectureReasoningStats, read_crate_doc_comment,
     role_claim_kir_id,
+};
+pub use binary_analyzer::{BinaryAnalyzerPass, BinaryStats};
+pub use binary_reconstruction::{
+    ReconstructionConfig, ReconstructionStats, reconstruct_binary_logic,
 };
 pub use cache::CachedLlmProvider;
 pub use cicd_analyzer::CicdAnalyzerPass;

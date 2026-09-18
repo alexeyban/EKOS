@@ -278,6 +278,50 @@ fn is_expected_perl_package_symbol_pair<'a>(group: impl Iterator<Item = &'a KirO
     saw_package && saw_symbol
 }
 
+/// RFC 0148: a same-name-different-kind group drawn **only** from a compiled type's own
+/// declaration kinds — `Custom("BinaryType")`, `Custom("BinaryMethod")`, `Custom("BinaryField")` —
+/// is an expected, non-conflicting co-existence, the same narrowing
+/// [`is_expected_technology_jsmodule_pair`] and [`is_expected_perl_package_symbol_pair`] apply to
+/// their own pairs. Like the Perl one, this is mechanically guaranteed rather than merely likely.
+///
+/// A type is a classifier, a method is behaviour, a field is storage. They are categorically
+/// different entities, so a name match between them is never evidence that they are the same thing
+/// and a reviewer has nothing to decide. What makes it *unavoidable* is how code is written and
+/// compiled:
+///
+/// - Every C# property `Total` compiles to a backing field plus `get_Total`/`set_Total`, and
+///   `similarity::normalize` folds those toward the same token.
+/// - Java beans do the same by convention: a `private int count` beside `int count()`.
+/// - `.ctor`/`.cctor` normalize to `ctor` across every type in an assembly at once.
+/// - A field is routinely named after its own type (`private Interop interop;`).
+///
+/// Measured on a two-binary workspace (`pdfbox.jar` + `mscorlib.dll`): **258 conflicts, every one
+/// of them a method beside a same-named field**, which failed `ekos resolve` by default; widening
+/// to include `BinaryType` cleared the last two (`interop`, `assemblyref` — a field named after
+/// its type). Left unnarrowed this fails on essentially every real compiled workspace, training
+/// users to reach for `--force`, the one outcome that makes the detector worthless.
+///
+/// `BinaryAssembly` and `ExternalIoBoundary` are deliberately **not** in the set, and neither is
+/// any non-binary kind: the exclusion covers only declarations *inside* one type system, so a
+/// compiled name colliding with a real `Table`, `Concept` or assembly still surfaces. At least two
+/// distinct kinds must be present, so this can never suppress a same-kind group.
+fn is_expected_binary_declaration_group<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
+    const DECLARATION_KINDS: &[&str] = &["BinaryType", "BinaryMethod", "BinaryField"];
+    let mut seen: Vec<&str> = Vec::new();
+    for obj in group {
+        let ObjectKind::Custom(name) = &obj.kind else {
+            return false;
+        };
+        let Some(kind) = DECLARATION_KINDS.iter().find(|k| *k == name) else {
+            return false;
+        };
+        if !seen.contains(kind) {
+            seen.push(kind);
+        }
+    }
+    seen.len() >= 2
+}
+
 impl IdentityResolver for DefaultResolver {
     fn resolve(&self, graph: &KirGraph) -> ResolutionResult {
         let objects = &graph.objects;
@@ -313,6 +357,7 @@ impl IdentityResolver for DefaultResolver {
             if has_kind_mismatch {
                 if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i]))
                     || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
+                    || is_expected_binary_declaration_group(indices.iter().map(|&i| &objects[i]))
                 {
                     continue;
                 }
@@ -1079,6 +1124,69 @@ mod tests {
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.conflicts.len(), 1);
+    }
+
+    /// Regression test for a real false-positive conflict found live on a two-binary workspace
+    /// (`pdfbox.jar` + `mscorlib.dll`, RFC 0148): **258 conflicts, every one of them a
+    /// `BinaryMethod` beside a same-named `BinaryField`**, which made `ekos resolve` refuse to
+    /// proceed. Compilers guarantee this collision — a C# property is a backing field plus
+    /// `get_`/`set_` methods, and `.ctor` normalizes to `ctor` for every type at once.
+    #[test]
+    fn a_binary_method_and_a_same_named_field_do_not_conflict() {
+        let g = make_graph(&[
+            ("Total", ObjectKind::Custom("BinaryMethod".to_string())),
+            ("total", ObjectKind::Custom("BinaryField".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.conflicts.is_empty(),
+            "a compiled method beside a same-named field is expected, not a conflict — got: {:?}",
+            result.conflicts
+        );
+    }
+
+    /// A field named after its own type (`private Interop interop;`) is the second real shape
+    /// this fires on — the two conflicts left over after the method/field pair was excluded.
+    #[test]
+    fn a_binary_field_named_after_its_type_does_not_conflict() {
+        let g = make_graph(&[
+            ("Interop", ObjectKind::Custom("BinaryType".to_string())),
+            ("interop", ObjectKind::Custom("BinaryField".to_string())),
+        ]);
+        assert!(DefaultResolver::new().resolve(&g).conflicts.is_empty());
+    }
+
+    #[test]
+    fn a_non_declaration_kind_mixed_into_the_binary_group_still_conflicts() {
+        // The exclusion covers only declarations inside one compiled type system. An assembly —
+        // or anything else — sharing the name stays a genuine surprise worth flagging.
+        for intruder in [
+            ObjectKind::Custom("BinaryAssembly".to_string()),
+            ObjectKind::Custom("ExternalIoBoundary".to_string()),
+            ObjectKind::Custom("PythonModule".to_string()),
+        ] {
+            let g = make_graph(&[
+                ("Total", ObjectKind::Custom("BinaryMethod".to_string())),
+                ("total", ObjectKind::Custom("BinaryField".to_string())),
+                ("total", intruder.clone()),
+            ]);
+            assert_eq!(
+                DefaultResolver::new().resolve(&g).conflicts.len(),
+                1,
+                "{intruder} must still conflict"
+            );
+        }
+    }
+
+    #[test]
+    fn a_binary_method_paired_with_an_unrelated_kind_still_conflicts() {
+        // The exclusion requires *both* binary kinds. A `BinaryMethod` beside a `Table` is a real
+        // cross-system name collision and must stay visible.
+        let g = make_graph(&[
+            ("Total", ObjectKind::Custom("BinaryMethod".to_string())),
+            ("total", ObjectKind::Table),
+        ]);
+        assert_eq!(DefaultResolver::new().resolve(&g).conflicts.len(), 1);
     }
 
     #[test]

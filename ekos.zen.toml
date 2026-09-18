@@ -1,0 +1,116 @@
+# EKOS workspace configuration
+
+[workspace]
+root = "."
+log-level = "info"
+log-format = "pretty"  # "pretty" | "json"
+
+[observe]
+paths = ["."]
+ignore-patterns = [
+    ".ekos",
+    ".git",
+    "target",
+    "node_modules",
+    "*.lock",
+    # Test/demo fixtures — real content (Northwind/ecommerce SQL, Pentaho/PDF presentation
+    # examples used to validate other RFCs' analyzers), but not EKOS's own architecture. Excluded
+    # so `ekos docs generate` documents EKOS itself, not the fixture data other analyzers were
+    # tested against.
+    "fixtures",
+    "examples",
+    # Found live 2026-08-23 (devlog_90 found the same gap in a downstream project first): `doc/`
+    # is this repo's own self-dogfooded `docs generate --output doc` output. Left unexcluded, a
+    # real `ekos build` would re-ingest EKOS's own generated documentation as if it were fresh
+    # project source — the same self-referential contamination loop devlog_90 fixed elsewhere.
+    "doc",
+    "doc-sa",
+    "doc-objects",
+    # Found live 2026-09-06 during an `ekos eval run` baseline: RFC 0138's `evals/` directory
+    # (scenario YAML + saved JSON reports) was never added here, so it self-contaminated the
+    # ledger the eval harness grades answers against — a search for `FooBarNonexistentAnalyzer`
+    # (an intentionally-fake name from an adversarial scenario) hit `evals/datasets/adversarial.
+    # yaml` directly, and a real question about the redaction module got answered by citing
+    # `evals/datasets/security.yaml` back at itself instead of `redaction.rs`. Same class of bug
+    # as the `doc`/`doc-sa`/`doc-objects` exclusion above (devlog_90).
+    "evals",
+    # Found live 2026-09-06, same rebuild that found the `evals/` gap above: `test-runs/` is a
+    # ~2.3GB, git-ignored (see .gitignore) local directory of leftover artifacts from the RFC
+    # 0111/0113 distributed-storage E2E soak tests (devlog_144, 2026-08-31) — full copies of a
+    # 95-partition Elixir workspace plus duplicated MySQL/MSSQL DB-script fixtures. Being
+    # git-ignored doesn't exclude it from `ekos build`'s own observation walk, so it was being
+    # fully re-ingested as if it were EKOS's own multi-language source — the actual cause of the
+    # 376 identity conflicts a `resolve` hit on this rebuild (generic names like `generate`/
+    # `validate`/`json`/`test` colliding across Rust/Python/Elixir/JS symbols from that test
+    # workspace), and a much bigger contamination source for `ekos ask`/eval answers than the
+    # `evals/` gap alone.
+    "test-runs",
+    # Found live 2026-09-08 by the RFC 0140 claim-location measurement, which surfaced cited
+    # claims pointing at `web/api/.venv/lib/python3.13/site-packages/{numpy,scipy,networkx,
+    # _pytest}/…`. This is by far the largest contamination source found so far — bigger than
+    # `evals/`, `test-runs/` and `doc/` combined:
+    #
+    #   3758 of the 3797 Python files analysed (98.7%) were third-party venv code, not EKOS's own
+    #   (the whole repo has just 49 real .py files outside it), and
+    #   27408 of 53830 compiled CKM objects (50.9%) came from site-packages, against 3838 (7.1%)
+    #   from EKOS's own `ekos/` source.
+    #
+    # So over half the knowledge model described numpy/scipy/pytest internals, and every `ekos ask`
+    # retrieval ranked EKOS's own code against 27k third-party objects. `__pycache__` is listed for
+    # the same reason at a smaller scale. Note `.gitignore` does not exclude anything from `ekos
+    # build`'s observation walk — that is precisely how `test-runs/` was missed too.
+    ".venv",
+    "venv",
+    "site-packages",
+    "__pycache__",
+    # Found 2026-09-08 in the same measurement, one layer down: after the venv fix, `build` still
+    # observed 9964 files — and 9107 of them (91%) were SonarCloud scanner output in
+    # `./.scannerwork` (422) and `./web/api/.scannerwork` (8685). These compile to almost nothing
+    # (4 CKM objects, being `.ucfg` intermediates rather than source), but `ekos build` writes a
+    # real `File` object per observed file straight to the ledger, so 8685 of the ledger's 9964
+    # `File` objects were scanner artifacts — all indexed and searchable, competing with real code
+    # in every retrieval.
+    #
+    # Self-inflicted, like the `evals/` case: these directories exist because this project runs
+    # `sonar-scanner` on itself. Deliberately NOT adding the generic `build`/`dist`/`coverage`
+    # names — patterns match a bare path component, so those would risk pruning real source
+    # directories in this or any other workspace; the `build` hits here are all under `target/`,
+    # which is already excluded.
+    ".scannerwork",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+]
+
+[llm]
+provider = "openai"
+base-url = "https://opencode.ai/zen/v1"
+model = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+[llm-description]
+# Temporarily disabled for the RFC 0139/0140/0141 measurement rebuild (2026-09-14) and the RFC
+# 0140 §1 rebuild before it (2026-09-08), same reasoning both times: `llm_description` is a
+# post-`commit` step that makes an LLM call per Module/Rollup/Symbol, and leaving it on would add
+# hours to a run whose whole purpose was something else. Restored to `true` immediately after each
+# measurement completed; the actual regeneration itself (a slow, ~6,000+-call pass) is still
+# deferred, not run — see TODO.md.
+enabled = false
+scope = "all"
+
+# RFC 0030 — Marketing Agent (`ekos marketing publish`). Defaults shown; publishing to X
+# stays off until [marketing.twitter] enabled = true is set explicitly.
+[marketing]
+github = "https://github.com/alexeyban/EKOS"
+hashtags = ["Rust", "AI", "MCP"]
+#
+[marketing.twitter]
+# Disabled 2026-08-20 at the user's request, pausing automatic X publishing after it was just
+# wired up (both this gate and the GitHub Actions auto-trigger below were disabled together).
+# `ekos marketing publish` still drafts/previews normally — this only blocks the real API call,
+# forcing NoopPublisher regardless of --dry-run. Flip back to true to re-enable.
+enabled = false
+dry-run = false
+
+[ai]
+max-tokens = 8192  # deepseek-v4-flash reasons; hidden reasoning tokens count against this

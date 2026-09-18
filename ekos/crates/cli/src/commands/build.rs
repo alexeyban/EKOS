@@ -4,6 +4,7 @@ use ekos_artifact::{ArtifactId, ArtifactStore, IndexArtifact, PackArtifactStore}
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
+use ekos_plugin_binary::BinaryObserver;
 use ekos_plugin_clickhouse::{ClickHouseHttpClient, ClickHouseObserver};
 use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
@@ -139,6 +140,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         // RFC 0147: local .pl/.pm/.t/.psgi files (and .cgi with a real perl shebang), no
         // credential to gate on — runs unconditionally, same as JavaScriptObserver.
         Box::new(PerlObserver::new()),
+        // RFC 0148: compiled .dll/.exe/.class/.jar/.war/.ear. Candidate files are chosen by
+        // extension but the format is decided by magic bytes, so the overwhelmingly common
+        // native `.dll` is skipped rather than reported as an empty assembly. No credential to
+        // gate on and no toolchain required — the readers are in-process, so this runs
+        // unconditionally like every other local-source observer above.
+        Box::new(BinaryObserver::new()),
     ];
     if let Ok(export_dir) = std::env::var(CRYPTO_EXPORT_DIR_ENV) {
         observers.push(Box::new(CryptoObserver::new(

@@ -5370,6 +5370,34 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] Adversarial premise rejections ("the evidence does not confirm…") aren't counted as refusals (adv-004/011/015) — decide grader vs prompt.
   - [ ] `code-004`: workspace `[workspace.package] edition` isn't surfaced as a fact.
 
+- [x] **RFC 0148 — compiled .NET and JVM binary recovery (devlog_189, 2026-09-18).** The "no readable
+  source" wedge taken to its limit: a program whose source is gone, not merely a format nobody can read.
+  New `crates/binary` (`DecompiledAst` + a `cafebabe`-backed JVM backend and a **hand-written ECMA-335
+  reader** for .NET), `plugins/binary` observer, `BinaryAnalyzerPass` (types/methods/fields/`Calls`/
+  `ExternalIoBoundary` + one RFC 0027 `TransformGraph` per method, zero LLM), opt-in
+  `[binary-reconstruction]` LLM stage with real confidence scoring, and the `ekos_binary_explain` MCP tool.
+  **In-process, no toolchain, `#![forbid(unsafe_code)]`** — the incoming design's decompiler sidecars were
+  rejected on RFC 0147's own precedent (toolchain dependency, non-reproducible builds, pass determinism,
+  and sandboxing untrusted customer DLLs).
+  **pdfbox.jar + mscorlib.dll: 3,717 types, 33,323 methods, 18,861 fields, 187 I/O boundaries, 13,077
+  resolved call edges; resolve clean, compile 169,379 objects / 264,012 relationships, zero warnings.**
+  - [x] `dotnetdll` (GPL-3.0+, licence-incompatible) and `dotscope` 0.9.1 (**parsed only 77 of 147 real
+    Mono assemblies** — whole-file abort on one custom-attribute blob, the RFC 0146 failure mode) both
+    rejected on measured evidence; the .NET reader degrades per row, never per file.
+  - [x] Cross-kind conflict false positive found live and fixed: **258 conflicts**, all
+    `BinaryMethod`/`BinaryField` (and `BinaryField`/`BinaryType`) name collisions, which failed
+    `ekos resolve` by default. `is_expected_binary_declaration_group`, the third instance of RFC 0093's
+    shape.
+  - [x] `mscorlib.dll` first produced a single **34 MB artifact**; `DecompiledAst::split_by_type` makes
+    both backends emit one artifact per type.
+  - [ ] No statement-level reconstruction (`Fidelity::Structural`). The decompiler sidecar is *defined but
+    unbuilt* behind the same seam — build it only if a customer needs real method bodies.
+  - [ ] Obfuscated/packed binaries are out of scope; detection is in scope but not yet implemented.
+  - [ ] `Calls` edges resolve only to methods compiled in the same run — framework targets stay as the
+    method's `call_targets` property. Revisit if cross-workspace assembly resolution is ever wanted.
+  - [ ] The LLM reconstruction stage has not been run against a real provider yet (subscription/promo-token
+    policy); its guards are unit-tested, not live-measured. Run it on a real legacy app before Phase 5.
+
 - [x] **RFC 0147 — Perl connector and structural analyzer (devlog_188, 2026-09-18).** Perl was the last
   major language in the working set getting nothing but `plugins/file`'s declaration-prefix scan — bare name
   strings, no packages, no edges, no spans. New `plugins/perl` observer (`.pl`/`.pm`/`.t`/`.psgi`, plus

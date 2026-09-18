@@ -1667,8 +1667,10 @@ mod tests {
             seed(&ledger);
             let runtime = Runtime::new(&ledger);
             let mock = Arc::new(MockLlmProvider::new(r#"{"relevant_indices": [2, 1]}"#));
-            let mut config = AiRuntimeConfig::default();
-            config.rerank_llm = true;
+            let config = AiRuntimeConfig {
+                rerank_llm: true,
+                ..Default::default()
+            };
             let ai = AiRuntime::new(&runtime, mock, config);
 
             let mut set = crate::reason::EvidenceSet {
@@ -1695,8 +1697,10 @@ mod tests {
             seed(&ledger);
             let runtime = Runtime::new(&ledger);
             let mock = Arc::new(MockLlmProvider::new("I cannot help with that."));
-            let mut config = AiRuntimeConfig::default();
-            config.rerank_llm = true;
+            let config = AiRuntimeConfig {
+                rerank_llm: true,
+                ..Default::default()
+            };
             let ai = AiRuntime::new(&runtime, mock, config);
 
             let mut set = crate::reason::EvidenceSet {

@@ -950,10 +950,9 @@ mod tests {
             "no object may be created by a comment"
         );
         assert!(
-            table(&graph, "account")
+            !table(&graph, "account")
                 .properties
-                .get("description")
-                .is_none()
+                .contains_key("description")
         );
     }
 

@@ -1,0 +1,21 @@
+[package]
+name = "ekos-plugin-binary"
+description = "RFC 0148 — .NET/JVM binary observer: emits a DecompiledAst per compiled type"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-artifact.workspace = true
+ekos-observation-sdk.workspace = true
+ekos-binary.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

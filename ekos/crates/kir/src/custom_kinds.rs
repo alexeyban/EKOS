@@ -130,6 +130,40 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "directory path — RFC 0044; one hierarchical rollup per directory",
     },
     CustomKind {
+        name: "BinaryAssembly",
+        structurally_keyed: true,
+        note: "(binary path, sha256) — RFC 0148; a facade and its real implementation share a \
+               name and are different entities",
+    },
+    CustomKind {
+        name: "BinaryType",
+        structurally_keyed: true,
+        note: "(binary path, type locator) — RFC 0148; one assembly's namespace prefix is shared \
+               by thousands of types",
+    },
+    CustomKind {
+        name: "BinaryMethod",
+        structurally_keyed: true,
+        note: "(binary path, method locator) — RFC 0148; overloads and accessors collide on name \
+               constantly (`get_Item`, `ToString`, `<init>`)",
+    },
+    CustomKind {
+        name: "BinaryField",
+        structurally_keyed: true,
+        note: "(binary path, field locator) — RFC 0148; `_value`/`Count` recur in every type",
+    },
+    CustomKind {
+        name: "ExternalIoBoundary",
+        structurally_keyed: true,
+        note: "(method locator, bytecode offset) — RFC 0148; every JDBC call site shares the same \
+               owner and method name",
+    },
+    CustomKind {
+        name: "BinaryRule",
+        structurally_keyed: true,
+        note: "(method locator, rule index) — RFC 0148 stage 2; one reconstructed rule per slot",
+    },
+    CustomKind {
         name: "ProjectSummary",
         structurally_keyed: true,
         note: "the workspace/project — RFC 0088; exactly one per project",
@@ -207,6 +241,12 @@ mod tests {
             "JsModule",
             "JsSymbol",
             "Document",
+            "BinaryAssembly",
+            "BinaryType",
+            "BinaryMethod",
+            "BinaryField",
+            "ExternalIoBoundary",
+            "BinaryRule",
         ] {
             assert!(
                 is_structurally_keyed(name),

@@ -112,7 +112,10 @@ Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real functi
 RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
 Perl source (`.pl`/`.pm`/`.t`/`.psgi`, plus `.cgi` with a real `perl` shebang — packages, subs,
 `use`/`require` dependencies, `use parent`/`use base`/`@ISA` inheritance, POD descriptions and
-source spans; RFC 0147), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
+source spans; RFC 0147), **compiled .NET and JVM binaries with no source available**
+(`.dll`/`.exe`/`.class`/`.jar`/`.war`/`.ear` — types, methods, signatures, fields, the real call
+graph, branch structure, string/numeric constants and external I/O boundaries, read in-process
+from CLI metadata and bytecode with no .NET SDK or JRE required; RFC 0148), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
 0056), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). PostgreSQL, SQL Server, and Jira remain planned.

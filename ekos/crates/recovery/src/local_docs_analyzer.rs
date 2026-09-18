@@ -859,7 +859,7 @@ mod tests {
             .find(|o| o.id == section_kir_id("notes.md", 0))
             .unwrap();
         assert_eq!(sec.name, "notes.md: section 1");
-        assert!(sec.properties.get("heading").is_none());
+        assert!(!sec.properties.contains_key("heading"));
         assert_eq!(sec.properties["doc_type"], "doc");
     }
 

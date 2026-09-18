@@ -139,6 +139,16 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
         None
     };
 
+    // RFC 0148 stage 2: opt-in LLM reconstruction of business logic from compiled binaries.
+    // Runs after `[llm-description]` and for the same architectural reason — it reads the real,
+    // fully-committed structural facts (methods, literals, call targets, I/O boundaries) that
+    // `recover`/`commit` produced, not an in-memory graph.
+    let reconstruction_stats = if config.binary_reconstruction.enabled {
+        Some(run_binary_reconstruction(config, cwd, &*ledger, yes).await?)
+    } else {
+        None
+    };
+
     // RFC 0125: the opt-in vector-search index. Runs last (like `[llm-description]`) so it can
     // embed the `ai_overview` prose that step just wrote. `[embeddings].enabled` gates it;
     // `arms_run.vector` in `retrieve` reports the downgrade when it's absent.
@@ -165,6 +175,25 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
             stats.symbols_without_span,
             stats.llm_errors
         );
+    }
+    if let Some(stats) = &reconstruction_stats {
+        println!(
+            "  Binary logic:          {} type(s) named, {} rule(s) accepted, {} unconfirmed, \
+             {} discarded ({} slice(s), {} invented locator(s), {} error(s))",
+            stats.types_named,
+            stats.rules_accepted,
+            stats.rules_unconfirmed,
+            stats.rules_dropped,
+            stats.slices_sent,
+            stats.locators_hallucinated,
+            stats.errors
+        );
+        if stats.skipped_budget > 0 {
+            println!(
+                "  Binary logic budget:   {} type(s) not attempted (max-slices reached)",
+                stats.skipped_budget
+            );
+        }
     }
     if lineage_links_added > 0 {
         println!("  Data lineage links:    {lineage_links_added}");
@@ -542,6 +571,42 @@ async fn run_llm_description(
     }
 
     Ok(stats)
+}
+
+/// RFC 0148 stage 2 — `[binary-reconstruction]`.
+///
+/// Gated behind the same explicit spend confirmation `[llm-description]` uses. The number quoted
+/// is the *ceiling* (`max-slices`), not an estimate: a user accepting a cost must be told the
+/// worst case, and this run cannot exceed it.
+async fn run_binary_reconstruction(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    yes: bool,
+) -> anyhow::Result<ekos_recovery::ReconstructionStats> {
+    let cfg = config.binary_reconstruction;
+    println!(
+        "Binary logic reconstruction requested — up to {} LLM call(s), one per compiled type, \
+         real cost. Rules scoring below {:.2} are recorded as unconfirmed, not as facts.",
+        cfg.max_slices, cfg.min_confidence
+    );
+    if !confirm_description_spend(yes)? {
+        println!("Skipped (not confirmed).");
+        return Ok(ekos_recovery::ReconstructionStats::default());
+    }
+
+    let llm = select_llm_provider_for_description(config, &config.artifact_dir(cwd))?;
+    ekos_recovery::reconstruct_binary_logic(
+        ledger,
+        &*llm,
+        ekos_recovery::ReconstructionConfig {
+            max_slices: cfg.max_slices,
+            min_confidence: cfg.min_confidence,
+            include_compiler_generated: cfg.include_compiler_generated,
+        },
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("binary logic reconstruction failed: {e}"))
 }
 
 /// RFC 0125: the opt-in post-`commit` embed pass. No spend prompt — embeddings are cheap and

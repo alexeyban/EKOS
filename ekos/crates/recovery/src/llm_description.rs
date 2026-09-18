@@ -63,6 +63,7 @@ const MODULE_KINDS: &[&str] = &[
     "RustModule",
     "PythonModule",
     "JsModule",
+    "BinaryType",
     "Crate",
     "Rollup",
 ];
@@ -72,6 +73,7 @@ const SYMBOL_KINDS: &[&str] = &[
     "PythonSymbol",
     "JsSymbol",
     "PerlSymbol",
+    "BinaryMethod",
 ];
 
 /// RFC 0088's `[llm-description] scope` — how far this run goes. `Modules` is the config default

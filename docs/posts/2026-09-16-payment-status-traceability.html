@@ -1,0 +1,137 @@
+<title>Testing EKOS on a Postgres project</title>
+<meta name="description" content="Tnhn asked me to test EKOS on a Postgres project: when a payment fails or changes status, you have to search three places to find out why. I ran it on LedgerSMB instead.">
+<style>
+:root{
+  --ground:#f6f4fc; --raised:#ffffff; --ink:#171326; --ink-soft:#5c5578; --rule:#e3ddf5;
+  --violet:#7c3aed; --green:#059669; --red:#dc2f57; --track:#ece7f8;
+  --code-bg:#130f22; --code-fg:#e9e4f7; --code-dim:#8f89b0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0b0a12; --raised:#14121f; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.11);
+    --violet:#a66bff; --green:#14f195; --red:#ff5c7a; --track:rgba(255,255,255,0.07);
+    --code-bg:#100d1c; --code-fg:#e9e4f7; --code-dim:#7f79a3;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0b0a12; --raised:#14121f; --ink:#f3f1fa; --ink-soft:#a7a2c4; --rule:rgba(255,255,255,0.11);
+  --violet:#a66bff; --green:#14f195; --red:#ff5c7a; --track:rgba(255,255,255,0.07);
+  --code-bg:#100d1c; --code-fg:#e9e4f7; --code-dim:#7f79a3;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+.mono,code,.num{font-family:ui-monospace,"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace}
+.wrap{max-width:46rem;margin:0 auto;padding-block:3.5rem 6rem;padding-inline:clamp(16px,5vw,32px)}
+h1,h2,h3{text-wrap:balance;margin:0;line-height:1.15;letter-spacing:-0.012em}
+h1{font-size:clamp(2rem,5.2vw,2.9rem);font-weight:750}
+h2{font-size:1.5rem;font-weight:700;margin-top:3.6rem}
+h3{font-size:1.02rem;font-weight:650;margin-top:1.8rem}
+p{margin:1rem 0 0;max-width:65ch}
+.eyebrow{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;color:var(--violet);margin:0 0 1rem}
+.lede{font-size:1.14rem;color:var(--ink-soft);margin-top:1.1rem}
+a{color:var(--violet)}
+code{font-size:.86em;background:var(--track);padding:.1em .35em;border-radius:4px}
+ul{padding-left:1.2rem;margin:.8rem 0 0}
+li{margin-top:.45rem;max-width:63ch}
+strong{font-weight:650}
+
+/* score ladder */
+.ladder{margin-top:2.4rem;display:grid;gap:.9rem}
+.rung{display:grid;grid-template-columns:3.2rem 1fr;gap:.9rem;align-items:center}
+.rung .n{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:1.55rem;font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.rung .body{display:grid;gap:.3rem}
+.rung .bar{height:.7rem;background:var(--track);border-radius:3px;overflow:hidden}
+.rung .bar i{display:block;height:100%;border-radius:3px;background:var(--ink-soft)}
+.rung.after .bar i{background:var(--violet)}
+.rung.after .n{color:var(--violet)}
+.rung .lbl{font-size:.9rem;color:var(--ink-soft)}
+.rung .lbl b{color:var(--ink);font-weight:600}
+.rung .delta{font-family:ui-monospace,"SF Mono",Consolas,monospace;color:var(--green);font-size:.82rem;margin-left:.35rem}
+.scale-note{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.72rem;color:var(--ink-soft);margin-top:.6rem;padding-left:4.1rem}
+
+/* tables */
+.tbl{overflow-x:auto;margin-top:1.4rem;border:1px solid var(--rule);border-radius:8px;background:var(--raised)}
+table{border-collapse:collapse;width:100%;min-width:34rem;font-size:.9rem}
+th,td{padding:.62rem .85rem;text-align:left;border-top:1px solid var(--rule);vertical-align:middle}
+thead th{border-top:none;font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.total td{font-weight:700}
+.cell-bar{display:grid;grid-template-columns:1fr;gap:3px;min-width:7rem}
+.cell-bar span{display:block;height:6px;border-radius:2px}
+.cell-bar .b{background:var(--ink-soft);opacity:.55}
+.cell-bar .a{background:var(--violet)}
+.up{color:var(--green);font-family:ui-monospace,"SF Mono",Consolas,monospace}
+.dn{color:var(--red);font-family:ui-monospace,"SF Mono",Consolas,monospace}
+
+/* where the LLM sits */
+.flow{margin-top:1.4rem;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.76rem}
+.flow span{border:1px solid var(--rule);background:var(--raised);border-radius:5px;padding:.38rem .6rem;white-space:nowrap}
+.flow span.llm{border-color:var(--violet);color:var(--violet);font-weight:650}
+.flow em{font-style:normal;color:var(--ink-soft)}
+.uses{margin-top:1.2rem;display:grid;gap:0;border-top:1px solid var(--rule)}
+.uses div{display:grid;grid-template-columns:minmax(9rem,13rem) 1fr;gap:1rem;padding:.7rem 0;border-bottom:1px solid var(--rule);font-size:.92rem}
+.uses dt{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.8rem;color:var(--ink)}
+.uses dd{margin:0;color:var(--ink-soft)}
+.tag{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--rule);border-radius:4px;padding:.05rem .35rem;margin-left:.4rem;color:var(--ink-soft)}
+@media (max-width:560px){.uses div{grid-template-columns:1fr;gap:.2rem}}
+
+pre{background:var(--code-bg);color:var(--code-fg);border-radius:8px;padding:1rem 1.1rem;overflow-x:auto;font-size:.82rem;line-height:1.55;margin-top:1.2rem}
+pre .c{color:var(--code-dim)}
+
+/* failures */
+.fail{margin-top:1.1rem;border-left:2px solid var(--red);padding:.15rem 0 .15rem 1rem}
+.fail h3{margin:0;font-size:.98rem}
+.fail .ids{font-family:ui-monospace,"SF Mono",Consolas,monospace;font-size:.74rem;color:var(--red);margin-top:.2rem}
+.fail p{margin-top:.35rem;font-size:.93rem;color:var(--ink-soft)}
+
+.note{margin-top:2.2rem;padding:1rem 1.15rem;border:1px dashed var(--rule);border-radius:8px;font-size:.86rem;color:var(--ink-soft)}
+footer{margin-top:4rem;font-size:.8rem;color:var(--ink-soft);border-top:1px solid var(--rule);padding-top:1.2rem}
+</style>
+<style>
+.quote{margin:1.6rem 0 0;padding:1.1rem 1.3rem;border-left:3px solid var(--violet);
+  background:var(--raised);border-radius:0 8px 8px 0;color:var(--ink-soft)}
+.quote p{margin:0;max-width:60ch}
+.want{margin:1.2rem 0 0;padding-left:1.2rem}
+.want li{margin-top:.4rem}
+.cta{margin-top:2.4rem;padding:1.3rem 1.4rem;border:1px solid var(--rule);border-radius:10px;background:var(--raised)}
+.cta a{font-weight:650}
+</style>
+
+<div class="wrap">
+
+<div class="eyebrow">EKOS · field test · 16 September 2026</div>
+<h1>Testing EKOS on a Postgres project</h1>
+
+<p class="lede">Tnhn asked me to test EKOS on a Postgres project, with this business problem:</p>
+
+<div class="quote">
+  <p>“When a payment fails or status changes, I can't trace where it comes from. I have to search
+  3 places: Postgres DB, backend code, and PDF invoices. It's hard to know which code updates
+  payment status.”</p>
+</div>
+
+<p>What was wanted from EKOS: not just a chat answer, but a final document that shows</p>
+
+<ol class="want">
+  <li>Data lineage</li>
+  <li>Code evidence — which file and function updates <code>payment_status</code></li>
+  <li>Links to the actual code lines and DB columns as proof</li>
+</ol>
+
+<p>I could not apply it to that project, so I took
+<a href="https://github.com/ledgersmb/LedgerSMB">LedgerSMB</a> — a real Perl 5 / PostgreSQL
+accounting ERP.</p>
+
+<p>I added a PostgreSQL adaptor. To get a clean result I deleted the <code>doc/</code> folder and
+<code>README.md</code>, so nothing in the answer could come from documentation somebody had already
+written, and ran EKOS on the project.</p>
+
+<p>It turned out there is no <code>payment_status</code> column at all. Status lives in a workflow
+engine, reached through the general ledger, and exactly one function in the codebase writes it.</p>
+
+<div class="cta">
+  <p style="margin:0">How, and the results — <a href="../presentations/payment-status-traceability.html">Where payment status comes from →</a></p>
+</div>
+
+</div>
