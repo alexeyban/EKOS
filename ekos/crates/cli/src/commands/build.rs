@@ -1,10 +1,10 @@
 use super::store::open_store;
+use crate::extension::Extensions;
 use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
-use ekos_plugin_binary::BinaryObserver;
 use ekos_plugin_clickhouse::{ClickHouseHttpClient, ClickHouseObserver};
 use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
@@ -105,6 +105,12 @@ fn save_fingerprints(path: &Path, fingerprints: &HashMap<String, String>) -> Res
 }
 
 pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
+    run_with(config, cwd, &Extensions::none()).await
+}
+
+/// [`run`] with RFC 0149 extensions: their observers run after the built-in ones, and their
+/// logic versions are folded into the fingerprint cache key.
+pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Result<()> {
     let ledger = open_store(config, cwd)?;
 
     let artifact_store = PackArtifactStore::open(config.artifact_dir(cwd))
@@ -140,13 +146,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         // RFC 0147: local .pl/.pm/.t/.psgi files (and .cgi with a real perl shebang), no
         // credential to gate on — runs unconditionally, same as JavaScriptObserver.
         Box::new(PerlObserver::new()),
-        // RFC 0148: compiled .dll/.exe/.class/.jar/.war/.ear. Candidate files are chosen by
-        // extension but the format is decided by magic bytes, so the overwhelmingly common
-        // native `.dll` is skipped rather than reported as an empty assembly. No credential to
-        // gate on and no toolchain required — the readers are in-process, so this runs
-        // unconditionally like every other local-source observer above.
-        Box::new(BinaryObserver::new()),
     ];
+    // RFC 0149: out-of-tree observers (e.g. the private RFC 0148 binary decompiler) run after the
+    // built-in ones.
+    for e in ext.iter() {
+        observers.extend(e.observers(config));
+    }
     if let Ok(export_dir) = std::env::var(CRYPTO_EXPORT_DIR_ENV) {
         observers.push(Box::new(CryptoObserver::new(
             Arc::new(ParquetExportReader),
@@ -243,6 +248,10 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let mut connectors_skipped_cached = 0usize;
     let mut index_entries: HashMap<String, ekos_artifact::ArtifactId> = HashMap::new();
     let redaction_config = config.redaction_config();
+    // RFC 0135 Part A, extended by RFC 0149: an extension's observer output changing must also
+    // invalidate the cache. With no extensions this is exactly `PIPELINE_LOGIC_VERSION`.
+    let logic_version =
+        ekos_common::PIPELINE_LOGIC_VERSION.wrapping_add(ext.logic_version().wrapping_mul(1_000));
 
     for base in &observe_paths {
         // RFC 0044 Phase 1: distinguishes objects from different projects when `[observe] paths`
@@ -273,8 +282,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
 
         let fp = source_fingerprint(&ctx);
-        let fp_key =
-            fingerprint_cache_key(base, ekos_common::PIPELINE_LOGIC_VERSION, &redaction_config);
+        let fp_key = fingerprint_cache_key(base, logic_version, &redaction_config);
         if !ledger_is_empty && fingerprints.get(&fp_key) == Some(&fp.0) {
             connectors_skipped_cached += observers.len();
             continue;

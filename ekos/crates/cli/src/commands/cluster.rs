@@ -11,6 +11,7 @@
 //! coordinator and commits the new manifest generation — fenced, so a stale ex-lease-holder's
 //! late commit is rejected and the next worker resumes from the recorded watermark.
 
+use crate::extension::Extensions;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -113,6 +114,28 @@ pub async fn compile_worker_run(
     force_resolve: bool,
     retry_lease_seconds: u64,
 ) -> Result<()> {
+    compile_worker_run_with(
+        coordinator,
+        shard,
+        workspace,
+        parallel_recover,
+        force_resolve,
+        retry_lease_seconds,
+        &Extensions::none(),
+    )
+    .await
+}
+
+/// [`compile_worker_run`] with RFC 0149 extensions: the shard's pipeline runs them too.
+pub async fn compile_worker_run_with(
+    coordinator: &str,
+    shard: &str,
+    workspace: &Path,
+    parallel_recover: bool,
+    force_resolve: bool,
+    retry_lease_seconds: u64,
+    ext: &Extensions,
+) -> Result<()> {
     let config_path = workspace.join("ekos.toml");
     let config = EkosConfig::from_file_or_default(&config_path);
     if config.storage.distributed.is_enabled() {
@@ -158,6 +181,7 @@ pub async fn compile_worker_run(
         let ws = workspace.to_path_buf();
         let cfg = config.clone();
         let client_w = client.clone();
+        let ext = ext.clone();
 
         let result = worker
             .run_shard(shard, move |guard| async move {
@@ -170,12 +194,19 @@ pub async fn compile_worker_run(
                 // executor stays free to heartbeat the lease through a multi-minute compile.
                 let ws2 = ws.clone();
                 let cfg2 = cfg.clone();
+                let ext2 = ext.clone();
                 tokio::task::spawn_blocking(move || {
                     tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .map_err(|e| e.to_string())?
-                        .block_on(run_pipeline(&cfg2, &ws2, parallel_recover, force_resolve))
+                        .block_on(run_pipeline(
+                            &cfg2,
+                            &ws2,
+                            parallel_recover,
+                            force_resolve,
+                            &ext2,
+                        ))
                         .map_err(|e| format!("{e:#}"))
                 })
                 .await
@@ -243,12 +274,13 @@ async fn run_pipeline(
     cwd: &Path,
     parallel_recover: bool,
     force_resolve: bool,
+    ext: &Extensions,
 ) -> Result<()> {
-    crate::commands::build::run(config, cwd).await?;
-    crate::commands::recover::run(config, cwd, parallel_recover).await?;
+    crate::commands::build::run_with(config, cwd, ext).await?;
+    crate::commands::recover::run_with(config, cwd, parallel_recover, ext).await?;
     crate::commands::resolve::run(config, cwd, force_resolve)?;
     crate::commands::compile::run(config, cwd).await?;
-    crate::commands::commit::run(config, cwd, true).await?;
+    crate::commands::commit::run_with(config, cwd, true, ext).await?;
     Ok(())
 }
 

@@ -15,7 +15,6 @@ ekos-semantic.workspace = true
 # occupy in `cli/src/commands/commit.rs`) — confirmed before adding this: `ekos-ledger` depends
 # only on `ekos-common`/`ekos-kir`/`ekos-artifact`, so this doesn't create a cycle.
 ekos-ledger.workspace = true
-ekos-binary.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 serde.workspace = true

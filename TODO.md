@@ -5412,6 +5412,16 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] MCP tools ignore unknown arguments silently (`ekos_impact` given `max_depth` ran at its default
     `max_hops: 5`). Consider rejecting unknown keys against the published `inputSchema`.
 
+- [x] **RFC 0149 — extension seam; binary decompiler moved to a private repo (devlog_191, 2026-09-18).**
+  `ekos::extension::EkosExtension` lets an out-of-tree crate add observers (`build`), passes with
+  report lines (`recover`), a post-commit step (`commit`) and MCP tools; `ekos::app::main_with`
+  runs the whole CLI with them, and the public binary is `main_with(Extensions::none())`. Every
+  entry point keeps its signature and gains a `*_with` variant; `architecture investigate` and the
+  cluster compile worker thread the set through too. RFC 0148's readers, observer, analyzer pass,
+  `[binary-reconstruction]` and `ekos_binary_explain` now live in private `alexeyban/ekos-binary`
+  (its own `ekos` binary, git-pinned to this repo). Public history was deliberately not rewritten.
+  - [ ] The private workspace pins public EKOS by `Cargo.lock` revision: after any public change to
+    the seam or a crate it uses, run `cargo update` there and re-run its tests.
 - [x] **RFC 0147 — Perl connector and structural analyzer (devlog_188, 2026-09-18).** Perl was the last
   major language in the working set getting nothing but `plugins/file`'s declaration-prefix scan — bare name
   strings, no packages, no edges, no spans. New `plugins/perl` observer (`.pl`/`.pm`/`.t`/`.psgi`, plus

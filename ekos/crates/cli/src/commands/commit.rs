@@ -1,4 +1,5 @@
 use super::store::{open_store, store_display};
+use crate::extension::{CommitContext, Extensions};
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirGraph, KirObject, KirRelationship, SourceLocation};
@@ -8,6 +9,12 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
+    run_with(config, cwd, yes, &Extensions::none()).await
+}
+
+/// [`run`] with RFC 0149 extensions: each one's `after_commit` step runs over the fully
+/// committed ledger, after `[llm-description]` and before `[embeddings]`.
+pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensions) -> Result<()> {
     let model_path = config.ekos_dir(cwd).join("ckm").join("model.json");
 
     if ekos_common::compress::resolve_auto(&model_path).is_none() {
@@ -139,15 +146,27 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
         None
     };
 
-    // RFC 0148 stage 2: opt-in LLM reconstruction of business logic from compiled binaries.
-    // Runs after `[llm-description]` and for the same architectural reason — it reads the real,
-    // fully-committed structural facts (methods, literals, call targets, I/O boundaries) that
-    // `recover`/`commit` produced, not an in-memory graph.
-    let reconstruction_stats = if config.binary_reconstruction.enabled {
-        Some(run_binary_reconstruction(config, cwd, &*ledger, yes).await?)
-    } else {
-        None
-    };
+    // RFC 0149: out-of-tree post-commit steps (e.g. the private RFC 0148 binary logic
+    // reconstruction). Same slot and same reason as `[llm-description]`: they read the real,
+    // fully committed graph, not the in-memory CKM `compile` builds.
+    if config.binary_reconstruction.enabled && ext.is_empty() {
+        eprintln!(
+            "note: [binary-reconstruction] is enabled, but this ekos build has no binary \
+             extension installed — skipped"
+        );
+    }
+    let mut extension_lines: Vec<String> = Vec::new();
+    {
+        let commit_ctx = CommitContext {
+            config,
+            cwd,
+            ledger: &*ledger,
+            yes,
+        };
+        for e in ext.iter() {
+            extension_lines.extend(e.after_commit(&commit_ctx).await?);
+        }
+    }
 
     // RFC 0125: the opt-in vector-search index. Runs last (like `[llm-description]`) so it can
     // embed the `ai_overview` prose that step just wrote. `[embeddings].enabled` gates it;
@@ -176,24 +195,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
             stats.llm_errors
         );
     }
-    if let Some(stats) = &reconstruction_stats {
-        println!(
-            "  Binary logic:          {} type(s) named, {} rule(s) accepted, {} unconfirmed, \
-             {} discarded ({} slice(s), {} invented locator(s), {} error(s))",
-            stats.types_named,
-            stats.rules_accepted,
-            stats.rules_unconfirmed,
-            stats.rules_dropped,
-            stats.slices_sent,
-            stats.locators_hallucinated,
-            stats.errors
-        );
-        if stats.skipped_budget > 0 {
-            println!(
-                "  Binary logic budget:   {} type(s) not attempted (max-slices reached)",
-                stats.skipped_budget
-            );
-        }
+    for line in &extension_lines {
+        println!("  {line}");
     }
     if lineage_links_added > 0 {
         println!("  Data lineage links:    {lineage_links_added}");
@@ -573,42 +576,6 @@ async fn run_llm_description(
     Ok(stats)
 }
 
-/// RFC 0148 stage 2 — `[binary-reconstruction]`.
-///
-/// Gated behind the same explicit spend confirmation `[llm-description]` uses. The number quoted
-/// is the *ceiling* (`max-slices`), not an estimate: a user accepting a cost must be told the
-/// worst case, and this run cannot exceed it.
-async fn run_binary_reconstruction(
-    config: &EkosConfig,
-    cwd: &Path,
-    ledger: &dyn ekos_ledger::KnowledgeStore,
-    yes: bool,
-) -> anyhow::Result<ekos_recovery::ReconstructionStats> {
-    let cfg = config.binary_reconstruction;
-    println!(
-        "Binary logic reconstruction requested — up to {} LLM call(s), one per compiled type, \
-         real cost. Rules scoring below {:.2} are recorded as unconfirmed, not as facts.",
-        cfg.max_slices, cfg.min_confidence
-    );
-    if !confirm_description_spend(yes)? {
-        println!("Skipped (not confirmed).");
-        return Ok(ekos_recovery::ReconstructionStats::default());
-    }
-
-    let llm = select_llm_provider_for_description(config, &config.artifact_dir(cwd))?;
-    ekos_recovery::reconstruct_binary_logic(
-        ledger,
-        &*llm,
-        ekos_recovery::ReconstructionConfig {
-            max_slices: cfg.max_slices,
-            min_confidence: cfg.min_confidence,
-            include_compiler_generated: cfg.include_compiler_generated,
-        },
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("binary logic reconstruction failed: {e}"))
-}
-
 /// RFC 0125: the opt-in post-`commit` embed pass. No spend prompt — embeddings are cheap and
 /// cached, unlike the `[llm-description]` generation calls. Vector search is a `FactLedger`-only
 /// feature (`Ledger`/SQLite has no vector arm), and single-node this phase, so this is a no-op on
@@ -722,7 +689,7 @@ pub(crate) fn build_embedding_provider(
 }
 
 /// Same shape as `docs.rs::confirm_prose_spend`.
-fn confirm_description_spend(auto: bool) -> Result<bool> {
+pub fn confirm_description_spend(auto: bool) -> Result<bool> {
     if auto {
         return Ok(true);
     }
@@ -737,7 +704,7 @@ fn confirm_description_spend(auto: bool) -> Result<bool> {
 
 /// Same shape as `docs.rs::select_llm_provider_for_prose` — no degraded mode: an opt-in LLM step
 /// with no real API access should fail clearly, not silently produce nonsense output.
-fn select_llm_provider_for_description(
+pub fn select_llm_provider_for_description(
     config: &EkosConfig,
     artifact_dir: &Path,
 ) -> Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {

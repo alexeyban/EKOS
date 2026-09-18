@@ -115,7 +115,8 @@ Perl source (`.pl`/`.pm`/`.t`/`.psgi`, plus `.cgi` with a real `perl` shebang �
 source spans; RFC 0147), **compiled .NET and JVM binaries with no source available**
 (`.dll`/`.exe`/`.class`/`.jar`/`.war`/`.ear` — types, methods, signatures, fields, the real call
 graph, branch structure, string/numeric constants and external I/O boundaries, read in-process
-from CLI metadata and bytecode with no .NET SDK or JRE required; RFC 0148), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
+from CLI metadata and bytecode with no .NET SDK or JRE required; RFC 0148 — shipped as a separately
+licensed extension build, not part of this open-source repository, RFC 0149), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
 0056), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). PostgreSQL, SQL Server, and Jira remain planned.

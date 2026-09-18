@@ -93,7 +93,7 @@ verb is a compiler stage, run in that order, writing artifacts the next stage co
 | `dbt-gen` | Renders the Transformation IR (RFC 0027) into executable dbt SQL models with `ref()` semantics |
 | `marketing` | Devlog → tweet → human approval → X publish (RFC 0030) — auxiliary tooling outside the compiler pipeline, not a `CompilerPass`/`Observer` |
 | `simulation` | World Engine (RFC 0047-0055) — auxiliary, opt-in, deliberately separate from the compiler pipeline above: `action.rs`/`decision.rs`/`simulation.rs` (a closed 12-action vocabulary, a provider-independent `DecisionEngine` trait, a deterministic round-based loop with seeded priority/resource conflict resolution), `scenario.rs` (YAML scenario/agent definitions, `ekos simulate`'s loader), `forum.rs` (channels/replies/likes/follows/shares), `replay.rs` (a durable per-ledger event log + point-in-time reconstruction, `ekos replay`), `ingest.rs` (`world.sources`: real documents via the actual `localdocs` connector + `LocalDocAnalyzerPass`, no LLM). Writes through `&dyn KnowledgeStore` directly, the same access level `commit.rs` has — `Runtime` stays read-only throughout, unmodified by this crate. Every RFC in this crate builds additively on existing KIR/ledger primitives (`Custom()` escape hatches, `properties` conventions) rather than inventing new storage |
-| `cli` | `commands/` — one file per CLI subcommand, dispatched from `crates/cli/src/bin/ekos.rs`; also hosts the MCP server (`commands/mcp.rs`) |
+| `cli` | `commands/` — one file per CLI subcommand, dispatched from `crates/cli/src/app.rs` (`main_with`; `bin/ekos.rs` is a shim); also hosts the MCP server (`commands/mcp.rs`) and `extension.rs`, the RFC 0149 extension seam (`EkosExtension`: extra observers, recover passes, a post-commit step, MCP tools) that out-of-tree builds plug into |
 | `common` | Shared utilities — `ContentHash`, zstd compression, and `redaction` (RFC 0043: built-in, non-disable-able secrets/PII pattern table + excluded-file globs, the single module both `build.rs` and `recover.rs`'s direct-file-read blocks call before anything reaches the artifact store or ledger) |
 | `scheduler`, `sql-dialect-sdk` | Pass scheduling primitives; the `SqlDialectParser` trait every `plugins/sql-dialect-*` crate implements (RFC 0031) |
 
@@ -107,6 +107,12 @@ Each plugin implements `Observer` from `observation-sdk` and is registered indep
 AST + `Calls` recovery), `clickhouse` (real HTTP client, schema metadata + the opt-in live
 NL-to-SQL query engine, RFC 0056). `sql-dialect-{postgres,mysql,mssql,snowflake,databricks,clickhouse}`
 implement the `SqlDialectParser` trait (RFC 0031).
+**Not in this repo:** RFC 0148's compiled .NET/JVM binary decompiler (readers, observer, analyzer pass,
+`[binary-reconstruction]`, `ekos_binary_explain`) lives in the private `alexeyban/ekos-binary` workspace as
+an RFC 0149 extension with its own `ekos` binary. Public EKOS keeps only the `[binary-reconstruction]`
+config schema, the `Binary*` custom-kind registry rows and identity's binary narrowing, so a ledger a
+private build wrote still resolves and queries here. Public crates must never depend on it.
+
 Scaffolded proof-of-concept only (mock API shapes, not exercised against live accounts):
 `salesforce`, `sap`, `oracle`, `fabric`, `snowflake`.
 

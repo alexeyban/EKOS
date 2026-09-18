@@ -9,7 +9,6 @@ members = [
     "crates/scheduler",
     "crates/observation-sdk",
     "crates/sql-dialect-sdk",
-    "crates/binary",
     "crates/segment-backend",
     "crates/cluster",
     "crates/ledger",
@@ -44,7 +43,6 @@ members = [
     "plugins/elixir",
     "plugins/perl",
     "plugins/javascript",
-    "plugins/binary",
     "plugins/sql-dialect-mysql",
     "plugins/sql-dialect-postgres",
     "plugins/sql-dialect-snowflake",
@@ -76,8 +74,6 @@ ekos-identity  = { path = "crates/identity" }
 ekos-semantic  = { path = "crates/semantic" }
 ekos-observation-sdk = { path = "crates/observation-sdk" }
 ekos-sql-dialect-sdk = { path = "crates/sql-dialect-sdk" }
-ekos-binary     = { path = "crates/binary" }
-ekos-plugin-binary = { path = "plugins/binary" }
 ekos-plugin-sql-dialect-mysql = { path = "plugins/sql-dialect-mysql" }
 ekos-plugin-sql-dialect-postgres = { path = "plugins/sql-dialect-postgres" }
 ekos-plugin-sql-dialect-snowflake = { path = "plugins/sql-dialect-snowflake" }
@@ -170,17 +166,6 @@ oxc_parser    = "=0.133.0"
 oxc_allocator = "=0.133.0"
 oxc_span      = "=0.133.0"
 oxc_ast       = "=0.133.0"
-
-# JVM class-file parsing (RFC 0148) — 0BSD, pure safe Rust, and the only one of the candidates
-# that survived a real corpus: 652/652 classes of `/usr/share/java/pdfbox.jar` parsed, with the
-# `Code` attribute's opcodes already decoded. There is deliberately no .NET equivalent here —
-# `dotnetdll` is GPL-3.0+ (incompatible with this MIT workspace) and `dotscope` 0.9.1 aborted the
-# whole file on 70 of 147 real Mono assemblies, so `crates/binary`'s ECMA-335 reader is written by
-# hand. See RFC 0148 "Stage 1 — .NET backend, and why".
-cafebabe = "0.9"
-
-# Archive reading — jar/war/ear members (RFC 0148) and DOCX (`plugins/localdocs`, pre-existing).
-zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # HTTP client (LLM API calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

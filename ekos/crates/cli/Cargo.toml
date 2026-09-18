@@ -52,7 +52,6 @@ ekos-plugin-python = { path = "../../plugins/python" }
 ekos-plugin-rust = { path = "../../plugins/rust" }
 ekos-plugin-elixir = { path = "../../plugins/elixir" }
 ekos-plugin-perl = { path = "../../plugins/perl" }
-ekos-plugin-binary = { path = "../../plugins/binary" }
 ekos-plugin-javascript = { path = "../../plugins/javascript" }
 clap.workspace = true
 uuid.workspace = true
@@ -61,6 +60,7 @@ axum.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

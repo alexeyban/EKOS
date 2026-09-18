@@ -26,6 +26,7 @@
 
 use super::query_log;
 use super::store::{facts_dir, open_store, open_store_read_only, uses_fact_engine};
+use crate::extension::Extensions;
 use anyhow::{Context, Result};
 use axum::{
     Router,
@@ -175,12 +176,34 @@ pub fn run(
     allow_origins: &[String],
     token: Option<String>,
 ) -> Result<()> {
+    run_with(
+        config,
+        workspace,
+        tcp,
+        http,
+        allow_origins,
+        token,
+        &Extensions::none(),
+    )
+}
+
+/// [`run`] with RFC 0149 extensions: their MCP tools are listed and dispatched alongside the
+/// built-in ones on whichever transport runs.
+pub fn run_with(
+    config: &EkosConfig,
+    workspace: &Path,
+    tcp: Option<&str>,
+    http: Option<&str>,
+    allow_origins: &[String],
+    token: Option<String>,
+    ext: &Extensions,
+) -> Result<()> {
     match (tcp, http) {
         (Some(_), Some(_)) => {
             anyhow::bail!("`--tcp` and `--http` are mutually exclusive — pick one transport")
         }
-        (Some(addr), None) => serve_tcp(config, workspace, addr, token),
-        (None, Some(addr)) => serve_http(config, workspace, addr, token, allow_origins),
+        (Some(addr), None) => serve_tcp(config, workspace, addr, token, ext),
+        (None, Some(addr)) => serve_http(config, workspace, addr, token, allow_origins, ext),
         (None, None) => {
             // stdio is a private pipe owned by the spawning host — never gated (RFC 0128 §1.1).
             let stdin = std::io::stdin();
@@ -190,6 +213,7 @@ pub fn run(
                 config,
                 workspace,
                 &mut cache,
+                ext,
                 stdin.lock(),
                 stdout.lock(),
                 None,
@@ -237,6 +261,7 @@ fn serve_messages(
     config: &EkosConfig,
     workspace: &Path,
     cache: &mut StoreCache,
+    ext: &Extensions,
     reader: impl BufRead,
     mut writer: impl Write,
     require_token: Option<&str>,
@@ -281,7 +306,7 @@ fn serve_messages(
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handle_message(config, workspace, &line, cache) {
+        if let Some(response) = handle_message_with(config, workspace, &line, cache, ext) {
             writeln!(writer, "{response}")?;
             writer.flush()?;
         }
@@ -311,6 +336,7 @@ fn serve_tcp(
     workspace: &Path,
     addr: &str,
     token: Option<String>,
+    ext: &Extensions,
 ) -> Result<()> {
     let listener = std::net::TcpListener::bind(addr)
         .with_context(|| format!("binding MCP TCP listener on {addr}"))?;
@@ -335,6 +361,7 @@ fn serve_tcp(
         let config = config.clone();
         let workspace = workspace.to_path_buf();
         let token = token.clone();
+        let ext = ext.clone();
         std::thread::spawn(move || {
             let reader = match stream.try_clone() {
                 Ok(s) => std::io::BufReader::new(s),
@@ -348,6 +375,7 @@ fn serve_tcp(
                 &config,
                 &workspace,
                 &mut cache,
+                &ext,
                 reader,
                 &stream,
                 token.as_deref(),
@@ -393,12 +421,19 @@ fn serve_http(
     addr: &str,
     token: Option<String>,
     allow_origins: &[String],
+    ext: &Extensions,
 ) -> Result<()> {
     let socket: std::net::SocketAddr = addr
         .parse()
         .with_context(|| format!("parsing --http address {addr}"))?;
 
-    let app = build_http_router(config, workspace, token.clone(), allow_origins.to_vec());
+    let app = build_http_router(
+        config,
+        workspace,
+        token.clone(),
+        allow_origins.to_vec(),
+        ext,
+    );
 
     let loopback = socket.ip().is_loopback();
     let auth_note = if token.is_some() {
@@ -441,15 +476,17 @@ fn build_http_router(
     workspace: &Path,
     token: Option<String>,
     allow_origins: Vec<String>,
+    ext: &Extensions,
 ) -> Router {
     let (jobs, mut rx) = tokio::sync::mpsc::unbounded_channel::<McpJob>();
     {
         let config = config.clone();
         let workspace = workspace.to_path_buf();
+        let ext = ext.clone();
         std::thread::spawn(move || {
             let mut cache = StoreCache::new();
             while let Some((line, reply)) = rx.blocking_recv() {
-                let response = handle_message(&config, &workspace, &line, &mut cache);
+                let response = handle_message_with(&config, &workspace, &line, &mut cache, &ext);
                 let _ = reply.send(response);
             }
         });
@@ -634,6 +671,18 @@ pub fn handle_message(
     line: &str,
     cache: &mut StoreCache,
 ) -> Option<String> {
+    handle_message_with(config, workspace, line, cache, &Extensions::none())
+}
+
+/// [`handle_message`] with RFC 0149 extensions: their tools are appended to `tools/list`, and a
+/// `tools/call` no built-in tool matches is offered to them before failing as unknown.
+pub fn handle_message_with(
+    config: &EkosConfig,
+    workspace: &Path,
+    line: &str,
+    cache: &mut StoreCache,
+    ext: &Extensions,
+) -> Option<String> {
     let msg: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
@@ -657,8 +706,8 @@ pub fn handle_message(
     let response = match method {
         "initialize" => ok_response(id, initialize_result(&params)),
         "ping" => ok_response(id, json!({})),
-        "tools/list" => ok_response(id, json!({ "tools": tool_definitions(config) })),
-        "tools/call" => ok_response(id, tools_call(config, workspace, &params, cache)),
+        "tools/list" => ok_response(id, json!({ "tools": tool_definitions(config, ext) })),
+        "tools/call" => ok_response(id, tools_call(config, workspace, &params, cache, ext)),
         other => error_response(id, -32601, &format!("method not found: {other}")),
     };
     Some(response)
@@ -690,10 +739,13 @@ fn initialize_result(params: &Value) -> Value {
 /// (every other tool reads only the local ledger). Off by default — only listed when
 /// `[clickhouse].enable-mcp-query = true` is set in `ekos.toml`, so a connected AI agent never
 /// gets live query access unless a human operator explicitly opts the workspace in.
-fn tool_definitions(config: &EkosConfig) -> Vec<Value> {
+fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     let mut tools = base_tool_definitions();
     if config.clickhouse.enable_mcp_query {
         tools.push(clickhouse_query_tool_definition());
+    }
+    for e in ext.iter() {
+        tools.extend(e.mcp_tools(config));
     }
     tools
 }
@@ -882,18 +934,6 @@ fn base_tool_definitions() -> Vec<Value> {
             }
         },
         {
-            "name": "ekos_binary_explain",
-            "description": "Explains the business logic recovered from a compiled .NET assembly or JVM class (RFC 0148) with no source available: the type's members, each method's signature, cyclomatic complexity, string/numeric constants and external I/O boundaries (database/http/file/messaging/process), plus any LLM-reconstructed rules with their confidence and the full provenance chain back to a bytecode offset or metadata token and the binary's SHA-256. Read-only. Facts read deterministically from bytecode carry extractor `ekos-jvm-classfile/v1`/`ekos-cil-metadata/v2`; LLM-inferred rules carry `llm-reconstruction-v1` and are never presented as equally certain.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "description": "A BinaryType or BinaryMethod object id, from ekos_search or ekos_ekl" },
-                    "include_unconfirmed": { "type": "boolean", "description": "Include reconstructed rules that scored below the confidence threshold or were contradicted (default false)" }
-                },
-                "required": ["id"]
-            }
-        },
-        {
             "name": "ekos_architecture_evaluate",
             "description": "Real, deterministic architecture completeness/evidence-coverage score (RFC 0065 Phase 3) — the same computation `ekos architecture investigate` and generated docs' Executive Summary use, without running a build. Reports crates_total/crates_classified and any open issues (e.g. missing role classification). No LLM call; a vacuous score (crates_total == 0) means nothing has been compiled yet, not 100% confidence.",
             "inputSchema": { "type": "object", "properties": {} }
@@ -1033,6 +1073,7 @@ fn tools_call(
     workspace: &Path,
     params: &Value,
     cache: &mut StoreCache,
+    ext: &Extensions,
 ) -> Value {
     let name = params
         .get("name")
@@ -1047,7 +1088,7 @@ fn tools_call(
     // entirely — no usage-log entry (this log is scoped to reads, for materialized-view
     // candidate-scoping) and no result cache (a write's result isn't a re-servable read).
     if name == "ekos_identity_review" || name == "ekos_architecture_review" {
-        return match call_tool(config, workspace, name, &arguments, cache) {
+        return match call_tool(config, workspace, name, &arguments, cache, ext) {
             Ok(result) => tool_ok(&result),
             Err(e) => tool_err(&e),
         };
@@ -1084,7 +1125,7 @@ fn tools_call(
     }
 
     let start = std::time::Instant::now();
-    match call_tool(config, workspace, name, &arguments, cache) {
+    match call_tool(config, workspace, name, &arguments, cache, ext) {
         Ok(result) => {
             let duration_ms = start.elapsed().as_millis();
             if cacheable {
@@ -1112,6 +1153,7 @@ fn call_tool(
     name: &str,
     args: &Value,
     cache: &mut StoreCache,
+    ext: &Extensions,
 ) -> Result<Value> {
     // The write-capable tools bypass the read-only cache entirely — a real
     // write needs a real writable store, and `StoreCache` deliberately
@@ -1544,14 +1586,6 @@ fn call_tool(
                 "diff": diff_chains(&old_chain, &new_chain),
             }))
         }
-        "ekos_binary_explain" => {
-            let id = required_id(args)?;
-            let include_unconfirmed = args
-                .get("include_unconfirmed")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            binary_explain(ledger, &id, include_unconfirmed)
-        }
         "ekos_clickhouse_query" => {
             // Defense-in-depth: re-check the gate even though an ungated server never lists
             // this tool in `tools/list` — a client could still call it by name directly.
@@ -1563,152 +1597,10 @@ fn call_tool(
             let question = required_str(args, "question")?;
             run_clickhouse_query_blocking(config, workspace, question)
         }
-        other => Err(anyhow::anyhow!("unknown tool: {other}")),
+        other => ext
+            .call_mcp_tool(other, args, ledger)
+            .unwrap_or_else(|| Err(anyhow::anyhow!("unknown tool: {other}"))),
     }
-}
-
-/// `ekos_binary_explain`'s implementation (RFC 0148).
-///
-/// Accepts either a `BinaryType` (explains the type and every method under it) or a
-/// `BinaryMethod` (explains that one method). Everything reported is read straight from the
-/// committed facts — this tool performs no inference of its own, and it keeps deterministically
-/// recovered facts and LLM-reconstructed rules in **separate** sections of the response so a
-/// consumer cannot accidentally read one as the other.
-fn binary_explain(
-    ledger: &dyn ekos_ledger::KnowledgeStore,
-    id: &KirId,
-    include_unconfirmed: bool,
-) -> Result<Value> {
-    let target = ledger
-        .get_object(id)?
-        .ok_or_else(|| anyhow::anyhow!("no object with id {id}"))?;
-    let kind = match &target.kind {
-        ekos_kir::ObjectKind::Custom(k) if k == "BinaryType" || k == "BinaryMethod" => k.clone(),
-        other => {
-            anyhow::bail!("{id} is a {other}, not a BinaryType or BinaryMethod")
-        }
-    };
-
-    let prop = |o: &ekos_kir::KirObject, k: &str| -> Value {
-        o.properties.get(k).cloned().unwrap_or(Value::Null)
-    };
-    let describe_method = |m: &ekos_kir::KirObject| -> Value {
-        json!({
-            "id": m.id.to_string(),
-            "name": m.name,
-            "signature": prop(m, "signature"),
-            "visibility": prop(m, "visibility"),
-            "is_static": prop(m, "is_static"),
-            "cyclomatic_complexity": prop(m, "cyclomatic_complexity"),
-            "branch_count": prop(m, "branch_count"),
-            "string_literals": prop(m, "string_literals"),
-            "numeric_literals": prop(m, "numeric_literals"),
-            "call_targets": prop(m, "call_targets"),
-            // The near end of the two-hop provenance chain.
-            "locator": prop(m, "locator"),
-        })
-    };
-
-    let relationships = ledger.relationships_for(id)?;
-    let child_ids: Vec<KirId> = relationships
-        .iter()
-        .filter(|r| r.from == *id)
-        .map(|r| r.to)
-        .collect();
-    let mut methods = Vec::new();
-    let mut io_boundaries = Vec::new();
-    let mut rules = Vec::new();
-    let mut unconfirmed_rules = 0usize;
-
-    for child in &child_ids {
-        let Some(obj) = ledger.get_object(child)? else {
-            continue;
-        };
-        match &obj.kind {
-            ekos_kir::ObjectKind::Custom(k) if k == "BinaryMethod" => {
-                methods.push(describe_method(&obj));
-                // I/O boundaries hang off the method, not the type.
-                for r in ledger.relationships_for(&obj.id)? {
-                    if r.from != obj.id {
-                        continue;
-                    }
-                    if let Some(io) = ledger.get_object(&r.to)?
-                        && matches!(&io.kind, ekos_kir::ObjectKind::Custom(k) if k == "ExternalIoBoundary")
-                    {
-                        io_boundaries.push(json!({
-                            "target": io.name,
-                            "io_kind": prop(&io, "io_kind"),
-                            "in_method": obj.name,
-                            "bytecode_offset": prop(&io, "bytecode_offset"),
-                        }));
-                    }
-                }
-            }
-            ekos_kir::ObjectKind::Custom(k) if k == "ExternalIoBoundary" => {
-                io_boundaries.push(json!({
-                    "target": obj.name,
-                    "io_kind": prop(&obj, "io_kind"),
-                    "bytecode_offset": prop(&obj, "bytecode_offset"),
-                }));
-            }
-            ekos_kir::ObjectKind::Custom(k) if k == "BinaryRule" => {
-                let confirmed = prop(&obj, "status") == "accepted";
-                if !confirmed {
-                    unconfirmed_rules += 1;
-                    if !include_unconfirmed {
-                        continue;
-                    }
-                }
-                rules.push(json!({
-                    "condition": prop(&obj, "condition"),
-                    "outcome": prop(&obj, "outcome"),
-                    "inputs": prop(&obj, "inputs"),
-                    "confidence": prop(&obj, "confidence"),
-                    "status": prop(&obj, "status"),
-                    "conflict": prop(&obj, "conflict"),
-                    "evidence_locators": prop(&obj, "evidence_locators"),
-                    "extractor": prop(&obj, "extractor"),
-                }));
-            }
-            _ => {}
-        }
-    }
-
-    if kind == "BinaryMethod" {
-        methods.push(describe_method(&target));
-    }
-
-    Ok(json!({
-        "target": {
-            "id": id.to_string(),
-            "name": target.name,
-            "kind": kind,
-            "namespace": prop(&target, "namespace"),
-            "category": prop(&target, "category"),
-            "super_type": prop(&target, "super_type"),
-        },
-        // Deterministically read from bytecode. Never mixed with the inferred section below.
-        "recovered": {
-            "extractor": prop(&target, "extractor"),
-            "methods": methods,
-            "external_io": io_boundaries,
-        },
-        // Two-hop provenance: every fact above cites a locator, and every locator belongs to
-        // this exact build.
-        "provenance": {
-            "binary_path": prop(&target, "binary_path"),
-            "binary_sha256": prop(&target, "binary_sha256"),
-            "locator": prop(&target, "locator"),
-        },
-        // Present only when `[binary-reconstruction]` has run. Inferred, not read.
-        "reconstructed": {
-            "extractor": "llm-reconstruction-v1",
-            "ai_business_name": prop(&target, "ai_business_name"),
-            "ai_summary": prop(&target, "ai_summary"),
-            "rules": rules,
-            "unconfirmed_rule_count": unconfirmed_rules,
-        },
-    }))
 }
 
 /// `ekos_identity_review`'s implementation — the one write-capable MCP
@@ -2303,7 +2195,6 @@ mod tests {
                 "ekos_status",
                 "ekos_transformation_explain",
                 "ekos_transformation_diff",
-                "ekos_binary_explain",
                 "ekos_architecture_evaluate",
                 "ekos_architecture_drift",
                 "ekos_architecture_diff",
@@ -2932,159 +2823,6 @@ mod tests {
         assert_eq!(body["drift_count"], 0);
     }
 
-    /// RFC 0148: `ekos_binary_explain` must keep deterministically-recovered facts and
-    /// LLM-reconstructed rules in separate sections, and must not surface an unconfirmed rule as
-    /// a fact unless explicitly asked.
-    #[test]
-    fn binary_explain_separates_recovered_facts_from_reconstructed_rules() {
-        use ekos_kir::{KirObject, KirRelationship, ObjectKind, RelationshipKind};
-        let config = EkosConfig::default();
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        let facts = facts_dir(&config, dir);
-
-        let mut ty = KirObject::new(
-            "com.acme.Billing",
-            ObjectKind::Custom("BinaryType".to_string()),
-        );
-        ty.properties
-            .insert("binary_path".into(), "billing.jar".into());
-        ty.properties
-            .insert("binary_sha256".into(), "abc123".into());
-        ty.properties
-            .insert("locator".into(), "com/acme/Billing".into());
-        ty.properties
-            .insert("extractor".into(), "ekos-jvm-classfile/v1".into());
-        ty.properties
-            .insert("ai_business_name".into(), "Invoice pricing".into());
-
-        let mut method =
-            KirObject::new("calculate", ObjectKind::Custom("BinaryMethod".to_string()));
-        method
-            .properties
-            .insert("signature".into(), "() -> double".into());
-        method
-            .properties
-            .insert("cyclomatic_complexity".into(), 4.into());
-        method.properties.insert(
-            "string_literals".into(),
-            serde_json::json!(["insufficient funds"]),
-        );
-        method
-            .properties
-            .insert("locator".into(), "com/acme/Billing.calculate:()D".into());
-
-        let mut io = KirObject::new(
-            "java.sql.PreparedStatement.executeQuery",
-            ObjectKind::Custom("ExternalIoBoundary".to_string()),
-        );
-        io.properties.insert("io_kind".into(), "database".into());
-        io.properties.insert("bytecode_offset".into(), 42.into());
-
-        let mut accepted = KirObject::new(
-            "amount > 10000",
-            ObjectKind::Custom("BinaryRule".to_string()),
-        );
-        accepted
-            .properties
-            .insert("condition".into(), "amount > 10000".into());
-        accepted
-            .properties
-            .insert("outcome".into(), "reject".into());
-        accepted
-            .properties
-            .insert("status".into(), "accepted".into());
-        accepted.properties.insert("confidence".into(), 0.82.into());
-
-        let mut unconfirmed =
-            KirObject::new("amount < 0", ObjectKind::Custom("BinaryRule".to_string()));
-        unconfirmed
-            .properties
-            .insert("condition".into(), "amount < 0".into());
-        unconfirmed
-            .properties
-            .insert("status".into(), "unconfirmed".into());
-        unconfirmed
-            .properties
-            .insert("confidence".into(), 0.2.into());
-
-        {
-            let ledger = ekos_ledger::FactLedger::open(&facts).unwrap();
-            for o in [&ty, &method, &io, &accepted, &unconfirmed] {
-                ledger.append_object(o).unwrap();
-            }
-            ledger
-                .append_relationship(&KirRelationship::new(
-                    RelationshipKind::Contains,
-                    ty.id,
-                    method.id,
-                ))
-                .unwrap();
-            ledger
-                .append_relationship(&KirRelationship::new(
-                    RelationshipKind::References,
-                    method.id,
-                    io.id,
-                ))
-                .unwrap();
-            for r in [&accepted, &unconfirmed] {
-                ledger
-                    .append_relationship(&KirRelationship::new(
-                        RelationshipKind::References,
-                        ty.id,
-                        r.id,
-                    ))
-                    .unwrap();
-            }
-        }
-
-        let call = |include: bool| -> Value {
-            let line = req(
-                77,
-                "tools/call",
-                json!({ "name": "ekos_binary_explain",
-                        "arguments": { "id": ty.id.to_string(), "include_unconfirmed": include } }),
-            );
-            let resp = parse(&handle_message(&config, dir, &line, &mut StoreCache::new()).unwrap());
-            assert_eq!(resp["result"]["isError"], false);
-            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
-        };
-
-        let body = call(false);
-        assert_eq!(body["target"]["kind"], "BinaryType");
-        // Deterministic facts, under their own extractor.
-        assert_eq!(body["recovered"]["extractor"], "ekos-jvm-classfile/v1");
-        let methods = body["recovered"]["methods"].as_array().unwrap();
-        assert_eq!(methods.len(), 1);
-        assert_eq!(methods[0]["cyclomatic_complexity"], 4);
-        assert_eq!(
-            body["recovered"]["external_io"][0]["io_kind"], "database",
-            "the I/O boundary hangs off the method and must still surface"
-        );
-        // The two-hop provenance chain.
-        assert_eq!(body["provenance"]["binary_sha256"], "abc123");
-        assert_eq!(body["provenance"]["locator"], "com/acme/Billing");
-        // Inferred content is separate and separately attributed.
-        assert_eq!(body["reconstructed"]["extractor"], "llm-reconstruction-v1");
-        assert_eq!(body["reconstructed"]["ai_business_name"], "Invoice pricing");
-        let rules = body["reconstructed"]["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 1, "only the accepted rule by default");
-        assert_eq!(rules[0]["condition"], "amount > 10000");
-        assert_eq!(
-            body["reconstructed"]["unconfirmed_rule_count"], 1,
-            "the withheld rule is counted, not hidden"
-        );
-
-        // Asked for explicitly, the unconfirmed rule appears — still labelled.
-        let body = call(true);
-        let rules = body["reconstructed"]["rules"].as_array().unwrap();
-        assert_eq!(rules.len(), 2);
-        assert!(
-            rules.iter().any(|r| r["status"] == "unconfirmed"),
-            "an unconfirmed rule must stay labelled when included"
-        );
-    }
-
     #[test]
     fn architecture_diff_reports_a_real_technology_added_between_two_timestamps() {
         use ekos_kir::{KirObject, ObjectKind};
@@ -3686,6 +3424,7 @@ mod tests {
             &config,
             tmp.path(),
             &mut cache,
+            &Extensions::none(),
             input.as_bytes(),
             &mut output,
             None,
@@ -3716,6 +3455,7 @@ mod tests {
             &config,
             tmp.path(),
             &mut cache,
+            &Extensions::none(),
             script.as_bytes(),
             &mut output,
             Some(require_token),
@@ -3812,6 +3552,7 @@ mod tests {
                         &config,
                         &workspace,
                         &mut cache,
+                        &Extensions::none(),
                         reader,
                         &stream,
                         Some("letmein"),
@@ -3877,7 +3618,15 @@ mod tests {
                 std::thread::spawn(move || {
                     let reader = BufReader::new(stream.try_clone().unwrap());
                     let mut cache = StoreCache::new();
-                    let _ = serve_messages(&config, &workspace, &mut cache, reader, &stream, None);
+                    let _ = serve_messages(
+                        &config,
+                        &workspace,
+                        &mut cache,
+                        &Extensions::none(),
+                        reader,
+                        &stream,
+                        None,
+                    );
                 });
             }
         });
@@ -3924,6 +3673,7 @@ mod tests {
             tmp.path(),
             token.map(str::to_string),
             allow_origins,
+            &Extensions::none(),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -4192,7 +3942,7 @@ mod tests {
                 .append_object(&KirObject::new("orders", ObjectKind::Table))
                 .unwrap();
         }
-        let app = build_http_router(&config, tmp.path(), None, vec![]);
+        let app = build_http_router(&config, tmp.path(), None, vec![], &Extensions::none());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

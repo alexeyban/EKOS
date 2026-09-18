@@ -1,6 +1,7 @@
 # RFC 0148 — .NET & Java binary recovery, and LLM business-logic reconstruction
 
-**Status:** Accepted
+**Status:** Accepted — implementation moved out of this repository into the private
+`alexeyban/ekos-binary` workspace by RFC 0149 (2026-09-18); this design document stays public.
 **Date:** 2026-09-18
 **Supersedes:** none
 **Related:** RFC 0027 (Transformation IR), RFC 0028 (`ekos_transformation_explain`),

@@ -720,6 +720,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "ekos-artifact",
  "ekos-common",
  "ekos-compiler-core",
  "ekos-identity",
@@ -753,6 +754,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
 ]
