@@ -244,6 +244,40 @@ fn is_expected_technology_jsmodule_pair<'a>(group: impl Iterator<Item = &'a KirO
     saw_technology
 }
 
+/// RFC 0147: a same-name-different-kind group of **exactly** `Custom("PerlPackage")` and
+/// `Custom("PerlSymbol")` objects is an expected, non-conflicting co-existence, for the same
+/// reason [`is_expected_technology_jsmodule_pair`] narrows its own pair — and this one is
+/// mechanically guaranteed rather than merely likely.
+///
+/// A Perl package is a namespace; a Perl sub is a function inside one. They are categorically
+/// different entities, so a name match between them is never evidence that they are the same
+/// thing, and a reviewer has nothing to decide. What makes it *common* is that
+/// `similarity::normalize` lowercases: real Perl routinely names a method after the module it
+/// works with, so `use Template;` (Template Toolkit — one of the most widely used CPAN modules
+/// there is) and `sub template` differ only in case. Found live on LedgerSMB, where that exact
+/// pair was the single conflict in a 272-package run and would have failed `ekos resolve` by
+/// default on most real Perl codebases — training users to reach for `--force`, which is the one
+/// outcome that would make the detector worthless.
+///
+/// A third kind mixed into the group still conflicts as before: this only ever narrows the
+/// specific two-kind pair, never widens to "any name match involving a Perl object."
+fn is_expected_perl_package_symbol_pair<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
+    let package = ObjectKind::Custom("PerlPackage".to_string());
+    let symbol = ObjectKind::Custom("PerlSymbol".to_string());
+    let mut saw_package = false;
+    let mut saw_symbol = false;
+    for obj in group {
+        if obj.kind == package {
+            saw_package = true;
+        } else if obj.kind == symbol {
+            saw_symbol = true;
+        } else {
+            return false;
+        }
+    }
+    saw_package && saw_symbol
+}
+
 impl IdentityResolver for DefaultResolver {
     fn resolve(&self, graph: &KirGraph) -> ResolutionResult {
         let objects = &graph.objects;
@@ -277,7 +311,9 @@ impl IdentityResolver for DefaultResolver {
             let first_kind = &objects[indices[0]].kind;
             let has_kind_mismatch = indices[1..].iter().any(|&i| &objects[i].kind != first_kind);
             if has_kind_mismatch {
-                if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i])) {
+                if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i]))
+                    || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
+                {
                     continue;
                 }
                 let ids: Vec<KirId> = indices.iter().map(|&i| objects[i].id).collect();
@@ -1006,6 +1042,52 @@ mod tests {
             ("utils", ObjectKind::Custom("Technology".to_string())),
             ("utils", ObjectKind::Custom("JsModule".to_string())),
             ("utils", ObjectKind::Custom("PythonModule".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.conflicts.len(), 1);
+    }
+
+    /// Regression test for a real false-positive conflict found live against LedgerSMB's 272
+    /// Perl packages (RFC 0147): `use Template;` (Template Toolkit) compiles to a
+    /// `Custom("PerlPackage")` while `sub template` compiles to a `Custom("PerlSymbol")`, and
+    /// `normalize` lowercases both to `template`. A namespace and a function inside one are
+    /// categorically different entities, so there is nothing for a reviewer to decide — but
+    /// before this exclusion it was the single conflict in the run, and `ekos resolve` (no
+    /// `--force`) refuses to proceed at all when any conflict exists.
+    #[test]
+    fn a_perl_package_and_a_perl_sub_sharing_a_name_do_not_conflict() {
+        let g = make_graph(&[
+            ("Template", ObjectKind::Custom("PerlPackage".to_string())),
+            ("template", ObjectKind::Custom("PerlSymbol".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(
+            result.conflicts.is_empty(),
+            "a Perl package and a same-named sub is expected, not a conflict — got: {:?}",
+            result.conflicts
+        );
+    }
+
+    #[test]
+    fn a_third_kind_mixed_into_the_perl_group_still_conflicts() {
+        // The exclusion is exactly `{PerlPackage, PerlSymbol}` — any other kind sharing the name
+        // stays a genuine, worth-flagging surprise.
+        let g = make_graph(&[
+            ("Template", ObjectKind::Custom("PerlPackage".to_string())),
+            ("template", ObjectKind::Custom("PerlSymbol".to_string())),
+            ("template", ObjectKind::Custom("PythonModule".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.conflicts.len(), 1);
+    }
+
+    #[test]
+    fn two_perl_packages_sharing_a_name_are_not_silently_excluded() {
+        // The exclusion requires *both* kinds to be present. A same-kind group never reaches it
+        // (no kind mismatch), but pairing a PerlPackage with an unrelated kind must still fire.
+        let g = make_graph(&[
+            ("Template", ObjectKind::Custom("PerlPackage".to_string())),
+            ("template", ObjectKind::Table),
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.conflicts.len(), 1);

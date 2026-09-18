@@ -51,6 +51,7 @@ ekos-plugin-pentaho = { path = "../../plugins/pentaho" }
 ekos-plugin-python = { path = "../../plugins/python" }
 ekos-plugin-rust = { path = "../../plugins/rust" }
 ekos-plugin-elixir = { path = "../../plugins/elixir" }
+ekos-plugin-perl = { path = "../../plugins/perl" }
 ekos-plugin-javascript = { path = "../../plugins/javascript" }
 clap.workspace = true
 uuid.workspace = true

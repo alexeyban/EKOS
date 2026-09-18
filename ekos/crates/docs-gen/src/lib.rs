@@ -684,6 +684,8 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     | "PythonSymbol"
                     | "ElixirModule"
                     | "ElixirSymbol"
+                    | "PerlPackage"
+                    | "PerlSymbol"
                     | "JsModule"
                     | "JsSymbol"
                     | "Technology"
@@ -2957,7 +2959,11 @@ fn is_symbol_kind(kind: &ObjectKind) -> bool {
     matches!(
         kind,
         ObjectKind::Custom(s)
-            if s == "RustSymbol" || s == "PythonSymbol" || s == "ElixirSymbol" || s == "JsSymbol"
+            if s == "RustSymbol"
+                || s == "PythonSymbol"
+                || s == "ElixirSymbol"
+                || s == "JsSymbol"
+                || s == "PerlSymbol"
     )
 }
 
@@ -2996,9 +3002,13 @@ pub fn render_api(objects: &[KirObject], relationships: &[KirRelationship]) -> R
         .filter(|o| o.kind == ObjectKind::File)
         .map(|o| (o.id, o))
         .collect();
+    // Elixir modules and Perl packages are both the direct `Contains` parent of their own
+    // functions (`File Contains Module Contains Symbol`), unlike Rust/Python where the `File` is.
+    // Grouping by the real container is more meaningful than forcing every language into
+    // file-shaped grouping. RFC 0147 adds Perl to the same branch rather than a parallel one.
     let elixir_module_by_id: HashMap<KirId, &KirObject> = objects
         .iter()
-        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ElixirModule"))
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "ElixirModule" || s == "PerlPackage"))
         .map(|o| (o.id, o))
         .collect();
     let mut containing_context: HashMap<KirId, KirId> = HashMap::new();
@@ -3360,6 +3370,8 @@ const DOC_BEARING_CUSTOM_KINDS: &[&str] = &[
     "ElixirModule",
     "JsSymbol",
     "JsModule",
+    "PerlSymbol",
+    "PerlPackage",
 ];
 
 /// Render `DependencyRiskReport.md`: real declared versions (`Crate.version`, and npm

@@ -85,6 +85,16 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(owning module id, qualified name) — RFC 0081",
     },
     CustomKind {
+        name: "PerlPackage",
+        structurally_keyed: true,
+        note: "qualified package name — RFC 0147; LedgerSMB::* shares a prefix across ~700 files",
+    },
+    CustomKind {
+        name: "PerlSymbol",
+        structurally_keyed: true,
+        note: "(owning package/file id, sub name) — RFC 0147",
+    },
+    CustomKind {
         name: "JsModule",
         structurally_keyed: true,
         note: "qualified module name — RFC 0085",
@@ -192,6 +202,8 @@ mod tests {
             "ArchitectureGap",
             "ElixirModule",
             "ElixirSymbol",
+            "PerlPackage",
+            "PerlSymbol",
             "JsModule",
             "JsSymbol",
             "Document",

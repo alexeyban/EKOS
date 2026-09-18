@@ -59,13 +59,20 @@ const MAX_SOURCE_LINES: usize = 400;
 
 const MODULE_KINDS: &[&str] = &[
     "ElixirModule",
+    "PerlPackage",
     "RustModule",
     "PythonModule",
     "JsModule",
     "Crate",
     "Rollup",
 ];
-const SYMBOL_KINDS: &[&str] = &["ElixirSymbol", "RustSymbol", "PythonSymbol", "JsSymbol"];
+const SYMBOL_KINDS: &[&str] = &[
+    "ElixirSymbol",
+    "RustSymbol",
+    "PythonSymbol",
+    "JsSymbol",
+    "PerlSymbol",
+];
 
 /// RFC 0088's `[llm-description] scope` — how far this run goes. `Modules` is the config default
 /// specifically so enabling this once never silently commits a workspace to `All`'s ~5x larger

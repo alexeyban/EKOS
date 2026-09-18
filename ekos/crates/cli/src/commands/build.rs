@@ -14,6 +14,7 @@ use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
 use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
 use ekos_plugin_pentaho::PentahoObserver;
+use ekos_plugin_perl::PerlObserver;
 use ekos_plugin_python::PythonObserver;
 use ekos_plugin_rust::RustObserver;
 use std::collections::HashMap;
@@ -135,6 +136,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
         // RFC 0085: local .js/.jsx/.ts/.tsx/.mjs/.cjs files, no credential to gate on — runs
         // unconditionally, same as ElixirObserver.
         Box::new(JavaScriptObserver::new()),
+        // RFC 0147: local .pl/.pm/.t/.psgi files (and .cgi with a real perl shebang), no
+        // credential to gate on — runs unconditionally, same as JavaScriptObserver.
+        Box::new(PerlObserver::new()),
     ];
     if let Ok(export_dir) = std::env::var(CRYPTO_EXPORT_DIR_ENV) {
         observers.push(Box::new(CryptoObserver::new(

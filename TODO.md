@@ -5370,6 +5370,27 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] Adversarial premise rejections ("the evidence does not confirm…") aren't counted as refusals (adv-004/011/015) — decide grader vs prompt.
   - [ ] `code-004`: workspace `[workspace.package] edition` isn't surfaced as a fact.
 
+- [x] **RFC 0147 — Perl connector and structural analyzer (devlog_188, 2026-09-18).** Perl was the last
+  major language in the working set getting nothing but `plugins/file`'s declaration-prefix scan — bare name
+  strings, no packages, no edges, no spans. New `plugins/perl` observer (`.pl`/`.pm`/`.t`/`.psgi`, plus
+  `.cgi` gated on a real `perl` shebang) + `PerlAnalyzerPass`: packages, subs, `use`/`require` `DependsOn`
+  (pragmas excluded), `use parent`/`use base`/`@ISA` `Extends`, POD descriptions (interleaved *and* trailing
+  `=head1 METHODS` conventions), `source_span`, `signature`, evidence. Hand-written scanner — Perl is not
+  statically parseable, and shelling out to `PPI`/`perl -MO=Deparse` would execute `BEGIN` blocks from
+  observed code.
+  **LedgerSMB `lib/`: 272 packages, 1,333 subs, 1,154 `DependsOn`, 34 `Extends`, 1,313 source spans,
+  823 sub + 272/272 package descriptions, zero LLM calls.**
+  - [x] Cross-kind conflict false positive found live and fixed: `use Template;` (`PerlPackage`) vs
+    `sub template` (`PerlSymbol`) — `normalize` lowercases, so this would have failed `ekos resolve` by
+    default on most real Perl codebases. `is_expected_perl_package_symbol_pair`, mirroring RFC 0093.
+  - [ ] Extensionless `bin/` scripts carrying a Perl shebang are not collected (would need to sniff every
+    extensionless file in the tree) — documented gap, worth revisiting for `old/bin`-shaped estates.
+  - [ ] No `Calls` graph: Perl dispatch is fully dynamic. Revisit only if a bounded, honest subset
+    (`Foo::Bar->method()` with a literal class name) proves worth the false-positive risk.
+  - [ ] Scanner is not heredoc-, `q{}`- or regex-aware; a brace inside one can desynchronize depth tracking
+    for the rest of that one file. Accepted, documented, same tradeoff as `elixir_analyzer.rs`.
+  - [ ] Update LedgerSMB's own `ekos.toml` comment, which still says "EKOS has no Perl AST analyzer today".
+
 - [x] **RFC 0146 — PostgreSQL dialect coverage for hand-written schemas (devlog_187, 2026-09-16).** The
   `postgres` dialect was tuned entirely against `pg_dump`; a correctly-configured LedgerSMB recovered **0 of
   158 tables**. Three phases, all measured on the real repo: eleven `preprocess` transforms (`COMMENT ON`,

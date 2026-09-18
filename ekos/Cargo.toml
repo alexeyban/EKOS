@@ -41,6 +41,7 @@ members = [
     "plugins/python",
     "plugins/rust",
     "plugins/elixir",
+    "plugins/perl",
     "plugins/javascript",
     "plugins/sql-dialect-mysql",
     "plugins/sql-dialect-postgres",

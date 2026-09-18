@@ -32,6 +32,8 @@ const CODE_KINDS: &[&str] = &[
     "JsSymbol",
     "ElixirModule",
     "ElixirSymbol",
+    "PerlPackage",
+    "PerlSymbol",
     "Crate",
 ];
 

@@ -110,7 +110,9 @@ repo, 1,600 real issues/PRs — RFC 0062), Confluence, local documents
 RFC 0027), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
 Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
 RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
-ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
+Perl source (`.pl`/`.pm`/`.t`/`.psgi`, plus `.cgi` with a real `perl` shebang — packages, subs,
+`use`/`require` dependencies, `use parent`/`use base`/`@ISA` inheritance, POD descriptions and
+source spans; RFC 0147), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
 0056), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). PostgreSQL, SQL Server, and Jira remain planned.

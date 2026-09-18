@@ -11,10 +11,11 @@ use ekos_recovery::{
     DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
     JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
-    OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PythonAnalyzerPass,
-    PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
-    SqlTransformAnalyzerPass, SqlTransformStats, anthropic::AnthropicProvider,
-    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
+    OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PerlAnalyzerPass,
+    PerlStats, PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass,
+    RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
+    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
+    llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -391,6 +392,22 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
         );
         elixir_stats = Some(elixir_pass.stats_handle());
         pass_manager.register(Box::new(elixir_pass));
+    }
+
+    // ── Perl .pl/.pm/.t/.psgi/.cgi artifacts (RFC 0147) ─────────────────────
+    let perl_artifact_ids = collect_perl_artifact_ids(&*artifact_store);
+    let perl_count = perl_artifact_ids.len();
+    let mut perl_stats: Option<Arc<std::sync::Mutex<PerlStats>>> = None;
+    if !perl_artifact_ids.is_empty() {
+        let perl_pass = PerlAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            perl_artifact_ids,
+        );
+        perl_stats = Some(perl_pass.stats_handle());
+        pass_manager.register(Box::new(perl_pass));
     }
 
     // ── JavaScript/TypeScript artifacts (RFC 0085) ──────────────────────────
@@ -868,6 +885,16 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
             s.modules_total, s.symbols_total
         );
     }
+    if perl_count > 0 {
+        println!("  Perl files analysed: {perl_count}");
+    }
+    if let Some(stats) = &perl_stats {
+        let s = *stats.lock().unwrap();
+        println!(
+            "  Perl packages/symbols recovered: {} packages, {} symbols",
+            s.packages_total, s.symbols_total
+        );
+    }
     if javascript_count > 0 {
         println!("  JavaScript/TypeScript files analysed: {javascript_count}");
     }
@@ -1059,6 +1086,10 @@ fn collect_python_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
 /// Collect ArtifactIds for every Rust `.rs` artifact currently in the store (RFC 0041).
 fn collect_rust_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
     collect_artifact_ids_for_connector(store, "rust")
+}
+
+fn collect_perl_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
+    collect_artifact_ids_for_connector(store, "perl")
 }
 
 fn collect_elixir_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
