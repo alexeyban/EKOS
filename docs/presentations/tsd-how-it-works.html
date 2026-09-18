@@ -59,12 +59,12 @@
   <div class="eyebrow">The system in one slide</div>
   <h2 style="font-size:clamp(1.8rem,3.6vw,2.7rem); max-width:24ch;">A handheld that scans, and a desktop that feeds it.</h2>
   <div class="two-col">
-    <p class="lede" style="margin-top:0;">The handheld window is titled <span class="ru">«Терминал сбора данных»</span> (data-collection terminal). Store staff use it for price checks, stock-taking, receiving trucks and boxes, and returns. The desktop app, <span class="ru">«Сервер обмена с ТСД»</span> (TSD exchange server), loads the product catalogue and documents onto it and pulls the scans back.</p>
+    <p class="lede" style="margin-top:0;">The handheld window is titled “Data Collection Terminal”. Store staff use it for price checks, stock-taking, receiving trucks and boxes, and returns. The desktop app, “TSD Exchange Server”, loads the product catalogue and documents onto it and pulls the scans back.</p>
     <ul class="facts">
       <li><span class="k">Handheld</span><span class="v"><code class="mono">TSDClient.exe</code>, .NET Compact Framework 2.0 on Windows CE. 117 types, 1,189 methods.</span></li>
       <li><span class="k">Desktop</span><span class="v"><code class="mono">TSDServer.exe</code>, Windows Forms tray app. 59 types, 817 methods.</span></li>
       <li><span class="k">Devices</span><span class="v">Vendor SDK wrappers under namespace <code class="mono">Calib</code>: barcode reader, Bluetooth, buzzer/vibrator.</span></li>
-      <li><span class="k">Upstream</span><span class="v">Products carry a <code class="mono">NavCode</code>, shown as <span class="ru">«Код навижн»</span> (Navision code). The ERP is most likely Dynamics NAV <span class="gloss">(reading)</span>.</span></li>
+      <li><span class="k">Upstream</span><span class="v">Products carry a <code class="mono">NavCode</code>, shown as “Navision code”. The ERP is most likely Dynamics NAV <span class="gloss">(reading)</span>.</span></li>
     </ul>
   </div>
 </section>
@@ -111,23 +111,23 @@
       <tr><td class="tool">7</td><td>desktop</td><td class="desc">Results written and archived as <code class="mono">{name}_{yyyyMMddhhmmss}.txt</code>; terminal wiped if configured</td><td class="tool">UploadResults · DeleteOldDB</td></tr>
     </tbody>
   </table>
-  <div class="src"><b>batch mode</b> <code>TSDServer.exe /c</code> runs steps 1–2 unattended with a 900,000 ms timeout per file; every import's status is emailed (<span class="ru">«Статус загрузки данных»</span>, data load status)</div>
+  <div class="src"><b>batch mode</b> <code>TSDServer.exe /c</code> runs steps 1–2 unattended with a 900,000 ms timeout per file; every import's status is emailed (subject “Data load status”)</div>
 </section>
 
 <!-- 5 -->
 <section class="slide" id="s5">
   <div class="stage-num mono">§ 04 / the handheld</div>
-  <div class="eyebrow">MainForm — verbatim button captions</div>
+  <div class="eyebrow">MainForm — button captions (translated from Russian)</div>
   <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem);">A numbered keypad menu, seven workflows.</h2>
   <div class="menu">
-    <div class="key"><div class="n">1</div><div class="t ru">Контроль цен</div><div class="gloss">price check</div><div class="f">ViewProductForm</div></div>
-    <div class="key"><div class="n">2</div><div class="t ru">Инвентаризация</div><div class="gloss">stock-taking</div><div class="f">InventarForm</div></div>
-    <div class="key"><div class="n">3</div><div class="t ru">Прием короба внутрит.</div><div class="gloss">internal box receiving</div><div class="f">IncomeForm</div></div>
-    <div class="key"><div class="n">4</div><div class="t ru">Прием машины</div><div class="gloss">truck receiving</div><div class="f">TtnForm → IncomeForm</div></div>
-    <div class="key"><div class="n">5</div><div class="t ru">Настройки</div><div class="gloss">settings</div><div class="f">SettingsForm</div></div>
-    <div class="key"><div class="n">6</div><div class="t ru">Накладные</div><div class="gloss">delivery notes</div><div class="f">InventarForm · SimpleIncome</div></div>
-    <div class="key"><div class="n">7</div><div class="t ru">Возвраты</div><div class="gloss">returns</div><div class="f">ReturnForm</div></div>
-    <div class="key dim"><div class="n">0</div><div class="t ru">Выход</div><div class="gloss">exit</div><div class="f">only if EnableExit</div></div>
+    <div class="key"><div class="n">1</div><div class="t">Price check</div><div class="f">ViewProductForm</div></div>
+    <div class="key"><div class="n">2</div><div class="t">Stock-taking</div><div class="f">InventarForm</div></div>
+    <div class="key"><div class="n">3</div><div class="t">Internal box receiving</div><div class="f">IncomeForm</div></div>
+    <div class="key"><div class="n">4</div><div class="t">Truck receiving</div><div class="f">TtnForm → IncomeForm</div></div>
+    <div class="key"><div class="n">5</div><div class="t">Settings</div><div class="f">SettingsForm</div></div>
+    <div class="key"><div class="n">6</div><div class="t">Delivery notes</div><div class="f">InventarForm · SimpleIncome</div></div>
+    <div class="key"><div class="n">7</div><div class="t">Returns</div><div class="f">ReturnForm</div></div>
+    <div class="key dim"><div class="n">0</div><div class="t">Exit</div><div class="f">only if EnableExit</div></div>
   </div>
   <div class="src"><b>evidence</b> captions: string constants of MainForm 0x0200001D · forms: constructors called by <code>MenuEvents</code> 0x0600013C · key ↔ form pairing: reading</div>
 </section>
@@ -138,9 +138,9 @@
   <div class="eyebrow">What each screen enforces — its own messages</div>
   <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem); max-width:26ch;">The rules live in the messages the code can show.</h2>
   <div class="steps3">
-    <div class="inv"><h3>Receiving</h3><p class="quote"><span class="ru">«Это чужой короб!»</span> <span class="gloss">foreign box</span><br><span class="ru">«Короб уже принят!»</span> <span class="gloss">box already accepted</span><br><span class="ru">«ТТН не этого магазина!»</span> <span class="gloss">waybill for another store</span><br><span class="ru">«Принято {0} из {1} коробов»</span> <span class="gloss">{0} of {1} boxes accepted</span></p></div>
-    <div class="inv"><h3>Stock-taking and notes</h3><p class="quote"><span class="ru">«Отсканируейте ШК нового паспорта»</span> <span class="gloss">scan a new count sheet</span><br><span class="ru">«Просчет уже существует!»</span> <span class="gloss">count already exists</span><br><span class="ru">«Штрихкод {0} неверный адрес!»</span> <span class="gloss">wrong location barcode</span><br><span class="ru">«Товар уже принят {0} из {1}»</span> <span class="gloss">already received {0} of {1}</span></p></div>
-    <div class="inv"><h3>Price check and returns</h3><p class="quote"><span class="ru">«Этот товар участвует в возврате»</span> <span class="gloss">item is part of a return</span><br><span class="ru">«Не найдено возвратов»</span> <span class="gloss">no returns found</span><br><span class="ru">«Короб {0} уже закрыт»</span> <span class="gloss">box already closed</span><br>F1 / F2 print label · F4 documents</p></div>
+    <div class="inv"><h3>Receiving</h3><p class="quote"><span class="ru">“This is a foreign box!”</span><br><span class="ru">“Box already accepted!”</span><br><span class="ru">“Waybill is not for this store!”</span><br><span class="ru">“Accepted {0} of {1} boxes”</span></p></div>
+    <div class="inv"><h3>Stock-taking and notes</h3><p class="quote"><span class="ru">“Scan the new count sheet barcode”</span><br><span class="ru">“Count already exists!”</span><br><span class="ru">“Barcode {0}: wrong address!”</span><br><span class="ru">“Item already received: {0} of {1}”</span></p></div>
+    <div class="inv"><h3>Price check and returns</h3><p class="quote"><span class="ru">“This item is part of a return”</span><br><span class="ru">“No returns found”</span><br><span class="ru">“Box {0} already closed”</span><br>F1 / F2 print label · F4 documents</p></div>
   </div>
   <div class="src"><b>evidence</b> string literals of IncomeForm, TtnForm, InventarForm, ViewProductForm.DoAction 0x0600004B, ReturnForm, ActionsClass.CloseReturnBoxAction 0x060001B1</div>
 </section>
@@ -193,8 +193,8 @@
 <span class="k">BoxReturns</span>  <span class="k">ReturnBoxWProducts</span>  <span class="k">CloseBoxReturns</span>
 <span class="k">ReturnsTTN</span>  <span class="k">ReturnInInventory</span>  <span class="k">CloseInventar</span>
 <span class="k">AlreadyAccepted</span>  <span class="k">NotFound</span>  <span class="k">DocNotFound</span>
-<span class="c">// labels: ПЕРЕОЦЕНКА (repricing), ПЕРЕБРОСКА (transfer),</span>
-<span class="c">// СКОРАЯ ПОМОЩЬ (quick help), Поставки (ТТН) (deliveries), …</span></pre></div>
+<span class="c">// labels: REPRICING, TRANSFER,</span>
+<span class="c">// QUICK HELP, Deliveries (waybill), …</span></pre></div>
   </div>
 </section>
 
@@ -228,7 +228,7 @@
     <div class="inv warn"><h3>6 of 19 settings are never read</h3><p>Including <code class="mono">VibarationOn</code>/<code class="mono">ScanSoundNotifyOn</code> and the SQL&nbsp;CE <code class="mono">products.sdf</code> connection string. Their getters have no incoming <code class="mono">Calls</code> edge.</p></div>
     <div class="inv warn"><h3>An unreachable screen</h3><p><code class="mono">ReturnBoxForm</code> (11 methods, a near-copy of <code class="mono">IncomeForm</code>) is never constructed. <code class="mono">GetDeviceID</code> is never called either, so <code class="mono">TerminalID</code> comes from the settings file.</p></div>
     <div class="inv warn"><h3>Label templates are absent</h3><p><code class="mono">PrintLabel</code> reads <code class="mono">LABEL_{n}.DEF</code>, and none is in the folder. Three DLLs that no binary depends on (Imager, MoFlink, ControlsLib) ship anyway.</p></div>
-    <div class="inv warn"><h3>Three builds side by side</h3><p><code class="mono">TSDClient.exe</code>, <code class="mono">TSDClient - копия.exe</code> and <code class="mono">TSDClient.ex_</code> differ in type count. The folder alone cannot tell which one is deployed.</p></div>
+    <div class="inv warn"><h3>Three builds side by side</h3><p><code class="mono">TSDClient.exe</code>, <code class="mono">TSDClient - Copy.exe</code> and <code class="mono">TSDClient.ex_</code> differ in type count. The folder alone cannot tell which one is deployed.</p></div>
   </div>
 </section>
 

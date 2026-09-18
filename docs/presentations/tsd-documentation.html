@@ -173,13 +173,13 @@
 <section id="summary">
   <div class="eyebrow">Summary</div>
   <div class="answer">
-    <p class="lead">TSD (<span class="ru">«Терминал сбора данных»</span>, a data-collection terminal) is a two-part retail back-office system. Store staff use a <strong>Windows&nbsp;CE handheld</strong> to scan goods for price checks, stock-taking, receiving trucks and boxes, and returns. A <strong>desktop exchange server</strong> loads reference data onto the handheld and pulls the scan results back.</p>
+    <p class="lead">TSD (the handheld window is titled “Data Collection Terminal”) is a two-part retail back-office system. Store staff use a <strong>Windows&nbsp;CE handheld</strong> to scan goods for price checks, stock-taking, receiving trucks and boxes, and returns. A <strong>desktop exchange server</strong> loads reference data onto the handheld and pulls the scan results back.</p>
     <ul>
       <li>The two sides share no network connection and no database server. They exchange <strong>files over ActiveSync/RAPI</strong> while the terminal sits in its cradle. <span class="chip cmp">compiled</span></li>
       <li>The server imports the product catalogue and documents from windows-1251 text files. It converts them into a custom indexed file database (<code>FamilTsdDB</code>) and copies that database to the terminal. <span class="chip cmp">compiled</span></li>
       <li>On the terminal, every scan passes through an <strong>action engine</strong>. The document a product belongs to decides what the handheld does: which sound or vibration plays, and whether a price label goes to a Bluetooth printer. <span class="chip cmp">compiled</span></li>
       <li>Every change to a scan record is journaled on the terminal to <code>scannedbarcodes.txt</code> and <code>register.txt</code> the moment it happens. The files are copied back to the desktop and archived with a timestamp, and each import's status is emailed. <span class="chip cmp">compiled</span> <span class="chip obs">observed</span></li>
-      <li>Product records carry a <code>NavCode</code>, and the handheld shows it under the label <span class="ru">«Код навижн»</span> (Navision code). The upstream ERP is therefore most likely Microsoft Dynamics&nbsp;NAV. <span class="chip rd">reading</span></li>
+      <li>Product records carry a <code>NavCode</code>, and the handheld shows it under the label “Navision code”. The upstream ERP is therefore most likely Microsoft Dynamics&nbsp;NAV. <span class="chip rd">reading</span></li>
     </ul>
   </div>
   <div class="stats">
@@ -202,7 +202,7 @@
     <span><span class="chip grf">graph</span> answer of an EKOS graph query (<code>ekos_impact</code>, <code>ekos_dependents</code>, <code>ekos_neighborhood</code>)</span>
     <span><span class="chip rd">reading</span> an interpretation that joins several EKOS facts. It is not itself a compiled fact, and the evidence it rests on is stated.</span>
   </div>
-  <p>English glosses of Russian UI strings are translations added for this document. The strings themselves are verbatim constants lifted from the binaries.</p>
+  <p>The application's user interface is in Russian. Every on-screen string quoted here is an English translation of a constant compiled into the binaries; the Russian originals can be read with <code>ekos_binary_explain</code>. File names containing the Russian word for “copy” are shown translated.</p>
 </section>
 
 <!-- ─────────────────────────────── 3 ─────────────────────────────── -->
@@ -212,9 +212,9 @@
   <div class="tablewrap"><table>
     <thead><tr><th>Assembly</th><th>File</th><th>Role</th><th>Types</th><th>Methods</th><th>CLR</th><th>Used by</th></tr></thead>
     <tbody>
-      <tr><td class="m">TSDClient</td><td class="m">TSDClient.exe</td><td class="q">Handheld application, window title <span class="ru">«Терминал сбора данных»</span></td><td class="n">117</td><td class="n">1,189</td><td class="m">v2.0</td><td class="q">entry point</td></tr>
-      <tr><td class="m">TSDClient</td><td class="m">TSDClient - копия.exe</td><td class="q">Second copy of the handheld app ("копия" = copy), a different build (two fewer types)</td><td class="n">115</td><td class="n">1,155</td><td class="m">v2.0</td><td class="q">—</td></tr>
-      <tr><td class="m">TSDServer</td><td class="m">TSDServer.exe</td><td class="q">Desktop exchange server, window title <span class="ru">«Сервер обмена с ТСД»</span></td><td class="n">59</td><td class="n">817</td><td class="m">v2.0</td><td class="q">entry point</td></tr>
+      <tr><td class="m">TSDClient</td><td class="m">TSDClient.exe</td><td class="q">Handheld application, window title “Data Collection Terminal”</td><td class="n">117</td><td class="n">1,189</td><td class="m">v2.0</td><td class="q">entry point</td></tr>
+      <tr><td class="m">TSDClient</td><td class="m">TSDClient - Copy.exe</td><td class="q">Second copy of the handheld app, a different build (two fewer types)</td><td class="n">115</td><td class="n">1,155</td><td class="m">v2.0</td><td class="q">—</td></tr>
+      <tr><td class="m">TSDServer</td><td class="m">TSDServer.exe</td><td class="q">Desktop exchange server, window title “TSD Exchange Server”</td><td class="n">59</td><td class="n">817</td><td class="m">v2.0</td><td class="q">entry point</td></tr>
       <tr><td class="m">OBReadLibNet</td><td class="m">obreadlibnet.dll</td><td class="q">Optical barcode reader SDK wrapper (namespace <code>Calib</code>)</td><td class="n">7</td><td class="n">209</td><td class="m">v1.1</td><td class="q">TSDClient ×2 <span class="chip grf">graph</span></td></tr>
       <tr><td class="m">BluetoothLibNet</td><td class="m">bluetoothlibnet.dll</td><td class="q">Bluetooth stack SDK wrapper (<code>Calib</code>)</td><td class="n">8</td><td class="n">125</td><td class="m">v1.1</td><td class="q">TSDClient ×2 <span class="chip grf">graph</span></td></tr>
       <tr><td class="m">SystemLibnet</td><td class="m">systemlibnet.dll</td><td class="q">Device system SDK: buzzer, vibrator, events (<code>Calib</code>)</td><td class="n">5</td><td class="n">246</td><td class="m">v1.1</td><td class="q">TSDClient ×2 <span class="chip grf">graph</span></td></tr>
@@ -254,7 +254,7 @@
         <text x="345" y="44" text-anchor="middle" font-size="12" class="soft">DESKTOP (Windows)</text>
         <rect class="boxa" x="240" y="58" width="210" height="148" rx="4"/>
         <text x="345" y="80" text-anchor="middle" font-size="14" font-weight="600">TSDServer.exe</text>
-        <text x="345" y="100" text-anchor="middle" font-size="11" class="soft">Form1 · «Сервер обмена с ТСД»</text>
+        <text x="345" y="100" text-anchor="middle" font-size="11" class="soft">Form1 · “TSD Exchange Server”</text>
         <text x="345" y="120" text-anchor="middle" font-size="11" class="soft">DataLoaderClass — import</text>
         <text x="345" y="136" text-anchor="middle" font-size="11" class="soft">UploadResults — export</text>
         <text x="345" y="152" text-anchor="middle" font-size="11" class="soft">Program.Main /c — batch mode</text>
@@ -353,17 +353,17 @@
   </figure>
   <ol class="steps">
     <li><div class="step-body"><h3>Import reference data <span class="loc">TSDServer.exe · 0x0600000D, 0x06000024</span></h3>
-      <p>The operator presses <span class="ru">«Импорт файла товаров»</span> (import product file) or <span class="ru">«Импорт файла документов»</span> (import document file). The handlers call <code>DataLoaderClass.AutoLoadProduct</code> / <code>AutoLoadDoc</code>, which start the import on a background thread (<code>LoadFile</code>, <span class="loc">0x060002C5</span>). A second import cannot start while one is running: <span class="ru">«Идет процесс загрузки!»</span> (a load is in progress). <span class="chip cmp">compiled</span></p></div></li>
+      <p>The operator presses “Import product file” or “Import document file”. The handlers call <code>DataLoaderClass.AutoLoadProduct</code> / <code>AutoLoadDoc</code>, which start the import on a background thread (<code>LoadFile</code>, <span class="loc">0x060002C5</span>). A second import cannot start while one is running: “Load in progress!”. <span class="chip cmp">compiled</span></p></div></li>
     <li><div class="step-body"><h3>Parse and store <span class="loc">TSDServer.exe · 0x060002CA</span></h3>
-      <p><code>BeginImport</code> clears the target tables (<code>CleanProducts</code>/<code>CleanDocs</code>) and reads the file as <code>windows-1251</code>. It dispatches each line to a fixed-width or delimited parser depending on the <code>ImportFileTypeIsFixed</code> setting (<code>AddFixedStringProducts</code>, <code>AddDelimetedStringDocs</code>, …). Finally it commits through the table adapters' <code>Update</code>. Lines with a bad barcode are skipped with <span class="ru">«Штрихкод неверный - строка пропущена»</span> (invalid barcode, line skipped). Other errors either abort or continue, depending on <code>BreakOnError</code>. <span class="chip cmp">compiled</span></p></div></li>
+      <p><code>BeginImport</code> clears the target tables (<code>CleanProducts</code>/<code>CleanDocs</code>) and reads the file as <code>windows-1251</code>. It dispatches each line to a fixed-width or delimited parser depending on the <code>ImportFileTypeIsFixed</code> setting (<code>AddFixedStringProducts</code>, <code>AddDelimetedStringDocs</code>, …). Finally it commits through the table adapters' <code>Update</code>. Lines with a bad barcode are skipped with “Invalid barcode - line skipped”. Other errors either abort or continue, depending on <code>BreakOnError</code>. <span class="chip cmp">compiled</span></p></div></li>
     <li><div class="step-body"><h3>Upload to the terminal <span class="loc">TSDServer.exe · 0x06000011</span></h3>
-      <p>The upload handler (<span class="ru">«Выгрузить на терминал»</span>, upload to terminal) first calls <code>GetDBDate</code> and compares the catalogue date with today. If the catalogue is old, it warns: <span class="ru">«Внимание, справочник … имеет дату {0}! Вы уверены, что хотите загрузить старые данные?»</span> (the catalogue is dated {0}; are you sure you want to load old data?). It then connects over RAPI, deletes any existing database files on the device, and streams each file with <code>BeginCopyFileToDevice</code> behind a cancellable progress dialog. When the device connects, <code>ActiveSync_Active</code> also syncs the terminal clock (<code>RAPI.SetDeviceTime</code>). <span class="chip cmp">compiled</span></p></div></li>
+      <p>The upload handler (“Upload to terminal”) first calls <code>GetDBDate</code> and compares the catalogue date with today. If the catalogue is old, it warns: “Warning: the catalogue … is dated {0}! Are you sure you want to load old data?”. It then connects over RAPI, deletes any existing database files on the device, and streams each file with <code>BeginCopyFileToDevice</code> behind a cancellable progress dialog. When the device connects, <code>ActiveSync_Active</code> also syncs the terminal clock (<code>RAPI.SetDeviceTime</code>). <span class="chip cmp">compiled</span></p></div></li>
     <li><div class="step-body"><h3>Terminal start-up <span class="loc">TSDClient.exe · 0x06000464</span></h3>
       <p><code>Program.Main</code> loads <code>Settings.xml</code> next to the executable. If the file is missing, it creates a settings row with built-in defaults: printer <code>00:03:7a:32:4c:55</code>, COM 9, storage path <code>\Storage Card\tsdfamilia</code>, <code>StorageMemorySize</code> 15000. The main form then shows the numbered menu and starts the scanner (<code>ActionsClass.BeginScan</code>). <span class="chip cmp">compiled</span> <span class="chip obs">observed</span></p></div></li>
     <li><div class="step-body"><h3>Scanning <span class="loc">see §7–§10</span></h3>
       <p>Staff pick a workflow and scan. Each accepted scan updates the in-memory <code>ScannedBarcodes</code> table. <code>BeginScan</code> <span class="loc">0x06000167</span> subscribes to that table's <code>RowChanged</code>/<code>ColumnChanged</code> events. Their handlers call <code>WriteDbTxt</code> <span class="loc">0x0600016A</span>, which appends the row to <code>scannedbarcodes.txt</code> as a <code>|</code>-separated line and to <code>register.txt</code>, then flushes. A crash or battery loss therefore does not lose a scan. <span class="chip cmp">compiled</span></p></div></li>
     <li><div class="step-body"><h3>Download results <span class="loc">TSDServer.exe · 0x06000025</span></h3>
-      <p><span class="ru">«Загрузить с терминала»</span> (download from terminal) copies the scanned-data files back with <code>RAPI.CopyFileFromDevice</code>. It reports every file that failed to copy. <span class="chip cmp">compiled</span></p></div></li>
+      <p>“Download from terminal” copies the scanned-data files back with <code>RAPI.CopyFileFromDevice</code>. It reports every file that failed to copy. <span class="chip cmp">compiled</span></p></div></li>
     <li><div class="step-body"><h3>Publish results <span class="loc">TSDServer.exe · 0x060002D5, 0x06000026</span></h3>
       <p><code>UploadResults</code> writes <code>scannedbarcodes.txt</code> (7 fields, <code>{0}|…|{6}</code>) and <code>register.txt</code> (<code>{0},{1,11:D}, {2,7:D}</code>) into <code>LocalFilePath</code>. It copies each one to <code>RemoteFilePath</code> as <code>{name}_{yyyyMMddhhmmss}.txt</code>. If <code>EraseTerminalDB</code> is set, <code>DeleteOldDB</code> then deletes the scanned files on the terminal. <span class="chip cmp">compiled</span></p></div></li>
   </ol>
@@ -372,10 +372,10 @@
 <!-- ─────────────────────────────── 6 ─────────────────────────────── -->
 <section id="server">
   <h2><span class="num">6</span>Desktop exchange server (TSDServer.exe)</h2>
-  <p>A Windows Forms tray application (<code>notifyIcon1</code>, <span class="ru">«Сервер ТСД»</span>) with a status log (<code>richTextBox1</code>). It has two modes, chosen in <code>Program.Main</code> <span class="loc">0x060002B5</span>. <span class="chip cmp">compiled</span></p>
+  <p>A Windows Forms tray application (<code>notifyIcon1</code>, “TSD Server”) with a status log (<code>richTextBox1</code>). It has two modes, chosen in <code>Program.Main</code> <span class="loc">0x060002B5</span>. <span class="chip cmp">compiled</span></p>
   <div class="grid2">
     <div class="card"><h3>Interactive mode</h3><p>Opens <code>Form1</code> and registers an IPC remoting channel at <code>ipc://localhost:9090/RemoteObject.rem</code> that exposes <code>RemoteObject.Show</code>. This is most likely a single-instance mechanism: a second launch asks the running window to show itself. <span class="chip cmp">compiled</span> <span class="chip rd">reading</span></p></div>
-    <div class="card"><h3>Batch mode: <code>/c</code></h3><p>Configures log4net from <code>log4netconfig.xml</code>, runs <code>AutoLoadProduct</code> and then <code>AutoLoadDoc</code>, and waits up to <strong>900,000&nbsp;ms (15 min)</strong> for each. On timeout it logs <code>ERROR LOAD PRODUCT - TIMEOUT</code> / <code>ERROR LOAD DOCS - TIMEOUT</code>, emails <code>AddressToList</code> through <code>SendMailClass</code>, and returns an <code>ERRORLEVELS</code> exit code. It is built to run from a scheduler. In both modes, <code>DataLoaderClass_OnFinishImport</code> <span class="loc">0x060002C7</span> also emails the import log, subject <span class="ru">«Статус загрузки данных»</span> (data load status), after every import. <span class="chip cmp">compiled</span></p></div>
+    <div class="card"><h3>Batch mode: <code>/c</code></h3><p>Configures log4net from <code>log4netconfig.xml</code>, runs <code>AutoLoadProduct</code> and then <code>AutoLoadDoc</code>, and waits up to <strong>900,000&nbsp;ms (15 min)</strong> for each. On timeout it logs <code>ERROR LOAD PRODUCT - TIMEOUT</code> / <code>ERROR LOAD DOCS - TIMEOUT</code>, emails <code>AddressToList</code> through <code>SendMailClass</code>, and returns an <code>ERRORLEVELS</code> exit code. It is built to run from a scheduler. In both modes, <code>DataLoaderClass_OnFinishImport</code> <span class="loc">0x060002C7</span> also emails the import log, subject “Data load status”, after every import. <span class="chip cmp">compiled</span></p></div>
   </div>
   <div class="tablewrap"><table>
     <thead><tr><th>Component</th><th>Token</th><th>What it does</th></tr></thead>
@@ -393,21 +393,21 @@
 <!-- ─────────────────────────────── 7 ─────────────────────────────── -->
 <section id="client">
   <h2><span class="num">7</span>Handheld application (TSDClient.exe)</h2>
-  <p>A .NET Compact Framework 2.0 Windows Forms application driven entirely from the keypad. Menus are numbered and hot keys are announced on screen, for example <span class="ru">«Ентер – Да, FN+CLR – нет»</span> (Enter = yes, FN+CLR = no) and <span class="ru">«F4 - результат»</span> (F4 = results). <span class="chip cmp">compiled</span></p>
+  <p>A .NET Compact Framework 2.0 Windows Forms application driven entirely from the keypad. Menus are numbered and hot keys are announced on screen, for example “Enter – Yes, FN+CLR – No” and “F4 - Results”. <span class="chip cmp">compiled</span></p>
   <div class="tablewrap"><table>
     <thead><tr><th>Key</th><th>Main-menu item <span class="loc">MainForm · 0x0200001D</span></th><th>Opens</th></tr></thead>
     <tbody>
-      <tr><td class="m">1</td><td><span class="ru">Контроль цен</span> <span class="tr">price check</span></td><td class="m">ViewProductForm</td></tr>
-      <tr><td class="m">2</td><td><span class="ru">Инвентаризация</span> <span class="tr">stock-taking</span></td><td class="m">InventarForm</td></tr>
-      <tr><td class="m">3</td><td><span class="ru">Прием короба внутрит.</span> <span class="tr">internal box receiving</span></td><td class="m">IncomeForm</td></tr>
-      <tr><td class="m">4</td><td><span class="ru">Прием машины</span> <span class="tr">truck receiving</span></td><td class="m">TtnForm</td></tr>
-      <tr><td class="m">5</td><td><span class="ru">Настройки</span> <span class="tr">settings</span></td><td class="m">SettingsForm</td></tr>
-      <tr><td class="m">6</td><td><span class="ru">Накладные</span> <span class="tr">delivery notes</span></td><td class="m">InventarForm (SimpleIncome mode)</td></tr>
-      <tr><td class="m">7</td><td><span class="ru">Возвраты</span> <span class="tr">returns</span></td><td class="m">ReturnForm</td></tr>
-      <tr><td class="m">0</td><td><span class="ru">Выход</span> <span class="tr">exit</span> (only when <code>EnableExit</code>)</td><td class="m">Application.Exit</td></tr>
+      <tr><td class="m">1</td><td>Price check</td><td class="m">ViewProductForm</td></tr>
+      <tr><td class="m">2</td><td>Stock-taking</td><td class="m">InventarForm</td></tr>
+      <tr><td class="m">3</td><td>Internal box receiving</td><td class="m">IncomeForm</td></tr>
+      <tr><td class="m">4</td><td>Truck receiving</td><td class="m">TtnForm</td></tr>
+      <tr><td class="m">5</td><td>Settings</td><td class="m">SettingsForm</td></tr>
+      <tr><td class="m">6</td><td>Delivery notes</td><td class="m">InventarForm (SimpleIncome mode)</td></tr>
+      <tr><td class="m">7</td><td>Returns</td><td class="m">ReturnForm</td></tr>
+      <tr><td class="m">0</td><td>Exit (only when <code>EnableExit</code>)</td><td class="m">Application.Exit</td></tr>
     </tbody>
   </table></div>
-  <p>The labels are verbatim button captions <span class="chip cmp">compiled</span>. <code>MenuEvents</code> <span class="loc">0x0600013C</span> constructs exactly the forms in the right-hand column <span class="chip cmp">compiled</span>. The one-to-one pairing of key and form is inferred from caption order and each form's own title strings, for example TtnForm's title is <span class="ru">«Прием машин»</span> (truck receiving). <span class="chip rd">reading</span></p>
+  <p>The labels are the button captions, translated from Russian <span class="chip cmp">compiled</span>. <code>MenuEvents</code> <span class="loc">0x0600013C</span> constructs exactly the forms in the right-hand column <span class="chip cmp">compiled</span>. The one-to-one pairing of key and form is inferred from caption order and each form's own title strings, for example TtnForm's title is “Truck receiving”. <span class="chip rd">reading</span></p>
   <div class="tablewrap"><table>
     <thead><tr><th>Type</th><th>Token</th><th>Methods</th><th>Responsibility</th></tr></thead>
     <tbody>
@@ -431,35 +431,35 @@
   <div class="grid2">
     <div class="card">
       <h3>1 · Price check <span class="loc">ViewProductForm</span></h3>
-      <p>Scan a product or type its Navision code (<span class="ru">«Код навижн»</span>). The screen shows name, article, <code>OldPrice</code>/<code>NewPrice</code> (formatted <code>######.00</code>) and planned vs. actual quantity. <strong>F1 / F2</strong> print a label with template 1 or 2 (<span class="ru">«F1-Печать1»</span>, <span class="ru">«F2-Печать2»</span>). <strong>F4</strong> lists every document the product appears in (<code>ViewDocsForm</code>). A product that is also part of a return is flagged <span class="ru">«Этот товар участвует в возврате»</span> (this item is part of a return).</p>
+      <p>Scan a product or type its Navision code (“Navision code”). The screen shows name, article, <code>OldPrice</code>/<code>NewPrice</code> (formatted <code>######.00</code>) and planned vs. actual quantity. <strong>F1 / F2</strong> print a label with template 1 or 2 (“F1-Print1”, “F2-Print2”). <strong>F4</strong> lists every document the product appears in (<code>ViewDocsForm</code>). A product that is also part of a return is flagged “This item is part of a return”.</p>
     </div>
     <div class="card">
       <h3>2 · Stock-taking <span class="loc">InventarForm · 0x060001DC</span></h3>
-      <p>Start by scanning <span class="ru">«ШК нового паспорта»</span> (the barcode of a new count sheet). The count is opened (<code>OpenInv</code>) or resumed (<span class="ru">«Продолжить просчет?»</span>, continue the count?). Items are then scanned into it, and <strong>F3</strong> closes it (<span class="ru">«F3-Инв.Закрыть»</span>). A count that is already closed is refused (<span class="ru">«Просчет … уже завершен!»</span>). A wrong location barcode gives <span class="ru">«Штрихкод {0} неверный адрес!»</span> (barcode is a wrong address). The <code>InventarMode</code> enum distinguishes <code>UseReturns</code> / <code>DontUseReturns</code>.</p>
+      <p>Start by scanning the “new count sheet barcode”. The count is opened (<code>OpenInv</code>) or resumed (“Continue the count?”). Items are then scanned into it, and <strong>F3</strong> closes it (“F3-Close count”). A count that is already closed is refused (“Count … already completed!”). A wrong location barcode gives “Barcode {0}: wrong address!”. The <code>InventarMode</code> enum distinguishes <code>UseReturns</code> / <code>DontUseReturns</code>.</p>
     </div>
     <div class="card">
       <h3>3 · Internal box receiving <span class="loc">IncomeForm · 0x02000070</span></h3>
-      <p>Scan a box barcode. The terminal finds the delivery note it belongs to and shows <span class="ru">«По накладной №{0} {1} коробов»</span> (note №{0}: {1} boxes). It rejects foreign boxes (<span class="ru">«Это чужой короб!»</span>), boxes already accepted, and barcodes that are not box barcodes. <strong>F1</strong> accepts a box in full (<span class="ru">«F1-принять полностью»</span>). Running totals show articles and pieces planned vs. accepted until <span class="ru">«КОРОБ ПРИНЯТ ПОЛНОСТЬЮ»</span> (box fully accepted).</p>
+      <p>Scan a box barcode. The terminal finds the delivery note it belongs to and shows “Note No. {0}: {1} boxes”. It rejects foreign boxes (“This is a foreign box!”), boxes already accepted, and barcodes that are not box barcodes. <strong>F1</strong> accepts a box in full (“F1-accept in full”). Running totals show articles and pieces planned vs. accepted until “BOX FULLY ACCEPTED”.</p>
     </div>
     <div class="card">
       <h3>4 · Truck receiving by waybill (TTN) <span class="loc">TtnForm · 0x02000031</span></h3>
-      <p>Scan the TTN (consignment note) barcode. A TTN for another store is rejected (<span class="ru">«ТТН не этого магазина!»</span>), as is a closed one (<span class="ru">«ТТН уже закрыто!»</span>). A TTN moves through <span class="ru">ТТН ПРИНЯТЬ → ТТН В ПРИЕМКЕ → ТТН ПРИНЯТО</span> (to accept → being received → accepted), per <code>CheckStatus</code>. Its boxes are then received box by box (<code>CarScanMode</code>: <code>CarsScan</code> / <code>BoxScan</code>). <code>ViewTtnForm</code> shows the truck as a tree of boxes with accepted/total counts.</p>
+      <p>Scan the TTN (consignment note) barcode. A TTN for another store is rejected (“Waybill is not for this store!”), as is a closed one (“Waybill already closed!”). A TTN moves through WAYBILL TO ACCEPT → WAYBILL BEING RECEIVED → WAYBILL ACCEPTED, per <code>CheckStatus</code>. Its boxes are then received box by box (<code>CarScanMode</code>: <code>CarsScan</code> / <code>BoxScan</code>). <code>ViewTtnForm</code> shows the truck as a tree of boxes with accepted/total counts.</p>
     </div>
     <div class="card">
       <h3>6 · Delivery notes <span class="loc">InventarForm, SimpleIncome mode</span></h3>
-      <p>The same form as stock-taking, in <code>InventarFormMode.SimpleIncome</code>. Enter or scan a delivery-note number (<span class="ru">«Введите № накладной»</span>). Start or continue it, scan items against the plan, then close it (<span class="ru">«Вы хотите закрыть накладную?»</span>, close the note?).</p>
+      <p>The same form as stock-taking, in <code>InventarFormMode.SimpleIncome</code>. Enter or scan a delivery-note number (“Enter note No.”). Start or continue it, scan items against the plan, then close it (“Do you want to close the note?”).</p>
     </div>
     <div class="card">
       <h3>7 · Returns <span class="loc">ReturnForm</span></h3>
-      <p>Scan a product. The terminal lists every open return that includes it (<code>FindAllReturnsByProduct</code>), or shows <span class="ru">«Не найдено возвратов»</span> (no returns found). Returned goods are packed into return boxes (<code>CreateNewReturnBox</code>, <code>CheckOpenedReturnBox</code>, <code>CloseReturnBoxAction</code>). A box that is already closed is refused: <span class="ru">«Короб {0} уже закрыт»</span> (box {0} already closed). A dedicated <code>ReturnBoxForm</code> exists in the binary, but nothing opens it (§16).</p>
+      <p>Scan a product. The terminal lists every open return that includes it (<code>FindAllReturnsByProduct</code>), or shows “No returns found”. Returned goods are packed into return boxes (<code>CreateNewReturnBox</code>, <code>CheckOpenedReturnBox</code>, <code>CloseReturnBoxAction</code>). A box that is already closed is refused: “Box {0} already closed”. A dedicated <code>ReturnBoxForm</code> exists in the binary, but nothing opens it (§16).</p>
     </div>
     <div class="card">
       <h3>5 · Settings <span class="loc">SettingsForm · 0x0600000D</span></h3>
-      <p>1: find and pair the Bluetooth printer (<code>SearchPrinterForm</code>). 2: clear scanned data, with a two-step confirmation (<span class="ru">«После очистки все ранее отсканированные данные будут недоступны!»</span>, after clearing, all previously scanned data will be unavailable). This deletes <code>scannedbarcodes.txt</code> and <code>register.txt</code>. 3: data information (<code>ViewLoadDateForm</code>): last load date and a database health check (<code>TestDB</code>, <code>CheckDbFile</code>).</p>
+      <p>1: find and pair the Bluetooth printer (<code>SearchPrinterForm</code>). 2: clear scanned data, with a two-step confirmation (“After clearing, all previously scanned data will be unavailable!”). This deletes <code>scannedbarcodes.txt</code> and <code>register.txt</code>. 3: data information (<code>ViewLoadDateForm</code>): last load date and a database health check (<code>TestDB</code>, <code>CheckDbFile</code>).</p>
     </div>
     <div class="card">
       <h3>Quantity correction</h3>
-      <p>Two dialogs, <code>ChangeQtyForm</code> and <code>MultiplyForm</code>, gated by <code>EnableChgQty</code> (read by the result viewers) and <code>EnableChgMlt</code> (read by the product screen). They validate input (<span class="ru">«Кол-во вне диапазона»</span>, quantity out of range; <span class="ru">«Неверный формат»</span>, invalid format). In the product screen, undoing the last scan asks for confirmation (<span class="ru">«Уменьшить по коду {0} … с количества {0} до количества {1}?»</span>, reduce code {0} from quantity {0} to {1}?) and refuses to go below zero (<span class="ru">«Дальше уменьшить нельзя!»</span>, cannot reduce further).</p>
+      <p>Two dialogs, <code>ChangeQtyForm</code> and <code>MultiplyForm</code>, gated by <code>EnableChgQty</code> (read by the result viewers) and <code>EnableChgMlt</code> (read by the product screen). They validate input (“Quantity out of range”, “Invalid format”). In the product screen, undoing the last scan asks for confirmation (“Reduce code {0} … from quantity {0} to quantity {1}?”) and refuses to go below zero (“Cannot reduce any further!”).</p>
     </div>
   </div>
 </section>
@@ -469,13 +469,13 @@
   <h2><span class="num">9</span>The action engine</h2>
   <p>A scan's outcome is not hard-coded per screen. <code>ActionsClass.InvokeAction(ActionCode, ProductsTblRow, DocsTblRow)</code> <span class="loc">0x0600018D</span> dispatches through an <code>ActOnProduct</code> delegate to one handler per action code. The document row carries per-document behaviour in <code>LabelCode</code>, <code>MusicCode</code>, <code>VibroCode</code> and <code>Priority</code>. So the <em>back office</em>, by preparing the document file, decides what the terminal does when an item is scanned. <span class="chip cmp">compiled</span> <span class="chip rd">reading</span></p>
   <div class="tablewrap"><table>
-    <thead><tr><th><code>TSDUtils.ActionCode</code> members <span class="chip grf">graph</span></th><th>Display labels (<code>ActionCodeDescription</code>) <span class="chip cmp">compiled</span></th></tr></thead>
+    <thead><tr><th><code>TSDUtils.ActionCode</code> members <span class="chip grf">graph</span></th><th>Display labels, translated (<code>ActionCodeDescription</code>) <span class="chip cmp">compiled</span></th></tr></thead>
     <tbody><tr>
       <td class="q mono" style="font-size:0.78rem; line-height:1.8">NoAction · Returns · Reprice · Remove · InventoryGlobal · QuickHelp · InventoryLocal · IncomeBox · CloseInventar · Cars · SimpleIncome · BoxWProducts · CarsBoxes · CloseIncome · BoxIncomes · BoxReturns · ReturnBoxWProducts · CloseBoxReturns · ReturnsTTN · ReturnInInventory · StrangeBox · AlreadyAccepted · NotFound · DocNotFound</td>
-      <td class="q ru" style="line-height:1.8">НЕТ ДЕЙСТВИЯ · ВОЗВРАТ · ПЕРЕОЦЕНКА · ПЕРЕБРОСКА · Инвент-ция Глобальная · СКОРАЯ ПОМОЩЬ · Инвент-ция Точечная · Прием коробов · Закрытие глобальной инвентаризации · Поставки (ТТН) · Прием товаров · Накладные и короба · Машины и короба · Закрытие накладной · Накладные · Короба и товары возвратов · Накладные и короба возвратов · Закрытие короба возвратов · Накладные возвратов · Товар не найден · Документ не найден</td>
+      <td class="q" style="line-height:1.8">NO ACTION · RETURN · REPRICING · TRANSFER · Inventory, global · QUICK HELP · Inventory, spot check · Box receiving · Close global inventory · Deliveries (waybill) · Goods receiving · Notes and boxes · Trucks and boxes · Close note · Notes · Return boxes and goods · Return notes and boxes · Close return box · Return notes · Item not found · Document not found</td>
     </tr></tbody>
   </table></div>
-  <p>Enum members come from <code>ekos_neighborhood</code> on the <code>ActionCode</code> type. Labels are the string constants of <code>ActionCodeDescription</code> <span class="loc">0x02000007</span>, in declaration order. They pair up closely: Returns/ВОЗВРАТ, Reprice/ПЕРЕОЦЕНКА (repricing), Remove/ПЕРЕБРОСКА (transfer), QuickHelp/СКОРАЯ ПОМОЩЬ (quick help). EKOS does not read enum constant values, so the exact numeric mapping is not asserted.</p>
+  <p>Enum members come from <code>ekos_neighborhood</code> on the <code>ActionCode</code> type. Labels are the string constants of <code>ActionCodeDescription</code> <span class="loc">0x02000007</span>, in declaration order. They pair up closely: Returns/RETURN, Reprice/REPRICING, Remove/TRANSFER, QuickHelp/QUICK HELP. EKOS does not read enum constant values, so the exact numeric mapping is not asserted.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>Handler</th><th>Token</th><th>Behaviour</th></tr></thead>
     <tbody>
@@ -501,9 +501,9 @@
   <ol class="steps">
     <li><div class="step-body"><h3>Reader thread waits <span class="loc">ScanClass.InitScan 0x060001FF · start 0x06000200</span></h3><p><code>InitScan</code> configures the reader through <code>OBReadLibNet</code>: symbologies, scan key, buffer type, notification, buzzer and vibrator. It then calls <code>OBROpen</code> and starts a thread. The thread blocks on <code>SysWaitForEvent("OBRScanningEvent", 2000)</code>, reads the text, and raises <code>Scanned</code>. Supported symbologies include Code39, NW-7, UPC/EAN, ITF, Code93, Code128, MSI, IATA and EAN-13/GTIN.</p></div></li>
     <li><div class="step-body"><h3>Screen receives it <span class="loc">ViewProductForm.Scanned 0x06000049</span></h3><p>The active form's handler (<code>OnScanned</code> / <code>Scanned</code>) looks up the product (<code>SearchBarcode</code>, <code>GetProductRowByNavCode</code>) and the document (<code>GetDataByDocIdAndType</code>, <code>FindByDocIdAndDocType</code>).</p></div></li>
-    <li><div class="step-body"><h3>Rules are applied <span class="loc">ViewProductForm.DoAction 0x0600004B</span></h3><p><code>DoAction</code> (complexity 38, 33 branches) decides between the outcomes whose messages it carries: <span class="ru">«Товар уже принят {0} из {1}»</span> (item already received: {0} of {1}), <span class="ru">«Принять еще {0} шт»</span> (receive {0} more), <span class="ru">«Товар не входит в короб!»</span> (item not in this box), <span class="ru">«БРАК»</span> (defective), <span class="ru">«Режим инвентаризации»</span> (stock-taking mode), <span class="ru">«Режим накладных»</span> (delivery-note mode). It then calls <code>ActionsClass.InvokeAction</code>.</p></div></li>
+    <li><div class="step-body"><h3>Rules are applied <span class="loc">ViewProductForm.DoAction 0x0600004B</span></h3><p><code>DoAction</code> (complexity 38, 33 branches) decides between the outcomes whose messages it carries: “Item already received: {0} of {1}”, “Receive {0} more pcs”, “Item is not in this box!”, “DEFECTIVE”, “Stock-taking mode”, “Delivery-note mode”. It then calls <code>ActionsClass.InvokeAction</code>.</p></div></li>
     <li><div class="step-body"><h3>Scan is recorded <span class="loc">ActionsClass.AddScannedRow 0x060001A4</span></h3><p><code>AddScannedRow</code> finds or creates the row keyed by (Barcode, DocType, DocId) and calls <code>AcceptChanges</code>. The table's change events fire <code>WriteDbTxt</code> <span class="loc">0x0600016A</span>, which appends an 8-field line (<code>{0}|…|{7}</code>, UTF-8) to the journal and a line to <code>register.txt</code>. Opening and closing documents, boxes and trucks write their own marker lines directly (<code>OpenInv</code>, <code>CloseInv</code>, <code>CloseDoc</code>, <code>CloseCarAction</code>, <code>CreateNewReturnBox</code>, <code>CloseReturnBoxAction</code>, <code>IncomeBoxAction</code>).</p></div></li>
-    <li><div class="step-body"><h3>Feedback <span class="loc">Action_OnActionCompleted 0x06000053</span></h3><p>The <code>ActionCompleted</code> event updates planned vs. actual counts on screen. It plays the document's sound, and when a box is complete it shows <span class="ru">«Короб по накладной … принят полностью!»</span> (box on note … fully received).</p></div></li>
+    <li><div class="step-body"><h3>Feedback <span class="loc">Action_OnActionCompleted 0x06000053</span></h3><p>The <code>ActionCompleted</code> event updates planned vs. actual counts on screen. It plays the document's sound, and when a box is complete it shows “Box on note … fully received!”.</p></div></li>
   </ol>
   <p><strong>Blast radius:</strong> <code>ekos_impact</code> on <code>AddScannedRow</code>, following <code>Calls</code> in reverse, finds <strong>29 methods</strong> that write scan records through it: 14 direct callers, and the deepest 4 hops away (the query bound was 5, so this is the complete set). Among them are <code>DoAction</code>, <code>navCodeTB_KeyDown</code>, <code>OpenInv</code>/<code>CloseInv</code>, every <code>*ActionProc</code>, <code>CheckStatus</code>, <code>OnIncomeScanned</code> and <code>CreateNewReturnBox</code>. Any change to the scan-record key or format has to be checked against all of them. <span class="chip grf">graph</span> (<a href="examples/tsd/impact-AddScannedRow.json">raw result</a>)</p>
 </section>
@@ -518,7 +518,7 @@
     <div class="card"><h3>ScannedBarcodes</h3><div class="where">ScannedProductsDataSet · client + server</div><p>Barcode · DocId · DocType · PlanQuanity · FactQuantity · ScannedDate · TerminalId · Priority</p><p class="tr">The result of the day's work. Primary lookup is (Barcode, DocType, DocId). "PlanQuanity" is misspelled in the schema itself.</p></div>
     <div class="card"><h3>TypedSettings / UntypedSettings</h3><div class="where">SettingsDataSet · client</div><p>19 typed columns (§14) plus a free-form Name/Value table.</p></div>
     <div class="card"><h3>ProductsBinTbl · DocsBinTbl · DocsBinTbl1</h3><div class="where">ProductsDataSet · server only</div><p><code>ProductsBinTbl</code>'s column set is combined with <code>FieldsLength</code> in <code>DataLoaderClass.SetFormats</code> <span class="loc">0x060002C2</span> to define the fixed-width import layout. <code>DocsBinTbl</code>/<code>DocsBinTbl1</code> (adding Shablon, RePriceDate and ReturnDate) have no reader in the call graph.</p></div>
-    <div class="card"><h3>DocumentClass</h3><div class="where">TSDClient · 0x02000065</div><p>View model rendered as <span class="ru">«Документ {0} №{1} от {2} … План:{6}, Факт: {7}»</span> (document {0} №{1} dated {2} … plan: {6}, actual: {7}).</p></div>
+    <div class="card"><h3>DocumentClass</h3><div class="where">TSDClient · 0x02000065</div><p>View model rendered as “Document {0} No. {1} dated {2} … Plan: {6}, Actual: {7}”.</p></div>
   </div>
 </section>
 
@@ -584,10 +584,10 @@
     <thead><tr><th>File</th><th>What it is</th><th>Evidence</th></tr></thead>
     <tbody>
       <tr><td class="m">TSDClient.exe · TSDServer.exe</td><td class="q">The two applications</td><td><span class="chip cmp">compiled</span></td></tr>
-      <tr><td class="m">TSDClient - копия.exe · TSDClient.ex_</td><td class="q">Copies of the handheld app ("копия" = copy). The <code>.ex_</code> is recorded as a file only; the binary observer does not pick it up.</td><td><span class="chip cmp">compiled</span></td></tr>
+      <tr><td class="m">TSDClient - Copy.exe · TSDClient.ex_</td><td class="q">Copies of the handheld app. The <code>.ex_</code> is recorded as a file only; the binary observer does not pick it up.</td><td><span class="chip cmp">compiled</span></td></tr>
       <tr><td class="m">TSDClient.pdb</td><td class="q">Debug symbols (650 KB). EKOS does not read PDBs.</td><td><span class="chip obs">observed</span></td></tr>
       <tr><td class="m">*.dll (11)</td><td class="q">See §3. <code>MCSSLib.dll</code> is native ARM code.</td><td><span class="chip cmp">compiled</span></td></tr>
-      <tr><td class="m">Settings.xml · _Settings.xml · Settings - копия.xml</td><td class="q">Terminal settings plus two variants</td><td><span class="chip obs">observed</span></td></tr>
+      <tr><td class="m">Settings.xml · _Settings.xml · Settings - Copy.xml</td><td class="q">Terminal settings plus two variants</td><td><span class="chip obs">observed</span></td></tr>
       <tr><td class="m">SOUND_10/12/250.def · VIBRO_10/12/250.def</td><td class="q">Buzzer and vibrator patterns per <code>MusicCode</code>/<code>VibroCode</code></td><td><span class="chip obs">observed</span> <span class="chip cmp">compiled</span></td></tr>
       <tr><td class="m">scannedbarcodes.txt · scannedbarcodes.txt1 · register.txt</td><td class="q">Sample results: a desktop-format export (2011 dates) and a terminal journal (2003 dates)</td><td><span class="chip obs">observed</span></td></tr>
       <tr><td class="m">BTLog.txt</td><td class="q">Bluetooth printer log. Its 1/3/2003 timestamps suggest the device clock was unset.</td><td><span class="chip obs">observed</span></td></tr>
@@ -613,7 +613,7 @@
     </tbody>
   </table></div>
   <div class="grid2">
-    <div class="badbox"><h3>Duplicated binaries</h3><p>Three builds of the handheld app sit side by side (<code>.exe</code>, <code>- копия.exe</code>, <code>.ex_</code>) with different type counts, plus three settings files. Which one is deployed cannot be told from the folder. <span class="chip cmp">compiled</span></p></div>
+    <div class="badbox"><h3>Duplicated binaries</h3><p>Three builds of the handheld app sit side by side (<code>.exe</code>, <code>- Copy.exe</code>, <code>.ex_</code>) with different type counts, plus three settings files. Which one is deployed cannot be told from the folder. <span class="chip cmp">compiled</span></p></div>
     <div class="badbox"><h3>Missing label templates</h3><p><code>PrintLabel</code> requires <code>LABEL_{n}.DEF</code>, and no such file is in this folder. Printing depends on files deployed some other way. <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
     <div class="warnbox"><h3>Dead weight shipped</h3><p><code>ImagerLibNet</code>, <code>MoFlinkLibNet</code> and <code>ControlsLib</code> have no dependents. <code>ControlsLib</code> itself references <code>NetworkLib</code> and <code>TsdCommandsLib</code>, which are not in the folder. Its <code>NewForm</code> uses a <code>NetMan</code> command/reply protocol, a trace of a different, networked client. <span class="chip grf">graph</span> <span class="chip cmp">compiled</span></p></div>
     <div class="warnbox"><h3>God class</h3><p><code>ActionsClass</code> holds 96 methods: dispatch, persistence, lookups, device feedback and printing. It is the one type that nearly every workflow calls, and 29 methods reach its scan-record writer (§10). <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
