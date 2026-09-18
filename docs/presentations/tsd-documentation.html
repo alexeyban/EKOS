@@ -655,14 +655,14 @@ ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve --force &amp;&amp; ek
     <li><div class="step-body"><h3>Generate EKOS's deterministic documentation</h3>
 <pre>ekos docs generate --layout curated               <span class="c"># README / Architecture / API + 9,283 entity pages</span>
 ekos docs generate --layout solution-architect    <span class="c"># risk report, onboarding guide, findings memo</span></pre>
-      <p>A copy of the top-level generated reports is kept in <a href="examples/tsd/generated/">examples/tsd/generated/</a>.</p></div></li>
+      <p>A copy of the top-level generated reports is kept in <a href="https://github.com/alexeyban/EKOS/tree/main/docs/presentations/examples/tsd/generated">examples/tsd/generated/</a>.</p></div></li>
     <li><div class="step-body"><h3>Ask EKOS through MCP</h3>
 <pre>ekos mcp serve --workspace .
 <span class="c"># ekos_ekl             FIND Object WHERE kind CONTAINS 'BinaryType' AND name = 'TSDServer.ViewProductForm'
 # ekos_binary_explain  {id}  → members, complexity, constants, call targets, I/O, provenance
 # ekos_impact          {id, direction: "dependents", kinds: ["Calls"]}
 # ekos_dependents      {id of BluetoothLibNet}  → TSDClient ×2</span></pre>
-      <p>The <code>ekos_binary_explain</code> output behind this document is kept for 22 key types in <a href="examples/tsd/binary-explain/">examples/tsd/binary-explain/</a>.</p></div></li>
+      <p>The <code>ekos_binary_explain</code> output behind this document is kept for 22 key types in <a href="https://github.com/alexeyban/EKOS/tree/main/docs/presentations/examples/tsd/binary-explain">examples/tsd/binary-explain/</a>.</p></div></li>
   </ol>
 </section>
 
