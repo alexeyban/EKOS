@@ -54,7 +54,29 @@ const PATTERNS: &[(&str, IoBoundary)] = &[
     ("java.lang.Runtime", IoBoundary::Process),
     ("java.lang.ProcessBuilder", IoBoundary::Process),
     // ── CLR: database ───────────────────────────────────────────────────────
-    ("System.Data.", IoBoundary::Database),
+    // Providers and the connection/command abstractions only. Most of `System.Data` is the
+    // in-memory `DataSet`/`DataTable`/`DataRow` model, which never leaves the process: a bare
+    // `System.Data.` prefix claimed ~2,000 `DataTable.get_Columns`-style calls in one real app as
+    // database boundaries and buried its actual ones.
+    ("System.Data.SqlClient.", IoBoundary::Database),
+    ("System.Data.SqlServerCe.", IoBoundary::Database),
+    ("System.Data.OleDb.", IoBoundary::Database),
+    ("System.Data.Odbc.", IoBoundary::Database),
+    ("System.Data.OracleClient.", IoBoundary::Database),
+    ("System.Data.SQLite.", IoBoundary::Database),
+    ("System.Data.EntityClient.", IoBoundary::Database),
+    ("System.Data.Entity.", IoBoundary::Database),
+    ("System.Data.Linq.", IoBoundary::Database),
+    ("System.Data.Common.DbConnection", IoBoundary::Database),
+    ("System.Data.Common.DbCommand", IoBoundary::Database),
+    ("System.Data.Common.DbDataReader", IoBoundary::Database),
+    ("System.Data.Common.DbDataAdapter", IoBoundary::Database),
+    ("System.Data.Common.DbTransaction", IoBoundary::Database),
+    ("System.Data.IDbConnection", IoBoundary::Database),
+    ("System.Data.IDbCommand", IoBoundary::Database),
+    ("System.Data.IDataReader", IoBoundary::Database),
+    ("System.Data.IDbDataAdapter", IoBoundary::Database),
+    ("System.Data.IDbTransaction", IoBoundary::Database),
     ("Microsoft.Data.", IoBoundary::Database),
     ("Microsoft.EntityFrameworkCore.", IoBoundary::Database),
     ("Npgsql.", IoBoundary::Database),
@@ -75,7 +97,8 @@ const PATTERNS: &[(&str, IoBoundary)] = &[
     ("System.IO.StreamReader", IoBoundary::File),
     ("System.IO.StreamWriter", IoBoundary::File),
     ("System.IO.FileStream", IoBoundary::File),
-    ("System.IO.Path", IoBoundary::File),
+    // Not `System.IO.Path`: `Combine`/`GetFileName`/`GetExtension` are string manipulation and
+    // touch no file.
     // ── CLR: messaging ──────────────────────────────────────────────────────
     ("System.Messaging.", IoBoundary::Messaging),
     ("Microsoft.Azure.ServiceBus.", IoBoundary::Messaging),
@@ -169,5 +192,35 @@ mod tests {
                 Some(IoBoundary::Database)
             );
         }
+    }
+
+    /// The in-memory ADO.NET model is not I/O. `DataTable`, `DataRow` and `DataSet` live
+    /// entirely in the process; only a provider or connection/command type crosses to a database.
+    #[test]
+    fn in_memory_ado_net_types_are_not_database_io() {
+        for owner in [
+            "System.Data.DataTable",
+            "System.Data.DataRow",
+            "System.Data.DataSet",
+            "System.Data.DataColumnCollection",
+            "System.Data.StrongTypingException",
+        ] {
+            assert_eq!(classify(owner), None, "{owner}");
+        }
+        for owner in [
+            "System.Data.SqlServerCe.SqlCeCommand",
+            "System.Data.OleDb.OleDbConnection",
+            "System.Data.Common.DbDataAdapter",
+            "System.Data.IDbCommand",
+            "System.Data.Entity.DbContext",
+        ] {
+            assert_eq!(classify(owner), Some(IoBoundary::Database), "{owner}");
+        }
+    }
+
+    #[test]
+    fn path_manipulation_is_not_file_io() {
+        assert_eq!(classify("System.IO.Path"), None);
+        assert_eq!(classify("System.IO.FileStream"), Some(IoBoundary::File));
     }
 }

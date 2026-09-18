@@ -1,0 +1,214 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "c3c4da2f-18cb-5925-b500-dcce410424a7"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDServer.exe",
+   "binary_sha256": "63e023e4f29f765d68a4c6c02f7e96f854889a4b40a90ad17c2965bd007b0d6e",
+   "locator": "0x02000038"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 5,
+     "in_method": "Log",
+     "io_kind": "process",
+     "target": "System.Diagnostics.Process.GetCurrentProcess"
+    },
+    {
+     "bytecode_offset": 10,
+     "in_method": "Log",
+     "io_kind": "process",
+     "target": "System.Diagnostics.Process.get_Id"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 8,
+     "call_targets": [
+      "System.String.IsNullOrEmpty",
+      "SendMailAttach.SendMailClass.Log",
+      "System.Threading.WaitHandle.WaitOne",
+      "System.Threading.EventWaitHandle.Reset",
+      "System.Console.WriteLine",
+      "System.String.Join",
+      "System.String.Split",
+      "System.String.Trim",
+      "System.Net.Mail.MailMessage..ctor",
+      "System.Net.Mail.MailMessage.get_To",
+      "System.Net.Mail.MailAddress..ctor",
+      "constructed type.Add",
+      "System.Net.Mail.MailMessage.set_From",
+      "System.Net.Mail.MailMessage.set_IsBodyHtml",
+      "System.Text.Encoding.GetEncoding",
+      "System.Net.Mail.MailMessage.set_BodyEncoding",
+      "System.String.Replace",
+      "System.Net.Mail.MailMessage.set_Subject",
+      "System.Net.Mail.MailMessage.get_Bcc",
+      "System.Net.Mail.MailAddressCollection.Add",
+      "System.Net.Mail.SmtpClient..ctor",
+      "System.Net.CredentialCache.get_DefaultNetworkCredentials",
+      "System.Net.Mail.SmtpClient.set_Credentials",
+      "System.Net.Mail.MailMessage.set_Body",
+      "System.Net.Mime.ContentType..ctor",
+      "System.IO.Path.GetFileName",
+      "System.Net.Mime.ContentType.set_Name",
+      "System.Net.Mail.Attachment..ctor",
+      "System.Net.Mail.Attachment.get_ContentDisposition",
+      "System.Net.Mime.ContentType.get_Name",
+      "System.Net.Mime.ContentDisposition.set_FileName",
+      "System.Net.Mime.ContentDisposition.set_DispositionType"
+     ],
+     "cyclomatic_complexity": 9,
+     "id": "d3ba5c60-fd77-50b1-85c3-61b021d98e55",
+     "is_static": false,
+     "locator": "0x060002F7",
+     "name": "SendMail",
+     "numeric_literals": [
+      "5000",
+      "59"
+     ],
+     "signature": "(System.String[]) -> System.Void",
+     "string_literals": [
+      "START process",
+      "Usage: | SendMailAttach | Subject | Body | To | Attachment_FileName ",
+      " ",
+      "KOI8-R",
+      "\r\n",
+      "application/vnd.ms-excel",
+      "attachment",
+      "Mail succesully sended to ",
+      "END process"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Object..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "dd3f8e1c-9543-5ce5-95ea-72cf3c450cc5",
+     "is_static": false,
+     "locator": "0x060002F4",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "(System.String, System.String, System.Boolean, System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.ManualResetEvent..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ce355683-a915-58bd-8115-095533aa3c29",
+     "is_static": true,
+     "locator": "0x060002F8",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Diagnostics.Process.GetCurrentProcess",
+      "System.Diagnostics.Process.get_Id",
+      "System.Int32.ToString",
+      "System.String.Format",
+      "log4net.ILog.Info",
+      "System.Console.WriteLine",
+      "System.Object.ToString",
+      "System.Exception.get_Message",
+      "System.Exception.get_Source",
+      "System.Exception.get_StackTrace",
+      "System.Exception.get_InnerException"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0e3429f9-660b-532e-a124-a8b725ea1703",
+     "is_static": false,
+     "locator": "0x060002F5",
+     "name": "Log",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "Process: {0} Info: {1}"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Net.Mail.MailMessage..ctor",
+      "System.Net.Mail.MailMessage.get_To",
+      "System.Net.Mail.MailAddress..ctor",
+      "constructed type.Add",
+      "System.Net.Mail.MailMessage.set_From",
+      "System.Net.Mail.MailMessage.set_IsBodyHtml",
+      "System.Text.Encoding.GetEncoding",
+      "System.Net.Mail.MailMessage.set_BodyEncoding",
+      "System.Net.Mail.MailMessage.set_Subject",
+      "System.Net.Mail.MailMessage.get_Bcc",
+      "System.Net.Mail.MailAddressCollection.Add",
+      "System.Net.Mail.SmtpClient..ctor",
+      "System.Net.CredentialCache.get_DefaultNetworkCredentials",
+      "System.Net.Mail.SmtpClient.set_Credentials",
+      "System.Net.Mail.MailMessage.set_Body",
+      "System.Net.Mime.ContentType..ctor",
+      "System.String.IsNullOrEmpty",
+      "System.String.Trim",
+      "System.IO.Path.GetFileName",
+      "System.Net.Mime.ContentType.set_Name",
+      "System.Net.Mail.Attachment..ctor",
+      "System.Net.Mail.Attachment.get_ContentDisposition",
+      "System.Net.Mime.ContentType.get_Name",
+      "System.Net.Mime.ContentDisposition.set_FileName",
+      "System.Net.Mime.ContentDisposition.set_DispositionType",
+      "System.Net.Mail.MailMessage.get_Attachments",
+      "System.Net.Mail.SmtpClient.Send",
+      "System.String.Concat",
+      "SendMailAttach.SendMailClass.Log",
+      "System.Object.ToString",
+      "System.String.Format"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "d3a0fb56-ff28-5054-be15-86e3d053006e",
+     "is_static": false,
+     "locator": "0x060002F6",
+     "name": "SendMail",
+     "numeric_literals": null,
+     "signature": "(System.String, System.String, System.String, System.String) -> System.Void",
+     "string_literals": [
+      "KOI8-R",
+      "application/vnd.ms-excel",
+      "attachment",
+      "Mail succesully sended to ",
+      "err={0},Subject={1},Body = {2}, To={3}, Attach={4}"
+     ],
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "c3c4da2f-18cb-5925-b500-dcce410424a7",
+   "kind": "BinaryType",
+   "name": "SendMailAttach.SendMailClass",
+   "namespace": "SendMailAttach",
+   "super_type": null
+  }
+ }
+}

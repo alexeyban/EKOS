@@ -76,6 +76,7 @@ pub const METHOD_DEF: usize = 0x06;
 pub const PARAM: usize = 0x08;
 pub const INTERFACE_IMPL: usize = 0x09;
 pub const MEMBER_REF: usize = 0x0A;
+pub const MODULE_REF: usize = 0x1A;
 pub const TYPE_SPEC: usize = 0x1B;
 pub const ASSEMBLY: usize = 0x20;
 pub const ASSEMBLY_REF: usize = 0x23;
@@ -625,6 +626,7 @@ mod coded_exports {
     use super::*;
     pub const C_TYPE_DEF_OR_REF: Coded = TYPE_DEF_OR_REF;
     pub const C_MEMBER_REF_PARENT: Coded = MEMBER_REF_PARENT;
+    pub const C_RESOLUTION_SCOPE: Coded = RESOLUTION_SCOPE;
 }
 
 #[cfg(test)]

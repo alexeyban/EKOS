@@ -1,0 +1,858 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "b005c5e4-0bf4-5d3b-8fac-fddc6505de7b"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDServer.exe",
+   "binary_sha256": "63e023e4f29f765d68a4c6c02f7e96f854889a4b40a90ad17c2965bd007b0d6e",
+   "locator": "0x02000003"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 678,
+     "in_method": "button2_Click",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 504,
+     "in_method": "button2_Click",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 88,
+     "in_method": "downloadBtn_Click",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 263,
+     "in_method": "downloadBtn_Click",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 271,
+     "in_method": "downloadBtn_Click",
+     "io_kind": "file",
+     "target": "System.IO.File.Delete"
+    },
+    {
+     "bytecode_offset": 96,
+     "in_method": "downloadBtn_Click",
+     "io_kind": "file",
+     "target": "System.IO.File.Delete"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.DataLoaderClass.get_Processing",
+      "System.Windows.Forms.MessageBox.Show",
+      "TSDServer.DataLoaderClass.Cancel",
+      "System.Windows.Forms.TextBoxBase.AppendText"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "02cba853-c7e7-5bbf-8b56-1e0ba7c59266",
+     "is_static": false,
+     "locator": "0x06000021",
+     "name": "button4_Click",
+     "numeric_literals": [
+      "32"
+     ],
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": [
+      "Вы хотите остановить загрузку ?",
+      "Загрузка данных",
+      "Отмена загрузки...\n",
+      "Дождитесь завершения... \n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.DataLoaderClass.get_Processing",
+      "System.Windows.Forms.MessageBox.Show",
+      "System.Windows.Forms.CommonDialog.ShowDialog",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.ToolStripItem.set_Text",
+      "System.Windows.Forms.FileDialog.get_FileName",
+      "TSDServer.DataLoaderClass.AutoLoadProduct",
+      "System.Windows.Forms.Control.set_Enabled"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "36e8a279-78f1-5955-b64e-ffbcb09db5a2",
+     "is_static": false,
+     "locator": "0x0600000D",
+     "name": "button1_Click",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": [
+      "Идет процесс загрузки!"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.Application.Exit"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0bc86945-3fe8-55cd-8aae-d90254a48aee",
+     "is_static": false,
+     "locator": "0x0600001E",
+     "name": "выходToolStripMenuItem_Click",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "d9268cfe-e1fd-545c-a6e2-847ee302314e",
+     "is_static": false,
+     "locator": "0x06000015",
+     "name": "terminalRapi_RAPIConnected",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Reflection.Assembly.GetExecutingAssembly",
+      "System.Reflection.Assembly.GetName",
+      "System.Reflection.AssemblyName.get_Version",
+      "System.String.Format",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.Timer.set_Enabled",
+      "System.Windows.Forms.Control.set_Enabled",
+      "OpenNETCF.Desktop.Communication.RAPI.get_ActiveSync",
+      "OpenNETCF.Desktop.Communication.ActiveHandler..ctor",
+      "OpenNETCF.Desktop.Communication.ActiveSync.add_Active",
+      "OpenNETCF.Desktop.Communication.IPAddrHandler..ctor",
+      "OpenNETCF.Desktop.Communication.ActiveSync.add_IPChange",
+      "OpenNETCF.Desktop.Communication.AnswerHandler..ctor",
+      "OpenNETCF.Desktop.Communication.ActiveSync.add_Answer",
+      "OpenNETCF.Desktop.Communication.DisconnectHandler..ctor",
+      "OpenNETCF.Desktop.Communication.ActiveSync.add_Disconnect",
+      "OpenNETCF.Desktop.Communication.InactiveHandler..ctor",
+      "OpenNETCF.Desktop.Communication.ActiveSync.add_Inactive",
+      "OpenNETCF.Desktop.Communication.RAPIConnectedHandler..ctor",
+      "OpenNETCF.Desktop.Communication.RAPI.add_RAPIConnected",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_ImportDocsEnabled",
+      "TSDServer.Properties.Settings.get_ImportProductsEnabled",
+      "TSDServer.Properties.Settings.get_SettingsEnabled"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0382e97c-03ca-53d8-8676-9680e6372b85",
+     "is_static": false,
+     "locator": "0x06000014",
+     "name": "Form1_Load",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": [
+      "ТСД Сервер. Версия {0}"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "OpenNETCF.Desktop.Communication.ActiveHandler..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_TSDDBPAth",
+      "OpenNETCF.Desktop.Communication.RAPI.SetDeviceTime",
+      "System.Windows.Forms.TextBoxBase.AppendText",
+      "System.Windows.Forms.ToolStripItem.set_Text",
+      "TSDServer.Properties.Resources.get_OK",
+      "System.Windows.Forms.ToolStripItem.set_Image"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "f280bdcb-ec7d-5a90-ab4c-2f4ef1aa9804",
+     "is_static": false,
+     "locator": "0x0600001A",
+     "name": "ActiveSync_Active",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Active\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.ComponentModel.Container..ctor",
+      "System.Type.GetTypeFromHandle",
+      "System.ComponentModel.ComponentResourceManager..ctor",
+      "System.Windows.Forms.Button..ctor",
+      "System.Windows.Forms.StatusStrip..ctor",
+      "System.Windows.Forms.ToolStripStatusLabel..ctor",
+      "System.Windows.Forms.OpenFileDialog..ctor",
+      "System.Windows.Forms.Timer..ctor",
+      "System.Windows.Forms.ContextMenuStrip..ctor",
+      "System.Windows.Forms.ToolStripMenuItem..ctor",
+      "System.Windows.Forms.ToolStripSeparator..ctor",
+      "System.Windows.Forms.NotifyIcon..ctor",
+      "System.Windows.Forms.RichTextBox..ctor",
+      "System.Windows.Forms.Panel..ctor",
+      "System.Windows.Forms.Splitter..ctor",
+      "System.Windows.Forms.Control.SuspendLayout",
+      "System.Drawing.Point..ctor",
+      "System.Windows.Forms.Control.set_Location",
+      "System.Windows.Forms.Control.set_Name",
+      "System.Drawing.Size..ctor",
+      "System.Windows.Forms.Control.set_Size",
+      "System.Windows.Forms.Control.set_TabIndex",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.ButtonBase.set_UseVisualStyleBackColor",
+      "System.EventHandler..ctor",
+      "System.Windows.Forms.Control.add_Click",
+      "System.Windows.Forms.ToolStrip.get_Items",
+      "System.Windows.Forms.ToolStripItemCollection.AddRange",
+      "TSDServer.Properties.Resources.get_CriticalError",
+      "System.Windows.Forms.ToolStripItem.set_Image",
+      "System.Windows.Forms.ToolStripItem.set_Name",
+      "System.Windows.Forms.ToolStripItem.set_Size"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "cfee51a9-0a34-559e-966a-9c58c3611ce5",
+     "is_static": false,
+     "locator": "0x06000028",
+     "name": "InitializeComponent",
+     "numeric_literals": [
+      "12",
+      "174",
+      "23",
+      "128",
+      "371",
+      "232",
+      "22",
+      "97",
+      "17",
+      "1000",
+      "132",
+      "54",
+      "131",
+      "180",
+      "191",
+      "192",
+      "28",
+      "41",
+      "9",
+      "70",
+      "99",
+      "170",
+      "10",
+      "6.0",
+      "13.0",
+      "393"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "importGoodBtn",
+      "Импорт файла товаров",
+      "settingsBtn",
+      "Настройки",
+      "statusStrip1",
+      "toolStripStatusLabel1",
+      "Не подключен",
+      "toolStripStatusLabel2",
+      "openFileDialog1",
+      "contextMenuStrip1",
+      "открытьToolStripMenuItem",
+      "Открыть",
+      "toolStripMenuItem1",
+      "выходToolStripMenuItem",
+      "Выход",
+      "notifyIcon1.Icon",
+      "Сервер ТСД",
+      "richTextBox1",
+      "stopGoodBtn",
+      "importDocBtn",
+      "Импорт файла документов",
+      "stopDocsBtn",
+      "panel1",
+      "uploadBtn",
+      "Выгрузить на терминал",
+      "downloadBtn",
+      "Загрузить с терминала",
+      "splitter1",
+      "Form1",
+      "Сервер обмена с ТСД"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "OpenNETCF.Desktop.Communication.InactiveHandler..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "System.Windows.Forms.TextBoxBase.AppendText"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "70c8dd66-cde9-5d09-819c-e8836cb998a0",
+     "is_static": false,
+     "locator": "0x06000017",
+     "name": "ActiveSync_Inactive",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Inactive\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.SettingsForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0b21bb63-2094-536c-b38e-8c2a5ba4477b",
+     "is_static": false,
+     "locator": "0x06000023",
+     "name": "button3_Click",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.IDisposable.Dispose",
+      "TSDServer.DataLoaderClass.Dispose",
+      "System.Windows.Forms.Form.Dispose"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "2206bdf4-f1b1-51b7-bbfb-833d0b13afa0",
+     "is_static": false,
+     "locator": "0x06000027",
+     "name": "Dispose",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": null,
+     "visibility": "protected"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_Visible",
+      "System.Windows.Forms.Control.Show",
+      "System.Windows.Forms.Control.BringToFront"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "f8535876-7bee-5e79-b74a-5ceb0e752fa2",
+     "is_static": false,
+     "locator": "0x06000020",
+     "name": "notifyIcon1_MouseDoubleClick",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.Windows.Forms.MouseEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_EraseTerminalDB",
+      "TSDServer.DataLoaderClass.get_NewScannedFileList",
+      "TSDServer.Properties.Settings.get_TSDDBPAth",
+      "System.IO.Path.GetFileName",
+      "System.String.Concat",
+      "OpenNETCF.Desktop.Communication.RAPI.DeleteDeviceFile",
+      "System.String.Format",
+      "System.Windows.Forms.TextBoxBase.AppendText",
+      "TSDServer.DataLoaderClass.get_OldScannedFileList"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "d1cfbc06-feb2-5531-913e-82883d38e552",
+     "is_static": false,
+     "locator": "0x06000026",
+     "name": "DeleteOldDB",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Ошибка стирания сканированных результатов на терминале - файла [0}\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "TSDServer.DataLoaderClass+ProcessImport..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "System.Windows.Forms.TextBoxBase.AppendText",
+      "System.String.Format",
+      "System.Windows.Forms.ToolStripItem.set_Text"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "030ba15f-1773-503c-bc23-c9f29405584f",
+     "is_static": false,
+     "locator": "0x06000010",
+     "name": "Form1_OnProcessImport",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Boolean) -> System.Void",
+     "string_literals": [
+      "Загружено {0} строк"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "TSDServer.DataLoaderClass+FinishImport..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "System.String.Format",
+      "System.Windows.Forms.MessageBox.Show",
+      "System.Windows.Forms.Control.set_Enabled",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_ImportProductsEnabled",
+      "TSDServer.Properties.Settings.get_ImportDocsEnabled",
+      "TSDServer.Properties.Settings.get_SettingsEnabled",
+      "System.Windows.Forms.TextBoxBase.AppendText"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "01cf86e3-b684-51e0-a5cb-7bd0e13d33a2",
+     "is_static": false,
+     "locator": "0x0600000F",
+     "name": "Form1_OnFinishImport",
+     "numeric_literals": [
+      "64"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "Статус загрузки",
+      "Загрузка завершена...\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.TextBoxBase.ScrollToCaret"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "c25ca9a9-ef7e-55b2-a186-1b456affe68f",
+     "is_static": false,
+     "locator": "0x06000022",
+     "name": "richTextBox1_TextChanged",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.Control.Show"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "a201f366-660f-5b9a-afe7-5ad50ae58492",
+     "is_static": false,
+     "locator": "0x0600001D",
+     "name": "открытьToolStripMenuItem_Click",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.DataLoaderClass.get_Processing",
+      "System.Windows.Forms.MessageBox.Show",
+      "System.Windows.Forms.CommonDialog.ShowDialog",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.ToolStripItem.set_Text",
+      "System.Windows.Forms.FileDialog.get_FileName",
+      "TSDServer.DataLoaderClass.AutoLoadDoc",
+      "System.Windows.Forms.Control.set_Enabled"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "58bce676-4910-5387-96f1-f35ab0de5b12",
+     "is_static": false,
+     "locator": "0x06000024",
+     "name": "importDocBtn_Click",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": [
+      "Идет процесс загрузки!"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 14,
+     "call_targets": [
+      "TSDServer.DataLoaderClass.GetDBDate",
+      "System.DateTime.get_Now",
+      "System.DateTime.Subtract",
+      "System.TimeSpan..ctor",
+      "System.TimeSpan.op_GreaterThanOrEqual",
+      "System.DateTime.ToString",
+      "System.String.Format",
+      "System.Windows.Forms.MessageBox.Show",
+      "System.Windows.Forms.TextBoxBase.AppendText",
+      "System.Exception.get_Message",
+      "System.String.Concat",
+      "System.Text.StringBuilder.set_Length",
+      "OpenNETCF.Desktop.Communication.RAPI.Connect",
+      "OpenNETCF.Desktop.Communication.RAPI.get_Connected",
+      "System.Windows.Forms.Control.set_Enabled",
+      "System.Windows.Forms.Control.set_Text",
+      "TSDServer.DataLoaderClass.get_ProductsFileList",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_TSDDBPAth",
+      "System.IO.Path.GetFileName",
+      "System.IO.Path.Combine",
+      "OpenNETCF.Desktop.Communication.RAPI.DeviceFileExists",
+      "OpenNETCF.Desktop.Communication.RAPI.DeleteDeviceFile",
+      "TSDServer.DataLoaderClass.get_DocsFileList",
+      "OpenNETCF.Desktop.Communication.RAPICopingHandler..ctor",
+      "OpenNETCF.Desktop.Communication.RAPI.add_RAPIFileCoping",
+      "System.IO.File.Exists",
+      "System.AsyncCallback..ctor",
+      "OpenNETCF.Desktop.Communication.RAPI.BeginCopyFileToDevice",
+      "System.Windows.Forms.Form.ShowDialog",
+      "OpenNETCF.Desktop.Communication.RAPI.remove_RAPIFileCoping",
+      "OpenNETCF.Desktop.Communication.RAPI.CancelCopyFileToDevice"
+     ],
+     "cyclomatic_complexity": 15,
+     "id": "1baa6f5b-e8e6-5791-84f9-2e83e6a95628",
+     "is_static": false,
+     "locator": "0x06000011",
+     "name": "button2_Click",
+     "numeric_literals": [
+      "48",
+      "5000",
+      "64",
+      "16"
+     ],
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": [
+      "Внимание, справочник который вы хотите загрузить на ТСД имеет дату {0}! \nВы уверены, что хотите загрузить старые данные?",
+      "dd.MM.yyyy",
+      "Старые данные в справочнике!",
+      "Копирование отменено...\n",
+      "\n",
+      "Отмена копирования...\n",
+      "Дождитесь завершения... \n",
+      "Копирование завершено успешно",
+      "Статус загрузки на терминал",
+      "Копирование завершено с ошибкой: {0}",
+      "Копирование завершено...\n",
+      "Терминал не подключен. Проверьте подключение.",
+      "Ошибка загрузки на терминал: "
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "System.Windows.Forms.TextBoxBase.AppendText",
+      "System.Text.StringBuilder.set_Length",
+      "OpenNETCF.Desktop.Communication.RAPI.Connect",
+      "TSDServer.DataLoaderClass.get_OldScannedFileList",
+      "System.IO.File.Exists",
+      "System.IO.File.Delete",
+      "System.IO.Path.GetExtension",
+      "System.String.ToUpper",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_TSDDBPAth",
+      "System.IO.Path.GetFileName",
+      "System.String.Concat",
+      "OpenNETCF.Desktop.Communication.RAPI.CopyFileFromDevice",
+      "System.String.Format",
+      "System.Text.StringBuilder.AppendFormat",
+      "System.Text.StringBuilder.get_Length",
+      "TSDServer.DataLoaderClass.get_NewScannedFileList",
+      "TSDServer.DataLoaderClass.UploadResults",
+      "System.Object.ToString",
+      "System.Exception.get_Message",
+      "System.Text.StringBuilder.Append",
+      "System.Windows.Forms.MessageBox.Show",
+      "TSDServer.Form1.DeleteOldDB"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "0cf75088-700e-576f-884c-1f5a03e4bbea",
+     "is_static": false,
+     "locator": "0x06000025",
+     "name": "downloadBtn_Click",
+     "numeric_literals": [
+      "5000",
+      "64",
+      "16"
+     ],
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": [
+      "Начало загрузки ...\n",
+      "Подключите терминал и не отключайте до окончания загрузки\n",
+      "Ошибка: Файл {0} не скопирован. \n",
+      "Ошибка: Файл {0} не скопирован.\n",
+      "Файл {0} не скопирован.\n",
+      "Загрузка завершена...\n",
+      "Загрузка завершена успешно.",
+      "Успех загрузки",
+      "Загрузка завершена с ошибкой: \n{0}",
+      "Ошибка загрузки"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "OpenNETCF.Desktop.Communication.IPAddrHandler..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_TSDDBPAth",
+      "OpenNETCF.Desktop.Communication.RAPI.SetDeviceTime",
+      "OpenNETCF.Desktop.Communication.ActiveSync.IntToDottedIP",
+      "System.String.Concat",
+      "System.Windows.Forms.TextBoxBase.AppendText"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "e598c70f-f32d-5720-be9e-187b646ad11d",
+     "is_static": false,
+     "locator": "0x06000016",
+     "name": "ActiveSync_IPChange",
+     "numeric_literals": null,
+     "signature": "(System.Int32) -> System.Void",
+     "string_literals": [
+      "IP Change ",
+      "\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "OpenNETCF.Desktop.Communication.RAPICopingHandler..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "TSDServer.FileCopyProgressForm.SetProgress",
+      "System.IO.Path.GetFileName",
+      "System.String.Format",
+      "TSDServer.FileCopyProgressForm.set_FormCaption",
+      "TSDServer.FileCopyProgressForm.SetError",
+      "System.Text.StringBuilder.AppendFormat",
+      "System.Windows.Forms.TextBoxBase.AppendText"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "92724317-ae35-522f-99da-61db72019b5d",
+     "is_static": false,
+     "locator": "0x06000012",
+     "name": "terminalRapi_RAPIFileCoping",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Int64, System.Int64, System.Exception) -> System.Void",
+     "string_literals": [
+      "Копирование {0}",
+      "Ошибка копирования {0}.\n",
+      "Ошибка копирования {0}. \n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "OpenNETCF.Desktop.Communication.AnswerHandler..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_TSDDBPAth",
+      "OpenNETCF.Desktop.Communication.RAPI.SetDeviceTime",
+      "System.Windows.Forms.TextBoxBase.AppendText"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "9979b88f-1270-54a3-90ff-9558829a421a",
+     "is_static": false,
+     "locator": "0x06000019",
+     "name": "ActiveSync_Answer",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Answer\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "36557b08-3745-51ee-8b2b-091d0510c09d",
+     "is_static": false,
+     "locator": "0x0600001F",
+     "name": "notifyIcon1_MouseClick",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.Windows.Forms.MouseEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.Mutex.ReleaseMutex"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "6e0068a0-a489-547b-8a54-771ca92fc026",
+     "is_static": false,
+     "locator": "0x0600001C",
+     "name": "Form1_FormClosing",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.Windows.Forms.FormClosingEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "OpenNETCF.Desktop.Communication.DisconnectHandler..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "System.Windows.Forms.TextBoxBase.AppendText",
+      "System.Windows.Forms.ToolStripItem.set_Text",
+      "TSDServer.Properties.Resources.get_CriticalError",
+      "System.Windows.Forms.ToolStripItem.set_Image"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "fb3a3215-c48b-5a1e-8ebb-30205ee9ceab",
+     "is_static": false,
+     "locator": "0x06000018",
+     "name": "ActiveSync_Disconnect",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Disconnect\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.DataLoaderClass..ctor",
+      "OpenNETCF.Desktop.Communication.RAPI..ctor",
+      "TSDServer.FileCopyProgressForm..ctor",
+      "System.Text.StringBuilder..ctor",
+      "System.Windows.Forms.Form..ctor",
+      "TSDServer.Form1.InitializeComponent",
+      "System.Threading.Mutex..ctor",
+      "System.Threading.WaitHandle.WaitOne",
+      "System.Threading.WaitHandle.Close",
+      "TSDServer.DataLoaderClass+ProcessImport..ctor",
+      "TSDServer.DataLoaderClass.add_OnProcessImport",
+      "TSDServer.DataLoaderClass+FinishImport..ctor",
+      "TSDServer.DataLoaderClass.add_OnFinishImport",
+      "TSDServer.DataLoaderClass+FailedImport..ctor",
+      "TSDServer.DataLoaderClass.add_OnFailedImport"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "886f6124-224e-53e5-b258-8439e2d89cac",
+     "is_static": false,
+     "locator": "0x0600000C",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Подключен",
+      "Не подключен",
+      "FAMILTSDSERVER"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "System.AsyncCallback..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "System.Windows.Forms.Control.Hide"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "9fb003f3-2f4c-5951-b5ea-ad312fec1ce9",
+     "is_static": false,
+     "locator": "0x06000013",
+     "name": "OnEndCopyFile",
+     "numeric_literals": null,
+     "signature": "(System.IAsyncResult) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "TSDServer.DataLoaderClass+FailedImport..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "System.Windows.Forms.MessageBox.Show"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "a8f17023-029b-5163-930c-e37050324f34",
+     "is_static": false,
+     "locator": "0x0600000E",
+     "name": "Form1_OnFailedImport",
+     "numeric_literals": [
+      "64"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "Статус загрузки на сервер"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "OpenNETCF.Desktop.Communication.RAPI.get_DevicePresent",
+      "System.Windows.Forms.ToolStripItem.set_Text",
+      "TSDServer.Properties.Resources.get_OK",
+      "System.Windows.Forms.ToolStripItem.set_Image",
+      "TSDServer.Properties.Resources.get_CriticalError",
+      "System.Windows.Forms.Application.DoEvents"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "0c39e957-3f7b-5349-b3e3-9b2b3e571284",
+     "is_static": false,
+     "locator": "0x0600001B",
+     "name": "timer1_Tick",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "b005c5e4-0bf4-5d3b-8fac-fddc6505de7b",
+   "kind": "BinaryType",
+   "name": "TSDServer.Form1",
+   "namespace": "TSDServer",
+   "super_type": "System.Windows.Forms.Form"
+  }
+ }
+}

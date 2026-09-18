@@ -1,0 +1,365 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "1371b51f-f1f0-5d8c-9c09-e637d4c65351"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x0200006D"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ReturnForm.ProcessKeyDoun"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "340637c0-eafd-57b2-8499-a763964e4d77",
+     "is_static": false,
+     "locator": "0x0600047D",
+     "name": "textBox1_KeyDown",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.Windows.Forms.KeyEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ce32b973-ab10-5ff8-8ab4-682d2ac0e0e0",
+     "is_static": false,
+     "locator": "0x06000477",
+     "name": "add_onEndLoad",
+     "numeric_literals": null,
+     "signature": "(TSDServer.EndLoadDelegate) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "constructed type..ctor",
+      "System.Windows.Forms.Form..ctor",
+      "TSDServer.ReturnForm.InitializeComponent",
+      "TSDServer.Scanned..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ed668529-33fd-56c1-89f4-f66c717d063e",
+     "is_static": false,
+     "locator": "0x06000479",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.IDisposable.Dispose",
+      "System.Windows.Forms.Control.Dispose"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "6936bb65-2af6-55ce-99af-448c99eba250",
+     "is_static": false,
+     "locator": "0x06000475",
+     "name": "Dispose",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": null,
+     "visibility": "protected"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ReturnForm.ProcessKeyDoun"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0063aebf-6da4-54f4-9993-b8e52a568f2a",
+     "is_static": false,
+     "locator": "0x0600047F",
+     "name": "listBox1_KeyDown",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.Windows.Forms.KeyEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.Panel..ctor",
+      "System.Windows.Forms.ListBox..ctor",
+      "System.Windows.Forms.Label..ctor",
+      "System.Windows.Forms.TextBox..ctor",
+      "System.Windows.Forms.Control.SuspendLayout",
+      "System.Drawing.Color.get_PaleGreen",
+      "System.Windows.Forms.Control.set_BackColor",
+      "System.Windows.Forms.Control.get_Controls",
+      "System.Windows.Forms.Control+ControlCollection.Add",
+      "System.Drawing.Point..ctor",
+      "System.Windows.Forms.Control.set_Location",
+      "System.Windows.Forms.Control.set_Name",
+      "System.Drawing.Size..ctor",
+      "System.Windows.Forms.Control.set_Size",
+      "System.Windows.Forms.Control.set_TabIndex",
+      "System.Windows.Forms.KeyEventHandler..ctor",
+      "System.Windows.Forms.Control.add_KeyDown",
+      "System.Drawing.Font..ctor",
+      "System.Windows.Forms.Control.set_Font",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.Label.set_TextAlign",
+      "System.Drawing.Color.get_Black",
+      "System.Windows.Forms.Control.set_ForeColor",
+      "System.Windows.Forms.Control.set_Visible",
+      "System.Drawing.Color.get_Red",
+      "System.Windows.Forms.Control.set_Dock",
+      "System.Drawing.Color.get_Gold",
+      "System.Drawing.SizeF..ctor",
+      "System.Windows.Forms.ContainerControl.set_AutoScaleDimensions",
+      "System.Windows.Forms.ContainerControl.set_AutoScaleMode",
+      "System.Windows.Forms.ScrollableControl.set_AutoScroll",
+      "System.Drawing.Color.get_White"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "45782bd9-39f0-57d4-a290-f7b58d674b37",
+     "is_static": false,
+     "locator": "0x06000476",
+     "name": "InitializeComponent",
+     "numeric_literals": [
+      "235",
+      "256",
+      "154",
+      "229",
+      "82",
+      "10.0",
+      "236",
+      "20",
+      "131",
+      "111",
+      "91",
+      "12.0",
+      "71",
+      "36",
+      "232",
+      "23",
+      "13",
+      "238",
+      "444",
+      "640",
+      "145",
+      "95",
+      "33",
+      "86",
+      "96.0",
+      "480"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "panel1",
+      "listBox1",
+      "Tahoma",
+      "label4",
+      "Fn-Clr - выход",
+      "dateLabel",
+      "Поставщик:",
+      "docLabel",
+      "Возврат №",
+      "bkLabel",
+      "ШК:",
+      "errLabel",
+      "ШК **** нет возвратов",
+      "textBox1",
+      "label1",
+      "Отсканируейте ШК товара",
+      "panel2",
+      "label3",
+      "F4 - Показать результат",
+      "label2",
+      "F1 - подсчет коробов",
+      "ReturnForm",
+      "Возврат товаров"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "bf42b47a-c383-5c62-bfd6-d7eef866d5d0",
+     "is_static": false,
+     "locator": "0x06000478",
+     "name": "remove_onEndLoad",
+     "numeric_literals": null,
+     "signature": "(TSDServer.EndLoadDelegate) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Windows.Forms.Control.set_Width",
+      "System.Windows.Forms.Control.set_Height",
+      "System.Windows.Forms.Control.Focus",
+      "TSDServer.ScanClass.get_Scaner",
+      "TSDServer.ScanClass.InitScan",
+      "System.Delegate.Combine",
+      "System.Windows.Forms.Control.Refresh",
+      "TSDServer.EndLoadDelegate.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "5bd51ae7-fe48-5cba-841a-fc7d830ed3d6",
+     "is_static": false,
+     "locator": "0x0600047A",
+     "name": "InventarForm_Load",
+     "numeric_literals": [
+      "235",
+      "295"
+     ],
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 11,
+     "call_targets": [
+      "System.Windows.Forms.KeyEventArgs.get_KeyCode",
+      "System.Windows.Forms.Control.get_Focused",
+      "System.Windows.Forms.Control.get_Text",
+      "System.String.op_Inequality",
+      "TSDServer.ReturnForm.OnScanned",
+      "System.Windows.Forms.ListBox.get_Items",
+      "System.Windows.Forms.ListControl.get_SelectedIndex",
+      "System.Windows.Forms.ListBox+ObjectCollection.get_Item",
+      "System.Object.ToString",
+      "System.String.Split",
+      "TSDServer.ScanClass.get_Scaner",
+      "System.Delegate.Remove",
+      "TSDServer.ScanClass.StopScan",
+      "TSDServer.ViewProductForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog",
+      "System.IDisposable.Dispose",
+      "TSDServer.BTPrintClass.get_PrintClass",
+      "System.Exception.get_Message",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "TSDServer.ScanClass.InitScan",
+      "System.Delegate.Combine",
+      "System.Windows.Forms.Form.Close",
+      "System.Windows.Forms.KeyEventArgs.get_KeyValue",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "System.Windows.Forms.Control.Refresh"
+     ],
+     "cyclomatic_complexity": 12,
+     "id": "5eaa46fd-395e-5dd9-bc1e-68455b1ac3c9",
+     "is_static": false,
+     "locator": "0x0600047E",
+     "name": "ProcessKeyDoun",
+     "numeric_literals": [
+      "13",
+      "124",
+      "27",
+      "18",
+      "16",
+      "115",
+      "9"
+     ],
+     "signature": "(System.Windows.Forms.KeyEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 10,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "TSDServer.Scanned..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "System.Windows.Forms.Control.set_Visible",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.TextBoxBase.SelectAll",
+      "System.Windows.Forms.ListBox.get_Items",
+      "System.Windows.Forms.ListBox+ObjectCollection.Clear",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ActionsClass.FindAllReturnsByProduct",
+      "TSDServer.ActionsClass.PlaySoundAsync",
+      "TSDServer.ActionsClass.PlayVibroAsync",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Text2",
+      "constructed type.Add",
+      "constructed type.ContainsKey",
+      "System.ApplicationException..ctor",
+      "constructed type.get_Keys",
+      "constructed type.GetEnumerator",
+      "constructed type.get_Current",
+      "constructed type.get_Item",
+      "System.String.Concat",
+      "System.Windows.Forms.ListBox+ObjectCollection.Add",
+      "System.Windows.Forms.Control.Focus",
+      "System.Windows.Forms.ListControl.set_SelectedIndex",
+      "constructed type.MoveNext",
+      "System.IDisposable.Dispose",
+      "System.Exception.get_Message",
+      "System.String.get_Length",
+      "System.String.Substring",
+      "System.Windows.Forms.Control.Refresh"
+     ],
+     "cyclomatic_complexity": 11,
+     "id": "d5c6fdf6-718b-59bc-a3a7-451db38278bf",
+     "is_static": false,
+     "locator": "0x0600047C",
+     "name": "OnScanned",
+     "numeric_literals": [
+      "18",
+      "30"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "Не найдено возвратов",
+      "|"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScanClass.get_Scaner",
+      "System.Delegate.Remove",
+      "TSDServer.ScanClass.StopScan"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "8269fea3-4551-5c4e-b12f-4c807ed48736",
+     "is_static": false,
+     "locator": "0x0600047B",
+     "name": "InventarForm_Closed",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "1371b51f-f1f0-5d8c-9c09-e637d4c65351",
+   "kind": "BinaryType",
+   "name": "TSDServer.ReturnForm",
+   "namespace": "TSDServer",
+   "super_type": "System.Windows.Forms.Form"
+  }
+ }
+}

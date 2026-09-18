@@ -883,7 +883,7 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_binary_explain",
-            "description": "Explains the business logic recovered from a compiled .NET assembly or JVM class (RFC 0148) with no source available: the type's members, each method's signature, cyclomatic complexity, string/numeric constants and external I/O boundaries (database/http/file/messaging/process), plus any LLM-reconstructed rules with their confidence and the full provenance chain back to a bytecode offset or metadata token and the binary's SHA-256. Read-only. Facts read deterministically from bytecode carry extractor `ekos-jvm-classfile/v1`/`ekos-cil-metadata/v1`; LLM-inferred rules carry `llm-reconstruction-v1` and are never presented as equally certain.",
+            "description": "Explains the business logic recovered from a compiled .NET assembly or JVM class (RFC 0148) with no source available: the type's members, each method's signature, cyclomatic complexity, string/numeric constants and external I/O boundaries (database/http/file/messaging/process), plus any LLM-reconstructed rules with their confidence and the full provenance chain back to a bytecode offset or metadata token and the binary's SHA-256. Read-only. Facts read deterministically from bytecode carry extractor `ekos-jvm-classfile/v1`/`ekos-cil-metadata/v2`; LLM-inferred rules carry `llm-reconstruction-v1` and are never presented as equally certain.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

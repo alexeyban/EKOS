@@ -1,0 +1,1193 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "227c0a79-afe0-599b-bf6f-6538633f3762"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x02000038"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 44,
+     "in_method": "SetStatusEvent",
+     "io_kind": "file",
+     "target": "System.IO.StreamWriter..ctor"
+    },
+    {
+     "bytecode_offset": 44,
+     "in_method": "SetErrorEvent",
+     "io_kind": "file",
+     "target": "System.IO.StreamWriter..ctor"
+    },
+    {
+     "bytecode_offset": 55,
+     "in_method": "TestPrint2",
+     "io_kind": "file",
+     "target": "System.IO.StreamWriter..ctor"
+    },
+    {
+     "bytecode_offset": 62,
+     "in_method": "CheckForClear",
+     "io_kind": "file",
+     "target": "System.IO.FileSystemInfo.Refresh"
+    },
+    {
+     "bytecode_offset": 55,
+     "in_method": "CheckForClear",
+     "io_kind": "file",
+     "target": "System.IO.FileInfo..ctor"
+    },
+    {
+     "bytecode_offset": 27,
+     "in_method": "CheckForClear",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 104,
+     "in_method": "CheckForClear",
+     "io_kind": "file",
+     "target": "System.IO.File.Delete"
+    },
+    {
+     "bytecode_offset": 69,
+     "in_method": "CheckForClear",
+     "io_kind": "file",
+     "target": "System.IO.FileInfo.get_Length"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.BTPrintClass.WriteFile"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "9809a32e-ba5b-52dd-96c3-0a0179dcc122",
+     "is_static": false,
+     "locator": "0x06000257",
+     "name": "PortWrite",
+     "numeric_literals": null,
+     "signature": "(System.Byte[], System.Int32, System.IntPtr) -> System.Int32",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "9b0a5e51-54d0-5770-8d74-6d571a1705db",
+     "is_static": true,
+     "locator": "0x0600024D",
+     "name": "CreateFile",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Int32, System.Int32, System.IntPtr, System.Int32, System.Int32, System.IntPtr) -> System.IntPtr",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.SetStatus.Invoke",
+      "TSDServer.Program.get_StartupPath",
+      "System.IO.Path.Combine",
+      "System.IO.StreamWriter..ctor",
+      "System.DateTime.get_Now",
+      "System.String.Format",
+      "System.IO.TextWriter.WriteLine",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "542e06b7-990c-556a-97ee-db819e793d04",
+     "is_static": false,
+     "locator": "0x06000246",
+     "name": "SetStatusEvent",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "BTLog.txt",
+      "{0} {1}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "c8cc58f2-6de4-5f17-a364-f1df825c9c5d",
+     "is_static": true,
+     "locator": "0x06000254",
+     "name": "GetCommModemStatus",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr, ref System.Int32) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.SetError.Invoke",
+      "TSDServer.Program.get_StartupPath",
+      "System.IO.Path.Combine",
+      "System.IO.StreamWriter..ctor",
+      "System.DateTime.get_Now",
+      "System.String.Format",
+      "System.IO.TextWriter.WriteLine",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "18c26517-1e28-577b-8ad9-8e019b3400b8",
+     "is_static": false,
+     "locator": "0x0600024A",
+     "name": "SetErrorEvent",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "BTLog.txt",
+      "{0} {1}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "1a83aaec-9d0f-5a34-85b2-100c6b86a30a",
+     "is_static": true,
+     "locator": "0x0600024F",
+     "name": "CloseHandle",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0462d056-dab5-5e5c-9f72-c1685e0282a7",
+     "is_static": false,
+     "locator": "0x06000241",
+     "name": "add_OnSetStatus",
+     "numeric_literals": null,
+     "signature": "(TSDServer.SetStatus) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "System.Text.Encoding.get_ASCII",
+      "System.Text.Encoding.GetBytes",
+      "TSDServer.Program.get_StartupPath",
+      "System.IO.Path.Combine",
+      "System.IO.StreamWriter..ctor",
+      "System.String..ctor",
+      "System.IO.TextWriter.WriteLine",
+      "System.Int32.ToString",
+      "Calib.BluetoothLibNet+BTST_DEVICEINFO.get_length",
+      "System.Int16.ToString",
+      "System.String.Concat",
+      "System.IO.TextWriter.Write",
+      "System.IO.TextWriter.Flush",
+      "System.IO.TextWriter.Close",
+      "System.IDisposable.Dispose",
+      "Calib.BluetoothLibNet+Api.BTSelectDevice",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "System.IO.Ports.SerialPort.GetPortNames",
+      "System.String.Format",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTComPort",
+      "TSDServer.BTPrintClass.TestPrintCom"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "b46af496-ba20-5c1a-8290-1dacf280dae4",
+     "is_static": false,
+     "locator": "0x06000268",
+     "name": "TestPrint2",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "***** TEST PRINT CS.NET *****\r\nIT-600 or DT-X11\r\nCASIO\r\nwww.casio.co.jp/English/system/\r\n\r\nCASIO Computer Co., Ltd.\r\n\r\n6-2, Hon-machi 1-chome\r\n\r\nShibuya-ku, Tok…",
+      "BTLog.txt",
+      " ",
+      "BTPORT_SERIAL",
+      "BT register printer info Error",
+      "Com port {0} present",
+      "try to connect to printer..."
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "4fca1d81-6cfa-55d1-854f-85ca57f95bb3",
+     "is_static": true,
+     "locator": "0x0600024E",
+     "name": "WriteFile",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr, System.Byte[], System.Int32, ref System.Int32, System.IntPtr) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.Thread.Sleep",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTPrinterAddress",
+      "TSDServer.BTPrintClass.ConnToPrinter",
+      "System.Object.ToString",
+      "TSDServer.BTPrintClass.SetErrorEvent"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "f9bd4d11-9106-5293-be4d-8d059b90a8d1",
+     "is_static": false,
+     "locator": "0x06000240",
+     "name": "PartialReconnect",
+     "numeric_literals": [
+      "1000",
+      "12"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Ошибка подключения. Переподключите принтер и попробуйте еще раз."
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "c974914f-6403-544b-bf1c-843b677b7f56",
+     "is_static": false,
+     "locator": "0x06000244",
+     "name": "remove_OnConnectionError",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ConnectionError) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "System.Threading.WaitHandle.WaitOne",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "System.Threading.ManualResetEvent.Reset",
+      "System.IO.Ports.SerialPort.DiscardOutBuffer",
+      "System.IO.Ports.SerialPort.Write",
+      "System.Threading.Thread.Sleep",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "TSDServer.BTConnectionFailedException..ctor",
+      "System.Threading.ManualResetEvent.Set",
+      "System.Object.ToString"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "0ab5e62d-4586-5eb8-84db-29cc7c4129a2",
+     "is_static": false,
+     "locator": "0x06000263",
+     "name": "Print",
+     "numeric_literals": [
+      "71",
+      "12"
+     ],
+     "signature": "(System.Byte[]) -> System.Void",
+     "string_literals": [
+      "Ожидание очереди печати...",
+      "Принтер занят...",
+      "Отправка на принтер...",
+      "Идет печать...",
+      "BT принтер успешно напечатал",
+      "BT Принтер не подключен",
+      "Ошибка печати. Переподключите принтер и попробуйте еще раз."
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "Calib.BluetoothLibNet+Api.BTSelectDevice",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTComPort",
+      "System.String.Format",
+      "TSDServer.BTPrintClass.PortOpen",
+      "System.IntPtr.ToInt32",
+      "TSDServer.BTPrintClass.PortWrite",
+      "System.Int32.ToString",
+      "TSDServer.BTPrintClass.GetCommModemStatus",
+      "System.Threading.Thread.Sleep"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "9d9b8d33-df23-5f79-abe0-2d2a2bf999e9",
+     "is_static": false,
+     "locator": "0x0600025F",
+     "name": "ConnToPrinter2",
+     "numeric_literals": [
+      "19200",
+      "3000",
+      "34",
+      "192",
+      "200",
+      "76",
+      "71"
+     ],
+     "signature": "(Calib.BluetoothLibNet+BTST_DEVICEINFO) -> System.Int32",
+     "string_literals": [
+      "BTPORT_SERIAL",
+      "BT register printer info Error",
+      "try to connect to printer...",
+      "COM{0}:",
+      "BT Open Error",
+      "wait for answer...{0}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "System.IO.Ports.SerialPort.get_IsOpen",
+      "System.IO.Ports.SerialPort.Close",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "Calib.BluetoothLibNet+Api.BTWaitForBtReady"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "08af36ef-ce68-5e5c-b70e-6e28e3b5e53f",
+     "is_static": false,
+     "locator": "0x06000265",
+     "name": "Disconnect",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Отключение принтера...",
+      "Ошибка отключения  BT принтера {0}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "Calib.BluetoothLibNet+Api.BTGetLibraryStatus",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "Calib.BluetoothLibNet+Api.BTInitialize",
+      "System.Int32.ToString",
+      "System.String.Concat",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "System.String..ctor",
+      "System.String.ToCharArray",
+      "Calib.BluetoothLibNet+Api.BTGetLocalInfo",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "Calib.BluetoothLibNet+Api.BTSetLocalInfo",
+      "Calib.BluetoothLibNet+Api.BTRegisterLocalInfo",
+      "System.Threading.ManualResetEvent.Set"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "a3189229-2687-5567-979e-1fd69bf5b0f6",
+     "is_static": false,
+     "locator": "0x06000259",
+     "name": "BTPrinterInit",
+     "numeric_literals": [
+      "32",
+      "82"
+     ],
+     "signature": "() -> System.Int32",
+     "string_literals": [
+      "Инициализация модуля Bluetooth...",
+      "BT ошибка инициализации ",
+      "                  ",
+      "Получение локальных настроек...",
+      "Получение локальных настроек - Ошибка {0}",
+      "Установка новых локальных настроек...",
+      "Установка новых локальных настроек - Ошибка {0}",
+      "BT Регистрация локальных настроек - Ошибка"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "ec32c761-8bc9-52f1-bb11-7d7a004d81e8",
+     "is_static": false,
+     "locator": "0x0600024C",
+     "name": "get_Connected",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "26bd5c53-0471-56b1-a625-fb66929845da",
+     "is_static": true,
+     "locator": "0x06000252",
+     "name": "GetCommState",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr, TSDServer.BTPrintClass+DCB) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "TSDServer.BTPrintClass.BTPrinterInit",
+      "Calib.BluetoothLibNet+Api.BTSelectDevice",
+      "TSDServer.BTPrintClass.ConnToPrinter3",
+      "System.Char.ToString",
+      "System.String.ToUpper",
+      "System.String.Concat",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "System.String.op_Equality"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "3605b128-f989-54b6-9aa4-010d847a17ed",
+     "is_static": false,
+     "locator": "0x0600025D",
+     "name": "ConnToPrinter",
+     "numeric_literals": [
+      "17",
+      "71"
+     ],
+     "signature": "(System.String) -> System.Int32",
+     "string_literals": [
+      "BTPORT_SERIAL"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "914fda4f-a93e-5b00-a1d2-acdfe92e61f5",
+     "is_static": true,
+     "locator": "0x06000253",
+     "name": "SetCommState",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr, TSDServer.BTPrintClass+DCB) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "fc40dc69-4507-5222-998f-c848865bd9fa",
+     "is_static": false,
+     "locator": "0x06000249",
+     "name": "remove_OnSetError",
+     "numeric_literals": null,
+     "signature": "(TSDServer.SetError) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "d4826c80-b44d-5867-a923-c68fb160545e",
+     "is_static": false,
+     "locator": "0x06000242",
+     "name": "remove_OnSetStatus",
+     "numeric_literals": null,
+     "signature": "(TSDServer.SetStatus) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "2497567d-269b-51cb-ab0b-dbbc7d5bc7b6",
+     "is_static": false,
+     "locator": "0x06000243",
+     "name": "add_OnConnectionError",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ConnectionError) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ba19a281-2ca3-52c1-b094-ab7948b675c3",
+     "is_static": false,
+     "locator": "0x06000248",
+     "name": "add_OnSetError",
+     "numeric_literals": null,
+     "signature": "(TSDServer.SetError) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "8992b4f2-9c45-59ac-b447-b30b6bd20b7d",
+     "is_static": true,
+     "locator": "0x0600023D",
+     "name": "get_PrintClass",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.BTPrintClass",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Collections.Specialized.StringDictionary..ctor",
+      "System.Threading.ManualResetEvent..ctor",
+      "Calib.BluetoothLibNet+BTST_DEVICEINFO..ctor",
+      "Calib.BluetoothLibNet+BTST_LOCALINFO..ctor",
+      "System.String.Format",
+      "System.IO.Ports.SerialPort..ctor",
+      "System.Object..ctor",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_WaitPrintTimeDefault"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "b121ad77-1958-5238-83e6-b8fbb38a05fe",
+     "is_static": false,
+     "locator": "0x0600023E",
+     "name": ".ctor",
+     "numeric_literals": [
+      "16",
+      "17",
+      "19200"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "COM6:"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "System.Char.ToString",
+      "System.String.ToUpper",
+      "System.String.Concat",
+      "System.Collections.Specialized.StringDictionary.ContainsKey",
+      "System.String..ctor",
+      "System.String.Replace",
+      "System.Collections.Specialized.StringDictionary.Add"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "1169ce2f-421b-5de8-b87d-0d85326ccb31",
+     "is_static": false,
+     "locator": "0x0600025C",
+     "name": "GetFoundedDevicesDict",
+     "numeric_literals": [
+      "17"
+     ],
+     "signature": "() -> System.Collections.Specialized.StringDictionary",
+     "string_literals": [
+      "\u0000"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "caee5323-593c-54bb-a5dc-e1d9fe68aafc",
+     "is_static": true,
+     "locator": "0x06000251",
+     "name": "SetCommTimeouts",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr, TSDServer.BTPrintClass+COMMTIMEOUTS) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.BTPrintClass+DCB..ctor",
+      "TSDServer.BTPrintClass+COMMTIMEOUTS..ctor",
+      "TSDServer.BTPrintClass.CreateFile",
+      "System.IntPtr.op_Explicit",
+      "TSDServer.BTPrintClass.GetCommTimeouts",
+      "TSDServer.BTPrintClass.SetCommTimeouts",
+      "TSDServer.BTPrintClass.GetCommState",
+      "TSDServer.BTPrintClass.SetCommState"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "0e09ed81-f40a-53b0-9640-b9972a3faa18",
+     "is_static": false,
+     "locator": "0x06000256",
+     "name": "PortOpen",
+     "numeric_literals": [
+      "-1073741824",
+      "128"
+     ],
+     "signature": "(System.String, System.Int32, System.Byte, System.Byte, System.Byte, System.Int32, System.Int32) -> System.IntPtr",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.String.Format",
+      "TSDServer.BTPrintClass.SetStatusEvent"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "5ce0171c-e48c-5fb1-b510-38f7c346eab5",
+     "is_static": false,
+     "locator": "0x06000247",
+     "name": "SetStatusEvent",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Object[]) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.String.Format",
+      "TSDServer.BTPrintClass.SetErrorEvent"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "99dcd577-b364-5189-9a1d-1d8629ea7617",
+     "is_static": false,
+     "locator": "0x0600024B",
+     "name": "SetErrorEvent",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Object[]) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "System.IO.Ports.SerialPort.get_IsOpen",
+      "System.IO.Ports.SerialPort.Close",
+      "System.Threading.Thread.Sleep",
+      "System.IO.Ports.SerialPort.DiscardOutBuffer",
+      "System.IO.Ports.SerialPort.DiscardInBuffer",
+      "System.Object.ToString",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "System.IO.Ports.SerialPort.Open",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "TSDServer.BTConnectionFailedException..ctor",
+      "TSDServer.ConnectionError.Invoke"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "c9dc9ec1-94d5-5f43-b886-45b011b6a6dc",
+     "is_static": false,
+     "locator": "0x06000261",
+     "name": "ConnToPrinter3",
+     "numeric_literals": [
+      "500",
+      "71",
+      "12"
+     ],
+     "signature": "() -> System.Int32",
+     "string_literals": [
+      "BT Принтер подключен",
+      "BT сбой подключения принтера",
+      "Ошибка подключения. Переподключите принтер и попробуйте еще раз."
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.BTPrintClass.ConnToPrinter",
+      "TSDServer.BTPrintClass.Print",
+      "TSDServer.BTPrintClass.Disconnect"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "baf4908b-10a4-5183-b2f8-175828bdd3c0",
+     "is_static": false,
+     "locator": "0x06000266",
+     "name": "TestPrint3",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "! UTILITIES\r\nGAP-SENSE\r\nSET-TOF 0\r\nTONE 100\r\nSPEED 5\r\nON-FEED FEED\r\nTIMEOUT 0\r\nPRINT\r\n! 0 200 200 318 1\r\nLABEL\r\nPAGE-WIDTH 463\r\nSETMAG 0 0\r\nT 0 4 20  8 TEST_ATT…"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Threading.Monitor.Enter",
+      "TSDServer.Program.get_StartupPath",
+      "System.IO.Path.Combine",
+      "System.IO.File.Exists",
+      "System.IO.FileInfo..ctor",
+      "System.IO.FileSystemInfo.Refresh",
+      "System.IO.FileInfo.get_Length",
+      "System.IO.File.Delete",
+      "System.Threading.Monitor.Exit"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "8181485f-17ab-5d70-b009-b2ccfb4218ed",
+     "is_static": false,
+     "locator": "0x06000245",
+     "name": "CheckForClear",
+     "numeric_literals": [
+      "1000000"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "BTLog.txt"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "ab86111e-7dfa-5d67-bc84-59e2687929ea",
+     "is_static": false,
+     "locator": "0x0600025B",
+     "name": "GetFoundedDevices",
+     "numeric_literals": null,
+     "signature": "() -> Calib.BluetoothLibNet+BTST_DEVICEINFO[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.BTPrintClass..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "27daa759-5a29-5fa3-b6f2-9047f15cf5be",
+     "is_static": true,
+     "locator": "0x0600026A",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "TSDServer.BTPrintClass.Disconnect",
+      "System.Threading.Thread.Sleep",
+      "TSDServer.BTPrintClass.BTPrinterInit",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTPrinterAddress",
+      "TSDServer.BTPrintClass.ConnToPrinter",
+      "System.Object.ToString"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3518a17a-baaf-5d6c-b134-1f97891ff213",
+     "is_static": false,
+     "locator": "0x0600023F",
+     "name": "Reconnect",
+     "numeric_literals": [
+      "1000",
+      "12"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Выполняется отключение BlueTooth. Ждите...",
+      "Выполняется подключение BlueTooth. Ждите...",
+      "Ошибка подключения. Переподключите принтер и попробуйте еще раз."
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 10,
+     "call_targets": [
+      "System.IO.Ports.SerialPort.get_IsOpen",
+      "Calib.BluetoothLibNet+Api.BTGetLibraryStatus",
+      "TSDServer.BTPrintClass.BTPrinterInit",
+      "Calib.BluetoothLibNet+Api.BTSelectDevice",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "System.Data.DataRow.get_Item",
+      "System.Object.ToString",
+      "System.String.op_Inequality",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTPrinterAddress",
+      "System.String.ToUpper",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "TSDServer.BTPrintClass.SearchDevices",
+      "TSDServer.BTConnectionFailedException..ctor",
+      "TSDServer.BTPrintClass.SetDefaultDevice",
+      "TSDServer.BTPrintClass.ConnToPrinter3",
+      "TSDServer.ConnectionError.Invoke"
+     ],
+     "cyclomatic_complexity": 11,
+     "id": "03e2bce1-b164-5f6b-aed6-247b07359cef",
+     "is_static": false,
+     "locator": "0x06000262",
+     "name": "ConnToPrinter3",
+     "numeric_literals": [
+      "71",
+      "12"
+     ],
+     "signature": "(Calib.BluetoothLibNet+BTST_DEVICEINFO) -> System.Int32",
+     "string_literals": [
+      "BTPORT_SERIAL",
+      "Стандартный принтер не найден!",
+      "BTPrinterAddress",
+      "00:00:00:00:00:00",
+      "Поиск принтера {0}",
+      "Принтер не найден!",
+      "Установка принтера {0} стандартным",
+      "Стандартный принтер не установлен",
+      "{0} BT принтер найден!",
+      "Ошибка подключения. Переподключите принтер и попробуйте еще раз."
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "Calib.BluetoothLibNet+Api.BTGetLibraryStatus",
+      "TSDServer.BTPrintClass.BTPrinterInit",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "Calib.BluetoothLibNet+Api.BTInquiry",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "System.String..ctor",
+      "System.String.Concat",
+      "System.String.ToCharArray",
+      "System.String.Substring",
+      "Calib.BluetoothLibNet+Api.BTGetDeviceInfo"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "08ea3c45-d2b5-5f22-a86d-00dd1c5b0297",
+     "is_static": false,
+     "locator": "0x0600025A",
+     "name": "SearchDevices",
+     "numeric_literals": [
+      "16",
+      "5000",
+      "32",
+      "82",
+      "18"
+     ],
+     "signature": "() -> System.Int32",
+     "string_literals": [
+      "Поиск Bluetooth устройств...",
+      "BT Ошибка поиска устройст",
+      "Найдено {0} bluetooth устройств!",
+      " "
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 20,
+     "call_targets": [
+      "Calib.BluetoothLibNet+BTST_DEVICEINFO..ctor",
+      "System.Text.Encoding.get_ASCII",
+      "System.Text.Encoding.GetBytes",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "Calib.BluetoothLibNet+Api.BTInitialize",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "System.String..ctor",
+      "System.String.ToCharArray",
+      "Calib.BluetoothLibNet+Api.BTGetLocalInfo",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "Calib.BluetoothLibNet+Api.BTSetLocalInfo",
+      "Calib.BluetoothLibNet+Api.BTRegisterLocalInfo",
+      "Calib.BluetoothLibNet+Api.BTInquiry",
+      "System.String.Format",
+      "System.String.Concat",
+      "System.String.Substring",
+      "Calib.BluetoothLibNet+Api.BTGetDeviceInfo",
+      "System.Char.ToString",
+      "System.String.op_Equality",
+      "Calib.BluetoothLibNet+Api.BTGetServiceInfo",
+      "Calib.BluetoothLibNet+Api.BTRegisterDeviceInfo",
+      "Calib.BluetoothLibNet+Api.BTSetDefaultDevice",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTComPort",
+      "TSDServer.BTPrintClass.PortOpen",
+      "System.IntPtr.ToInt32",
+      "TSDServer.BTPrintClass.PortWrite",
+      "System.Int32.ToString",
+      "TSDServer.BTPrintClass.GetCommModemStatus",
+      "System.Threading.Thread.Sleep",
+      "System.String.get_Length"
+     ],
+     "cyclomatic_complexity": 21,
+     "id": "84bcd49c-5cd3-556f-88b8-c53fb91ef09f",
+     "is_static": false,
+     "locator": "0x06000267",
+     "name": "TestPrint",
+     "numeric_literals": [
+      "16",
+      "17",
+      "32",
+      "82",
+      "5000",
+      "18",
+      "19200",
+      "3000",
+      "192",
+      "200",
+      "76"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "***** TEST PRINT CS.NET *****\r\nIT-600 or DT-X11\r\nCASIO\r\nwww.casio.co.jp/English/system/\r\n\r\nCASIO Computer Co., Ltd.\r\n\r\n6-2, Hon-machi 1-chome\r\n\r\nShibuya-ku, Tok…",
+      "initialize bluetooth modul...",
+      "BT Init Error",
+      "                  ",
+      "get local device info...",
+      "BT get local info Error",
+      "set new local device info...",
+      "BT set local info Error",
+      "BT register local info Error",
+      "searching bluetooth devices...",
+      "BT Inquiry Error",
+      "Found {0} bluetooth devices!",
+      " ",
+      "BT register printer info Error",
+      "BT Get device info error",
+      "BT Printer not found!",
+      "Extech BT printer found!",
+      "BTPORT_SERIAL",
+      "BT Printer set default device Error",
+      "try to connect to printer...",
+      "COM{0}:",
+      "BT Open Error",
+      "wait for answer...{0}",
+      "sending datas...",
+      "BT Write Error",
+      "BT Printing",
+      "disconnect printer..."
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "Calib.BluetoothLibNet+Api.BTGetServiceInfo",
+      "Calib.BluetoothLibNet+Api.BTRegisterDeviceInfo",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "TSDServer.BTPrintClass.BTPrinterInit",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "Calib.BluetoothLibNet+Api.BTSetDefaultDevice",
+      "Calib.BluetoothLibNet+Api.BTConnectSerial",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTComPort",
+      "System.String.Format",
+      "TSDServer.BTPrintClass.PortOpen",
+      "System.IntPtr.ToInt32",
+      "TSDServer.BTPrintClass.PortWrite",
+      "System.Int32.ToString",
+      "TSDServer.BTPrintClass.GetCommModemStatus",
+      "System.Threading.Thread.Sleep"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "053f56d2-fa76-526e-8847-f57e4d12d37f",
+     "is_static": false,
+     "locator": "0x06000260",
+     "name": "ConnToPrinter",
+     "numeric_literals": [
+      "1000",
+      "19200",
+      "3000",
+      "34",
+      "192",
+      "200",
+      "76",
+      "71"
+     ],
+     "signature": "(Calib.BluetoothLibNet+BTST_DEVICEINFO) -> System.Int32",
+     "string_literals": [
+      "BT register printer info Error",
+      "Extech BT printer found!",
+      "BTPORT_SERIAL",
+      "BT Printer set default device Error",
+      "try to connect to printer...",
+      "COM{0}:",
+      "BT Open Error",
+      "wait for answer...{0}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.IntPtr.op_Explicit",
+      "TSDServer.BTPrintClass.CloseHandle"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "ee2f35be-d053-5c42-87b6-f09fe6b010ad",
+     "is_static": false,
+     "locator": "0x06000258",
+     "name": "PortClose",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "27896564-89fb-522a-87d0-b43b9d463535",
+     "is_static": true,
+     "locator": "0x06000250",
+     "name": "GetCommTimeouts",
+     "numeric_literals": null,
+     "signature": "(System.IntPtr, TSDServer.BTPrintClass+COMMTIMEOUTS) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "System.Char.ToString",
+      "System.String.ToUpper",
+      "System.String.Concat",
+      "System.String.op_Equality",
+      "Calib.BluetoothLibNet+Api.BTGetServiceInfo",
+      "Calib.BluetoothLibNet+Api.BTRegisterDeviceInfo",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "Calib.BluetoothLibNet+Api.BTDeInitialize",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "Calib.BluetoothLibNet+Api.BTSetDefaultDevice",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_BTPrinterAddress"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "4a902598-041f-549a-86a2-c7d4f3753d46",
+     "is_static": false,
+     "locator": "0x0600025E",
+     "name": "SetDefaultDevice",
+     "numeric_literals": [
+      "17",
+      "22"
+     ],
+     "signature": "(System.String) -> System.Int32",
+     "string_literals": [
+      "BT регистрация принтера {0} - ошибка",
+      "BT регистрация принтера {0} - успешно",
+      "BTPORT_SERIAL",
+      "BT установка принтера стандартным {0} - ошибка",
+      "BT установка принтера стандартным {0} - успешно"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDUtils.CustomEncodingClass.get_Encoding",
+      "TSDUtils.CustomEncodingClass.GetBytes",
+      "TSDServer.BTPrintClass.Print"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "be368e23-bc95-5c46-8782-fcace1aa5725",
+     "is_static": false,
+     "locator": "0x06000264",
+     "name": "Print",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Text.Encoding.get_ASCII",
+      "System.Text.Encoding.GetBytes",
+      "System.String.Format",
+      "System.IO.Ports.SerialPort..ctor",
+      "System.IO.Ports.SerialPort.Open",
+      "System.IO.Ports.SerialPort.get_IsOpen",
+      "System.String.Concat",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "System.IO.Ports.SerialPort.Write",
+      "System.Threading.Thread.Sleep",
+      "System.IO.Ports.SerialPort.Close",
+      "System.Object.ToString"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "9ceb4db4-2bb1-5fd9-87d5-b7f2a6605b43",
+     "is_static": false,
+     "locator": "0x06000269",
+     "name": "TestPrintCom",
+     "numeric_literals": [
+      "19200",
+      "5000"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "***** TEST PRINT CS.NET *****\r\nIT-600 or DT-X11\r\nCASIO\r\nwww.casio.co.jp/English/system/\r\n\r\nCASIO Computer Co., Ltd.\r\n\r\n6-2, Hon-machi 1-chome\r\n\r\nShibuya-ku, Tok…",
+      "COM{0}",
+      "Port open",
+      "Port written",
+      "Port closed",
+      "COM{0}:",
+      "Port open: "
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "4511e75c-f5e0-5508-a718-6861d7450e65",
+     "is_static": false,
+     "locator": "0x06000255",
+     "name": "get_IsPrinterFound",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": null,
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "227c0a79-afe0-599b-bf6f-6538633f3762",
+   "kind": "BinaryType",
+   "name": "TSDServer.BTPrintClass",
+   "namespace": "TSDServer",
+   "super_type": null
+  }
+ }
+}

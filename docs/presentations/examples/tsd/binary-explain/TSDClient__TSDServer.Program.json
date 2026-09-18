@@ -1,0 +1,156 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "34dd9be3-84fa-5042-8085-32e2529134d8"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x02000067"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 67,
+     "in_method": "Main",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "4a7f5676-d528-50e3-b3ad-72f37e3f0906",
+     "is_static": true,
+     "locator": "0x06000463",
+     "name": "get_StartupPath",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "9ddf9244-9516-5e91-a8ba-ee4f73c8359c",
+     "is_static": true,
+     "locator": "0x06000465",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "TSDServer.SettingsDataSet..ctor",
+      "System.Reflection.Assembly.GetCallingAssembly",
+      "System.Reflection.Assembly.GetName",
+      "System.Reflection.AssemblyName.get_CodeBase",
+      "System.IO.Path.GetDirectoryName",
+      "TSDServer.Program.get_StartupPath",
+      "System.IO.Path.Combine",
+      "System.IO.File.Exists",
+      "System.Data.DataSet.ReadXml",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "System.Data.DataRow.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.NewTypedSettingsRow",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_BTComPort",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_BTPrinterAddress",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_DatabaseFileName",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_DatabaseStoragePath",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_StorageMemorySize",
+      "System.DateTime..ctor",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_BaseDate",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_ProductsConnectionString",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_DefaultRepriceShablon",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_TerminalID",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_BlueButtonShablon",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_EnableExit",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_EnableWorkWOPrinter",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_WaitPrintTimeDefault",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_EnableChgMlt",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.set_EnableChgQty",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.AddTypedSettingsRow",
+      "System.Data.DataTable.AcceptChanges"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "d88dcd35-6a41-505e-8699-d593c5fcd4bb",
+     "is_static": true,
+     "locator": "0x06000464",
+     "name": "Main",
+     "numeric_literals": [
+      "9",
+      "15000",
+      "2000",
+      "1000",
+      "100"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "Settings.xml",
+      "TerminalID",
+      "00:03:7a:32:4c:55",
+      "products.sdf",
+      "\\Storage Card\\tsdfamilia",
+      "Data Source=|DataDirectory|\\Products.sdf",
+      "Global error: {0}, Stack: {1}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0cd630e7-cab5-5460-8f15-5bc1e4ead320",
+     "is_static": true,
+     "locator": "0x06000462",
+     "name": "get_Default",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.SettingsDataSet+TypedSettingsRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "cf6972f6-2e70-58e4-ba4a-45908288a839",
+     "is_static": true,
+     "locator": "0x06000461",
+     "name": "get_TerminalId",
+     "numeric_literals": null,
+     "signature": "() -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "34dd9be3-84fa-5042-8085-32e2529134d8",
+   "kind": "BinaryType",
+   "name": "TSDServer.Program",
+   "namespace": "TSDServer",
+   "super_type": null
+  }
+ }
+}

@@ -1,0 +1,759 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "09dd97f7-a4da-54a1-becc-207b97eefc56"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDServer.exe",
+   "binary_sha256": "63e023e4f29f765d68a4c6c02f7e96f854889a4b40a90ad17c2965bd007b0d6e",
+   "locator": "0x0200002F"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 156,
+     "in_method": "BeginImport",
+     "io_kind": "file",
+     "target": "System.IO.StreamReader..ctor"
+    },
+    {
+     "bytecode_offset": 329,
+     "in_method": "UploadResults",
+     "io_kind": "file",
+     "target": "System.IO.StreamWriter..ctor"
+    },
+    {
+     "bytecode_offset": 611,
+     "in_method": "UploadResults",
+     "io_kind": "file",
+     "target": "System.IO.File.Copy"
+    },
+    {
+     "bytecode_offset": 636,
+     "in_method": "UploadResults",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 38,
+     "in_method": "UploadResults",
+     "io_kind": "file",
+     "target": "System.IO.StreamWriter..ctor"
+    },
+    {
+     "bytecode_offset": 551,
+     "in_method": "UploadResults",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 696,
+     "in_method": "UploadResults",
+     "io_kind": "file",
+     "target": "System.IO.File.Copy"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.DataLoaderClass.LoadFile"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "c4d74d2a-7d0b-5cfa-b4f0-c47131a70620",
+     "is_static": false,
+     "locator": "0x060002C3",
+     "name": "AutoLoadDoc",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Text.StringBuilder.AppendLine"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "f3ccdde1-fca8-5306-bcdf-d98abafbd09c",
+     "is_static": false,
+     "locator": "0x060002C8",
+     "name": "DataLoaderClass_OnProcessImport",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Boolean) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "97a86109-d7e3-5d83-9b68-4bb50d9f14c6",
+     "is_static": false,
+     "locator": "0x060002C0",
+     "name": "remove_OnFailedImport",
+     "numeric_literals": null,
+     "signature": "(TSDServer.DataLoaderClass+FailedImport) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.Dispose",
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.Dispose",
+      "System.ComponentModel.MarshalByValueComponent.Dispose"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "7db7a094-540f-55ab-8638-1e2f2d60be45",
+     "is_static": false,
+     "locator": "0x060002D7",
+     "name": "Dispose",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "9ef700a6-b6ff-5627-a91d-33a02e8c069c",
+     "is_static": false,
+     "locator": "0x060002BC",
+     "name": "remove_OnProcessImport",
+     "numeric_literals": null,
+     "signature": "(TSDServer.DataLoaderClass+ProcessImport) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Globalization.DateTimeFormatInfo..ctor",
+      "System.Globalization.NumberFormatInfo..ctor",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_BaseDate",
+      "TSDServer.Properties.Settings.get_FieldDelimeter",
+      "System.String.get_Chars",
+      "System.Text.StringBuilder..ctor",
+      "System.Object..ctor",
+      "TSDServer.ProductsDataSet..ctor",
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter..ctor",
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter..ctor",
+      "TSDServer.ScannedProductsDataSet..ctor",
+      "TSDServer.ScannedProductsDataSetTableAdapters.ScannedBarcodesTableAdapter..ctor",
+      "TSDServer.DataLoaderClass.SetFormats"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3651d2bb-a284-535b-90cf-578c0f471b31",
+     "is_static": false,
+     "locator": "0x060002C1",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSetTableAdapters.ScannedBarcodesTableAdapter.get_FileList",
+      "constructed type.AddRange",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_LocalFilePath",
+      "System.IO.Path.Combine",
+      "constructed type.Add",
+      "constructed type.ToArray"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "cdf6b1ca-e724-5936-a266-5e133087068b",
+     "is_static": false,
+     "locator": "0x060002D0",
+     "name": "get_ScannedFileList",
+     "numeric_literals": null,
+     "signature": "() -> System.String[]",
+     "string_literals": [
+      "register.txt",
+      "scannedbarcodes.txt"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "5fabebb0-cc1d-5b5a-bb22-30a5ca1be075",
+     "is_static": false,
+     "locator": "0x060002BE",
+     "name": "remove_OnFinishImport",
+     "numeric_literals": null,
+     "signature": "(TSDServer.DataLoaderClass+FinishImport) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.GetDataByBarcode",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_ProductName",
+      "System.String.IsNullOrEmpty",
+      "System.String.Replace",
+      "System.DateTime.Parse",
+      "TSDServer.DataLoaderClass+NoDateException..ctor",
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.Close"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "1f515626-6a3d-55f0-8965-6fd11f1ea529",
+     "is_static": false,
+     "locator": "0x060002D6",
+     "name": "GetDBDate",
+     "numeric_literals": null,
+     "signature": "() -> System.DateTime",
+     "string_literals": [
+      "НАЧАЛО загрузки ",
+      "Row empty"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.DataLoaderClass+ProcessImport..ctor",
+      "System.Delegate.Combine",
+      "TSDServer.DataLoaderClass+FinishImport..ctor",
+      "TSDServer.DataLoaderClass+FailedImport..ctor",
+      "System.Threading.ParameterizedThreadStart..ctor",
+      "System.Threading.Thread..ctor",
+      "System.Threading.Thread.Start"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "dc6f4896-54f0-587d-b677-224302058eb3",
+     "is_static": false,
+     "locator": "0x060002C5",
+     "name": "LoadFile",
+     "numeric_literals": null,
+     "signature": "(System.String, TSDServer.DataLoaderClass+ImportModeEnum) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "System.String.Split",
+      "TSDServer.ProductsDataSet.get_ProductsTbl",
+      "TSDServer.ProductsDataSet+ProductsTblDataTable.NewProductsTblRow",
+      "System.String.Trim",
+      "System.String.IsNullOrEmpty",
+      "System.String.Format",
+      "TSDServer.DataLoaderClass+ProcessImport.Invoke",
+      "TSDServer.DataLoaderClass.ParseColumn",
+      "System.Exception.get_Message",
+      "System.Data.DataTable.get_Columns",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ProductsDataSet+ProductsTblDataTable.AddProductsTblRow",
+      "System.Int32.ToString"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "32d1b3dd-c165-55e7-b67a-11c4ac38c081",
+     "is_static": false,
+     "locator": "0x060002CD",
+     "name": "AddDelimetedStringProducts",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "Штрихкод неверный - строка пропущена {0}\n",
+      "Ошибка в строке: {0}: {1}\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Object..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "51d99484-9de2-5b5c-8520-c8c30b0f8385",
+     "is_static": true,
+     "locator": "0x060002D8",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "b1d4682c-5fe8-5b7b-8b49-5d1ed1546d32",
+     "is_static": false,
+     "locator": "0x060002C4",
+     "name": "Cancel",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "91230fa8-2324-5c4e-887a-7d01e1efac70",
+     "is_static": false,
+     "locator": "0x060002BF",
+     "name": "add_OnFailedImport",
+     "numeric_literals": null,
+     "signature": "(TSDServer.DataLoaderClass+FailedImport) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ProductsDataSet.get_ProductsBinTbl",
+      "System.Data.DataTable.get_Columns",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_ShortDatePattern",
+      "System.Globalization.DateTimeFormatInfo.set_ShortDatePattern",
+      "TSDServer.Properties.Settings.get_DateSeparator",
+      "System.Globalization.DateTimeFormatInfo.set_DateSeparator",
+      "TSDServer.Properties.Settings.get_NumberDecimalSeparator",
+      "System.Globalization.NumberFormatInfo.set_NumberDecimalSeparator",
+      "TSDServer.Properties.Settings.get_FieldsLength",
+      "System.String.Split",
+      "System.Int32.Parse"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "6a2ca5e7-c969-56d5-b860-fca9b3a6e0a3",
+     "is_static": false,
+     "locator": "0x060002C2",
+     "name": "SetFormats",
+     "numeric_literals": [
+      "59"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 14,
+     "call_targets": [
+      "System.Object.ToString",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_ImportFileTypeIsFixed",
+      "TSDServer.ProductsDataSet.CleanProducts",
+      "TSDServer.DataLoaderClass+AddStringDelegate..ctor",
+      "TSDServer.ProductsDataSet.CleanDocs",
+      "System.Text.Encoding.GetEncoding",
+      "System.IO.StreamReader..ctor",
+      "TSDServer.DataLoaderClass+AddStringDelegate.Invoke",
+      "TSDServer.Properties.Settings.get_BreakOnError",
+      "System.Exception.get_Message",
+      "System.String.Format",
+      "TSDServer.DataLoaderClass+ProcessImport.Invoke",
+      "System.IO.TextReader.ReadLine",
+      "System.IDisposable.Dispose",
+      "TSDServer.DataLoaderClass+FailedImport.Invoke",
+      "System.String.Concat",
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.Update",
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.Update",
+      "System.Data.DataSet.AcceptChanges",
+      "TSDServer.DataLoaderClass+FinishImport.Invoke"
+     ],
+     "cyclomatic_complexity": 15,
+     "id": "8fdd4f33-b5d1-5ca6-bfb6-329b8cbc4421",
+     "is_static": false,
+     "locator": "0x060002CA",
+     "name": "BeginImport",
+     "numeric_literals": null,
+     "signature": "(System.Object) -> System.Void",
+     "string_literals": [
+      "windows-1251",
+      "Ошибка в строке: {0}: {1}\n",
+      "Загрузка отменена... ",
+      "Ошибка: ",
+      "Загрузка завершена..."
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "74301358-e6da-5aeb-8c28-7951b4de16a8",
+     "is_static": false,
+     "locator": "0x060002BB",
+     "name": "add_OnProcessImport",
+     "numeric_literals": null,
+     "signature": "(TSDServer.DataLoaderClass+ProcessImport) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.DataLoaderClass.LoadFile"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "42588469-f7f9-54a7-a3a0-6670798f39e9",
+     "is_static": false,
+     "locator": "0x060002C9",
+     "name": "AutoLoadProduct",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3fb18dc1-7cce-5b50-9e46-4a2ff41f3521",
+     "is_static": false,
+     "locator": "0x060002BD",
+     "name": "add_OnFinishImport",
+     "numeric_literals": null,
+     "signature": "(TSDServer.DataLoaderClass+FinishImport) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "constructed type..ctor",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_LocalFilePath",
+      "System.IO.Path.Combine",
+      "constructed type.Add",
+      "constructed type.ToArray"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3d78d4b7-df07-54de-93df-4dab585b5fc7",
+     "is_static": false,
+     "locator": "0x060002D2",
+     "name": "get_NewScannedFileList",
+     "numeric_literals": null,
+     "signature": "() -> System.String[]",
+     "string_literals": [
+      "register.txt",
+      "scannedbarcodes.txt"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 11,
+     "call_targets": [
+      "System.Data.DataRow.get_Table",
+      "System.Data.DataTable.get_Columns",
+      "System.Data.DataColumnCollection.get_Item",
+      "System.Data.DataColumn.get_DataType",
+      "System.Type.GetTypeFromHandle",
+      "System.String.Trim",
+      "System.String.op_Inequality",
+      "TSDUtils.CustomEncodingClass.get_Encoding",
+      "TSDUtils.CustomEncodingClass.GetBytes",
+      "System.Data.DataRow.set_Item",
+      "System.String.IsNullOrEmpty",
+      "System.Int64.Parse",
+      "System.Byte.Parse",
+      "System.Int16.Parse",
+      "System.Int32.Parse",
+      "System.Single.Parse",
+      "System.DateTime.Parse",
+      "System.Decimal.Parse"
+     ],
+     "cyclomatic_complexity": 12,
+     "id": "fe2012d0-4d82-58a7-b15e-2b47ddab9c87",
+     "is_static": false,
+     "locator": "0x060002CB",
+     "name": "ParseColumn",
+     "numeric_literals": null,
+     "signature": "(System.Int32, System.Data.DataRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Text.StringBuilder.AppendLine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "476d0353-1acc-5812-a1d5-e6c7b3f9f176",
+     "is_static": false,
+     "locator": "0x060002C6",
+     "name": "DataLoaderClass_OnFailedImport",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "TSDServer.ProductsDataSet.get_ProductsTbl",
+      "System.Data.DataTable.get_Columns",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ProductsDataSet+ProductsTblDataTable.NewProductsTblRow",
+      "System.String.Substring",
+      "System.String.Trim",
+      "System.String.IsNullOrEmpty",
+      "System.String.Format",
+      "TSDServer.DataLoaderClass+ProcessImport.Invoke",
+      "TSDServer.DataLoaderClass.ParseColumn",
+      "System.Exception.get_Message",
+      "TSDServer.ProductsDataSet+ProductsTblDataTable.AddProductsTblRow",
+      "System.Int32.ToString"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "f363aafb-a376-525f-b9d5-416b9eaac478",
+     "is_static": false,
+     "locator": "0x060002CC",
+     "name": "AddFixedStringProducts",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "Штрихкод неверный - строка пропущена {0}\n",
+      "Ошибка в строке: {0}: {1}\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.get_FileList"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "38e686bf-2b1c-583d-86a9-305cda56bd49",
+     "is_static": false,
+     "locator": "0x060002D3",
+     "name": "get_ProductsFileList",
+     "numeric_literals": null,
+     "signature": "() -> System.String[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.ProductsDataSet.get_DocsTbl",
+      "System.Data.DataTable.get_Columns",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ProductsDataSet+DocsTblDataTable.NewDocsTblRow",
+      "System.String.Substring",
+      "System.String.Trim",
+      "System.String.IsNullOrEmpty",
+      "System.String.op_Equality",
+      "System.String.Format",
+      "TSDServer.DataLoaderClass+ProcessImport.Invoke",
+      "TSDServer.DataLoaderClass.ParseColumn",
+      "System.Exception.get_Message",
+      "TSDServer.ProductsDataSet+DocsTblDataTable.AddDocsTblRow",
+      "System.Int32.ToString"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "7fbd7a0f-6f0e-5c75-b439-ac2336ef095c",
+     "is_static": false,
+     "locator": "0x060002CF",
+     "name": "AddFixedStringDocs",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "0",
+      "9999999999999",
+      "Штрихкод неверный - строка пропущена {0}\n",
+      "Ошибка в строке: {0}: {1}\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.get_FileList"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3b21a64c-8b2a-55bc-9ca7-d257cfeb9756",
+     "is_static": false,
+     "locator": "0x060002D4",
+     "name": "get_DocsFileList",
+     "numeric_literals": null,
+     "signature": "() -> System.String[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSetTableAdapters.ScannedBarcodesTableAdapter.get_FileList"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "12c4fb5f-7246-57d1-9448-92041c81e0d7",
+     "is_static": false,
+     "locator": "0x060002D1",
+     "name": "get_OldScannedFileList",
+     "numeric_literals": null,
+     "signature": "() -> System.String[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 10,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSetTableAdapters.ScannedBarcodesTableAdapter.Fill",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_LocalFilePath",
+      "System.IO.Path.Combine",
+      "System.IO.StreamWriter..ctor",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_ScannedDate",
+      "System.Data.DataRow.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_TerminalId",
+      "System.Int32.ToString",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Priority",
+      "System.String.Format",
+      "System.IO.TextWriter.WriteLine",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose",
+      "System.IO.TextWriter.Flush",
+      "System.IO.TextWriter.Close",
+      "System.DateTime.get_Now",
+      "System.DateTime.ToString",
+      "System.IO.File.Exists",
+      "TSDServer.Properties.Settings.get_RemoteFilePath",
+      "System.IO.File.Copy",
+      "System.ApplicationException..ctor"
+     ],
+     "cyclomatic_complexity": 11,
+     "id": "28486458-4b0c-5094-8568-ebe8b4acffee",
+     "is_static": false,
+     "locator": "0x060002D5",
+     "name": "UploadResults",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "scannedbarcodes.txt",
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}",
+      "TerminalId",
+      "register.txt",
+      "{0},{1,11:D}, {2,7:D}",
+      "yyyyMMddhhmmss",
+      "{0}_{1}.txt",
+      "register",
+      "scannedbarcodes",
+      "Ошибка записи результатов"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": null,
+     "cyclomatic_complexity": 2,
+     "id": "91d6cba2-6a2c-5d6c-88c8-16c74e10c8ce",
+     "is_static": false,
+     "locator": "0x060002BA",
+     "name": "get_Processing",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "System.String.Split",
+      "TSDServer.ProductsDataSet.get_DocsTbl",
+      "TSDServer.ProductsDataSet+DocsTblDataTable.NewDocsTblRow",
+      "System.String.Trim",
+      "System.String.IsNullOrEmpty",
+      "System.String.op_Equality",
+      "System.String.Format",
+      "TSDServer.DataLoaderClass+ProcessImport.Invoke",
+      "TSDServer.DataLoaderClass.ParseColumn",
+      "System.Exception.get_Message",
+      "System.Data.DataTable.get_Columns",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ProductsDataSet+DocsTblDataTable.AddDocsTblRow",
+      "System.Int32.ToString"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "a01eff8b-4434-5eda-9c5f-260368caca7d",
+     "is_static": false,
+     "locator": "0x060002CE",
+     "name": "AddDelimetedStringDocs",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "0",
+      "9999999999999",
+      "Штрихкод неверный - строка пропущена {0}\n",
+      "Ошибка в строке: {0}: {1}\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Threading.Monitor.Enter",
+      "System.Text.StringBuilder.AppendLine",
+      "System.Object.ToString",
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_AddressToList",
+      "SendMailAttach.SendMailClass.SendMail",
+      "System.Text.StringBuilder.get_Length",
+      "System.Text.StringBuilder.Remove",
+      "System.Threading.Monitor.Exit"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "c4cecaea-bbec-5481-9f79-27efeae32eab",
+     "is_static": false,
+     "locator": "0x060002C7",
+     "name": "DataLoaderClass_OnFinishImport",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "Статус загрузки данных"
+     ],
+     "visibility": "private"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "09dd97f7-a4da-54a1-becc-207b97eefc56",
+   "kind": "BinaryType",
+   "name": "TSDServer.DataLoaderClass",
+   "namespace": "TSDServer",
+   "super_type": null
+  }
+ }
+}

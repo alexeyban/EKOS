@@ -1,0 +1,380 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "74a231ea-257c-55a9-9df7-6e51f93644ed"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x02000029"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 12,
+     "call_targets": [
+      "System.Threading.WaitHandle.WaitOne",
+      "System.Windows.Forms.Control.set_Visible",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.TextBoxBase.SelectAll",
+      "System.String.StartsWith",
+      "System.String.get_Length",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ActionsClass.FindByDocIdAndDocType",
+      "System.String.Format",
+      "TSDServer.DialogFrm.ShowMessage",
+      "TSDServer.ActionsClass.OpenInv",
+      "TSDServer.ScanClass.get_Scaner",
+      "System.Delegate.Remove",
+      "TSDServer.ScanClass.StopScan",
+      "TSDServer.ViewProductForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog",
+      "System.IDisposable.Dispose",
+      "System.Exception.get_Message",
+      "System.Delegate.Combine",
+      "TSDServer.ScanClass.InitScan",
+      "System.Windows.Forms.Form.Close",
+      "System.Windows.Forms.Control.Refresh",
+      "TSDServer.ActionsClass.CheckInv",
+      "TSDServer.ActionsClass.InvokeAction"
+     ],
+     "cyclomatic_complexity": 13,
+     "id": "59f514ca-9505-5a68-b45e-73b4b9a1d01c",
+     "is_static": false,
+     "locator": "0x060001DC",
+     "name": "OnInventarScanned",
+     "numeric_literals": [
+      "5000",
+      "13",
+      "255"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "660",
+      "№ {0}?",
+      "Вы хотите начать просчет?",
+      " № {0}",
+      "ДА – продолжить. Нет – выйти",
+      "Новый просчет",
+      "Ошибка инв-ции",
+      "Ошибка",
+      "Идет просчет № {0}",
+      "Продолжить просчет?",
+      "Просчет уже существует!",
+      "Просчет {0} завершен!",
+      "Штрихкод {0} неверный адрес!"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "System.Windows.Forms.Control.set_Width",
+      "System.Windows.Forms.Control.set_Height",
+      "System.Windows.Forms.Control.Focus",
+      "System.Windows.Forms.Control.set_Text",
+      "TSDServer.ScanClass.get_Scaner",
+      "TSDServer.ScanClass.InitScan",
+      "System.Windows.Forms.Control.Refresh",
+      "System.Delegate.Combine",
+      "TSDServer.Scanned..ctor",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ActionsClass.FindOpenInventar",
+      "System.String.op_Inequality",
+      "System.Windows.Forms.Control.BeginInvoke",
+      "System.Threading.ManualResetEvent.Set"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "2509ffd5-c73f-5e38-8d4e-2475cf9544de",
+     "is_static": false,
+     "locator": "0x060001D9",
+     "name": "InventarForm_Load",
+     "numeric_literals": [
+      "235",
+      "295"
+     ],
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": [
+      "Введите № накладной",
+      "Накладные"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.InventarForm..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "fc9239cb-1de4-5a7d-a2fa-0ee2ede39786",
+     "is_static": false,
+     "locator": "0x060001D8",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "(TSDServer.InventarFormMode) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.Panel..ctor",
+      "System.Windows.Forms.Label..ctor",
+      "System.Windows.Forms.TextBox..ctor",
+      "System.Windows.Forms.Control.SuspendLayout",
+      "System.Drawing.Color.get_PaleGreen",
+      "System.Windows.Forms.Control.set_BackColor",
+      "System.Windows.Forms.Control.get_Controls",
+      "System.Windows.Forms.Control+ControlCollection.Add",
+      "System.Drawing.Point..ctor",
+      "System.Windows.Forms.Control.set_Location",
+      "System.Windows.Forms.Control.set_Name",
+      "System.Drawing.Size..ctor",
+      "System.Windows.Forms.Control.set_Size",
+      "System.Drawing.Color.get_Gold",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.Label.set_TextAlign",
+      "System.Drawing.Color.get_White",
+      "System.Drawing.Color.get_Black",
+      "System.Windows.Forms.Control.set_ForeColor",
+      "System.Windows.Forms.Control.set_Visible",
+      "System.Drawing.Color.get_Red",
+      "System.Windows.Forms.Control.set_TabIndex",
+      "System.Windows.Forms.KeyEventHandler..ctor",
+      "System.Windows.Forms.Control.add_KeyDown",
+      "System.Drawing.SizeF..ctor",
+      "System.Windows.Forms.ContainerControl.set_AutoScaleDimensions",
+      "System.Windows.Forms.ContainerControl.set_AutoScaleMode",
+      "System.Windows.Forms.ScrollableControl.set_AutoScroll",
+      "System.Windows.Forms.Control.set_ClientSize",
+      "System.Windows.Forms.Form.set_ControlBox",
+      "System.Windows.Forms.Form.set_FormBorderStyle",
+      "System.Windows.Forms.Form.set_WindowState"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "f9bdc3b6-1014-5121-b300-d98ef0e2e7dc",
+     "is_static": false,
+     "locator": "0x060001D6",
+     "name": "InitializeComponent",
+     "numeric_literals": [
+      "232",
+      "292",
+      "254",
+      "226",
+      "20",
+      "234",
+      "214",
+      "194",
+      "136",
+      "116",
+      "96",
+      "36",
+      "23",
+      "13",
+      "96.0",
+      "235",
+      "295"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "panel1",
+      "label8",
+      "Для просмотра нажмите F4",
+      "label7",
+      "Для выхода - Fn-CLR",
+      "label6",
+      " или зеленую кнопку",
+      "label5",
+      "Для продолжения нажмите ENTER",
+      "label4",
+      "№ {0}?",
+      "label3",
+      "Вы хотите начать просчет?",
+      "label2",
+      "Просчет **** уже завершен!",
+      "textBox1",
+      "label1",
+      "Отсканируейте ШК нового паспорта",
+      "InventarForm",
+      "Инвентаризация"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.ManualResetEvent..ctor",
+      "System.Windows.Forms.Form..ctor",
+      "TSDServer.InventarForm.InitializeComponent",
+      "TSDServer.Scanned..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "8bff27b6-e792-5f17-b8d2-2139930aa92c",
+     "is_static": false,
+     "locator": "0x060001D7",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Windows.Forms.Control.get_InvokeRequired",
+      "TSDServer.Scanned..ctor",
+      "System.Windows.Forms.Control.Invoke",
+      "TSDServer.InventarForm.OnInventarScanned",
+      "TSDServer.InventarForm.OnIncomeScanned"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "51770d0d-c558-5963-b9d8-8d79fe6dd44c",
+     "is_static": false,
+     "locator": "0x060001DB",
+     "name": "OnScanned",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 11,
+     "call_targets": [
+      "System.Windows.Forms.KeyEventArgs.get_KeyCode",
+      "System.Windows.Forms.Control.get_Text",
+      "System.String.op_Inequality",
+      "TSDServer.InventarForm.OnScanned",
+      "System.Windows.Forms.Form.Close",
+      "System.Windows.Forms.KeyEventArgs.get_KeyValue",
+      "System.Windows.Forms.KeyEventArgs.set_Handled",
+      "System.String.IsNullOrEmpty",
+      "TSDServer.ViewInventarForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 12,
+     "id": "72e7189b-c7e3-5532-b5d6-4663281460fa",
+     "is_static": false,
+     "locator": "0x060001DE",
+     "name": "textBox1_KeyDown",
+     "numeric_literals": [
+      "13",
+      "27",
+      "18",
+      "16",
+      "115",
+      "14",
+      "9"
+     ],
+     "signature": "(System.Object, System.Windows.Forms.KeyEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScanClass.get_Scaner",
+      "System.Delegate.Remove",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ActionsClass.EndScan",
+      "TSDServer.ScanClass.StopScan"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "c94f9769-9405-56fd-a6f3-c23118a466d2",
+     "is_static": false,
+     "locator": "0x060001DA",
+     "name": "InventarForm_Closed",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 10,
+     "call_targets": [
+      "System.Threading.WaitHandle.WaitOne",
+      "System.Windows.Forms.Control.set_Visible",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.TextBoxBase.SelectAll",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ActionsClass.FindByDocIdAndDocType",
+      "System.String.Format",
+      "TSDServer.DialogFrm.ShowMessage",
+      "TSDServer.ActionsClass.OpenInv",
+      "TSDServer.ScanClass.get_Scaner",
+      "System.Delegate.Remove",
+      "TSDServer.ScanClass.StopScan",
+      "TSDServer.ViewProductForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog",
+      "System.IDisposable.Dispose",
+      "System.Exception.get_Message",
+      "System.Delegate.Combine",
+      "TSDServer.ScanClass.InitScan",
+      "System.Windows.Forms.Form.Close",
+      "System.Windows.Forms.Control.Refresh",
+      "TSDServer.ActionsClass.CheckInv"
+     ],
+     "cyclomatic_complexity": 11,
+     "id": "eba891ee-292f-5779-a87c-bb1f2ca5c9a9",
+     "is_static": false,
+     "locator": "0x060001DD",
+     "name": "OnIncomeScanned",
+     "numeric_literals": [
+      "5000",
+      "13",
+      "14"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "№ {0}?",
+      "Вы хотите начать накладную?",
+      " № {0}",
+      "ДА – продолжить. Нет – выйти",
+      "Новая накладная",
+      "Ошибка накл-ой",
+      "Ошибка",
+      "Накладная № {0}",
+      "Продолжить накладную?",
+      "Накладная уже существует!",
+      "Накладная {0} завершена!"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.IDisposable.Dispose",
+      "System.Windows.Forms.Control.Dispose"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "6889f68b-e253-523f-8955-af0f59f087e7",
+     "is_static": false,
+     "locator": "0x060001D5",
+     "name": "Dispose",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": null,
+     "visibility": "protected"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "74a231ea-257c-55a9-9df7-6e51f93644ed",
+   "kind": "BinaryType",
+   "name": "TSDServer.InventarForm",
+   "namespace": "TSDServer",
+   "super_type": "System.Windows.Forms.Form"
+  }
+ }
+}

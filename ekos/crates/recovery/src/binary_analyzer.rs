@@ -106,7 +106,9 @@ impl CompilerPass for BinaryAnalyzerPass {
     /// Bump on any change to this pass's output shape — `cache_inputs` alone cannot catch a logic
     /// change, as `rust_analyzer`'s own `version` doc records at length.
     fn version(&self) -> &str {
-        "v1"
+        // v2: .NET `Calls` edges actually join (ekos-binary owner/descriptor fix), and
+        // `DependsOn`/`Extends` resolve onto binaries observed in the same run.
+        "v2"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -127,13 +129,30 @@ impl CompilerPass for BinaryAnalyzerPass {
         // both a facade and the real implementation of one assembly (wine-mono ships exactly
         // that), and guessing which of the two a call meant would be worse than picking one and
         // saying so here.
+        //
+        // Three indexes, because a name alone does not identify a method: a client and a server
+        // compiled from shared source (or two copies of one exe side by side) declare the same
+        // `Ns.Type.method(sig)`, and a run-wide first-wins join sent 320 of one real server's
+        // calls into the *client* binary. A call whose format names its target assembly (.NET)
+        // is joined within that assembly — the caller's own binary when it names itself; one
+        // that does not (JVM) prefers the caller's own binary, then the run.
         let mut method_index: HashMap<String, KirId> = HashMap::new();
+        let mut methods_by_binary: HashMap<(String, String), KirId> = HashMap::new();
+        let mut methods_by_assembly: HashMap<(String, String), KirId> = HashMap::new();
         // Thin objects already materialized for entities referenced but not compiled here, so a
         // type inherited from by 500 classes yields one object rather than 500.
         let mut external: HashMap<KirId, ()> = HashMap::new();
         // Deferred until every artifact has been read, because a call very often precedes its
         // target in artifact order.
-        let mut pending_calls: Vec<(KirId, String)> = Vec::new();
+        let mut pending_calls: Vec<PendingCall> = Vec::new();
+        // Assembly references and inheritance, deferred for the same reason: `TSDClient.exe`
+        // referencing `BluetoothLibNet` must land on the `bluetoothlibnet.dll` observed beside
+        // it, not on an empty `external` stub of the same name. Only a name no binary in this run
+        // defines falls back to a stub. First occurrence wins, as for `method_index`.
+        let mut observed_assemblies: HashMap<String, KirId> = HashMap::new();
+        let mut observed_types: HashMap<String, KirId> = HashMap::new();
+        let mut types_by_binary: HashMap<(String, String), KirId> = HashMap::new();
+        let mut pending_refs: Vec<PendingRef> = Vec::new();
 
         for artifact_id in &self.artifact_ids {
             let json = match ctx.artifact_store.read(artifact_id) {
@@ -173,22 +192,16 @@ impl CompilerPass for BinaryAnalyzerPass {
                 );
                 combined.add_object(assembly_object(&data, assembly_id, ev));
                 stats.binaries += 1;
+                observed_assemblies
+                    .entry(data.ast.assembly_name.clone())
+                    .or_insert(assembly_id);
                 for reference in &data.ast.references {
-                    let ref_id = kir_id("assembly-ref", reference, "");
-                    add_external(
-                        &mut combined,
-                        &mut external,
-                        ref_id,
-                        reference,
-                        "BinaryAssembly",
-                        "assembly-ref",
-                    );
-                    combined.add_relationship(KirRelationship::deterministic(
-                        RelationshipKind::DependsOn,
-                        assembly_id,
-                        ref_id,
-                        "binary-reference",
-                    ));
+                    pending_refs.push(PendingRef {
+                        from: assembly_id,
+                        binary: id_path.clone(),
+                        target: reference.clone(),
+                        kind: RelationshipKind::DependsOn,
+                    });
                 }
             }
 
@@ -205,6 +218,10 @@ impl CompilerPass for BinaryAnalyzerPass {
                     &ty.locator,
                 );
                 combined.add_object(type_object(ty, type_id, &data, ev));
+                observed_types.entry(ty.qualified_name()).or_insert(type_id);
+                types_by_binary
+                    .entry((id_path.clone(), ty.qualified_name()))
+                    .or_insert(type_id);
                 combined.add_relationship(KirRelationship::deterministic(
                     RelationshipKind::Contains,
                     assembly_id,
@@ -215,21 +232,12 @@ impl CompilerPass for BinaryAnalyzerPass {
                 // Inheritance and interface implementation are both `Extends` — the taxonomy
                 // draws no distinction, and neither do most of the questions asked of it.
                 for parent in ty.super_type.iter().chain(ty.interfaces.iter()) {
-                    let parent_id = kir_id("type-ref", parent, "");
-                    add_external(
-                        &mut combined,
-                        &mut external,
-                        parent_id,
-                        parent,
-                        "BinaryType",
-                        "type-ref",
-                    );
-                    combined.add_relationship(KirRelationship::deterministic(
-                        RelationshipKind::Extends,
-                        type_id,
-                        parent_id,
-                        "binary-extends",
-                    ));
+                    pending_refs.push(PendingRef {
+                        from: type_id,
+                        binary: id_path.clone(),
+                        target: parent.clone(),
+                        kind: RelationshipKind::Extends,
+                    });
                 }
 
                 for field in &ty.fields {
@@ -287,21 +295,25 @@ impl CompilerPass for BinaryAnalyzerPass {
                         method_id,
                         "binary-method",
                     ));
-                    method_index
-                        .entry(call_key(
-                            &ty.qualified_name(),
-                            &method.name,
-                            &method.descriptor,
-                        ))
+                    let key = call_key(&ty.qualified_name(), &method.name, &method.descriptor);
+                    methods_by_binary
+                        .entry((id_path.clone(), key.clone()))
                         .or_insert(method_id);
+                    methods_by_assembly
+                        .entry((data.ast.assembly_name.clone(), key.clone()))
+                        .or_insert(method_id);
+                    method_index.entry(key).or_insert(method_id);
 
                     let Some(body) = &method.body else { continue };
 
                     for call in &body.calls {
-                        pending_calls.push((
-                            method_id,
-                            call_key(&call.owner, &call.method, &call.descriptor),
-                        ));
+                        pending_calls.push(PendingCall {
+                            from: method_id,
+                            binary: id_path.clone(),
+                            assembly: data.ast.assembly_name.clone(),
+                            target_assembly: call.target_assembly.clone(),
+                            key: call_key(&call.owner, &call.method, &call.descriptor),
+                        });
                         if let Some(io) = call.io {
                             let io_id = kir_id(
                                 "io",
@@ -362,8 +374,48 @@ impl CompilerPass for BinaryAnalyzerPass {
             }
         }
 
-        for (from, key) in pending_calls {
-            match method_index.get(&key) {
+        for r in pending_refs {
+            let (observed, stub_kind, scope, source) = match r.kind {
+                RelationshipKind::DependsOn => (
+                    &observed_assemblies,
+                    "BinaryAssembly",
+                    "assembly-ref",
+                    "binary-reference",
+                ),
+                _ => (&observed_types, "BinaryType", "type-ref", "binary-extends"),
+            };
+            // A type declared in the referrer's own binary wins over a same-named one elsewhere.
+            let local = match r.kind {
+                RelationshipKind::Extends => types_by_binary.get(&(r.binary, r.target.clone())),
+                _ => None,
+            };
+            let to = match local.or_else(|| observed.get(&r.target)) {
+                Some(&id) => id,
+                None => {
+                    let id = kir_id(scope, &r.target, "");
+                    add_external(
+                        &mut combined,
+                        &mut external,
+                        id,
+                        &r.target,
+                        stub_kind,
+                        scope,
+                    );
+                    id
+                }
+            };
+            combined.add_relationship(KirRelationship::deterministic(r.kind, r.from, to, source));
+        }
+
+        for c in pending_calls {
+            let in_binary = || methods_by_binary.get(&(c.binary.clone(), c.key.clone()));
+            let target = match &c.target_assembly {
+                Some(a) if *a == c.assembly => in_binary(),
+                Some(a) => methods_by_assembly.get(&(a.clone(), c.key.clone())),
+                None => in_binary().or_else(|| method_index.get(&c.key)),
+            };
+            let from = c.from;
+            match target {
                 Some(&to) => {
                     stats.calls_resolved += 1;
                     combined.add_relationship(KirRelationship::deterministic(
@@ -434,6 +486,29 @@ fn combined_ev(
     kir.add_evidence(ev)
 }
 
+/// An assembly reference or inheritance edge whose target is resolved once every artifact in the
+/// run has been read.
+struct PendingRef {
+    from: KirId,
+    /// The referrer's binary (`id_path`), so a same-binary target can win.
+    binary: String,
+    /// The referenced assembly name, or the parent type's qualified name.
+    target: String,
+    /// `DependsOn` for an assembly reference, `Extends` for a parent type.
+    kind: RelationshipKind,
+}
+
+/// A call site whose `Calls` edge is resolved once every artifact in the run has been read.
+struct PendingCall {
+    from: KirId,
+    /// The caller's binary (`id_path`) and assembly name.
+    binary: String,
+    assembly: String,
+    /// [`ekos_binary::CallSite::target_assembly`].
+    target_assembly: Option<String>,
+    key: String,
+}
+
 /// Materialize a thin object for an entity this run references but did not compile — a
 /// superclass in the framework, an assembly that was not observed.
 ///
@@ -444,9 +519,10 @@ fn combined_ev(
 ///
 /// This is `perl_analyzer`'s established shape for a `use` target: one deterministically-keyed
 /// object, marked `external` so nothing mistakes it for something EKOS actually read. Keyed by
-/// qualified name rather than by binary path, because a reference names only the name — so if the
-/// defining binary is later observed, its own path-scoped object is a *separate*, richer object,
-/// and this one stays the reference stub it always was.
+/// qualified name rather than by binary path, because a reference names only the name. Only called
+/// for a name no binary in this run defines (see [`PendingRef`]); if the defining binary is
+/// observed in a *later* run, its own path-scoped object is a separate, richer object, and this
+/// one stays the reference stub it always was.
 fn add_external(
     kir: &mut KirGraph,
     seen: &mut HashMap<KirId, ()>,
@@ -852,6 +928,7 @@ mod tests {
 
     fn io_call(offset: u32, method: &str) -> CallSite {
         CallSite {
+            target_assembly: None,
             offset,
             kind: CallKind::Virtual,
             owner: "java.sql.PreparedStatement".into(),
@@ -1129,5 +1206,252 @@ mod tests {
             call_key("com.acme.Billing", "calculate", "(I)V"),
             "overloads must stay distinct"
         );
+    }
+
+    /// The real `bin/Release` shape that broke a name-keyed join: two copies of one exe
+    /// (`App.exe`, `App - Copy.exe`) and a server compiled from shared source, all declaring
+    /// `App.MainForm.Helper`. A run-wide first-wins index sent one binary's calls into another's
+    /// methods — 320 of a real server's calls landed in its client. Each call must stay inside
+    /// the assembly its metadata names: its own binary for a self-call, `Lib` for a `Lib` call.
+    #[tokio::test]
+    async fn calls_stay_inside_the_assembly_their_metadata_names() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut config = ekos_compiler_core::EkosConfig::default();
+        config.observe.ignore_patterns = vec![];
+        let cwd = dir.path().to_path_buf();
+        std::fs::create_dir_all(cwd.join(".ekos/artifacts")).unwrap();
+        let mut ctx = PassContext::new(Arc::new(config), cwd);
+
+        let call = |owner: &str, method: &str, asm: &str| CallSite {
+            target_assembly: Some(asm.into()),
+            offset: 0,
+            kind: CallKind::Static,
+            owner: owner.into(),
+            method: method.into(),
+            descriptor: "()V".into(),
+            io: None,
+        };
+        let form = |asm: &str| {
+            let mut t = ty(vec![
+                method(
+                    "Show",
+                    Some(MethodBody {
+                        calls: vec![
+                            call("App.MainForm", "Helper", asm),
+                            call("Lib.Widget", "Draw", "Lib"),
+                        ],
+                        ..Default::default()
+                    }),
+                ),
+                method("Helper", None),
+            ]);
+            t.namespace = "App".into();
+            t.name = "MainForm".into();
+            t
+        };
+        let mut widget = ty(vec![method("Draw", None)]);
+        widget.namespace = "Lib".into();
+        widget.name = "Widget".into();
+
+        let ast = |path: &str, name: &str, types: Vec<DecompiledType>| DecompiledAst {
+            source: BinarySource {
+                kind: BinaryKind::DotNet,
+                path: path.into(),
+                container_entry: None,
+                sha256: "d".into(),
+                format_version: "v2.0.50727".into(),
+                extractor: "test".into(),
+            },
+            fidelity: Fidelity::Structural,
+            assembly_name: name.into(),
+            references: vec![],
+            types,
+            diagnostics: vec![],
+        };
+        // Order matters to the bug: the shadowing binaries come first, so a first-wins join
+        // would pick them.
+        let mut ids = Vec::new();
+        for (path, a) in [
+            (
+                "App - Copy.exe",
+                ast("App - Copy.exe", "App", vec![form("App")]),
+            ),
+            (
+                "Server.exe",
+                ast("Server.exe", "Server", vec![form("Server")]),
+            ),
+            ("App.exe", ast("App.exe", "App", vec![form("App")])),
+            ("Lib.dll", ast("Lib.dll", "Lib", vec![widget])),
+        ] {
+            let data = serde_json::json!({ "path": path, "ast": a });
+            let artifact = ekos_artifact::ObservationArtifact::new("binary", path, data);
+            ctx.artifact_store
+                .write(&artifact.id, &serde_json::to_value(&artifact).unwrap())
+                .unwrap();
+            ids.push(artifact.id);
+        }
+
+        let mut pass = BinaryAnalyzerPass::new("test", ids);
+        let stats = pass.stats_handle();
+        pass.run(&mut ctx).await.unwrap();
+        assert_eq!(stats.lock().unwrap().calls_resolved, 6);
+
+        let json = ctx
+            .artifact_store
+            .list()
+            .unwrap()
+            .into_iter()
+            .filter_map(|id| ctx.artifact_store.read(&id).unwrap())
+            .find(|j| j.get("pass_name").and_then(|p| p.as_str()) == Some("binary-analyzer:test"))
+            .unwrap();
+        let kir = serde_json::from_value::<ekos_artifact::KnowledgeArtifact>(json)
+            .unwrap()
+            .content
+            .kir;
+        let by_id: HashMap<KirId, &KirObject> = kir.objects.iter().map(|o| (o.id, o)).collect();
+        let prop = |o: &KirObject, k: &str| o.properties[k].as_str().unwrap().to_string();
+
+        let mut checked = 0;
+        for r in kir
+            .relationships
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::Calls)
+        {
+            let (from, to) = (by_id[&r.from], by_id[&r.to]);
+            match to.name.as_str() {
+                "Helper" => assert_eq!(
+                    prop(from, "binary_path"),
+                    prop(to, "binary_path"),
+                    "a self-call must stay in its own binary"
+                ),
+                "Draw" => assert_eq!(prop(to, "binary_path"), "Lib.dll"),
+                other => panic!("unexpected call target {other}"),
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 6);
+    }
+
+    /// Two binaries observed side by side, as in any `bin/Release` folder: `App.exe` references
+    /// `Lib`, subclasses a `Lib` type and calls into it. Every one of those edges must land on
+    /// the real `Lib` objects compiled in this run — only `mscorlib`, which nobody observed,
+    /// gets an `external` stub. Before this, `DependsOn` and `Extends` always went to a stub of
+    /// the same name, so "what depends on lib.dll" answered "nothing".
+    #[tokio::test]
+    async fn references_resolve_onto_binaries_observed_in_the_same_run() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut config = ekos_compiler_core::EkosConfig::default();
+        config.observe.ignore_patterns = vec![];
+        let cwd = dir.path().to_path_buf();
+        std::fs::create_dir_all(cwd.join(".ekos/artifacts")).unwrap();
+        let mut ctx = PassContext::new(Arc::new(config), cwd);
+
+        let ast = |name: &str, references: Vec<&str>, types: Vec<DecompiledType>| DecompiledAst {
+            source: BinarySource {
+                kind: BinaryKind::DotNet,
+                path: format!("{name}.dll"),
+                container_entry: None,
+                sha256: "d".into(),
+                format_version: "v2.0.50727".into(),
+                extractor: "test".into(),
+            },
+            fidelity: Fidelity::Structural,
+            assembly_name: name.into(),
+            references: references.into_iter().map(String::from).collect(),
+            types,
+            diagnostics: vec![],
+        };
+        let mut widget = ty(vec![method("Draw", None)]);
+        widget.namespace = "Lib".into();
+        widget.name = "Widget".into();
+        widget.locator = "0x02000002".into();
+
+        let mut form = ty(vec![method(
+            "Show",
+            Some(MethodBody {
+                calls: vec![CallSite {
+                    target_assembly: None,
+                    offset: 0,
+                    kind: CallKind::Virtual,
+                    owner: "Lib.Widget".into(),
+                    method: "Draw".into(),
+                    descriptor: "()V".into(),
+                    io: None,
+                }],
+                ..Default::default()
+            }),
+        )]);
+        form.namespace = "App".into();
+        form.name = "MainForm".into();
+        form.locator = "0x02000002".into();
+        form.super_type = Some("Lib.Widget".into());
+        form.interfaces = vec!["System.IDisposable".into()];
+
+        let mut ids = Vec::new();
+        for (path, a) in [
+            ("App.exe", ast("App", vec!["Lib", "mscorlib"], vec![form])),
+            ("Lib.dll", ast("Lib", vec!["mscorlib"], vec![widget])),
+        ] {
+            let data = serde_json::json!({ "path": path, "ast": a });
+            let artifact = ekos_artifact::ObservationArtifact::new("binary", path, data);
+            ctx.artifact_store
+                .write(&artifact.id, &serde_json::to_value(&artifact).unwrap())
+                .unwrap();
+            ids.push(artifact.id);
+        }
+
+        let mut pass = BinaryAnalyzerPass::new("test", ids);
+        let stats = pass.stats_handle();
+        pass.run(&mut ctx).await.unwrap();
+        assert_eq!(stats.lock().unwrap().calls_resolved, 1);
+
+        let json = ctx
+            .artifact_store
+            .list()
+            .unwrap()
+            .into_iter()
+            .filter_map(|id| ctx.artifact_store.read(&id).unwrap())
+            .find(|j| j.get("pass_name").and_then(|p| p.as_str()) == Some("binary-analyzer:test"))
+            .expect("the pass writes a KnowledgeArtifact");
+        let kir = serde_json::from_value::<ekos_artifact::KnowledgeArtifact>(json)
+            .unwrap()
+            .content
+            .kir;
+
+        let is_external = |o: &KirObject| o.properties.get("external") == Some(&true.into());
+        let find = |kind: &str, name: &str, external: bool| {
+            kir.objects
+                .iter()
+                .find(|o| {
+                    o.kind == ObjectKind::Custom(kind.into())
+                        && o.name == name
+                        && is_external(o) == external
+                })
+                .map(|o| o.id)
+        };
+        let edge = |kind: RelationshipKind, from: KirId, to: KirId| {
+            kir.relationships
+                .iter()
+                .any(|r| r.kind == kind && r.from == from && r.to == to)
+        };
+
+        let app = find("BinaryAssembly", "App", false).unwrap();
+        let lib = find("BinaryAssembly", "Lib", false).unwrap();
+        assert!(edge(RelationshipKind::DependsOn, app, lib));
+        assert_eq!(
+            find("BinaryAssembly", "Lib", true),
+            None,
+            "an observed assembly must not also get a stub"
+        );
+        let mscorlib = find("BinaryAssembly", "mscorlib", true).expect("unobserved → stub");
+        assert!(edge(RelationshipKind::DependsOn, app, mscorlib));
+        assert!(edge(RelationshipKind::DependsOn, lib, mscorlib));
+
+        let main_form = find("BinaryType", "App.MainForm", false).unwrap();
+        let widget = find("BinaryType", "Lib.Widget", false).unwrap();
+        assert!(edge(RelationshipKind::Extends, main_form, widget));
+        assert_eq!(find("BinaryType", "Lib.Widget", true), None);
+        let idisposable = find("BinaryType", "System.IDisposable", true).unwrap();
+        assert!(edge(RelationshipKind::Extends, main_form, idisposable));
     }
 }

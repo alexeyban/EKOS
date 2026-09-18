@@ -287,6 +287,7 @@ fn read_body(
                 // resolvable owner. Recording the call-site name and descriptor keeps the
                 // evidence without pretending an edge was resolved.
                 body.calls.push(CallSite {
+                    target_assembly: None,
                     offset,
                     kind: CallKind::Dynamic,
                     owner: String::new(),
@@ -416,6 +417,7 @@ fn push_loadable(body: &mut MethodBody, offset: u32, l: &Loadable<'_>) {
 fn call(offset: u32, kind: CallKind, r: &MemberRef<'_>) -> CallSite {
     let owner = dotted(&r.class_name);
     CallSite {
+        target_assembly: None,
         offset,
         kind,
         io: io_classify::classify(&owner),

@@ -1,0 +1,277 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "33afca8c-1d94-5662-8ec3-04eab9a4594e"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x0200006A"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.NativeClass.SetSystemMemoryDivision"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "633bc394-f7e2-551f-8156-739e561ded30",
+     "is_static": true,
+     "locator": "0x06000468",
+     "name": "set_SystemStorageMemory",
+     "numeric_literals": [
+      "10"
+     ],
+     "signature": "(System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.NativeClass.KernelIoControl",
+      "System.BitConverter.ToInt32",
+      "System.Text.StringBuilder..ctor",
+      "System.BitConverter.ToInt16",
+      "System.String.Format",
+      "System.Text.StringBuilder.Append",
+      "System.Object.ToString"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "8ca15da6-6a21-5de7-9854-6aed264d237f",
+     "is_static": true,
+     "locator": "0x06000471",
+     "name": "GetDeviceID",
+     "numeric_literals": [
+      "256",
+      "12",
+      "16"
+     ],
+     "signature": "() -> System.String",
+     "string_literals": [
+      "{0:X8}-{1:X4}-{2:X4}-{3:X4}-",
+      "{0:X2}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "da7de19f-56ec-5da6-bef7-6c6dc5c06cda",
+     "is_static": true,
+     "locator": "0x0600046C",
+     "name": "SetSystemMemoryDivision",
+     "numeric_literals": null,
+     "signature": "(System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "bad79a69-16a0-55e6-ab06-cb5af3aa728d",
+     "is_static": true,
+     "locator": "0x06000466",
+     "name": "get_ChangeStatus",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.SystemMemoryChangeStatusEnum",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.String..ctor",
+      "TSDServer.NativeClass.SystemParametersInfo",
+      "System.String.IndexOf",
+      "System.String.Substring",
+      "System.String.ToUpper"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "d84dcb08-bf19-5317-8bef-d062a61aaffa",
+     "is_static": true,
+     "locator": "0x06000472",
+     "name": "GetOemInfo",
+     "numeric_literals": [
+      "32",
+      "50",
+      "258"
+     ],
+     "signature": "() -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "a14dcd19-00f3-5882-8f76-749097508c72",
+     "is_static": true,
+     "locator": "0x0600046F",
+     "name": "KernelIoControl",
+     "numeric_literals": null,
+     "signature": "(System.Int32, System.IntPtr, System.Int32, System.Byte[], System.Int32, ref System.Int32) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.NativeClass.WCE_PlaySound"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "55e917b0-3158-5b89-ba10-48ab9671bf6c",
+     "is_static": true,
+     "locator": "0x06000469",
+     "name": "Play",
+     "numeric_literals": [
+      "131073"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "c22bead4-3f90-5d08-ac56-f84d7b53e6e3",
+     "is_static": true,
+     "locator": "0x06000470",
+     "name": "SystemParametersInfo",
+     "numeric_literals": null,
+     "signature": "(System.Int32, System.Int32, System.String, System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "5e4b095f-ce4b-5fd8-a8e6-e3b9fba9d121",
+     "is_static": true,
+     "locator": "0x0600046D",
+     "name": "WCE_PlaySound",
+     "numeric_literals": null,
+     "signature": "(System.String, System.IntPtr, System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "2ed30c99-e07e-5a56-a6d5-2c8dbabc324b",
+     "is_static": true,
+     "locator": "0x0600046E",
+     "name": "WCE_PlaySoundBytes",
+     "numeric_literals": null,
+     "signature": "(System.Byte[], System.IntPtr, System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.IO.Stream.get_Length",
+      "System.IO.Stream.Read",
+      "TSDServer.NativeClass.WCE_PlaySoundBytes"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "7d70666a-bd4a-5bb2-b2a6-b62c5c85045d",
+     "is_static": true,
+     "locator": "0x0600046A",
+     "name": "Play",
+     "numeric_literals": null,
+     "signature": "(System.IO.Stream) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "e4109f03-4a7f-50fe-a329-e1b5311b3c33",
+     "is_static": true,
+     "locator": "0x06000474",
+     "name": ".cctor",
+     "numeric_literals": [
+      "257",
+      "16",
+      "14",
+      "84"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Object..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "4cfecbb6-16b1-566b-a9af-05e156a4ef74",
+     "is_static": false,
+     "locator": "0x06000473",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.NativeClass.GetSystemMemoryDivision"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "bacd3d3e-3a7e-53f2-86ae-9a73f167dc51",
+     "is_static": true,
+     "locator": "0x06000467",
+     "name": "get_SystemStorageMemory",
+     "numeric_literals": [
+      "10"
+     ],
+     "signature": "() -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": null,
+     "call_targets": null,
+     "cyclomatic_complexity": null,
+     "id": "4915f34e-4bb1-56e8-992d-5549b09f7d4c",
+     "is_static": true,
+     "locator": "0x0600046B",
+     "name": "GetSystemMemoryDivision",
+     "numeric_literals": null,
+     "signature": "(ref System.Int32, ref System.Int32, ref System.Int32) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "33afca8c-1d94-5662-8ec3-04eab9a4594e",
+   "kind": "BinaryType",
+   "name": "TSDServer.NativeClass",
+   "namespace": "TSDServer",
+   "super_type": null
+  }
+ }
+}

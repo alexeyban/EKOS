@@ -1,0 +1,300 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "5e4ad383-4d52-579b-b17c-71d43a13cdb4"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x0200002F"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "Calib.SystemLibNet+Api.SysWaitForEvent",
+      "TSDServer.ScanClass.GetText",
+      "System.String.IsNullOrEmpty",
+      "TSDServer.Scanned.Invoke",
+      "System.Exception.get_Message",
+      "TSDServer.ScanClass.SetScanError"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "b5bb43c6-1d0d-5ed2-ad96-7e2518593481",
+     "is_static": false,
+     "locator": "0x06000200",
+     "name": "start",
+     "numeric_literals": [
+      "2000"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "OBRScanningEvent"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "e1961b9c-8682-56cb-9fde-d348a457da50",
+     "is_static": true,
+     "locator": "0x060001FB",
+     "name": "get_Scaner",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.ScanClass",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "Calib.OBReadLibNet+Api.OBRLoadConfigFile",
+      "Calib.OBReadLibNet+Api.OBRSetDefaultSymbology",
+      "Calib.OBReadLibNet+Api.OBRSetScanningKey",
+      "Calib.OBReadLibNet+Api.OBRSetScanningCode",
+      "Calib.OBReadLibNet+Api.OBRSetBuffType",
+      "Calib.OBReadLibNet+Api.OBRSetScanningNotification",
+      "Calib.OBReadLibNet+Api.OBRSetBuzzer",
+      "Calib.OBReadLibNet+Api.OBRSetVibrator",
+      "Calib.OBReadLibNet+Api.OBROpen",
+      "TSDServer.ScanClass.SetScanError",
+      "TSDServer.ScanClass.set_Paused",
+      "Calib.OBReadLibNet+Api.OBRClearBuff",
+      "System.Threading.ThreadStart..ctor",
+      "System.Threading.Thread..ctor",
+      "System.Threading.Thread.Start",
+      "Calib.OBReadLibNet+Api.OBRSaveConfigFile"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "0b7bde8a-42c4-5bc3-9c1b-ac8ce42707ef",
+     "is_static": false,
+     "locator": "0x060001FF",
+     "name": "InitScan",
+     "numeric_literals": [
+      "259",
+      "131071",
+      "-63727",
+      "-63739"
+     ],
+     "signature": "() -> System.Int32",
+     "string_literals": [
+      "Failed to connect to the scanner. Please exit a scanner application.",
+      "Trigger keys are being used. Please quit the program which is using the trigger keys.",
+      "Failed to connect to the scanner."
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "Calib.OBReadLibNet+Api.OBRClose",
+      "Calib.SystemLibNet+Api.SysTerminateWaitEvent",
+      "System.Threading.Thread.Abort"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "82a530bd-e7e2-5bc0-8c81-6af55aa5c2ed",
+     "is_static": false,
+     "locator": "0x06000205",
+     "name": "StopScan",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScanClass..ctor",
+      "System.Runtime.CompilerServices.RuntimeHelpers.InitializeArray"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "1266faa7-9d5c-5b7f-bde6-fec531119262",
+     "is_static": true,
+     "locator": "0x06000207",
+     "name": ".cctor",
+     "numeric_literals": [
+      "14",
+      "9",
+      "10",
+      "11",
+      "12",
+      "13"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "          ",
+      "OBR_CD39  ",
+      "OBR_NW_7  ",
+      "OBR_WPCA  ",
+      "OBR_WPC   ",
+      "OBR_UPEA  ",
+      "OBR_UPE   ",
+      "OBR_IDF   ",
+      "OBR_ITF   ",
+      "OBR_CD93  ",
+      "OBR_CD128 ",
+      "OBR_MSI   ",
+      "OBR_IATA  ",
+      "OBR_EA13GTIN "
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "Calib.OBReadLibNet+Api.OBRGetStatus",
+      "Calib.OBReadLibNet+Api.OBRGets",
+      "System.Text.Encoding.GetEncoding",
+      "System.Text.Encoding.GetString",
+      "Calib.OBReadLibNet+Api.OBRClearBuff"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "b11500e4-22e0-59cf-a894-3080a886d4dd",
+     "is_static": false,
+     "locator": "0x06000203",
+     "name": "GetText",
+     "numeric_literals": [
+      "1024"
+     ],
+     "signature": "() -> System.String",
+     "string_literals": [
+      "ascii"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "System.IntPtr.op_Inequality",
+      "Calib.OBReadLibNet+Api.OBRGetStatus",
+      "Calib.OBReadLibNet+Api.OBRGets",
+      "System.Text.Encoding.GetEncoding",
+      "Calib.OBReadLibNet+Api.OBRClearBuff"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "cffc4e9f-23e9-5759-9d82-05f56329dc01",
+     "is_static": false,
+     "locator": "0x06000204",
+     "name": "SetText",
+     "numeric_literals": [
+      "1024",
+      "13"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "ascii",
+      "----------"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.ManualResetEvent..ctor",
+      "System.Object..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "fa1dd40a-27b0-5e5f-acf8-5c09dcc41c04",
+     "is_static": false,
+     "locator": "0x060001FC",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ScanError.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "198a99d1-9dd5-58dc-b162-542bfcc972c7",
+     "is_static": false,
+     "locator": "0x06000206",
+     "name": "SetScanError",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "0c5dc880-850b-548a-9f13-6193c74d4480",
+     "is_static": false,
+     "locator": "0x060001FD",
+     "name": "get_Paused",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScanClass.set_Paused"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "a3d672d4-4810-5a23-b753-24a9d6f69b6c",
+     "is_static": false,
+     "locator": "0x06000201",
+     "name": "PauseScan",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "69af35c6-0dba-51e2-a0f2-be72f4a095c8",
+     "is_static": false,
+     "locator": "0x060001FE",
+     "name": "set_Paused",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScanClass.set_Paused"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "76688b66-e673-55a1-b993-1749428ea959",
+     "is_static": false,
+     "locator": "0x06000202",
+     "name": "ResumeScan",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "5e4ad383-4d52-579b-b17c-71d43a13cdb4",
+   "kind": "BinaryType",
+   "name": "TSDServer.ScanClass",
+   "namespace": "TSDServer",
+   "super_type": null
+  }
+ }
+}

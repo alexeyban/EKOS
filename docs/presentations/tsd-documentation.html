@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TSD System Documentation</title>
+<meta name="description" content="Complete documentation of TSD — a Windows CE barcode data-collection terminal and its desktop exchange server — recovered by EKOS from compiled .NET binaries alone, with every claim traced to a metadata token.">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+  :root{
+    color-scheme: light dark;
+    --ground:#F5F6F9; --surface:#FFFFFF; --surface-2:#EDF0F5;
+    --ink:#161A24; --ink-soft:#5A6275; --rule:#D8DDE7;
+    --accent:#2F5DA8; --accent-soft:#E4ECF8;
+    --green:#2E6A4E; --green-soft:#E3EFE7;
+    --warn:#8A5C06; --warn-soft:#F7EEDA;
+    --bad:#9B2F2A; --bad-soft:#F6E5E3;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#10131A; --surface:#181C25; --surface-2:#1F2430;
+      --ink:#E4E8F0; --ink-soft:#97A0B3; --rule:#2B3140;
+      --accent:#7FA6E8; --accent-soft:#1B2638;
+      --green:#67BE92; --green-soft:#1D2F26;
+      --warn:#D3A24A; --warn-soft:#2E2718;
+      --bad:#E08A82; --bad-soft:#321E1C;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#10131A; --surface:#181C25; --surface-2:#1F2430;
+    --ink:#E4E8F0; --ink-soft:#97A0B3; --rule:#2B3140;
+    --accent:#7FA6E8; --accent-soft:#1B2638;
+    --green:#67BE92; --green-soft:#1D2F26;
+    --warn:#D3A24A; --warn-soft:#2E2718;
+    --bad:#E08A82; --bad-soft:#321E1C;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--ground); color:var(--ink); font-family:var(--serif); font-size:16px; line-height:1.6; margin:0; padding:0 16px;}
+  .wrap{max-width:900px; margin:0 auto; padding-block:48px 80px;}
+  h1,h2,h3,h4{font-family:var(--sans); text-wrap:balance; margin:0;}
+  h1{font-size:2.15rem; font-weight:700; line-height:1.15; letter-spacing:-0.02em;}
+  h2{font-size:1.32rem; font-weight:600; letter-spacing:-0.01em;}
+  h3{font-size:1.02rem; font-weight:600;}
+  p{margin:0;}
+  a{color:var(--accent);}
+  code,.mono{font-family:var(--mono); font-size:0.86em;}
+  .eyebrow{font-family:var(--sans); font-size:0.72rem; font-weight:600; letter-spacing:0.13em; text-transform:uppercase; color:var(--ink-soft);}
+
+  header.doc{border-bottom:2px solid var(--ink); padding-bottom:22px; display:flex; flex-direction:column; gap:12px;}
+  .subject{font-family:var(--mono); font-size:0.8rem; color:var(--ink-soft); word-break:break-word;}
+  .question{font-size:1.06rem; color:var(--ink-soft); font-style:italic; max-width:64ch;}
+
+  nav.toc{margin-top:28px; background:var(--surface); border:1px solid var(--rule); padding:18px 22px;}
+  nav.toc ol{margin:8px 0 0 0; padding-left:22px; columns:2; column-gap:32px; font-family:var(--sans); font-size:0.9rem;}
+  nav.toc li{margin:3px 0; break-inside:avoid;}
+  @media (max-width:640px){ nav.toc ol{columns:1;} }
+
+  section{margin-top:56px; display:flex; flex-direction:column; gap:18px; scroll-margin-top:16px;}
+  section > p{max-width:68ch;}
+  .num{font-family:var(--mono); color:var(--ink-soft); font-weight:500; margin-right:6px;}
+
+  .answer{background:var(--accent-soft); border-left:4px solid var(--accent); padding:24px 26px; display:flex; flex-direction:column; gap:14px;}
+  .answer .lead{font-family:var(--sans); font-size:1.1rem; font-weight:500; line-height:1.5;}
+  .answer ul{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px;}
+
+  .chip{font-family:var(--sans); font-size:0.62rem; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; padding:2px 6px; border-radius:2px; white-space:nowrap; border:1px solid var(--rule); color:var(--ink-soft); background:var(--surface-2); vertical-align:1px;}
+  .chip.cmp{border-color:var(--accent); color:var(--accent); background:var(--accent-soft);}
+  .chip.obs{border-color:var(--green); color:var(--green); background:var(--green-soft);}
+  .chip.grf{border-color:var(--ink-soft); color:var(--ink); background:transparent;}
+  .chip.rd{border-color:var(--warn); color:var(--warn); background:var(--warn-soft);}
+  .loc{font-family:var(--mono); font-size:0.74rem; color:var(--ink-soft); white-space:nowrap;}
+  .legend{display:flex; gap:14px 22px; flex-wrap:wrap; font-size:0.84rem; color:var(--ink-soft);}
+  .legend span{display:flex; gap:7px; align-items:center;}
+
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px;}
+  .stat{background:var(--surface); border:1px solid var(--rule); padding:14px 16px;}
+  .stat b{display:block; font-family:var(--mono); font-size:1.45rem; font-weight:600; color:var(--accent);}
+  .stat span{font-family:var(--sans); font-size:0.78rem; color:var(--ink-soft);}
+
+  .grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px;}
+  .card{background:var(--surface); border:1px solid var(--rule); padding:18px; display:flex; flex-direction:column; gap:9px;}
+  .card .where{font-family:var(--mono); font-size:0.76rem; color:var(--accent); word-break:break-all;}
+  .card p{font-size:0.92rem; color:var(--ink-soft);}
+  .card h3{display:flex; gap:8px; align-items:baseline; flex-wrap:wrap;}
+
+  figure{margin:0; display:flex; flex-direction:column; gap:10px;}
+  figure svg{max-width:100%; height:auto; display:block;}
+  figcaption{font-family:var(--sans); font-size:0.82rem; color:var(--ink-soft); max-width:68ch;}
+  .figbox{background:var(--surface); border:1px solid var(--rule); padding:20px 16px; overflow-x:auto;}
+  svg text{font-family:var(--sans); fill:var(--ink);}
+  svg .soft{fill:var(--ink-soft);}
+  svg text.mono{font-family:var(--mono); font-size:10px;}
+  svg .box{fill:var(--surface-2); stroke:var(--rule); stroke-width:1.2;}
+  svg .boxa{fill:var(--accent-soft); stroke:var(--accent); stroke-width:1.4;}
+  svg .boxg{fill:var(--green-soft); stroke:var(--green); stroke-width:1.2;}
+  svg .boxw{fill:var(--warn-soft); stroke:var(--warn); stroke-width:1.2; stroke-dasharray:4 3;}
+  svg .ln{stroke:var(--ink-soft); stroke-width:1.3; fill:none;}
+  svg .lna{stroke:var(--accent); stroke-width:1.6; fill:none;}
+  svg .life{stroke:var(--rule); stroke-width:1.2; stroke-dasharray:3 4;}
+
+  .tablewrap{overflow-x:auto; border:1px solid var(--rule); background:var(--surface);}
+  table{border-collapse:collapse; width:100%; font-size:0.87rem; min-width:600px;}
+  th{font-family:var(--sans); font-size:0.68rem; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft); text-align:left; padding:10px 12px; border-bottom:1px solid var(--rule); background:var(--surface-2); white-space:nowrap;}
+  td{padding:10px 12px; border-bottom:1px solid var(--rule); vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  td.m{font-family:var(--mono); font-size:0.78rem; white-space:nowrap;}
+  td.n{font-variant-numeric:tabular-nums; text-align:right; font-family:var(--mono); font-size:0.8rem;}
+  td.q{font-size:0.84rem;}
+  .ru{font-family:var(--sans); font-size:0.86rem;}
+  .tr{color:var(--ink-soft); font-style:italic; font-size:0.84rem;}
+
+  .fields{display:flex; flex-direction:column; gap:10px;}
+  .field{display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px dashed var(--rule);}
+  .field:last-child{border-bottom:none; padding-bottom:0;}
+  .field .name{font-family:var(--mono); font-size:0.84rem; font-weight:500; min-width:200px;}
+  .field .note{font-size:0.9rem; color:var(--ink-soft); flex:1; min-width:220px;}
+
+  pre{margin:0; font-family:var(--mono); font-size:0.78rem; line-height:1.6; background:var(--surface-2); border:1px solid var(--rule); padding:13px 15px; overflow-x:auto; color:var(--ink);}
+  pre .c{color:var(--ink-soft);}
+  ol.steps{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:26px; counter-reset:step;}
+  ol.steps > li{counter-increment:step; display:grid; grid-template-columns:36px 1fr; gap:14px; align-items:start;}
+  ol.steps > li::before{content:counter(step); font-family:var(--mono); font-size:0.84rem; font-weight:600; color:var(--accent); border:1px solid var(--accent); border-radius:50%; width:30px; height:30px; display:flex; align-items:center; justify-content:center; margin-top:1px;}
+  .step-body{display:flex; flex-direction:column; gap:9px; min-width:0;}
+  .step-body p{font-size:0.94rem; max-width:64ch;}
+
+  .warnbox{background:var(--warn-soft); border-left:4px solid var(--warn); padding:20px 22px; display:flex; flex-direction:column; gap:12px;}
+  .warnbox h2,.warnbox h3{color:var(--warn);}
+  .badbox{background:var(--bad-soft); border-left:4px solid var(--bad); padding:20px 22px; display:flex; flex-direction:column; gap:12px;}
+  .badbox h3{color:var(--bad);}
+  ul.plain{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px; max-width:70ch;}
+  footer.method{margin-top:64px; padding-top:22px; border-top:1px solid var(--rule); display:flex; flex-direction:column; gap:14px;}
+  footer.method p{font-size:0.88rem; color:var(--ink-soft); max-width:70ch;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <div class="eyebrow"><a href="../presentations.html" style="color:inherit; text-decoration:none;">← EKOS presentations</a> · System documentation</div>
+  <h1>TSD: a barcode data-collection terminal and its exchange server</h1>
+  <p class="question">How the application works, recovered only from the compiled binaries in its release folder. The source code, design documents and developers were not consulted.</p>
+  <p class="subject">github.com/alexeyban/tsd · SmartDeviceProject3/SmartDeviceProject2/SmartDeviceProject2/bin/Release · 31 files · 12 managed assemblies · compiled by EKOS 2026-09-18 · extractor <code>ekos-cil-metadata/v2</code> · zero LLM calls</p>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <div class="eyebrow">Contents</div>
+  <ol>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#provenance">How to read this document</a></li>
+    <li><a href="#inventory">What is in the release folder</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#cycle">The exchange cycle, end to end</a></li>
+    <li><a href="#server">Desktop exchange server (TSDServer.exe)</a></li>
+    <li><a href="#client">Handheld application (TSDClient.exe)</a></li>
+    <li><a href="#workflows">Business workflows</a></li>
+    <li><a href="#actions">The action engine</a></li>
+    <li><a href="#scan">Anatomy of one scan</a></li>
+    <li><a href="#data">Data model</a></li>
+    <li><a href="#storage">Storage engine and file formats</a></li>
+    <li><a href="#devices">Device integration</a></li>
+    <li><a href="#config">Configuration reference</a></li>
+    <li><a href="#files">Release-folder file reference</a></li>
+    <li><a href="#risks">Hotspots, risks and anomalies</a></li>
+    <li><a href="#limits">What EKOS could not determine</a></li>
+    <li><a href="#reproduce">Reproduce and query this analysis</a></li>
+  </ol>
+</nav>
+
+<!-- ─────────────────────────────── 1 ─────────────────────────────── -->
+<section id="summary">
+  <div class="eyebrow">Summary</div>
+  <div class="answer">
+    <p class="lead">TSD (<span class="ru">«Терминал сбора данных»</span>, a data-collection terminal) is a two-part retail back-office system. Store staff use a <strong>Windows&nbsp;CE handheld</strong> to scan goods for price checks, stock-taking, receiving trucks and boxes, and returns. A <strong>desktop exchange server</strong> loads reference data onto the handheld and pulls the scan results back.</p>
+    <ul>
+      <li>The two sides share no network connection and no database server. They exchange <strong>files over ActiveSync/RAPI</strong> while the terminal sits in its cradle. <span class="chip cmp">compiled</span></li>
+      <li>The server imports the product catalogue and documents from windows-1251 text files. It converts them into a custom indexed file database (<code>FamilTsdDB</code>) and copies that database to the terminal. <span class="chip cmp">compiled</span></li>
+      <li>On the terminal, every scan passes through an <strong>action engine</strong>. The document a product belongs to decides what the handheld does: which sound or vibration plays, and whether a price label goes to a Bluetooth printer. <span class="chip cmp">compiled</span></li>
+      <li>Every change to a scan record is journaled on the terminal to <code>scannedbarcodes.txt</code> and <code>register.txt</code> the moment it happens. The files are copied back to the desktop and archived with a timestamp, and each import's status is emailed. <span class="chip cmp">compiled</span> <span class="chip obs">observed</span></li>
+      <li>Product records carry a <code>NavCode</code>, and the handheld shows it under the label <span class="ru">«Код навижн»</span> (Navision code). The upstream ERP is therefore most likely Microsoft Dynamics&nbsp;NAV. <span class="chip rd">reading</span></li>
+    </ul>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>12</b><span>managed assemblies read</span></div>
+    <div class="stat"><b>888</b><span>types recovered</span></div>
+    <div class="stat"><b>8,327</b><span>methods, with signatures</span></div>
+    <div class="stat"><b>10,956</b><span>resolved call edges</span></div>
+    <div class="stat"><b>174</b><span>external I/O boundaries</span></div>
+    <div class="stat"><b>0</b><span>database I/O boundaries</span></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 2 ─────────────────────────────── -->
+<section id="provenance">
+  <h2><span class="num">2</span>How to read this document</h2>
+  <p>Every statement is tagged with how EKOS obtained it. Most statements also carry a <span class="loc">binary · token</span> locator: an ECMA-335 metadata token such as <span class="loc">TSDClient.exe · 0x0600004B</span>. That token names the exact method in the exact build (binary SHA-256 is recorded on every fact). Any claim can be re-checked with <code>ekos_binary_explain</code> or <code>ekos query object</code>.</p>
+  <div class="legend">
+    <span><span class="chip cmp">compiled</span> read deterministically from IL/metadata: names, signatures, call targets, string and numeric constants</span>
+    <span><span class="chip obs">observed</span> content of a non-binary file EKOS observed in the folder</span>
+    <span><span class="chip grf">graph</span> answer of an EKOS graph query (<code>ekos_impact</code>, <code>ekos_dependents</code>, <code>ekos_neighborhood</code>)</span>
+    <span><span class="chip rd">reading</span> an interpretation that joins several EKOS facts. It is not itself a compiled fact, and the evidence it rests on is stated.</span>
+  </div>
+  <p>English glosses of Russian UI strings are translations added for this document. The strings themselves are verbatim constants lifted from the binaries.</p>
+</section>
+
+<!-- ─────────────────────────────── 3 ─────────────────────────────── -->
+<section id="inventory">
+  <h2><span class="num">3</span>What is in the release folder</h2>
+  <p>EKOS detects formats by magic bytes and the PE CLI header, never by file extension. Of the 14 PE files, 13 are managed .NET assemblies and one (<code>MCSSLib.dll</code>, ARM Thumb, Windows&nbsp;CE) is native code. EKOS records the native file as a <code>File</code> and reads nothing from it. <span class="chip cmp">compiled</span></p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Assembly</th><th>File</th><th>Role</th><th>Types</th><th>Methods</th><th>CLR</th><th>Used by</th></tr></thead>
+    <tbody>
+      <tr><td class="m">TSDClient</td><td class="m">TSDClient.exe</td><td class="q">Handheld application, window title <span class="ru">«Терминал сбора данных»</span></td><td class="n">117</td><td class="n">1,189</td><td class="m">v2.0</td><td class="q">entry point</td></tr>
+      <tr><td class="m">TSDClient</td><td class="m">TSDClient - копия.exe</td><td class="q">Second copy of the handheld app ("копия" = copy), a different build (two fewer types)</td><td class="n">115</td><td class="n">1,155</td><td class="m">v2.0</td><td class="q">—</td></tr>
+      <tr><td class="m">TSDServer</td><td class="m">TSDServer.exe</td><td class="q">Desktop exchange server, window title <span class="ru">«Сервер обмена с ТСД»</span></td><td class="n">59</td><td class="n">817</td><td class="m">v2.0</td><td class="q">entry point</td></tr>
+      <tr><td class="m">OBReadLibNet</td><td class="m">obreadlibnet.dll</td><td class="q">Optical barcode reader SDK wrapper (namespace <code>Calib</code>)</td><td class="n">7</td><td class="n">209</td><td class="m">v1.1</td><td class="q">TSDClient ×2 <span class="chip grf">graph</span></td></tr>
+      <tr><td class="m">BluetoothLibNet</td><td class="m">bluetoothlibnet.dll</td><td class="q">Bluetooth stack SDK wrapper (<code>Calib</code>)</td><td class="n">8</td><td class="n">125</td><td class="m">v1.1</td><td class="q">TSDClient ×2 <span class="chip grf">graph</span></td></tr>
+      <tr><td class="m">SystemLibnet</td><td class="m">systemlibnet.dll</td><td class="q">Device system SDK: buzzer, vibrator, events (<code>Calib</code>)</td><td class="n">5</td><td class="n">246</td><td class="m">v1.1</td><td class="q">TSDClient ×2 <span class="chip grf">graph</span></td></tr>
+      <tr><td class="m">ImagerLibNet</td><td class="m">ImagerLibNet.dll</td><td class="q">Camera imager / OCR SDK (<code>Calib</code>)</td><td class="n">13</td><td class="n">244</td><td class="m">v1.1</td><td class="q">nothing <span class="chip grf">graph</span></td></tr>
+      <tr><td class="m">MoFlinkLibNet</td><td class="m">MoFlinkLibNet.dll</td><td class="q">Device SDK: <code>FLK_*</code> file, status and system-info structures (<code>Calib</code>)</td><td class="n">18</td><td class="n">217</td><td class="m">v1.1</td><td class="q">nothing <span class="chip grf">graph</span></td></tr>
+      <tr><td class="m">OpenNETCF</td><td class="m">OpenNETCF.dll</td><td class="q">OpenNETCF Smart Device Framework (third party)</td><td class="n">375</td><td class="n">2,591</td><td class="m">v2.0</td><td class="q">OpenNETCF.Drawing, .Windows.Forms</td></tr>
+      <tr><td class="m">OpenNETCF.Windows.Forms</td><td class="m">OpenNETCF.Windows.Forms.dll</td><td class="q">OpenNETCF UI controls</td><td class="n">132</td><td class="n">1,248</td><td class="m">v2.0</td><td class="q">TSDClient ×2</td></tr>
+      <tr><td class="m">OpenNETCF.Drawing</td><td class="m">OpenNETCF.Drawing.dll</td><td class="q">OpenNETCF drawing</td><td class="n">30</td><td class="n">197</td><td class="m">v2.0</td><td class="q">OpenNETCF.Windows.Forms</td></tr>
+      <tr><td class="m">ControlsLib</td><td class="m">controlslib.dll</td><td class="q">Custom controls, namespace <code>Bananamama.BackOffice.TSD.Client</code></td><td class="n">9</td><td class="n">89</td><td class="m">v2.0</td><td class="q">nothing <span class="chip grf">graph</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>The CLR column is the metadata version string: <code>v2.0.50727</code> is .NET Compact Framework 2.0, and <code>v1.1.4322</code> is the device vendor's older SDK build. "Used by" counts real <code>DependsOn</code> edges resolved onto binaries in this same folder. <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p>
+  <p>The <code>Calib</code> namespace, the <code>OBR*</code>/<code>BT*</code>/<code>Sys*</code> API names, and a test-print string naming <span class="mono">"CASIO IT-600 or DT-X11"</span> (in <code>BTPrintClass</code>) together suggest the handheld hardware is a Casio industrial terminal. <span class="chip rd">reading</span></p>
+</section>
+
+<!-- ─────────────────────────────── 4 ─────────────────────────────── -->
+<section id="architecture">
+  <h2><span class="num">4</span>Architecture</h2>
+  <p>Two executables and a set of device SDK wrappers. The only channel between desktop and handheld is file copy over ActiveSync, through <code>OpenNETCF.Desktop.Communication.RAPI</code>. <span class="chip cmp">compiled</span></p>
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 860 470" role="img" aria-label="Architecture: upstream text files feed TSDServer on the desktop, which writes FamilTsdDB files, copies them over ActiveSync RAPI to the handheld, where TSDClient reads them, drives the scanner, printer and buzzer through vendor SDKs, and journals scans to text files that travel back the same way.">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--ink-soft)"/></marker></defs>
+        <!-- upstream -->
+        <rect class="boxw" x="14" y="40" width="170" height="92" rx="4"/>
+        <text x="99" y="64" text-anchor="middle" font-size="13" font-weight="600">Upstream (ERP)</text>
+        <text x="99" y="84" text-anchor="middle" font-size="11" class="soft">product file · document file</text>
+        <text x="99" y="100" text-anchor="middle" font-size="11" class="soft">windows-1251 text</text>
+        <text x="99" y="116" text-anchor="middle" font-size="11" class="soft">fixed-width or delimited</text>
+        <rect class="boxw" x="14" y="300" width="170" height="92" rx="4"/>
+        <text x="99" y="324" text-anchor="middle" font-size="13" font-weight="600">Downstream</text>
+        <text x="99" y="344" text-anchor="middle" font-size="11" class="soft">RemoteFilePath archive</text>
+        <text x="99" y="360" text-anchor="middle" font-size="11" class="soft">load-status email (SMTP)</text>
+        <text x="99" y="376" text-anchor="middle" font-size="11" class="soft">KOI8-R, .xls attachment</text>
+        <!-- desktop -->
+        <rect class="box" x="220" y="20" width="250" height="400" rx="6"/>
+        <text x="345" y="44" text-anchor="middle" font-size="12" class="soft">DESKTOP (Windows)</text>
+        <rect class="boxa" x="240" y="58" width="210" height="148" rx="4"/>
+        <text x="345" y="80" text-anchor="middle" font-size="14" font-weight="600">TSDServer.exe</text>
+        <text x="345" y="100" text-anchor="middle" font-size="11" class="soft">Form1 · «Сервер обмена с ТСД»</text>
+        <text x="345" y="120" text-anchor="middle" font-size="11" class="soft">DataLoaderClass — import</text>
+        <text x="345" y="136" text-anchor="middle" font-size="11" class="soft">UploadResults — export</text>
+        <text x="345" y="152" text-anchor="middle" font-size="11" class="soft">Program.Main /c — batch mode</text>
+        <text x="345" y="168" text-anchor="middle" font-size="11" class="soft">SendMailClass — SMTP</text>
+        <text x="345" y="184" text-anchor="middle" font-size="11" class="soft">log4net · IPC :9090</text>
+        <rect class="boxg" x="240" y="232" width="210" height="70" rx="4"/>
+        <text x="345" y="254" text-anchor="middle" font-size="13" font-weight="600">FamilTsdDB files</text>
+        <text x="345" y="274" text-anchor="middle" font-size="11" class="soft mono">{table}.db · .col · .idx · .idf</text>
+        <text x="345" y="290" text-anchor="middle" font-size="11" class="soft">TSDDBPAth</text>
+        <rect class="boxg" x="240" y="326" width="210" height="70" rx="4"/>
+        <text x="345" y="348" text-anchor="middle" font-size="13" font-weight="600">Results files</text>
+        <text x="345" y="368" text-anchor="middle" font-size="11" class="soft mono">scannedbarcodes_{ts}.txt</text>
+        <text x="345" y="384" text-anchor="middle" font-size="11" class="soft mono">register_{ts}.txt</text>
+        <!-- channel -->
+        <rect class="box" x="488" y="160" width="116" height="120" rx="4"/>
+        <text x="546" y="190" text-anchor="middle" font-size="12" font-weight="600">ActiveSync</text>
+        <text x="546" y="208" text-anchor="middle" font-size="11" class="soft">RAPI</text>
+        <text x="546" y="232" text-anchor="middle" font-size="10" class="soft">CopyFileToDevice</text>
+        <text x="546" y="248" text-anchor="middle" font-size="10" class="soft">CopyFileFromDevice</text>
+        <text x="546" y="264" text-anchor="middle" font-size="10" class="soft">SetDeviceTime</text>
+        <!-- handheld -->
+        <rect class="box" x="622" y="20" width="226" height="400" rx="6"/>
+        <text x="735" y="44" text-anchor="middle" font-size="12" class="soft">HANDHELD (Windows CE)</text>
+        <rect class="boxa" x="638" y="58" width="194" height="132" rx="4"/>
+        <text x="735" y="80" text-anchor="middle" font-size="14" font-weight="600">TSDClient.exe</text>
+        <text x="735" y="100" text-anchor="middle" font-size="11" class="soft">MainForm menu · 7 workflows</text>
+        <text x="735" y="118" text-anchor="middle" font-size="11" class="soft">ActionsClass — action engine</text>
+        <text x="735" y="136" text-anchor="middle" font-size="11" class="soft">ScanClass · BTPrintClass</text>
+        <text x="735" y="154" text-anchor="middle" font-size="11" class="soft">FamilTsdDB reader</text>
+        <text x="735" y="172" text-anchor="middle" font-size="11" class="soft">Settings.xml</text>
+        <rect class="box" x="638" y="206" width="94" height="84" rx="4"/>
+        <text x="685" y="228" text-anchor="middle" font-size="11" font-weight="600">OBReadLibNet</text>
+        <text x="685" y="246" text-anchor="middle" font-size="10" class="soft">scanner</text>
+        <text x="685" y="266" text-anchor="middle" font-size="11" font-weight="600">SystemLibnet</text>
+        <text x="685" y="282" text-anchor="middle" font-size="10" class="soft">buzzer · vibro</text>
+        <rect class="box" x="738" y="206" width="94" height="84" rx="4"/>
+        <text x="785" y="228" text-anchor="middle" font-size="11" font-weight="600">BluetoothLib</text>
+        <text x="785" y="246" text-anchor="middle" font-size="10" class="soft">+ COM port</text>
+        <text x="785" y="268" text-anchor="middle" font-size="11" font-weight="600">BT printer</text>
+        <text x="785" y="284" text-anchor="middle" font-size="10" class="soft">LABEL_{n}.DEF</text>
+        <rect class="boxg" x="638" y="306" width="194" height="98" rx="4"/>
+        <text x="735" y="328" text-anchor="middle" font-size="13" font-weight="600">Terminal storage</text>
+        <text x="735" y="348" text-anchor="middle" font-size="11" class="soft mono">\Storage Card\tsdfamilia</text>
+        <text x="735" y="366" text-anchor="middle" font-size="11" class="soft mono">scannedbarcodes.txt (journal)</text>
+        <text x="735" y="384" text-anchor="middle" font-size="11" class="soft mono">register.txt · *.def</text>
+        <!-- arrows -->
+        <path class="ln" d="M184,86 L240,120" marker-end="url(#ah)"/>
+        <path class="ln" d="M345,206 L345,232" marker-end="url(#ah)"/>
+        <path class="ln" d="M450,267 L496,230" marker-end="url(#ah)"/>
+        <path class="ln" d="M596,210 L638,355" marker-end="url(#ah)"/>
+        <path class="ln" d="M638,380 L596,262" marker-end="url(#ah)"/>
+        <path class="ln" d="M496,262 L450,360" marker-end="url(#ah)"/>
+        <path class="ln" d="M240,361 L184,346" marker-end="url(#ah)"/>
+      </svg>
+    </div>
+    <figcaption>Component and data-flow view. Every box and label is a compiled type, method, string constant or observed file. The upstream and downstream systems (dashed) are outside the binaries; they are known only by the file formats and SMTP calls the server uses.</figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="card"><h3>Shared source, two executables</h3><p>The handheld app declares its classes in the <code>TSDServer</code> namespace. Both executables contain their own compiled copies of <code>ProductsDataSet</code>, <code>ScannedProductsDataSet</code> and the whole <code>FamilTsdDB</code> storage engine. Server and client were built from one shared code base. <span class="chip cmp">compiled</span></p></div>
+    <div class="card"><h3>No database server anywhere</h3><p>EKOS found 0 calls into any database provider (<code>SqlClient</code>, <code>SqlServerCe</code>, <code>OleDb</code>, …) in all 12 binaries. The typed <code>TableAdapter</code>s read and write <code>FamilTsdDB</code> files, not SQL. The <code>products.sdf</code> SQL&nbsp;CE connection string in the settings is never used. <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 5 ─────────────────────────────── -->
+<section id="cycle">
+  <h2><span class="num">5</span>The exchange cycle, end to end</h2>
+  <p>A working day for one terminal, reconstructed from the call graph. Steps 1–3 and 6–7 run on the desktop, steps 4–5 on the handheld.</p>
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 860 430" role="img" aria-label="Sequence: operator imports files into TSDServer, which writes FamilTsdDB; operator uploads to the terminal via RAPI; the terminal loads settings and database, staff scan goods and the terminal journals scans; the operator downloads results via RAPI, the server writes timestamped result files and optionally erases the terminal database.">
+        <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--accent)"/></marker></defs>
+        <g font-size="12" font-weight="600">
+          <rect class="boxw" x="20" y="14" width="130" height="32" rx="3"/><text x="85" y="35" text-anchor="middle">External systems</text>
+          <rect class="boxa" x="235" y="14" width="150" height="32" rx="3"/><text x="310" y="35" text-anchor="middle">TSDServer.exe</text>
+          <rect class="box" x="455" y="14" width="140" height="32" rx="3"/><text x="525" y="35" text-anchor="middle">ActiveSync / RAPI</text>
+          <rect class="boxa" x="680" y="14" width="160" height="32" rx="3"/><text x="760" y="35" text-anchor="middle">TSDClient.exe</text>
+        </g>
+        <line class="life" x1="85" y1="46" x2="85" y2="420"/><line class="life" x1="310" y1="46" x2="310" y2="420"/><line class="life" x1="525" y1="46" x2="525" y2="420"/><line class="life" x1="760" y1="46" x2="760" y2="420"/>
+        <g font-size="11">
+          <path class="lna" d="M85,76 L306,76" marker-end="url(#ah2)"/><text x="195" y="70" text-anchor="middle">1 · AutoLoadProduct / AutoLoadDoc</text>
+          <text x="318" y="100">2 · BeginImport → FamilTsdDB files</text>
+          <path class="lna" d="M310,132 L756,132" marker-end="url(#ah2)"/><text x="530" y="126" text-anchor="middle">3 · button2_Click: date check, DeleteDeviceFile, BeginCopyFileToDevice</text>
+          <text x="600" y="162" text-anchor="end">4 · Program.Main: Settings.xml, DB</text>
+          <text x="600" y="180" text-anchor="end">MainForm → workflows</text>
+          <text x="600" y="204" text-anchor="end">5 · scan → action → journal line</text>
+          <text x="600" y="222" text-anchor="end">scannedbarcodes.txt · register.txt</text>
+          <path class="lna" d="M756,262 L314,262" marker-end="url(#ah2)"/><text x="530" y="256" text-anchor="middle">6 · downloadBtn_Click: CopyFileFromDevice</text>
+          <text x="318" y="290">7 · UploadResults → {name}_{yyyyMMddhhmmss}.txt</text>
+          <text x="318" y="308">File.Copy → RemoteFilePath</text>
+          <path class="lna" d="M310,342 L756,342" marker-end="url(#ah2)"/><text x="530" y="336" text-anchor="middle">DeleteOldDB (if EraseTerminalDB): DeleteDeviceFile</text>
+          <path class="lna" d="M310,392 L89,392" marker-end="url(#ah2)"/><text x="195" y="386" text-anchor="middle">SendMail: load status · batch timeouts</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Every arrow is a compiled call path. The method names are the real names in the binaries. <span class="chip cmp">compiled</span></figcaption>
+  </figure>
+  <ol class="steps">
+    <li><div class="step-body"><h3>Import reference data <span class="loc">TSDServer.exe · 0x0600000D, 0x06000024</span></h3>
+      <p>The operator presses <span class="ru">«Импорт файла товаров»</span> (import product file) or <span class="ru">«Импорт файла документов»</span> (import document file). The handlers call <code>DataLoaderClass.AutoLoadProduct</code> / <code>AutoLoadDoc</code>, which start the import on a background thread (<code>LoadFile</code>, <span class="loc">0x060002C5</span>). A second import cannot start while one is running: <span class="ru">«Идет процесс загрузки!»</span> (a load is in progress). <span class="chip cmp">compiled</span></p></div></li>
+    <li><div class="step-body"><h3>Parse and store <span class="loc">TSDServer.exe · 0x060002CA</span></h3>
+      <p><code>BeginImport</code> clears the target tables (<code>CleanProducts</code>/<code>CleanDocs</code>) and reads the file as <code>windows-1251</code>. It dispatches each line to a fixed-width or delimited parser depending on the <code>ImportFileTypeIsFixed</code> setting (<code>AddFixedStringProducts</code>, <code>AddDelimetedStringDocs</code>, …). Finally it commits through the table adapters' <code>Update</code>. Lines with a bad barcode are skipped with <span class="ru">«Штрихкод неверный - строка пропущена»</span> (invalid barcode, line skipped). Other errors either abort or continue, depending on <code>BreakOnError</code>. <span class="chip cmp">compiled</span></p></div></li>
+    <li><div class="step-body"><h3>Upload to the terminal <span class="loc">TSDServer.exe · 0x06000011</span></h3>
+      <p>The upload handler (<span class="ru">«Выгрузить на терминал»</span>, upload to terminal) first calls <code>GetDBDate</code> and compares the catalogue date with today. If the catalogue is old, it warns: <span class="ru">«Внимание, справочник … имеет дату {0}! Вы уверены, что хотите загрузить старые данные?»</span> (the catalogue is dated {0}; are you sure you want to load old data?). It then connects over RAPI, deletes any existing database files on the device, and streams each file with <code>BeginCopyFileToDevice</code> behind a cancellable progress dialog. When the device connects, <code>ActiveSync_Active</code> also syncs the terminal clock (<code>RAPI.SetDeviceTime</code>). <span class="chip cmp">compiled</span></p></div></li>
+    <li><div class="step-body"><h3>Terminal start-up <span class="loc">TSDClient.exe · 0x06000464</span></h3>
+      <p><code>Program.Main</code> loads <code>Settings.xml</code> next to the executable. If the file is missing, it creates a settings row with built-in defaults: printer <code>00:03:7a:32:4c:55</code>, COM 9, storage path <code>\Storage Card\tsdfamilia</code>, <code>StorageMemorySize</code> 15000. The main form then shows the numbered menu and starts the scanner (<code>ActionsClass.BeginScan</code>). <span class="chip cmp">compiled</span> <span class="chip obs">observed</span></p></div></li>
+    <li><div class="step-body"><h3>Scanning <span class="loc">see §7–§10</span></h3>
+      <p>Staff pick a workflow and scan. Each accepted scan updates the in-memory <code>ScannedBarcodes</code> table. <code>BeginScan</code> <span class="loc">0x06000167</span> subscribes to that table's <code>RowChanged</code>/<code>ColumnChanged</code> events. Their handlers call <code>WriteDbTxt</code> <span class="loc">0x0600016A</span>, which appends the row to <code>scannedbarcodes.txt</code> as a <code>|</code>-separated line and to <code>register.txt</code>, then flushes. A crash or battery loss therefore does not lose a scan. <span class="chip cmp">compiled</span></p></div></li>
+    <li><div class="step-body"><h3>Download results <span class="loc">TSDServer.exe · 0x06000025</span></h3>
+      <p><span class="ru">«Загрузить с терминала»</span> (download from terminal) copies the scanned-data files back with <code>RAPI.CopyFileFromDevice</code>. It reports every file that failed to copy. <span class="chip cmp">compiled</span></p></div></li>
+    <li><div class="step-body"><h3>Publish results <span class="loc">TSDServer.exe · 0x060002D5, 0x06000026</span></h3>
+      <p><code>UploadResults</code> writes <code>scannedbarcodes.txt</code> (7 fields, <code>{0}|…|{6}</code>) and <code>register.txt</code> (<code>{0},{1,11:D}, {2,7:D}</code>) into <code>LocalFilePath</code>. It copies each one to <code>RemoteFilePath</code> as <code>{name}_{yyyyMMddhhmmss}.txt</code>. If <code>EraseTerminalDB</code> is set, <code>DeleteOldDB</code> then deletes the scanned files on the terminal. <span class="chip cmp">compiled</span></p></div></li>
+  </ol>
+</section>
+
+<!-- ─────────────────────────────── 6 ─────────────────────────────── -->
+<section id="server">
+  <h2><span class="num">6</span>Desktop exchange server (TSDServer.exe)</h2>
+  <p>A Windows Forms tray application (<code>notifyIcon1</code>, <span class="ru">«Сервер ТСД»</span>) with a status log (<code>richTextBox1</code>). It has two modes, chosen in <code>Program.Main</code> <span class="loc">0x060002B5</span>. <span class="chip cmp">compiled</span></p>
+  <div class="grid2">
+    <div class="card"><h3>Interactive mode</h3><p>Opens <code>Form1</code> and registers an IPC remoting channel at <code>ipc://localhost:9090/RemoteObject.rem</code> that exposes <code>RemoteObject.Show</code>. This is most likely a single-instance mechanism: a second launch asks the running window to show itself. <span class="chip cmp">compiled</span> <span class="chip rd">reading</span></p></div>
+    <div class="card"><h3>Batch mode: <code>/c</code></h3><p>Configures log4net from <code>log4netconfig.xml</code>, runs <code>AutoLoadProduct</code> and then <code>AutoLoadDoc</code>, and waits up to <strong>900,000&nbsp;ms (15 min)</strong> for each. On timeout it logs <code>ERROR LOAD PRODUCT - TIMEOUT</code> / <code>ERROR LOAD DOCS - TIMEOUT</code>, emails <code>AddressToList</code> through <code>SendMailClass</code>, and returns an <code>ERRORLEVELS</code> exit code. It is built to run from a scheduler. In both modes, <code>DataLoaderClass_OnFinishImport</code> <span class="loc">0x060002C7</span> also emails the import log, subject <span class="ru">«Статус загрузки данных»</span> (data load status), after every import. <span class="chip cmp">compiled</span></p></div>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Component</th><th>Token</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td class="m">Form1</td><td class="m">0x02000003</td><td class="q">Main window: import buttons, upload/download, ActiveSync connect/disconnect/IP-change handlers, RAPI copy progress, tray icon. 29 methods; most complex is the upload handler (cyclomatic complexity 15).</td></tr>
+      <tr><td class="m">DataLoaderClass</td><td class="m">0x0200002F</td><td class="q">Import pipeline: threaded load, fixed and delimited parsers for products and docs, <code>ParseColumn</code> (complexity 12), catalogue date (<code>GetDBDate</code>, <code>NoDateException</code>), and result export (<code>UploadResults</code>). Raises <code>StartImport</code>/<code>ProcessImport</code>/<code>FinishImport</code>/<code>FailedImport</code> events.</td></tr>
+      <tr><td class="m">SendMailAttach.SendMailClass</td><td class="m">0x02000038</td><td class="q">SMTP sender using the default network credentials, <code>KOI8-R</code> body encoding and an <code>application/vnd.ms-excel</code> attachment. Also usable stand-alone: its usage text is <span class="mono">SendMailAttach Subject Body To Attachment_FileName</span>.</td></tr>
+      <tr><td class="m">Compressor</td><td class="m">0x02000037</td><td class="q">GZip plus <code>BinaryFormatter</code> helpers. No method in any binary calls them. <span class="chip grf">graph</span></td></tr>
+      <tr><td class="m">SettingsForm</td><td class="m">0x0200001C</td><td class="q">Import format editor: column widths, field delimiter, file type (fixed/delimited), date format and separator, decimal separator, database path, and the program path on the terminal.</td></tr>
+      <tr><td class="m">Properties.Settings</td><td class="m">0x02000039</td><td class="q">Persisted server settings. See <a href="#config">§14</a>.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ─────────────────────────────── 7 ─────────────────────────────── -->
+<section id="client">
+  <h2><span class="num">7</span>Handheld application (TSDClient.exe)</h2>
+  <p>A .NET Compact Framework 2.0 Windows Forms application driven entirely from the keypad. Menus are numbered and hot keys are announced on screen, for example <span class="ru">«Ентер – Да, FN+CLR – нет»</span> (Enter = yes, FN+CLR = no) and <span class="ru">«F4 - результат»</span> (F4 = results). <span class="chip cmp">compiled</span></p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Key</th><th>Main-menu item <span class="loc">MainForm · 0x0200001D</span></th><th>Opens</th></tr></thead>
+    <tbody>
+      <tr><td class="m">1</td><td><span class="ru">Контроль цен</span> <span class="tr">price check</span></td><td class="m">ViewProductForm</td></tr>
+      <tr><td class="m">2</td><td><span class="ru">Инвентаризация</span> <span class="tr">stock-taking</span></td><td class="m">InventarForm</td></tr>
+      <tr><td class="m">3</td><td><span class="ru">Прием короба внутрит.</span> <span class="tr">internal box receiving</span></td><td class="m">IncomeForm</td></tr>
+      <tr><td class="m">4</td><td><span class="ru">Прием машины</span> <span class="tr">truck receiving</span></td><td class="m">TtnForm</td></tr>
+      <tr><td class="m">5</td><td><span class="ru">Настройки</span> <span class="tr">settings</span></td><td class="m">SettingsForm</td></tr>
+      <tr><td class="m">6</td><td><span class="ru">Накладные</span> <span class="tr">delivery notes</span></td><td class="m">InventarForm (SimpleIncome mode)</td></tr>
+      <tr><td class="m">7</td><td><span class="ru">Возвраты</span> <span class="tr">returns</span></td><td class="m">ReturnForm</td></tr>
+      <tr><td class="m">0</td><td><span class="ru">Выход</span> <span class="tr">exit</span> (only when <code>EnableExit</code>)</td><td class="m">Application.Exit</td></tr>
+    </tbody>
+  </table></div>
+  <p>The labels are verbatim button captions <span class="chip cmp">compiled</span>. <code>MenuEvents</code> <span class="loc">0x0600013C</span> constructs exactly the forms in the right-hand column <span class="chip cmp">compiled</span>. The one-to-one pairing of key and form is inferred from caption order and each form's own title strings, for example TtnForm's title is <span class="ru">«Прием машин»</span> (truck receiving). <span class="chip rd">reading</span></p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Type</th><th>Token</th><th>Methods</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td class="m">ActionsClass</td><td class="m">0x02000022</td><td class="n">96</td><td class="q">Singleton core: action dispatch, document open/close, scan journal, lookups, sounds, vibration, label printing. Largest type in the app.</td></tr>
+      <tr><td class="m">ViewProductForm</td><td class="m">0x0200000E</td><td class="n">18</td><td class="q">Product screen used by several workflows. Holds the two most complex methods in the system (§16).</td></tr>
+      <tr><td class="m">BTPrintClass</td><td class="m">0x02000038</td><td class="n">46</td><td class="q">Bluetooth printer discovery, pairing, serial-port I/O, reconnect and print queue.</td></tr>
+      <tr><td class="m">ScanClass</td><td class="m">0x0200002F</td><td class="n">13</td><td class="q">Barcode reader lifecycle on a background thread; raises <code>Scanned</code>.</td></tr>
+      <tr><td class="m">InventarForm · IncomeForm · TtnForm · ReturnForm</td><td class="m">—</td><td class="n">10–12</td><td class="q">One form per workflow (§8). <code>TtnForm</code> hands each truck's boxes to <code>IncomeForm</code>. <code>ReturnBoxForm</code> is unreachable (§16).</td></tr>
+      <tr><td class="m">ViewBoxForm · ViewInventarForm · ViewTtnForm · ViewDocsForm · ViewLoadDateForm</td><td class="m">—</td><td class="n">6–8</td><td class="q">Result and status viewers (F4 screens, data information).</td></tr>
+      <tr><td class="m">NativeClass</td><td class="m">0x0200006A</td><td class="n">15</td><td class="q">P/Invoke: device ID via <code>KernelIoControl</code>, OEM info, memory division, <code>WCE_PlaySound</code>.</td></tr>
+      <tr><td class="m">FamilTsdDB.*</td><td class="m">0x02000054–5E</td><td class="n">~100</td><td class="q">Embedded file database engine (§12).</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ─────────────────────────────── 8 ─────────────────────────────── -->
+<section id="workflows">
+  <h2><span class="num">8</span>Business workflows</h2>
+  <p>Each workflow below is described from its form's handlers and the verbatim prompts and messages compiled into them. <span class="chip cmp">compiled</span></p>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>1 · Price check <span class="loc">ViewProductForm</span></h3>
+      <p>Scan a product or type its Navision code (<span class="ru">«Код навижн»</span>). The screen shows name, article, <code>OldPrice</code>/<code>NewPrice</code> (formatted <code>######.00</code>) and planned vs. actual quantity. <strong>F1 / F2</strong> print a label with template 1 or 2 (<span class="ru">«F1-Печать1»</span>, <span class="ru">«F2-Печать2»</span>). <strong>F4</strong> lists every document the product appears in (<code>ViewDocsForm</code>). A product that is also part of a return is flagged <span class="ru">«Этот товар участвует в возврате»</span> (this item is part of a return).</p>
+    </div>
+    <div class="card">
+      <h3>2 · Stock-taking <span class="loc">InventarForm · 0x060001DC</span></h3>
+      <p>Start by scanning <span class="ru">«ШК нового паспорта»</span> (the barcode of a new count sheet). The count is opened (<code>OpenInv</code>) or resumed (<span class="ru">«Продолжить просчет?»</span>, continue the count?). Items are then scanned into it, and <strong>F3</strong> closes it (<span class="ru">«F3-Инв.Закрыть»</span>). A count that is already closed is refused (<span class="ru">«Просчет … уже завершен!»</span>). A wrong location barcode gives <span class="ru">«Штрихкод {0} неверный адрес!»</span> (barcode is a wrong address). The <code>InventarMode</code> enum distinguishes <code>UseReturns</code> / <code>DontUseReturns</code>.</p>
+    </div>
+    <div class="card">
+      <h3>3 · Internal box receiving <span class="loc">IncomeForm · 0x02000070</span></h3>
+      <p>Scan a box barcode. The terminal finds the delivery note it belongs to and shows <span class="ru">«По накладной №{0} {1} коробов»</span> (note №{0}: {1} boxes). It rejects foreign boxes (<span class="ru">«Это чужой короб!»</span>), boxes already accepted, and barcodes that are not box barcodes. <strong>F1</strong> accepts a box in full (<span class="ru">«F1-принять полностью»</span>). Running totals show articles and pieces planned vs. accepted until <span class="ru">«КОРОБ ПРИНЯТ ПОЛНОСТЬЮ»</span> (box fully accepted).</p>
+    </div>
+    <div class="card">
+      <h3>4 · Truck receiving by waybill (TTN) <span class="loc">TtnForm · 0x02000031</span></h3>
+      <p>Scan the TTN (consignment note) barcode. A TTN for another store is rejected (<span class="ru">«ТТН не этого магазина!»</span>), as is a closed one (<span class="ru">«ТТН уже закрыто!»</span>). A TTN moves through <span class="ru">ТТН ПРИНЯТЬ → ТТН В ПРИЕМКЕ → ТТН ПРИНЯТО</span> (to accept → being received → accepted), per <code>CheckStatus</code>. Its boxes are then received box by box (<code>CarScanMode</code>: <code>CarsScan</code> / <code>BoxScan</code>). <code>ViewTtnForm</code> shows the truck as a tree of boxes with accepted/total counts.</p>
+    </div>
+    <div class="card">
+      <h3>6 · Delivery notes <span class="loc">InventarForm, SimpleIncome mode</span></h3>
+      <p>The same form as stock-taking, in <code>InventarFormMode.SimpleIncome</code>. Enter or scan a delivery-note number (<span class="ru">«Введите № накладной»</span>). Start or continue it, scan items against the plan, then close it (<span class="ru">«Вы хотите закрыть накладную?»</span>, close the note?).</p>
+    </div>
+    <div class="card">
+      <h3>7 · Returns <span class="loc">ReturnForm</span></h3>
+      <p>Scan a product. The terminal lists every open return that includes it (<code>FindAllReturnsByProduct</code>), or shows <span class="ru">«Не найдено возвратов»</span> (no returns found). Returned goods are packed into return boxes (<code>CreateNewReturnBox</code>, <code>CheckOpenedReturnBox</code>, <code>CloseReturnBoxAction</code>). A box that is already closed is refused: <span class="ru">«Короб {0} уже закрыт»</span> (box {0} already closed). A dedicated <code>ReturnBoxForm</code> exists in the binary, but nothing opens it (§16).</p>
+    </div>
+    <div class="card">
+      <h3>5 · Settings <span class="loc">SettingsForm · 0x0600000D</span></h3>
+      <p>1: find and pair the Bluetooth printer (<code>SearchPrinterForm</code>). 2: clear scanned data, with a two-step confirmation (<span class="ru">«После очистки все ранее отсканированные данные будут недоступны!»</span>, after clearing, all previously scanned data will be unavailable). This deletes <code>scannedbarcodes.txt</code> and <code>register.txt</code>. 3: data information (<code>ViewLoadDateForm</code>): last load date and a database health check (<code>TestDB</code>, <code>CheckDbFile</code>).</p>
+    </div>
+    <div class="card">
+      <h3>Quantity correction</h3>
+      <p>Two dialogs, <code>ChangeQtyForm</code> and <code>MultiplyForm</code>, gated by <code>EnableChgQty</code> (read by the result viewers) and <code>EnableChgMlt</code> (read by the product screen). They validate input (<span class="ru">«Кол-во вне диапазона»</span>, quantity out of range; <span class="ru">«Неверный формат»</span>, invalid format). In the product screen, undoing the last scan asks for confirmation (<span class="ru">«Уменьшить по коду {0} … с количества {0} до количества {1}?»</span>, reduce code {0} from quantity {0} to {1}?) and refuses to go below zero (<span class="ru">«Дальше уменьшить нельзя!»</span>, cannot reduce further).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 9 ─────────────────────────────── -->
+<section id="actions">
+  <h2><span class="num">9</span>The action engine</h2>
+  <p>A scan's outcome is not hard-coded per screen. <code>ActionsClass.InvokeAction(ActionCode, ProductsTblRow, DocsTblRow)</code> <span class="loc">0x0600018D</span> dispatches through an <code>ActOnProduct</code> delegate to one handler per action code. The document row carries per-document behaviour in <code>LabelCode</code>, <code>MusicCode</code>, <code>VibroCode</code> and <code>Priority</code>. So the <em>back office</em>, by preparing the document file, decides what the terminal does when an item is scanned. <span class="chip cmp">compiled</span> <span class="chip rd">reading</span></p>
+  <div class="tablewrap"><table>
+    <thead><tr><th><code>TSDUtils.ActionCode</code> members <span class="chip grf">graph</span></th><th>Display labels (<code>ActionCodeDescription</code>) <span class="chip cmp">compiled</span></th></tr></thead>
+    <tbody><tr>
+      <td class="q mono" style="font-size:0.78rem; line-height:1.8">NoAction · Returns · Reprice · Remove · InventoryGlobal · QuickHelp · InventoryLocal · IncomeBox · CloseInventar · Cars · SimpleIncome · BoxWProducts · CarsBoxes · CloseIncome · BoxIncomes · BoxReturns · ReturnBoxWProducts · CloseBoxReturns · ReturnsTTN · ReturnInInventory · StrangeBox · AlreadyAccepted · NotFound · DocNotFound</td>
+      <td class="q ru" style="line-height:1.8">НЕТ ДЕЙСТВИЯ · ВОЗВРАТ · ПЕРЕОЦЕНКА · ПЕРЕБРОСКА · Инвент-ция Глобальная · СКОРАЯ ПОМОЩЬ · Инвент-ция Точечная · Прием коробов · Закрытие глобальной инвентаризации · Поставки (ТТН) · Прием товаров · Накладные и короба · Машины и короба · Закрытие накладной · Накладные · Короба и товары возвратов · Накладные и короба возвратов · Закрытие короба возвратов · Накладные возвратов · Товар не найден · Документ не найден</td>
+    </tr></tbody>
+  </table></div>
+  <p>Enum members come from <code>ekos_neighborhood</code> on the <code>ActionCode</code> type. Labels are the string constants of <code>ActionCodeDescription</code> <span class="loc">0x02000007</span>, in declaration order. They pair up closely: Returns/ВОЗВРАТ, Reprice/ПЕРЕОЦЕНКА (repricing), Remove/ПЕРЕБРОСКА (transfer), QuickHelp/СКОРАЯ ПОМОЩЬ (quick help). EKOS does not read enum constant values, so the exact numeric mapping is not asserted.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Handler</th><th>Token</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td class="m">RepriceActionProc</td><td class="m">0x0600017B</td><td class="q">Finds the scan row. Plays the document's sound and vibration, prints a label using the document's <code>LabelCode</code> template (<code>ActionCodeDescription.GetShablon</code> → <code>PrintLabel</code>), and increments <code>FactQuantity</code>.</td></tr>
+      <tr><td class="m">SimpleIncomeActionProc · InventoryGlobalActionProc · InventoryLocalActionProc</td><td class="m">0x0600017F · 0x0600017E</td><td class="q">Adds or increments the scan row for (barcode, DocType, DocId) with the document's plan quantity and priority, then signals completion.</td></tr>
+      <tr><td class="m">BoxWProductsActionProc · AcceptFullBoxWProductsActionProc · IncomeBoxAction · IncomeCarBoxAction</td><td class="m">0x06000181 · 0x06000182</td><td class="q">Box and truck receiving: per-item or whole-box acceptance.</td></tr>
+      <tr><td class="m">ReturnActionProc · ReturnBoxWProductsActionProc · CloseReturnBoxAction</td><td class="m">0x06000180 · 0x060001B1</td><td class="q">Returns and return boxes.</td></tr>
+      <tr><td class="m">RemoveActionProc · NoActionProc</td><td class="m">—</td><td class="q">Transfer; no action.</td></tr>
+      <tr><td class="m">NotFoundActionProc · DocNotFoundActionProc</td><td class="m">0x06000184</td><td class="q">Unknown product or document: warning sound and vibration only.</td></tr>
+      <tr><td class="m">UndoLastScannedPosition</td><td class="m">0x0600019C</td><td class="q">Decrements <code>FactQuantity</code> of the last scan.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid2">
+    <div class="card"><h3>Sound and vibration <span class="loc">0x0600016F · 0x06000172</span></h3><p><code>PlaySound(code)</code> reads <code>SOUND_{code}.def</code> next to the executable, parses each line into a <code>SoundDef</code> (type, frequency, time) and drives <code>Calib.SystemLibNet.Api.SysPlayBuzzer</code>. Vibration does the same with <code>VIBRO_{code}.def</code>. The folder ships codes 10, 12 and 250 for both. Their observed contents document the <code>SysPlayBuzzer</code>/<code>SysPlayVibrator</code> parameters. <span class="chip cmp">compiled</span> <span class="chip obs">observed</span></p></div>
+    <div class="card"><h3>Label templates <span class="loc">0x06000174 · 0x06000178</span></h3><p><code>PrintLabel</code> reads <code>LABEL_{n}.DEF</code>, replaces placeholders with <code>ReplaceAttr</code>, and sends the result to the printer. The placeholders are <code>&lt;GOODS_ATTRIBUTE_x&gt;</code>, <code>&lt;DOCS_ATTRIBUTE_x&gt;</code>, <code>&lt;SCAN_ATTRIBUTE_x&gt;</code> and <code>&lt;SYSTEMDATE&gt;</code>; ReplaceAttr's numeric constants 60 and 62 are the character codes of <code>&lt;</code> and <code>&gt;</code>. Values are formatted by type (<code>dd.MM.yyyy</code>, <code>######.00</code>) and encoded with <code>CustomEncodingClass</code>, a Cyrillic code page embedded as a string table. On a busy printer it retries, up to <code>WaitPrintTimeDefault</code>. <strong>No <code>LABEL_*.DEF</code> file is present in this release folder.</strong> <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 10 ─────────────────────────────── -->
+<section id="scan">
+  <h2><span class="num">10</span>Anatomy of one scan</h2>
+  <p>The path from trigger press to journal line, following resolved <code>Calls</code> edges. <span class="chip cmp">compiled</span></p>
+  <ol class="steps">
+    <li><div class="step-body"><h3>Reader thread waits <span class="loc">ScanClass.InitScan 0x060001FF · start 0x06000200</span></h3><p><code>InitScan</code> configures the reader through <code>OBReadLibNet</code>: symbologies, scan key, buffer type, notification, buzzer and vibrator. It then calls <code>OBROpen</code> and starts a thread. The thread blocks on <code>SysWaitForEvent("OBRScanningEvent", 2000)</code>, reads the text, and raises <code>Scanned</code>. Supported symbologies include Code39, NW-7, UPC/EAN, ITF, Code93, Code128, MSI, IATA and EAN-13/GTIN.</p></div></li>
+    <li><div class="step-body"><h3>Screen receives it <span class="loc">ViewProductForm.Scanned 0x06000049</span></h3><p>The active form's handler (<code>OnScanned</code> / <code>Scanned</code>) looks up the product (<code>SearchBarcode</code>, <code>GetProductRowByNavCode</code>) and the document (<code>GetDataByDocIdAndType</code>, <code>FindByDocIdAndDocType</code>).</p></div></li>
+    <li><div class="step-body"><h3>Rules are applied <span class="loc">ViewProductForm.DoAction 0x0600004B</span></h3><p><code>DoAction</code> (complexity 38, 33 branches) decides between the outcomes whose messages it carries: <span class="ru">«Товар уже принят {0} из {1}»</span> (item already received: {0} of {1}), <span class="ru">«Принять еще {0} шт»</span> (receive {0} more), <span class="ru">«Товар не входит в короб!»</span> (item not in this box), <span class="ru">«БРАК»</span> (defective), <span class="ru">«Режим инвентаризации»</span> (stock-taking mode), <span class="ru">«Режим накладных»</span> (delivery-note mode). It then calls <code>ActionsClass.InvokeAction</code>.</p></div></li>
+    <li><div class="step-body"><h3>Scan is recorded <span class="loc">ActionsClass.AddScannedRow 0x060001A4</span></h3><p><code>AddScannedRow</code> finds or creates the row keyed by (Barcode, DocType, DocId) and calls <code>AcceptChanges</code>. The table's change events fire <code>WriteDbTxt</code> <span class="loc">0x0600016A</span>, which appends an 8-field line (<code>{0}|…|{7}</code>, UTF-8) to the journal and a line to <code>register.txt</code>. Opening and closing documents, boxes and trucks write their own marker lines directly (<code>OpenInv</code>, <code>CloseInv</code>, <code>CloseDoc</code>, <code>CloseCarAction</code>, <code>CreateNewReturnBox</code>, <code>CloseReturnBoxAction</code>, <code>IncomeBoxAction</code>).</p></div></li>
+    <li><div class="step-body"><h3>Feedback <span class="loc">Action_OnActionCompleted 0x06000053</span></h3><p>The <code>ActionCompleted</code> event updates planned vs. actual counts on screen. It plays the document's sound, and when a box is complete it shows <span class="ru">«Короб по накладной … принят полностью!»</span> (box on note … fully received).</p></div></li>
+  </ol>
+  <p><strong>Blast radius:</strong> <code>ekos_impact</code> on <code>AddScannedRow</code>, following <code>Calls</code> in reverse, finds <strong>29 methods</strong> that write scan records through it: 14 direct callers, and the deepest 4 hops away (the query bound was 5, so this is the complete set). Among them are <code>DoAction</code>, <code>navCodeTB_KeyDown</code>, <code>OpenInv</code>/<code>CloseInv</code>, every <code>*ActionProc</code>, <code>CheckStatus</code>, <code>OnIncomeScanned</code> and <code>CreateNewReturnBox</code>. Any change to the scan-record key or format has to be checked against all of them. <span class="chip grf">graph</span> (<a href="examples/tsd/impact-AddScannedRow.json">raw result</a>)</p>
+</section>
+
+<!-- ─────────────────────────────── 11 ─────────────────────────────── -->
+<section id="data">
+  <h2><span class="num">11</span>Data model</h2>
+  <p>Typed ADO.NET DataSets, recovered from their generated row accessors (<code>get_X</code>/<code>IsXNull</code>) and schema strings. <span class="chip cmp">compiled</span></p>
+  <div class="grid2">
+    <div class="card"><h3>ProductsTbl</h3><div class="where">ProductsDataSet · client + server</div><p>Barcode · NavCode · Article · ProductName · Country · Structure · OldPrice · NewPrice · MarketPrice · Message · Message2 · AcceptDefect</p><p class="tr">MarketPrice, Message2 and AcceptDefect exist only in the client build; the server writes the other 9 columns.</p></div>
+    <div class="card"><h3>DocsTbl</h3><div class="where">ProductsDataSet · client + server</div><p>DocId · DocType · NavCode · DocumentDate · Quantity · Priority · LabelCode · MusicCode · VibroCode · Text1 · Text2 · Text3</p><p class="tr">One row per (document, product): planned quantity plus the per-document print, sound and vibration behaviour.</p></div>
+    <div class="card"><h3>ScannedBarcodes</h3><div class="where">ScannedProductsDataSet · client + server</div><p>Barcode · DocId · DocType · PlanQuanity · FactQuantity · ScannedDate · TerminalId · Priority</p><p class="tr">The result of the day's work. Primary lookup is (Barcode, DocType, DocId). "PlanQuanity" is misspelled in the schema itself.</p></div>
+    <div class="card"><h3>TypedSettings / UntypedSettings</h3><div class="where">SettingsDataSet · client</div><p>19 typed columns (§14) plus a free-form Name/Value table.</p></div>
+    <div class="card"><h3>ProductsBinTbl · DocsBinTbl · DocsBinTbl1</h3><div class="where">ProductsDataSet · server only</div><p><code>ProductsBinTbl</code>'s column set is combined with <code>FieldsLength</code> in <code>DataLoaderClass.SetFormats</code> <span class="loc">0x060002C2</span> to define the fixed-width import layout. <code>DocsBinTbl</code>/<code>DocsBinTbl1</code> (adding Shablon, RePriceDate and ReturnDate) have no reader in the call graph.</p></div>
+    <div class="card"><h3>DocumentClass</h3><div class="where">TSDClient · 0x02000065</div><p>View model rendered as <span class="ru">«Документ {0} №{1} от {2} … План:{6}, Факт: {7}»</span> (document {0} №{1} dated {2} … plan: {6}, actual: {7}).</p></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 12 ─────────────────────────────── -->
+<section id="storage">
+  <h2><span class="num">12</span>Storage engine and file formats</h2>
+  <p><code>FamilTsdDB</code> is an in-house embedded database compiled into both executables. It stores each DataTable as a set of files, and the typed <code>TableAdapter</code>s (<code>BaseTableAdapter</code>: <code>Open</code>/<code>Fill</code>/<code>Update</code>/<code>Close</code>) sit on top of it. <span class="chip cmp">compiled</span></p>
+  <div class="fields">
+    <div class="field"><span class="name">{dir}\{table}.col</span><span class="note">Column definitions, one per line (<code>{0}|{1}|{2}|{3}|{4}|{5}</code>), taken from the DataTable's name, type, max length, nullability and uniqueness (<code>DataTable..ctor</code> <span class="loc">0x06000419</span>).</span></div>
+    <div class="field"><span class="name">{dir}\{table}.db</span><span class="note">Rows as binary records (<code>BinaryWriter</code>). They are read back by seeking and <code>BitConverter.ToUInt16</code>-prefixed reads (<code>Fill</code> <span class="loc">0x06000426</span>, <code>Write</code> <span class="loc">0x0600041C</span>).</span></div>
+    <div class="field"><span class="name">{dir}\{table}_{col}.idx / .idf</span><span class="note">Primary and secondary indexes with hashed <code>IndexItem</code>s. Lookups: <code>FindByPk</code>, <code>FindByIndex</code>, <code>FindByIndexes</code>, <code>FindAllByPartIndexes</code> (prefix match), plus direct-scan and reverse-scan fallbacks. The most complex method in the engine is the index iterator <code>FindIndexes</code> (complexity 17).</span></div>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Text file</th><th>Written by</th><th>Format</th><th>Example (observed)</th></tr></thead>
+    <tbody>
+      <tr><td class="m">scannedbarcodes.txt (terminal journal)</td><td class="m">TSDClient ActionsClass</td><td class="m">8 fields, <code>|</code>, UTF-8</td><td class="m" style="white-space:normal">6600000000001|6600000000001|8|0|02.01.2003|0|0|0</td></tr>
+      <tr><td class="m">scannedbarcodes.txt (desktop export)</td><td class="m">TSDServer UploadResults</td><td class="m">7 fields, <code>|</code></td><td class="m" style="white-space:normal">2900655000005|02: 15.06.11|2|1|29.06.2011|1|0</td></tr>
+      <tr><td class="m">register.txt</td><td class="m">both</td><td class="m"><code>{0},{1,11:D}, {2,7:D}</code></td><td class="m" style="white-space:normal">2896459000009,          1,       1</td></tr>
+    </tbody>
+  </table></div>
+  <p>Field order is read from the getter call order. <code>UploadResults</code> exports Barcode, DocId, DocType, FactQuantity, ScannedDate, TerminalId, Priority. The terminal's <code>WriteDbTxt</code> journals Barcode, DocId, DocType, FactQuantity, ScannedDate, TerminalId, Priority, PlanQuanity. Both observed samples fit. <span class="chip cmp">compiled</span> <span class="chip obs">observed</span> <span class="chip rd">reading</span> The journal's first line uses the document's own barcode as both Barcode and DocId, which is the open-document marker <code>OpenInv</code> writes. Its <code>660…</code> prefix matches the <code>"660"</code> constant in <code>InventarForm</code>, so stock-taking count sheets most likely use a 660 barcode range. <span class="chip rd">reading</span> <code>OpenScanned</code> <span class="loc">0x06000163</span> rebuilds the in-memory table from the journal whenever a workflow is opened from the menu or an open document or box is looked up; its numeric constants 10 and 124 are <code>'\n'</code> and <code>'|'</code>. <span class="chip cmp">compiled</span></p>
+</section>
+
+<!-- ─────────────────────────────── 13 ─────────────────────────────── -->
+<section id="devices">
+  <h2><span class="num">13</span>Device integration</h2>
+  <div class="grid2">
+    <div class="card"><h3>Barcode reader</h3><div class="where">ScanClass → Calib.OBReadLibNet.Api</div><p><code>OBRLoadConfigFile</code>, <code>OBRSetDefaultSymbology</code>, <code>OBRSetScanningKey</code>, <code>OBRSetScanningNotification</code>, <code>OBROpen</code>, <code>OBRClearBuff</code>, <code>OBRSaveConfigFile</code>. Scanning can be paused and resumed around dialogs (<code>PauseScan</code>/<code>ResumeScan</code>). Errors reported: <span class="mono">"Failed to connect to the scanner."</span> and <span class="mono">"Trigger keys are being used…"</span>. <span class="chip cmp">compiled</span></p></div>
+    <div class="card"><h3>Bluetooth label printer</h3><div class="where">BTPrintClass → Calib.BluetoothLibNet.Api + serial port</div><p><code>BTInitialize</code> → <code>BTInquiry</code> (device search) → <code>BTRegisterDeviceInfo</code> → <code>BTSetDefaultDevice</code> → <code>BTConnectSerial</code> (<code>BTPORT_SERIAL</code>). It then opens <code>COM{n}:</code> from <code>BTComPort</code> and writes through <code>SerialPort</code>. The connect method's numeric constant 19200 is most likely the baud rate <span class="chip rd">reading</span>. A string in the same method reads <span class="mono">"Extech BT printer found!"</span>. Every step is logged to <code>BTLog.txt</code>, and a lost connection opens <code>BTConnectionErrorForm</code> with reconnect. <span class="chip cmp">compiled</span></p></div>
+    <div class="card"><h3>Buzzer and vibrator</h3><div class="where">ActionsClass → Calib.SystemLibNet.Api</div><p><code>SysPlayBuzzer</code> and the vibrator API, parameterised by the <code>.def</code> files. <code>SoundCodes</code> members: B_CLICK, B_TAP, B_WARNING, B_ALARM, B_SCANEND, B_WIREREAD, B_CARDREAD, B_USERDEF. <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
+    <div class="card"><h3>Device identity</h3><div class="where">NativeClass.GetDeviceID · 0x06000471</div><p><code>GetDeviceID</code> can read the hardware ID with <code>KernelIoControl</code> (formatted <code>{0:X8}-{1:X4}-{2:X4}-{3:X4}-…</code>), but <strong>nothing calls it</strong>. The <code>TerminalID</code> stamped into scan rows and exported results comes from <code>Settings.xml</code>, so two terminals with the same settings file report the same ID. <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 14 ─────────────────────────────── -->
+<section id="config">
+  <h2><span class="num">14</span>Configuration reference</h2>
+  <h3>Handheld: <code>Settings.xml</code> (<code>SettingsDataSet.TypedSettings</code>)</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Setting</th><th>Meaning (from where it is used)</th><th>Observed value</th></tr></thead>
+    <tbody>
+      <tr><td class="m">TerminalID</td><td class="q">Stamped on scan rows and exported results</td><td class="m">—</td></tr>
+      <tr><td class="m">DatabaseStoragePath</td><td class="q">FamilTsdDB directory used by <code>TestDB</code>/<code>CheckDbFile</code></td><td class="m">\Storage Card\tsdfamilia</td></tr>
+      <tr><td class="m">BTPrinterAddress · BTComPort</td><td class="q">Paired printer MAC; virtual COM port for the printer</td><td class="m">00:03:7a:32:4c:55 · 9</td></tr>
+      <tr><td class="m">WaitPrintTimeDefault</td><td class="q">Print retry wait in <code>PrintLabel</code></td><td class="m">—</td></tr>
+      <tr><td class="m">DefaultRepriceShablon · BlueButtonShablon</td><td class="q">Label templates used by the product screen's print keys (both read in <code>navCodeTB_KeyDown</code>)</td><td class="m">—</td></tr>
+      <tr><td class="m">StorageMemorySize</td><td class="q">Storage/program memory split, applied at start-up: <code>Program.Main</code> → <code>NativeClass.SystemStorageMemory</code> → <code>SetSystemMemoryDivision</code></td><td class="m">15000</td></tr>
+      <tr><td class="m">EnableExit · EnableWorkWOPrinter</td><td class="q">Allow exit from the menu; allow the product screen to work without a printer (read in <code>ViewProductForm_Load</code>)</td><td class="m">—</td></tr>
+      <tr><td class="m">EnableChgQty · EnableChgMlt</td><td class="q">Allow quantity edit (read by the result viewers) / multiply (read by the product screen)</td><td class="m">—</td></tr>
+      <tr><td class="m">BaseDate</td><td class="q">Date baseline, read by the table adapters and <code>ActionsClass</code></td><td class="m">2000-01-01</td></tr>
+      <tr><td class="m" style="color:var(--bad)">DatabaseFileName · ProductsConnectionString · VibarationOn · ScanSoundNotifyOn · ComBufferSize · CurrentDate</td><td class="q"><strong>Never read.</strong> Their getters have no incoming <code>Calls</code> edge from any method in any binary. They are written as defaults and persisted, but nothing acts on them. This includes the SQL&nbsp;CE database name and connection string. <span class="chip grf">graph</span></td><td class="m">products.sdf · Data Source=|DataDirectory|\Products.sdf · false · false · — · —</td></tr>
+    </tbody>
+  </table></div>
+  <p>Setting names and defaults are compiled into <code>TypedSettingsDataTable</code> and <code>Program.Main</code> <span class="chip cmp">compiled</span>. "Read by" is the set of direct callers of each getter, from <code>ekos_impact</code> over resolved <code>Calls</code> edges <span class="chip grf">graph</span>. Values come from the observed <code>Settings.xml</code> excerpt <span class="chip obs">observed</span>. "—" means the excerpt EKOS stored was truncated before that element.</p>
+  <h3>Desktop: <code>TSDServer.Properties.Settings</code></h3>
+  <p class="mono" style="font-size:0.8rem; line-height:1.9">LocalFilePath · RemoteFilePath · TSDDBPAth · EraseTerminalDB · ImportProductsEnabled · ImportDocsEnabled · ImportFileTypeIsFixed · FieldsLength · FieldDelimeter · DateSeparator · ShortDatePattern · NumberDecimalSeparator · BaseDate · BreakOnError · SettingsEnabled · SmtpClient · AddressFrom · UserNameFrom · AddressToList</p>
+</section>
+
+<!-- ─────────────────────────────── 15 ─────────────────────────────── -->
+<section id="files">
+  <h2><span class="num">15</span>Release-folder file reference</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>File</th><th>What it is</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td class="m">TSDClient.exe · TSDServer.exe</td><td class="q">The two applications</td><td><span class="chip cmp">compiled</span></td></tr>
+      <tr><td class="m">TSDClient - копия.exe · TSDClient.ex_</td><td class="q">Copies of the handheld app ("копия" = copy). The <code>.ex_</code> is recorded as a file only; the binary observer does not pick it up.</td><td><span class="chip cmp">compiled</span></td></tr>
+      <tr><td class="m">TSDClient.pdb</td><td class="q">Debug symbols (650 KB). EKOS does not read PDBs.</td><td><span class="chip obs">observed</span></td></tr>
+      <tr><td class="m">*.dll (11)</td><td class="q">See §3. <code>MCSSLib.dll</code> is native ARM code.</td><td><span class="chip cmp">compiled</span></td></tr>
+      <tr><td class="m">Settings.xml · _Settings.xml · Settings - копия.xml</td><td class="q">Terminal settings plus two variants</td><td><span class="chip obs">observed</span></td></tr>
+      <tr><td class="m">SOUND_10/12/250.def · VIBRO_10/12/250.def</td><td class="q">Buzzer and vibrator patterns per <code>MusicCode</code>/<code>VibroCode</code></td><td><span class="chip obs">observed</span> <span class="chip cmp">compiled</span></td></tr>
+      <tr><td class="m">scannedbarcodes.txt · scannedbarcodes.txt1 · register.txt</td><td class="q">Sample results: a desktop-format export (2011 dates) and a terminal journal (2003 dates)</td><td><span class="chip obs">observed</span></td></tr>
+      <tr><td class="m">BTLog.txt</td><td class="q">Bluetooth printer log. Its 1/3/2003 timestamps suggest the device clock was unset.</td><td><span class="chip obs">observed</span></td></tr>
+      <tr><td class="m">tsdfamilia.zip</td><td class="q">877-byte archive; contents not observed</td><td><span class="chip obs">observed</span></td></tr>
+      <tr><td class="m">enkaTCdaily.xml</td><td class="q">An SQL Server Reporting Services export (<code>reportserver</code>, "JANUS Head Office"). Unrelated to TSD and not referenced by any binary.</td><td><span class="chip obs">observed</span> <span class="chip grf">graph</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ─────────────────────────────── 16 ─────────────────────────────── -->
+<section id="risks">
+  <h2><span class="num">16</span>Hotspots, risks and anomalies</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Method</th><th>Binary · token</th><th>Complexity</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td class="m">ViewProductForm.navCodeTB_KeyDown</td><td class="m">client · 0x06000051</td><td class="n">42</td><td class="q">Every key on the product screen: print, close count, close note, undo, add quantity</td></tr>
+      <tr><td class="m">ViewProductForm.DoAction</td><td class="m">client · 0x0600004B</td><td class="n">38</td><td class="q">The per-scan business rules (§10)</td></tr>
+      <tr><td class="m">ViewBoxForm.RefreshData</td><td class="m">client · 0x06000443</td><td class="n">24</td><td class="q">Box result listing</td></tr>
+      <tr><td class="m">IncomeForm.textBox1_KeyDown</td><td class="m">client · 0x06000492</td><td class="n">22</td><td class="q">Box receiving keys. An identical copy sits in the unreachable <code>ReturnBoxForm</code> (0x06000156).</td></tr>
+      <tr><td class="m">BTPrintClass.TestPrint</td><td class="m">client</td><td class="n">21</td><td class="q">Printer diagnostics</td></tr>
+      <tr><td class="m">ActionsClass.ReplaceAttr</td><td class="m">client · 0x06000178</td><td class="n">18</td><td class="q">Label template substitution</td></tr>
+      <tr><td class="m">DataLoaderClass.BeginImport</td><td class="m">server · 0x060002CA</td><td class="n">15</td><td class="q">All inbound data passes through here</td></tr>
+    </tbody>
+  </table></div>
+  <div class="grid2">
+    <div class="badbox"><h3>Duplicated binaries</h3><p>Three builds of the handheld app sit side by side (<code>.exe</code>, <code>- копия.exe</code>, <code>.ex_</code>) with different type counts, plus three settings files. Which one is deployed cannot be told from the folder. <span class="chip cmp">compiled</span></p></div>
+    <div class="badbox"><h3>Missing label templates</h3><p><code>PrintLabel</code> requires <code>LABEL_{n}.DEF</code>, and no such file is in this folder. Printing depends on files deployed some other way. <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
+    <div class="warnbox"><h3>Dead weight shipped</h3><p><code>ImagerLibNet</code>, <code>MoFlinkLibNet</code> and <code>ControlsLib</code> have no dependents. <code>ControlsLib</code> itself references <code>NetworkLib</code> and <code>TsdCommandsLib</code>, which are not in the folder. Its <code>NewForm</code> uses a <code>NetMan</code> command/reply protocol, a trace of a different, networked client. <span class="chip grf">graph</span> <span class="chip cmp">compiled</span></p></div>
+    <div class="warnbox"><h3>God class</h3><p><code>ActionsClass</code> holds 96 methods: dispatch, persistence, lookups, device feedback and printing. It is the one type that nearly every workflow calls, and 29 methods reach its scan-record writer (§10). <span class="chip cmp">compiled</span> <span class="chip grf">graph</span></p></div>
+    <div class="warnbox"><h3>Hard-coded defaults</h3><p>A specific printer MAC (<code>00:03:7a:32:4c:55</code>), COM port 9 and <code>\Storage Card</code> paths are compiled into <code>Program.Main</code> as fall-backs. A terminal without <code>Settings.xml</code> silently targets that one printer. <span class="chip cmp">compiled</span></p></div>
+    <div class="warnbox"><h3>Dead settings</h3><p>Six of the terminal's 19 typed settings are never read. They include both feedback switches (<code>VibarationOn</code>, <code>ScanSoundNotifyOn</code>) and the SQL&nbsp;CE <code>DatabaseFileName</code>/<code>ProductsConnectionString</code>. Turning feedback off in <code>Settings.xml</code> changes nothing: sound and vibration follow the document's <code>MusicCode</code>/<code>VibroCode</code> instead. <span class="chip grf">graph</span> <span class="chip rd">reading</span></p></div>
+    <div class="badbox"><h3>Unreachable code</h3><p><code>ReturnBoxForm</code> (a near-copy of <code>IncomeForm</code>, 11 methods) is never constructed, so the screen cannot be opened. Also never called: <code>NativeClass.GetDeviceID</code>, the server's <code>Compressor</code>, and the server's <code>DocsBinTbl</code>/<code>DocsBinTbl1</code> tables. <span class="chip grf">graph</span></p></div>
+    <div class="warnbox"><h3>Plain-text results</h3><p>Scan results travel and are archived as unencrypted text files, and are emailed with default network credentials. Nothing sensitive appears in the samples, but there is no integrity check on the exchange. <span class="chip cmp">compiled</span> <span class="chip rd">reading</span></p></div>
+  </div>
+  <p>EKOS's own <code>Risk</code> objects are all <em>concentration risks</em> on framework assemblies: <code>mscorlib</code> (12 dependents), <code>System.Windows.Forms</code> (8), <code>System</code>, <code>System.Drawing</code> (6), <code>System.Data</code> (5), <code>System.Xml</code> (4). For a .NET Compact Framework 2.0 application, they mostly say that the platform itself is the migration risk. <span class="chip grf">graph</span></p>
+</section>
+
+<!-- ─────────────────────────────── 17 ─────────────────────────────── -->
+<section id="limits">
+  <div class="warnbox">
+    <h2><span class="num">17</span>What EKOS could not determine</h2>
+    <ul class="plain">
+      <li><strong>Exact conditions.</strong> EKOS reads binaries at <em>structural</em> fidelity: names, signatures, calls, constants and branch counts, but no reconstructed statements. It knows <code>DoAction</code> has 33 branches and which messages it can show, but not the precise predicate that selects each message.</li>
+      <li><strong>Enum values.</strong> Enum members are recovered but not their numeric constants, so the <code>ActionCode</code> numbers behind document <code>DocType</code>s (such as 2, 5 and 8 in the samples) are not mapped.</li>
+      <li><strong>Import file layouts.</strong> Column order and widths are runtime settings (<code>FieldsLength</code>, <code>FieldDelimeter</code>) that are not in the folder.</li>
+      <li><strong>Long call lists.</strong> A method's stored <code>call_targets</code> property keeps at most 32 distinct targets (<code>Program.Main</code> has more), with no truncation marker. Every "never called" and "read by" statement here therefore comes from resolved <code>Calls</code> edges through <code>ekos_impact</code>, which are complete for code inside these binaries.</li>
+      <li><strong>Three files.</strong> <code>MCSSLib.dll</code> (native ARM), <code>TSDClient.pdb</code> and <code>tsdfamilia.zip</code> are recorded but not read.</li>
+      <li><strong>No LLM stage was run.</strong> EKOS's opt-in <code>[binary-reconstruction]</code> stage, which proposes business rules scored for confidence, was not used; only local models were available. Every <span class="chip rd">reading</span> in this document is a human-auditable join of compiled facts, not model output.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ─────────────────────────────── 18 ─────────────────────────────── -->
+<section id="reproduce">
+  <h2><span class="num">18</span>Reproduce and query this analysis</h2>
+  <ol class="steps">
+    <li><div class="step-body"><h3>Compile the folder</h3>
+<pre>git clone --filter=blob:none --sparse https://github.com/alexeyban/tsd.git
+cd tsd &amp;&amp; git sparse-checkout set SmartDeviceProject3/SmartDeviceProject2/SmartDeviceProject2/bin/Release
+ekos init
+ekos build &amp;&amp; ekos recover &amp;&amp; ekos resolve --force &amp;&amp; ekos compile &amp;&amp; ekos commit
+<span class="c"># recover: 12 binaries, 888 types, 8327 methods, 7134 fields, 174 I/O boundaries
+#          10956 call edges resolved
+# resolve --force: one known false conflict (the "System" assembly vs. a field named "system")</span></pre></div></li>
+    <li><div class="step-body"><h3>Generate EKOS's deterministic documentation</h3>
+<pre>ekos docs generate --layout curated               <span class="c"># README / Architecture / API + 9,283 entity pages</span>
+ekos docs generate --layout solution-architect    <span class="c"># risk report, onboarding guide, findings memo</span></pre>
+      <p>A copy of the top-level generated reports is kept in <a href="examples/tsd/generated/">examples/tsd/generated/</a>.</p></div></li>
+    <li><div class="step-body"><h3>Ask EKOS through MCP</h3>
+<pre>ekos mcp serve --workspace .
+<span class="c"># ekos_ekl             FIND Object WHERE kind CONTAINS 'BinaryType' AND name = 'TSDServer.ViewProductForm'
+# ekos_binary_explain  {id}  → members, complexity, constants, call targets, I/O, provenance
+# ekos_impact          {id, direction: "dependents", kinds: ["Calls"]}
+# ekos_dependents      {id of BluetoothLibNet}  → TSDClient ×2</span></pre>
+      <p>The <code>ekos_binary_explain</code> output behind this document is kept for 22 key types in <a href="examples/tsd/binary-explain/">examples/tsd/binary-explain/</a>.</p></div></li>
+  </ol>
+</section>
+
+<footer class="method">
+  <div class="eyebrow">Method</div>
+  <p>Every fact above comes from the EKOS ledger for this folder: 44,865 objects, 74,353 relationships and 164,077 ledger entries. It was retrieved through EKOS's own runtime tools: <code>ekos_binary_explain</code> over all 931 types, <code>ekos_ekl</code>, <code>ekos_neighborhood</code>, <code>ekos_impact</code>, <code>ekos_dependents</code>, <code>ekos_state</code> and <code>ekos_architecture_evaluate</code>. No decompiler, source code or LLM was used. The binaries were read in-process as bytes and never executed.</p>
+  <p>This run also found and fixed four defects in EKOS's .NET binary recovery; before the fixes, the call graph behind §5 and §10 would have been empty or wrong. See <code>devlogs/devlog_190.md</code>.</p>
+  <p>Companion deck: <a href="tsd-how-it-works.html">How TSD Works</a>.</p>
+</footer>
+
+</div>
+</body>
+</html>

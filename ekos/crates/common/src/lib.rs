@@ -29,7 +29,10 @@ use sha2::{Digest, Sha256};
 /// - **v1** (RFC 0135, 2026-09-04): introduced.
 /// - **v2** (RFC 0144, 2026-09-15): `ekos-plugin-localdocs` splits Markdown per heading and
 ///   records heading path + line range on each section.
-pub const PIPELINE_LOGIC_VERSION: u32 = 2;
+/// - **v3** (RFC 0148 follow-up, 2026-09-18): `ekos-binary`'s .NET reader names every call
+///   site's owner and target assembly in the declaration's own format, and the I/O classifier no
+///   longer claims in-memory `System.Data` / `System.IO.Path` calls.
+pub const PIPELINE_LOGIC_VERSION: u32 = 3;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

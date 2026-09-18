@@ -1,0 +1,724 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "d89ed356-a3c9-5da8-a524-5fc97bbb1dd0"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDServer.exe",
+   "binary_sha256": "63e023e4f29f765d68a4c6c02f7e96f854889a4b40a90ad17c2965bd007b0d6e",
+   "locator": "0x02000039"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "fcb47ec5-d44f-55f3-9011-24d2ca2436f0",
+     "is_static": false,
+     "locator": "0x06000318",
+     "name": "get_SmtpClient",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "SmtpClient"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "f75c7b83-43c3-53ac-95ba-fe6b15935ba8",
+     "is_static": false,
+     "locator": "0x06000301",
+     "name": "set_FieldsLength",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "FieldsLength"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "f98a071f-d7ba-55be-8879-ce35356a1a19",
+     "is_static": false,
+     "locator": "0x06000303",
+     "name": "set_FieldDelimeter",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "FieldDelimeter"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ea806e73-a42b-5416-8df9-e9f5002e15ef",
+     "is_static": false,
+     "locator": "0x06000312",
+     "name": "get_RemoteFilePath",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "RemoteFilePath"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "182202b6-08b3-5c2d-a888-d4028218a9b9",
+     "is_static": false,
+     "locator": "0x06000309",
+     "name": "set_LocalFilePath",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "LocalFilePath"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "9d10646b-507a-5dd9-a596-1657dbedbb31",
+     "is_static": false,
+     "locator": "0x06000315",
+     "name": "set_UserNameFrom",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "UserNameFrom"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "f3be1d3b-3799-56d8-b159-87182414ea4e",
+     "is_static": false,
+     "locator": "0x06000317",
+     "name": "set_AddressFrom",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "AddressFrom"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "1799604e-d905-564e-aaee-9897c7d19326",
+     "is_static": false,
+     "locator": "0x0600030C",
+     "name": "get_ImportDocsEnabled",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": [
+      "ImportDocsEnabled"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "d7d4e840-3aaa-5421-8e7a-b837e272fb0d",
+     "is_static": false,
+     "locator": "0x06000319",
+     "name": "set_SmtpClient",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "SmtpClient"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "706f34ec-0439-564b-963f-55a9bdcb1466",
+     "is_static": false,
+     "locator": "0x0600030D",
+     "name": "set_ImportDocsEnabled",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": [
+      "ImportDocsEnabled"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "15b5a782-13a3-54f7-a63b-69c39013b657",
+     "is_static": false,
+     "locator": "0x06000302",
+     "name": "get_FieldDelimeter",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "FieldDelimeter"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "83458813-eb27-56af-851d-d8505a312e14",
+     "is_static": false,
+     "locator": "0x06000300",
+     "name": "get_FieldsLength",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "FieldsLength"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "dda622c7-fb26-5df4-9c9d-e17cea245242",
+     "is_static": false,
+     "locator": "0x060002FD",
+     "name": "set_ShortDatePattern",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "ShortDatePattern"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "8bc43135-d9bb-53ba-8ee8-c69f6808bc83",
+     "is_static": false,
+     "locator": "0x0600031E",
+     "name": "get_EraseTerminalDB",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": [
+      "EraseTerminalDB"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "4985a094-459e-598d-9548-dba66666d2c9",
+     "is_static": false,
+     "locator": "0x06000310",
+     "name": "get_TSDDBPAth",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "TSDDBPAth"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "53bec3e6-4219-5685-8c20-bb9d8e6cd24a",
+     "is_static": false,
+     "locator": "0x06000306",
+     "name": "get_BaseDate",
+     "numeric_literals": null,
+     "signature": "() -> System.DateTime",
+     "string_literals": [
+      "BaseDate"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "21674372-52c5-5c5d-b998-fc65a0db5ef0",
+     "is_static": true,
+     "locator": "0x060002F9",
+     "name": "get_Default",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.Properties.Settings",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "b3d17c63-7535-52f8-b342-06a8fb230f6a",
+     "is_static": false,
+     "locator": "0x060002FB",
+     "name": "set_NumberDecimalSeparator",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "NumberDecimalSeparator"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "385b84e7-498f-5172-a44a-ddf4ba7f804b",
+     "is_static": false,
+     "locator": "0x06000316",
+     "name": "get_AddressFrom",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "AddressFrom"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "59a4b39f-ab01-5f9e-9804-64e2a915e707",
+     "is_static": false,
+     "locator": "0x0600030B",
+     "name": "set_ImportProductsEnabled",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": [
+      "ImportProductsEnabled"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3a939cf9-a12a-5c77-ba3f-b5ba4b3a0feb",
+     "is_static": false,
+     "locator": "0x06000314",
+     "name": "get_UserNameFrom",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "UserNameFrom"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.ApplicationSettingsBase..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "e6a0a235-7c0a-53a7-89c2-9f4837dc9fbd",
+     "is_static": false,
+     "locator": "0x06000320",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "fc6fad3b-013f-5fbb-83f3-c76b45b1d396",
+     "is_static": false,
+     "locator": "0x0600030E",
+     "name": "get_SettingsEnabled",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": [
+      "SettingsEnabled"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "541cfd81-28c2-5781-98eb-c70ff11430b1",
+     "is_static": false,
+     "locator": "0x0600031D",
+     "name": "set_AddressToList",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "AddressToList"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "febb583d-718c-59cf-abae-db83599c02f9",
+     "is_static": false,
+     "locator": "0x06000311",
+     "name": "set_TSDDBPAth",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "TSDDBPAth"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "53002a9e-ac7b-5cc6-aaa3-9a9f859637cf",
+     "is_static": false,
+     "locator": "0x0600031C",
+     "name": "get_AddressToList",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "AddressToList"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "fb38782b-7be9-5259-808f-095d1058ec31",
+     "is_static": false,
+     "locator": "0x0600031F",
+     "name": "set_EraseTerminalDB",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": [
+      "EraseTerminalDB"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "04223844-a4b9-5ef6-8d5c-f71fa42e09f9",
+     "is_static": false,
+     "locator": "0x060002FA",
+     "name": "get_NumberDecimalSeparator",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "NumberDecimalSeparator"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "e03e411e-216c-5163-8a3b-c0e231ba54f1",
+     "is_static": false,
+     "locator": "0x0600031A",
+     "name": "get_BreakOnError",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": [
+      "BreakOnError"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "1d7f3136-7868-5f6e-85c0-274dc6ce74d8",
+     "is_static": false,
+     "locator": "0x0600031B",
+     "name": "set_BreakOnError",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": [
+      "BreakOnError"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "1b09d2ed-80d0-505c-b3ca-5b324f727021",
+     "is_static": false,
+     "locator": "0x060002FC",
+     "name": "get_ShortDatePattern",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "ShortDatePattern"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "5030bac0-f6e2-5cf7-b683-f0061b275725",
+     "is_static": false,
+     "locator": "0x06000313",
+     "name": "set_RemoteFilePath",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "RemoteFilePath"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "df6ac35f-4f5f-5504-ad0d-1b1a8cb953ea",
+     "is_static": false,
+     "locator": "0x06000304",
+     "name": "get_ImportFileTypeIsFixed",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": [
+      "ImportFileTypeIsFixed"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.Properties.Settings..ctor",
+      "System.Configuration.SettingsBase.Synchronized"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "76a07884-06c0-5aca-b9e2-0f73ff119a75",
+     "is_static": true,
+     "locator": "0x06000321",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "9e2ca37c-cbe6-5359-80ce-025abd630996",
+     "is_static": false,
+     "locator": "0x0600030A",
+     "name": "get_ImportProductsEnabled",
+     "numeric_literals": null,
+     "signature": "() -> System.Boolean",
+     "string_literals": [
+      "ImportProductsEnabled"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "bf5a6486-84b1-5e8a-9655-c4c5102da1ca",
+     "is_static": false,
+     "locator": "0x06000307",
+     "name": "set_BaseDate",
+     "numeric_literals": null,
+     "signature": "(System.DateTime) -> System.Void",
+     "string_literals": [
+      "BaseDate"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "b0675049-ee52-5482-9fcc-4c2027dcf1ec",
+     "is_static": false,
+     "locator": "0x0600030F",
+     "name": "set_SettingsEnabled",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": [
+      "SettingsEnabled"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "fac06b56-bdb4-51f5-8ae3-cf11ecdd7d3a",
+     "is_static": false,
+     "locator": "0x060002FF",
+     "name": "set_DateSeparator",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "DateSeparator"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "76b298f5-fc66-54bd-94af-5b81f472b7fa",
+     "is_static": false,
+     "locator": "0x060002FE",
+     "name": "get_DateSeparator",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "DateSeparator"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "013adf76-bc45-5f94-a2c4-296e7ece2684",
+     "is_static": false,
+     "locator": "0x06000308",
+     "name": "get_LocalFilePath",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": [
+      "LocalFilePath"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Configuration.SettingsBase.set_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "7ddb4e12-ba31-5ff3-84c4-45f799123d1f",
+     "is_static": false,
+     "locator": "0x06000305",
+     "name": "set_ImportFileTypeIsFixed",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": [
+      "ImportFileTypeIsFixed"
+     ],
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "d89ed356-a3c9-5da8-a524-5fc97bbb1dd0",
+   "kind": "BinaryType",
+   "name": "TSDServer.Properties.Settings",
+   "namespace": "TSDServer.Properties",
+   "super_type": "System.Configuration.ApplicationSettingsBase"
+  }
+ }
+}

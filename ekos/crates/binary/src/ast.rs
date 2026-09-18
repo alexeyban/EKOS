@@ -378,6 +378,13 @@ pub struct CallSite {
     pub owner: String,
     pub method: String,
     pub descriptor: String,
+    /// The assembly that defines the callee, when the format records it. .NET does — a
+    /// `MethodDef` token is always this assembly, a `TypeRef` names its `AssemblyRef` — and
+    /// without it two binaries declaring the same type name (a client and server built from
+    /// shared source, or two copies of one exe) are indistinguishable to a name-keyed join. The
+    /// JVM has no such scope (a class is found on the classpath), so it is `None` there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_assembly: Option<String>,
     /// Set when [`crate::io_classify`] recognizes the owner as an I/O boundary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub io: Option<IoBoundary>,

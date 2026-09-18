@@ -19,13 +19,14 @@ use crate::ast::*;
 use crate::io_classify;
 use crate::{BinaryError, Result, limits};
 use metadata::{
-    ASSEMBLY, ASSEMBLY_REF, C_MEMBER_REF_PARENT, C_TYPE_DEF_OR_REF, FIELD, INTERFACE_IMPL,
-    MEMBER_REF, METHOD_DEF, Metadata, NESTED_CLASS, TYPE_DEF, TYPE_REF, TYPE_SPEC,
+    ASSEMBLY, ASSEMBLY_REF, C_MEMBER_REF_PARENT, C_RESOLUTION_SCOPE, C_TYPE_DEF_OR_REF, FIELD,
+    INTERFACE_IMPL, MEMBER_REF, METHOD_DEF, MODULE, MODULE_REF, Metadata, NESTED_CLASS, TYPE_DEF,
+    TYPE_REF, TYPE_SPEC,
 };
 use std::collections::HashMap;
 
 /// Recorded as `BinarySource::extractor` on every fact derived from this backend.
-pub const EXTRACTOR: &str = "ekos-cil-metadata/v1";
+pub const EXTRACTOR: &str = "ekos-cil-metadata/v2";
 
 // TypeDef flags (ECMA-335 II.23.1.15).
 const TYPE_VISIBILITY_MASK: u32 = 0x0000_0007;
@@ -53,13 +54,13 @@ pub fn read_assembly(bytes: &[u8], path: &str, sha256: &str) -> Result<Decompile
     let md = Metadata::parse(image.metadata()?)?;
     let mut diagnostics = Vec::new();
 
-    let names = TypeNames::build(&md);
-    let nesting = nesting_map(&md);
-
     let assembly_name = md
         .string_cell(ASSEMBLY, 1, 7)
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| path.rsplit('/').next().unwrap_or(path).to_string());
+
+    let nesting = nesting_map(&md);
+    let names = TypeNames::build(&md, &nesting, &assembly_name);
 
     let references = (1..=md.rows(ASSEMBLY_REF))
         .filter_map(|r| md.string_cell(ASSEMBLY_REF, r, 6))
@@ -115,13 +116,32 @@ pub fn read_assembly(bytes: &[u8], path: &str, sha256: &str) -> Result<Decompile
 ///
 /// Built up front rather than on demand because signature decoding resolves type references
 /// constantly, and each resolution would otherwise re-read two string-heap cells.
+///
+/// Every name here must be spelled exactly as [`DecompiledType::qualified_name`] spells the
+/// declaration — `Ns.Outer+Inner` for a nested type — because `binary_analyzer` joins call
+/// sites to declarations by string. A call site that spells its callee differently from the
+/// declaration is not an error anywhere; it just silently never becomes a `Calls` edge.
 struct TypeNames {
     defs: Vec<String>,
     refs: Vec<String>,
+    /// `MethodDef row - 1 → qualified name of the declaring type`. A `MethodDef` row carries no
+    /// back-pointer to its type — ownership is implied by the `TypeDef` method-list ranges.
+    method_owners: Vec<String>,
+    /// `Field row - 1 → qualified name of the declaring type`, by the same list-range rule.
+    field_owners: Vec<String>,
+    /// `TypeRef row - 1 → the assembly that defines it`, from its outermost `ResolutionScope`.
+    /// `None` when the scope does not name one (an exported-type indirection).
+    ref_assemblies: Vec<Option<String>>,
+    /// This assembly's own name — the target of every `MethodDef` call.
+    own_assembly: String,
 }
 
+/// Deeper than any real nesting; bounds the walk on a hostile or corrupt `NestedClass`/
+/// `ResolutionScope` chain that loops back on itself.
+const MAX_NESTING_DEPTH: usize = 32;
+
 impl TypeNames {
-    fn build(md: &Metadata<'_>) -> Self {
+    fn build(md: &Metadata<'_>, nesting: &HashMap<u32, u32>, own_assembly: &str) -> Self {
         let qualify = |ns: Option<String>, name: Option<String>| -> String {
             let name = name.unwrap_or_default();
             match ns {
@@ -129,24 +149,103 @@ impl TypeNames {
                 _ => name,
             }
         };
+
+        // A nested type's own `Namespace` column is empty: its name is its enclosing type's
+        // name, `+`, its own. Same shape for both tables; only the parent lookup differs.
+        let def_parent = |row: u32| nesting.get(&row).copied();
+        let ref_parent = |row: u32| match md.cell(TYPE_REF, row, 0) {
+            Some(scope) => match md.decode_coded(C_RESOLUTION_SCOPE, scope) {
+                Some((TYPE_REF, outer)) => Some(outer),
+                _ => None,
+            },
+            None => None,
+        };
+        let nest = |table: usize, rows: u32, parent: &dyn Fn(u32) -> Option<u32>| -> Vec<String> {
+            let flat: Vec<String> = (1..=rows)
+                .map(|r| qualify(md.string_cell(table, r, 2), md.string_cell(table, r, 1)))
+                .collect();
+            (1..=rows)
+                .map(|r| {
+                    let mut name = flat[r as usize - 1].clone();
+                    let mut at = r;
+                    for _ in 0..MAX_NESTING_DEPTH {
+                        match parent(at).filter(|&o| o >= 1 && o <= rows && o != at) {
+                            Some(outer) => {
+                                name = format!("{}+{name}", flat[outer as usize - 1]);
+                                at = outer;
+                            }
+                            None => break,
+                        }
+                    }
+                    name
+                })
+                .collect()
+        };
+        let defs = nest(TYPE_DEF, md.rows(TYPE_DEF), &def_parent);
+        let refs = nest(TYPE_REF, md.rows(TYPE_REF), &ref_parent);
+
+        let owners = |col: usize, target: usize| -> Vec<String> {
+            let mut out = vec![String::new(); md.rows(target) as usize];
+            for (i, owner) in defs.iter().enumerate() {
+                let (start, end) = md.list_range(TYPE_DEF, i as u32 + 1, col, target);
+                for member in start..end {
+                    if let Some(slot) = out.get_mut(member as usize - 1) {
+                        slot.clone_from(owner);
+                    }
+                }
+            }
+            out
+        };
+        let method_owners = owners(5, METHOD_DEF);
+        let field_owners = owners(4, FIELD);
+
+        // A nested `TypeRef`'s scope is its enclosing `TypeRef`; only the outermost one names
+        // where the type lives.
+        let ref_assemblies = (1..=md.rows(TYPE_REF))
+            .map(|r| {
+                let mut at = r;
+                for _ in 0..MAX_NESTING_DEPTH {
+                    let scope = md.cell(TYPE_REF, at, 0)?;
+                    match md.decode_coded(C_RESOLUTION_SCOPE, scope)? {
+                        (TYPE_REF, outer) if outer != at => at = outer,
+                        (ASSEMBLY_REF, row) => return md.string_cell(ASSEMBLY_REF, row, 6),
+                        // `Module`/`ModuleRef`: defined in this assembly (possibly another
+                        // module of it).
+                        (MODULE | MODULE_REF, _) => return Some(own_assembly.to_string()),
+                        _ => return None,
+                    }
+                }
+                None
+            })
+            .collect();
+
         Self {
-            defs: (1..=md.rows(TYPE_DEF))
-                .map(|r| {
-                    qualify(
-                        md.string_cell(TYPE_DEF, r, 2),
-                        md.string_cell(TYPE_DEF, r, 1),
-                    )
-                })
-                .collect(),
-            refs: (1..=md.rows(TYPE_REF))
-                .map(|r| {
-                    qualify(
-                        md.string_cell(TYPE_REF, r, 2),
-                        md.string_cell(TYPE_REF, r, 1),
-                    )
-                })
-                .collect(),
+            defs,
+            refs,
+            method_owners,
+            field_owners,
+            ref_assemblies,
+            own_assembly: own_assembly.to_string(),
         }
+    }
+
+    /// The assembly defining the type a `MemberRefParent` coded index names, when known.
+    fn member_parent_assembly(&self, md: &Metadata<'_>, coded: u32) -> Option<String> {
+        match md.decode_coded(C_MEMBER_REF_PARENT, coded)? {
+            (TYPE_DEF | METHOD_DEF, _) => Some(self.own_assembly.clone()),
+            (TYPE_REF, row) => self.ref_assemblies.get(row as usize - 1).cloned().flatten(),
+            _ => None,
+        }
+    }
+
+    /// The declaring type of a `MethodDef` row, or `"?"` for a row no type claims.
+    fn method_owner(&self, row: u32) -> String {
+        owner_at(&self.method_owners, row)
+    }
+
+    /// The declaring type of a `Field` row, or `"?"` for a row no type claims.
+    fn field_owner(&self, row: u32) -> String {
+        owner_at(&self.field_owners, row)
     }
 
     /// Resolve a `TypeDefOrRef` coded index to a name.
@@ -185,9 +284,17 @@ impl TypeNames {
                 .get(row as usize - 1)
                 .cloned()
                 .unwrap_or_else(|| "?".into()),
+            Some((METHOD_DEF, row)) => self.method_owner(row),
             Some((TYPE_SPEC, _)) => "constructed type".into(),
             _ => "?".into(),
         }
+    }
+}
+
+fn owner_at(owners: &[String], row: u32) -> String {
+    match owners.get((row as usize).wrapping_sub(1)) {
+        Some(owner) if !owner.is_empty() => owner.clone(),
+        _ => "?".into(),
     }
 }
 
@@ -517,37 +624,44 @@ fn read_method_body(
     Some(body)
 }
 
-/// Resolve a method token to `(owner, name, signature)`.
+/// Resolve a method token to `(owner, name, descriptor, defining assembly)`.
+///
+/// The descriptor is rendered by [`render_descriptor`], the same function that renders a
+/// declaration's — so a call site and the method it calls produce the same join key.
 fn resolve_method_token(
     md: &Metadata<'_>,
     names: &TypeNames,
     token: u32,
-) -> Option<(String, String, String)> {
+) -> Option<(String, String, String, Option<String>)> {
     let (table, row) = il::split_token(token);
     let resolve = |coded: u32| names.resolve(md, coded);
+    let descriptor = |blob: Option<&[u8]>| {
+        blob.and_then(|b| sig::method_signature(b, &resolve))
+            .map(|s| render_descriptor(&s))
+            .unwrap_or_else(|| "?".into())
+    };
     match table as usize {
         MEMBER_REF => {
-            let owner = names.resolve_member_parent(md, md.cell(MEMBER_REF, row, 0)?);
+            let parent = md.cell(MEMBER_REF, row, 0)?;
+            let owner = names.resolve_member_parent(md, parent);
             let name = md.string_cell(MEMBER_REF, row, 1)?;
-            let sig = md
-                .blob_cell(MEMBER_REF, row, 2)
-                .and_then(|b| sig::method_signature(b, &resolve))
-                .map(|s| s.render())
-                .unwrap_or_else(|| "?".into());
-            Some((owner, name, sig))
+            Some((
+                owner,
+                name,
+                descriptor(md.blob_cell(MEMBER_REF, row, 2)),
+                names.member_parent_assembly(md, parent),
+            ))
         }
+        // A `MethodDef` token names a method in *this* assembly; its owner comes from the
+        // `TypeDef` method-list ranges, precomputed in `TypeNames`.
         METHOD_DEF => {
             let name = md.string_cell(METHOD_DEF, row, 3)?;
-            let sig = md
-                .blob_cell(METHOD_DEF, row, 4)
-                .and_then(|b| sig::method_signature(b, &resolve))
-                .map(|s| s.render())
-                .unwrap_or_else(|| "?".into());
-            // A `MethodDef` token names a method in *this* assembly. Its owner is the type whose
-            // method list contains it, which needs a reverse scan; the owner is filled in by the
-            // caller's own type context downstream, so an empty owner here is honest rather than
-            // a guess at the wrong type.
-            Some((String::new(), name, sig))
+            Some((
+                names.method_owner(row),
+                name,
+                descriptor(md.blob_cell(METHOD_DEF, row, 4)),
+                Some(names.own_assembly.clone()),
+            ))
         }
         // MethodSpec (0x2B): a generic method instantiation. Its `Method` column is itself a
         // MethodDefOrRef, but resolving it adds only the type arguments — the callee name and
@@ -564,7 +678,8 @@ fn push_call(
     kind: CallKind,
     token: Option<u32>,
 ) {
-    let Some((owner, method, descriptor)) = token.and_then(|t| resolve_method_token(md, names, t))
+    let Some((owner, method, descriptor, target_assembly)) =
+        token.and_then(|t| resolve_method_token(md, names, t))
     else {
         return;
     };
@@ -575,6 +690,7 @@ fn push_call(
         owner,
         method,
         descriptor,
+        target_assembly,
     });
 }
 
@@ -599,7 +715,7 @@ fn push_field(
                 .unwrap_or_else(|| "?".into()),
         ),
         FIELD => (
-            String::new(),
+            names.field_owner(row),
             md.string_cell(FIELD, row, 1).unwrap_or_default(),
             md.blob_cell(FIELD, row, 2)
                 .map(|b| sig::field_signature(b, &resolve))
@@ -863,6 +979,103 @@ mod tests {
         assert!(
             ast.types.iter().any(|t| t.compiler_generated),
             "expected some compiler-generated types"
+        );
+    }
+
+    /// `binary_analyzer` turns a call site into a `Calls` edge only when
+    /// `owner.method descriptor` matches a declaration's key character for character. The first
+    /// version left a `MethodDef` call's owner empty ("filled in downstream" — nothing did) and
+    /// rendered call-site signatures in a different format from declarations, so every .NET call
+    /// failed to join: a 12-assembly app recovered 36,107 call sites and 0 edges, with no error
+    /// anywhere. Pinned against real IL because only real IL has the token mix that exposed it.
+    #[test]
+    fn call_sites_join_to_their_declarations() {
+        let Some(dir) = mono_dir() else {
+            eprintln!("skipping: no Mono assembly corpus on this machine");
+            return;
+        };
+        let Ok(bytes) = std::fs::read(dir.join("mscorlib.dll")) else {
+            return;
+        };
+        let ast = read_assembly(&bytes, "mscorlib.dll", "d").unwrap();
+        let key = |owner: &str, name: &str, desc: &str| format!("{owner}.{name}{desc}");
+        let declared: std::collections::HashSet<String> = ast
+            .types
+            .iter()
+            .flat_map(|t| {
+                t.methods
+                    .iter()
+                    .map(move |m| key(&t.qualified_name(), &m.name, &m.descriptor))
+            })
+            .collect();
+        let declared_types: std::collections::HashSet<String> =
+            ast.types.iter().map(|t| t.qualified_name()).collect();
+
+        let calls: Vec<&CallSite> = ast
+            .types
+            .iter()
+            .flat_map(|t| &t.methods)
+            .filter_map(|m| m.body.as_ref())
+            .flat_map(|b| &b.calls)
+            .collect();
+        assert!(
+            calls.iter().all(|c| !c.owner.is_empty()),
+            "a call site with no owner can never join"
+        );
+
+        let internal: Vec<&&CallSite> = calls
+            .iter()
+            .filter(|c| declared_types.contains(&c.owner))
+            .collect();
+        let joined = internal
+            .iter()
+            .filter(|c| declared.contains(&key(&c.owner, &c.method, &c.descriptor)))
+            .count();
+        // mscorlib calls itself constantly, so most calls must land on a declared type, and
+        // essentially all of those on a declared method — measured 69,971 of 69,971 on wine-mono
+        // 8.1.0. (Generic method instantiations go through `MethodSpec`, which is not resolved
+        // at all, so they never reach this join to miss it.)
+        assert!(
+            internal.len() * 2 > calls.len(),
+            "only {} of {} calls target a type in this assembly",
+            internal.len(),
+            calls.len()
+        );
+        assert!(
+            joined * 100 >= internal.len() * 99,
+            "only {joined} of {} intra-assembly calls join to a declaration",
+            internal.len()
+        );
+        eprintln!(
+            "{} calls, {} intra-assembly, {joined} joined",
+            calls.len(),
+            internal.len()
+        );
+
+        // Every call into this assembly's own types says so, so the join can stay inside it.
+        assert!(
+            internal
+                .iter()
+                .all(|c| c.target_assembly.as_deref() == Some("mscorlib")),
+            "a call into a declared type must name this assembly as its target"
+        );
+
+        // Field access is keyed the same way.
+        let fields = ast
+            .types
+            .iter()
+            .flat_map(|t| &t.methods)
+            .filter_map(|m| m.body.as_ref())
+            .flat_map(|b| &b.field_access);
+        assert!(fields.clone().count() > 0);
+        assert!(fields.clone().all(|f| !f.owner.is_empty()));
+
+        // Nested types are spelled `Outer+Inner` on both sides of the join.
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.owner.contains('+') && declared_types.contains(&c.owner)),
+            "calls into nested types must name them as their declarations do"
         );
     }
 

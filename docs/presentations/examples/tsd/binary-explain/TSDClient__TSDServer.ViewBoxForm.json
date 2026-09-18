@@ -1,0 +1,292 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "166f005d-f1e4-54ef-8927-61f333a49517"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x02000061"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 17,
+     "call_targets": [
+      "System.Windows.Forms.KeyEventArgs.get_KeyCode",
+      "System.Windows.Forms.KeyEventArgs.get_KeyValue",
+      "System.Windows.Forms.KeyEventArgs.set_Handled",
+      "System.Windows.Forms.Form.Close",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_EnableChgQty",
+      "OpenNETCF.Windows.Forms.OwnerDrawnList.get_SelectedIndex",
+      "OpenNETCF.Windows.Forms.ListBoxEx.get_Items",
+      "System.Collections.CollectionBase.get_Count",
+      "OpenNETCF.Windows.Forms.ListBoxEx+ItemCollection.get_Item",
+      "OpenNETCF.Windows.Forms.ListItem.get_Text",
+      "TSDServer.ViewBoxForm+ListBoxItem..ctor",
+      "TSDServer.FChangeQtyForm.get_MForm",
+      "System.Int64.ToString",
+      "TSDServer.ChangeQtyForm.set_Barcode",
+      "System.Object.ToString",
+      "TSDServer.ChangeQtyForm.set_ProductName",
+      "TSDServer.ChangeQtyForm.set_FactQuantity",
+      "TSDServer.ChangeQtyForm.set_PlanQuantity",
+      "System.Windows.Forms.Form.ShowDialog",
+      "TSDServer.ChangeQtyForm.get_NewQuantity",
+      "TSDServer.ChangeQtyForm.get_FactQuantity",
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Add",
+      "constructed type.get_Item",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_NavCode",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_NavCode",
+      "System.String.op_Equality",
+      "constructed type.GetEnumerator",
+      "constructed type.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity"
+     ],
+     "cyclomatic_complexity": 18,
+     "id": "a75e7054-18c6-5a57-84af-8019af11320c",
+     "is_static": false,
+     "locator": "0x06000444",
+     "name": "listBox1_KeyDown",
+     "numeric_literals": [
+      "27",
+      "115",
+      "18"
+     ],
+     "signature": "(System.Object, System.Windows.Forms.KeyEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "bc4cf284-5966-58ac-b33b-2ff0e41a0a71",
+     "is_static": false,
+     "locator": "0x06000442",
+     "name": "InventarForm_Closed",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "constructed type..ctor",
+      "System.Windows.Forms.Form..ctor",
+      "TSDServer.ViewBoxForm.InitializeComponent"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "7bb31037-dd5b-5bb6-8ecc-4c8b68611f95",
+     "is_static": false,
+     "locator": "0x0600043F",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_EnableChgQty",
+      "System.Windows.Forms.Control.set_Visible",
+      "TSDServer.ViewBoxForm.RefreshData"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "44207124-8acd-537b-8578-3bcbdac9627c",
+     "is_static": false,
+     "locator": "0x06000441",
+     "name": "ViewInventarForm_Load",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.EventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.IDisposable.Dispose",
+      "System.Windows.Forms.Control.Dispose"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "6fb67127-301d-5b8c-8dfb-e66548032c0d",
+     "is_static": false,
+     "locator": "0x0600043D",
+     "name": "Dispose",
+     "numeric_literals": null,
+     "signature": "(System.Boolean) -> System.Void",
+     "string_literals": null,
+     "visibility": "protected"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.Panel..ctor",
+      "OpenNETCF.Windows.Forms.ListBoxEx..ctor",
+      "System.Windows.Forms.Label..ctor",
+      "System.Windows.Forms.Control.SuspendLayout",
+      "System.Drawing.Color.get_White",
+      "System.Windows.Forms.Control.set_BackColor",
+      "System.Windows.Forms.Control.get_Controls",
+      "System.Windows.Forms.Control+ControlCollection.Add",
+      "System.Drawing.Point..ctor",
+      "System.Windows.Forms.Control.set_Location",
+      "System.Windows.Forms.Control.set_Name",
+      "System.Drawing.Size..ctor",
+      "System.Windows.Forms.Control.set_Size",
+      "OpenNETCF.Windows.Forms.OwnerDrawnList.set_BackgroundImage",
+      "System.Windows.Forms.Control.set_Dock",
+      "OpenNETCF.Windows.Forms.ListBoxEx.set_EvenItemColor",
+      "System.Windows.Forms.Control.set_TabIndex",
+      "System.Windows.Forms.KeyEventHandler..ctor",
+      "System.Windows.Forms.Control.add_KeyDown",
+      "System.Drawing.Color.get_PaleGreen",
+      "System.Drawing.Color.get_Yellow",
+      "System.Windows.Forms.Control.set_Text",
+      "System.Windows.Forms.Label.set_TextAlign",
+      "System.Drawing.Color.get_Red",
+      "System.Windows.Forms.Control.set_Visible",
+      "System.Drawing.SizeF..ctor",
+      "System.Windows.Forms.ContainerControl.set_AutoScaleDimensions",
+      "System.Windows.Forms.ContainerControl.set_AutoScaleMode",
+      "System.Windows.Forms.ScrollableControl.set_AutoScroll",
+      "System.Windows.Forms.Control.set_ClientSize",
+      "System.Windows.Forms.Form.set_ControlBox",
+      "System.Windows.Forms.Form.set_FormBorderStyle"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "150f036c-aed2-59e0-b490-40fc8d82ec74",
+     "is_static": false,
+     "locator": "0x0600043E",
+     "name": "InitializeComponent",
+     "numeric_literals": [
+      "235",
+      "249",
+      "438",
+      "640",
+      "42",
+      "30",
+      "15",
+      "96.0",
+      "480"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "panel1",
+      "listBox1",
+      "panel2",
+      "label1",
+      "Выход: Fn-Clr или F4 Желтая кнопка",
+      "label2",
+      "Text",
+      "label3",
+      "F1 - изменить количество",
+      "ViewBoxForm",
+      "Просмотр просчета"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ViewBoxForm..ctor",
+      "System.Drawing.FontFamily.get_GenericMonospace",
+      "System.Drawing.Font..ctor",
+      "System.Windows.Forms.Control.set_Font",
+      "OpenNETCF.Windows.Forms.ListBoxEx.get_Items",
+      "OpenNETCF.Windows.Forms.ListBoxEx+ItemCollection.Clear"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "36450e2f-67db-5122-9cb7-d3ad11fa50db",
+     "is_static": false,
+     "locator": "0x06000440",
+     "name": ".ctor",
+     "numeric_literals": [
+      "8.0"
+     ],
+     "signature": "(System.String, System.Byte) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 23,
+     "call_targets": [
+      "constructed type.Clear",
+      "OpenNETCF.Windows.Forms.ListBoxEx.get_Items",
+      "OpenNETCF.Windows.Forms.ListBoxEx+ItemCollection.Clear",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ActionsClass.FindByDocIdAndDocType",
+      "TSDServer.ActionsClass.GetDataByDocIdAndType",
+      "TSDServer.ViewBoxForm+FirstListBoxItem..ctor",
+      "System.Object.ToString",
+      "OpenNETCF.Windows.Forms.ListBoxEx+ItemCollection.Add",
+      "System.Drawing.FontFamily.get_GenericMonospace",
+      "System.Drawing.Font..ctor",
+      "OpenNETCF.Windows.Forms.ListItem.set_Font",
+      "System.Windows.Forms.Control.set_Font",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_NavCode",
+      "TSDServer.ActionsClass.GetProductRowByNavCode",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "constructed type.ContainsKey",
+      "constructed type.Add",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_PlanQuanity",
+      "System.Drawing.Color.get_Green",
+      "System.Drawing.Color.get_Red",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_ProductName",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Quantity",
+      "TSDServer.ViewBoxForm+ListBoxItem..ctor",
+      "constructed type..ctor",
+      "System.Int64.ToString",
+      "TSDServer.ActionsClass.GetProductRow",
+      "constructed type.get_Keys",
+      "constructed type.GetEnumerator"
+     ],
+     "cyclomatic_complexity": 24,
+     "id": "63352073-559e-5c59-b2d5-21cf28cef85e",
+     "is_static": false,
+     "locator": "0x06000443",
+     "name": "RefreshData",
+     "numeric_literals": [
+      "8.0",
+      "238",
+      "295"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "{0,13}|{1,10}|{2,2}|{3,2}",
+      " ",
+      "Итого:"
+     ],
+     "visibility": "private"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "166f005d-f1e4-54ef-8927-61f333a49517",
+   "kind": "BinaryType",
+   "name": "TSDServer.ViewBoxForm",
+   "namespace": "TSDServer",
+   "super_type": "System.Windows.Forms.Form"
+  }
+ }
+}

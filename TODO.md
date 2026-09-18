@@ -5397,6 +5397,20 @@ are excluded — see the full exclusion list in the planning history if needed.
     method's `call_targets` property. Revisit if cross-workspace assembly resolution is ever wanted.
   - [ ] The LLM reconstruction stage has not been run against a real provider yet (subscription/promo-token
     policy); its guards are unit-tested, not live-measured. Run it on a real legacy app before Phase 5.
+  - [x] **First real-app run (devlog_190, 2026-09-18)** — `alexeyban/tsd` WinCE barcode-terminal
+    `bin/Release`, 12 assemblies. Found and fixed four defects: .NET `Calls` joined **0 of 36,107** call
+    sites (empty `MethodDef` owner + two descriptor formats); `DependsOn`/`Extends` went to stubs even for
+    binaries observed in the same run; the run-wide name-keyed join sent **320** server calls into the
+    client (shared source + duplicate exe copies) — now scoped by `CallSite::target_assembly`; the
+    `System.Data.`/`System.IO.Path` I/O prefixes claimed in-memory work (**4,130 → 174** boundaries).
+    Now 10,956 edges, all cross-binary edges matching a real `AssemblyRef`.
+  - [ ] Method-level I/O patterns: `DataSet.ReadXml(path)`/`WriteXml(path)` are real file I/O but share
+    an owner with in-memory `DataSet` members, so the owner-prefix table cannot claim them.
+  - [ ] `BinaryMethod.call_targets` is capped at 32 (`capped()`, shared with literals) with **no truncation
+    marker** — a caller-scan over it gives false "never called" answers (devlog_190 follow-up). Record
+    `call_targets_truncated`/total count like the literal lists do, or document it on the property.
+  - [ ] MCP tools ignore unknown arguments silently (`ekos_impact` given `max_depth` ran at its default
+    `max_hops: 5`). Consider rejecting unknown keys against the published `inputSchema`.
 
 - [x] **RFC 0147 — Perl connector and structural analyzer (devlog_188, 2026-09-18).** Perl was the last
   major language in the working set getting nothing but `plugins/file`'s declaration-prefix scan — bare name

@@ -52,7 +52,7 @@ const PROMPT_VERSION: &str = "llm-reconstruction-v1";
 
 /// The `extractor` stamped on every fact this module writes.
 ///
-/// Deliberately different from `ekos-jvm-classfile/v1` / `ekos-cil-metadata/v1`, so no query can
+/// Deliberately different from `ekos-jvm-classfile/v1` / `ekos-cil-metadata/v2`, so no query can
 /// conflate a deterministically-read fact with an inferred one — RFC 0148's provenance rule.
 pub const EXTRACTOR: &str = "llm-reconstruction-v1";
 

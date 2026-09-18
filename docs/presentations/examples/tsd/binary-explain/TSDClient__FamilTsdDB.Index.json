@@ -1,0 +1,473 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "52772c5d-4252-59d8-8137-b8f96cfe37bf"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x0200005D"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 20,
+     "in_method": "OpenIndex",
+     "io_kind": "file",
+     "target": "System.IO.FileStream..ctor"
+    },
+    {
+     "bytecode_offset": 168,
+     "in_method": "Write",
+     "io_kind": "file",
+     "target": "System.IO.FileStream..ctor"
+    },
+    {
+     "bytecode_offset": 35,
+     "in_method": "Write",
+     "io_kind": "file",
+     "target": "System.IO.StreamWriter..ctor"
+    },
+    {
+     "bytecode_offset": 141,
+     "in_method": ".ctor",
+     "io_kind": "file",
+     "target": "System.IO.StreamReader..ctor"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.IO.FileStream..ctor",
+      "System.IO.BinaryReader..ctor",
+      "System.IO.Stream.get_Length"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "4b265947-7562-590f-ba41-fb7340b6e8f9",
+     "is_static": false,
+     "locator": "0x06000409",
+     "name": "OpenIndex",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "FamilTsdDB.IndexItem..ctor",
+      "FamilTsdDB.Index.FindIndex"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "176f1dbd-504c-5c8b-8dbc-7f0cf91b42c2",
+     "is_static": false,
+     "locator": "0x0600040E",
+     "name": "FindIndex",
+     "numeric_literals": null,
+     "signature": "(FamilTsdDB.DataRowItem[], ref System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "System.Text.StringBuilder..ctor",
+      "FamilTsdDB.SecondaryIndex.get_Count",
+      "FamilTsdDB.Index.OpenIndex",
+      "System.IO.Stream.Seek",
+      "System.IO.BinaryReader.Read",
+      "constructed type.ToArray",
+      "FamilTsdDB.IndexItem..ctor",
+      "FamilTsdDB.IndexItem.get_Item",
+      "System.Object.ToString",
+      "System.Text.StringBuilder.Append",
+      "FamilTsdDB.IndexItem.get_Offset",
+      "FamilTsdDB.SecondaryIndex.Add",
+      "System.Text.StringBuilder.set_Length",
+      "System.IO.Stream.get_Length",
+      "FamilTsdDB.Index.CloseIndex",
+      "constructed type.get_Item",
+      "FamilTsdDB.DataRowItem..ctor",
+      "FamilTsdDB.SecondaryIndex.GetItems"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "7e7c882d-3645-5235-b8fc-dcb001fb348e",
+     "is_static": false,
+     "locator": "0x06000414",
+     "name": "FindIndexesData",
+     "numeric_literals": null,
+     "signature": "(System.Int32[], System.Object[]) -> System.Collections.Generic.IEnumerable`1<System.Int32>",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "System.IO.Stream.get_Position",
+      "System.IO.Stream.Seek",
+      "System.IO.BinaryReader.Read",
+      "constructed type.ToArray",
+      "FamilTsdDB.IndexItem..ctor",
+      "FamilTsdDB.IndexItem.CompareTo",
+      "FamilTsdDB.IndexItem.get_Offset"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "5d33b1cd-c7aa-5ede-a2a9-2ec6050b11c1",
+     "is_static": false,
+     "locator": "0x06000410",
+     "name": "FindIndexReverse",
+     "numeric_literals": [
+      "-2"
+     ],
+     "signature": "(FamilTsdDB.IndexItem, ref System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "constructed type.get_Count",
+      "constructed type.get_Item",
+      "System.String.op_Inequality"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "86e9cd78-7982-545d-802b-8a1278499049",
+     "is_static": false,
+     "locator": "0x06000417",
+     "name": "CompareTo",
+     "numeric_literals": null,
+     "signature": "(System.Object) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "FamilTsdDB.IndexItem..ctor",
+      "FamilTsdDB.Index.FindIndex"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "a8ba3969-6421-51ed-ada3-c465dd6c82f9",
+     "is_static": false,
+     "locator": "0x0600040D",
+     "name": "FindIndex",
+     "numeric_literals": null,
+     "signature": "(FamilTsdDB.DataRowItem[]) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "constructed type.Clear",
+      "FamilTsdDB.Index.CloseIndex"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "9f1fca01-464b-5fdf-993e-8b3d430e3431",
+     "is_static": false,
+     "locator": "0x06000416",
+     "name": "Dispose",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "constructed type.Sort",
+      "System.String.Replace",
+      "System.IO.StreamWriter..ctor",
+      "constructed type.get_Item",
+      "System.String.Format",
+      "System.IO.TextWriter.WriteLine",
+      "constructed type.get_Count",
+      "System.IO.TextWriter.Flush",
+      "System.IO.TextWriter.Close",
+      "System.IDisposable.Dispose",
+      "System.IO.FileStream..ctor",
+      "System.IO.BinaryWriter..ctor",
+      "constructed type.GetEnumerator",
+      "constructed type.get_Current",
+      "FamilTsdDB.IndexItem.GetBytes",
+      "System.IO.BinaryWriter.Write",
+      "constructed type.MoveNext",
+      "System.IO.BinaryWriter.Flush",
+      "System.IO.BinaryWriter.Close"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "e9ed953f-ad38-5f4e-8b34-59959c2c1bfe",
+     "is_static": false,
+     "locator": "0x06000408",
+     "name": "Write",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": [
+      ".idx",
+      ".idf",
+      "{0}|{1}"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "constructed type.Clear"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0d6fae34-fbf1-5fd7-b907-ddd803db2138",
+     "is_static": false,
+     "locator": "0x06000415",
+     "name": "Clear",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "FamilTsdDB.SecondaryIndex..ctor",
+      "constructed type..ctor",
+      "System.Object..ctor",
+      "System.IO.StreamReader..ctor",
+      "System.String.Split",
+      "FamilTsdDB.DataColumnCollection.get_Item",
+      "constructed type.Add",
+      "System.IO.TextReader.ReadLine",
+      "System.IDisposable.Dispose",
+      "constructed type.get_Count",
+      "System.String.Replace",
+      "System.IO.Path.GetFileNameWithoutExtension",
+      "System.String.Format",
+      "System.Int32.Parse",
+      "constructed type.get_Item"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "af6b4acc-c1b7-5390-a5d9-be893923d8e2",
+     "is_static": false,
+     "locator": "0x06000405",
+     "name": ".ctor",
+     "numeric_literals": [
+      "124"
+     ],
+     "signature": "(System.String, FamilTsdDB.DataTable) -> System.Void",
+     "string_literals": [
+      ".idf",
+      ".idx",
+      "{0}_"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "FamilTsdDB.Index+<FindIndexes>d__0..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "92e309f4-f9e2-5e3d-9f23-6be920b8b404",
+     "is_static": false,
+     "locator": "0x06000411",
+     "name": "FindIndexes",
+     "numeric_literals": [
+      "-2"
+     ],
+     "signature": "(FamilTsdDB.IndexItem) -> System.Collections.Generic.IEnumerable`1<System.Int32>",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 9,
+     "call_targets": [
+      "System.IO.Stream.get_Position",
+      "System.IO.Stream.Seek",
+      "System.IO.BinaryReader.Read",
+      "constructed type.ToArray",
+      "FamilTsdDB.IndexItem..ctor",
+      "FamilTsdDB.IndexItem.CompareTo",
+      "FamilTsdDB.IndexItem.get_Offset",
+      "FamilTsdDB.Index.FindIndexReverse",
+      "FamilTsdDB.Index.FindIndexDirect",
+      "FamilTsdDB.IndexItem.get_Length"
+     ],
+     "cyclomatic_complexity": 10,
+     "id": "47410616-d0e3-5a15-8821-dac784cfdd9e",
+     "is_static": false,
+     "locator": "0x0600040C",
+     "name": "FindIndex",
+     "numeric_literals": null,
+     "signature": "(FamilTsdDB.IndexItem, ref System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "System.IO.BinaryReader.Close",
+      "System.IO.Stream.Close"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "eaa0435d-2338-56c8-9295-4a0036b53f19",
+     "is_static": false,
+     "locator": "0x0600040A",
+     "name": "CloseIndex",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "FamilTsdDB.Index+<FindIndexes>d__c..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "a22c679c-5564-596b-80e1-1cb40c0bcbb2",
+     "is_static": false,
+     "locator": "0x06000412",
+     "name": "FindIndexes",
+     "numeric_literals": [
+      "-2"
+     ],
+     "signature": "() -> System.Collections.Generic.IEnumerable`1<System.Int32>",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "f696c4e4-999e-58ae-bcb2-1f526997eb06",
+     "is_static": true,
+     "locator": "0x06000418",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "FamilTsdDB.SecondaryIndex..ctor",
+      "constructed type..ctor",
+      "System.Object..ctor",
+      "constructed type.get_Count",
+      "System.String.Format",
+      "constructed type.get_Item",
+      "System.String.Replace",
+      "constructed type.Add"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "0d939cc5-a679-5b06-84c8-8def2d7d2dac",
+     "is_static": false,
+     "locator": "0x06000406",
+     "name": ".ctor",
+     "numeric_literals": null,
+     "signature": "(FamilTsdDB.DataTable, System.Collections.Generic.List`1<FamilTsdDB.DataColumn>) -> System.Void",
+     "string_literals": [
+      "{0}\\{1}_{2}.idx",
+      ".idx",
+      ".idf"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "System.IO.Stream.get_Position",
+      "System.IO.Stream.Seek",
+      "System.IO.BinaryReader.Read",
+      "constructed type.ToArray",
+      "FamilTsdDB.IndexItem..ctor",
+      "FamilTsdDB.IndexItem.CompareTo",
+      "FamilTsdDB.IndexItem.get_Offset",
+      "System.IO.Stream.get_Length"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "e3d8aad8-736d-553d-bb94-c1bfc51e6646",
+     "is_static": false,
+     "locator": "0x0600040F",
+     "name": "FindIndexDirect",
+     "numeric_literals": null,
+     "signature": "(FamilTsdDB.IndexItem, ref System.Int32) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "FamilTsdDB.Index.FindIndex"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "f4404be0-eb6a-5d42-82e2-5816d8f91b83",
+     "is_static": false,
+     "locator": "0x0600040B",
+     "name": "FindIndex",
+     "numeric_literals": null,
+     "signature": "(FamilTsdDB.IndexItem) -> System.Int32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "constructed type.get_Count",
+      "constructed type.get_Item",
+      "FamilTsdDB.DataRow.get_Item",
+      "FamilTsdDB.IndexItem..ctor",
+      "constructed type.Add"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "4e3a8fb1-31a5-5c54-a449-0139b2dee973",
+     "is_static": false,
+     "locator": "0x06000407",
+     "name": "AddIndexItem",
+     "numeric_literals": null,
+     "signature": "(System.Int32, FamilTsdDB.DataRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "System.IO.Stream.Seek",
+      "constructed type..ctor",
+      "System.IO.BinaryReader.Read",
+      "constructed type.ToArray",
+      "FamilTsdDB.IndexItem..ctor",
+      "constructed type.Add",
+      "System.IO.Stream.get_Length"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "46c3a29f-a10a-533f-8d68-0c8ab7590bb5",
+     "is_static": false,
+     "locator": "0x06000413",
+     "name": "FindIndexesData",
+     "numeric_literals": null,
+     "signature": "() -> System.Collections.Generic.IEnumerable`1<FamilTsdDB.IndexItem>",
+     "string_literals": null,
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "52772c5d-4252-59d8-8137-b8f96cfe37bf",
+   "kind": "BinaryType",
+   "name": "FamilTsdDB.Index",
+   "namespace": "FamilTsdDB",
+   "super_type": null
+  }
+ }
+}

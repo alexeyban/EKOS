@@ -1,0 +1,162 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "d9e56902-b443-568d-bf04-f808378a3410"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDServer.exe",
+   "binary_sha256": "63e023e4f29f765d68a4c6c02f7e96f854889a4b40a90ad17c2965bd007b0d6e",
+   "locator": "0x0200002C"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 149,
+     "in_method": "Main",
+     "io_kind": "file",
+     "target": "System.IO.FileInfo..ctor"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Type.GetTypeFromHandle",
+      "log4net.LogManager.GetLogger",
+      "TSDServer.RemoteObject..ctor",
+      "System.Threading.ManualResetEvent..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "24fbe1da-ec22-5e66-8dd0-7580de240caf",
+     "is_static": true,
+     "locator": "0x060002B7",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.Control.Show",
+      "System.Windows.Forms.Form.Activate"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ffd7a02f-9bfd-5dfd-91c9-cf5654e5b671",
+     "is_static": true,
+     "locator": "0x060002B4",
+     "name": "Show",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.Properties.Settings.get_Default",
+      "TSDServer.Properties.Settings.get_AddressFrom",
+      "TSDServer.Properties.Settings.get_UserNameFrom",
+      "TSDServer.Properties.Settings.get_SmtpClient",
+      "SendMailAttach.SendMailClass..ctor",
+      "System.String.ToLower",
+      "System.String.op_Equality",
+      "TSDServer.Properties.Settings.set_LocalFilePath",
+      "System.Windows.Forms.Application.get_StartupPath",
+      "System.IO.Path.Combine",
+      "System.IO.FileInfo..ctor",
+      "log4net.Config.XmlConfigurator.Configure",
+      "TSDServer.DataLoaderClass..ctor",
+      "TSDServer.DataLoaderClass+FinishImport..ctor",
+      "TSDServer.DataLoaderClass.add_OnFinishImport",
+      "System.Threading.EventWaitHandle.Reset",
+      "TSDServer.DataLoaderClass.AutoLoadProduct",
+      "System.Threading.WaitHandle.WaitOne",
+      "System.Console.WriteLine",
+      "TSDServer.DataLoaderClass.AutoLoadDoc",
+      "log4net.ILog.Fatal",
+      "System.Object.ToString",
+      "TSDServer.Properties.Settings.get_AddressToList",
+      "SendMailAttach.SendMailClass.SendMail",
+      "System.Windows.Forms.MessageBox.Show",
+      "System.Windows.Forms.Application.EnableVisualStyles",
+      "System.Windows.Forms.Application.SetCompatibleTextRenderingDefault",
+      "TSDServer.Form1..ctor",
+      "System.Runtime.Remoting.Channels.Ipc.IpcChannel..ctor",
+      "System.Runtime.Remoting.Channels.ChannelServices.RegisterChannel",
+      "System.Type.GetTypeFromHandle",
+      "System.Runtime.Remoting.WellKnownServiceTypeEntry..ctor"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "1c7461b8-6fda-585f-a377-cfec5ae88e7c",
+     "is_static": true,
+     "locator": "0x060002B5",
+     "name": "Main",
+     "numeric_literals": [
+      "900000"
+     ],
+     "signature": "(System.String[]) -> System.Int32",
+     "string_literals": [
+      "/c",
+      "log4netconfig.xml",
+      "ERROR LOAD PRODUCT - TIMEOUT",
+      "ERROR LOAD DOCS - TIMEOUT",
+      "Ошибка загрузки данных",
+      "localhost:9090",
+      "RemoteObject.rem",
+      "ipc://localhost:9090/RemoteObject.rem"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Windows.Forms.Application.get_StartupPath"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "73ed61bc-26ef-5af5-9854-b3058a1d6480",
+     "is_static": true,
+     "locator": "0x060002B3",
+     "name": "get_CurrentPath",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.EventWaitHandle.Set"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "bd89000b-4068-5cb4-8f35-7e3a888558e1",
+     "is_static": true,
+     "locator": "0x060002B6",
+     "name": "loader_OnFinishImport",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "d9e56902-b443-568d-bf04-f808378a3410",
+   "kind": "BinaryType",
+   "name": "TSDServer.Program",
+   "namespace": "TSDServer",
+   "super_type": null
+  }
+ }
+}

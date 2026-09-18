@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How TSD Works — EKOS</title>
+<meta name="description" content="A scrollable deck: how a Windows CE barcode data-collection terminal and its desktop exchange server work, recovered by EKOS from compiled .NET binaries with no source code.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+  .ru{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .gloss{ color:var(--ink-soft); font-style:italic; font-size:0.86em; }
+  .menu{ display:grid; grid-template-columns:repeat(4,1fr); gap:0.9rem; margin-top:2.4rem; }
+  @media (max-width:900px){ .menu{ grid-template-columns:repeat(2,1fr); } }
+  .key{ border:1px solid var(--rule); background:var(--ground-raised); border-radius:8px; padding:1rem 1.1rem; box-shadow:var(--shadow); }
+  .key .n{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:1.5rem; font-weight:700; background:var(--accent-gradient); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .key .t{ font-weight:600; margin-top:0.2rem; }
+  .key .f{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem; color:var(--ink-soft); margin-top:0.35rem; }
+  .key.dim{ opacity:0.55; }
+  .src{ font-family:ui-monospace,"SF Mono",Consolas,monospace; font-size:0.72rem; color:var(--ink-soft); margin-top:1.6rem; }
+  .src b{ color:var(--accent-a); font-weight:600; }
+  .flow{ margin-top:2.2rem; }
+  .flow .node{ min-width:8rem; }
+  .flow .node .l2{ font-size:0.86rem; }
+  .steps3{ display:grid; grid-template-columns:repeat(3,1fr); gap:1.4rem; margin-top:2.4rem; }
+  @media (max-width:900px){ .steps3{ grid-template-columns:1fr; } }
+  .steps3 .inv p{ max-width:none; }
+  .quote{ font-size:0.95rem; color:var(--ink-soft); line-height:1.7; }
+  .quote .ru{ color:var(--ink); }
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true">
+  <a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a><a href="#s5"></a><a href="#s6"></a>
+  <a href="#s7"></a><a href="#s8"></a><a href="#s9"></a><a href="#s10"></a><a href="#s11"></a><a href="#s12"></a>
+</nav>
+
+<div class="deck">
+
+<!-- 1 -->
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>How TSD works,<br>read from its <span class="arrow-word">binaries</span>.</h1>
+  <p class="lede">A retail barcode terminal and its desktop exchange server, known to EKOS only as a <code class="mono">bin/Release</code> folder of compiled .NET assemblies: no source code, no documentation, no developers to ask. This deck explains how the whole system works. Every claim traces to a metadata token in a specific binary.</p>
+  <div class="hero-diagram">
+    <span class="chip">12 assemblies</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos build · recover · compile · commit</span><span class="sep mono">→</span>
+    <span class="chip">888 types · 8,327 methods · 10,956 call edges</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos_binary_explain · ekos_impact</span><span class="sep mono">→</span>
+    <span class="chip">this deck</span>
+  </div>
+  <div class="byline"><span class="dot"></span> github.com/alexeyban/tsd · RFC 0148 binary recovery · zero LLM calls · <a href="tsd-documentation.html">full documentation →</a></div>
+</section>
+
+<!-- 2 -->
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 01 / what it is</div>
+  <div class="eyebrow">The system in one slide</div>
+  <h2 style="font-size:clamp(1.8rem,3.6vw,2.7rem); max-width:24ch;">A handheld that scans, and a desktop that feeds it.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">The handheld window is titled <span class="ru">«Терминал сбора данных»</span> (data-collection terminal). Store staff use it for price checks, stock-taking, receiving trucks and boxes, and returns. The desktop app, <span class="ru">«Сервер обмена с ТСД»</span> (TSD exchange server), loads the product catalogue and documents onto it and pulls the scans back.</p>
+    <ul class="facts">
+      <li><span class="k">Handheld</span><span class="v"><code class="mono">TSDClient.exe</code>, .NET Compact Framework 2.0 on Windows CE. 117 types, 1,189 methods.</span></li>
+      <li><span class="k">Desktop</span><span class="v"><code class="mono">TSDServer.exe</code>, Windows Forms tray app. 59 types, 817 methods.</span></li>
+      <li><span class="k">Devices</span><span class="v">Vendor SDK wrappers under namespace <code class="mono">Calib</code>: barcode reader, Bluetooth, buzzer/vibrator.</span></li>
+      <li><span class="k">Upstream</span><span class="v">Products carry a <code class="mono">NavCode</code>, shown as <span class="ru">«Код навижн»</span> (Navision code). The ERP is most likely Dynamics NAV <span class="gloss">(reading)</span>.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 02 / architecture</div>
+  <div class="eyebrow">No network. No database server.</div>
+  <h2 style="font-size:clamp(1.8rem,3.6vw,2.7rem); max-width:26ch;">Everything moves as files through the ActiveSync cradle.</h2>
+  <div class="flow">
+    <div class="node"><div class="l1">upstream</div><div class="l2">text files<br>windows-1251</div></div>
+    <div class="arrow">→</div>
+    <div class="node active"><div class="l1">desktop</div><div class="l2">TSDServer<br>DataLoaderClass</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">FamilTsdDB</div><div class="l2">.db · .col<br>.idx · .idf</div></div>
+    <div class="arrow">⇄</div>
+    <div class="node"><div class="l1">ActiveSync</div><div class="l2">RAPI file copy</div></div>
+    <div class="arrow">⇄</div>
+    <div class="node active"><div class="l1">handheld</div><div class="l2">TSDClient<br>ActionsClass</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">results</div><div class="l2">scannedbarcodes<br>register</div></div>
+  </div>
+  <div class="inv-grid">
+    <div class="inv"><h3>Zero database I/O</h3><p>Across all 12 binaries, EKOS found no call into any database provider. The typed <code class="mono">TableAdapter</code>s call <code class="mono">FamilTsdDB</code>'s <code class="mono">Fill</code>/<code class="mono">Write</code>, an in-house indexed file store.</p></div>
+    <div class="inv"><h3>One code base, two exes</h3><p>The handheld declares its classes in namespace <code class="mono">TSDServer</code>. Both executables compile the same DataSets and the same storage engine.</p></div>
+  </div>
+  <div class="src"><b>evidence</b> 174 I/O boundaries, 0 of kind database · <code>RAPI.BeginCopyFileToDevice</code> / <code>CopyFileFromDevice</code> in TSDServer.exe 0x06000011 / 0x06000025</div>
+</section>
+
+<!-- 4 -->
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 03 / the daily cycle</div>
+  <div class="eyebrow">Seven steps, all compiled call paths</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem); max-width:26ch;">Import, upload, scan, download, publish.</h2>
+  <table class="ttable">
+    <thead><tr><th>#</th><th>Where</th><th>What happens</th><th>Method</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">1</td><td>desktop</td><td class="desc">Operator imports the product or document file; parsing runs on a background thread</td><td class="tool">AutoLoadProduct · LoadFile</td></tr>
+      <tr><td class="tool">2</td><td>desktop</td><td class="desc">windows-1251 text is parsed (fixed-width or delimited) into FamilTsdDB; bad barcodes are skipped</td><td class="tool">BeginImport</td></tr>
+      <tr><td class="tool">3</td><td>desktop → device</td><td class="desc">Catalogue-age check, old files deleted on the device, new ones copied over RAPI (device clock is synced on connect)</td><td class="tool">button2_Click</td></tr>
+      <tr><td class="tool">4</td><td>device</td><td class="desc">Settings.xml loaded (with built-in defaults), numbered menu shown, scanner started</td><td class="tool">Program.Main · BeginScan</td></tr>
+      <tr><td class="tool">5</td><td>device</td><td class="desc">Every scan updates the table and is journaled to disk at once, via change events</td><td class="tool">WriteDbTxt</td></tr>
+      <tr><td class="tool">6</td><td>device → desktop</td><td class="desc">Scanned files copied back over RAPI</td><td class="tool">downloadBtn_Click</td></tr>
+      <tr><td class="tool">7</td><td>desktop</td><td class="desc">Results written and archived as <code class="mono">{name}_{yyyyMMddhhmmss}.txt</code>; terminal wiped if configured</td><td class="tool">UploadResults · DeleteOldDB</td></tr>
+    </tbody>
+  </table>
+  <div class="src"><b>batch mode</b> <code>TSDServer.exe /c</code> runs steps 1–2 unattended with a 900,000 ms timeout per file; every import's status is emailed (<span class="ru">«Статус загрузки данных»</span>, data load status)</div>
+</section>
+
+<!-- 5 -->
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 04 / the handheld</div>
+  <div class="eyebrow">MainForm — verbatim button captions</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem);">A numbered keypad menu, seven workflows.</h2>
+  <div class="menu">
+    <div class="key"><div class="n">1</div><div class="t ru">Контроль цен</div><div class="gloss">price check</div><div class="f">ViewProductForm</div></div>
+    <div class="key"><div class="n">2</div><div class="t ru">Инвентаризация</div><div class="gloss">stock-taking</div><div class="f">InventarForm</div></div>
+    <div class="key"><div class="n">3</div><div class="t ru">Прием короба внутрит.</div><div class="gloss">internal box receiving</div><div class="f">IncomeForm</div></div>
+    <div class="key"><div class="n">4</div><div class="t ru">Прием машины</div><div class="gloss">truck receiving</div><div class="f">TtnForm → IncomeForm</div></div>
+    <div class="key"><div class="n">5</div><div class="t ru">Настройки</div><div class="gloss">settings</div><div class="f">SettingsForm</div></div>
+    <div class="key"><div class="n">6</div><div class="t ru">Накладные</div><div class="gloss">delivery notes</div><div class="f">InventarForm · SimpleIncome</div></div>
+    <div class="key"><div class="n">7</div><div class="t ru">Возвраты</div><div class="gloss">returns</div><div class="f">ReturnForm</div></div>
+    <div class="key dim"><div class="n">0</div><div class="t ru">Выход</div><div class="gloss">exit</div><div class="f">only if EnableExit</div></div>
+  </div>
+  <div class="src"><b>evidence</b> captions: string constants of MainForm 0x0200001D · forms: constructors called by <code>MenuEvents</code> 0x0600013C · key ↔ form pairing: reading</div>
+</section>
+
+<!-- 6 -->
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 05 / workflows</div>
+  <div class="eyebrow">What each screen enforces — its own messages</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem); max-width:26ch;">The rules live in the messages the code can show.</h2>
+  <div class="steps3">
+    <div class="inv"><h3>Receiving</h3><p class="quote"><span class="ru">«Это чужой короб!»</span> <span class="gloss">foreign box</span><br><span class="ru">«Короб уже принят!»</span> <span class="gloss">box already accepted</span><br><span class="ru">«ТТН не этого магазина!»</span> <span class="gloss">waybill for another store</span><br><span class="ru">«Принято {0} из {1} коробов»</span> <span class="gloss">{0} of {1} boxes accepted</span></p></div>
+    <div class="inv"><h3>Stock-taking and notes</h3><p class="quote"><span class="ru">«Отсканируейте ШК нового паспорта»</span> <span class="gloss">scan a new count sheet</span><br><span class="ru">«Просчет уже существует!»</span> <span class="gloss">count already exists</span><br><span class="ru">«Штрихкод {0} неверный адрес!»</span> <span class="gloss">wrong location barcode</span><br><span class="ru">«Товар уже принят {0} из {1}»</span> <span class="gloss">already received {0} of {1}</span></p></div>
+    <div class="inv"><h3>Price check and returns</h3><p class="quote"><span class="ru">«Этот товар участвует в возврате»</span> <span class="gloss">item is part of a return</span><br><span class="ru">«Не найдено возвратов»</span> <span class="gloss">no returns found</span><br><span class="ru">«Короб {0} уже закрыт»</span> <span class="gloss">box already closed</span><br>F1 / F2 print label · F4 documents</p></div>
+  </div>
+  <div class="src"><b>evidence</b> string literals of IncomeForm, TtnForm, InventarForm, ViewProductForm.DoAction 0x0600004B, ReturnForm, ActionsClass.CloseReturnBoxAction 0x060001B1</div>
+</section>
+
+<!-- 7 -->
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 06 / one scan</div>
+  <div class="eyebrow">Trigger to disk, following resolved Calls edges</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem); max-width:24ch;">Anatomy of a single scan.</h2>
+  <div class="flow">
+    <div class="node"><div class="l1">reader thread</div><div class="l2">ScanClass.start<br>SysWaitForEvent</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">screen</div><div class="l2">OnScanned<br>SearchBarcode</div></div>
+    <div class="arrow">→</div>
+    <div class="node active"><div class="l1">rules · cc 38</div><div class="l2">ViewProductForm<br>.DoAction</div></div>
+    <div class="arrow">→</div>
+    <div class="node active"><div class="l1">dispatch</div><div class="l2">ActionsClass<br>.InvokeAction</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">record</div><div class="l2">AddScannedRow</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><div class="l1">RowChanged</div><div class="l2">WriteDbTxt<br>journal + register</div></div>
+  </div>
+  <div class="two-col" style="margin-top:2.4rem;">
+    <ul class="facts">
+      <li><span class="k">Reader</span><span class="v"><code class="mono">OBROpen</code> via OBReadLibNet; waits on <code class="mono">"OBRScanningEvent"</code> with a 2000 ms timeout.</span></li>
+      <li><span class="k">Journal</span><span class="v">8 fields, <code class="mono">|</code>-separated, UTF-8, flushed per change, so a battery loss loses nothing.</span></li>
+    </ul>
+    <ul class="facts">
+      <li><span class="k">Blast radius</span><span class="v"><code class="mono">ekos_impact</code>: <b>29 methods</b> (14 direct, deepest 4 hops away) write scan records through <code class="mono">AddScannedRow</code>.</span></li>
+      <li><span class="k">Hotspot</span><span class="v"><code class="mono">navCodeTB_KeyDown</code> (cc 42) and <code class="mono">DoAction</code> (cc 38) are the most complex methods in the system.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 07 / action engine</div>
+  <div class="eyebrow">The back office decides what the terminal does</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem); max-width:26ch;">Behaviour ships as data, inside each document row.</h2>
+  <div class="two-col">
+    <div>
+      <p class="lede" style="margin-top:0;">Each <code class="mono">DocsTbl</code> row carries <code class="mono">LabelCode</code>, <code class="mono">MusicCode</code>, <code class="mono">VibroCode</code> and <code class="mono">Priority</code>. On a scan, the action handler plays <code class="mono">SOUND_{MusicCode}.def</code> on the buzzer and <code class="mono">VIBRO_{VibroCode}.def</code> on the vibrator. It can also print <code class="mono">LABEL_{n}.DEF</code> to the Bluetooth printer, after filling <code class="mono">&lt;GOODS_ATTRIBUTE_x&gt;</code>, <code class="mono">&lt;DOCS_ATTRIBUTE_x&gt;</code>, <code class="mono">&lt;SCAN_ATTRIBUTE_x&gt;</code> and <code class="mono">&lt;SYSTEMDATE&gt;</code>.</p>
+      <div class="src"><b>evidence</b> PlaySound 0x0600016F · PlayVibro 0x06000172 · PrintLabel 0x06000174 · ReplaceAttr 0x06000178 (constants 60/62 = &lt; &gt;)</div>
+    </div>
+    <div class="codeblock"><div class="tag">TSDUtils.ActionCode — 24 members · ekos_neighborhood</div>
+<pre style="margin:0;"><span class="k">NoAction</span>  <span class="k">Returns</span>  <span class="k">Reprice</span>  <span class="k">Remove</span>
+<span class="k">InventoryGlobal</span>  <span class="k">InventoryLocal</span>  <span class="k">QuickHelp</span>
+<span class="k">IncomeBox</span>  <span class="k">BoxIncomes</span>  <span class="k">SimpleIncome</span>  <span class="k">CloseIncome</span>
+<span class="k">Cars</span>  <span class="k">CarsBoxes</span>  <span class="k">BoxWProducts</span>  <span class="k">StrangeBox</span>
+<span class="k">BoxReturns</span>  <span class="k">ReturnBoxWProducts</span>  <span class="k">CloseBoxReturns</span>
+<span class="k">ReturnsTTN</span>  <span class="k">ReturnInInventory</span>  <span class="k">CloseInventar</span>
+<span class="k">AlreadyAccepted</span>  <span class="k">NotFound</span>  <span class="k">DocNotFound</span>
+<span class="c">// labels: ПЕРЕОЦЕНКА (repricing), ПЕРЕБРОСКА (transfer),</span>
+<span class="c">// СКОРАЯ ПОМОЩЬ (quick help), Поставки (ТТН) (deliveries), …</span></pre></div>
+  </div>
+</section>
+
+<!-- 9 -->
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 08 / data</div>
+  <div class="eyebrow">Typed DataSets, recovered from their accessors</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem);">Four tables carry the whole business.</h2>
+  <table class="ttable">
+    <thead><tr><th>Table</th><th>Columns</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">ProductsTbl</td><td class="desc">Barcode · NavCode · Article · ProductName · Country · Structure · OldPrice · NewPrice · Message (+ MarketPrice · Message2 · AcceptDefect on the client)</td><td class="desc">catalogue</td></tr>
+      <tr><td class="tool">DocsTbl</td><td class="desc">DocId · DocType · NavCode · DocumentDate · Quantity · Priority · LabelCode · MusicCode · VibroCode · Text1–3</td><td class="desc">plan + per-document behaviour</td></tr>
+      <tr><td class="tool">ScannedBarcodes</td><td class="desc">Barcode · DocId · DocType · PlanQuanity · FactQuantity · ScannedDate · TerminalId · Priority</td><td class="desc">the day's result</td></tr>
+      <tr><td class="tool">TypedSettings</td><td class="desc">19 terminal settings: printer MAC and COM port, storage path, templates, permissions…</td><td class="desc">Settings.xml</td></tr>
+    </tbody>
+  </table>
+  <div class="codeblock" style="margin-top:2rem;"><div class="tag">observed in the release folder</div>
+<pre style="margin:0;"><span class="c"># terminal journal (8 fields)          scannedbarcodes.txt1</span>
+<span class="s">6600000000001|6600000000001|8|0|02.01.2003|0|0|0</span>
+<span class="c"># desktop export (7 fields)             scannedbarcodes.txt</span>
+<span class="s">2900655000005|02: 15.06.11|2|1|29.06.2011|1|0</span></pre></div>
+</section>
+
+<!-- 10 -->
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 09 / what the graph found</div>
+  <div class="eyebrow">Things you only see with the call graph</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem); max-width:24ch;">Dead code, dead settings, missing files.</h2>
+  <div class="inv-grid">
+    <div class="inv warn"><h3>6 of 19 settings are never read</h3><p>Including <code class="mono">VibarationOn</code>/<code class="mono">ScanSoundNotifyOn</code> and the SQL&nbsp;CE <code class="mono">products.sdf</code> connection string. Their getters have no incoming <code class="mono">Calls</code> edge.</p></div>
+    <div class="inv warn"><h3>An unreachable screen</h3><p><code class="mono">ReturnBoxForm</code> (11 methods, a near-copy of <code class="mono">IncomeForm</code>) is never constructed. <code class="mono">GetDeviceID</code> is never called either, so <code class="mono">TerminalID</code> comes from the settings file.</p></div>
+    <div class="inv warn"><h3>Label templates are absent</h3><p><code class="mono">PrintLabel</code> reads <code class="mono">LABEL_{n}.DEF</code>, and none is in the folder. Three DLLs that no binary depends on (Imager, MoFlink, ControlsLib) ship anyway.</p></div>
+    <div class="inv warn"><h3>Three builds side by side</h3><p><code class="mono">TSDClient.exe</code>, <code class="mono">TSDClient - копия.exe</code> and <code class="mono">TSDClient.ex_</code> differ in type count. The folder alone cannot tell which one is deployed.</p></div>
+  </div>
+</section>
+
+<!-- 11 -->
+<section class="slide" id="s11">
+  <div class="stage-num mono">§ 10 / how EKOS knows</div>
+  <div class="eyebrow">Provenance, and its limits</div>
+  <h2 style="font-size:clamp(1.8rem,3.4vw,2.5rem); max-width:26ch;">Structural facts are certain. Conditions are not reconstructed.</h2>
+  <div class="two-col">
+    <ul class="facts">
+      <li><span class="k">Read</span><span class="v">Names, signatures, resolved calls, string and numeric constants, branch counts, fields. Read in-process from IL and metadata; the binaries are never executed.</span></li>
+      <li><span class="k">Traced</span><span class="v">Every fact carries its ECMA-335 token and the binary's SHA-256.</span></li>
+      <li><span class="k">Queried</span><span class="v"><code class="mono">ekos_binary_explain</code> over all 931 types; <code class="mono">ekos_impact</code>, <code class="mono">ekos_neighborhood</code>, <code class="mono">ekos_dependents</code>, <code class="mono">ekos_state</code>.</span></li>
+    </ul>
+    <ul class="facts">
+      <li><span class="k">Not known</span><span class="v">The exact predicate behind each of <code class="mono">DoAction</code>'s 33 branches; enum numeric values; import column widths (runtime settings).</span></li>
+      <li><span class="k">Not read</span><span class="v">Native <code class="mono">MCSSLib.dll</code> (ARM), the <code class="mono">.pdb</code> and the <code class="mono">.zip</code>.</span></li>
+      <li><span class="k">Not used</span><span class="v">The opt-in LLM business-rule reconstruction. Every "reading" in the documentation is a stated join of compiled facts.</span></li>
+    </ul>
+  </div>
+  <div class="src"><b>side effect</b> this analysis found and fixed four defects in EKOS's .NET recovery; before them the call graph above was empty (0 of 36,107 calls resolved). See devlog_190.</div>
+</section>
+
+<!-- 12 -->
+<section class="slide cta" id="s12">
+  <div class="eyebrow">Reproduce it</div>
+  <h2>Point EKOS at a release folder. Ask it anything.</h2>
+  <div class="codeblock"><pre style="margin:0;"><span class="c"># compile the binaries into a ledger</span>
+<span class="k">ekos</span> init && <span class="k">ekos</span> build && <span class="k">ekos</span> recover
+<span class="k">ekos</span> resolve --force && <span class="k">ekos</span> compile && <span class="k">ekos</span> commit
+<span class="c"># deterministic docs, then ask through MCP</span>
+<span class="k">ekos</span> docs generate --layout curated
+<span class="k">ekos</span> mcp serve --workspace .   <span class="c"># ekos_binary_explain · ekos_impact</span></pre></div>
+  <p class="fineprint"><a href="tsd-documentation.html">Full documentation (18 sections)</a> · <a href="examples/tsd/binary-explain/">raw ekos_binary_explain output</a> · <a href="examples/tsd/generated/">EKOS-generated reports</a></p>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

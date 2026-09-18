@@ -1,0 +1,2544 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "2f021241-9432-5fec-a33d-59ce0895365e"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x02000022"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [
+    {
+     "bytecode_offset": 166,
+     "in_method": "PlaySound",
+     "io_kind": "file",
+     "target": "System.IO.StreamReader..ctor"
+    },
+    {
+     "bytecode_offset": 172,
+     "in_method": "PlayVibro",
+     "io_kind": "file",
+     "target": "System.IO.StreamReader..ctor"
+    },
+    {
+     "bytecode_offset": 53,
+     "in_method": "OpenScanned",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 78,
+     "in_method": "OpenScanned",
+     "io_kind": "file",
+     "target": "System.IO.FileStream..ctor"
+    },
+    {
+     "bytecode_offset": 680,
+     "in_method": "OpenScanned",
+     "io_kind": "file",
+     "target": "System.IO.FileStream..ctor"
+    },
+    {
+     "bytecode_offset": 50,
+     "in_method": "TestFileArray",
+     "io_kind": "file",
+     "target": "System.IO.FileSystemInfo.Refresh"
+    },
+    {
+     "bytecode_offset": 27,
+     "in_method": "TestFileArray",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 43,
+     "in_method": "TestFileArray",
+     "io_kind": "file",
+     "target": "System.IO.FileInfo..ctor"
+    },
+    {
+     "bytecode_offset": 57,
+     "in_method": "TestFileArray",
+     "io_kind": "file",
+     "target": "System.IO.FileSystemInfo.get_LastWriteTime"
+    },
+    {
+     "bytecode_offset": 193,
+     "in_method": "PrintLabel",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 210,
+     "in_method": "PrintLabel",
+     "io_kind": "file",
+     "target": "System.IO.File.OpenRead"
+    },
+    {
+     "bytecode_offset": 386,
+     "in_method": "WriteDbTxt",
+     "io_kind": "file",
+     "target": "System.IO.StreamWriter..ctor"
+    },
+    {
+     "bytecode_offset": 178,
+     "in_method": "ClearScannedData",
+     "io_kind": "file",
+     "target": "System.IO.File.Delete"
+    },
+    {
+     "bytecode_offset": 146,
+     "in_method": "ClearScannedData",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 88,
+     "in_method": "ClearScannedData",
+     "io_kind": "file",
+     "target": "System.IO.File.Exists"
+    },
+    {
+     "bytecode_offset": 120,
+     "in_method": "ClearScannedData",
+     "io_kind": "file",
+     "target": "System.IO.File.Delete"
+    },
+    {
+     "bytecode_offset": 57,
+     "in_method": "CheckDbFile",
+     "io_kind": "file",
+     "target": "System.IO.FileSystemInfo.get_LastWriteTime"
+    },
+    {
+     "bytecode_offset": 35,
+     "in_method": "CheckDbFile",
+     "io_kind": "file",
+     "target": "System.IO.FileInfo.get_Length"
+    },
+    {
+     "bytecode_offset": 20,
+     "in_method": "CheckDbFile",
+     "io_kind": "file",
+     "target": "System.IO.FileSystemInfo.Refresh"
+    },
+    {
+     "bytecode_offset": 27,
+     "in_method": "CheckDbFile",
+     "io_kind": "file",
+     "target": "System.IO.FileSystemInfo.get_Exists"
+    },
+    {
+     "bytecode_offset": 13,
+     "in_method": "CheckDbFile",
+     "io_kind": "file",
+     "target": "System.IO.FileInfo..ctor"
+    }
+   ],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Quantity",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Priority",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "9eacb0c2-5402-5eab-b396-30c51a0be1a1",
+     "is_static": false,
+     "locator": "0x0600017F",
+     "name": "SimpleIncomeActionProc",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.remove_ColumnChanged",
+      "System.Data.DataTable.remove_RowChanged"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "9366fc42-aef1-585b-ae57-aee6be05b3a6",
+     "is_static": false,
+     "locator": "0x0600016C",
+     "name": "EndScan",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeDocTypeDocId",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDUtils.ActionCodeDescription.get_ActionDescription",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_LabelCode",
+      "TSDUtils.ActionCodeDescription.GetShablon",
+      "TSDServer.ActionsClass.PrintLabel",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass.PlayVibroAsync",
+      "TSDServer.ActionsClass.PlaySoundAsync",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "ba4bf5f5-b197-5d87-9cd2-9d218854dd0e",
+     "is_static": false,
+     "locator": "0x0600017B",
+     "name": "RepriceActionProc",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "TSDServer.ActionsClass.FindByDocIdAndDocType",
+      "System.String.Format",
+      "System.ApplicationException..ctor",
+      "System.Int64.Parse",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "ce0362ed-0b02-53bb-9cfb-4ccd121ed25e",
+     "is_static": false,
+     "locator": "0x0600019B",
+     "name": "OpenInv",
+     "numeric_literals": [
+      "13"
+     ],
+     "signature": "(System.String, TSDUtils.ActionCode, TSDServer.InventarFormMode) -> System.Void",
+     "string_literals": [
+      "Накл-я",
+      "Инв-ция",
+      "{0} {1} уже просчитана",
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "8d266d67-1427-5976-b09d-5a857303165e",
+     "is_static": true,
+     "locator": "0x06000160",
+     "name": "get_Action",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.ActionsClass",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByDocIdAndDocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Priority",
+      "System.Int64.Parse",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeDocTypeDocId",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.String.Format",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "0f5340b6-ae29-5f70-8d3e-8d3e1507f7b6",
+     "is_static": false,
+     "locator": "0x06000195",
+     "name": "CloseInv",
+     "numeric_literals": [
+      "13",
+      "255"
+     ],
+     "signature": "(System.String, TSDUtils.ActionCode, TSDServer.InventarFormMode) -> System.Void",
+     "string_literals": [
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Int64.Parse",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "TSDServer.ActionsClass.get_Products",
+      "TSDServer.ProductsDataSet.get_DocsTbl",
+      "System.DateTime.get_Now",
+      "TSDServer.ProductsDataSet+DocsTblDataTable.AddDocsTblRow",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.String.Format",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "11cdfa74-e871-50c5-ac60-39eba18ed933",
+     "is_static": false,
+     "locator": "0x060001B0",
+     "name": "CreateNewReturnBox",
+     "numeric_literals": [
+      "16"
+     ],
+     "signature": "(System.String, System.String) -> TSDServer.ProductsDataSet+DocsTblRow",
+     "string_literals": [
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "System.Int64.Parse",
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.GetDataByBarcode",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_NavCode",
+      "TSDServer.ActionsClass.GetDataByNavCodeAndType",
+      "System.ApplicationException..ctor"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "6c8d4b87-0efd-57ec-ae03-71583cd6e541",
+     "is_static": false,
+     "locator": "0x060001B8",
+     "name": "FindAllReturnsByProduct",
+     "numeric_literals": null,
+     "signature": "(System.String) -> TSDServer.ProductsDataSet+DocsTblRow[]",
+     "string_literals": [
+      "Не найдено возвратов"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByDocIdAndDocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Priority",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.String.Format",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "af4a6a84-3f05-5ea6-b10c-d689f478aa54",
+     "is_static": false,
+     "locator": "0x06000196",
+     "name": "CloseDoc",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(System.String, TSDUtils.ActionCode) -> System.Void",
+     "string_literals": [
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Random..ctor",
+      "TSDServer.ActionsClass..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "567cd998-11d9-5c8a-91e9-4ad25cfe1a3e",
+     "is_static": true,
+     "locator": "0x060001B9",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.TimeZone.get_CurrentTimeZone",
+      "System.DateTime.get_Now",
+      "System.TimeZone.GetUtcOffset",
+      "System.Text.StringBuilder..ctor",
+      "System.DateTime.ToString",
+      "System.String.Format",
+      "System.Text.StringBuilder.Append",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_DatabaseStoragePath",
+      "TSDServer.ActionsClass.get_Products",
+      "TSDServer.ProductsDataSet.get_ProductsTbl",
+      "System.Data.DataTable.get_TableName",
+      "TSDServer.ActionsClass.CheckDbFile",
+      "TSDServer.BaseTableAdapter.get_FileList",
+      "TSDServer.ActionsClass.TestFileArray",
+      "TSDServer.ProductsDataSet.get_DocsTbl",
+      "System.Object.ToString"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "eb8ada48-c2d6-5a35-a414-ccd081007763",
+     "is_static": false,
+     "locator": "0x060001AC",
+     "name": "TestDB",
+     "numeric_literals": null,
+     "signature": "(ref System.Boolean) -> System.String",
+     "string_literals": [
+      "Текущее время: {0}\n",
+      "dd.MM.yyyy HH:mm",
+      "{0}\\{1}.db"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.CloseProducts",
+      "TSDServer.ActionsClass.ClosedScanned"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "7011f951-feb2-5f96-b030-ac8b8d31824c",
+     "is_static": false,
+     "locator": "0x06000166",
+     "name": "CloseDB",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Remove"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ecafa1da-5dff-5012-8b82-c872e9d42881",
+     "is_static": false,
+     "locator": "0x0600015F",
+     "name": "remove_OnActionCompleted",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ActionsClass+ActionCompleted) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "constructed type.ContainsKey",
+      "constructed type.get_Item",
+      "constructed type.GetEnumerator",
+      "constructed type.get_Current",
+      "TSDUtils.SoundDef.get_SoundType",
+      "TSDUtils.SoundDef.get_Frequency",
+      "TSDUtils.SoundDef.get_Time",
+      "Calib.SystemLibNet+Api.SysPlayBuzzer",
+      "constructed type.MoveNext",
+      "System.IDisposable.Dispose",
+      "System.Threading.Monitor.Enter",
+      "constructed type..ctor",
+      "TSDServer.Program.get_StartupPath",
+      "System.String.Format",
+      "System.IO.Path.Combine",
+      "System.IO.StreamReader..ctor",
+      "System.String.Trim",
+      "System.String.get_Chars",
+      "TSDUtils.SoundDef.Parse",
+      "constructed type.Add",
+      "System.IO.TextReader.ReadLine",
+      "TSDServer.ActionsClass.PlaySound",
+      "System.Threading.Monitor.Exit"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "0367183b-b97e-50f5-b6f4-a0a4ceee7659",
+     "is_static": false,
+     "locator": "0x0600016F",
+     "name": "PlaySound",
+     "numeric_literals": [
+      "59"
+     ],
+     "signature": "(System.Byte) -> System.Void",
+     "string_literals": [
+      "SOUND_{0}.def"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Int64.Parse",
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.GetDataByBarcode"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ff48ac76-2e3f-52ff-b85c-f456dc5f58ae",
+     "is_static": false,
+     "locator": "0x0600019E",
+     "name": "GetProductRow",
+     "numeric_literals": null,
+     "signature": "(System.String) -> TSDServer.ProductsDataSet+ProductsTblRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Int64.Parse",
+      "TSDServer.ActionsClass.FindByBarcodeDocTypeDocId"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "dc611850-13a3-57e6-942f-7b587c63ecb6",
+     "is_static": false,
+     "locator": "0x060001A6",
+     "name": "FindByBarcodeDocTypeDocId",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Byte, System.String) -> TSDServer.ScannedProductsDataSet+ScannedBarcodesRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.OpenInv"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3b1d50f2-e350-5e6a-86de-e4ecf5c056db",
+     "is_static": false,
+     "locator": "0x0600019A",
+     "name": "OpenInv",
+     "numeric_literals": null,
+     "signature": "(System.String, TSDUtils.ActionCode) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "System.Data.DataRowCollection.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "System.Int64.Parse",
+      "constructed type.Add",
+      "constructed type.Remove",
+      "constructed type.get_Count",
+      "constructed type.get_Item",
+      "System.Int64.ToString"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "95662cd8-3992-5bd2-8e4c-e0ff6e1827ff",
+     "is_static": false,
+     "locator": "0x060001B2",
+     "name": "CheckOpenedReturnBox",
+     "numeric_literals": [
+      "16",
+      "17"
+     ],
+     "signature": "(System.String) -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByDocIdAndDocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Priority",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.String.Format",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "c2775e09-2505-5a7f-a27d-4854055d08bf",
+     "is_static": false,
+     "locator": "0x06000197",
+     "name": "CloseDoc",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(System.String, TSDUtils.ActionCode, System.Int32) -> System.Void",
+     "string_literals": [
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Quantity",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Priority",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "9d6a8724-9deb-5c0a-9d30-423f68fc0200",
+     "is_static": false,
+     "locator": "0x0600017E",
+     "name": "InventoryGlobalActionProc",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "eb40db7b-0cfe-55bc-9c7f-ce65bd4cd826",
+     "is_static": false,
+     "locator": "0x0600015C",
+     "name": "get_ScannedProducts",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.ScannedProductsDataSet",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "constructed type..ctor",
+      "TSDServer.ActionsClass.get_ScannedProducts",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose",
+      "constructed type.ToArray",
+      "TSDServer.ActionsClass.OpenScanned",
+      "TSDServer.ActionsClass.FindByDocIdAndDocType"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "8e283f6b-adb2-5e28-90d7-ba60ad0cf106",
+     "is_static": false,
+     "locator": "0x060001A5",
+     "name": "FindByDocIdAndDocType",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Byte) -> TSDServer.ScannedProductsDataSet+ScannedBarcodesRow[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.PlaySound"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "2df86137-0572-579f-91c6-76be7005e78a",
+     "is_static": false,
+     "locator": "0x0600016E",
+     "name": "PlaySound",
+     "numeric_literals": null,
+     "signature": "(System.Object) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "constructed type.ContainsKey",
+      "constructed type.get_Item",
+      "constructed type.GetEnumerator",
+      "constructed type.get_Current",
+      "TSDUtils.VibroDef.get_VibroType",
+      "TSDUtils.VibroDef.get_Count",
+      "TSDUtils.VibroDef.get_OnTime",
+      "TSDUtils.VibroDef.get_OFFTime",
+      "Calib.SystemLibNet+Api.SysPlayVibrator",
+      "constructed type.MoveNext",
+      "System.IDisposable.Dispose",
+      "System.Threading.Monitor.Enter",
+      "constructed type..ctor",
+      "TSDServer.Program.get_StartupPath",
+      "System.String.Format",
+      "System.IO.Path.Combine",
+      "System.IO.StreamReader..ctor",
+      "System.String.Trim",
+      "System.String.get_Chars",
+      "TSDUtils.VibroDef.Parse",
+      "constructed type.Add",
+      "System.IO.TextReader.ReadLine",
+      "TSDServer.ActionsClass.PlayVibro",
+      "System.Threading.Monitor.Exit"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "c0f8155b-686b-548d-be32-52cc98caa827",
+     "is_static": false,
+     "locator": "0x06000172",
+     "name": "PlayVibro",
+     "numeric_literals": [
+      "59"
+     ],
+     "signature": "(System.Byte) -> System.Void",
+     "string_literals": [
+      "VIBRO_{0}.def"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 17,
+     "call_targets": [
+      "constructed type..ctor",
+      "System.Convert.ToByte",
+      "constructed type.Add",
+      "constructed type.get_Count",
+      "constructed type.CopyTo",
+      "constructed type.Clear",
+      "TSDUtils.CustomEncodingClass.get_Encoding",
+      "TSDUtils.CustomEncodingClass.GetString",
+      "System.String.Replace",
+      "System.String.IndexOf",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeDocTypeDocId",
+      "System.Int32.Parse",
+      "System.Data.DataRow.get_Table",
+      "System.Data.DataTable.get_Columns",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "System.Data.DataRow.get_Item",
+      "System.Data.DataColumnCollection.get_Item",
+      "System.Data.DataColumn.get_DataType",
+      "TSDServer.ActionsClass.GetAttrValue",
+      "System.DateTime.get_Today",
+      "System.Type.GetTypeFromHandle",
+      "constructed type.AddRange",
+      "constructed type.ToArray"
+     ],
+     "cyclomatic_complexity": 18,
+     "id": "640310fb-865f-5d68-9fd7-bbd3f9f119d3",
+     "is_static": false,
+     "locator": "0x06000178",
+     "name": "ReplaceAttr",
+     "numeric_literals": [
+      "60",
+      "62"
+     ],
+     "signature": "(System.Byte[], TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Byte[]",
+     "string_literals": [
+      "<",
+      "GOODS",
+      "DOCS",
+      "SCAN",
+      "GOODS_ATTRIBUTE_",
+      "DOCS_ATTRIBUTE_",
+      "SCAN_ATTRIBUTE_",
+      "SYSTEMDATE"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "constructed type.ContainsKey",
+      "constructed type.get_Item",
+      "TSDServer.ActionsClass+ActOnProduct.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "44ed0215-37b0-5b61-83ea-c9015f0c969e",
+     "is_static": false,
+     "locator": "0x0600018D",
+     "name": "InvokeAction",
+     "numeric_literals": null,
+     "signature": "(TSDUtils.ActionCode, TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.PlayVibro",
+      "TSDServer.ActionsClass.PlaySound"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "b2b328f7-4ef8-5e26-9004-a53a59527b5d",
+     "is_static": false,
+     "locator": "0x0600017A",
+     "name": "NoActionProc",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "f0e7b036-252d-5647-b061-211dd95bcb6d",
+     "is_static": false,
+     "locator": "0x0600019C",
+     "name": "UndoLastScannedPosition",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow, TSDServer.ScannedProductsDataSet+ScannedBarcodesRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "a11ac14e-4749-518a-a43a-0d0cd8aa98d4",
+     "is_static": false,
+     "locator": "0x0600018E",
+     "name": "OnTimer",
+     "numeric_literals": null,
+     "signature": "(System.Object) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_VibroCode",
+      "TSDServer.ActionsClass.PlayVibroAsync"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "17de0d18-a08c-57c9-8dcd-690b5c10e4ad",
+     "is_static": false,
+     "locator": "0x0600018C",
+     "name": "PlayVibroAsyncAction",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByDocIdAndDocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Priority",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.String.Format",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "fcd34e21-6aed-546d-a194-e86520541bd5",
+     "is_static": false,
+     "locator": "0x06000188",
+     "name": "CloseCarAction",
+     "numeric_literals": [
+      "9",
+      "255"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": [
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 8,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Priority",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Contains",
+      "constructed type.Remove",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose",
+      "constructed type.get_Count",
+      "constructed type.get_Item",
+      "System.Int64.ToString"
+     ],
+     "cyclomatic_complexity": 9,
+     "id": "b8a39420-fc53-5980-8f1c-fd8a49e3cc8b",
+     "is_static": false,
+     "locator": "0x060001AB",
+     "name": "FindOpenInventar",
+     "numeric_literals": [
+      "13",
+      "255"
+     ],
+     "signature": "(TSDServer.InventarFormMode) -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.IO.Stream.Flush",
+      "System.IO.Stream.Close"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "216bd680-b1b4-5111-857e-3f4efdeffda7",
+     "is_static": false,
+     "locator": "0x06000165",
+     "name": "ClosedScanned",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.PlayVibroAsync",
+      "TSDServer.ActionsClass.PlaySoundAsync"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "b2da5b04-4d68-55d3-ae27-f6f018aa1fb5",
+     "is_static": false,
+     "locator": "0x06000184",
+     "name": "NotFoundActionProc",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.PlayVibroAsync",
+      "TSDServer.ActionsClass.PlaySoundAsync"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "1584353d-c734-5578-9b75-d5193246689c",
+     "is_static": false,
+     "locator": "0x06000185",
+     "name": "DocNotFoundActionProc",
+     "numeric_literals": [
+      "254"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "18ab1095-a249-579b-ad82-ae00de5c2190",
+     "is_static": false,
+     "locator": "0x0600015B",
+     "name": "set_Products",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.OpenScanned"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "069a633a-5442-5cf2-a486-f753dc35a253",
+     "is_static": false,
+     "locator": "0x0600018A",
+     "name": "LoadScannedData",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "System.Data.DataRowCollection.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Add",
+      "constructed type.Remove",
+      "constructed type.get_Count",
+      "constructed type.get_Item",
+      "System.Int64.ToString"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "95c08865-fc4e-5929-a4b8-f9e30ea583a6",
+     "is_static": false,
+     "locator": "0x060001B4",
+     "name": "FindFirstOpenedReturnBox",
+     "numeric_literals": [
+      "16",
+      "17"
+     ],
+     "signature": "() -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.GetDataByDocIdNavcodeAndType"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "2d869fbc-0d46-5b98-a6f5-e09f4323af39",
+     "is_static": false,
+     "locator": "0x060001A3",
+     "name": "GetDataByNavcodeDocIdAndType",
+     "numeric_literals": null,
+     "signature": "(System.String, System.String, System.Byte) -> TSDServer.ProductsDataSet+DocsTblRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "System.Type.GetTypeFromHandle",
+      "TSDUtils.CustomEncodingClass.get_Encoding",
+      "System.Object.ToString",
+      "TSDUtils.CustomEncodingClass.GetBytes",
+      "System.DateTime.ToString",
+      "System.Int32.ToString",
+      "System.Single.ToString"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "ad6a7e38-dad8-5823-84b3-326b9f63f739",
+     "is_static": false,
+     "locator": "0x06000179",
+     "name": "GetAttrValue",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.Type) -> System.Byte[]",
+     "string_literals": [
+      "dd.MM.yyyy",
+      "######",
+      "######.00"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.GetAllDataByDocIdAndType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_NavCode",
+      "TSDServer.ActionsClass.GetProductRowByNavCode",
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Quantity",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "f7cdef93-80d1-52b1-8e50-9e1ba9f15164",
+     "is_static": false,
+     "locator": "0x06000182",
+     "name": "AcceptFullBoxWProductsActionProc",
+     "numeric_literals": [
+      "10",
+      "255"
+     ],
+     "signature": "(System.String) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeAndDocType",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDUtils.ActionCodeDescription.get_ActionDescription",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_LabelCode",
+      "TSDUtils.ActionCodeDescription.GetShablon",
+      "TSDServer.ActionsClass.PrintLabel",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass.PlayVibroAsync",
+      "TSDServer.ActionsClass.PlaySoundAsync",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke",
+      "System.Threading.Thread.Sleep"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "7839e065-288b-53d9-b8df-5bddd9e4f99a",
+     "is_static": false,
+     "locator": "0x0600017C",
+     "name": "ReturnActionProc",
+     "numeric_literals": [
+      "255",
+      "1000"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "f20981af-8521-5575-a0eb-57be8d10959b",
+     "is_static": false,
+     "locator": "0x0600015D",
+     "name": "set_ScannedProducts",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ScannedProductsDataSet) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.PrintLabel"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "87225c36-b706-5cb1-a021-47ea4a76ce7d",
+     "is_static": false,
+     "locator": "0x06000176",
+     "name": "PrintLabel",
+     "numeric_literals": null,
+     "signature": "(System.Object) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "System.Data.DataRowCollection.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Add",
+      "constructed type.Remove",
+      "constructed type.ToArray"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "4228441f-11fe-5d51-be7f-2ec9cf45d611",
+     "is_static": false,
+     "locator": "0x060001B5",
+     "name": "FindAllOpenedReturnBox",
+     "numeric_literals": [
+      "16",
+      "17"
+     ],
+     "signature": "(System.String) -> System.Int64[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 9,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "System.IO.File.Exists",
+      "System.IO.FileStream..ctor",
+      "System.IO.Stream.get_Length",
+      "System.IO.Stream.Read",
+      "System.Text.Encoding.get_UTF8",
+      "System.Text.Encoding.GetString",
+      "System.String.Split",
+      "System.String.IsNullOrEmpty",
+      "TSDServer.ActionsClass.get_ScannedProducts",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.NewScannedBarcodesRow",
+      "System.Int64.Parse",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Barcode",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_DocId",
+      "System.Byte.Parse",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_DocType",
+      "System.Int32.Parse",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "System.DateTime.Parse",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_ScannedDate",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_TerminalId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Priority",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_PlanQuanity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeDocTypeDocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Priority",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.AddScannedBarcodesRow"
+     ],
+     "cyclomatic_complexity": 10,
+     "id": "3ca3e7c3-a696-5344-8d97-4a0b5018aabe",
+     "is_static": false,
+     "locator": "0x06000163",
+     "name": "OpenScanned",
+     "numeric_literals": [
+      "10",
+      "124"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.FindOpenInventar"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "588e80b3-7721-5640-95a0-aed39f247444",
+     "is_static": false,
+     "locator": "0x060001AA",
+     "name": "FindOpenInventar",
+     "numeric_literals": null,
+     "signature": "() -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Delegate.Combine"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "69c29ae3-cee1-504d-b337-15b58a5649b1",
+     "is_static": false,
+     "locator": "0x0600015E",
+     "name": "add_OnActionCompleted",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ActionsClass+ActionCompleted) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeAndDocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_PlanQuanity",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDUtils.ActionCodeDescription.get_ActionDescription",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_LabelCode",
+      "TSDUtils.ActionCodeDescription.GetShablon",
+      "TSDServer.ActionsClass.PrintLabel",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass.PlayVibroAsync",
+      "TSDServer.ActionsClass.PlaySoundAsync",
+      "TSDServer.RemoveFinishForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog",
+      "System.IDisposable.Dispose",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "009bc547-ab0e-5bf7-b2b4-cba2f9385827",
+     "is_static": false,
+     "locator": "0x0600017D",
+     "name": "RemoveActionProc",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "System.Data.DataRowCollection.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Add",
+      "constructed type.Remove",
+      "constructed type.get_Count",
+      "constructed type.get_Item",
+      "System.Int64.ToString"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "b8d9c912-2d26-5fb4-864e-65fd7ea2932d",
+     "is_static": false,
+     "locator": "0x060001B3",
+     "name": "FindFirstOpenedReturnBox",
+     "numeric_literals": [
+      "16",
+      "17"
+     ],
+     "signature": "(System.String) -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.BaseTableAdapter.get_Opened",
+      "TSDServer.BaseTableAdapter.Open"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "a6d75b90-8cd0-5fc3-bd2f-8b4ea60ba419",
+     "is_static": false,
+     "locator": "0x06000162",
+     "name": "OpenProducts",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "844183ed-f33f-5e0a-9235-a3e226773af8",
+     "is_static": false,
+     "locator": "0x0600019D",
+     "name": "ChangeQtyPosition",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+DocsTblRow, TSDServer.ScannedProductsDataSet+ScannedBarcodesRow, System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.DateTime.get_Today",
+      "System.DateTime.get_Year",
+      "System.DateTime.get_Month",
+      "System.DateTime.get_Day",
+      "System.Int32.ToString",
+      "System.Random.Next",
+      "System.String.Concat",
+      "System.String.get_Chars",
+      "System.Char.ToString",
+      "System.Byte.Parse",
+      "System.String.get_Length",
+      "System.Byte.ToString",
+      "System.Int64.Parse"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "f818ca09-3071-5cb8-b0cd-b3c87639c8fe",
+     "is_static": false,
+     "locator": "0x060001AF",
+     "name": "GenerateNewBarcodeReturnBox",
+     "numeric_literals": [
+      "10000",
+      "100",
+      "10"
+     ],
+     "signature": "() -> System.Int64",
+     "string_literals": [
+      "0#",
+      "16"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Quantity",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "2428ebc2-6e7d-5366-8c18-2e16461e00b8",
+     "is_static": false,
+     "locator": "0x06000181",
+     "name": "BoxWProductsActionProc",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow, System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass+PrintLabelParam..ctor",
+      "System.Threading.WaitCallback..ctor",
+      "System.Threading.ThreadPool.QueueUserWorkItem"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "caf64a83-d63c-597f-9a23-d0565ba07750",
+     "is_static": false,
+     "locator": "0x06000177",
+     "name": "PrintLabelAsync",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_ScannedProducts",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose",
+      "TSDServer.ActionsClass.OpenScanned",
+      "TSDServer.ActionsClass.FindByBarcodeDocTypeDocId"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "7cd1f4c6-4e94-501b-bcd6-28864fc7a7a1",
+     "is_static": false,
+     "locator": "0x060001A7",
+     "name": "FindByBarcodeDocTypeDocId",
+     "numeric_literals": null,
+     "signature": "(System.Int64, System.Byte, System.String) -> TSDServer.ScannedProductsDataSet+ScannedBarcodesRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.BaseTableAdapter.Close",
+      "TSDServer.ProductsDataSet.get_ProductsTbl",
+      "System.Data.DataTable.Clear",
+      "TSDServer.ProductsDataSet.get_DocsTbl"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "40b35ca8-624e-50d9-a35a-7955053a75d6",
+     "is_static": false,
+     "locator": "0x06000164",
+     "name": "CloseProducts",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "System.Data.DataColumnChangeEventArgs.get_Column",
+      "System.Data.DataColumn.get_ColumnName",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.get_FactQuantityColumn",
+      "System.String.op_Equality",
+      "System.Data.DataColumnChangeEventArgs.get_Row",
+      "System.Data.DataRow.get_Item",
+      "System.Data.DataColumnChangeEventArgs.get_ProposedValue",
+      "TSDServer.ActionsClass.WriteDbTxt"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "75ecbdf1-a13a-59dd-8566-c92057ee6ca6",
+     "is_static": false,
+     "locator": "0x06000168",
+     "name": "ScannedBarcodes_ColumnChanged",
+     "numeric_literals": null,
+     "signature": "(System.Object, System.Data.DataColumnChangeEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Products",
+      "TSDServer.ProductsDataSet.get_ProductsTbl",
+      "System.Data.DataTable.Clear",
+      "TSDServer.ProductsDataSet.get_DocsTbl",
+      "TSDServer.ActionsClass.get_ScannedProducts",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataSet.AcceptChanges"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "3b8680ad-a4b6-5d7a-bfe8-ddcc8ed57cab",
+     "is_static": false,
+     "locator": "0x060001A9",
+     "name": "ClearCache",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.WaitCallback..ctor",
+      "System.Threading.ThreadPool.QueueUserWorkItem"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "13051066-1e55-590b-918d-e69f4d66757a",
+     "is_static": false,
+     "locator": "0x06000170",
+     "name": "PlayVibroAsync",
+     "numeric_literals": null,
+     "signature": "(System.Byte) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "System.Text.StringBuilder..ctor",
+      "System.IO.File.Exists",
+      "System.IO.FileInfo..ctor",
+      "System.IO.FileSystemInfo.Refresh",
+      "System.IO.FileSystemInfo.get_LastWriteTime",
+      "System.DateTime.AddHours",
+      "System.DateTime.Subtract",
+      "System.TimeSpan.get_Minutes",
+      "System.Math.Abs",
+      "System.String.Format",
+      "System.Text.StringBuilder.Append",
+      "System.Object.ToString"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "374ddf3c-1007-59be-820a-3c9c02c0b746",
+     "is_static": false,
+     "locator": "0x060001AD",
+     "name": "TestFileArray",
+     "numeric_literals": [
+      "15"
+     ],
+     "signature": "(ref System.Boolean, System.DateTime, System.String[]) -> System.String",
+     "string_literals": [
+      "Файл БД\n {0}\n возможно старый!\n",
+      "Файл\n {0}\n отсутствует!\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDUtils.ActionCodeDescription.get_ActionDescription",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_LabelCode",
+      "TSDUtils.ActionCodeDescription.GetShablon",
+      "TSDServer.ActionsClass.PrintLabel"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "b922dcf6-e623-50ee-a7a6-96561ce2f6fe",
+     "is_static": false,
+     "locator": "0x06000173",
+     "name": "PrintLabel",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet..ctor",
+      "TSDServer.ProductsDataSet..ctor",
+      "constructed type..ctor",
+      "System.Globalization.DateTimeFormatInfo..ctor",
+      "System.Globalization.NumberFormatInfo..ctor",
+      "System.Object..ctor",
+      "System.TimeZone.get_CurrentTimeZone",
+      "System.DateTime.get_Now",
+      "System.TimeZone.GetUtcOffset",
+      "System.TimeSpan.get_Hours",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BaseDate",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_DatabaseStoragePath",
+      "TSDServer.BTPrintClass.get_PrintClass",
+      "System.Globalization.DateTimeFormatInfo.set_ShortDatePattern",
+      "System.Globalization.DateTimeFormatInfo.set_FullDateTimePattern",
+      "System.Globalization.DateTimeFormatInfo.set_DateSeparator",
+      "System.Globalization.NumberFormatInfo.set_NumberDecimalSeparator",
+      "System.Globalization.NumberFormatInfo.set_NumberGroupSeparator",
+      "TSDServer.ActionsClass+ActOnProduct..ctor",
+      "constructed type.Add",
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter..ctor",
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter..ctor",
+      "System.IO.Path.Combine",
+      "System.Data.DataRowChangeEventHandler..ctor",
+      "System.Data.DataColumnChangeEventHandler..ctor"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "9855c7dc-1fc0-5238-a972-6a2ff3a72ed6",
+     "is_static": false,
+     "locator": "0x06000161",
+     "name": ".ctor",
+     "numeric_literals": [
+      "11",
+      "14",
+      "255",
+      "254"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "dd.MM.yyyy",
+      "dd.MM.yyyy HH:mm:ss",
+      ".",
+      "scannedbarcodes.txt"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_ScannedDate",
+      "System.DateTime.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Contains",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "75838e46-bd03-5e56-905f-f47a7cbab63c",
+     "is_static": false,
+     "locator": "0x06000193",
+     "name": "CalculateTotalsWOPriority",
+     "numeric_literals": null,
+     "signature": "(TSDUtils.ActionCode, System.DateTime, ref System.Int32, ref System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.BTPrintClass.get_Connected",
+      "TSDServer.BTPrintClass.Print",
+      "TSDServer.SettingsDataSet.get_TypedSettings",
+      "TSDServer.SettingsDataSet+TypedSettingsDataTable.get_Item",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_BTPrinterAddress",
+      "TSDServer.BTPrintClass.ConnToPrinter",
+      "TSDServer.BTPrintClass.SetErrorEvent",
+      "System.Threading.Thread.Sleep"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "a3d20219-2be2-575e-9333-2ed7654c8124",
+     "is_static": false,
+     "locator": "0x06000175",
+     "name": "Print",
+     "numeric_literals": [
+      "5000"
+     ],
+     "signature": "(System.Byte[]) -> System.Boolean",
+     "string_literals": [
+      "Ошибка связи BlueTooth. Ждите 5 сек..."
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 5,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Contains",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 6,
+     "id": "9f577c1d-dce8-5c99-bcc1-122fe23149a3",
+     "is_static": false,
+     "locator": "0x06000191",
+     "name": "CalculateTotalsWOPriority",
+     "numeric_literals": null,
+     "signature": "(TSDUtils.ActionCode, ref System.Int32, ref System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 9,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Priority",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Contains",
+      "constructed type.Remove",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose",
+      "constructed type.get_Count"
+     ],
+     "cyclomatic_complexity": 10,
+     "id": "f1672df6-d891-593e-a287-31406017c165",
+     "is_static": false,
+     "locator": "0x06000199",
+     "name": "CheckInv",
+     "numeric_literals": [
+      "13",
+      "255"
+     ],
+     "signature": "(System.String, TSDServer.InventarFormMode) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.Data.DataRowChangeEventArgs.get_Action",
+      "System.Data.DataRowChangeEventArgs.get_Row",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ActionsClass.WriteDbTxt"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "99912f51-3902-5dd0-9601-dd3f2a6c2116",
+     "is_static": false,
+     "locator": "0x06000169",
+     "name": "ScannedBarcodes_RowChanged",
+     "numeric_literals": [
+      "16"
+     ],
+     "signature": "(System.Object, System.Data.DataRowChangeEventArgs) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeDocTypeDocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.NewScannedBarcodesRow",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Barcode",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_DocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_PlanQuanity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_Priority",
+      "System.DateTime.get_Today",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_ScannedDate",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.Program.get_TerminalId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_TerminalId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.AddScannedBarcodesRow",
+      "System.Data.DataTable.AcceptChanges"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "ef73f7b4-700c-54a1-8311-095077889567",
+     "is_static": false,
+     "locator": "0x060001A4",
+     "name": "AddScannedRow",
+     "numeric_literals": null,
+     "signature": "(System.Int64, System.Byte, System.String, System.Int32, System.Byte) -> TSDServer.ScannedProductsDataSet+ScannedBarcodesRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.CloseInv"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "041db401-911b-557f-a24f-4e4dcf77550a",
+     "is_static": false,
+     "locator": "0x06000194",
+     "name": "CloseInv",
+     "numeric_literals": null,
+     "signature": "(System.String, TSDUtils.ActionCode) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "System.Int64.Parse",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "constructed type.Contains",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "28676ec3-1a5e-5fe6-8fe6-2c3a8dad9f7c",
+     "is_static": false,
+     "locator": "0x06000192",
+     "name": "CalculateTotalsWOPriority",
+     "numeric_literals": null,
+     "signature": "(TSDUtils.ActionCode, System.String, System.String, ref System.Int32, ref System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 7,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByBarcodeAndDocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_PlanQuanity",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDUtils.ActionCodeDescription.get_ActionDescription",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_LabelCode",
+      "TSDUtils.ActionCodeDescription.GetShablon",
+      "TSDServer.ActionsClass.PrintLabel",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass.PlayVibroAsync",
+      "TSDServer.ActionsClass.PlaySoundAsync",
+      "TSDServer.RemoveFinishForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog",
+      "System.IDisposable.Dispose",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 8,
+     "id": "e3ec67ac-31ee-547c-966f-8876fb1f595e",
+     "is_static": false,
+     "locator": "0x06000183",
+     "name": "InventoryLocalActionProc",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Priority",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Contains",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "60ea7522-c1a7-55d3-be2b-e8ef029513d2",
+     "is_static": false,
+     "locator": "0x06000190",
+     "name": "CalculateTotals",
+     "numeric_literals": [
+      "255"
+     ],
+     "signature": "(TSDUtils.ActionCode, ref System.Int32, ref System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.GetDataByNavCodeAndType"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "ad662de4-67f7-5762-b800-f390dae57ef7",
+     "is_static": false,
+     "locator": "0x060001A1",
+     "name": "GetDataByNavCodeAndType",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Byte) -> TSDServer.ProductsDataSet+DocsTblRow[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_MusicCode",
+      "TSDServer.ActionsClass.PlaySoundAsync"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "f5599f9a-49d6-5ea5-970d-ce04d266dc6d",
+     "is_static": false,
+     "locator": "0x0600018B",
+     "name": "PlaySoundAsyncAction",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.ProductsDataSet+ProductsTblRow.get_Barcode",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_DocId",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Quantity",
+      "TSDServer.ProductsDataSet+DocsTblRow.get_Priority",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "TSDServer.ActionsClass.PlayVibroAsyncAction",
+      "TSDServer.ActionsClass.PlaySoundAsyncAction",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass+ActionCompleted.Invoke"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "6d00ca9a-0e5a-538b-8fd4-a69b32a9466b",
+     "is_static": false,
+     "locator": "0x06000180",
+     "name": "ReturnBoxWProductsActionProc",
+     "numeric_literals": [
+      "15"
+     ],
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "System.Data.DataRowCollection.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Add",
+      "constructed type.Remove",
+      "constructed type.get_Count",
+      "constructed type.get_Values",
+      "constructed type.CopyTo",
+      "TSDServer.ActionsClass.get_Products",
+      "TSDServer.ProductsDataSet.get_DocsTbl",
+      "System.Int64.ToString",
+      "System.DateTime.get_Now",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "TSDServer.ProductsDataSet+DocsTblDataTable.AddDocsTblRow"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "cb34e942-a7c0-5d06-a881-a161bb8b54a1",
+     "is_static": false,
+     "locator": "0x060001B7",
+     "name": "GetActualBoxReturnsDocRow",
+     "numeric_literals": [
+      "16",
+      "17"
+     ],
+     "signature": "() -> TSDServer.ProductsDataSet+DocsTblRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.FindByDocIdAndDocType",
+      "System.Int64.Parse",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "System.String.Format",
+      "System.ApplicationException..ctor",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "42ea383b-9228-5dc6-a263-debd598aa7c3",
+     "is_static": false,
+     "locator": "0x060001B1",
+     "name": "CloseReturnBoxAction",
+     "numeric_literals": [
+      "17",
+      "255"
+     ],
+     "signature": "(System.String, System.String) -> System.Void",
+     "string_literals": [
+      "Короб {0} уже закрыт",
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.ProductsTblTableAdapter.GetDataByNavcode"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "c42e85ed-ac2c-5761-8f89-01e2af472dd1",
+     "is_static": false,
+     "locator": "0x0600019F",
+     "name": "GetProductRowByNavCode",
+     "numeric_literals": null,
+     "signature": "(System.String) -> TSDServer.ProductsDataSet+ProductsTblRow",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 9,
+     "call_targets": [
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_WaitPrintTimeDefault",
+      "System.Threading.WaitHandle.WaitOne",
+      "TSDServer.BTPrintClass.SetStatusEvent",
+      "constructed type.ContainsKey",
+      "constructed type.get_Item",
+      "TSDUtils.CustomEncodingClass.get_Encoding",
+      "TSDUtils.CustomEncodingClass.GetString",
+      "TSDServer.Program.get_StartupPath",
+      "System.String.Format",
+      "System.IO.Path.Combine",
+      "System.IO.File.Exists",
+      "System.IO.File.OpenRead",
+      "System.IO.Stream.get_Length",
+      "System.IO.Stream.Read",
+      "System.IO.Stream.Close",
+      "System.IDisposable.Dispose",
+      "constructed type.Add",
+      "System.String.IndexOf",
+      "System.String.Substring",
+      "TSDUtils.CustomEncodingClass.GetBytes",
+      "TSDServer.ActionsClass.ReplaceAttr",
+      "TSDServer.ActionsClass.Print",
+      "System.String.get_Length",
+      "TSDServer.BTConnectionErrorForm..ctor",
+      "System.Windows.Forms.Form.ShowDialog",
+      "TSDServer.BTPrintClass.get_PrintClass",
+      "TSDServer.BTPrintClass.Reconnect",
+      "TSDServer.ActionsClass.PrintLabel",
+      "System.Object.ToString",
+      "TSDServer.BTPrintClass.SetErrorEvent"
+     ],
+     "cyclomatic_complexity": 10,
+     "id": "8292f17f-520d-5f73-841a-7e57b3f16dd9",
+     "is_static": false,
+     "locator": "0x06000174",
+     "name": "PrintLabel",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ProductsDataSet+ProductsTblRow, TSDServer.ProductsDataSet+DocsTblRow, System.UInt32) -> System.Boolean",
+     "string_literals": [
+      "Ожидание очереди печати {0} попытка...",
+      "LABEL_{0}.DEF",
+      "MAGICSTRING",
+      "Ошибка! Отключите принтер и подключите заново",
+      "Отключите принтер и подключите заново"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.PlayVibro"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "bbcebc16-343e-5748-8d73-d7774ee065b9",
+     "is_static": false,
+     "locator": "0x06000171",
+     "name": "PlayVibro",
+     "numeric_literals": null,
+     "signature": "(System.Object) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.GetAllDataByDocIdAndType"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "594b79a0-ef1c-54ad-b2b6-c08e4f7e78bb",
+     "is_static": false,
+     "locator": "0x060001A2",
+     "name": "GetDataByDocIdAndType",
+     "numeric_literals": null,
+     "signature": "(System.String, System.Byte) -> TSDServer.ProductsDataSet+DocsTblRow[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 8,
+     "call_targets": [
+      "System.Data.DataRow.get_RowState",
+      "System.Data.DataRow.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_ScannedDate",
+      "System.DateTime.AddHours",
+      "System.DateTime.ToString",
+      "System.DateTime.get_Today",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_TerminalId",
+      "System.Int32.ToString",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Priority",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_PlanQuanity",
+      "System.String.Format",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_DatabaseStoragePath",
+      "System.IO.Path.Combine",
+      "System.IO.StreamWriter..ctor",
+      "System.IO.TextWriter.WriteLine",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 9,
+     "id": "d26000c0-03fa-58d9-a33e-33dc3f4ad188",
+     "is_static": false,
+     "locator": "0x0600016A",
+     "name": "WriteDbTxt",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ScannedProductsDataSet+ScannedBarcodesRow, System.Int32) -> System.Void",
+     "string_literals": [
+      "FactQuantity",
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}",
+      "ScannedDate",
+      "dd.MM.yyyy",
+      "TerminalId",
+      "\r\n",
+      "register.txt",
+      "{0},{1,11:D}, {2,7:D}"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_Action",
+      "TSDServer.Boxes.get_Barcode",
+      "System.Int64.Parse",
+      "TSDServer.ActionsClass.AddScannedRow",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.set_FactQuantity",
+      "TSDServer.ActionsClass.PlaySoundAsync",
+      "TSDServer.ActionsClass.PlayVibroAsync"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "51304b4c-af94-580c-8973-40389295dedb",
+     "is_static": false,
+     "locator": "0x06000186",
+     "name": "IncomeCarBoxAction",
+     "numeric_literals": [
+      "12"
+     ],
+     "signature": "(System.String, TSDServer.Boxes) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Threading.WaitCallback..ctor",
+      "System.Threading.ThreadPool.QueueUserWorkItem"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "2e305a97-f1da-5376-94a6-7eb2a093f965",
+     "is_static": false,
+     "locator": "0x0600016D",
+     "name": "PlaySoundAsync",
+     "numeric_literals": null,
+     "signature": "(System.Byte) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 3,
+     "call_targets": [
+      "System.IO.Stream.Close",
+      "System.Threading.Thread.Sleep",
+      "TSDServer.ActionsClass.get_ScannedProducts",
+      "System.Data.DataSet.Clear",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_DatabaseStoragePath",
+      "System.IO.Path.Combine",
+      "System.IO.File.Exists",
+      "System.IO.File.Delete"
+     ],
+     "cyclomatic_complexity": 4,
+     "id": "c3e55bff-919e-563d-8427-cadb0da909a5",
+     "is_static": false,
+     "locator": "0x06000189",
+     "name": "ClearScannedData",
+     "numeric_literals": [
+      "500"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "scannedbarcodes.txt",
+      "register.txt"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ActionsClass.OpenScanned",
+      "constructed type..ctor",
+      "System.Data.DataRowCollection.get_Item",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Add",
+      "constructed type.ToArray"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "8fd2eb4d-f363-56cf-bc0d-05201689ed9d",
+     "is_static": false,
+     "locator": "0x060001B6",
+     "name": "FindAllReturnBox",
+     "numeric_literals": [
+      "16"
+     ],
+     "signature": "(System.String) -> System.Int64[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 6,
+     "call_targets": [
+      "constructed type..ctor",
+      "TSDServer.ActionsClass.get_ScannedProducts",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.get_Rows",
+      "System.Data.InternalDataCollectionBase.get_Count",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "constructed type.Add",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose",
+      "TSDServer.ActionsClass.OpenScanned",
+      "TSDServer.ActionsClass.FindByBarcodeDocType",
+      "constructed type.ToArray"
+     ],
+     "cyclomatic_complexity": 7,
+     "id": "e786ca58-61f4-513c-80f7-d7a0b8ba042d",
+     "is_static": false,
+     "locator": "0x060001A8",
+     "name": "FindByBarcodeDocType",
+     "numeric_literals": null,
+     "signature": "(System.Int64, System.Byte) -> TSDServer.ScannedProductsDataSet+ScannedBarcodesRow[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ActionsClass.CheckInv"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "34efcae9-d9a2-5817-916e-bb1ff7dcafc4",
+     "is_static": false,
+     "locator": "0x06000198",
+     "name": "CheckInv",
+     "numeric_literals": null,
+     "signature": "(System.String) -> System.Boolean",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ProductsDataSetTableAdapters.DocsTblTableAdapter.GetDataByNavCode"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "0484ceeb-3906-5cf0-b231-f013afc8dc57",
+     "is_static": false,
+     "locator": "0x060001A0",
+     "name": "GetDataByNavCode",
+     "numeric_literals": null,
+     "signature": "(System.String) -> TSDServer.ProductsDataSet+DocsTblRow[]",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "a1e587f5-2975-5115-b7f6-eb0584a39e67",
+     "is_static": false,
+     "locator": "0x0600015A",
+     "name": "get_Products",
+     "numeric_literals": null,
+     "signature": "() -> TSDServer.ProductsDataSet",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_Barcode",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "System.DateTime.get_Today",
+      "System.DateTime.ToString",
+      "TSDServer.Program.get_Default",
+      "TSDServer.SettingsDataSet+TypedSettingsRow.get_TerminalID",
+      "System.String.Format",
+      "System.Text.Encoding.get_UTF8",
+      "System.String.Concat",
+      "System.Text.Encoding.GetBytes",
+      "System.IO.Stream.Write",
+      "System.IO.Stream.Flush"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "88900a8a-0a15-5747-95b6-4d30af6da260",
+     "is_static": false,
+     "locator": "0x06000187",
+     "name": "IncomeBoxAction",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ScannedProductsDataSet+ScannedBarcodesRow) -> System.Void",
+     "string_literals": [
+      "{0}|{1}|{2}|{3}|{4}|{5}|{6}",
+      "dd.MM.yyyy",
+      "\r\n"
+     ],
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "System.Data.DataTable.add_RowChanged",
+      "System.Data.DataTable.add_ColumnChanging"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "eb1647e4-ec80-5bb7-bf7c-ea238ba783f3",
+     "is_static": false,
+     "locator": "0x06000167",
+     "name": "BeginScan",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 2,
+     "call_targets": [
+      "System.DateTime.get_Now",
+      "System.IO.FileInfo..ctor",
+      "System.IO.FileSystemInfo.Refresh",
+      "System.IO.FileSystemInfo.get_Exists",
+      "System.IO.FileInfo.get_Length",
+      "System.IO.FileSystemInfo.get_LastWriteTime",
+      "System.DateTime.AddHours",
+      "System.DateTime.ToString",
+      "System.String.Format"
+     ],
+     "cyclomatic_complexity": 3,
+     "id": "9334d8b1-5abd-50df-80fc-2a7cefd4a785",
+     "is_static": false,
+     "locator": "0x060001AE",
+     "name": "CheckDbFile",
+     "numeric_literals": null,
+     "signature": "(ref System.Boolean, System.String, ref System.DateTime) -> System.String",
+     "string_literals": [
+      "Дата файла Базы\n {0}: \n{1} \n",
+      "dd.MM.yyyy HH:mm",
+      "Файл Базы \n{0} \nне найден!\n"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 4,
+     "call_targets": [
+      "TSDServer.ActionsClass.get_ScannedProducts",
+      "TSDServer.ScannedProductsDataSet.get_ScannedBarcodes",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesDataTable.GetEnumerator",
+      "System.Collections.IEnumerator.get_Current",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocId",
+      "System.String.op_Equality",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_DocType",
+      "TSDServer.ScannedProductsDataSet+ScannedBarcodesRow.get_FactQuantity",
+      "System.Collections.IEnumerator.MoveNext",
+      "System.IDisposable.Dispose"
+     ],
+     "cyclomatic_complexity": 5,
+     "id": "24d1705d-04d4-5d35-b23e-25599e4b0bdf",
+     "is_static": false,
+     "locator": "0x0600018F",
+     "name": "CalculateTotals",
+     "numeric_literals": null,
+     "signature": "(System.String, TSDUtils.ActionCode, ref System.Int32, ref System.Int32) -> System.Void",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "032703e2-4bfd-544f-bfad-ab2feff1b836",
+     "is_static": false,
+     "locator": "0x0600016B",
+     "name": "WriteDbTxt",
+     "numeric_literals": null,
+     "signature": "(TSDServer.ScannedProductsDataSet+ScannedBarcodesRow) -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "2f021241-9432-5fec-a33d-59ce0895365e",
+   "kind": "BinaryType",
+   "name": "TSDServer.ActionsClass",
+   "namespace": "TSDServer",
+   "super_type": null
+  }
+ }
+}

@@ -1,0 +1,175 @@
+{
+ "tool": "ekos_binary_explain",
+ "args": {
+  "id": "0a401441-19fd-51c9-aa06-7734df4bb095"
+ },
+ "result": {
+  "provenance": {
+   "binary_path": "Release/TSDClient.exe",
+   "binary_sha256": "757094ee3905649cf4c0f242c2efc9482615df71f160e4e1c4cf833d4e9de544",
+   "locator": "0x02000007"
+  },
+  "reconstructed": {
+   "ai_business_name": null,
+   "ai_summary": null,
+   "extractor": "llm-reconstruction-v1",
+   "rules": [],
+   "unconfirmed_rule_count": 0
+  },
+  "recovered": {
+   "external_io": [],
+   "extractor": "ekos-cil-metadata/v2",
+   "methods": [
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "constructed type..ctor",
+      "TSDUtils.ActionCodeDescription..ctor"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "25e1dbbf-aa9c-5168-be34-58ac587f203e",
+     "is_static": true,
+     "locator": "0x06000019",
+     "name": ".cctor",
+     "numeric_literals": null,
+     "signature": "() -> System.Void",
+     "string_literals": null,
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "System.Object..ctor",
+      "constructed type.Add"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "29c47176-5c6e-5cd1-a1b1-55cde3fbd6de",
+     "is_static": false,
+     "locator": "0x06000013",
+     "name": ".ctor",
+     "numeric_literals": [
+      "9",
+      "10",
+      "11",
+      "12",
+      "13",
+      "14",
+      "15",
+      "16",
+      "17",
+      "18",
+      "255",
+      "254"
+     ],
+     "signature": "() -> System.Void",
+     "string_literals": [
+      "НЕТ ДЕЙСТВИЯ",
+      "ВОЗВРАТ",
+      "ПЕРЕОЦЕНКА",
+      "ПЕРЕБРОСКА",
+      "Инвент-ция Глобальная",
+      "СКОРАЯ ПОМОЩЬ",
+      "Инвент-ция Точечная",
+      "Прием коробов",
+      "Закрытие глобальной инвентаризации",
+      "Поставки (ТТН)",
+      "Прием товаров",
+      "Накладные и короба",
+      "Машины и короба",
+      "Закрытие накладной",
+      "Накладные",
+      "Короба и товары возвратов",
+      "Накладные и короба возвратов",
+      "Закрытие короба возвратов",
+      "Накладные возвратов",
+      "Товар не найден",
+      "Документ не найден"
+     ],
+     "visibility": "private"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "44338434-1902-5754-8d7f-009dc60e8116",
+     "is_static": false,
+     "locator": "0x06000017",
+     "name": "GetShablon",
+     "numeric_literals": null,
+     "signature": "(System.Byte, System.UInt32) -> System.UInt32",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "constructed type.get_Item"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "e901338f-e12a-5cb7-a01a-933928937093",
+     "is_static": false,
+     "locator": "0x06000016",
+     "name": "get_Item",
+     "numeric_literals": null,
+     "signature": "(System.Byte) -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": null,
+     "cyclomatic_complexity": 1,
+     "id": "0862cdc2-9fc6-5b2a-aa9f-99e09d80cab1",
+     "is_static": true,
+     "locator": "0x06000014",
+     "name": "get_ActionDescription",
+     "numeric_literals": null,
+     "signature": "() -> TSDUtils.ActionCodeDescription",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 1,
+     "call_targets": [
+      "constructed type.ContainsKey",
+      "constructed type.get_Item"
+     ],
+     "cyclomatic_complexity": 2,
+     "id": "906559a2-f332-5a8d-a8ee-87c2688a3ede",
+     "is_static": false,
+     "locator": "0x06000015",
+     "name": "get_Item",
+     "numeric_literals": [
+      "254"
+     ],
+     "signature": "(TSDUtils.ActionCode) -> System.String",
+     "string_literals": null,
+     "visibility": "public"
+    },
+    {
+     "branch_count": 0,
+     "call_targets": [
+      "TSDUtils.ActionCodeDescription.GetShablon"
+     ],
+     "cyclomatic_complexity": 1,
+     "id": "03203d64-9337-53ae-9a66-f96df658d8e9",
+     "is_static": false,
+     "locator": "0x06000018",
+     "name": "GetShablon",
+     "numeric_literals": null,
+     "signature": "(TSDUtils.ActionCode, System.UInt32) -> System.UInt32",
+     "string_literals": null,
+     "visibility": "public"
+    }
+   ]
+  },
+  "target": {
+   "category": "class",
+   "id": "0a401441-19fd-51c9-aa06-7734df4bb095",
+   "kind": "BinaryType",
+   "name": "TSDUtils.ActionCodeDescription",
+   "namespace": "TSDUtils",
+   "super_type": null
+  }
+ }
+}
