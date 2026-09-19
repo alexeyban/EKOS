@@ -5422,6 +5422,20 @@ are excluded — see the full exclusion list in the planning history if needed.
   (its own `ekos` binary, git-pinned to this repo). Public history was deliberately not rewritten.
   - [ ] The private workspace pins public EKOS by `Cargo.lock` revision: after any public change to
     the seam or a crate it uses, run `cargo update` there and re-run its tests.
+- [x] **RFC 0150 — statement-level .NET recovery and assisted migration to Python (devlog_192, 2026-09-19).**
+  Implemented in private `alexeyban/ekos-binary`; RFC + devlog public. In-process CIL decoder → stack
+  simulation → CFG → structured `if`/loop/`switch`/`try`, fidelity per method (`structural`/`control_flow`/
+  `statements`), per-method spec in `ekos_binary_explain`, `ekos_binary_migration_check`, the
+  `binary-migration-planner` agent. Phase 0 gaps closed (I/O classifier, `call_targets` cap, obfuscation
+  detector, strict `ekos_binary_explain` args, LLM stage run for real). **mscorlib: 24,526 bodies, 96.0% fully
+  structured, 0 divergent from the CFG, 0 dropping code; Newtonsoft.Json 13.0.3 and TSD checked against
+  published source (decision points ±1 in 98–100% of methods, string recall 99.6–100%).**
+  - [ ] Characterization tests against the running original (specified, not built; TSD is CF/Windows CE).
+  - [ ] ILSpy CI oracle (no .NET SDK on the dev machine).
+  - [ ] **Licence: `malachite` (LGPL-3.0) is in the private binary via the public `ekos-recovery` Python
+    analyzer (`rustpython-parser`) — resolve before selling a proprietary build.**
+  - [ ] LLM reconstruction still spends most output on generated plumbing (4/30 invented after the fix, 13%);
+    66–71 Newtonsoft `if` mismatches unexplained; async/iterator state machines not un-lowered; JVM statements.
 - [x] **RFC 0147 — Perl connector and structural analyzer (devlog_188, 2026-09-18).** Perl was the last
   major language in the working set getting nothing but `plugins/file`'s declaration-prefix scan — bare name
   strings, no packages, no edges, no spans. New `plugins/perl` observer (`.pl`/`.pm`/`.t`/`.psgi`, plus
