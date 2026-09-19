@@ -146,8 +146,13 @@ roxmltree = "0.20"
 
 # Python parsing (RFC 0038/0040 Phase 2) — pure Rust, no C-dependency class (rejected
 # tree-sitter-python for the same reason RFC 0031 rejected pg_query)
-rustpython-parser = "0.4"
-rustpython-ast = "0.4"
+#
+# `default-features = false` + `num-bigint`: the default `malachite-bigint` backend is LGPL-3.0,
+# which cannot ship inside a proprietary build (the private `ekos-binary` extension links these
+# crates). `num-bigint` is MIT/Apache-2.0 and is the same `BigInt` API. Cargo unifies features
+# across the whole graph, so this has to be decided here, not in the downstream workspace.
+rustpython-parser = { version = "0.4", default-features = false, features = ["location", "num-bigint"] }
+rustpython-ast = { version = "0.4", default-features = false, features = ["location", "num-bigint"] }
 
 # Rust source parsing (RFC 0041) — pure Rust, no C-dependency
 syn = { version = "3.0", features = ["full", "visit"] }
