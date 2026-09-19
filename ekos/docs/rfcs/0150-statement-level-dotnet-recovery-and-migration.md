@@ -287,7 +287,9 @@ parity is checked statically, and every report says so.
   tests. The private build pins the public crates by `Cargo.lock`.
 - **Licences are checked before any code is sold.** Linked today: `cafebabe` (0BSD), `zip` (MIT),
   `serde`/`serde_json`/`sha2`/`hex`/`thiserror`/`uuid`/`walkdir` (MIT or Apache-2.0), and the
-  public EKOS crates (MIT), plus `rustpython-parser` (MIT) for Phase 5. The CI-only oracle,
+  public EKOS crates (MIT), plus `rustpython-parser` (MIT) for Phase 5 — built with its `num-bigint`
+  feature, **not** the default `malachite-bigint`, which is LGPL-3.0 and was removed from both workspaces on
+  2026-09-19 (the two workspaces must keep the same feature set, since Cargo unifies features across the graph). The CI-only oracle,
   ICSharpCode.Decompiler, is MIT and is never linked. `dotnetdll` (GPL-3.0+) remains rejected.
   A licence report (`cargo about`/`cargo deny`) is part of the release checklist.
 
