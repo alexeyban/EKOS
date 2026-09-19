@@ -101,8 +101,10 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `scheduler`, `sql-dialect-sdk`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`,
 `marketing`, `docs-gen`, `dbt-gen`, `common`, `cli`, `demo-server`, `segment-backend` / `cluster` /
 `distributed` (RFC 0111/0113's partitioned + horizontally-distributed storage — see below),
-`simulation` (RFC 0047-0055's opt-in World Engine — see below), and `clickhouse-query` (RFC 0056's
-opt-in live NL-to-SQL query engine — see below).
+`simulation` (RFC 0047-0055's opt-in World Engine — see below), `clickhouse-query` (RFC 0056's
+opt-in live NL-to-SQL query engine — see below), and `evals` (RFC 0138's answer-grading harness — see
+below). The same workspace also builds `ekos` with a generic extension seam (RFC 0149) that out-of-tree
+builds plug extra connectors and MCP tools into.
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs (live-verified against a real
 repo, 1,600 real issues/PRs — RFC 0062), Confluence, local documents
@@ -117,11 +119,13 @@ source spans; RFC 0147), **compiled .NET and JVM binaries with no source availab
 graph, branch structure, string/numeric constants and external I/O boundaries, read in-process
 from CLI metadata and bytecode with no .NET SDK or JRE required; for .NET, per-method statement
 recovery — `if`/loop/`switch`/`try` with the IL offset of every line, labelled with the fidelity actually
-reached — plus a per-method migration spec and a Python-rewrite parity check, RFC 0150; RFC 0148 — shipped
+reached — plus a per-method migration spec, a Python-rewrite parity check and sandboxed characterization tests that
+run the original and check the rewrite against what it did, RFC 0150; RFC 0148 — shipped
 as a separately licensed extension build, not part of this open-source repository, RFC 0149), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
 0056), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
-account). PostgreSQL, SQL Server, and Jira remain planned.
+account). SQL in the PostgreSQL, SQL Server (T-SQL), MySQL, Snowflake, Databricks and ClickHouse dialects is
+parsed from files (RFC 0031); live PostgreSQL / SQL Server database connectors and a Jira connector remain planned.
 
 ## Installation
 
@@ -601,61 +605,105 @@ CPU time:                 14.7s
 Status: FAIL
 ```
 
-That's a real run against this repo's own live self-analysis ledger (12,283 compiled objects) with
-the local `llama3:latest` model already configured in this repo's `ekos.toml` — not a simulated
-example.
+That example is a real run against this repo's own live self-analysis ledger with the local
+`llama3:latest` model — not a simulated one. It is also the *floor*: a workstation-sized local model.
 
-**Current full-suite results** (`ekos-full`, 101 scenarios, `llama3:latest`, same ruler across
-both columns — the "before" column is the same suite against the corpus as it stood before
-RFC 0140/0141's fixes):
+**Full-suite results — `ekos-full`, 101 scenarios, graded deterministically.** The answering model
+went from a local llama3 8B on Ollama to **DeepSeek V4 Flash through [OpenCode Zen](https://opencode.ai/zen)**
+(an OpenAI-compatible cloud endpoint), and the knowledge EKOS hands it was improved in two further steps. The same
+checked-in suite, one change at a time:
 
-| Metric | Before | Now |
+| Step | Passed | What changed |
 |---|---|---|
-| Passed | 39/101 | **43/101** |
-| Answer correctness | 42.5% | **49.7%** |
-| Evidence groundedness | 44.0% | **51.6%** |
-| Completeness | — | 45.6% |
-| Invalid citations | — | **0.0%** |
-| Claims citing a precise `file:line` | 0 of 1,289 | **29.8%** |
-| Claims citing any source location | 26.4% | **67.3%** |
-| Fabrications on adversarial questions | 3 | **6 — worse** |
+| Baseline, local `llama3:latest` (8B) — report `20260914T154459Z` | 42/101 | — |
+| + evidence text kept, citation parsing, refusal wording (devlog_183) | 53/101 | Grader and evidence-rendering bugs, not the model |
+| **+ DeepSeek V4 Flash** (model swap only) | **70/101** | A larger model, and the local one had been reading a **truncated prompt** — EKOS never sent `num_ctx`, so Ollama dropped the *start* of long prompts, where the instructions live (RFC 0145) |
+| + document structure (RFC 0144) | **79/101** | Markdown cut by heading instead of blind 2,500-char chunks, fully indexed; docs link to code and to each other; output limit raised to 8,192 |
+| + query-planner fixes (devlog_186) | **87/101** | A dependency phrase in a descriptive clause no longer triggers a graph walk; `crate::path` names resolve as one entity; generic words stop matching unrelated objects |
 
-The last row is not a typo and is not buried. With third-party noise gone, adversarial questions
-now retrieve *real* objects that read as more convincing evidence, which appears to make the model
-likelier to answer than refuse — a hypothesis awaiting the transcripts, not a finding. The suite
-still reports `Status: FAIL` against its own gates, and will keep saying so until it doesn't.
+Seventeen points came from the model and seventeen from engineering; 53 → 87 is **+34**. Per category, before → after:
 
-**A further round of fixes (RFC 0139 Phase 2/4, RFC 0140 §3/§4, RFC 0141) was measured the same
-way on 2026-09-14** (devlog_182) and landed **bit-identical** on the two headline scores — 49.7%/
-51.6%, unchanged — which is a real, useful confirmation, not a null result: `[llm]`'s
-`temperature: 0` contract (RFC 0008) means an unchanged prompt produces an unchanged completion
-locally, so anything that *did* move is attributable to a real change, not run-to-run noise.
-`recall@10` moved (52.9% → 47.1%), and it traces to exactly one scenario whose score flipped from
-a false 1.0 to an honest 0.0 — RFC 0139 Phase 2's recall-grading fix correcting a metric that had
-been silently grading the wrong query. Separately verified outside the eval score entirely: RFC
-0141's signature fix moved `build_llm_provider` from outside the top ten to **#3** for a bare
-"LlmProvider" search — real, reproducible, and independent of anything above.
+| Category | Before | After |
+|---|---|---|
+| Architecture | 9/20 | 18/20 |
+| Code | 8/15 | 13/15 |
+| Dependencies | 10/12 | 10/12 |
+| Lineage | 5/12 | 10/12 |
+| History | 3/12 | 11/12 |
+| Security | 7/12 | 10/12 |
+| Adversarial | 11/18 | 15/18 |
+| **Total** | **53/101** | **87/101** |
 
-**Phase 1 of a follow-up eval-improvement pass landed 2026-09-15** (devlog_183): a multi-round
-classification of every one of the 59 then-failing scenarios found the biggest lever wasn't a
-retrieval-ranking or routing fix, but three cheaper bugs — evidence claims rendering only an
-object's *name* and discarding its retrieved text, broken citation-block parsing, and a
-refusal-wording mismatch where the model's own echoed prompt header wasn't recognised as a refusal
-— plus grading-ruler defects that would otherwise have inflated the measured gain. Real result,
-measured against the `20260914T154459Z` baseline: **42/101 → 53/101**, groundedness 51.6% → 65.9%,
-recall@10 47.1% → 64.7%, hallucination count 8 → 7. Two side effects measured and documented rather
-than hidden: richer evidence text made the model fabricate on 4 adversarial questions it previously
-refused correctly (offset by 4 different adversarial scenarios a wording fix corrected — net zero
-for that category), and a prompt-header restyling coincided with 3 scenarios where the model wrote
-a citation in prose instead of the required JSON block.
+| Metric | llama3 8B (53/101) | DeepSeek V4 Flash (87/101) |
+|---|---|---|
+| Answer correctness | 50.1% | **85.7%** |
+| Evidence groundedness | 65.9% | **95.6%** |
+| Hallucinated answers on adversarial questions | 7 | **3** |
+| Recall@10 | 64.7% | 55.9% — *fell* |
+| Latency | up to 79 s p95, killed three times for lack of memory on a 15 GB workstation | median 5 s per fresh call |
+| Cost of a full 101-question run | free (local) | about **$0.05–0.08** |
 
-A local model is real and free to run, but it is not the reference: `ekos eval run` refuses outright
-rather than silently grading against the stub `MockLlmProvider` when the configured provider's API
-key isn't set (there is no `--agent mock` option), and a local model still needs a genuinely
-powerful server to keep pace with a 101-scenario suite — P95 latency above was measured at 49.4s per
-scenario on `llama3:latest`, and per-scenario latency this high compounds fast across a full run.
-Any published reference baseline should come from `--agent claude`/`--agent openai` against a
-cloud model, not from whatever happened to be configured locally.
+Recall@10 fell because documents are now many heading-sections that outrank the crate or file a
+retrieval-only scenario expects; answers improved anyway, and section-vs-document ranking is a tracked
+follow-up. These numbers were re-verified against the per-category reports saved in
+`evals/reports/zen-*/` (`zen-base` 70, `zen-final-8k` 79, `zen-planner2` 87). The full account, including the model-swap
+run's 2,048-token output limit that cut off 17 answers (DeepSeek V4 Flash reasons, and its hidden reasoning
+counts against the limit — so the model's own contribution is, if anything, understated), is in
+[EKOS from 53 to 87](https://alexeyban.github.io/EKOS/presentations/deepseek-53-to-87.html) and
+devlog_183 / 185 / 186.
+
+**What still fails — 14 of 101, named rather than averaged away:**
+
+| Cause | Scenarios |
+|---|---|
+| The model correctly rejects a false premise but not in refusal wording the grader accepts | adv-004, adv-011, adv-015 |
+| The answer never reaches the top of the retrieved evidence | code-002, lin-008, dep-004 |
+| The fact isn't recorded yet (a workspace-inherited Rust edition, struct fields as claims, no caller reached the evidence) | code-004, lin-007, dep-005 |
+| Retrieval-only scenarios graded on recall@10 (see above) | arch-009, hist-007 |
+| Right in substance, wrong keyword | arch-020, sec-002, sec-010 |
+
+**Reproduce it, with your own model:**
+
+```bash
+export OPENCODE_API_KEY=...        # or any OpenAI-compatible endpoint: set base-url/model in the config
+cargo run -p ekos -- --config ../ekos.zen.toml eval run --dataset ekos-full --save-answers
+cargo run -p ekos -- eval history  # trend table across every saved run
+```
+
+```toml
+# ekos.zen.toml — hosted, or a self-hosted OpenAI-compatible server (vLLM, llama.cpp) inside the network
+[llm]
+provider    = "openai"
+base-url    = "https://opencode.ai/zen/v1"
+model       = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+[ai]
+max-tokens  = 8192   # a reasoning model: hidden reasoning counts against this
+
+# local Ollama: set the window explicitly — a silent default truncation cost 17 points
+# [llm]
+# provider = "ollama"
+# context-window = 32768
+```
+
+**Closed environments.** Compiling needs no GPU, no network and no model; answer quality tracks the model you
+can serve. A workstation-sized local model lands near the llama3 column; reaching the DeepSeek column without a
+cloud API means self-hosting a much larger open-weights model on dedicated GPU servers, with a context window of
+at least 32k tokens and enough throughput to answer in seconds. Prompts contain real source excerpts — EKOS
+redacts secrets and PII before anything reaches the ledger, but a hosted model still sees your code (Zen's paid
+models are zero-retention; its free models may use prompts for training).
+
+A local model is real and free to run, but it is not the reference: `ekos eval run` refuses outright rather than
+silently grading against the stub `MockLlmProvider` when the configured provider's API key isn't set (there is no
+`--agent mock` option). Grading is unchanged across every step above — keyword and id matching at temperature 0,
+unchanged prompts replayed from the LLM cache — so a score that moved is attributable to a real change.
+
+*Earlier history.* With llama3 held fixed the suite went 39 → 43 (RFC 0140/0141), then 42 → 53 against the
+`20260914T154459Z` baseline (devlog_183), mostly because the harness found something unflattering: an adversarial-question fabrication count that got *worse* (3 → 6) once
+third-party noise was gone and real objects made a wrong answer read more convincingly; a bit-identical re-run
+after RFC 0139/0140/0141 that confirmed `temperature: 0` makes an unchanged prompt reproducible; and
+recall@10 grading that had silently graded the wrong query (RFC 0139, devlog_182). Details: devlog_182, devlog_183.
 
 Those numbers moved mostly because the harness found something unflattering: **94% of what this
 repo was compiling wasn't its own code.** A Python virtualenv and two `.scannerwork/` directories
@@ -1254,6 +1302,11 @@ Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presen
 - [The AI-Native Enterprise Knowledge Compiler](https://alexeyban.github.io/EKOS/presentations/ai-native-knowledge-compiler-pitch.html) — the startup pitch, audited live by Claude Code using EKOS's own MCP server.
 - [ClickHouse: Compiled Metadata + Live NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html) — the one explicit, audited exception to "AI never touches raw enterprise systems directly," verified live against a real ClickHouse container, honest failures included.
 - [GitHub, Live, End to End](https://alexeyban.github.io/EKOS/presentations/github-live-cross-system.html) — the GitHub connector's first live run, 1,600 real issues/PRs from a real repo: two known gaps fixed before the run, a third (96% of items collapsing into one identity) found only at real scale and fixed the same session, and the residual limitation reported honestly, not hidden.
+- [EKOS from 53 to 87](https://alexeyban.github.io/EKOS/presentations/deepseek-53-to-87.html) — the same 101-question eval, graded deterministically, moving from a local llama3 8B to DeepSeek V4 Flash (OpenCode Zen) and then to better document structure and query planning: 53 → 70 → 79 → 87, what each step bought, the 14 that still fail and why.
+- [Eval Comparison: Fixing a Self-Contaminated Ledger](https://alexeyban.github.io/EKOS/presentations/eval-comparison-report.html) — how the eval harness found that 94% of what EKOS was compiling was not its own code, and three bugs that made fixes silently do nothing.
+- [TSD System Documentation](https://alexeyban.github.io/EKOS/presentations/tsd-documentation.html) and [How TSD Works](https://alexeyban.github.io/EKOS/presentations/tsd-how-it-works.html) — a Windows CE barcode terminal and its desktop server documented from compiled .NET binaries alone (RFC 0148), every claim traced to a metadata token.
+- [Distributed Storage Under Fire](https://alexeyban.github.io/EKOS/presentations/distributed-storage-under-fire.html) — two end-to-end runs of the RFC 0111/0113 distributed engine and the eight defects they found.
+- [EKOS Web Console](https://alexeyban.github.io/EKOS/presentations/web-console.html) — the web console, RFC 0128–0133.
 - [Vision & Token Utility](https://alexeyban.github.io/EKOS/presentations/vision-and-token-utility.html) — why the EKOS token's relevance is designed to grow as a consequence of platform adoption, not a promise of price.
 
 See [alexeyban.github.io/EKOS/presentations.html](https://alexeyban.github.io/EKOS/presentations.html) for the full list.
@@ -1278,6 +1331,9 @@ the canonical facts in [TOKENOMICS.md](TOKENOMICS.md); the phased utility roadma
 | v0.6 | Runtime |
 | v0.7 | AI Layer |
 | v1.0 | Enterprise Knowledge Compiler |
+
+The workspace is versioned `0.1.0`; the table above is the original plan. What has actually shipped — RFCs up to
+0150 and 193 devlogs so far — is tracked phase by phase in [TODO.md](TODO.md) and the devlogs, not by this table.
 
 ## Team
 

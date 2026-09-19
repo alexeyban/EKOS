@@ -155,8 +155,7 @@ exist yet.
 
 ## Not done / open
 
-- Characterization tests against the running original: specified, not built (TSD is .NET Compact Framework
-  on Windows CE and cannot run on a desktop CLR).
+- Characterization tests against the running original: built afterwards — see devlog_193.
 - The ILSpy oracle is not running (no SDK here).
 - `async`/iterator state machines are not un-lowered; the benchmark skips them.
 - JVM statement recovery is a non-goal of this RFC.

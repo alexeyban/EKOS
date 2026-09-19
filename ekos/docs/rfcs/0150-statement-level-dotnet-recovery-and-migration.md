@@ -251,12 +251,24 @@ text*, so it reads no files and stays inside the Runtime-only rule. It parses th
 The output lists, per method, what is matched, missing and extra. It is evidence for the developer
 to judge, not a pass/fail oracle, because two correct programs can differ in structure.
 
-**Characterization tests** (running the original on sample inputs and recording its outputs) need
-a runtime that can load the binary. TSD targets .NET Compact Framework on Windows CE, which cannot
-run on a desktop CLR without its platform assemblies. For binaries that can run (desktop .NET
-Framework on Mono or .NET), a harness is specified here but not built: it would invoke a public
-static method through reflection on recorded inputs, in a sandbox with no network. Until it exists,
-parity is checked statically, and every report says so.
+**Characterization tests** run the original on recorded inputs and store what it did, so the rewrite
+can be checked against behaviour rather than structure. Implemented as `ekos-characterize`
+(`crates/characterize` in the private workspace), separate from the ledger and the MCP server because it
+**executes untrusted code**, which nothing else in this RFC does.
+
+- **Execution:** wine-mono runs the assembly (loaded by reflection, so any method — including non-public —
+  can be called with `out` parameters, instance construction, files pre-created and read back). A small C#
+  runner, compiled with wine-mono's own `mcs`, records the return value, exception, named instance state,
+  stdout and files written; a matching Python runner does the same for the rewrite, in the same JSON
+  encoding, and the two are compared value by value.
+- **Two steps:** `record` needs wine; `check` needs only Python and a golden file, so CI can verify a rewrite
+  without the original or wine.
+- **Sandbox:** bubblewrap — no network, no `$HOME`, read-only system, only the assembly's directory and a
+  scratch directory visible, a fresh PID namespace. `doctor` proves it by attempting to escape; the probe is
+  validated by running it unsandboxed, where every attempt succeeds.
+- **Honest limits:** the original runs on wine-mono's class library, not the runtime it shipped on; the
+  Compact-Framework TSD client (native UI, OpenNETCF, Windows CE) cannot run at all; UIs are not driven;
+  cases are authored by a person.
 
 ---
 

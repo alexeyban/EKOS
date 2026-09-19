@@ -5430,7 +5430,11 @@ are excluded — see the full exclusion list in the planning history if needed.
   detector, strict `ekos_binary_explain` args, LLM stage run for real). **mscorlib: 24,526 bodies, 96.0% fully
   structured, 0 divergent from the CFG, 0 dropping code; Newtonsoft.Json 13.0.3 and TSD checked against
   published source (decision points ±1 in 98–100% of methods, string recall 99.6–100%).**
-  - [ ] Characterization tests against the running original (specified, not built; TSD is CF/Windows CE).
+  - [x] Characterization tests against the running original — `ekos-characterize` (devlog_193): wine-mono +
+    bubblewrap, `record`/`check`/`run`, `doctor` sandbox self-test. Real TSD `Compressor`: 6/6, and it found a
+    difference the static check missed (`Compress(byte[])` on empty input). The CF/Windows CE TSD client cannot run.
+  - [ ] Characterization: cases are hand-written (no generator from the spec); runs on wine-mono's BCL, not the
+    original runtime; no UI driving.
   - [ ] ILSpy CI oracle (no .NET SDK on the dev machine).
   - [x] **Licence: `malachite` (LGPL-3.0), pulled in by `rustpython-parser`'s default bigint backend, removed
     (2026-09-19):** the public workspace and `ekos-binary` now use the `num-bigint` feature (MIT/Apache-2.0,
