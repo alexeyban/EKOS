@@ -5432,8 +5432,10 @@ are excluded — see the full exclusion list in the planning history if needed.
   published source (decision points ±1 in 98–100% of methods, string recall 99.6–100%).**
   - [ ] Characterization tests against the running original (specified, not built; TSD is CF/Windows CE).
   - [ ] ILSpy CI oracle (no .NET SDK on the dev machine).
-  - [ ] **Licence: `malachite` (LGPL-3.0) is in the private binary via the public `ekos-recovery` Python
-    analyzer (`rustpython-parser`) — resolve before selling a proprietary build.**
+  - [x] **Licence: `malachite` (LGPL-3.0), pulled in by `rustpython-parser`'s default bigint backend, removed
+    (2026-09-19):** the public workspace and `ekos-binary` now use the `num-bigint` feature (MIT/Apache-2.0,
+    same `BigInt` API). Both must keep the same feature set — Cargo unifies features across the graph.
+    Remaining audit hit: `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`, take MIT; UEFI-only).
   - [ ] LLM reconstruction still spends most output on generated plumbing (4/30 invented after the fix, 13%);
     66–71 Newtonsoft `if` mismatches unexplained; async/iterator state machines not un-lowered; JVM statements.
 - [x] **RFC 0147 — Perl connector and structural analyzer (devlog_188, 2026-09-18).** Perl was the last

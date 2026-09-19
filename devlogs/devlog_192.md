@@ -145,7 +145,10 @@ exist yet.
 - **`sqlparser` 0.53: `Insert.table_name`, `Delete.from` is `FromTable::{WithFromKeyword,WithoutKeyword}`.**
 - **Licences:** `malachite`/`malachite-bigint` (**LGPL-3.0**) is in the private binary today via the *public*
   `ekos-recovery` Python analyzer (`rustpython-parser`). Not introduced by this work, but it must be resolved
-  before a proprietary build is sold. All 4 `LicenseRef-Proprietary` and the public-workspace `UNKNOWN`
+  before a proprietary build is sold. **Fixed the same day (783fd3e):** `rustpython-parser`/`-ast` now use the
+  `num-bigint` feature (MIT/Apache) instead of the default `malachite-bigint`, in both workspaces — the two
+  must match or Cargo unifies malachite back in. Verified: 0 `malachite` in all four lockfiles; public gates
+  and both test suites pass. Only `r-efi` (triple-licensed, MIT option) remains in the audit. All 4 `LicenseRef-Proprietary` and the public-workspace `UNKNOWN`
   licences are our own crates.
 - Structuring is bounded: `MAX_BLOCKS` 2,000, nesting depth 128, an emission budget; a hostile graph falls
   back to `control_flow`, verified on a 300-block dense graph.
