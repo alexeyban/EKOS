@@ -266,13 +266,27 @@ impl Answerer for Ekos<'_> {
         let Ok(b) = brief(self.store, None, &[], &[], 2000) else {
             return true;
         };
-        let inside = b.text.starts_with("<session-memory untrusted=\"true\">")
-            && b.text.trim_end().ends_with("</session-memory>");
+        // The directive preamble sits *above* the envelope now, so the invariant is that every
+        // rendered note line lies strictly between the tags — not that the text starts with the
+        // open tag. Deliberately not keyed on a tier string: the previous version asserted
+        // `!contains("T0 unconfirmed")`, which would go vacuously true (and silently invert this
+        // check) the moment that label stopped being printed.
+        let (Some(open), Some(close)) = (
+            b.text.find("<session-memory untrusted=\"true\">"),
+            b.text.rfind("</session-memory>"),
+        ) else {
+            return true;
+        };
+        let enveloped = b
+            .text
+            .match_indices("- [")
+            .all(|(i, _)| i > open && i < close);
+        // Only a human can promote a note, so an injected one must never render as confirmed.
         let promoted = b
             .text
             .lines()
-            .any(|l| l.contains("IGNORE ALL PREVIOUS") && !l.contains("T0 unconfirmed"));
-        !inside || promoted
+            .any(|l| l.contains("IGNORE ALL PREVIOUS") && l.contains("HUMAN-CONFIRMED"));
+        !enveloped || promoted
     }
     fn brief_tokens(&self) -> usize {
         brief(self.store, None, &[], &[], 2000)

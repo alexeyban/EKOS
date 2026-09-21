@@ -32,12 +32,27 @@ ekos session review <claim-id> confirm                         # HUMAN ONLY: T0 
 Kinds: `finding | decision | dead_end | constraint | todo`. Anchors must be exact object names or
 workspace-relative paths; an ambiguous or unknown anchor is recorded as such and never guessed.
 
+`--scope` (and `--scope-from-git`) is what makes a brief relevant rather than generic: scope
+overlap outranks staleness and recency in the ranking, so a note about the thing you are editing
+comes first. A scope entry matches an anchor exactly or on the final path segment, so a git path
+still lines up with an anchor written as a bare file name.
+
 ## Staleness
 
 Each anchor records a fingerprint of the narrow slice of state a note is about (a table's columns, a
 symbol's signature, a section's text). At read time a note is `fresh`, `changed` (with what changed),
 `orphaned` (the anchor left the ledger) or `unanchored`. A confirmed (`T1`) note whose anchor changed
 still shows `changed` — confirmation does not freeze the code.
+
+In the **brief**, only a label that calls for action is printed: a line carries `[CHANGED]` or
+`[ORPHANED]` when the code it describes has moved, and `[HUMAN-CONFIRMED]` once a person has
+promoted it. Everything else — the common `T0` / `fresh` / `unanchored` case — is stated once by
+the preamble and left off the line. Printing every label on every line is what made the marker
+invisible in the first live eval (0 of 24 answers flagged it). If the budget hides some notes, the
+truncation line says how many of the hidden ones were changed.
+
+The preamble sits **above** the `<session-memory untrusted="true">` envelope, not inside it: the
+envelope's whole point is that its contents are inert data, so instructions belong outside it.
 
 ## Safety properties (each has a test)
 

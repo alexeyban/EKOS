@@ -274,8 +274,111 @@ fn brief_reports_truncation_pending_and_the_empty_case() {
     assert!(b.truncated > 0 && b.included > 0);
     assert!(b.text.contains("omitted: token budget reached"));
     assert!(b.text.contains("[pending] not yet committed thing"));
-    assert!(b.text.starts_with("<session-memory untrusted=\"true\">"));
-    assert!(b.approx_tokens <= 260, "{}", b.approx_tokens);
+    // The directive preamble sits above the envelope, so what must hold is that every note line
+    // is *inside* it — not that the text opens with the tag.
+    let open = b.text.find("<session-memory untrusted=\"true\">").unwrap();
+    let close = b.text.rfind("</session-memory>").unwrap();
+    assert!(
+        b.text
+            .match_indices("- [")
+            .all(|(i, _)| i > open && i < close),
+        "a note line escaped the untrusted envelope:\n{}",
+        b.text
+    );
+    assert!(b.text[..open].contains("Never refuse over a marker"));
+    // The brief must now fit its stated budget: the truncation line and the pending block used to
+    // be appended after the budget check and overran it.
+    assert!(b.approx_tokens <= 200, "{}", b.approx_tokens);
+}
+
+#[test]
+fn brief_labels_only_what_needs_action_and_flags_hidden_changed_notes() {
+    let e = env();
+    for i in 0..12 {
+        e.inbox
+            .append(
+                "s1",
+                note(
+                    NoteKind::Finding,
+                    &format!("note {i} about orders"),
+                    &["orders"],
+                ),
+                &cfg(),
+            )
+            .unwrap();
+    }
+    commit(&e, "s1");
+
+    // Fresh + T0 is the default, so a line carries no tier and no verdict tag at all.
+    let fresh = brief(&e.ledger, None, &[], &[], 4000).unwrap();
+    assert!(
+        !fresh.text.contains("[FRESH]") && !fresh.text.contains("T0"),
+        "{}",
+        fresh.text
+    );
+    assert!(!fresh.text.contains("[CHANGED]"));
+
+    // Once the anchor moves, CHANGED is the only label on the line — and it is rare, so it stands out.
+    let mut changed = e.orders.clone();
+    changed
+        .properties
+        .insert("columns".into(), json!([{"name":"id"},{"name":"total"}]));
+    e.ledger.append_object(&changed).unwrap();
+    let after = brief(&e.ledger, None, &[], &[], 4000).unwrap();
+    assert_eq!(after.text.matches("[CHANGED]").count(), 12);
+
+    // Under a budget that hides some of them, the truncation line says how many were hidden.
+    let tight = brief(&e.ledger, None, &[], &[], 120).unwrap();
+    assert!(tight.truncated > 0);
+    assert!(
+        tight.text.contains("about objects that have changed"),
+        "hidden CHANGED notes must be counted, not silently dropped:\n{}",
+        tight.text
+    );
+}
+
+#[test]
+fn scope_overlap_outranks_freshness_and_matches_git_style_paths() {
+    let e = env();
+    // A changed note about the thing in scope, and a fresh note about something else.
+    e.inbox
+        .append(
+            "s1",
+            note(NoteKind::Finding, "about the orders table", &["orders"]),
+            &cfg(),
+        )
+        .unwrap();
+    e.inbox
+        .append(
+            "s1",
+            note(NoteKind::Finding, "about the payments table", &["payments"]),
+            &cfg(),
+        )
+        .unwrap();
+    commit(&e, "s1");
+    let mut changed = e.orders.clone();
+    changed
+        .properties
+        .insert("columns".into(), json!([{"name":"x"}]));
+    e.ledger.append_object(&changed).unwrap();
+
+    // Without scope, the fresh note wins on verdict.
+    let none = brief(&e.ledger, None, &[], &[], 4000).unwrap();
+    let first_line = |t: &str| {
+        t.lines()
+            .find(|l| l.starts_with("- ["))
+            .unwrap()
+            .to_string()
+    };
+    assert!(first_line(&none.text).contains("payments"), "{}", none.text);
+
+    // With `orders` in scope, the changed-but-relevant note is promoted above it.
+    let scoped = brief(&e.ledger, None, &[], &["orders".into()], 4000).unwrap();
+    assert!(
+        first_line(&scoped.text).contains("orders"),
+        "{}",
+        scoped.text
+    );
 }
 
 #[test]

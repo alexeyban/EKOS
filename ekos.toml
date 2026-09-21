@@ -110,3 +110,9 @@ hashtags = ["Rust", "AI", "MCP"]
 # forcing NoopPublisher regardless of --dry-run. Flip back to true to re-enable.
 enabled = false
 dry-run = false
+
+# RFC 0151 — agent session memory. Opt-in: without this the three ekos_session_* MCP tools are
+# not exposed at all. Notes are redacted and capped on the way in, land as unconfirmed (T0)
+# claims, and only `ekos session review` (human-only, no MCP tool) can promote one.
+[session-memory]
+enabled = true

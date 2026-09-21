@@ -1,6 +1,6 @@
 # RFC 0151 — Agent Session Memory
 
-**Status:** Accepted, all phases implemented 2026-09-21 (devlog_197). The live Phase 5 eval (2026-09-21) did **not** meet the go/no-go rule: no correctness advantage, staleness inconclusive at this scale (see Results). `SessionStart` context injection verified live.
+**Status:** Accepted, all phases implemented 2026-09-21 (devlog_197). Phase 5 evals (2026-09-21): no advantage at 7 notes; at 121 notes, budget-matched, a **scoped** lookup met the rule and an **unscoped** brief did not (see Results). `SessionStart` context injection verified live.
 **Plan:** `todo-agent-session-memory.md` (phases P0–P8). **Findings:** `docs/spikes/session-memory-findings.md`.
 
 ## Problem
@@ -92,3 +92,24 @@ baseline), stale-fact-served 0.00 vs 0.50. **Not established:** any live-model c
 served 0.83 vs 0.67 (within noise); no injected-note leak in any condition. Under this RFC's own rule that
 is a NO-GO at this scale. The feature stays opt-in and unclaimed; the untested hypothesis is that anchored
 memory helps when note volume exceeds what a summary retains. See `docs/evals/session-continuity-2026-09-21.md`.
+
+**Scale result (2026-09-21, supersedes the 7-note run for correctness).** 121 notes over 40 tables,
+every condition held to one 400-token budget, haiku, 2 runs, 191 metered calls:
+
+| condition | correct | stale served | over-hedge |
+|---|---|---|---|
+| model-written summary, same budget | 0.16 | n/a (refused all) | n/a |
+| brief, no scope | 0.16 | n/a (refused all) | n/a |
+| brief, scoped | 1.00 | 1.00 | 0.00 |
+| brief, scoped, anchors changed | 1.00 | 0.17 | 0.00 |
+
+Two findings, one for and one against. **For:** the RFC 0151 staleness marker now reaches the
+answer — 5 of 6 eligible answers both answered and warned the note may be out of date, against 0
+of 24 before the directive envelope and label changes. **Against:** an *unscoped* brief scored
+0.16, identical to no memory at all. At 121 notes a 400-token brief holds ~12, and with no scope
+the ranking cannot know which 12. The value demonstrated here belongs to scoped retrieval
+(`ekos_session_recall`, or `brief --scope`), not to an unprompted session-start brief.
+
+The fixture's facts are arbitrary 4-digit numbers — maximally hostile to summarisation and
+maximally favourable to verbatim retrieval. See the report's Limits section, and the discarded
+first run whose fixture bug is documented there.

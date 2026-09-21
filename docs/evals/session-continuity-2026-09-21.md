@@ -75,6 +75,10 @@ supports that the memory layer has the properties the design needs.
 
 ---
 
+> **Superseded for the correctness question by `session-continuity-scale-2026-09-21.md`** (121
+> notes, budget-matched). This 7-note run remains the record of the small-corpus regime, where
+> session memory showed no advantage over a summary.
+
 # Live run (added 2026-09-21) — supersedes the proxy GO
 
 Reproduce: `python3 demo/session-memory/live_eval.py <ekos-binary> <workdir> --runs 3 --model haiku`

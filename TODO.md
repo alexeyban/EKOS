@@ -5721,7 +5721,7 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
   - *Output:* `docs/evals/session-continuity-<date>.md`.
   - *Test/Validate:* Numbers reproducible from a documented command.
 
-- [x] **GO / NO-GO decision** _(proxy said GO; LIVE run 2026-09-21 = NO-GO at 7 notes / haiku: correctness 0.92 vs 0.92, staleness inconclusive — feature stays opt-in and unclaimed)_
+- [x] **GO / NO-GO decision** _(proxy GO; live 7-note run = no advantage; RE-RUN at 121 notes budget-matched (devlog_198): staleness now reaches the answer (5/6, was 0/24) and a SCOPED brief scored 1.00 vs 0.16 for a same-budget summary — but an UNSCOPED brief scored 0.16, no better than no memory, so the win is scoped retrieval, not a session-start brief)_
   - *What:* If EKOS session memory does not beat the compaction-summary baseline on correctness **and** stale-fact-served rate, stop and write up why before P6.
   - *Output:* Decision recorded in the RFC with the numbers.
   - *Test/Validate:* Acceptance Criteria item 5 checked.
@@ -5801,7 +5801,7 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
   - *Output:* Docs, demo script, headless transcripts.
   - *Test/Validate:* Demo is reproducible from a clean checkout.
 
-- [ ] **Public communication guardrail check**
+- [~] **Public communication guardrail check** _(checklist written and updated with the 121-note numbers; still no draft)_
   - *What:* Draft any article/post only after eval numbers exist. Every sentence is checked against: shipped vs planned, measured vs asserted, and the residual poisoning risk stated honestly. Framing is complementary to native memory and generic memory services, not "better than".
   - *Output:* Draft plus a claim-by-claim checklist.
   - *Test/Validate:* No roadmap item stated as shipped; every number traces to a committed eval report.
