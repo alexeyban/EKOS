@@ -5494,3 +5494,345 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] A first-class "payments with no approval" MCP tool, if the `ekos_state` / `ekos treasury scan` watchlist proves insufficient (EKL has no negation).
 
 - [x] Compiled .NET app -> EKOS -> Python rewrite demo with per-step screenshots (`demo/binary-demo`, devlog_195); Java version needs a JVM statement decoder (future RFC)
+
+
+---
+
+# Agent Session Memory (RFC 0151)
+
+Status (2026-09-21): all phases implemented (devlog_197). NOT done: live Claude Code hook verification, a live `claude -p` eval run (the P5 GO is on a deterministic proxy, conditional), any public communication (checklist only: `docs/session-memory-comms-checklist.md`). Deviations: see RFC 0151 "Deviations". Findings: `docs/spikes/session-memory-findings.md`. Note: the plan's "RFC 0136/0137" dependencies are RFC 0135 Parts C/B here and are already landed.
+
+## Working rules for every phase (from CLAUDE.md's mandatory workflow)
+
+- RFC first; no code for a phase until the RFC sections it consumes are accepted.
+- Every task ends with `cargo test --workspace`, `cargo clippy -D warnings`, `cargo fmt --check` clean.
+- One devlog per session (`devlog_NNN.md`): what was built, decisions with alternatives, Knowledge Captured, Files Changed.
+- Any bug a regression test catches is written up honestly in the devlog, including reverted attempts (as in devlog 114).
+- **No public claim outruns what is shipped and measured.** Roadmap items are never described as shipped.
+
+## Critical path and milestones
+
+```
+P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (notes → commit → brief/recall)
+                   │
+                   ├─► P4 (staleness + lifecycle)
+                   └─► P5 (eval v0)  ══► GATE: does session memory beat the /compact baseline?
+                                          │ yes
+                                          ▼
+                              P6 ══► M2  Claude Code loop (agent writes notes, hooks, skill)
+                                          ▼
+                                   P7 (transcript + LLM extraction, proposals only)
+                                          ▼
+                                   P8 (hardening, docs, demo, comms)
+```
+
+**External dependencies:** RFC 0136 (`KirRelationship::new()` id determinism) must land before P4 staleness is trusted; RFC 0137 (`source_artifact_id` audit trail) is needed for evidence pointers in P2. If either slips, P4 and P2's evidence links are blocked — see Risk Register.
+
+---
+
+## Phase 0 — Verification, decisions, and audit
+
+**Goal:** Turn every **[verify P0]** tag in the RFC into a confirmed fact or a design change, before writing code.
+**Size:** M
+
+- [x] **Audit existing claim machinery**
+  - *What:* Read the `Custom("Claim")` shape from RFC 0065/0067 and the claim/temporal-validity fields from RFC 0047–0048; decide whether `claim_type: "session_note"` is a clean extension.
+  - *Output:* `docs/spikes/session-memory-claims.md` with the chosen property set and any conflicts.
+  - *Test/Validate:* Doc cites the exact struct/field names from the code; no new top-level KIR primitive is proposed.
+
+- [x] **Audit existing memory artifacts**
+  - *What:* Read `.claude/skills/memory`, `.claude/skills/ekos-knowledge`, and the `memory-keeper` demo subagent. Decide reuse vs supersede.
+  - *Output:* Section in the spike doc: what exists, what overlaps, what is retired.
+  - *Test/Validate:* No planned deliverable duplicates an existing one without an explicit supersede note.
+
+- [~] **Verify Claude Code hook behaviour** _(docs-verified 2026-09-21; PreCompact does not exist; live injection check still open)_
+  - *What:* Against current Claude Code docs and a scratch project, confirm: hook event names (SessionStart, PreCompact, SessionEnd), payloads (is the transcript path provided?), timeouts, whether SessionStart hook output is injected as context, and failure semantics.
+  - *Output:* `docs/spikes/session-memory-hooks.md` with a working minimal `.claude/settings.json` snippet.
+  - *Test/Validate:* A scratch session demonstrably runs the hook and receives injected text; documented what happens on hook timeout/error.
+
+- [x] **Verify persistence path for review decisions**
+  - *What:* Find how `ekos_identity_review` (RFC 0029) persists confirm/reject so `ClaimStatusChanged` can reuse it.
+  - *Output:* Notes in spike doc; decision on reuse vs new event append.
+  - *Test/Validate:* Identified the exact function and the lock it takes.
+
+- [x] **Verify ledger lock behaviour for incremental single-source commit**
+  - *What:* Measure whether an observe→compile→commit restricted to one new source can run while `ekos mcp serve` is up and while a full `ekos build` runs elsewhere.
+  - *Output:* Findings + chosen retry/backoff policy (RFC Open Question 6).
+  - *Test/Validate:* Scripted repro showing behaviour under concurrent writers; no `LockBusy` reaches the agent.
+
+- [x] **DECISION GATE: ledger vs sidecar for claim text (RFC Open Question 1) and scope (Open Question 2)**
+  - *What:* Decide with the owner; record in the RFC.
+  - *Output:* RFC updated; if sidecar is chosen, P2/P4 are re-planned before proceeding.
+  - *Test/Validate:* RFC Open Questions 1–2 checked off with rationale.
+
+- [x] **RFC review and status → Accepted (for P1–P5 scope)**
+  - *What:* Review against `ekos.md`, `CLAUDE.md`, `SECURITY.md`; resolve or explicitly re-scope open questions.
+  - *Output:* RFC header `Status: Accepted` (or a partial acceptance note limited to P1–P5).
+  - *Test/Validate:* Acceptance Criteria items 1–2 checked.
+
+---
+
+## Phase 1 — Session inbox and redaction (write path, no ledger)
+
+**Goal:** A safe, capped, redacted, append-only staging area, usable from the CLI.
+**Size:** M
+**Crate hints:** `common` (redaction reuse), `cli`, a new small `session` module/crate.
+
+- [x] **Inbox schema and writer**
+  - *What:* Implement the entry schema (RFC §2) with `schema: 1`, content-hash `entry_id`, per-session JSONL file, `O_APPEND` writes, size/count caps.
+  - *Output:* `session::inbox` module + config section `[session-memory]` (default `enabled = false`).
+  - *Test/Validate:* Unit tests: cap enforcement, dropped-entry counting, truncated-last-line tolerance, deterministic `entry_id`.
+
+- [x] **Redaction at write**
+  - *What:* Route every note field (text, rationale, anchors) through `ekos_common::redaction`; drop the entry on redaction failure.
+  - *Output:* Redaction call at the single inbox-write choke point.
+  - *Test/Validate:* Fuzz/corpus tests with secret shapes in transcript-like content; a failing redactor yields no file write.
+
+- [x] **Workspace-boundary and permissions checks**
+  - *What:* Canonicalise `inbox_dir` and anchor paths; refuse anything outside the workspace; create files user-only.
+  - *Output:* Path validation helper.
+  - *Test/Validate:* Traversal tests (`../`, symlinks); file mode assertion on Unix.
+
+- [x] **`ekos session note` and `ekos session status` CLI**
+  - *What:* Typed note entry from the CLI; `status` reports counts, dropped entries, pending commit.
+  - *Output:* CLI subcommands wired in `bin/ekos.rs`.
+  - *Test/Validate:* Integration test: write 3 notes, `status` reports 3 pending, file contents match schema.
+
+- [x] **Devlog + RFC amendments noted**
+  - *Test/Validate:* Devlog lists dropped alternatives and any surprises.
+
+**Definition of done:** notes can be written from the CLI; nothing touches the ledger; all secret shapes in the corpus are redacted; caps hold.
+
+---
+
+## Phase 2 — SessionObserver, KIR mapping, and commit
+
+**Goal:** Inbox content reaches the ledger only through the normal pipeline, as unconfirmed anchored claims.
+**Size:** L
+**Blocked by:** RFC 0137 for evidence/audit-trail pointers (use best available provenance and mark the gap if not landed).
+
+- [x] **`SessionObserver` (observation-sdk)**
+  - *What:* Read sealed inbox segments; emit content-addressed `ObservationArtifact`s. No interpretation.
+  - *Output:* Observer registered as a raw-content entry point for RFC 0043.
+  - *Test/Validate:* Same inbox bytes → same artifact checksum; redaction re-applied at observation (test with a hand-edited inbox containing a secret).
+
+- [x] **Deterministic mapping pass: notes → `Session`, `Claim`, `DeadEnd` Event**
+  - *What:* Implement the RFC §4 mapping using `Custom()` kinds and properties only.
+  - *Output:* `SessionNotesPass` (deterministic, side-effect-free), `Custom("Session")`, `Custom("Claim")` with `claim_type: "session_note"`, `Custom("DeadEnd")`, `ObservedIn`.
+  - *Test/Validate:* Golden-file tests; two runs produce identical ledger content; pass declares real `cache_inputs()` (lesson from devlog 14).
+
+- [x] **Anchor resolution pass**
+  - *What:* Exact-match resolution of anchor hints to Object ids; outcomes `resolved / ambiguous / unresolved`; write `AnchoredTo` for resolved anchors only.
+  - *Output:* `SessionAnchorPass`.
+  - *Test/Validate:* Ambiguous name (two candidates) yields `ambiguous`, never an edge; unresolved is recorded; no existing object or identity is modified.
+
+- [x] **`ekos session commit` (incremental)**
+  - *What:* Run observe → compile → commit for the session source only, using the Phase 0 lock policy.
+  - *Output:* CLI subcommand; `pending` count goes to 0 after success.
+  - *Test/Validate:* Concurrent `ekos build` scenario leaves notes pending, loses nothing, and never surfaces a lock error to the caller.
+
+- [x] **Isolation test for default answer paths**
+  - *What:* Prove `ekos_query`, `ekos_retrieve`, `ekos ask`, and the RFC 0126 ranking gate are unaffected by session claims.
+  - *Test/Validate:* Existing ranking-gate CI unchanged; a test seeds session claims and asserts default query results are byte-identical.
+
+**Definition of done:** a note written in P1 shows up as an unconfirmed, anchored `Claim` after `ekos session commit`, with evidence pointing back to the inbox artifact.
+
+---
+
+## Phase 3 — Read path: `recall` and `brief`
+
+**Goal:** Retrieve session memory, read-only, with tier, staleness placeholder, and evidence — **Milestone M1.**
+**Size:** M
+
+- [x] **Runtime read model for session claims**
+  - *What:* Derive current claim state from `ClaimStatusChanged` events (none yet in P3, but the reducer exists) and join anchors/evidence.
+  - *Output:* `Runtime::session_claims(...)` (read-only, through `Runtime`, per the RFC 0005 contract).
+  - *Test/Validate:* Reducer tests on synthetic event sequences; works on `open_store_read_only`.
+
+- [x] **`ekos session recall` + MCP `ekos_session_recall`**
+  - *What:* Hybrid retrieval restricted to session claims/dead ends; explicit **no relevant session memory** result when nothing matches.
+  - *Output:* Tool registered in `commands/mcp.rs`; RFC 0013 tool table amended.
+  - *Test/Validate:* Extend the scripted `mcp_session.rs` pattern with a recall turn; a negative-control query returns the explicit refusal.
+
+- [x] **`ekos session brief` + MCP `ekos_session_brief`**
+  - *What:* Deterministic ranking (tier → freshness → scope overlap → recency), token budget, `pending` notes from the inbox, changed-since-last-session via the `ekos_diff` mechanism, data-envelope wrapper.
+  - *Output:* Tool + CLI `--format claude-hook`, `--scope-from-git`.
+  - *Test/Validate:* Golden-output tests; budget truncation is reported; brief with no session memory says so plainly.
+
+- [x] **Manual M1 walkthrough**
+  - *What:* Write notes by CLI → commit → run brief/recall in a headless `claude -p --allowedTools "mcp__ekos__*"` session (precedent: devlog 15).
+  - *Output:* Devlog with the transcript.
+  - *Test/Validate:* The headless session cites a note and its evidence; nothing was written by the agent.
+
+**Milestone M1:** the manual loop works end to end. Not yet agent-writable.
+
+---
+
+## Phase 4 — Staleness and claim lifecycle
+
+**Goal:** The differentiator — memory that flags itself when the code moves.
+**Size:** L
+**Blocked by:** RFC 0136 (relationship id determinism) before staleness verdicts are trusted; if not landed, ship behind a flag and say so in the devlog.
+
+- [x] **Per-kind state projections and fingerprints**
+  - *What:* Implement the narrow projections (table, symbol, document, transformation) and `anchor_fingerprint`; record it on `AnchoredTo` at pin time.
+  - *Output:* `anchor_projection(kind, state)` with unit tests.
+  - *Test/Validate:* Unrelated edits do not change a fingerprint; relevant edits do (property tests on fixtures).
+
+- [x] **Staleness verdicts at read time**
+  - *What:* `fresh / changed / orphaned / unanchored`, plus a short anchor change summary.
+  - *Output:* Verdicts in `recall` and `brief` output.
+  - *Test/Validate:* Fixture: note on `orders`, add a column, rebuild → verdict `changed` with the summary; delete the table → `orphaned`.
+
+- [x] **Lifecycle events and `Supersedes`**
+  - *What:* `ClaimStatusChanged` events; `Supersedes` edges; derived current state.
+  - *Output:* Event append via the Phase 0 persistence path.
+  - *Test/Validate:* Superseded claims drop out of default ranking but remain queryable; nothing is deleted.
+
+- [x] **`ekos session review` (human-only promotion)**
+  - *What:* Confirm/reject/supersede from the CLI, recording actor `human`.
+  - *Output:* CLI subcommand; no MCP equivalent in this phase.
+  - *Test/Validate:* Test proving no MCP tool can emit `T0 → T1`; a `T1` claim whose anchor changed renders as `changed`, not silently trusted.
+
+- [x] **Measure fingerprint noise on a real ledger**
+  - *What:* On the real multi-project ledger, simulate typical edits and count false `changed` flags (RFC Open Question 3).
+  - *Output:* Numbers in the devlog; projection tuning if noise is high.
+  - *Test/Validate:* Reported false-flag rate with the method used; no hand-picked examples.
+
+---
+
+## Phase 5 — Eval v0 and go/no-go gate
+
+**Goal:** Decide with evidence whether to invest in agent-writable memory.
+**Size:** M
+
+- [x] **`session-continuity` fixtures and runner**
+  - *What:* Scripted session A → notes (inserted by CLI, so this phase does not depend on P6) → fresh session B questions. Conditions: no memory, native compaction-style summary, EKOS session memory, EKOS after anchored code changed.
+  - *Output:* Runner in `crates/evals` using headless `claude -p`; fixtures under `tests/fixtures/session-continuity/`.
+  - *Test/Validate:* Fixtures verified not to leak answers outside the path under test.
+
+- [x] **Metrics**
+  - *What:* Correctness vs ground truth; citation coverage × validity × grounded-answer rate (uncited answers penalised, not excluded); stale-fact-served rate; poisoned-note leak rate; brief tokens; latency.
+  - *Output:* Metric definitions in code plus a written spec.
+  - *Test/Validate:* Negative controls (answer in no session) must produce a refusal; a deliberately broken retrieval makes the score drop (proves the metric can fail).
+
+- [x] **Variance and reporting**
+  - *What:* N repeated runs per condition; report mean and spread.
+  - *Output:* `docs/evals/session-continuity-<date>.md`.
+  - *Test/Validate:* Numbers reproducible from a documented command.
+
+- [x] **GO / NO-GO decision**
+  - *What:* If EKOS session memory does not beat the compaction-summary baseline on correctness **and** stale-fact-served rate, stop and write up why before P6.
+  - *Output:* Decision recorded in the RFC with the numbers.
+  - *Test/Validate:* Acceptance Criteria item 5 checked.
+
+---
+
+## Phase 6 — Agent write path and Claude Code integration — **Milestone M2**
+
+**Goal:** Claude Code records notes itself and starts sessions with a brief.
+**Size:** L
+**Precondition:** P5 GO. SECURITY.md/CLAUDE.md amendments land in the **same PR** as the tool.
+
+- [x] **Security amendment**
+  - *What:* Amend `SECURITY.md` ("A Note on MCP Tool Access") and `CLAUDE.md` invariants to list `ekos_session_note` as an inbox-only, gated tool; RFC 0013 tool table updated.
+  - *Output:* Doc diffs in the same PR as the tool.
+  - *Test/Validate:* Wording says precisely what the tool can and cannot do; no claim broader than the tests prove.
+
+- [x] **MCP tool `ekos_session_note` (gated, off by default)**
+  - *What:* Validates, redacts, appends to the inbox; returns only `{entry_id, accepted, redactions_applied}`.
+  - *Output:* Tool in `commands/mcp.rs`, enabled only with `[session_memory] enabled = true`.
+  - *Test/Validate:* **Boundary test: the write path opens no ledger handle (writable or read-only)**; server started without the flag does not list the tool; caps and redaction enforced through MCP.
+
+- [x] **Hooks and settings snippet**
+  - *What:* SessionStart (brief), PreCompact/SessionEnd (capture placeholder + background commit) per Phase 0 findings; fail open for memory, closed for redaction.
+  - *Output:* `docs/integrations/claude-code-session-memory.md` + `.claude/settings.json` example.
+  - *Test/Validate:* Hook timeout/error never blocks a scratch session; a redaction failure drops the note.
+
+- [x] **`.claude/skills/session-memory/SKILL.md`**
+  - *What:* When to note, what to note, what never to note; anchors must be real paths/symbols.
+  - *Output:* Skill file; retire or merge overlapping existing skill per the Phase 0 audit.
+  - *Test/Validate:* A headless session with the skill writes ≥1 well-formed, anchored note and does not write secrets or derivable facts.
+
+- [x] **M2 walkthrough + re-run of the P5 suite with agent-authored notes**
+  - *Output:* Devlog; updated eval report comparing agent-authored vs scripted notes.
+  - *Test/Validate:* Agent-authored notes do not regress the P5 metrics; any regression is reported, not tuned away.
+
+---
+
+## Phase 7 — Transcript capture and LLM extraction (proposals only)
+
+**Goal:** Catch what the agent forgot to note, without granting extractor output any trust.
+**Size:** L
+
+- [x] **`ekos session capture` (redacted transcript slices)**
+  - *What:* Slice, redact, store as content-addressed artifacts outside the ledger; retention policy.
+  - *Output:* CLI + hook wiring (PreCompact/SessionEnd).
+  - *Test/Validate:* Redaction fuzz on transcript-shaped input (env dumps, headers, tool output); retention deletes expired slices.
+
+- [x] **`SessionExtractionPass` (recovery layer, LLM via `LlmProvider`)**
+  - *What:* Strict-JSON, temperature 0, keyed by slice checksum and cached; every extracted claim must quote a span that exists in the slice or it is dropped.
+  - *Output:* Pass modelled on `DocumentSemanticsAnalyzerPass`; output is always `T0`, `capture: "extracted"`.
+  - *Test/Validate:* Hallucinated-span fixture is dropped; identical input → cached identical output; cloud LLM use follows the existing explicit-opt-in policy.
+
+- [x] **Extended evals**
+  - *What:* Add extracted-claim precision and drift measurement to the suite.
+  - *Output:* Updated report.
+  - *Test/Validate:* Extracted claims are measured separately from explicit ones.
+
+- [x] **`ekos session purge`**
+  - *What:* Delete inbox segments/slices by session or age; document exactly what it does *not* undo (ledger claims).
+  - *Test/Validate:* Post-purge, evidence pointers render as "source purged", claims remain and are still labelled.
+
+---
+
+## Phase 8 — Hardening, docs, demo, communications
+
+**Goal:** Make it trustworthy and describe it accurately.
+**Size:** M
+
+- [x] **Adversarial and security review pass**
+  - *What:* Poisoned-note fixtures, flood tests, permission tests, concurrent sessions, crash-mid-append, redaction bypass attempts.
+  - *Output:* Test suite + a written threat-model update in the RFC.
+  - *Test/Validate:* No fixture produces a `T1` claim without a human action; no secret shape survives to the ledger.
+
+- [x] **Docs and demo**
+  - *What:* User guide; extend the demo with a two-session scenario using Plausible Analytics as the live example, including the stale-memory moment.
+  - *Output:* Docs, demo script, headless transcripts.
+  - *Test/Validate:* Demo is reproducible from a clean checkout.
+
+- [ ] **Public communication guardrail check**
+  - *What:* Draft any article/post only after eval numbers exist. Every sentence is checked against: shipped vs planned, measured vs asserted, and the residual poisoning risk stated honestly. Framing is complementary to native memory and generic memory services, not "better than".
+  - *Output:* Draft plus a claim-by-claim checklist.
+  - *Test/Validate:* No roadmap item stated as shipped; every number traces to a committed eval report.
+
+- [x] **Close-out**
+  - *What:* RFC to `Accepted` for the full scope, open questions resolved or re-scoped with sign-off, `TODO.md` and devlog updated.
+
+---
+
+## Risk register
+
+| Risk | Impact | Mitigation | Trigger to re-plan |
+|---|---|---|---|
+| RFC 0136/0137 slip | Staleness untrustworthy; evidence links weaker | Ship staleness behind a flag; state the gap in devlogs | Not landed when P4 starts |
+| Fingerprint noise floods `changed` | Users learn to ignore staleness | Narrow projections; measure on real ledger in P4 | False-flag rate high on real edits |
+| Session memory does not beat compaction baseline | Feature not worth further cost | P5 hard gate; stop before P6 | Gate result |
+| Redaction miss is permanent in ledger | Irreversible sensitive content | Short capped text; redaction twice; sidecar option (Alt. B) | Any confirmed leak → switch to sidecar |
+| Memory poisoning via injected content | Persistent misleading "facts" | Tiers, no agent confirmation, labelled output, audit evidence | Any fixture reaches `T1` unattended |
+| Ledger writer-lock contention | Notes stay pending, stale briefs | Retry/backoff; `pending` shown in brief | Lock waits observed in P0 measurement |
+| Hook behaviour differs from assumptions | Integration rework | P0 verification; thin integration layer | P0 findings contradict RFC §8 |
+| Scope creep into a general write API | Breaks read-only positioning | Inbox-only tool; amendments list exact capabilities | Any proposal to write to the ledger directly |
+
+## Test inventory (must exist by P8)
+
+- Inbox: caps, truncation tolerance, permissions, traversal, deterministic ids.
+- Redaction: secret-shape corpus, transcript-shaped content, redactor-failure drops the note.
+- Observer/passes: golden files, determinism across runs, cache-input completeness.
+- Anchors: exact match only, ambiguity never guessed, no mutation of existing objects.
+- Boundary: write tool opens no ledger handle; default query paths byte-identical with session claims present.
+- Lifecycle: derived state, supersede, no deletion, human-only promotion.
+- Staleness: `fresh/changed/orphaned/unanchored` fixtures; fingerprint noise measurement.
+- Read path: budget truncation, explicit no-memory result, pending notes shown separately.
+- Eval: negative controls, breakable-metric check, variance reporting.
+- Adversarial: poisoned-note, flood, crash-mid-append, concurrent sessions.

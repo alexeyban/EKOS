@@ -52,6 +52,9 @@ directory. `mcp serve` therefore takes `--workspace <DIR>` (default: cwd) and re
 | `ekos_dependents` | `Runtime::relationships_for` (split by direction) | `id: string` |
 | `ekos_diff` | `diff_ledger`, touched ids resolved to names (≤200 listed) | `from: string` (RFC 3339), `to?: string` (default now) |
 | `ekos_status` | `Ledger` entry/object/relationship counts | — |
+| `ekos_session_note` *(RFC 0151, opt-in `[session-memory]`)* | redacted, capped append to the session inbox file — **no ledger handle** | `text`, `kind?`, `rationale?`, `anchors?`, `session?` |
+| `ekos_session_recall` *(RFC 0151, opt-in)* | read-only recall over unconfirmed session claims, with tier + staleness verdict | `query`, `limit?` |
+| `ekos_session_brief` *(RFC 0151, opt-in)* | read-only, token-budgeted, untrusted-envelope session brief | `scope?`, `budget_tokens?` |
 
 `ekos_dependents` answers impact analysis ("what breaks if this changes?"): incoming edges are
 `dependents`, outgoing edges `dependencies`, each resolved to name/kind with the relationship's

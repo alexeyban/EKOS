@@ -785,7 +785,8 @@ documentation drift, and a real architecture-level diff between two points in ti
 crate role classifications, risks, open questions — distinct from `ekos_diff`'s raw entry report;
 RFC 0065/0068 §55/RFC 0107-0108), and `ekos_identity_review`/`ekos_architecture_review` (confirm or
 reject a cross-system identity match, or an LLM-classified crate role claim — RFC 0029/RFC 0109,
-the two write-capable tools; every other tool reads only the local ledger). Long-lived server
+the two write-capable tools; every other tool reads only the local ledger, except the opt-in
+`ekos_session_note`, RFC 0151 — it writes a redacted note to a local inbox file, never to the ledger). Long-lived server
 sessions reuse one cached, read-only ledger handle across calls without ever blocking a concurrent
 `ekos build`/`commit` in another process (RFC 0097). Every read tool (and `ekos ekl` run from the
 CLI) appends one line to `.ekos/query-log.jsonl` — a real usage log the previous designs had no

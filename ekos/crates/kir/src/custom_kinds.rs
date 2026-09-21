@@ -15,6 +15,12 @@
 //! string literal in `crates/recovery/src` and `crates/semantic/src` and asserts each has an
 //! entry below, so a new kind fails CI rather than a generated entity page weeks later.
 
+/// RFC 0151 — kinds and name prefix reserved for agent session memory. Default retrieval
+/// (`Runtime::find_objects` / `Runtime::retrieve`) hides these; only `ekos_session_*` surfaces them.
+pub const SESSION_KIND: &str = "Session";
+pub const SESSION_CLAIM_KIND: &str = "SessionClaim";
+pub const SESSION_NAME_PREFIX: &str = "session-";
+
 /// One row of [`REGISTRY`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CustomKind {
@@ -113,6 +119,16 @@ pub const REGISTRY: &[CustomKind] = &[
         name: "Claim",
         structurally_keyed: true,
         note: "(subject, predicate, object) triple — RFC 0065",
+    },
+    CustomKind {
+        name: "Session",
+        structurally_keyed: true,
+        note: "session id — RFC 0151; one per inbox session",
+    },
+    CustomKind {
+        name: "SessionClaim",
+        structurally_keyed: true,
+        note: "inbox entry_id (content hash) — RFC 0151; never a merge candidate",
     },
     CustomKind {
         name: "ArchitectureGap",

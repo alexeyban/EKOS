@@ -269,13 +269,41 @@ impl<'a> Runtime<'a> {
 
     /// Full-text search over object names and kinds. Returns ranked `(id, name)` matches.
     pub fn find_objects(&self, query: &str) -> Result<Vec<(KirId, String)>, RuntimeError> {
-        Ok(self.ledger.find_objects(query)?)
+        let mut found = self.ledger.find_objects(query)?;
+        found.retain(|(id, name)| !self.is_session_memory(id, name, None));
+        Ok(found)
+    }
+
+    /// RFC 0151 — session memory is hidden from every default retrieval path. The cheap name
+    /// prefix is only a pre-filter; the object's real kind decides.
+    fn is_session_memory(
+        &self,
+        id: &KirId,
+        name: &str,
+        kind: Option<&ekos_kir::ObjectKind>,
+    ) -> bool {
+        use ekos_kir::custom_kinds::{SESSION_CLAIM_KIND, SESSION_KIND, SESSION_NAME_PREFIX};
+        let is_session = |k: &ekos_kir::ObjectKind| matches!(k, ekos_kir::ObjectKind::Custom(c) if c == SESSION_KIND || c == SESSION_CLAIM_KIND);
+        match kind {
+            Some(k) => is_session(k),
+            None if name.starts_with(SESSION_NAME_PREFIX) => self
+                .ledger
+                .get_object(id)
+                .ok()
+                .flatten()
+                .is_some_and(|o| is_session(&o.kind)),
+            None => false,
+        }
     }
 
     /// Scored, multi-signal retrieval (RFC 0118 / 0119) — the seam every search consumer routes
     /// through. In Phase 0 this is `find_objects` wrapped as one BM25 signal.
     pub fn retrieve(&self, req: &RetrievalRequest) -> Result<RankedResults, RuntimeError> {
-        Ok(self.ledger.retrieve(req)?)
+        let mut results = self.ledger.retrieve(req)?;
+        results
+            .hits
+            .retain(|h| !self.is_session_memory(&h.id, &h.name, h.kind.as_ref()));
+        Ok(results)
     }
 
     /// Every write this entity's current state descends from — run id, stage, and (RFC 0135 Part

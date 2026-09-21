@@ -22,6 +22,7 @@ members = [
     "crates/marketing",
     "crates/docs-gen",
     "crates/dbt-gen",
+    "crates/session",
     "crates/cli",
     "crates/evals",
     "crates/demo-server",
@@ -62,6 +63,7 @@ license = "MIT"
 # Internal crates
 ekos-common    = { path = "crates/common" }
 ekos-kir       = { path = "crates/kir" }
+ekos-session   = { path = "crates/session" }
 ekos-artifact  = { path = "crates/artifact" }
 ekos-compiler-core = { path = "crates/compiler-core" }
 ekos-segment-backend = { path = "crates/segment-backend" }

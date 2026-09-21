@@ -27,6 +27,7 @@ pub mod query_log;
 pub mod recover;
 pub mod replay;
 pub mod resolve;
+pub mod session;
 pub mod simulate;
 pub mod store;
 

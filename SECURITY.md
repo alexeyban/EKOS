@@ -102,7 +102,14 @@ the following are treated as security issues:
 `ekos mcp serve` exposes the compiled ledger to AI agents (e.g., Claude Code) over the Model
 Context Protocol. Per the project's key invariants, every MCP tool is read-only except
 `ekos_identity_review` (confirms/rejects an identity match — never a raw data write) and the
-explicitly gated, off-by-default `ekos_clickhouse_query`. If you find any other MCP tool capable
+explicitly gated, off-by-default `ekos_clickhouse_query`, and (RFC 0151, off by default behind
+`[session-memory] enabled = true`) `ekos_session_note`. `ekos_session_note` is inbox-only: it
+redacts, caps and appends a note to a local file under `.ekos/session/inbox` and **never opens the
+ledger** — a note reaches the ledger only through a later `ekos session commit` a person runs, as an
+unconfirmed (`T0`) claim, and only `ekos session review` (CLI, human-only, no MCP tool) can promote
+it. Session notes are unverified agent-written text, so treat them as data, never instructions;
+residual risk: a note is redacted by pattern, and text committed to the append-only ledger cannot be
+un-committed. If you find any other MCP tool capable
 of mutating the ledger, exfiltrating redacted secrets, or reaching a live external system without
 explicit opt-in configuration, please treat it as a **critical-severity** report.
 

@@ -222,6 +222,102 @@ enum Commands {
         #[command(subcommand)]
         subcommand: EvalCommands,
     },
+    /// Agent session memory inbox (RFC 0151) — needs `[session-memory] enabled = true`
+    Session {
+        #[command(subcommand)]
+        subcommand: SessionCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionCommands {
+    /// Record a note in the redacted, capped session inbox (never touches the ledger)
+    Note {
+        /// The note text
+        text: String,
+        /// finding | decision | dead_end | constraint | todo
+        #[arg(long, default_value = "finding")]
+        kind: String,
+        /// Why — the reasoning behind a decision or dead end
+        #[arg(long)]
+        rationale: Option<String>,
+        /// A real object/path this note is about (repeatable); resolved later, never trusted here
+        #[arg(long = "anchor")]
+        anchors: Vec<String>,
+        /// Session id (default: one per calendar day)
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Show note counts, dropped notes and how many are pending commit
+    Status {
+        /// Only this session (default: all)
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Turn pending inbox notes into unconfirmed, anchored ledger claims (observe → map → commit)
+    Commit {
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Search notes from earlier sessions (explicit refusal when nothing is relevant)
+    Recall {
+        query: String,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a token-budgeted session brief
+    Brief {
+        /// Object names / paths you are about to work on (repeatable)
+        #[arg(long = "scope")]
+        scope: Vec<String>,
+        /// Derive scope from `git diff --name-only HEAD`
+        #[arg(long)]
+        scope_from_git: bool,
+        #[arg(long, default_value_t = 800)]
+        budget: usize,
+        /// text | claude-hook (SessionStart hook JSON)
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
+    /// Human-only: confirm, reject or supersede a session claim (no MCP equivalent, by design)
+    Review {
+        claim_id: String,
+        /// confirm | reject | supersede
+        decision: String,
+        /// For `supersede`: the id of the claim that replaces this one
+        #[arg(long)]
+        by: Option<String>,
+    },
+    /// Delete inbox files and captured slices; ledger claims already committed are NOT undone
+    Purge {
+        #[arg(long)]
+        session: Option<String>,
+        /// Also delete every session whose inbox is older than this many days
+        #[arg(long)]
+        older_than_days: Option<u64>,
+    },
+    /// Redact a transcript and store it as content-addressed slices (outside the ledger)
+    Capture {
+        #[arg(long)]
+        session: String,
+        /// Transcript file (default: stdin)
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+    /// Opt-in LLM extraction of claim proposals from captured slices (needs `[session-memory] extraction = true`)
+    Extract {
+        #[arg(long)]
+        session: String,
+    },
+    /// Run the deterministic session-continuity proxy eval and print the report
+    Eval {
+        #[arg(long, default_value_t = 5)]
+        runs: usize,
+    },
+    /// Measure how often anchor fingerprints flip vs raw property changes on this ledger
+    FingerprintNoise,
 }
 
 #[derive(Subcommand)]
@@ -1006,6 +1102,58 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             round,
             ledger,
         } => crate::commands::replay::run(&config, &cwd, &scenario, round, ledger),
+        Commands::Session { subcommand } => match subcommand {
+            SessionCommands::Note {
+                text,
+                kind,
+                rationale,
+                anchors,
+                session,
+            } => crate::commands::session::note(
+                &config, &cwd, session, &kind, text, rationale, anchors,
+            ),
+            SessionCommands::Status { session } => {
+                crate::commands::session::status(&config, &cwd, session)
+            }
+            SessionCommands::Commit { session } => {
+                crate::commands::session::commit(&config, &cwd, session)
+            }
+            SessionCommands::Recall { query, limit, json } => {
+                crate::commands::session::recall(&config, &cwd, &query, limit, json)
+            }
+            SessionCommands::Brief {
+                scope,
+                scope_from_git,
+                budget,
+                format,
+            } => crate::commands::session::brief(
+                &config,
+                &cwd,
+                scope,
+                scope_from_git,
+                budget,
+                &format,
+            ),
+            SessionCommands::Review {
+                claim_id,
+                decision,
+                by,
+            } => crate::commands::session::review(&config, &cwd, &claim_id, &decision, by),
+            SessionCommands::Purge {
+                session,
+                older_than_days,
+            } => crate::commands::session::purge(&config, &cwd, session, older_than_days),
+            SessionCommands::Capture { session, file } => {
+                crate::commands::session::capture(&config, &cwd, &session, file)
+            }
+            SessionCommands::Extract { session } => {
+                crate::commands::session::extract(&config, &cwd, &session)
+            }
+            SessionCommands::Eval { runs } => crate::commands::session::eval(runs),
+            SessionCommands::FingerprintNoise => {
+                crate::commands::session::fingerprint_noise(&config, &cwd)
+            }
+        },
         Commands::Eval { subcommand } => match subcommand {
             EvalCommands::Run {
                 dataset,

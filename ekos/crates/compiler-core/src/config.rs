@@ -36,6 +36,8 @@ pub struct EkosConfig {
     pub storage: StorageConfig,
     #[serde(default)]
     pub retrieval: RetrievalConfig,
+    #[serde(default)]
+    pub session_memory: SessionMemoryConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +176,62 @@ pub struct LlmDescriptionConfig {
     pub enabled: bool,
     #[serde(default)]
     pub scope: DescriptionScope,
+}
+
+/// RFC 0151: `[session-memory]` — the agent session inbox. Off by default; `ekos session note`
+/// refuses to write anything until `enabled = true`. Caps bound both a single note and a whole
+/// session so a runaway agent cannot flood the inbox.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SessionMemoryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Relative to the workspace root; defaults to `.ekos/session/inbox`.
+    #[serde(default)]
+    pub inbox_dir: Option<PathBuf>,
+    #[serde(default = "default_session_max_note_chars")]
+    pub max_note_chars: usize,
+    #[serde(default = "default_session_max_entries")]
+    pub max_entries_per_session: usize,
+    #[serde(default = "default_session_max_bytes")]
+    pub max_bytes_per_session: u64,
+    /// Days redacted transcript slices are kept (`ekos session capture`); expired ones are
+    /// deleted on every capture and by `ekos session purge`.
+    #[serde(default = "default_session_retention_days")]
+    pub capture_retention_days: u64,
+    /// Opt-in LLM extraction of claims from captured slices (`ekos session extract`). Output is
+    /// always an unconfirmed proposal; uses the `[llm]` provider, so a cloud provider means a
+    /// metered call — leave off unless that is intended.
+    #[serde(default)]
+    pub extraction: bool,
+}
+
+fn default_session_retention_days() -> u64 {
+    14
+}
+
+fn default_session_max_note_chars() -> usize {
+    2000
+}
+fn default_session_max_entries() -> usize {
+    200
+}
+fn default_session_max_bytes() -> u64 {
+    256 * 1024
+}
+
+impl Default for SessionMemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            inbox_dir: None,
+            max_note_chars: default_session_max_note_chars(),
+            max_entries_per_session: default_session_max_entries(),
+            max_bytes_per_session: default_session_max_bytes(),
+            capture_retention_days: default_session_retention_days(),
+            extraction: false,
+        }
+    }
 }
 
 /// RFC 0148 stage 2: `[binary-reconstruction]` — the opt-in LLM reconstruction of business logic
@@ -571,6 +629,7 @@ impl Default for EkosConfig {
             architecture: ArchitectureConfig::default(),
             storage: StorageConfig::default(),
             retrieval: RetrievalConfig::default(),
+            session_memory: SessionMemoryConfig::default(),
         }
     }
 }

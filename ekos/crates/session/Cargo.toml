@@ -1,0 +1,19 @@
+[package]
+name = "ekos-session"
+description = "RFC 0151 — agent session memory: the capped, redacted, append-only session inbox"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tempfile = "3"
+ekos-common.workspace = true
+ekos-kir.workspace = true
+ekos-ledger.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+ekos-runtime.workspace = true
