@@ -1,0 +1,9 @@
+@@ Beyond hand-picked inputs: 3,000 generated documents, and a planted bug
+[1;32m$[0m [1mtools/fuzz_diff.py 3000 20260921[0m
+  seed 20260921: 3000 generated documents, 3000 identical, 0 different
+
+[90m# Same fuzzer against a copy of the port with ONE regex flag removed (Singleline on the bold pattern):[0m
+[1;32m$[0m [1mPORT_DIR=work/mutant tools/fuzz_diff.py 300[0m
+  seed 20260921: 300 generated documents, 256 identical, 44 different
+  --- doc 7: '7. seven\n8. eight\n\n* item a\n* item b\n    * nested\n* item c\n\n**bold spanning\nlines** here\n\ncafé ünïcödé 🙂\n\ntrailing two spaces  \nn…
+  original: '<ol start="7">\n<li>seven</li>\n<li><p>eight</p>\n\n<ul>\n<li>item a</li>\n<li>item b</li>\n<li>nested</li>\n<li>item c</li>\n</ul></li>\n</ol>\…

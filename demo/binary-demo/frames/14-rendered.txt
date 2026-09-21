@@ -1,0 +1,7 @@
+@@ What a user sees: the original's HTML and the port's HTML, rendered
+[1;32m$[0m [1mdiff <(wine mdcli.exe < 12-mixed-document.md) <(python -m mdport < 12-mixed-document.md) && echo IDENTICAL[0m
+IDENTICAL — no differing byte
+[1;32m$[0m [1msha256sum (first 16 hex)[0m
+original f26969f56534dc26
+port     f26969f56534dc26
+[90m# Rendered side by side in the browser image for this step.[0m

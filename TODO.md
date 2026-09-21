@@ -5485,3 +5485,12 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] LedgerSMB `SQL001` is 251 of 277 files — most legitimately declare no tables, but worth a pass to
     confirm none are silent losses.
 
+- [~] **RFC 0032 — DAO treasury compliance: payment ↔ approval matching — implemented 2026-09-19 (devlog_194), NOT live-verified.**
+  - [x] `ekos/plugins/treasury` (Etherscan-family explorer client) and `ekos/plugins/governance` (Snapshot GraphQL), each with a `Mock*Client`; `TreasuryAnalyzerPass` / `GovernanceAnalyzerPass`; `ekos_identity::treasury` scorer; `ekos treasury scan`; `ekos_identity_review` accepts `AuthorizedBy`.
+  - [x] End-to-end fixture test through the real pipeline (`crates/cli/tests/treasury_pipeline.rs`).
+  - [ ] **Run `RealTreasuryClient` against a live explorer and `SnapshotClient` against the live hub** — parsing is unit-tested against the documented shapes only; rate limits, the explorer's 10,000-row cap and chain quirks are unverified. Needs an explorer API key and a real treasury address.
+  - [ ] **Tune weights and the 0.3 floor on real DAO ground truth** — RFC 0029's values were reused unvalidated.
+  - [ ] A Solana connector (EKOS's own token lives there) and a Discourse governance connector — both deliberately out of v1.
+  - [ ] A first-class "payments with no approval" MCP tool, if the `ekos_state` / `ekos treasury scan` watchlist proves insufficient (EKL has no negation).
+
+- [x] Compiled .NET app -> EKOS -> Python rewrite demo with per-step screenshots (`demo/binary-demo`, devlog_195); Java version needs a JVM statement decoder (future RFC)

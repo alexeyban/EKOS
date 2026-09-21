@@ -1,0 +1,17 @@
+@@ The one place the original is not deterministic — EKOS flagged it in the spec
+[90m# EncodeEmailAddress (0x0600004E) constructs System.Random. The spec shows it, so the port keeps it random.[0m
+[1;32m$[0m [1mekos_binary_explain … EncodeEmailAddress   (excerpt)[0m
+EncodeEmailAddress(System.String) -> System.String   token 0x0600004E
+fidelity    statements   readiness: ready
+external    System.Object.ToString, System.Random..ctor, System.Random.Next, System.String.get_Chars, System.String.get_Length, Sy
+  loc1 = new System.Random();  // IL_0013
+
+[1;32m$[0m [1mtools/email_check.py     # original x2, port x2[0m
+  original <p>Contact <a href="&#x6d;&#x61;&#x69;&#108;&#116;&#111;…#x2e;&#x63;&#x6f;&#109;</a> for details.</p>
+  original <p>Contact <a href="&#x6d;&#x61;&#105;&#x6c;&#116;&#x6f;…#x2e;&#x63;&#111;&#109;</a> for details.</p>
+  port     <p>Contact <a href="&#109;&#x61;&#105;&#x6c;&#116;&#x6f;…&#x2e;&#99;&#111;&#x6d;</a> for details.</p>
+  port     <p>Contact <a href="&#109;&#x61;&#x69;&#108;&#116;o:&#11…&#x2e;&#99;&#111;&#109;</a> for details.</p>
+
+  byte-identical across the four runs : False
+  identical after decoding entities   : True
+  decoded: <p>Contact <a href="mailto:someone@example.com">someone@example.com</a> for details.</p>

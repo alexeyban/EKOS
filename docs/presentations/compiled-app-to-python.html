@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compiled App to Python — EKOS</title>
+<meta name="description" content="EKOS recovers the logic of a compiled .NET library with no source, a Python rewrite is checked against the running original, and both give identical output. Every step has a screenshot.">
+<link rel="stylesheet" href="../assets/theme.css">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<style>
+.codelinks{font-size:.85rem;margin:.4rem 0 0} .codelinks a{color:var(--accent-a)}
+.shot{margin-top:1.6rem;display:flex;flex-direction:column;gap:1rem}
+.shot img{width:100%;max-width:1180px;height:auto;border-radius:12px;border:1px solid var(--rule);box-shadow:var(--glow-shadow)}
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-hidden="true"><a href="#s1" class="current"></a><a href="#s2"></a><a href="#s3"></a><a href="#s4"></a><a href="#s5"></a><a href="#s6"></a><a href="#s7"></a><a href="#s8"></a><a href="#s9"></a><a href="#s10"></a><a href="#s11"></a><a href="#s12"></a><a href="#s13"></a><a href="#s14"></a><a href="#s15"></a><a href="#s16"></a><a href="#s17"></a><a href="#s18"></a><a href="#s19"></a><a href="#s20"></a><a href="#s21"></a><a href="#s22"></a><a href="#s23"></a></nav>
+
+<div class="deck">
+
+<section class="slide hero" id="s1">
+  <div class="eyebrow">EKOS — Enterprise Knowledge Operating System</div>
+  <h1>A compiled app, no source.<br><span class="arrow-word">Same results</span> in Python.</h1>
+  <p class="lede">EKOS reads a compiled .NET library it has never seen the source of, recovers what every method does,
+  and a Python rewrite is written from that. The rewrite is then checked against the running original
+  and produces byte-identical output. Below is every step, with the real screen for each.</p>
+  <div class="hero-diagram">
+    <span class="chip">MarkdownSharp.dll</span><span class="sep mono">→</span>
+    <span class="chip hot">ekos recover</span><span class="sep mono">→</span>
+    <span class="chip">statement-level spec</span><span class="sep mono">→</span>
+    <span class="chip">Python rewrite</span><span class="sep mono">→</span>
+    <span class="chip hot">characterize + fuzz</span>
+  </div>
+  <div class="byline"><span class="dot"></span> RFC 0148 · RFC 0150 · RFC 0149 (private extension)</div>
+</section>
+
+<section class="slide" id="s2">
+  <div class="stage-num mono">§ 00 / why this app</div>
+  <h2 style="font-size:clamp(1.9rem,3.8vw,2.9rem); max-width:24ch;">Open source, real, deterministic, and small enough to check completely.</h2>
+  <div class="two-col">
+    <p class="lede" style="margin-top:0;">MarkdownSharp is the Markdown engine that powered Stack Overflow. It is a text-to-HTML function with no
+    files, network or database, so "same results" means identical bytes. It leans on regular expressions,
+    which is where a port most easily goes wrong.</p>
+    <ul class="facts">
+      <li><span class="k">Input</span><span class="v">The compiled net40 assembly from NuGet, MIT licensed.</span></li>
+      <li><span class="k">Recovered</span><span class="v">99 of 101 method bodies as fully structured statements, 98%.</span></li>
+      <li><span class="k">Scope</span><span class="v">.NET only today. A Java jar would stop at structural facts; see the last slide.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="slide" id="s3">
+  <div class="stage-num mono">§ 01 / start</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">A DLL and nothing else</h2>
+  <p class="lede" style="max-width:62rem;">MarkdownSharp 2.0.5 (MIT), a 51 KB compiled .NET assembly. No repository, no source. Only its string constants are readable.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/01-mystery.png" alt="The starting point: a compiled library and nothing else" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s4">
+  <div class="stage-num mono">§ 02 / baseline</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">Run the original: this is the behaviour to reproduce</h2>
+  <p class="lede" style="max-width:62rem;">A 12-line harness calls <code class='mono'>new Markdown().Transform(text)</code>. It runs on wine-mono, with no .NET SDK installed.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/02-original-runs.png" alt="Run the original as-is: this is the behaviour to reproduce" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s5">
+  <div class="stage-num mono">§ 03 / observe</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;"><code class='mono'>ekos build</code> reads the bytes</h2>
+  <p class="lede" style="max-width:62rem;">The assembly is parsed, never executed. It becomes a content-addressed artifact.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/03-observe.png" alt="ekos build: observe the binary (bytes only, nothing is executed)" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s6">
+  <div class="stage-num mono">§ 04 / recover</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">Recovery: 101 method bodies, 99 fully structured</h2>
+  <p class="lede" style="max-width:62rem;">A hand-written CIL decoder builds control-flow graphs and structures them into if/loop/switch/try statements. No LLM key was set, so none was used.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/04-recover.png" alt="ekos recover / resolve / compile / commit: knowledge into the ledger" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s7">
+  <div class="stage-num mono">§ 05 / ledger</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">The result is queryable knowledge</h2>
+  <p class="lede" style="max-width:62rem;">Types, methods and the call graph are evidence-backed objects in the append-only ledger.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/05-ledger.png" alt="The compiled knowledge is queryable: types, methods, call graph" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s8">
+  <div class="stage-num mono">§ 06 / plan</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">The spec, and the order to port it in</h2>
+  <p class="lede" style="max-width:62rem;"><code class='mono'>ekos_binary_explain</code> over MCP, the same server an AI agent uses. Callees come first, so every port step only depends on finished work.</p>
+  <p class="codelinks mono"><a href="assets/binary-demo/code/decompiled/MarkdownSharp.recovered.txt">Recovered pseudo-code, all types</a></p>
+  <div class="shot"><img src="assets/binary-demo/06-type-summary.png" alt="ekos_binary_explain on the type: what it is, and the order to port it in" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s9">
+  <div class="stage-num mono">§ 07 / spec</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">One method, statement by statement</h2>
+  <p class="lede" style="max-width:62rem;">Every recovered line cites its IL offset. Regexes and replacement templates arrive as exact constants.</p>
+  <p class="codelinks mono"><a href="assets/binary-demo/code/decompiled/MarkdownSharp.recovered.txt">Recovered pseudo-code, all types</a></p>
+  <div class="shot"><img src="assets/binary-demo/07-method-spec.png" alt="ekos_binary_explain on one method: the spec the rewrite is written from" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s10">
+  <div class="stage-num mono">§ 08 / honesty</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">Where recovery falls short, it says so</h2>
+  <p class="lede" style="max-width:62rem;"><code class='mono'>Normalize</code> is <code class='mono'>control_flow</code> with one unstructured goto. EKOS marks it partial and tells the porter not to guess. Two of 101 methods are in this state.</p>
+  <p class="codelinks mono"><a href="assets/binary-demo/code/decompiled/MarkdownSharp.recovered.txt">Recovered pseudo-code, all types</a></p>
+  <div class="shot"><img src="assets/binary-demo/08-honest-gap.png" alt="Where recovery is incomplete, it says so — and refuses to guess" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s11">
+  <div class="stage-num mono">§ 09 / rewrite</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">The Python port</h2>
+  <p class="lede" style="max-width:62rem;">Written callees-first from the recovered statements. Long regex literals were lifted from the spec by a script, and every method cites its token.</p>
+  <p class="codelinks mono"><a href="assets/binary-demo/code/decompiled/MarkdownSharp.recovered.txt">Recovered pseudo-code, all types</a> · Python rewrite: <a href="assets/binary-demo/code/python-port/mdport/markdown.py">markdown.py</a> · <a href="assets/binary-demo/code/python-port/mdport/_literals.py">_literals.py</a> · <a href="assets/binary-demo/code/python-port/mdport/__main__.py">__main__.py</a></p>
+  <div class="shot"><img src="assets/binary-demo/09-the-port.png" alt="The rewrite: written callees-first from the recovered statements" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s12">
+  <div class="stage-num mono">§ 10 / static check</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">What the rewrite touches vs what the original touches</h2>
+  <p class="lede" style="max-width:62rem;">Evidence, not a verdict. It caught the config-file constructor that was left out on purpose. The rest are constants that moved files.</p>
+  <p class="codelinks mono">Python rewrite: <a href="assets/binary-demo/code/python-port/mdport/markdown.py">markdown.py</a> · <a href="assets/binary-demo/code/python-port/mdport/_literals.py">_literals.py</a> · <a href="assets/binary-demo/code/python-port/mdport/__main__.py">__main__.py</a></p>
+  <div class="shot"><img src="assets/binary-demo/10-static-check.png" alt="ekos_binary_migration_check: what the rewrite touches vs what the original touches" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s13">
+  <div class="stage-num mono">§ 11 / sandbox</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">Executing untrusted code, so prove the sandbox first</h2>
+  <p class="lede" style="max-width:62rem;">Five escape attempts, all blocked. The probe was itself validated by running it unsandboxed, where all five succeed.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/11-sandbox.png" alt="Before running any untrusted code: prove the sandbox holds" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s14">
+  <div class="stage-num mono">§ 12 / characterize</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">Record the original, check the rewrite</h2>
+  <p class="lede" style="max-width:62rem;">The original runs once in the sandbox and its results become a golden file. The check needs only Python.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/12-characterize.png" alt="Record what the original does, then check the rewrite against the record" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s15">
+  <div class="stage-num mono">§ 13 / compare</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">Same inputs, both programs, byte for byte</h2>
+  <p class="lede" style="max-width:62rem;"><code class='mono'>wine mdcli.exe</code> against <code class='mono'>python -m mdport</code>. Identical sha256 on all 15 fixtures.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/13-side-by-side.png" alt="Same inputs through both programs, compared byte for byte" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s16">
+  <div class="stage-num mono">§ 14 / rendered</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">What a user sees</h2>
+  <p class="lede" style="max-width:62rem;">The HTML of both programs rendered in a browser. Identical output, not just similar-looking output.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/14-rendered-browser.png" alt="What a user sees: the original&#x27;s HTML and the port&#x27;s HTML, rendered" loading="lazy"><img src="assets/binary-demo/14-rendered.png" alt="What a user sees: the original&#x27;s HTML and the port&#x27;s HTML, rendered" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s17">
+  <div class="stage-num mono">§ 15 / fuzz</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">3,000 generated documents, and a planted bug</h2>
+  <p class="lede" style="max-width:62rem;">Identical on every one. To show the fuzzer can fail, one regex flag was removed from a copy of the port. It found 44 differences in 300 documents.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/15-fuzz.png" alt="Beyond hand-picked inputs: 3,000 generated documents, and a planted bug" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s18">
+  <div class="stage-num mono">§ 16 / limits</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">The one non-deterministic path</h2>
+  <p class="lede" style="max-width:62rem;">The original builds <code class='mono'>System.Random</code> for email obfuscation. The spec shows it, so the port is random too, and the comparison decodes entities.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/16-nondeterminism.png" alt="The one place the original is not deterministic — EKOS flagged it in the spec" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s19">
+  <div class="stage-num mono">§ 17 / part 2</div>
+  <div class="eyebrow">How EKOS helps in this demo</div>
+  <h2 style="font-size:clamp(1.6rem,3.2vw,2.5rem); max-width:30ch;">EKOS does not write the port. It makes the input trustworthy and the output checkable.</h2>
+  <table class="ttable" style="max-width:74rem; text-align:left;">
+    <thead><tr><th>Step</th><th>What EKOS did here</th><th>What you would do without it</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">Read the binary</td><td class="desc">In-process CIL decoder, control-flow graphs, structuring: 101 method bodies, 99 as full statements. No SDK, nothing executed.</td><td class="desc">A PE file is not text an LLM can read. You need a decompiler first, and its output has no per-line evidence.</td></tr>
+      <tr><td class="tool">Constants</td><td class="desc">37 regex and format literals, 12,009 characters, delivered verbatim and copied into the port by a script.</td><td class="desc">Recall or retype them. One wrong character in a verbose regex changes behaviour and nothing complains.</td></tr>
+      <tr><td class="tool">Evidence</td><td class="desc">Every statement cites its IL offset; every fact is a ledger object with provenance.</td><td class="desc">Claims about what a method does cannot be traced back to anything.</td></tr>
+      <tr><td class="tool">Gaps</td><td class="desc">2 methods marked <code class="mono">control_flow</code> / partial, with "do not fill the gaps by guessing".</td><td class="desc">A model fills a gap with plausible code, and nobody sees where.</td></tr>
+      <tr><td class="tool">Order</td><td class="desc">Migration order, callees first, for all 78 methods of the type.</td><td class="desc">Ad hoc, and easy to port a caller before what it depends on.</td></tr>
+      <tr><td class="tool">Verify</td><td class="desc">Static check, sandboxed record of the original, replay against the port, and a fuzz that caught a planted bug.</td><td class="desc">"Looks right" review of code that was never compared to the running original.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide" id="s20">
+  <div class="stage-num mono">§ 17 / part 2</div>
+  <div class="eyebrow">Why this is harder for a plain LLM</div>
+  <h2 style="font-size:clamp(1.6rem,3.2vw,2.5rem); max-width:30ch;">Knowing Markdown is not the same as knowing this program.</h2>
+  <ul class="facts" style="max-width:74rem;">
+    <li><span class="k">Behaviour, not concept</span><span class="v">MarkdownSharp has its own quirks, for example a list that follows another gets nested inside the previous item. Two mature generic libraries match the original on 1 of 15 fixtures byte for byte, and 10 and 8 of 15 ignoring whitespace. The port written from the spec matches 15 of 15.</span></li>
+    <li><span class="k">Dialect traps</span><span class="v">.NET and Python regexes differ: <code class="mono">\z</code> vs <code class="mono">\Z</code>, variable-width lookbehind, atomic groups need Python 3.11+, options are integers in the IL. None of these show in a plain read of the code. Tests found them.</span></li>
+    <li><span class="k">Silent guessing</span><span class="v">Where the recovered structure is incomplete EKOS says so per method. A model asked to "port this" gives no such signal.</span></li>
+    <li><span class="k">No ground truth</span><span class="v">Without running the original there is nothing to compare against. Here the original ran in a sandbox, and a one-flag bug that a review would likely miss showed up as 44 differing documents in 300.</span></li>
+  </ul>
+  <div class="fineprint" style="max-width:74rem;">Honest limits: no head-to-head against an LLM was run, and the rewrite here was itself written by an LLM using EKOS's spec, check and harness. The generic libraries are a proxy. A plain LLM given a general decompiler such as ILSpy would do better than that proxy; it would still lack per-line IL evidence, fidelity flags, callee ordering, and the run-against-the-original loop.</div>
+</section>
+
+<section class="slide" id="s21">
+  <div class="stage-num mono">§ 17 / baseline</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">What general Markdown knowledge produces instead</h2>
+  <p class="lede" style="max-width:62rem;">Two mature generic libraries against the original's output. This is a proxy, not an LLM run. It shows how far <em>Markdown</em> the concept is from <em>this program</em>.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/17-generic-baseline.png" alt="Why the spec matters: what general Markdown knowledge produces instead" loading="lazy"></div>
+</section>
+
+<section class="slide" id="s22">
+  <div class="stage-num mono">§ 18 / result</div>
+  <h2 style="font-size:clamp(1.5rem,3vw,2.3rem); max-width:30ch;">Scoreboard, and what this does not prove</h2>
+  <p class="lede" style="max-width:62rem;">Numbers come from the frames, not from this page.</p>
+  
+  <div class="shot"><img src="assets/binary-demo/18-scoreboard.png" alt="Scoreboard — and what this does not prove" loading="lazy"></div>
+</section>
+
+<section class="slide cta" id="s23">
+  <div class="eyebrow">Reproduce it</div>
+  <h2>Every screenshot comes from one script.</h2>
+  <div class="codeblock">
+    <div class="tag">terminal</div>
+<pre style="margin:0;"><span class="c"># runs all 18 stages, real commands, writes frames/NN-*.txt</span>
+$ demo/binary-demo/run_demo.sh
+
+<span class="c"># renders each frame to a PNG (and the browser comparison)</span>
+$ python3 demo/binary-demo/capture.py
+
+<span class="c"># later: string the frames into a GIF or video</span>
+$ demo/binary-demo/tools/make_gif.sh 3</pre>
+  </div>
+  <p class="mono" style="margin-top:1.4rem;font-size:.9rem;">The code: <a href="assets/binary-demo/code/decompiled/MarkdownSharp.recovered.txt">Recovered pseudo-code, all types</a> · Python rewrite: <a href="assets/binary-demo/code/python-port/mdport/markdown.py">markdown.py</a> · <a href="assets/binary-demo/code/python-port/mdport/_literals.py">_literals.py</a> · <a href="assets/binary-demo/code/python-port/mdport/__main__.py">__main__.py</a></p>
+  <div class="fineprint">Not proven here: behaviour on the .NET Framework itself (the original ran on wine-mono); inputs outside the fuzzer's grammar; the app.config constructor (not ported). The decompiler is a private RFC 0149 extension; the screenshots show its output.</div>
+</section>
+
+</div>
+
+<script src="../assets/rail.js"></script>
+</body>
+</html>

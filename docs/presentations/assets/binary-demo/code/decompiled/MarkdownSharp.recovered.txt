@@ -1,0 +1,1007 @@
+// Recovered from MarkdownSharp.dll 2.0.5 (net40, MIT) by ekos-binary. Pseudo-code, not compilable C#.
+// Every line cites its IL offset. Types: MarkdownSharp.Markdown, MarkdownSharp.MarkdownOptions, MarkdownSharp.dll, MarkdownSharp.Markdown+<>c, MarkdownSharp.Markdown+<>c__DisplayClass119_0, MarkdownSharp.Markdown+<>c__DisplayClass52_0, MarkdownSharp.Markdown+<>c__DisplayClass96_0, MarkdownSharp.Markdown+Token, MarkdownSharp.Markdown+TokenType
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.Markdown
+// ====================================================================================================
+
+// MarkdownSharp.Markdown..ctor() -> System.Void — 0x0600000E [statements]
+: MarkdownSharp.Markdown(false);  // IL_0002
+
+// MarkdownSharp.Markdown..ctor(System.Boolean) -> System.Void — 0x0600000F [statements]
+// locals: System.Collections.Specialized.NameValueCollection loc0, System.Collections.IEnumerator loc1, System.String loc2, System.IDisposable loc3
+this.<EmptyElementSuffix>k__BackingField = " />";  // IL_0006
+this.<LinkEmails>k__BackingField = true;  // IL_000D
+this._urls = new System.Collections.Generic.Dictionary`2();  // IL_0018
+this._titles = new System.Collections.Generic.Dictionary`2();  // IL_0023
+this._htmlBlocks = new System.Collections.Generic.Dictionary`2();  // IL_002E
+: base();  // IL_0034
+if (loadOptionsFromConfigFile) {  // IL_003A
+    loc0 = System.Configuration.ConfigurationManager.AppSettings;  // IL_0042
+    loc1 = loc0.Keys.GetEnumerator();  // IL_004E
+    try {  // IL_004F
+        while (loc1.MoveNext()) {  // IL_0121
+            loc2 = (string)loc1.Current;  // IL_005F
+            if (loc2 == "Markdown.AutoHyperlink") {  // IL_006B
+                this.AutoHyperlink = System.Convert.ToBoolean(loc0[loc2]);  // IL_00BD
+                continue;  // IL_0121
+            }
+            if (loc2 == "Markdown.AutoNewlines") {  // IL_0078
+                this.AutoNewLines = System.Convert.ToBoolean(loc0[loc2]);  // IL_00D1
+                continue;  // IL_0121
+            }
+            if (loc2 == "Markdown.EmptyElementSuffix") {  // IL_0085
+                this.EmptyElementSuffix = loc0[loc2];  // IL_00E0
+                continue;  // IL_0121
+            }
+            if (loc2 == "Markdown.LinkEmails") {  // IL_0092
+                this.LinkEmails = System.Convert.ToBoolean(loc0[loc2]);  // IL_00F4
+                continue;  // IL_0121
+            }
+            if (loc2 == "Markdown.StrictBoldItalic") {  // IL_009F
+                this.StrictBoldItalic = System.Convert.ToBoolean(loc0[loc2]);  // IL_0108
+                continue;  // IL_0121
+            }
+            if (loc2 == "Markdown.AsteriskIntraWordEmphasis") {  // IL_00AC
+                this.AsteriskIntraWordEmphasis = System.Convert.ToBoolean(loc0[loc2]);  // IL_011C
+            }
+        }
+    } finally {
+        loc3 = loc1 as System.IDisposable;  // IL_0134
+        if (loc3 != null) {  // IL_0136
+            loc3.Dispose();  // IL_0139
+        }
+    }
+    return;  // IL_013F
+}
+
+// MarkdownSharp.Markdown..ctor(MarkdownSharp.MarkdownOptions) -> System.Void — 0x06000010 [statements]
+this.<EmptyElementSuffix>k__BackingField = " />";  // IL_0006
+this.<LinkEmails>k__BackingField = true;  // IL_000D
+this._urls = new System.Collections.Generic.Dictionary`2();  // IL_0018
+this._titles = new System.Collections.Generic.Dictionary`2();  // IL_0023
+this._htmlBlocks = new System.Collections.Generic.Dictionary`2();  // IL_002E
+: base();  // IL_0034
+this.AutoHyperlink = options.AutoHyperlink;  // IL_0040
+this.AutoNewLines = options.AutoNewlines;  // IL_004C
+this.EmptyElementSuffix = options.EmptyElementSuffix;  // IL_0058
+this.LinkEmails = options.LinkEmails;  // IL_0064
+this.StrictBoldItalic = options.StrictBoldItalic;  // IL_0070
+this.AsteriskIntraWordEmphasis = options.AsteriskIntraWordEmphasis;  // IL_007C
+
+// MarkdownSharp.Markdown.get_EmptyElementSuffix() -> System.String — 0x06000011 [statements]
+return this.<EmptyElementSuffix>k__BackingField;  // IL_0006
+
+// MarkdownSharp.Markdown.set_EmptyElementSuffix(System.String) -> System.Void — 0x06000012 [statements]
+this.<EmptyElementSuffix>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.Markdown.get_LinkEmails() -> System.Boolean — 0x06000013 [statements]
+return this.<LinkEmails>k__BackingField;  // IL_0006
+
+// MarkdownSharp.Markdown.set_LinkEmails(System.Boolean) -> System.Void — 0x06000014 [statements]
+this.<LinkEmails>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.Markdown.get_StrictBoldItalic() -> System.Boolean — 0x06000015 [statements]
+return this.<StrictBoldItalic>k__BackingField;  // IL_0006
+
+// MarkdownSharp.Markdown.set_StrictBoldItalic(System.Boolean) -> System.Void — 0x06000016 [statements]
+this.<StrictBoldItalic>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.Markdown.get_AsteriskIntraWordEmphasis() -> System.Boolean — 0x06000017 [statements]
+return this.<AsteriskIntraWordEmphasis>k__BackingField;  // IL_0006
+
+// MarkdownSharp.Markdown.set_AsteriskIntraWordEmphasis(System.Boolean) -> System.Void — 0x06000018 [statements]
+this.<AsteriskIntraWordEmphasis>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.Markdown.get_AutoNewLines() -> System.Boolean — 0x06000019 [statements]
+return this.<AutoNewLines>k__BackingField;  // IL_0006
+
+// MarkdownSharp.Markdown.set_AutoNewLines(System.Boolean) -> System.Void — 0x0600001A [statements]
+this.<AutoNewLines>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.Markdown.get_AutoHyperlink() -> System.Boolean — 0x0600001B [statements]
+return this.<AutoHyperlink>k__BackingField;  // IL_0006
+
+// MarkdownSharp.Markdown.set_AutoHyperlink(System.Boolean) -> System.Void — 0x0600001C [statements]
+this.<AutoHyperlink>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.Markdown..cctor() -> System.Void — 0x0600001D [statements]
+// locals: System.String loc0, System.String loc1, System.Int32 loc2, System.Char loc3, System.String loc4, System.String loc5
+MarkdownSharp.Markdown._newlinesLeadingTrailing = new System.Text.RegularExpressions.Regex("^\\n+|\\n+\\z", 8);  // IL_000B
+MarkdownSharp.Markdown._newlinesMultiple = new System.Text.RegularExpressions.Regex("\\n{2,}", 8);  // IL_001B
+MarkdownSharp.Markdown._leadingWhitespace = new System.Text.RegularExpressions.Regex("^[ ]*", 8);  // IL_002B
+MarkdownSharp.Markdown._htmlBlockHash = new System.Text.RegularExpressions.Regex("\u001aH\\d+H", 8);  // IL_003B
+MarkdownSharp.Markdown._linkDef = new System.Text.RegularExpressions.Regex(string.Format("\n                        ^[ ]{{0,{0}}}\\[([^\\[\\]]+)\\]:  # id = $1\n                          [ ]*\n                          \\n?                   # maybe *one* newline\n                          [ ]*\n                        <?(\\S+?)>?              # url = $2\n                          [ ]*\n                          \\n?                   # maybe one newline\n                          [ ]*\n                        (?:\n                            (?<=\\s)             # lookbehind for whitespace\n                            [\"(]\n                            (.+?)               # title = $3\n                            [\")]\n                            [ ]*\n                        )?                      # title is optional\n                        (?:\\n+|\\Z)", 3), 42);  // IL_0057
+MarkdownSharp.Markdown._blocksHtml = new System.Text.RegularExpressions.Regex(MarkdownSharp.Markdown.GetBlockPattern(), 34);  // IL_0068
+t0 = new string[5];  // IL_0073
+t0[0] = "\n            (<!--(?:|(?:[^>-]|-[^>])(?:[^-]|-[^-])*)-->)|        # match <!-- foo -->\n            (<\\?.*?\\?>)|                 # match <?foo?> ";  // IL_007A
+t0[1] = MarkdownSharp.Markdown.RepeatString(" \n            (<[A-Za-z\\/!$](?:[^<>]|", 5);  // IL_0088
+t0[2] = " \n            (<[A-Za-z\\/!$](?:[^<>]";  // IL_0090
+t0[3] = MarkdownSharp.Markdown.RepeatString(")*>)", 6);  // IL_009E
+t0[4] = " # match <tag> and </tag>";  // IL_00A6
+MarkdownSharp.Markdown._htmlTokens = new System.Text.RegularExpressions.Regex(string.Concat(t0), 62);  // IL_00B3
+MarkdownSharp.Markdown._anchorRef = new System.Text.RegularExpressions.Regex(string.Format("\n            (                               # wrap whole match in $1\n                \\[\n                    ({0})                   # link text = $2\n                \\]\n\n                [ ]?                        # one optional space\n                (?:\\n[ ]*)?                 # one optional newline followed by spaces\n\n                \\[\n                    (.*?)                   # id = $3\n                \\]\n            )", MarkdownSharp.Markdown.GetNestedBracketsPattern()), 40);  // IL_00CE
+MarkdownSharp.Markdown._anchorInline = new System.Text.RegularExpressions.Regex(string.Format("\n                (                           # wrap whole match in $1\n                    \\[\n                        ({0})               # link text = $2\n                    \\]\n                    \\(                      # literal paren\n                        [ ]*\n                        ({1})               # href = $3\n                        [ ]*\n                        (                   # $4\n                        (['\"])           # quote char = $5\n                        (.*?)               # title = $6\n                        \\5                  # matching quote\n                        [ ]*                # ignore any spaces between closing quote and )\n                        )?                  # title is optional\n                    \\)\n                )", MarkdownSharp.Markdown.GetNestedBracketsPattern(), MarkdownSharp.Markdown.GetNestedParensPattern()), 40);  // IL_00EE
+MarkdownSharp.Markdown._anchorRefShortcut = new System.Text.RegularExpressions.Regex("\n            (                               # wrap whole match in $1\n              \\[\n                 ([^\\[\\]]+)                 # link text = $2; can't contain [ or ]\n              \\]\n            )", 40);  // IL_00FF
+MarkdownSharp.Markdown._imagesRef = new System.Text.RegularExpressions.Regex("\n                    (               # wrap whole match in $1\n                    !\\[\n                        (.*?)       # alt text = $2\n                    \\]\n\n                    [ ]?            # one optional space\n                    (?:\\n[ ]*)?     # one optional newline followed by spaces\n\n                    \\[\n                        (.*?)       # id = $3\n                    \\]\n\n                    )", 40);  // IL_0110
+MarkdownSharp.Markdown._imagesInline = new System.Text.RegularExpressions.Regex(string.Format("\n              (                     # wrap whole match in $1\n                !\\[\n                    (.*?)           # alt text = $2\n                \\]\n                \\s?                 # one optional whitespace character\n                \\(                  # literal paren\n                    [ ]*\n                    ({0})           # href = $3\n                    [ ]*\n                    (               # $4\n                    (['\"])       # quote char = $5\n                    (.*?)           # title = $6\n                    \\5              # matching quote\n                    [ ]*\n                    )?              # title is optional\n                \\)\n              )", MarkdownSharp.Markdown.GetNestedParensPattern()), 40);  // IL_012B
+MarkdownSharp.Markdown._headerSetext = new System.Text.RegularExpressions.Regex("\n                ^(.+?)\n                [ ]*\n                \\n\n                (=+|-+)     # $1 = string of ='s or -'s\n                [ ]*\n                \\n+", 42);  // IL_013C
+MarkdownSharp.Markdown._headerAtx = new System.Text.RegularExpressions.Regex("\n                ^(\\#{1,6})  # $1 = string of #'s\n                [ ]*\n                (.+?)       # $2 = Header text\n                [ ]*\n                \\#*         # optional closing #'s (not counted)\n                \\n+", 42);  // IL_014D
+MarkdownSharp.Markdown._horizontalRules = new System.Text.RegularExpressions.Regex("\n            ^[ ]{0,3}         # Leading space\n                ([-*_])       # $1: First marker\n                (?>           # Repeated marker group\n                    [ ]{0,2}  # Zero, one, or two spaces.\n                    \\1        # Marker character\n                ){2,}         # Group repeated at least twice\n                [ ]*          # Trailing spaces\n                $             # End of line.\n            ", 42);  // IL_015E
+MarkdownSharp.Markdown._wholeList = string.Format("\n            (                               # $1 = whole list\n              (                             # $2\n                [ ]{{0,{1}}}\n                ({0})                       # $3 = first list item marker\n                [ ]+\n              )\n              (?s:.+?)\n              (                             # $4\n                  \\z\n                |\n                  \\n{{2,}}\n                  (?=\\S)\n                  (?!                       # Negative lookahead for another list item marker\n                    [ ]*\n                    {0}[ ]+\n                  )\n              )\n            )", string.Format("(?:{0}|{1})", "[*+-]", "\\d+[.]"), 3);  // IL_0187
+MarkdownSharp.Markdown._listNested = new System.Text.RegularExpressions.Regex("^" + MarkdownSharp.Markdown._wholeList, 42);  // IL_01A2
+MarkdownSharp.Markdown._listTopLevel = new System.Text.RegularExpressions.Regex("(?:(?<=\\n\\n)|\\A\\n?)" + MarkdownSharp.Markdown._wholeList, 42);  // IL_01BD
+MarkdownSharp.Markdown._codeBlock = new System.Text.RegularExpressions.Regex(string.Format("\n                    (?:\\n\\n|\\A\\n?)\n                    (                        # $1 = the code block -- one or more lines, starting with a space\n                    (?:\n                        (?:[ ]{{{0}}})       # Lines must start with a tab-width of spaces\n                        .*\\n+\n                    )+\n                    )\n                    ((?=^[ ]{{0,{0}}}[^ \\t\\n])|\\Z) # Lookahead for non-space at line-start, or end of doc", 4), 42);  // IL_01D9
+MarkdownSharp.Markdown._codeSpan = new System.Text.RegularExpressions.Regex("\n                    (?<![\\\\`])   # Character before opening ` can't be a backslash or backtick\n                    (`+)      # $1 = Opening run of `\n                    (?!`)     # and no more backticks -- match the full run\n                    (.+?)     # $2 = The code block\n                    (?<!`)\n                    \\1\n                    (?!`)", 56);  // IL_01EA
+MarkdownSharp.Markdown._bold = new System.Text.RegularExpressions.Regex("(\\*\\*|__) (?=\\S) (.+?[*_]*) (?<=\\S) \\1", 56);  // IL_01FB
+MarkdownSharp.Markdown._semiStrictBold = new System.Text.RegularExpressions.Regex("(?=.[*_]|[*_])(^|(?=\\W__|(?!\\*)[\\W_]\\*\\*|\\w\\*\\*\\w).)(\\*\\*|__)(?!\\2)(?=\\S)((?:|.*?(?!\\2).)(?=\\S_|\\w|\\S\\*\\*(?:[\\W_]|$)).)(?=__(?:\\W|$)|\\*\\*(?:[^*]|$))\\2", 24);  // IL_020C
+MarkdownSharp.Markdown._strictBold = new System.Text.RegularExpressions.Regex("(^|[\\W_])(?:(?!\\1)|(?=^))(\\*|_)\\2(?=\\S)(.*?\\S)\\2\\2(?!\\2)(?=[\\W_]|$)", 24);  // IL_021D
+MarkdownSharp.Markdown._italic = new System.Text.RegularExpressions.Regex("(\\*|_) (?=\\S) (.+?) (?<=\\S) \\1", 56);  // IL_022E
+MarkdownSharp.Markdown._semiStrictItalic = new System.Text.RegularExpressions.Regex("(?=.[*_]|[*_])(^|(?=\\W_|(?!\\*)(?:[\\W_]\\*|\\D\\*(?=\\w)\\D)).)(\\*|_)(?!\\2\\2\\2)(?=\\S)((?:(?!\\2).)*?(?=[^\\s_]_|(?=\\w)\\D\\*\\D|[^\\s*]\\*(?:[\\W_]|$)).)(?=_(?:\\W|$)|\\*(?:[^*]|$))\\2", 24);  // IL_023F
+MarkdownSharp.Markdown._strictItalic = new System.Text.RegularExpressions.Regex("(^|[\\W_])(?:(?!\\1)|(?=^))(\\*|_)(?=\\S)((?:(?!\\2).)*?\\S)\\2(?!\\2)(?=[\\W_]|$)", 24);  // IL_0250
+MarkdownSharp.Markdown._blockquote = new System.Text.RegularExpressions.Regex("\n            (                           # Wrap whole match in $1\n                (\n                ^[ ]*>[ ]?              # '>' at the start of a line\n                    .+\\n                # rest of the first line\n                (.+\\n)*                 # subsequent consecutive lines\n                \\n*                     # blanks\n                )+\n            )", 42);  // IL_0261
+MarkdownSharp.Markdown._autolinkBare = new System.Text.RegularExpressions.Regex("(<|=\")?\\b(https?|ftp)(://[-A-Z0-9+&@#/%?=~_|\\[\\]\\(\\)!:,\\.;\u001a]*[-A-Z0-9+&@#/%=~_|\\[\\])])(?=$|\\W)", 9);  // IL_0272
+MarkdownSharp.Markdown._endCharRegex = new System.Text.RegularExpressions.Regex("[-A-Z0-9+&@#/%=~_|\\[\\])]", 9);  // IL_0283
+MarkdownSharp.Markdown._autoEmailBare = new System.Text.RegularExpressions.Regex("(<|=\")?(?:mailto:)?([-.\\w]+\\@[-a-z0-9]+(\\.[-a-z0-9]+)*\\.[a-z]+)", 9);  // IL_0294
+MarkdownSharp.Markdown._linkEmail = new System.Text.RegularExpressions.Regex("<\n                      (?:mailto:)?\n                      (\n                        [-.\\w]+\n                        \\@\n                        [-a-z0-9]+(\\.[-a-z0-9]+)*\\.[a-z]+\n                      )\n                      >", 33);  // IL_02A5
+MarkdownSharp.Markdown._outDent = new System.Text.RegularExpressions.Regex("^[ ]{1," + 4 + "}", 10);  // IL_02C6
+MarkdownSharp.Markdown._codeEncoder = new System.Text.RegularExpressions.Regex("&|<|>|\\\\|\\*|_|\\{|\\}|\\[|\\]", 8);  // IL_02D6
+MarkdownSharp.Markdown._amps = new System.Text.RegularExpressions.Regex("&(?!((#[0-9]+)|(#[xX][a-fA-F0-9]+)|([a-zA-Z][a-zA-Z0-9]*));)", 12);  // IL_02E7
+MarkdownSharp.Markdown._angles = new System.Text.RegularExpressions.Regex("<(?![A-Za-z/?\\$!])", 12);  // IL_02F8
+MarkdownSharp.Markdown._unescapes = new System.Text.RegularExpressions.Regex("\u001aE\\d+E", 8);  // IL_0308
+MarkdownSharp.Markdown._escapeTable = new System.Collections.Generic.Dictionary`2();  // IL_0312
+MarkdownSharp.Markdown._invertedEscapeTable = new System.Collections.Generic.Dictionary`2();  // IL_031C
+MarkdownSharp.Markdown._backslashEscapeTable = new System.Collections.Generic.Dictionary`2();  // IL_0326
+loc0 = "";  // IL_0330
+loc1 = "\\`*_{}[]()>#+-.!/:";  // IL_0336
+loc2 = 0;  // IL_0338
+while (loc2 < loc1.Length) {  // IL_03AB
+    loc3 = loc1[loc2];  // IL_0342
+    loc4 = loc3.ToString();  // IL_034A
+    loc5 = MarkdownSharp.Markdown.GetHashKey(loc4, false);  // IL_0354
+    MarkdownSharp.Markdown._escapeTable.Add(loc4, loc5);  // IL_035F
+    MarkdownSharp.Markdown._invertedEscapeTable.Add(loc5, loc4);  // IL_036D
+    MarkdownSharp.Markdown._backslashEscapeTable.Add("\\" + loc4, loc5);  // IL_0385
+    loc0 = loc0 + System.Text.RegularExpressions.Regex.Escape("\\" + loc4) + "|";  // IL_03A6
+    loc2 = loc2 + 1;  // IL_03AA
+}
+MarkdownSharp.Markdown._backslashEscapes = new System.Text.RegularExpressions.Regex(loc0.Substring(0, loc0.Length - 1), 8);  // IL_03C9
+
+// MarkdownSharp.Markdown.get_Version() -> System.String — 0x0600001E [statements]
+return "1.13";  // IL_0005
+
+// MarkdownSharp.Markdown.Transform(System.String) -> System.String — 0x0600001F [statements]
+if (!string.IsNullOrEmpty(text)) {  // IL_0006
+    this.Setup();  // IL_000F
+    text = this.Normalize(text);  // IL_001B
+    text = this.HashHTMLBlocks(text);  // IL_0024
+    text = this.StripLinkDefinitions(text);  // IL_002D
+    text = this.RunBlockGamut(text, true, true);  // IL_0038
+    text = this.Unescape(text);  // IL_0041
+    this.Cleanup();  // IL_0044
+    return text + "\n";  // IL_0054
+}
+return "";  // IL_000D
+
+// MarkdownSharp.Markdown.RunBlockGamut(System.String, System.Boolean, System.Boolean) -> System.String — 0x06000020 [statements]
+text = this.DoHeaders(text);  // IL_0007
+text = this.DoHorizontalRules(text);  // IL_0010
+text = this.DoLists(text);  // IL_0019
+text = this.DoCodeBlocks(text);  // IL_0022
+text = this.DoBlockQuotes(text);  // IL_002B
+text = this.HashHTMLBlocks(text);  // IL_0034
+return this.FormParagraphs(text, unhash, createParagraphs);  // IL_003F
+
+// MarkdownSharp.Markdown.RunSpanGamut(System.String) -> System.String — 0x06000021 [statements]
+text = this.DoCodeSpans(text);  // IL_0007
+text = this.EscapeSpecialCharsWithinTagAttributes(text);  // IL_0010
+text = this.EscapeBackslashes(text);  // IL_0019
+text = this.DoImages(text);  // IL_0022
+text = this.DoAnchors(text);  // IL_002B
+text = this.DoAutoLinks(text);  // IL_0034
+text = text.Replace("\u001aP", "://");  // IL_0046
+text = this.EncodeAmpsAndAngles(text);  // IL_004F
+text = this.DoItalicsAndBold(text);  // IL_0058
+return this.DoHardBreaks(text);  // IL_0061
+
+// MarkdownSharp.Markdown.FormParagraphs(System.String, System.Boolean, System.Boolean) -> System.String — 0x06000022 [control_flow]
+// locals: System.String[] loc0, System.Int32 loc1, MarkdownSharp.Markdown+<>c__DisplayClass52_0 loc2, System.Int32 loc3
+// gap: 2 goto target(s) did not structure
+loc0 = MarkdownSharp.Markdown._newlinesMultiple.Split(MarkdownSharp.Markdown._newlinesLeadingTrailing.Replace(text, ""));  // IL_001A
+loc1 = 0;  // IL_001C
+while (loc1 < loc0.Length) {  // IL_00C2
+    if (!loc0[loc1].Contains("\u001aH")) {  // IL_002F
+        t0 = loc0;  // IL_0098
+        t1 = loc1;  // IL_0098
+        t2 = MarkdownSharp.Markdown._leadingWhitespace;  // IL_0098
+        t3 = this.RunSpanGamut(loc0[loc1]);  // IL_0098
+        t4 = loc0;  // IL_0098
+        t5 = loc1;  // IL_0098
+        t6 = MarkdownSharp.Markdown._leadingWhitespace;  // IL_0098
+        t7 = this.RunSpanGamut(loc0[loc1]);  // IL_0098
+        if (createParagraphs) {  // IL_0096
+            t8 = t0;  // IL_00A4
+            t9 = t1;  // IL_00A4
+            t10 = t2;  // IL_00A4
+            t11 = t3;  // IL_00A4
+            t12 = "<p>";  // IL_00A4
+        } else {
+            t8 = t4;  // IL_009F
+            t9 = t5;  // IL_009F
+            t10 = t6;  // IL_009F
+            t11 = t7;  // IL_009F
+            t12 = "";  // IL_009F
+        }
+        t13 = t8;  // IL_00AC
+        t14 = t9;  // IL_00AC
+        t15 = t10.Replace(t11, t12);  // IL_00AC
+        t16 = t8;  // IL_00AC
+        t17 = t9;  // IL_00AC
+        t18 = t10.Replace(t11, t12);  // IL_00AC
+        if (createParagraphs) {  // IL_00AA
+            t19 = t13;  // IL_00B8
+            t20 = t14;  // IL_00B8
+            t21 = t15;  // IL_00B8
+            t22 = "</p>";  // IL_00B8
+        } else {
+            t19 = t16;  // IL_00B3
+            t20 = t17;  // IL_00B3
+            t21 = t18;  // IL_00B3
+            t22 = "";  // IL_00B3
+        }
+        t19[t20] = t21 + t22;  // IL_00BD
+    } else if (unhash) {  // IL_0032
+        loc2 = new MarkdownSharp.Markdown+<>c__DisplayClass52_0();  // IL_003C
+        loc2.<>4__this = this;  // IL_003F
+        loc3 = 50;  // IL_0046
+        loc2.keepGoing = true;  // IL_0049
+        while (loc2.keepGoing) {  // IL_0077
+            if (loc3 > 0) {  // IL_0081
+                loc2.keepGoing = false;  // IL_0052
+                loc0[loc1] = MarkdownSharp.Markdown._htmlBlockHash.Replace(loc0[loc1], loc2.<FormParagraphs>b__0);  // IL_0072
+                loc3 = loc3 - 1;  // IL_0076
+                continue;  // IL_0077
+            }
+            goto IL_0083;  // IL_0083
+        }
+    }
+IL_00BE:
+    loc1 = loc1 + 1;  // IL_00C1
+}
+return string.Join("\n\n", loc0);  // IL_00D6
+IL_0083:
+while (true) {  // IL_0083
+IL_0083:
+    goto IL_00BE;  // IL_00BE
+}
+return string.Join("\n\n", loc0);  // IL_00D6
+
+// MarkdownSharp.Markdown.Setup() -> System.Void — 0x06000023 [statements]
+this._urls.Clear();  // IL_0006
+this._titles.Clear();  // IL_0011
+this._htmlBlocks.Clear();  // IL_001C
+this._listLevel = 0;  // IL_0023
+
+// MarkdownSharp.Markdown.Cleanup() -> System.Void — 0x06000024 [statements]
+this.Setup();  // IL_0001
+
+// MarkdownSharp.Markdown.GetNestedBracketsPattern() -> System.String — 0x06000025 [statements]
+if (MarkdownSharp.Markdown._nestedBracketsPattern == null) {  // IL_0005
+    MarkdownSharp.Markdown._nestedBracketsPattern = MarkdownSharp.Markdown.RepeatString("\n                    (?>              # Atomic matching\n                       [^\\[\\]]+      # Anything other than brackets\n                     |\n                       \\[\n                           ", 6) + MarkdownSharp.Markdown.RepeatString(" \\]\n                    )*", 6);  // IL_0022
+}
+return MarkdownSharp.Markdown._nestedBracketsPattern;  // IL_002C
+
+// MarkdownSharp.Markdown.GetNestedParensPattern() -> System.String — 0x06000026 [statements]
+if (MarkdownSharp.Markdown._nestedParensPattern == null) {  // IL_0005
+    MarkdownSharp.Markdown._nestedParensPattern = MarkdownSharp.Markdown.RepeatString("\n                    (?>              # Atomic matching\n                       [^()\\s]+      # Anything other than parens or whitespace\n                     |\n                       \\(\n                           ", 6) + MarkdownSharp.Markdown.RepeatString(" \\)\n                    )*", 6);  // IL_0022
+}
+return MarkdownSharp.Markdown._nestedParensPattern;  // IL_002C
+
+// MarkdownSharp.Markdown.StripLinkDefinitions(System.String) -> System.String — 0x06000027 [statements]
+return MarkdownSharp.Markdown._linkDef.Replace(text, this.LinkEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.LinkEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000028 [statements]
+// locals: System.String loc0
+loc0 = match.Groups[1].Value.ToLowerInvariant();  // IL_0016
+this._urls.set_Item(loc0, this.EncodeAmpsAndAngles(match.Groups[2].Value));  // IL_0035
+t0 = match.Groups[3];  // IL_0046
+t1 = t0;  // IL_0049
+t2 = t0;  // IL_0049
+if (t0 != null ? t1.Length > 0 : 0) {  // IL_0055
+    this._titles.set_Item(loc0, match.Groups[3].Value.Replace("\"", "&quot;"));  // IL_007E
+}
+return "";  // IL_0088
+
+// MarkdownSharp.Markdown.GetBlockPattern() -> System.String — 0x06000029 [statements]
+// locals: System.String loc0, System.String loc1, System.String loc2, System.Int32 loc3
+loc0 = MarkdownSharp.Markdown.RepeatString("\n                (?>\n                  [^<]+\t\t\t        # content without tag\n                |\n                  <\\2\t\t\t        # nested opening tag\n                    \n            (?>\t\t\t\t            # optional tag attributes\n              \\s\t\t\t            # starts with whitespace\n              (?>\n                [^>\"/]+\t            # text outside quotes\n              |\n                /+(?!>)\t\t            # slash not followed by >\n              |\n                \"[^\"]*\"\t\t        # text inside double quotes (tolerate >)\n              |\n                '[^']*'\t                # text inside single quotes (tolerate >)\n              )*\n            )?\t\n                   # attributes\n                  (?>\n                      />\n                  |\n                      >", 6) + ".*?" + MarkdownSharp.Markdown.RepeatString("\n                      </\\2\\s*>\t        # closing nested tag\n                  )\n                  |\t\t\t\t\n                  <(?!/\\2\\s*>           # other tags with a different name\n                  )\n                )*", 6);  // IL_0020
+loc1 = loc0.Replace("\\2", "\\3");  // IL_0031
+loc2 = "\n            (?>\n                  (?>\n                    (?<=\\n)     # Starting at the beginning of a line\n                    |           # or\n                    \\A\\n?       # the beginning of the doc\n                  )\n                  (             # save in $1\n\n                    # Match from `\\n<tag>` to `</tag>\\n`, handling nested tags \n                    # in between.\n                      \n                        <($block_tags_b_re)   # start tag = $2\n                        $attr>                # attributes followed by > and \\n\n                        $content              # content, support nesting\n                        </\\2>                 # the matching end tag\n                        [ ]*                  # trailing spaces\n                        (?=\\n+|\\Z)            # followed by a newline or end of document\n\n                  | # Special version for tags of group a.\n\n                        <($block_tags_a_re)   # start tag = $3\n                        $attr>[ ]*\\n          # attributes followed by >\n                        $content2             # content, support nesting\n                        </\\3>                 # the matching end tag\n                        [ ]*                  # trailing spaces\n                        (?=\\n+|\\Z)            # followed by a newline or end of document\n                      \n                  | # Special case just for <hr />. It was easier to make a special \n                    # case than to make the other regex more complicated.\n                  \n                        [ ]{0,$less_than_tab}\n                        <hr\n                        $attr                 # attributes\n                        /?>                   # the matching end tag\n                        [ ]*\n                        (?=\\n{2,}|\\Z)         # followed by a blank line or end of document\n                  \n                  | # Special case for standalone HTML comments:\n                  \n                      (?<=\\n\\n|\\A)            # preceded by a blank line or start of document\n                      [ ]{0,$less_than_tab}\n                      (?s:\n                        <!--(?:|(?:[^>-]|-[^>])(?:[^-]|-[^-])*)-->\n                      )\n                      [ ]*\n                      (?=\\n{2,}|\\Z)            # followed by a blank line or end of document\n                  \n                  | # PHP and ASP-style processor instructions (<? and <%)\n                  \n                      [ ]{0,$less_than_tab}\n                      (?s:\n                        <([?%])                # $4\n                        .*?\n                        \\4>\n                      )\n                      [ ]*\n                      (?=\\n{2,}|\\Z)            # followed by a blank line or end of document\n                      \n                  )\n            )";  // IL_0037
+t0 = loc2;  // IL_003F
+loc3 = 3;  // IL_003F
+loc2 = t0.Replace("$less_than_tab", loc3.ToString());  // IL_004C
+loc2 = loc2.Replace("$block_tags_b_re", "p|div|h[1-6]|blockquote|pre|table|dl|ol|ul|address|script|noscript|form|fieldset|iframe|math");  // IL_005D
+loc2 = loc2.Replace("$block_tags_a_re", "ins|del");  // IL_006E
+loc2 = loc2.Replace("$attr", "\n            (?>\t\t\t\t            # optional tag attributes\n              \\s\t\t\t            # starts with whitespace\n              (?>\n                [^>\"/]+\t            # text outside quotes\n              |\n                /+(?!>)\t\t            # slash not followed by >\n              |\n                \"[^\"]*\"\t\t        # text inside double quotes (tolerate >)\n              |\n                '[^']*'\t                # text inside single quotes (tolerate >)\n              )*\n            )?\t\n            ");  // IL_007F
+loc2 = loc2.Replace("$content2", loc1);  // IL_008C
+return loc2.Replace("$content", loc0);  // IL_0099
+
+// MarkdownSharp.Markdown.HashHTMLBlocks(System.String) -> System.String — 0x0600002A [statements]
+return MarkdownSharp.Markdown._blocksHtml.Replace(text, this.HtmlEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.HtmlEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x0600002B [statements]
+// locals: System.String loc0, System.String loc1
+loc0 = match.Groups[1].Value;  // IL_0011
+loc1 = MarkdownSharp.Markdown.GetHashKey(loc0, true);  // IL_0019
+this._htmlBlocks.set_Item(loc1, loc0);  // IL_0022
+return "\n\n" + loc1 + "\n\n";  // IL_0037
+
+// MarkdownSharp.Markdown.GetHashKey(System.String, System.Boolean) -> System.String — 0x0600002C [statements]
+// locals: System.Char loc0, System.Int32 loc1
+loc0 = isHtmlBlock ? 72 : 69;  // IL_0009
+t1 = loc0.ToString();  // IL_0021
+loc1 = System.Math.Abs(s.GetHashCode());  // IL_0021
+return "\u001a" + t1 + loc1.ToString() + loc0.ToString();  // IL_0035
+
+// MarkdownSharp.Markdown.TokenizeHTML(System.String) -> System.Collections.Generic.List`1<MarkdownSharp.Markdown+Token> — 0x0600002D [statements]
+// locals: System.Int32 loc0, System.Int32 loc1, System.Collections.Generic.List`1<MarkdownSharp.Markdown+Token> loc2, System.Collections.IEnumerator loc3, System.Text.RegularExpressions.Match loc4, System.IDisposable loc5
+loc0 = 0;  // IL_0001
+loc1 = 0;  // IL_0003
+loc2 = new System.Collections.Generic.List`1();  // IL_0009
+loc3 = MarkdownSharp.Markdown._htmlTokens.Matches(text).GetEnumerator();  // IL_001A
+try {  // IL_001B
+    while (loc3.MoveNext()) {  // IL_0069
+        loc4 = (System.Text.RegularExpressions.Match)loc3.Current;  // IL_0028
+        loc1 = loc4.Index;  // IL_0031
+        if (loc0 < loc1) {  // IL_0034
+            loc2.Add(new MarkdownSharp.Markdown+Token(TokenType.Text, text.Substring(loc0, loc1 - loc0)));  // IL_0047
+        }
+        loc2.Add(new MarkdownSharp.Markdown+Token(TokenType.Tag, loc4.Value));  // IL_005A
+        loc0 = loc1 + loc4.Length;  // IL_0068
+    }
+} finally {
+    loc5 = loc3 as System.IDisposable;  // IL_0079
+    if (loc5 != null) {  // IL_007D
+        loc5.Dispose();  // IL_0081
+    }
+}
+if (loc0 < text.Length) {  // IL_008E
+    loc2.Add(new MarkdownSharp.Markdown+Token(TokenType.Text, text.Substring(loc0, text.Length - loc0)));  // IL_00A6
+}
+return loc2;  // IL_00AC
+
+// MarkdownSharp.Markdown.DoAnchors(System.String) -> System.String — 0x0600002E [statements]
+if (text.Contains("[")) {  // IL_000B
+    text = MarkdownSharp.Markdown._anchorRef.Replace(text, this.AnchorRefEvaluator);  // IL_0026
+    text = MarkdownSharp.Markdown._anchorInline.Replace(text, this.AnchorInlineEvaluator);  // IL_003F
+    return MarkdownSharp.Markdown._anchorRefShortcut.Replace(text, this.AnchorRefShortcutEvaluator);  // IL_0058
+}
+return text;  // IL_000E
+
+// MarkdownSharp.Markdown.SaveFromAutoLinking(System.String) -> System.String — 0x0600002F [statements]
+return s.Replace("://", "\u001aP");  // IL_0010
+
+// MarkdownSharp.Markdown.AnchorRefEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000030 [statements]
+// locals: System.String loc0, System.String loc1, System.String loc2, System.String loc3, System.String loc4, System.String loc5
+loc0 = match.Groups[1].Value;  // IL_0011
+loc1 = this.SaveFromAutoLinking(match.Groups[2].Value);  // IL_0029
+loc2 = match.Groups[3].Value.ToLowerInvariant();  // IL_0040
+if (loc2 != null && loc2.Length == 0) {  // IL_0042
+    loc2 = loc1.ToLowerInvariant();  // IL_0052
+}
+if (!this._urls.ContainsKey(loc2)) {  // IL_005F
+    loc3 = loc0;  // IL_00E5
+} else {
+    loc4 = this._urls[loc2];  // IL_0070
+    loc4 = MarkdownSharp.Markdown.AttributeSafeUrl(loc4);  // IL_0079
+    loc3 = "<a href=\"" + loc4 + "\"";  // IL_008C
+    if (this._titles.ContainsKey(loc2)) {  // IL_0099
+        loc5 = MarkdownSharp.Markdown.AttributeEncode(this._titles[loc2]);  // IL_00AC
+        loc5 = MarkdownSharp.Markdown.AttributeEncode(this.EscapeBoldItalic(loc5));  // IL_00BB
+        loc3 = loc3 + " title=\"" + loc5 + "\"";  // IL_00CF
+    }
+    loc3 = loc3 + ">" + loc1 + "</a>";  // IL_00E1
+}
+return loc3;  // IL_00E7
+
+// MarkdownSharp.Markdown.AnchorRefShortcutEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000031 [statements]
+// locals: System.String loc0, System.String loc1, System.String loc2, System.String loc3, System.String loc4, System.String loc5
+loc0 = match.Groups[1].Value;  // IL_0011
+loc1 = this.SaveFromAutoLinking(match.Groups[2].Value);  // IL_0029
+loc2 = System.Text.RegularExpressions.Regex.Replace(loc1.ToLowerInvariant(), "[ ]*\\n[ ]*", " ");  // IL_003F
+if (!this._urls.ContainsKey(loc2)) {  // IL_004C
+    loc3 = loc0;  // IL_00CA
+} else {
+    loc4 = this._urls[loc2];  // IL_005A
+    loc4 = MarkdownSharp.Markdown.AttributeSafeUrl(loc4);  // IL_0063
+    loc3 = "<a href=\"" + loc4 + "\"";  // IL_0076
+    if (this._titles.ContainsKey(loc2)) {  // IL_0083
+        loc5 = MarkdownSharp.Markdown.AttributeEncode(this._titles[loc2]);  // IL_0096
+        loc5 = this.EscapeBoldItalic(loc5);  // IL_00A0
+        loc3 = loc3 + " title=\"" + loc5 + "\"";  // IL_00B4
+    }
+    loc3 = loc3 + ">" + loc1 + "</a>";  // IL_00C6
+}
+return loc3;  // IL_00CC
+
+// MarkdownSharp.Markdown.AnchorInlineEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000032 [statements]
+// locals: System.String loc0, System.String loc1, System.String loc2, System.String loc3
+loc0 = this.SaveFromAutoLinking(match.Groups[2].Value);  // IL_0017
+loc1 = match.Groups[3].Value;  // IL_0029
+loc2 = match.Groups[6].Value;  // IL_003B
+if (loc1.StartsWith("<") && loc1.EndsWith(">")) {  // IL_0047
+    loc1 = loc1.Substring(1, loc1.Length - 2);  // IL_0065
+}
+loc1 = MarkdownSharp.Markdown.AttributeSafeUrl(loc1);  // IL_006C
+loc3 = string.Format("<a href=\"{0}\"", loc1);  // IL_0078
+if (!string.IsNullOrEmpty(loc2)) {  // IL_007F
+    loc2 = MarkdownSharp.Markdown.AttributeEncode(loc2);  // IL_0087
+    loc2 = this.EscapeBoldItalic(loc2);  // IL_008F
+    loc3 = loc3 + string.Format(" title=\"{0}\"", loc2);  // IL_00A1
+}
+loc3 = loc3 + string.Format(">{0}</a>", loc0);  // IL_00B3
+return loc3;  // IL_00B5
+
+// MarkdownSharp.Markdown.DoImages(System.String) -> System.String — 0x06000033 [statements]
+if (text.Contains("![")) {  // IL_000B
+    text = MarkdownSharp.Markdown._imagesRef.Replace(text, this.ImageReferenceEvaluator);  // IL_0026
+    return MarkdownSharp.Markdown._imagesInline.Replace(text, this.ImageInlineEvaluator);  // IL_003F
+}
+return text;  // IL_000E
+
+// MarkdownSharp.Markdown.EscapeImageAltText(System.String) -> System.String — 0x06000034 [statements]
+s = this.EscapeBoldItalic(s);  // IL_0007
+t0 = MarkdownSharp.Markdown+<>c.<>9__80_0;  // IL_0014
+t1 = s;  // IL_0017
+t2 = "[\\[\\]()]";  // IL_0017
+t3 = t0;  // IL_0017
+t4 = s;  // IL_0017
+t5 = "[\\[\\]()]";  // IL_0017
+t6 = t0;  // IL_0017
+if (t0 == null) {  // IL_0015
+    t7 = MarkdownSharp.Markdown+<>c.<>9.<EscapeImageAltText>b__80_0;  // IL_0028
+    MarkdownSharp.Markdown+<>c.<>9__80_0 = t7;  // IL_0029
+    t1 = t4;  // IL_002E
+    t2 = t5;  // IL_002E
+    t3 = t7;  // IL_002E
+}
+return System.Text.RegularExpressions.Regex.Replace(t1, t2, t3);  // IL_0033
+
+// MarkdownSharp.Markdown.ImageReferenceEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000035 [statements]
+// locals: System.String loc0, System.String loc1, System.String loc2, System.String loc3, System.String loc4
+loc0 = match.Groups[1].Value;  // IL_0011
+loc1 = match.Groups[2].Value;  // IL_0023
+loc2 = match.Groups[3].Value.ToLowerInvariant();  // IL_003A
+if (loc2 != null && loc2.Length == 0) {  // IL_003C
+    loc2 = loc1.ToLowerInvariant();  // IL_004C
+}
+if (!this._urls.ContainsKey(loc2)) {  // IL_0059
+    return loc0;  // IL_0093
+}
+loc3 = this._urls[loc2];  // IL_0067
+loc4 = null;  // IL_0069
+if (this._titles.ContainsKey(loc2)) {  // IL_0077
+    loc4 = this._titles[loc2];  // IL_0085
+}
+return this.ImageTag(loc3, loc1, loc4);  // IL_0091
+
+// MarkdownSharp.Markdown.ImageInlineEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000036 [statements]
+// locals: System.String loc0, System.String loc1, System.String loc2
+loc0 = match.Groups[2].Value;  // IL_0011
+loc1 = match.Groups[3].Value;  // IL_0023
+loc2 = match.Groups[6].Value;  // IL_0035
+if (loc1.StartsWith("<") && loc1.EndsWith(">")) {  // IL_0041
+    loc1 = loc1.Substring(1, loc1.Length - 2);  // IL_005F
+}
+return this.ImageTag(loc1, loc0, loc2);  // IL_0069
+
+// MarkdownSharp.Markdown.ImageTag(System.String, System.String, System.String) -> System.String — 0x06000037 [statements]
+// locals: System.String loc0
+altText = this.EscapeImageAltText(MarkdownSharp.Markdown.AttributeEncode(altText));  // IL_000C
+url = MarkdownSharp.Markdown.AttributeSafeUrl(url);  // IL_0014
+loc0 = string.Format("<img src=\"{0}\" alt=\"{1}\"", url, altText);  // IL_0022
+if (!string.IsNullOrEmpty(title)) {  // IL_0029
+    title = MarkdownSharp.Markdown.AttributeEncode(this.EscapeBoldItalic(title));  // IL_0037
+    loc0 = loc0 + string.Format(" title=\"{0}\"", title);  // IL_004A
+}
+loc0 = loc0 + this.EmptyElementSuffix;  // IL_0057
+return loc0;  // IL_0059
+
+// MarkdownSharp.Markdown.DoHeaders(System.String) -> System.String — 0x06000038 [statements]
+text = MarkdownSharp.Markdown._headerSetext.Replace(text, this.SetextHeaderEvaluator);  // IL_0017
+return MarkdownSharp.Markdown._headerAtx.Replace(text, this.AtxHeaderEvaluator);  // IL_0030
+
+// MarkdownSharp.Markdown.SetextHeaderEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000039 [statements]
+// locals: System.String loc0, System.Int32 loc1
+loc0 = match.Groups[1].Value;  // IL_0011
+loc1 = match.Groups[2].Value.StartsWith("=") ? 1 : 2;  // IL_0033
+return string.Format("<h{1}>{0}</h{1}>\n\n", this.RunSpanGamut(loc0), loc1);  // IL_004B
+
+// MarkdownSharp.Markdown.AtxHeaderEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x0600003A [statements]
+// locals: System.String loc0, System.Int32 loc1
+loc0 = match.Groups[2].Value;  // IL_0011
+loc1 = match.Groups[1].Value.Length;  // IL_0028
+return string.Format("<h{1}>{0}</h{1}>\n\n", this.RunSpanGamut(loc0), loc1);  // IL_0040
+
+// MarkdownSharp.Markdown.DoHorizontalRules(System.String) -> System.String — 0x0600003B [statements]
+return MarkdownSharp.Markdown._horizontalRules.Replace(text, "<hr" + this.EmptyElementSuffix + "\n");  // IL_0020
+
+// MarkdownSharp.Markdown.DoLists(System.String) -> System.String — 0x0600003C [statements]
+if (this._listLevel <= 0) {  // IL_0007
+    return MarkdownSharp.Markdown._listTopLevel.Replace(text, this.ListEvaluator);  // IL_0038
+}
+return MarkdownSharp.Markdown._listNested.Replace(text, this.ListEvaluator);  // IL_0020
+
+// MarkdownSharp.Markdown.ListEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x0600003D [statements]
+// locals: System.String loc0, System.String loc1, System.String loc2, System.String loc3, System.String loc4, System.Int32 loc5
+loc0 = match.Groups[1].Value;  // IL_0011
+loc1 = match.Groups[3].Value;  // IL_0023
+loc2 = System.Text.RegularExpressions.Regex.IsMatch(loc1, "[*+-]") ? "ul" : "ol";  // IL_003D
+loc4 = "";  // IL_0043
+if (loc2 == "ol") {  // IL_0050
+    int.TryParse(loc1.Substring(0, loc1.Length - 1), ref loc5);  // IL_0068
+    if (loc5 != 1 && loc5 != 0) {  // IL_006C
+        loc4 = " start=\"" + loc5 + "\"";  // IL_0088
+    }
+}
+t1 = this;  // IL_0099
+t2 = loc0;  // IL_0099
+t3 = this;  // IL_0099
+t4 = loc0;  // IL_0099
+if (loc2 == "ul") {  // IL_0097
+    t5 = t1;  // IL_00A5
+    t6 = t2;  // IL_00A5
+    t7 = "[*+-]";  // IL_00A5
+} else {
+    t5 = t3;  // IL_00A0
+    t6 = t4;  // IL_00A0
+    t7 = "\\d+[.]";  // IL_00A0
+}
+loc3 = t5.ProcessListItems(t6, t7);  // IL_00AA
+return string.Format("<{0}{1}>\n{2}</{0}>\n", loc2, loc4, loc3);  // IL_00B9
+
+// MarkdownSharp.Markdown.ProcessListItems(System.String, System.String) -> System.String — 0x0600003E [statements]
+// locals: MarkdownSharp.Markdown+<>c__DisplayClass96_0 loc0, System.String loc1
+loc0 = new MarkdownSharp.Markdown+<>c__DisplayClass96_0();  // IL_0005
+loc0.<>4__this = this;  // IL_0008
+this._listLevel = this._listLevel + 1;  // IL_0016
+list = System.Text.RegularExpressions.Regex.Replace(list, "\\n{2,}\\z", "\n");  // IL_002B
+loc1 = string.Format("(^[ ]*)                    # leading whitespace = $1\n                ({0}) [ ]+                 # list marker = $2\n                ((?s:.+?)                  # list item text = $3\n                (\\n+))      \n                (?= (\\z | \\1 ({0}) [ ]+))", marker);  // IL_0038
+loc0.lastItemHadADoubleNewline = false;  // IL_003B
+list = System.Text.RegularExpressions.Regex.Replace(list, loc1, loc0.<ProcessListItems>g__ListItemEvaluator|0, 34);  // IL_0055
+this._listLevel = this._listLevel - 1;  // IL_0060
+return list;  // IL_0066
+
+// MarkdownSharp.Markdown.DoCodeBlocks(System.String) -> System.String — 0x0600003F [statements]
+return MarkdownSharp.Markdown._codeBlock.Replace(text, this.CodeBlockEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.CodeBlockEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000040 [statements]
+// locals: System.String loc0
+loc0 = match.Groups[1].Value;  // IL_0011
+loc0 = this.EncodeCode(this.Outdent(loc0));  // IL_001F
+loc0 = MarkdownSharp.Markdown._newlinesLeadingTrailing.Replace(loc0, "");  // IL_0030
+return "\n\n<pre><code>" + loc0 + "\n</code></pre>\n\n";  // IL_0041
+
+// MarkdownSharp.Markdown.DoCodeSpans(System.String) -> System.String — 0x06000041 [statements]
+return MarkdownSharp.Markdown._codeSpan.Replace(text, this.CodeSpanEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.CodeSpanEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000042 [statements]
+// locals: System.String loc0
+loc0 = match.Groups[2].Value;  // IL_0011
+loc0 = System.Text.RegularExpressions.Regex.Replace(loc0, "^[ ]*", "");  // IL_0022
+loc0 = System.Text.RegularExpressions.Regex.Replace(loc0, "[ ]*$", "");  // IL_0033
+loc0 = this.EncodeCode(loc0);  // IL_003B
+loc0 = this.SaveFromAutoLinking(loc0);  // IL_0043
+return "<code>" + loc0 + "</code>";  // IL_0054
+
+// MarkdownSharp.Markdown.DoItalicsAndBold(System.String) -> System.String — 0x06000043 [statements]
+if (text.Contains("*") || text.Contains("_")) {  // IL_000B
+    if (!this.StrictBoldItalic) {  // IL_0022
+        text = MarkdownSharp.Markdown._bold.Replace(text, "<strong>$2</strong>");  // IL_0088
+        text = MarkdownSharp.Markdown._italic.Replace(text, "<em>$2</em>");  // IL_009A
+    } else if (!this.AsteriskIntraWordEmphasis) {  // IL_002A
+        text = MarkdownSharp.Markdown._strictBold.Replace(text, "$1<strong>$3</strong>");  // IL_0062
+        text = MarkdownSharp.Markdown._strictItalic.Replace(text, "$1<em>$3</em>");  // IL_0074
+    } else {
+        text = MarkdownSharp.Markdown._semiStrictBold.Replace(text, "$1<strong>$3</strong>");  // IL_003C
+        text = MarkdownSharp.Markdown._semiStrictItalic.Replace(text, "$1<em>$3</em>");  // IL_004E
+    }
+    return text;  // IL_009D
+}
+return text;  // IL_001B
+
+// MarkdownSharp.Markdown.DoHardBreaks(System.String) -> System.String — 0x06000044 [statements]
+if (!this.AutoNewLines) {  // IL_0006
+    return System.Text.RegularExpressions.Regex.Replace(text, " {2,}\\n", string.Format("<br{0}\n", this.EmptyElementSuffix));  // IL_003F
+}
+return System.Text.RegularExpressions.Regex.Replace(text, "\\n", string.Format("<br{0}\n", this.EmptyElementSuffix));  // IL_0023
+
+// MarkdownSharp.Markdown.DoBlockQuotes(System.String) -> System.String — 0x06000045 [statements]
+return MarkdownSharp.Markdown._blockquote.Replace(text, this.BlockQuoteEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.BlockQuoteEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000046 [statements]
+// locals: System.String loc0, System.String loc1
+loc0 = match.Groups[1].Value;  // IL_0011
+loc0 = System.Text.RegularExpressions.Regex.Replace(loc0, "^[ ]*>[ ]?", "", 2);  // IL_0023
+loc0 = System.Text.RegularExpressions.Regex.Replace(loc0, "^[ ]+$", "", 2);  // IL_0035
+loc0 = this.RunBlockGamut(loc0, true, true);  // IL_003F
+loc0 = System.Text.RegularExpressions.Regex.Replace(loc0, "^", "  ", 2);  // IL_0051
+loc0 = System.Text.RegularExpressions.Regex.Replace(loc0, "(\\s*<pre>.+?</pre>)", this.BlockQuoteEvaluator2, 48);  // IL_006B
+loc0 = string.Format("<blockquote>\n{0}\n</blockquote>", loc0);  // IL_0077
+loc1 = MarkdownSharp.Markdown.GetHashKey(loc0, true);  // IL_007F
+this._htmlBlocks.set_Item(loc1, loc0);  // IL_0088
+return "\n\n" + loc1 + "\n\n";  // IL_009D
+
+// MarkdownSharp.Markdown.BlockQuoteEvaluator2(System.Text.RegularExpressions.Match) -> System.String — 0x06000047 [statements]
+return System.Text.RegularExpressions.Regex.Replace(match.Groups[1].Value, "^  ", "", 2);  // IL_0021
+
+// MarkdownSharp.Markdown.HandleTrailingParens(System.Text.RegularExpressions.Match) -> System.String — 0x06000048 [statements]
+// locals: MarkdownSharp.Markdown+<>c__DisplayClass119_0 loc0, System.String loc1, System.String loc2, System.Int32 loc3, System.Collections.IEnumerator loc4, System.Text.RegularExpressions.Match loc5, System.IDisposable loc6, System.Char loc7
+loc0 = new MarkdownSharp.Markdown+<>c__DisplayClass119_0();  // IL_0005
+if (!match.Groups[1].Success) {  // IL_0017
+    loc1 = match.Groups[2].Value;  // IL_0031
+    loc2 = match.Groups[3].Value;  // IL_0043
+    if (loc2.EndsWith(")")) {  // IL_004F
+        loc3 = 0;  // IL_0064
+        loc4 = System.Text.RegularExpressions.Regex.Matches(loc2, "[()]").GetEnumerator();  // IL_0075
+        try {  // IL_0077
+            while (loc4.MoveNext()) {  // IL_00AC
+                loc5 = (System.Text.RegularExpressions.Match)loc4.Current;  // IL_0085
+                if (!(loc5.Value == "(")) {  // IL_0098
+                    loc3 = loc3 - 1;  // IL_00AB
+                    continue;  // IL_00AC
+                }
+                if (loc3 > 0) {  // IL_009C
+                    loc3 = loc3 + 1;  // IL_00A5
+                    continue;  // IL_00AC
+                }
+                loc3 = 1;  // IL_009F
+            }
+        } finally {
+            loc6 = loc4 as System.IDisposable;  // IL_00BE
+            if (loc6 != null) {  // IL_00C2
+                loc6.Dispose();  // IL_00C6
+            }
+        }
+        loc0.tail = "";  // IL_00D2
+        if (loc3 < 0) {  // IL_00D9
+            loc2 = System.Text.RegularExpressions.Regex.Replace(loc2, "\\){1," + -loc3 + "}$", loc0.<HandleTrailingParens>b__0);  // IL_0103
+        }
+        if (loc0.tail.Length > 0) {  // IL_0110
+            loc7 = loc2[loc2.Length - 1];  // IL_0120
+            if (!MarkdownSharp.Markdown._endCharRegex.IsMatch(loc7.ToString())) {  // IL_0133
+                loc0.tail = loc7.ToString() + loc0.tail;  // IL_0148
+                loc2 = loc2.Substring(0, loc2.Length - 1);  // IL_015C
+            }
+        }
+        t0 = new string[5];  // IL_0163
+        t0[0] = "<";  // IL_016A
+        t0[1] = loc1;  // IL_016E
+        t0[2] = loc2;  // IL_0172
+        t0[3] = ">";  // IL_017A
+        t0[4] = loc0.tail;  // IL_0183
+        return string.Concat(t0);  // IL_0189
+    }
+    return "<" + loc1 + loc2 + ">";  // IL_0062
+}
+return match.Value;  // IL_001F
+
+// MarkdownSharp.Markdown.EmailBareLinkEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000049 [statements]
+if (!match.Groups[1].Success) {  // IL_0011
+    return "<" + match.Value + ">";  // IL_002F
+}
+return match.Value;  // IL_0019
+
+// MarkdownSharp.Markdown.DoAutoLinks(System.String) -> System.String — 0x0600004A [statements]
+if (this.AutoHyperlink) {  // IL_0006
+    text = MarkdownSharp.Markdown._autolinkBare.Replace(text, null.HandleTrailingParens);  // IL_001F
+}
+text = System.Text.RegularExpressions.Regex.Replace(text, "<((https?|ftp):[^'\">\\s]+)>", this.HyperlinkEvaluator);  // IL_0038
+if (this.LinkEmails) {  // IL_0040
+    text = MarkdownSharp.Markdown._linkEmail.Replace(text, this.EmailEvaluator);  // IL_0059
+}
+return text;  // IL_005C
+
+// MarkdownSharp.Markdown.HyperlinkEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x0600004B [statements]
+// locals: System.String loc0, System.String loc1
+loc0 = match.Groups[1].Value;  // IL_0011
+loc1 = MarkdownSharp.Markdown.AttributeSafeUrl(loc0);  // IL_0018
+return string.Format("<a href=\"{0}\">{1}</a>", loc1, loc0);  // IL_0025
+
+// MarkdownSharp.Markdown.EmailEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x0600004C [statements]
+// locals: System.String loc0
+loc0 = this.Unescape(match.Groups[1].Value);  // IL_0017
+loc0 = "mailto:" + loc0;  // IL_0023
+loc0 = this.EncodeEmailAddress(loc0);  // IL_002B
+loc0 = string.Format("<a href=\"{0}\">{0}</a>", loc0);  // IL_0037
+return System.Text.RegularExpressions.Regex.Replace(loc0, "\">.+?:", "\">");  // IL_0048
+
+// MarkdownSharp.Markdown.Outdent(System.String) -> System.String — 0x0600004D [statements]
+return MarkdownSharp.Markdown._outDent.Replace(block, "");  // IL_0010
+
+// MarkdownSharp.Markdown.EncodeEmailAddress(System.String) -> System.String — 0x0600004E [statements]
+// locals: System.Text.StringBuilder loc0, System.Random loc1, System.Int32 loc2, System.String loc3, System.Int32 loc4, System.Char loc5
+loc0 = new System.Text.StringBuilder(addr.Length * 5);  // IL_000D
+loc1 = new System.Random();  // IL_0013
+loc3 = addr;  // IL_0015
+loc4 = 0;  // IL_0017
+while (loc4 < loc3.Length) {  // IL_007E
+    loc5 = loc3[loc4];  // IL_0023
+    loc2 = loc1.Next(1, 100);  // IL_002E
+    if ((loc2 > 90 || loc5 == 58) && loc5 != 64) {  // IL_0032
+        loc0.Append(loc5);  // IL_0048
+    } else if (loc2 >= 45) {  // IL_004E
+        loc0.AppendFormat("&#{0};", loc5);  // IL_0077
+    } else {
+        loc0.AppendFormat("&#x{0:x};", loc5);  // IL_0062
+    }
+    loc4 = loc4 + 1;  // IL_007C
+}
+return loc0.ToString();  // IL_008E
+
+// MarkdownSharp.Markdown.EncodeCode(System.String) -> System.String — 0x0600004F [statements]
+return MarkdownSharp.Markdown._codeEncoder.Replace(code, this.EncodeCodeEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.EncodeCodeEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000050 [statements]
+// locals: System.String loc0
+loc0 = match.Value;  // IL_0006
+if (loc0 == "&") {  // IL_0012
+    return "&amp;";  // IL_0035
+}
+if (loc0 == "<") {  // IL_001F
+    return "&lt;";  // IL_003B
+}
+if (loc0 == ">") {  // IL_002C
+    return "&gt;";  // IL_0041
+}
+return MarkdownSharp.Markdown._escapeTable[match.Value];  // IL_0052
+
+// MarkdownSharp.Markdown.EncodeAmpsAndAngles(System.String) -> System.String — 0x06000051 [statements]
+s = MarkdownSharp.Markdown._amps.Replace(s, "&amp;");  // IL_0010
+return MarkdownSharp.Markdown._angles.Replace(s, "&lt;");  // IL_0022
+
+// MarkdownSharp.Markdown.EscapeBackslashes(System.String) -> System.String — 0x06000052 [statements]
+return MarkdownSharp.Markdown._backslashEscapes.Replace(s, this.EscapeBackslashesEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.EscapeBackslashesEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000053 [statements]
+return MarkdownSharp.Markdown._backslashEscapeTable[match.Value];  // IL_0010
+
+// MarkdownSharp.Markdown.Unescape(System.String) -> System.String — 0x06000054 [statements]
+return MarkdownSharp.Markdown._unescapes.Replace(s, this.UnescapeEvaluator);  // IL_0017
+
+// MarkdownSharp.Markdown.UnescapeEvaluator(System.Text.RegularExpressions.Match) -> System.String — 0x06000055 [statements]
+return MarkdownSharp.Markdown._invertedEscapeTable[match.Value];  // IL_0010
+
+// MarkdownSharp.Markdown.EscapeBoldItalic(System.String) -> System.String — 0x06000056 [statements]
+s = s.Replace("*", MarkdownSharp.Markdown._escapeTable["*"]);  // IL_001A
+return s.Replace("_", MarkdownSharp.Markdown._escapeTable["_"]);  // IL_0036
+
+// MarkdownSharp.Markdown.AttributeEncode(System.String) -> System.String — 0x06000057 [statements]
+return s.Replace(">", "&gt;").Replace("<", "&lt;").Replace("\"", "&quot;").Replace("'", "&#39;");  // IL_003D
+
+// MarkdownSharp.Markdown.AttributeSafeUrl(System.String) -> System.String — 0x06000058 [statements]
+// locals: System.String loc0, System.Int32 loc1, System.Char loc2
+s = MarkdownSharp.Markdown.AttributeEncode(s);  // IL_0006
+loc0 = "*_:()[]";  // IL_000D
+loc1 = 0;  // IL_000F
+while (loc1 < loc0.Length) {  // IL_003E
+    loc2 = loc0[loc1];  // IL_0019
+    s = s.Replace(loc2.ToString(), MarkdownSharp.Markdown._escapeTable[loc2.ToString()]);  // IL_0038
+    loc1 = loc1 + 1;  // IL_003D
+}
+return s;  // IL_0048
+
+// MarkdownSharp.Markdown.EscapeSpecialCharsWithinTagAttributes(System.String) -> System.String — 0x06000059 [statements]
+// locals: System.Collections.Generic.List`1<MarkdownSharp.Markdown+Token> loc0, System.Text.StringBuilder loc1, System.Collections.Generic.List`1+Enumerator<MarkdownSharp.Markdown+Token> loc2, MarkdownSharp.Markdown+Token loc3, System.String loc4
+loc0 = this.TokenizeHTML(text);  // IL_0007
+loc1 = new System.Text.StringBuilder(text.Length);  // IL_0013
+loc2 = loc0.GetEnumerator();  // IL_001A
+try {  // IL_001B
+    while (loc2.MoveNext()) {  // IL_00B9
+        loc3 = loc2.Current;  // IL_0027
+        loc4 = loc3.Value;  // IL_002E
+        if (loc3.Type == TokenType.Tag) {  // IL_0037
+            loc4 = loc4.Replace("\\", MarkdownSharp.Markdown._escapeTable["\\"]);  // IL_0054
+            if (this.AutoHyperlink && loc4.StartsWith("<!")) {  // IL_005C
+                loc4 = loc4.Replace("/", MarkdownSharp.Markdown._escapeTable["/"]);  // IL_0087
+            }
+            loc4 = System.Text.RegularExpressions.Regex.Replace(loc4, "(?<=.)</?code>(?=.)", MarkdownSharp.Markdown._escapeTable["`"]);  // IL_00A4
+            loc4 = this.EscapeBoldItalic(loc4);  // IL_00AE
+        }
+        loc1.Append(loc4);  // IL_00B8
+    }
+} finally {
+    loc2.Dispose();  // IL_00CF
+}
+return loc1.ToString();  // IL_00DB
+
+// MarkdownSharp.Markdown.Normalize(System.String) -> System.String — 0x0600005A [control_flow]
+// locals: System.Text.StringBuilder loc0, System.Text.StringBuilder loc1, System.Boolean loc2, System.Int32 loc3, System.Char loc4, System.Int32 loc5, System.Int32 loc6
+// gap: 1 goto target(s) did not structure
+loc0 = new System.Text.StringBuilder(text.Length);  // IL_000B
+loc1 = new System.Text.StringBuilder();  // IL_0011
+loc2 = false;  // IL_0013
+loc3 = 0;  // IL_0015
+while (loc3 < text.Length) {  // IL_00ED
+    loc4 = text[loc3];  // IL_0022
+    switch (loc4) {  // IL_0029
+        case 9:
+            loc5 = 4 - loc1.Length % 4;  // IL_00AD
+            loc6 = 0;  // IL_00B0
+            while (loc6 < loc5) {  // IL_00C3
+                loc1.Append(32);  // IL_00BC
+                loc6 = loc6 + 1;  // IL_00C1
+            }
+        case 10:
+            if (loc2) {  // IL_004E
+                loc0.Append(loc1);  // IL_0057
+            }
+            loc0.Append(10);  // IL_0060
+            loc1.Length = 0;  // IL_0063
+            loc2 = false;  // IL_0069
+        case 11: case 12:
+        IL_00CB:
+            if (!loc2 && text[loc3] != 32) {  // IL_00CC
+                loc2 = true;  // IL_00DA
+            }
+            loc1.Append(text[loc3]);  // IL_00E8
+        case 13:
+            if (loc3 < text.Length - 1 && text[loc3 + 1] != 10) {  // IL_0075
+                if (loc2) {  // IL_0085
+                    loc0.Append(loc1);  // IL_008E
+                }
+                loc0.Append(10);  // IL_0097
+                loc1.Length = 0;  // IL_009A
+                loc2 = false;  // IL_00A0
+            }
+        default:
+            if (loc4 != 26) {  // IL_0046
+                goto IL_00CB;  // IL_00CB
+            }
+    }
+    loc3 = loc3 + 1;  // IL_00EC
+}
+if (loc2) {  // IL_00FA
+    loc0.Append(loc1);  // IL_0103
+}
+loc0.Append(10);  // IL_010C
+return loc0.Append("\n\n").ToString();  // IL_011D
+
+// MarkdownSharp.Markdown.RepeatString(System.String, System.Int32) -> System.String — 0x0600005B [statements]
+// locals: System.Text.StringBuilder loc0, System.Int32 loc1
+loc0 = new System.Text.StringBuilder(text.Length * count);  // IL_000D
+loc1 = 0;  // IL_000F
+while (loc1 < count) {  // IL_001E
+    loc0.Append(text);  // IL_0019
+    loc1 = loc1 + 1;  // IL_001D
+}
+return loc0.ToString();  // IL_0028
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.MarkdownOptions
+// ====================================================================================================
+
+// MarkdownSharp.MarkdownOptions.get_AutoHyperlink() -> System.Boolean — 0x06000001 [statements]
+return this.<AutoHyperlink>k__BackingField;  // IL_0006
+
+// MarkdownSharp.MarkdownOptions.set_AutoHyperlink(System.Boolean) -> System.Void — 0x06000002 [statements]
+this.<AutoHyperlink>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.MarkdownOptions.get_AutoNewlines() -> System.Boolean — 0x06000003 [statements]
+return this.<AutoNewlines>k__BackingField;  // IL_0006
+
+// MarkdownSharp.MarkdownOptions.set_AutoNewlines(System.Boolean) -> System.Void — 0x06000004 [statements]
+this.<AutoNewlines>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.MarkdownOptions.get_EmptyElementSuffix() -> System.String — 0x06000005 [statements]
+return this.<EmptyElementSuffix>k__BackingField;  // IL_0006
+
+// MarkdownSharp.MarkdownOptions.set_EmptyElementSuffix(System.String) -> System.Void — 0x06000006 [statements]
+this.<EmptyElementSuffix>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.MarkdownOptions.get_LinkEmails() -> System.Boolean — 0x06000007 [statements]
+return this.<LinkEmails>k__BackingField;  // IL_0006
+
+// MarkdownSharp.MarkdownOptions.set_LinkEmails(System.Boolean) -> System.Void — 0x06000008 [statements]
+this.<LinkEmails>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.MarkdownOptions.get_StrictBoldItalic() -> System.Boolean — 0x06000009 [statements]
+return this.<StrictBoldItalic>k__BackingField;  // IL_0006
+
+// MarkdownSharp.MarkdownOptions.set_StrictBoldItalic(System.Boolean) -> System.Void — 0x0600000A [statements]
+this.<StrictBoldItalic>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.MarkdownOptions.get_AsteriskIntraWordEmphasis() -> System.Boolean — 0x0600000B [statements]
+return this.<AsteriskIntraWordEmphasis>k__BackingField;  // IL_0006
+
+// MarkdownSharp.MarkdownOptions.set_AsteriskIntraWordEmphasis(System.Boolean) -> System.Void — 0x0600000C [statements]
+this.<AsteriskIntraWordEmphasis>k__BackingField = value;  // IL_0002
+
+// MarkdownSharp.MarkdownOptions..ctor() -> System.Void — 0x0600000D [statements]
+: base();  // IL_0001
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.dll
+// ====================================================================================================
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.Markdown+<>c
+// ====================================================================================================
+
+// MarkdownSharp.Markdown+<>c..cctor() -> System.Void — 0x0600005F [statements]
+MarkdownSharp.Markdown+<>c.<>9 = new MarkdownSharp.Markdown+<>c();  // IL_0005
+
+// MarkdownSharp.Markdown+<>c..ctor() -> System.Void — 0x06000060 [statements]
+: base();  // IL_0001
+
+// MarkdownSharp.Markdown+<>c.<EscapeImageAltText>b__80_0(System.Text.RegularExpressions.Match) -> System.String — 0x06000061 [statements]
+return MarkdownSharp.Markdown._escapeTable[m.ToString()];  // IL_0010
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.Markdown+<>c__DisplayClass119_0
+// ====================================================================================================
+
+// MarkdownSharp.Markdown+<>c__DisplayClass119_0..ctor() -> System.Void — 0x06000064 [statements]
+: base();  // IL_0001
+
+// MarkdownSharp.Markdown+<>c__DisplayClass119_0.<HandleTrailingParens>b__0(System.Text.RegularExpressions.Match) -> System.String — 0x06000065 [statements]
+this.tail = m.Value;  // IL_0007
+return "";  // IL_0011
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.Markdown+<>c__DisplayClass52_0
+// ====================================================================================================
+
+// MarkdownSharp.Markdown+<>c__DisplayClass52_0..ctor() -> System.Void — 0x0600005D [statements]
+: base();  // IL_0001
+
+// MarkdownSharp.Markdown+<>c__DisplayClass52_0.<FormParagraphs>b__0(System.Text.RegularExpressions.Match) -> System.String — 0x0600005E [statements]
+this.keepGoing = true;  // IL_0002
+return this.<>4__this._htmlBlocks[match.Value];  // IL_001D
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.Markdown+<>c__DisplayClass96_0
+// ====================================================================================================
+
+// MarkdownSharp.Markdown+<>c__DisplayClass96_0..ctor() -> System.Void — 0x06000062 [statements]
+: base();  // IL_0001
+
+// MarkdownSharp.Markdown+<>c__DisplayClass96_0.<ProcessListItems>g__ListItemEvaluator|0(System.Text.RegularExpressions.Match) -> System.String — 0x06000063 [statements]
+// locals: System.String loc0, System.Boolean loc1, System.Boolean loc2, System.Boolean loc3
+loc0 = match.Groups[3].Value;  // IL_0011
+loc1 = loc0.EndsWith("\n\n");  // IL_001D
+loc2 = loc1 ? 1 : loc0.Contains("\n\n");  // IL_002F
+loc3 = loc2 | this.lastItemHadADoubleNewline;  // IL_0038
+loc0 = this.<>4__this.RunBlockGamut(this.<>4__this.Outdent(loc0) + "\n", false, loc3);  // IL_005C
+this.lastItemHadADoubleNewline = loc1;  // IL_005F
+return string.Format("<li>{0}</li>\n", loc0);  // IL_006F
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.Markdown+Token
+// ====================================================================================================
+
+// MarkdownSharp.Markdown+Token..ctor(MarkdownSharp.Markdown+TokenType, System.String) -> System.Void — 0x0600005C [statements]
+this.Type = type;  // IL_0002
+this.Value = value;  // IL_0009
+
+
+
+// ====================================================================================================
+// TYPE MarkdownSharp.Markdown+TokenType
+// ====================================================================================================
+

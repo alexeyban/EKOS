@@ -1,0 +1,147 @@
+[
+ {
+  "step": 1,
+  "name": "01-mystery",
+  "title": "The starting point: a compiled library and nothing else",
+  "images": [
+   "01-mystery.png"
+  ]
+ },
+ {
+  "step": 2,
+  "name": "02-original-runs",
+  "title": "Run the original as-is: this is the behaviour to reproduce",
+  "images": [
+   "02-original-runs.png"
+  ]
+ },
+ {
+  "step": 3,
+  "name": "03-observe",
+  "title": "ekos build: observe the binary (bytes only, nothing is executed)",
+  "images": [
+   "03-observe.png"
+  ]
+ },
+ {
+  "step": 4,
+  "name": "04-recover",
+  "title": "ekos recover / resolve / compile / commit: knowledge into the ledger",
+  "images": [
+   "04-recover.png"
+  ]
+ },
+ {
+  "step": 5,
+  "name": "05-ledger",
+  "title": "The compiled knowledge is queryable: types, methods, call graph",
+  "images": [
+   "05-ledger.png"
+  ]
+ },
+ {
+  "step": 6,
+  "name": "06-type-summary",
+  "title": "ekos_binary_explain on the type: what it is, and the order to port it in",
+  "images": [
+   "06-type-summary.png"
+  ]
+ },
+ {
+  "step": 7,
+  "name": "07-method-spec",
+  "title": "ekos_binary_explain on one method: the spec the rewrite is written from",
+  "images": [
+   "07-method-spec.png"
+  ]
+ },
+ {
+  "step": 8,
+  "name": "08-honest-gap",
+  "title": "Where recovery is incomplete, it says so — and refuses to guess",
+  "images": [
+   "08-honest-gap.png"
+  ]
+ },
+ {
+  "step": 9,
+  "name": "09-the-port",
+  "title": "The rewrite: written callees-first from the recovered statements",
+  "images": [
+   "09-the-port.png"
+  ]
+ },
+ {
+  "step": 10,
+  "name": "10-static-check",
+  "title": "ekos_binary_migration_check: what the rewrite touches vs what the original touches",
+  "images": [
+   "10-static-check.png"
+  ]
+ },
+ {
+  "step": 11,
+  "name": "11-sandbox",
+  "title": "Before running any untrusted code: prove the sandbox holds",
+  "images": [
+   "11-sandbox.png"
+  ]
+ },
+ {
+  "step": 12,
+  "name": "12-characterize",
+  "title": "Record what the original does, then check the rewrite against the record",
+  "images": [
+   "12-characterize.png"
+  ]
+ },
+ {
+  "step": 13,
+  "name": "13-side-by-side",
+  "title": "Same inputs through both programs, compared byte for byte",
+  "images": [
+   "13-side-by-side.png"
+  ]
+ },
+ {
+  "step": 14,
+  "name": "14-rendered",
+  "title": "What a user sees: the original's HTML and the port's HTML, rendered",
+  "images": [
+   "14-rendered-browser.png",
+   "14-rendered.png"
+  ]
+ },
+ {
+  "step": 15,
+  "name": "15-fuzz",
+  "title": "Beyond hand-picked inputs: 3,000 generated documents, and a planted bug",
+  "images": [
+   "15-fuzz.png"
+  ]
+ },
+ {
+  "step": 16,
+  "name": "16-nondeterminism",
+  "title": "The one place the original is not deterministic — EKOS flagged it in the spec",
+  "images": [
+   "16-nondeterminism.png"
+  ]
+ },
+ {
+  "step": 17,
+  "name": "17-generic-baseline",
+  "title": "Why the spec matters: what general Markdown knowledge produces instead",
+  "images": [
+   "17-generic-baseline.png"
+  ]
+ },
+ {
+  "step": 18,
+  "name": "18-scoreboard",
+  "title": "Scoreboard — and what this does not prove",
+  "images": [
+   "18-scoreboard.png"
+  ]
+ }
+]
