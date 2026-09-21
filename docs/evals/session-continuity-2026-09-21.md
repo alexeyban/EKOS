@@ -72,3 +72,67 @@ correctness EKOS 1.00 vs baseline 0.62; stale-fact-served EKOS 0.00 vs baseline 
 **Decision: GO to Phase 6 on the proxy result, conditional on a live `claude -p` run before any
 public claim.** Nothing here supports "session memory beats native compaction in practice"; it
 supports that the memory layer has the properties the design needs.
+
+---
+
+# Live run (added 2026-09-21) — supersedes the proxy GO
+
+Reproduce: `python3 demo/session-memory/live_eval.py <ekos-binary> <workdir> --runs 3 --model haiku`
+(real `claude -p` calls, metered). Raw answers: `session-continuity-live-2026-09-21.json`.
+
+## Setup
+
+Same 7 notes and 8 questions, on a real built ledger (`ekos build … commit`, four tables). Every
+condition gets its context through the same channel (`--append-system-prompt`), the same instruction
+("answer only from the earlier-session context, else `NONE`"), the same grader, model `haiku`,
+tools disabled, 3 runs. Conditions: **none**; **compaction** = a *real model-written* 4-line summary of
+the same notes (a proxy for `/compact` — native `/compact` cannot be driven from `-p`); **ekos** =
+`ekos session brief`; **ekos_changed** = the brief after `customers` and `orders` gained columns and
+the ledger was rebuilt. 96 calls per run.
+
+## Results (clean run; mean ± sd over 3 runs)
+
+| condition | correct | stale-fact served (customers/orders questions) | injected-note leak |
+|---|---|---|---|
+| none | 0.25 ±0.00 | n/a | 0.00 |
+| compaction (model-written summary) | 0.92 ±0.06 | 0.83 ±0.24 | 0.00 |
+| ekos | 0.92 ±0.06 | n/a (nothing had changed) | 0.00 |
+| ekos, anchors changed | 0.88 ±0.00 | 0.67 ±0.24 | 0.00 |
+
+"Stale-fact served" = the question is about a changed table, the model answered rather than said `NONE`,
+and its answer contains none of *chang / outdated / stale / orphan / moved / no longer*.
+
+## What this shows — and does not
+
+- **No correctness advantage.** 0.92 vs 0.92 (0.88 after the change). At 7 notes the compaction summary
+  keeps every fact in four lines. My proxy's "1.00 vs 0.62" compared EKOS against a deliberately weak
+  model (last 4 notes, truncated); a real summary is not that weak.
+- **Staleness: not established.** 0.67 vs 0.83 is within run-to-run spread (n = 3 runs × 2 questions).
+  The brief did carry `[CHANGED]` and the model sometimes hedged or answered `NONE` on changed notes,
+  but this run cannot separate that from noise.
+- **Injected note: no leak in any condition**, including compaction (the summariser flagged the injection
+  and dropped it). The proxy's "compaction leaks by construction" was wrong in practice.
+- Under the plan's own rule (beat the baseline on correctness **and** stale-fact-served) this is a
+  **NO-GO at this scale and model**. It does not show session memory is worse; it shows this fixture
+  cannot show it is better.
+
+## Things that went wrong in the harness (disclosed)
+
+1. **Run 1 was contaminated and is not used.** `claude -p` loaded my MCP servers even with tools
+   disabled; some answers were "grant access to the Serena tools". Fixed with `--strict-mcp-config`
+   and re-run (this is the reported run). Run 1 had shown a striking 0.17 stale-served for EKOS — that
+   number is an artefact and should not be quoted.
+2. **The first staleness grader was biased toward EKOS.** It counted "unconfirmed/unverified" as a
+   staleness flag, but the T0 tier label makes the model say "unconfirmed" whether or not anything
+   changed. Regraded offline with the stricter word list above (loose grader gave 0.50 for
+   ekos_changed; strict gives 0.67). The strict figure is reported.
+3. Grading is substring/`NONE` matching, so paraphrase can score as wrong (one compaction answer
+   "deduplicated by hash, same email can appear multiple times" was judged incorrect, arguably fairly).
+
+## What would test the actual hypothesis
+
+Compaction's weakness is volume and drift, not a 7-note fixture: rerun with dozens to hundreds of notes
+against a fixed summary budget, more than one model (sonnet), more questions per table, and enough
+repeats to give the staleness metric a usable confidence interval. Until then the only claims the data
+supports are the mechanical ones (notes are anchored, staleness is flagged in the brief, no promotion by
+agents), not that this beats native compaction.

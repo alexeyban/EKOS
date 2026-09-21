@@ -5721,7 +5721,7 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
   - *Output:* `docs/evals/session-continuity-<date>.md`.
   - *Test/Validate:* Numbers reproducible from a documented command.
 
-- [x] **GO / NO-GO decision**
+- [x] **GO / NO-GO decision** _(proxy said GO; LIVE run 2026-09-21 = NO-GO at 7 notes / haiku: correctness 0.92 vs 0.92, staleness inconclusive — feature stays opt-in and unclaimed)_
   - *What:* If EKOS session memory does not beat the compaction-summary baseline on correctness **and** stale-fact-served rate, stop and write up why before P6.
   - *Output:* Decision recorded in the RFC with the numbers.
   - *Test/Validate:* Acceptance Criteria item 5 checked.

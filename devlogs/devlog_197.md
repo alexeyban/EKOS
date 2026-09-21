@@ -33,9 +33,8 @@ Verdicts `fresh|changed|orphaned|unanchored` from a per-kind fingerprint pinned 
 `lifecycle.rs` has no agent actor; a test scans `mcp.rs` for it. Confirm/reject/supersede re-append the
 claim and add a `ClaimStatusChanged` event; nothing is deleted.
 
-## Phase 5 — eval (proxy)
-`ekos session eval`. Proxy GO: correctness 1.00 vs 0.62, stale-served 0.00 vs 0.50. Report:
-`docs/evals/session-continuity-2026-09-21.md`.
+## Phase 5 — eval
+`ekos session eval` (proxy) said GO, 1.00 vs 0.62. The **live** run (`demo/session-memory/live_eval.py`, real `claude -p`, haiku) did not confirm it: correctness 0.92 vs 0.92, staleness within noise, no injected-note leak in any condition — a NO-GO at this scale under the RFC's rule. The proxy's baseline was a strawman (last 4 notes, truncated); a real model-written summary keeps all 7 facts in 4 lines. Report: `docs/evals/session-continuity-2026-09-21.md` (live section).
 
 ## Phase 6/7 — MCP + capture
 `ekos_session_note` (opens no ledger handle, tested), `_recall`, `_brief`, all gated on
@@ -75,3 +74,8 @@ Threat model + residual risks in the RFC; user guide, comms checklist (no draft)
 | `ekos/crates/compiler-core/src/config.rs` | retention + extraction settings |
 | `SECURITY.md`, `CLAUDE.md`, `README.md`, `docs/rfcs/0013-*`, `docs/generated/ekos-self-documentation.html` | amendments |
 | `ekos/docs/rfcs/0151-*`, `docs/session-memory.md`, `docs/evals/…`, `docs/integrations/…`, `docs/session-memory-comms-checklist.md`, `.claude/skills/session-memory/SKILL.md`, `demo/session-memory/` | RFC, guides, eval, skill, demo |
+
+### Live eval lessons (2026-09-21)
+- `claude -p --tools ""` still loads the user's MCP servers; add `--strict-mcp-config` or the answers are contaminated (one first-run answer asked for "Serena tools" access).
+- A staleness grader keyed on words like "unconfirmed" rewards a system whose tier label says "unconfirmed". Grade on words that only a change can produce.
+- A deterministic proxy with a hand-built weak baseline gave a GO that the live run did not reproduce. Validate a proxy's baseline against the real thing before trusting the sign of the result.

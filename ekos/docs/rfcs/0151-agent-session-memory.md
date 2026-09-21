@@ -1,6 +1,6 @@
 # RFC 0151 — Agent Session Memory
 
-**Status:** Accepted, all phases implemented 2026-09-21 (devlog_197). Phase 5 GO is on a deterministic proxy and is conditional on a live-model run (see Results). `SessionStart` context injection verified live.
+**Status:** Accepted, all phases implemented 2026-09-21 (devlog_197). The live Phase 5 eval (2026-09-21) did **not** meet the go/no-go rule: no correctness advantage, staleness inconclusive at this scale (see Results). `SessionStart` context injection verified live.
 **Plan:** `todo-agent-session-memory.md` (phases P0–P8). **Findings:** `docs/spikes/session-memory-findings.md`.
 
 ## Problem
@@ -86,3 +86,9 @@ of real hits can shift slightly even though the returned set is unchanged.
 
 `docs/evals/session-continuity-2026-09-21.md`. Proxy GO: correctness 1.00 vs 0.62 (modelled compaction
 baseline), stale-fact-served 0.00 vs 0.50. **Not established:** any live-model comparison.
+
+**Live result (supersedes the proxy GO).** `claude -p` on haiku, real ledger, 7 notes, 3 runs: correctness
+0.92 (model-written compaction summary) vs 0.92 (EKOS brief) vs 0.88 (EKOS after anchors changed); stale-fact
+served 0.83 vs 0.67 (within noise); no injected-note leak in any condition. Under this RFC's own rule that
+is a NO-GO at this scale. The feature stays opt-in and unclaimed; the untested hypothesis is that anchored
+memory helps when note volume exceeds what a summary retains. See `docs/evals/session-continuity-2026-09-21.md`.
