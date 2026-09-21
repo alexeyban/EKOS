@@ -63,7 +63,7 @@ Threat model + residual risks in the RFC; user guide, comms checklist (no draft)
 - `KirObject.properties` is a `HashMap`: compare KIR via `serde_json::Value`, not serialized strings.
 - The TODO named "RFC 0136/0137" dependencies; here they are RFC 0135 Parts C/B. Check numbers against
   the repo, not the plan.
-- The hook `additionalContext` output format in `ekos session brief --format claude-hook` is unverified.
+- **Live hook check (same day):** a `SessionStart` hook printing `ekos session brief --format claude-hook` made `claude -p --model haiku` return the canary token from a pending note; the no-hook control returned `NONE`. `claude -p` warns "no stdin data received in 3s" unless stdin is redirected. Not exercised: hook timeout/failure, `SessionEnd`.
 
 ## Files Changed
 | File | Change summary |

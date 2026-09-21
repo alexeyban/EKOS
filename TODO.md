@@ -5545,7 +5545,7 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
   - *Output:* Section in the spike doc: what exists, what overlaps, what is retired.
   - *Test/Validate:* No planned deliverable duplicates an existing one without an explicit supersede note.
 
-- [~] **Verify Claude Code hook behaviour** _(docs-verified 2026-09-21; PreCompact does not exist; live injection check still open)_
+- [x] **Verify Claude Code hook behaviour** _(docs-verified + live `SessionStart` injection check 2026-09-21; PreCompact does not exist; hook timeout/failure and SessionEnd still unexercised)_
   - *What:* Against current Claude Code docs and a scratch project, confirm: hook event names (SessionStart, PreCompact, SessionEnd), payloads (is the transcript path provided?), timeouts, whether SessionStart hook output is injected as context, and failure semantics.
   - *Output:* `docs/spikes/session-memory-hooks.md` with a working minimal `.claude/settings.json` snippet.
   - *Test/Validate:* A scratch session demonstrably runs the hook and receives injected text; documented what happens on hook timeout/error.

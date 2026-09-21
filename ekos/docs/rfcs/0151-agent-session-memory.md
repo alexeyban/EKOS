@@ -1,6 +1,6 @@
 # RFC 0151 — Agent Session Memory
 
-**Status:** Accepted, all phases implemented 2026-09-21 (devlog_197). Phase 5 GO is on a deterministic proxy and is conditional on a live-model run (see Results).
+**Status:** Accepted, all phases implemented 2026-09-21 (devlog_197). Phase 5 GO is on a deterministic proxy and is conditional on a live-model run (see Results). `SessionStart` context injection verified live.
 **Plan:** `todo-agent-session-memory.md` (phases P0–P8). **Findings:** `docs/spikes/session-memory-findings.md`.
 
 ## Problem

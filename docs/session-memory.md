@@ -59,6 +59,6 @@ results are cached by slice checksum. With a cloud provider this is a metered ca
 
 ## What is not built / not verified
 
-Hook behaviour is verified against the docs but not in a live session (`docs/integrations/claude-code-session-memory.md`).
+`SessionStart` context injection is verified live; hook timeout/failure semantics and the `SessionEnd` commit hook are not (`docs/integrations/claude-code-session-memory.md`).
 The eval is a deterministic proxy (`docs/evals/session-continuity-2026-09-21.md`); no live-model
 comparison has been run.

@@ -11,7 +11,7 @@ pass, with the current status of each claim it might want to make.
 | Session memory beats native compaction | **no evidence** | proxy only, baseline is a model | **Do not claim.** |
 | Memory cannot be poisoned | **false** | – | State the residual risk: pattern redaction, append-only ledger, notes are unverified data. |
 | Agents cannot confirm their own notes | yes (no MCP promotion tool; guard test) | test | "Only a person can promote a note." |
-| Works inside Claude Code hooks | **unverified** | no | "A hook example is provided, not verified." |
+| Works inside Claude Code hooks | `SessionStart` injection yes (one live canary run) | one run, one prompt | "A SessionStart hook can load a session brief; timeout/failure behaviour not tested." |
 | Fingerprint staleness is accurate | partial | 7,701 flips / 9,004 raw changes on one ledger; no ground truth | Do not quote a false-flag rate. |
 
 Framing rule: complementary to native memory and generic memory services, never "better than".

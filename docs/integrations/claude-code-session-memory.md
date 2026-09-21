@@ -1,14 +1,13 @@
 # Claude Code + EKOS session memory (RFC 0151)
 
-> **Status: verified against the published hooks reference (code.claude.com/docs/en/hooks, checked
-> 2026-09-21); NOT verified in a live session.** Confirmed by the docs: events `SessionStart` and
-> `SessionEnd`; the JSON output shape `{"hookSpecificOutput":{"hookEventName":"SessionStart",
-> "additionalContext":"..."}}` that `ekos session brief --format claude-hook` emits; `timeout` in
-> seconds; `transcript_path`, `session_id` and `cwd` in the stdin payload; the
-> `hooks.<Event>[].hooks[].{type,command}` settings structure. **Not documented:** a `PreCompact`
-> event (this integration deliberately does not use one), and which events inject plain stdout into
-> model context — hence the brief uses the explicit `additionalContext` JSON form. Whether the
-> injected text actually reaches the model still needs one live check.
+> **Status: `SessionStart` injection verified live (2026-09-21); timeout/failure semantics and
+> `SessionEnd` not verified.** A scratch workspace with the hook below and a pending note containing a
+> canary token: `claude -p` with the hook answered with the token; the same prompt in a directory
+> without the hook answered `NONE`. So `ekos session brief --format claude-hook` output does reach the
+> model as context. The docs (code.claude.com/docs/en/hooks) also confirm `SessionStart`/`SessionEnd`,
+> `timeout` in seconds, and a `hooks.<Event>[].hooks[].{type,command}` structure. **No `PreCompact`
+> event is documented**, so this integration does not use one. Not exercised: what a hook that times
+> out or exits non-zero does to session start, and the `SessionEnd` commit hook.
 
 ## 1. Enable and register the MCP server
 

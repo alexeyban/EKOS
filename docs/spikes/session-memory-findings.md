@@ -60,9 +60,10 @@ concurrent-writer repro is a P2 test, not verified here.
 Checked 2026-09-21 against the published hooks reference: `SessionStart`/`SessionEnd` exist; the
 `additionalContext` JSON shape is documented; `timeout` is in seconds (default 600 for commands);
 `transcript_path`/`session_id`/`cwd` are provided; exit code 2 blocks only tool/prompt events. **No
-`PreCompact` event is documented** — the RFC's PreCompact capture idea is dropped. Still unverified:
-that injected `additionalContext` actually reaches the model, and the failure semantics of a
-`SessionStart` hook that times out. One live scratch session settles both.
+`PreCompact` event is documented** — the RFC's PreCompact capture idea is dropped. **Live check (2026-09-21):**
+a `SessionStart` hook emitting `additionalContext` with a canary token made `claude -p` answer with the
+token; the control without the hook answered `NONE`. Still unverified: the failure semantics of a
+`SessionStart` hook that times out or exits non-zero, and `SessionEnd`.
 
 ## 7. Decision gates (owner unavailable; defaults chosen, reversible)
 
