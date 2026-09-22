@@ -60,6 +60,12 @@ envelope's whole point is that its contents are inert data, so instructions belo
 - Inbox files are `0600`, the directory `0700`; anchors or an inbox path that leave the workspace are refused.
 - The agent-facing write tool (`ekos_session_note`) opens no ledger handle.
 - No MCP tool can confirm, reject or supersede a note.
+- Notes never reach an answer as if they were compiled facts. Every `Runtime` read path filters
+  them — search, `ekos_query`/`ekos_retrieve`, `ekos_ekl`'s `FIND Object`, the graph tools
+  (`ekos_neighborhood`, `ekos_dependents`, `ekos_impact`), `ekos_state` by id, and
+  `ekos_graph_export` — so a note is only ever seen through `ekos_session_recall` / `_brief`, which
+  carry the tier, the staleness verdict and the untrusted envelope. An anchored note is also not a
+  *dependent*: it never counts towards `ekos_dependents` / `ekos_impact`.
 - Nothing is deleted from the ledger; superseded/rejected notes just leave default ranking.
 - Recalled text is wrapped as untrusted data. **Residual risk:** redaction is pattern-based, and a
   committed note cannot be un-committed (the ledger is append-only). `ekos session purge` deletes

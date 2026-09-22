@@ -3085,7 +3085,7 @@ are excluded — see the full exclusion list in the planning history if needed.
   (RFC 0023); ClickHouse cross-source joins in one query and LLM-based business-meaning
   enrichment of table/column names (RFC 0056); a live Databricks Jobs API / ADF management-plane
   connector (RFC 0038); a raw-RPC treasury connector and broader DAO governance platform support
-  beyond one (RFC 0032); real-time streaming ingestion for the chat connector (RFC 0033).
+  beyond one (RFC 0032 — implemented 2026-09-19 for Snapshot + EVM explorers, devlog_194); real-time streaming ingestion for the chat connector (RFC 0033).
 
 - [ ] **Analyzers**: interprocedural/cross-file call-chain tracing — same underlying gap named
   separately for Python (RFC 0040) and Rust (RFC 0041), one cross-language item; Python `.ipynb`
@@ -3242,14 +3242,15 @@ are excluded — see the full exclusion list in the planning history if needed.
   `pub trait KnowledgeStore: Send` (`crates/ledger/src/lib.rs`). Full workspace
   build/test/clippy/fmt clean with the bound added — confirms the audit's finding, not just
   asserts it.
-  - [ ] **RFC 0112 itself — lock-free snapshot reads for `FactLedger` — remains open, separate
-    from the `Send` bound above.** Exists to close the cross-process visibility gap RFC 0104
-    documented; that gap is more load-bearing now, not less — the Web Console's supervisor
-    (`web/api`) spawns a long-lived `ekos mcp serve` per workspace while the job runner mutates
-    the same workspace from a subprocess (RFC 0129/0131). This is a real, separate implementation
-    effort (per-read incremental snapshot refresh replacing `StoreCache`'s full-reopen — touches
-    `SegmentStore`'s committed-length watermark and tantivy's `IndexReader::reload()`, per the
-    RFC's own Scope section), not something the `Send` bound alone unblocks or simplifies.
+  - [x] **RFC 0112 — lock-free snapshot reads for `FactLedger` — DONE 2026-09-19 (devlog_194).**
+    `FactLedger::refresh_snapshot` + `SegmentStore::refresh_read_only`: one `HEAD` read + one `stat`
+    when nothing changed, only the appended tail decoded when the active segment grew, tantivy
+    `reader.reload()` from the read side, cold rebuild only across a seal / run flush / dictionary
+    change. `StoreCache` uses it (RFC 0097's `walkdir` fingerprint stays only for SQLite /
+    partitioned / distributed stores). Measured (5k objects): unchanged 27 µs vs 101 µs `walkdir`;
+    one appended batch 106 µs vs 851 µs cold reopen. Live-verified with a long-lived `ekos mcp serve`
+    and a separate `build → … → commit` process. Follow-up left open: sharing the contract with RFC
+    0111 Service B's per-partition freshness check.
 
 - [ ] **`devlog_100`'s permission-denial incident — needs its own tracked follow-up, currently
   prose-only.** Given a dedicated TODO.md item 2026-09-04 (tech-debt paydown planning pass). A
@@ -5500,7 +5501,7 @@ are excluded — see the full exclusion list in the planning history if needed.
 
 # Agent Session Memory (RFC 0151)
 
-Status (2026-09-21): all phases implemented (devlog_197). NOT done: live Claude Code hook verification, a live `claude -p` eval run (the P5 GO is on a deterministic proxy, conditional), any public communication (checklist only: `docs/session-memory-comms-checklist.md`). Deviations: see RFC 0151 "Deviations". Findings: `docs/spikes/session-memory-findings.md`. Note: the plan's "RFC 0136/0137" dependencies are RFC 0135 Parts C/B here and are already landed.
+Status (2026-09-22): all phases implemented (devlog_197); live MCP-surface test found and fixed six isolation leaks — `ekos_ekl`/`ekos_neighborhood`/`ekos_dependents`/`ekos_impact`/`ekos_state`/`ekos_graph_export` all returned session claims as ordinary objects (devlog_199, RFC 0151 "Isolation scope"). NOT done: live Claude Code hook verification, a live `claude -p` eval run (the P5 GO is on a deterministic proxy, conditional), any public communication (checklist only: `docs/session-memory-comms-checklist.md`). Deviations: see RFC 0151 "Deviations". Findings: `docs/spikes/session-memory-findings.md`. Note: the plan's "RFC 0136/0137" dependencies are RFC 0135 Parts C/B here and are already landed.
 
 ## Working rules for every phase (from CLAUDE.md's mandatory workflow)
 
@@ -5545,7 +5546,7 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
   - *Output:* Section in the spike doc: what exists, what overlaps, what is retired.
   - *Test/Validate:* No planned deliverable duplicates an existing one without an explicit supersede note.
 
-- [x] **Verify Claude Code hook behaviour** _(docs-verified + live `SessionStart` injection check 2026-09-21; PreCompact does not exist; hook timeout/failure and SessionEnd still unexercised)_
+- [~] **Verify Claude Code hook behaviour** _(docs-verified 2026-09-21; PreCompact does not exist; live injection check still open)_
   - *What:* Against current Claude Code docs and a scratch project, confirm: hook event names (SessionStart, PreCompact, SessionEnd), payloads (is the transcript path provided?), timeouts, whether SessionStart hook output is injected as context, and failure semantics.
   - *Output:* `docs/spikes/session-memory-hooks.md` with a working minimal `.claude/settings.json` snippet.
   - *Test/Validate:* A scratch session demonstrably runs the hook and receives injected text; documented what happens on hook timeout/error.
@@ -5721,7 +5722,7 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
   - *Output:* `docs/evals/session-continuity-<date>.md`.
   - *Test/Validate:* Numbers reproducible from a documented command.
 
-- [x] **GO / NO-GO decision** _(proxy GO; live 7-note run = no advantage; RE-RUN at 121 notes budget-matched (devlog_198): staleness now reaches the answer (5/6, was 0/24) and a SCOPED brief scored 1.00 vs 0.16 for a same-budget summary — but an UNSCOPED brief scored 0.16, no better than no memory, so the win is scoped retrieval, not a session-start brief)_
+- [x] **GO / NO-GO decision**
   - *What:* If EKOS session memory does not beat the compaction-summary baseline on correctness **and** stale-fact-served rate, stop and write up why before P6.
   - *Output:* Decision recorded in the RFC with the numbers.
   - *Test/Validate:* Acceptance Criteria item 5 checked.
@@ -5801,7 +5802,7 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
   - *Output:* Docs, demo script, headless transcripts.
   - *Test/Validate:* Demo is reproducible from a clean checkout.
 
-- [~] **Public communication guardrail check** _(checklist written and updated with the 121-note numbers; still no draft)_
+- [ ] **Public communication guardrail check**
   - *What:* Draft any article/post only after eval numbers exist. Every sentence is checked against: shipped vs planned, measured vs asserted, and the residual poisoning risk stated honestly. Framing is complementary to native memory and generic memory services, not "better than".
   - *Output:* Draft plus a claim-by-claim checklist.
   - *Test/Validate:* No roadmap item stated as shipped; every number traces to a committed eval report.

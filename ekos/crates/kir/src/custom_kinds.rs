@@ -15,11 +15,30 @@
 //! string literal in `crates/recovery/src` and `crates/semantic/src` and asserts each has an
 //! entry below, so a new kind fails CI rather than a generated entity page weeks later.
 
-/// RFC 0151 — kinds and name prefix reserved for agent session memory. Default retrieval
-/// (`Runtime::find_objects` / `Runtime::retrieve`) hides these; only `ekos_session_*` surfaces them.
+/// RFC 0151 — kinds and name prefix reserved for agent session memory. Every `Runtime` read path
+/// hides these; only `ekos_session_*` and the human-only `ekos session review` surface them.
 pub const SESSION_KIND: &str = "Session";
 pub const SESSION_CLAIM_KIND: &str = "SessionClaim";
 pub const SESSION_NAME_PREFIX: &str = "session-";
+
+/// RFC 0151 — the two relationship kinds session memory owns outright (`AnchoredTo`: claim → the
+/// object it describes, `ObservedIn`: claim → its session). Nothing else in the compiler emits
+/// them, which makes them a sound *cheap* pre-filter for [`SESSION_KIND`]-endpoint edges; the
+/// endpoint's real kind is still what decides.
+pub const SESSION_RELATIONSHIP_KINDS: [&str; 2] = ["AnchoredTo", "ObservedIn"];
+
+/// `true` for the object kinds RFC 0151 reserves for agent session memory. The single predicate
+/// every read path shares — `Runtime` filters with it, and so does `export_graph`, which reads the
+/// store directly rather than through `Runtime`.
+pub fn is_session_object_kind(kind: &crate::ObjectKind) -> bool {
+    matches!(kind, crate::ObjectKind::Custom(c) if c == SESSION_KIND || c == SESSION_CLAIM_KIND)
+}
+
+/// `true` for the two relationship kinds session memory owns. A *cheap pre-filter* only: an
+/// endpoint's real object kind is what decides whether an edge is session memory.
+pub fn is_session_relationship_kind(kind: &crate::RelationshipKind) -> bool {
+    matches!(kind, crate::RelationshipKind::Custom(c) if SESSION_RELATIONSHIP_KINDS.contains(&c.as_str()))
+}
 
 /// One row of [`REGISTRY`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,6 +226,19 @@ pub const REGISTRY: &[CustomKind] = &[
         name: "PullRequest",
         structurally_keyed: false,
         note: "RFC 0020 — see Issue",
+    },
+    CustomKind {
+        name: "TreasuryPayment",
+        structurally_keyed: true,
+        note: "RFC 0032 — id is derived from `chain:{id}:tx:{hash}:{index}`, so it is keyed by the \
+               on-chain transfer itself; two payments of the same amount to the same address are \
+               different real payments and must never merge",
+    },
+    CustomKind {
+        name: "GovernanceProposal",
+        structurally_keyed: true,
+        note: "RFC 0032 — id is derived from `snapshot:{space}:{proposal_id}`; two proposals with \
+               the same title are different votes and must never merge",
     },
 ];
 

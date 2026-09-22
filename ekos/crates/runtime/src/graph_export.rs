@@ -241,10 +241,25 @@ pub fn export_graph(
 ) -> Result<GraphExport, RuntimeError> {
     // RFC 0134 — `as_of` swaps the unbounded reads for the point-in-time bulk primitives; every
     // downstream step (filter, degree, min_degree, truncation, aggregation) is unchanged.
-    let (objects, relationships) = match opts.as_of {
+    let (mut objects, mut relationships) = match opts.as_of {
         Some(at) => (store.all_objects_at(at)?, store.all_relationships_at(at)?),
         None => (store.all_objects()?, store.all_relationships()?),
     };
+    // RFC 0151 — agent session memory is not part of the compiled graph, so it is dropped before
+    // the totals, not just before the rendering: a `SessionClaim` node in a graph view is an
+    // unconfirmed note drawn with the same weight as a compiled fact. (`export_graph` reads the
+    // store directly rather than through `Runtime`, so it does not inherit `Runtime`'s filtering.)
+    // An edge is session memory only when an *endpoint* is — the kind alone is a pre-filter, not
+    // the decision, so an `AnchoredTo` between two real objects would survive.
+    let session_ids: HashSet<KirId> = objects
+        .iter()
+        .filter(|o| ekos_kir::custom_kinds::is_session_object_kind(&o.kind))
+        .map(|o| o.id)
+        .collect();
+    if !session_ids.is_empty() {
+        objects.retain(|o| !session_ids.contains(&o.id));
+        relationships.retain(|r| !session_ids.contains(&r.from) && !session_ids.contains(&r.to));
+    }
     let total_objects = objects.len();
     let total_relationships = relationships.len();
 
@@ -1059,5 +1074,84 @@ mod tests {
         let a = serde_json::to_value(export_graph(&*store, &opts).unwrap()).unwrap();
         let b = serde_json::to_value(export_graph(&*store, &opts).unwrap()).unwrap();
         assert_eq!(drop_generated_at(a), drop_generated_at(b));
+    }
+}
+
+/// RFC 0151 — the graph view must not draw an unconfirmed agent note with the same weight as a
+/// compiled fact. `export_graph` reads the store directly, so it needs its own filter; this test
+/// is the one that fails if that filter is ever removed.
+#[cfg(test)]
+mod session_isolation_tests {
+    use super::*;
+    use ekos_kir::custom_kinds::{SESSION_CLAIM_KIND, SESSION_KIND};
+    use ekos_kir::{KirObject, KirRelationship, ObjectKind, RelationshipKind};
+    use tempfile::TempDir;
+
+    #[test]
+    fn session_memory_is_absent_from_the_exported_graph() {
+        let dir = TempDir::new().unwrap();
+        let store = ekos_ledger::Ledger::open(&dir.path().join("ledger.db")).unwrap();
+
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let refunds = KirObject::new("refunds", ObjectKind::Table);
+        let session = KirObject::new("session-A", ObjectKind::Custom(SESSION_KIND.into()));
+        let claim = KirObject::new(
+            "session-note orders is in cents",
+            ObjectKind::Custom(SESSION_CLAIM_KIND.into()),
+        );
+        for o in [&orders, &refunds, &session, &claim] {
+            store.append_object(o).unwrap();
+        }
+        for r in [
+            KirRelationship::new(RelationshipKind::ForeignKey, refunds.id, orders.id),
+            KirRelationship::new(
+                RelationshipKind::Custom("AnchoredTo".into()),
+                claim.id,
+                orders.id,
+            ),
+            KirRelationship::new(
+                RelationshipKind::Custom("ObservedIn".into()),
+                claim.id,
+                session.id,
+            ),
+        ] {
+            store.append_relationship(&r).unwrap();
+        }
+
+        let g = export_graph(&store, &GraphExportOptions::default()).unwrap();
+        assert_eq!(
+            g.counts.total_objects, 2,
+            "session memory is not in the total"
+        );
+        assert_eq!(g.counts.total_relationships, 1);
+        assert!(
+            !g.kind_index.iter().any(|k| k.contains("Session")),
+            "session kinds leaked into the legend: {:?}",
+            g.kind_index
+        );
+        assert!(g.nodes.iter().all(|n| !n.name.starts_with("session-")));
+    }
+
+    /// An `AnchoredTo` edge between two ordinary objects is not session memory — the endpoint's
+    /// kind decides, never the relationship kind on its own.
+    #[test]
+    fn a_real_anchored_to_edge_survives() {
+        let dir = TempDir::new().unwrap();
+        let store = ekos_ledger::Ledger::open(&dir.path().join("ledger.db")).unwrap();
+        let a = KirObject::new("plain_a", ObjectKind::Table);
+        let b = KirObject::new("plain_b", ObjectKind::Table);
+        store.append_object(&a).unwrap();
+        store.append_object(&b).unwrap();
+        store
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::Custom("AnchoredTo".into()),
+                a.id,
+                b.id,
+            ))
+            .unwrap();
+
+        let g = export_graph(&store, &GraphExportOptions::default()).unwrap();
+        assert_eq!(g.counts.total_objects, 2);
+        assert_eq!(g.counts.total_relationships, 1);
     }
 }

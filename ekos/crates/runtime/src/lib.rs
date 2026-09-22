@@ -111,9 +111,13 @@ impl<'a> Runtime<'a> {
 
     // ── Current-state queries ─────────────────────────────────────────────────
 
-    /// Load a single object by ID. Returns `None` if unknown.
+    /// Load a single object by ID. Returns `None` if unknown — or if it is session memory
+    /// (RFC 0151), which only `ekos_session_*` may surface.
     pub fn load_object(&self, id: &KirId) -> Result<Option<KirObject>, RuntimeError> {
-        Ok(self.ledger.get_object(id)?)
+        Ok(self
+            .ledger
+            .get_object(id)?
+            .filter(|o| !Self::is_session_kind(&o.kind)))
     }
 
     /// BFS neighbourhood graph up to `depth` hops from `id`.
@@ -127,8 +131,9 @@ impl<'a> Runtime<'a> {
         let mut queue: VecDeque<(KirId, u32)> = VecDeque::new();
 
         let root = match self.ledger.get_object(id)? {
-            Some(obj) => obj,
-            None => return Ok(graph),
+            Some(obj) if !Self::is_session_kind(&obj.kind) => obj,
+            // Unknown, or session memory (RFC 0151) — never a graph root here.
+            _ => return Ok(graph),
         };
 
         visited.insert(root.id);
@@ -146,6 +151,10 @@ impl<'a> Runtime<'a> {
                 if rel.is_pending_review() {
                     continue;
                 }
+                // RFC 0151: an unconfirmed agent note is not part of the compiled graph.
+                if self.is_session_relationship(&rel) {
+                    continue;
+                }
 
                 let neighbour_id = if rel.from == current_id {
                     rel.to
@@ -161,6 +170,9 @@ impl<'a> Runtime<'a> {
                 if !visited.contains(&neighbour_id) {
                     visited.insert(neighbour_id);
                     if let Some(neighbour) = self.ledger.get_object(&neighbour_id)? {
+                        if Self::is_session_kind(&neighbour.kind) {
+                            continue;
+                        }
                         graph.add_object(neighbour);
                         queue.push_back((neighbour_id, current_depth + 1));
                     }
@@ -190,8 +202,10 @@ impl<'a> Runtime<'a> {
         let mut visited: HashSet<KirId> = HashSet::new();
         let mut queue: VecDeque<(KirId, u32)> = VecDeque::new();
 
-        if self.ledger.get_object(id)?.is_none() {
-            return Ok(hops);
+        // RFC 0151: session memory is neither a valid root nor a reachable hop.
+        match self.ledger.get_object(id)? {
+            Some(obj) if !Self::is_session_kind(&obj.kind) => {}
+            _ => return Ok(hops),
         }
 
         visited.insert(*id);
@@ -211,6 +225,11 @@ impl<'a> Runtime<'a> {
                 }
                 // RFC 0144: a doc section mentioning an object is not its dependent.
                 if rel.is_doc_mention() {
+                    continue;
+                }
+                // RFC 0151: an agent note anchored to an object is not its dependent either —
+                // left in, it inflates every `ekos_dependents` / `ekos_impact` count.
+                if self.is_session_relationship(&rel) {
                     continue;
                 }
 
@@ -245,13 +264,15 @@ impl<'a> Runtime<'a> {
     }
 
     /// Reconstruct the full current state of an object: object + relationships + evidence.
+    /// Session memory (RFC 0151) reads as `None`, and a real object's session edges are dropped.
     pub fn reconstruct_state(&self, id: &KirId) -> Result<Option<ObjectState>, RuntimeError> {
         let object = match self.ledger.get_object(id)? {
-            Some(obj) => obj,
-            None => return Ok(None),
+            Some(obj) if !Self::is_session_kind(&obj.kind) => obj,
+            _ => return Ok(None),
         };
 
-        let relationships = self.ledger.relationships_for(id)?;
+        let mut relationships = self.ledger.relationships_for(id)?;
+        relationships.retain(|r| !self.is_session_relationship(r));
 
         let mut evidence = Vec::new();
         for ev_id in &object.evidence {
@@ -274,26 +295,47 @@ impl<'a> Runtime<'a> {
         Ok(found)
     }
 
-    /// RFC 0151 — session memory is hidden from every default retrieval path. The cheap name
-    /// prefix is only a pre-filter; the object's real kind decides.
+    /// RFC 0151 — session memory is hidden from **every** `Runtime` read path, not just the
+    /// ranked ones: an agent note is an unconfirmed `T0` hypothesis, and anything that returns it
+    /// as an ordinary object presents it with none of the tier, staleness or untrusted-envelope
+    /// framing `ekos_session_recall`/`_brief` wrap it in. The cheap name prefix is only a
+    /// pre-filter; the object's real kind decides.
     fn is_session_memory(
         &self,
         id: &KirId,
         name: &str,
         kind: Option<&ekos_kir::ObjectKind>,
     ) -> bool {
-        use ekos_kir::custom_kinds::{SESSION_CLAIM_KIND, SESSION_KIND, SESSION_NAME_PREFIX};
-        let is_session = |k: &ekos_kir::ObjectKind| matches!(k, ekos_kir::ObjectKind::Custom(c) if c == SESSION_KIND || c == SESSION_CLAIM_KIND);
+        use ekos_kir::custom_kinds::SESSION_NAME_PREFIX;
         match kind {
-            Some(k) => is_session(k),
-            None if name.starts_with(SESSION_NAME_PREFIX) => self
-                .ledger
-                .get_object(id)
-                .ok()
-                .flatten()
-                .is_some_and(|o| is_session(&o.kind)),
+            Some(k) => Self::is_session_kind(k),
+            None if name.starts_with(SESSION_NAME_PREFIX) => self.is_session_object(id),
             None => false,
         }
+    }
+
+    fn is_session_kind(kind: &ekos_kir::ObjectKind) -> bool {
+        ekos_kir::custom_kinds::is_session_object_kind(kind)
+    }
+
+    /// Authoritative check for an id whose name we do not already hold (graph traversal, edge
+    /// endpoints). Costs one `get_object`; callers that can pre-filter should.
+    fn is_session_object(&self, id: &KirId) -> bool {
+        self.ledger
+            .get_object(id)
+            .ok()
+            .flatten()
+            .is_some_and(|o| Self::is_session_kind(&o.kind))
+    }
+
+    /// An edge belongs to session memory iff one of its endpoints does. `AnchoredTo`/`ObservedIn`
+    /// are emitted by nothing else (RFC 0151), so the kind screens out every other edge before
+    /// any object is loaded.
+    fn is_session_relationship(&self, rel: &KirRelationship) -> bool {
+        if !ekos_kir::custom_kinds::is_session_relationship_kind(&rel.kind) {
+            return false;
+        }
+        self.is_session_object(&rel.from) || self.is_session_object(&rel.to)
     }
 
     /// Scored, multi-signal retrieval (RFC 0118 / 0119) — the seam every search consumer routes
@@ -439,21 +481,29 @@ impl<'a> Runtime<'a> {
         }
     }
 
-    /// Every object currently in the ledger (RFC 0010 — EKL entity enumeration).
+    /// Every object currently in the ledger (RFC 0010 — EKL entity enumeration), session memory
+    /// excluded (RFC 0151).
     pub fn list_objects(&self) -> Result<Vec<KirObject>, RuntimeError> {
-        Ok(self.ledger.all_objects()?)
+        let mut objects = self.ledger.all_objects()?;
+        objects.retain(|o| !Self::is_session_kind(&o.kind));
+        Ok(objects)
     }
 
-    /// Every relationship currently in the ledger (RFC 0010 — EKL entity enumeration).
+    /// Every relationship currently in the ledger (RFC 0010 — EKL entity enumeration), session
+    /// memory excluded (RFC 0151).
     pub fn list_relationships(&self) -> Result<Vec<KirRelationship>, RuntimeError> {
-        Ok(self.ledger.all_relationships()?)
+        let mut rels = self.ledger.all_relationships()?;
+        rels.retain(|r| !self.is_session_relationship(r));
+        Ok(rels)
     }
 
     /// Every object as it existed at or before `at` (RFC 0096 — the bulk
     /// primitive EKL's `AS OF` clause needs; `reconstruct_state_at` below
     /// only ever handled one id at a time).
     pub fn list_objects_at(&self, at: DateTime<Utc>) -> Result<Vec<KirObject>, RuntimeError> {
-        Ok(self.ledger.all_objects_at(at)?)
+        let mut objects = self.ledger.all_objects_at(at)?;
+        objects.retain(|o| !Self::is_session_kind(&o.kind));
+        Ok(objects)
     }
 
     /// Every relationship as it existed at or before `at` (RFC 0096).
@@ -461,14 +511,18 @@ impl<'a> Runtime<'a> {
         &self,
         at: DateTime<Utc>,
     ) -> Result<Vec<KirRelationship>, RuntimeError> {
-        Ok(self.ledger.all_relationships_at(at)?)
+        let mut rels = self.ledger.all_relationships_at(at)?;
+        rels.retain(|r| !self.is_session_relationship(r));
+        Ok(rels)
     }
 
     /// All relationships touching `id`, in either direction (RFC 0013 —
     /// `ekos_dependents` impact analysis). Callers filter by `to == id` for
     /// incoming edges (dependents) or `from == id` for dependencies.
     pub fn relationships_for(&self, id: &KirId) -> Result<Vec<KirRelationship>, RuntimeError> {
-        Ok(self.ledger.relationships_for(id)?)
+        let mut rels = self.ledger.relationships_for(id)?;
+        rels.retain(|r| !self.is_session_relationship(r));
+        Ok(rels)
     }
 
     // ── Historical queries ────────────────────────────────────────────────────
@@ -481,11 +535,12 @@ impl<'a> Runtime<'a> {
         at: DateTime<Utc>,
     ) -> Result<Option<ObjectState>, RuntimeError> {
         let object = match self.ledger.object_at(id, at)? {
-            Some(obj) => obj,
-            None => return Ok(None),
+            Some(obj) if !Self::is_session_kind(&obj.kind) => obj,
+            _ => return Ok(None),
         };
 
-        let relationships = self.ledger.relationships_at(id, at)?;
+        let mut relationships = self.ledger.relationships_at(id, at)?;
+        relationships.retain(|r| !self.is_session_relationship(r));
 
         let mut evidence = Vec::new();
         for ev_id in &object.evidence {
@@ -505,13 +560,17 @@ impl<'a> Runtime<'a> {
     /// (RFC 0047) — the full version sequence, not a single point-in-time
     /// cut like `reconstruct_state_at`.
     pub fn object_history(&self, id: &KirId) -> Result<Vec<KirObject>, RuntimeError> {
-        Ok(self.ledger.object_history(id)?)
+        let mut versions = self.ledger.object_history(id)?;
+        versions.retain(|o| !Self::is_session_kind(&o.kind));
+        Ok(versions)
     }
 
     /// Every historical version of one relationship's own id, oldest to
     /// newest (RFC 0047).
     pub fn relationship_history(&self, id: &KirId) -> Result<Vec<KirRelationship>, RuntimeError> {
-        Ok(self.ledger.relationship_history(id)?)
+        let mut versions = self.ledger.relationship_history(id)?;
+        versions.retain(|r| !self.is_session_relationship(r));
+        Ok(versions)
     }
 
     /// Build a [`World`] (RFC 0048): the induced subgraph over `entity_ids` —
@@ -544,6 +603,8 @@ impl<'a> Runtime<'a> {
                 None => self.ledger.get_object(id)?,
             };
             match object {
+                // RFC 0151: session memory is never part of a world, even when named explicitly.
+                Some(object) if Self::is_session_kind(&object.kind) => {}
                 Some(object) => objects.push(object),
                 None => {
                     if let Some(event) = self.ledger.get_event(id)?
@@ -563,7 +624,7 @@ impl<'a> Runtime<'a> {
                 None => self.ledger.relationships_for(id)?,
             };
             for rel in rels {
-                if rel.is_pending_review() {
+                if rel.is_pending_review() || self.is_session_relationship(&rel) {
                     continue;
                 }
                 let other = if rel.from == *id { rel.to } else { rel.from };
@@ -1452,6 +1513,250 @@ mod tests {
         assert!(
             !bob_view.objects.iter().any(|o| o.id == theft_event.id),
             "Bob never gets what he didn't observe"
+        );
+    }
+}
+
+/// RFC 0151 — session memory must stay invisible to *every* `Runtime` read path, not just the
+/// two ranked ones. A leak here is not cosmetic: a `SessionClaim` returned as an ordinary object
+/// reaches the agent with none of the tier / staleness / untrusted framing that
+/// `ekos_session_recall` and `ekos_session_brief` wrap it in, and an `AnchoredTo` edge counted as
+/// a real one inflates `ekos_dependents` / `ekos_impact`.
+#[cfg(test)]
+mod session_isolation_tests {
+    use super::*;
+    use ekos_kir::custom_kinds::{SESSION_CLAIM_KIND, SESSION_KIND};
+    use ekos_kir::{KirObject, KirRelationship, ObjectKind, RelationshipKind};
+    use tempfile::TempDir;
+
+    struct Fixture {
+        _dir: TempDir,
+        ledger: ekos_ledger::Ledger,
+        orders: KirId,
+        refunds: KirId,
+        claim: KirId,
+        session: KirId,
+    }
+
+    /// `refunds` --ForeignKey--> `orders` <--AnchoredTo-- `session-note …` --ObservedIn--> `session-A`
+    fn fixture() -> Fixture {
+        let dir = TempDir::new().unwrap();
+        let ledger = ekos_ledger::Ledger::open(&dir.path().join("ledger.db")).unwrap();
+
+        let orders = KirObject::new("orders", ObjectKind::Table);
+        let refunds = KirObject::new("refunds", ObjectKind::Table);
+        let session = KirObject::new("session-A", ObjectKind::Custom(SESSION_KIND.into()));
+        let claim = KirObject::new(
+            "session-note orders.total_cents is in cents",
+            ObjectKind::Custom(SESSION_CLAIM_KIND.into()),
+        );
+        for o in [&orders, &refunds, &session, &claim] {
+            ledger.append_object(o).unwrap();
+        }
+        for r in [
+            KirRelationship::new(RelationshipKind::ForeignKey, refunds.id, orders.id),
+            KirRelationship::new(
+                RelationshipKind::Custom("AnchoredTo".into()),
+                claim.id,
+                orders.id,
+            ),
+            KirRelationship::new(
+                RelationshipKind::Custom("ObservedIn".into()),
+                claim.id,
+                session.id,
+            ),
+        ] {
+            ledger.append_relationship(&r).unwrap();
+        }
+        Fixture {
+            _dir: dir,
+            ledger,
+            orders: orders.id,
+            refunds: refunds.id,
+            claim: claim.id,
+            session: session.id,
+        }
+    }
+
+    #[test]
+    fn session_memory_is_absent_from_every_object_read_path() {
+        let f = fixture();
+        let rt = Runtime::new(&f.ledger);
+
+        // Direct lookup by a known id — the `ekos_state` path.
+        assert!(rt.load_object(&f.claim).unwrap().is_none());
+        assert!(rt.load_object(&f.session).unwrap().is_none());
+        assert!(rt.reconstruct_state(&f.claim).unwrap().is_none());
+        assert!(
+            rt.reconstruct_state_at(&f.claim, Utc::now())
+                .unwrap()
+                .is_none()
+        );
+        assert!(rt.object_history(&f.claim).unwrap().is_empty());
+        assert!(rt.load_object(&f.orders).unwrap().is_some(), "real object");
+
+        // Bulk enumeration — the `ekos_ekl` `FIND Object` path.
+        for listed in [
+            rt.list_objects().unwrap(),
+            rt.list_objects_at(Utc::now()).unwrap(),
+        ] {
+            let names: Vec<_> = listed.iter().map(|o| o.name.as_str()).collect();
+            assert_eq!(names.len(), 2, "only the two real tables: {names:?}");
+            assert!(names.contains(&"orders") && names.contains(&"refunds"));
+        }
+
+        // Graph traversal — `ekos_neighborhood` / `ekos_dependents` / `ekos_impact`.
+        let hood = rt.load_neighborhood(&f.orders, 3).unwrap();
+        assert!(
+            hood.objects
+                .iter()
+                .all(|o| !Runtime::is_session_kind(&o.kind)),
+            "neighbourhood leaked session memory"
+        );
+        let dependents = rt.dependents(&f.orders, 3).unwrap();
+        assert_eq!(
+            dependents.len(),
+            1,
+            "an anchored note is not a dependent: {:?}",
+            dependents.iter().map(|o| &o.name).collect::<Vec<_>>()
+        );
+        assert_eq!(dependents[0].id, f.refunds);
+        assert!(
+            rt.related(&f.orders, 3)
+                .unwrap()
+                .iter()
+                .all(|o| o.id == f.refunds)
+        );
+        assert!(
+            rt.trace_impact(&f.claim, ImpactDirection::Dependents, &[], 3)
+                .unwrap()
+                .is_empty(),
+            "session memory is not a valid impact root"
+        );
+        assert!(
+            rt.load_neighborhood(&f.claim, 3)
+                .unwrap()
+                .objects
+                .is_empty(),
+            "session memory is not a valid graph root"
+        );
+
+        // World Engine scoping (RFC 0048), even when the id is named outright.
+        let world = rt
+            .build_world("w", &[f.orders, f.refunds, f.claim, f.session], None, None)
+            .unwrap();
+        assert_eq!(world.objects.len(), 2);
+        assert_eq!(world.relationships.len(), 1);
+    }
+
+    #[test]
+    fn session_edges_are_absent_from_every_relationship_read_path() {
+        let f = fixture();
+        let rt = Runtime::new(&f.ledger);
+
+        let is_session_edge = |r: &KirRelationship| matches!(&r.kind, RelationshipKind::Custom(k) if k == "AnchoredTo" || k == "ObservedIn");
+
+        for rels in [
+            rt.list_relationships().unwrap(),
+            rt.list_relationships_at(Utc::now()).unwrap(),
+            rt.relationships_for(&f.orders).unwrap(),
+            rt.relationships_for(&f.claim).unwrap(),
+        ] {
+            assert!(
+                !rels.iter().any(is_session_edge),
+                "session edge leaked: {rels:?}"
+            );
+        }
+        assert_eq!(rt.relationships_for(&f.orders).unwrap().len(), 1);
+        assert!(rt.relationships_for(&f.claim).unwrap().is_empty());
+        assert_eq!(
+            rt.reconstruct_state(&f.orders)
+                .unwrap()
+                .unwrap()
+                .relationships
+                .len(),
+            1,
+            "the FK survives, the AnchoredTo does not"
+        );
+    }
+
+    /// A non-session `AnchoredTo`/`ObservedIn` edge (no such producer exists today, but the kind
+    /// string is not reserved) must not be swept up by the cheap kind pre-filter.
+    #[test]
+    fn the_kind_prefilter_is_not_the_decision() {
+        let f = fixture();
+        let a = KirObject::new("plain_a", ObjectKind::Table);
+        let b = KirObject::new("plain_b", ObjectKind::Table);
+        f.ledger.append_object(&a).unwrap();
+        f.ledger.append_object(&b).unwrap();
+        f.ledger
+            .append_relationship(&KirRelationship::new(
+                RelationshipKind::Custom("AnchoredTo".into()),
+                a.id,
+                b.id,
+            ))
+            .unwrap();
+
+        let rt = Runtime::new(&f.ledger);
+        assert_eq!(
+            rt.relationships_for(&a.id).unwrap().len(),
+            1,
+            "kind alone must not hide an edge between two real objects"
+        );
+    }
+
+    /// Guard: every `pub fn` on `Runtime` that can hand back a `KirObject`/`KirRelationship` is
+    /// listed here with the filtering decision that was made for it. A new read method fails this
+    /// test rather than silently becoming the next leak — the same enforcement shape as
+    /// `ekos-identity`'s `every_pipeline_custom_kind_is_registered`.
+    #[test]
+    fn every_object_returning_read_path_has_an_audited_session_decision() {
+        const AUDITED: &[&str] = &[
+            // filtered in this module's tests above
+            "load_object",
+            "load_neighborhood",
+            "trace_impact",
+            "reconstruct_state",
+            "reconstruct_state_at",
+            "find_objects",
+            "retrieve",
+            "dependencies",
+            "dependents",
+            "callers",
+            "related",
+            "graph_op",
+            "list_objects",
+            "list_relationships",
+            "list_objects_at",
+            "list_relationships_at",
+            "relationships_for",
+            "object_history",
+            "relationship_history",
+            "build_world",
+            "agent_observation",
+            // no KIR entity in the return type
+            "new",
+            "over",
+            "audit_trail",
+            "fact",
+            "facts_of",
+        ];
+
+        let src = include_str!("lib.rs");
+        let body = src
+            .split_once("impl<'a> Runtime<'a> {")
+            .expect("Runtime impl block")
+            .1;
+        let unaudited: Vec<&str> = body
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("pub fn "))
+            .filter_map(|l| l.split(['(', '<']).next())
+            .filter(|name| !AUDITED.contains(name))
+            .collect();
+        assert!(
+            unaudited.is_empty(),
+            "new Runtime read method(s) {unaudited:?} — decide whether they can return RFC 0151 \
+             session memory, filter them if so, then add them to AUDITED"
         );
     }
 }

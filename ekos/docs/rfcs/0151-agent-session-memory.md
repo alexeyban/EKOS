@@ -21,8 +21,11 @@ was about `orders`, and `orders` has since changed".
    (`ekos session review`, CLI, no MCP twin).
 4. **Anchors and staleness.** A note may anchor to real objects by exact-match; a per-kind fingerprint
    recorded at pin time lets read paths report `fresh / changed / orphaned / unanchored`.
-5. **Isolation.** Default answer paths (`ekos_query`, `ekos_retrieve`, `ekos ask`, the RFC 0126
-   ranking gate) are unaffected by session claims; they surface only through `ekos_session_*`.
+5. **Isolation.** *Every* `Runtime` read path — ranked (`ekos_query`, `ekos_retrieve`, `ekos ask`,
+   the RFC 0126 ranking gate), enumerated (`ekos_ekl`), graph (`ekos_neighborhood`,
+   `ekos_dependents`, `ekos_impact`), point (`ekos_state`) and `export_graph` — is unaffected by
+   session claims; they surface only through `ekos_session_*` and the human-only
+   `ekos session review`. See *Isolation scope* below.
 
 ## Phase 1 scope (this RFC's first implementation)
 
@@ -55,7 +58,7 @@ Questions 1 and 2 are resolved in the spike (ledger, per-workspace).
 | Notes are `Custom("Claim")` with `claim_type: "session_note"` | New kind `Custom("SessionClaim")` (registered, structurally keyed) | `architecture_evaluator`, identity and `ekos_architecture_review` all read `Custom("Claim")`; sharing the kind would change architecture-confidence scores. |
 | `DeadEnd` as an object kind | A `SessionClaim` with `note_kind: dead_end` plus an `EventKind::Custom("DeadEnd")` event | one identity per note; the event keeps the dead end queryable as an event. |
 | `SessionObserver` implements `Observer` | A pure `observe()` step inside `ekos session commit` | the standard `build` walk has no notion of an inbox; the step still re-redacts and content-hashes the batch (an RFC 0043 entry point). |
-| `Runtime::session_claims` | Free functions over `&dyn KnowledgeStore` in `ekos-session::read` | keeps `Runtime` unmodified; `Runtime::find_objects`/`retrieve` do gain a filter that hides session kinds. |
+| `Runtime::session_claims` | Free functions over `&dyn KnowledgeStore` in `ekos-session::read` | keeps the read path off `Runtime`; `Runtime` itself gains the filter that hides session kinds (originally on `find_objects`/`retrieve` only — widened to every read path, see *Isolation scope*). |
 | `ClaimStatusChanged` reducer over events | Status stored on the re-appended claim + a `ClaimStatusChanged` event | the trait has no "all events" read; this is the `architecture_review` pattern. |
 | Hybrid (BM25 + vector) recall | Deterministic lexical overlap with stopwords + light stemming | no embedding dependency for a small per-workspace corpus; recall quality is measured only by the proxy eval. |
 | `brief` includes "changed since last session" | One line: new notes since the previous brief + notes whose anchors are *currently* changed | the ledger does not record when an anchor moved relative to a note, so it is a state count, not a diff. |
@@ -73,7 +76,33 @@ Assets: the append-only ledger, the redaction guarantee, the reader agent's trus
 | Path traversal / symlink escape | canonicalised inbox and anchors, session-id charset | traversal + symlink tests |
 | Crash mid-append | torn last line skipped, next append starts a new line | `truncated_last_line_is_tolerated` |
 | Concurrent writers | per-session `create_new` lock file around check-then-append (stale after 10s), `O_APPEND` single write; no torn lines, exact caps/dedupe | `concurrent_sessions_and_writers_never_tear_lines` |
-| Session claims skew default answers | kinds hidden in `Runtime::find_objects`/`retrieve` | `session_memory_is_invisible_to_default_retrieval` |
+| Session claims skew default answers | kinds hidden in every `Runtime` read path + `export_graph` | `session_memory_is_invisible_to_default_retrieval`, `session_memory_is_absent_from_every_object_read_path`, `session_edges_are_absent_from_every_relationship_read_path`, `session_memory_is_absent_from_the_exported_graph` |
+
+### Isolation scope (revised 2026-09-22)
+
+The first implementation filtered `Runtime::find_objects` and `Runtime::retrieve` only. A live MCP
+probe found that left six agent-facing tools returning `SessionClaim`/`Session` as ordinary compiled
+objects — with no tier, no staleness verdict and no untrusted envelope: `ekos_ekl` (`FIND Object`),
+`ekos_neighborhood`, `ekos_dependents`, `ekos_impact`, `ekos_state` and `ekos_graph_export`.
+`ekos_dependents` additionally counted an `AnchoredTo` note as a dependent, so a table with one real
+foreign key reported `dependents_count: 2`.
+
+The filter now applies to every `Runtime` method that can return a `KirObject`/`KirRelationship`
+(`load_object`, `load_neighborhood`, `trace_impact` and the `dependencies`/`dependents`/`callers`/
+`related`/`graph_op` wrappers, `reconstruct_state{,_at}`, `list_{objects,relationships}{,_at}`,
+`relationships_for`, `{object,relationship}_history`, `build_world`), and separately to
+`export_graph`, which reads the store directly rather than through `Runtime`.
+
+Two rules make it sound:
+
+- **An edge is session memory only when an endpoint is.** `AnchoredTo`/`ObservedIn` are emitted by
+  nothing else in the compiler, so the kind is a cheap pre-filter that avoids an object load per
+  edge — but the endpoint's real object kind is what decides. An `AnchoredTo` edge between two
+  ordinary objects survives (`the_kind_prefilter_is_not_the_decision`).
+- **A new read method must state its decision.** `every_object_returning_read_path_has_an_audited_session_decision`
+  parses the `impl Runtime` block and fails on any `pub fn` missing from an audited list — the same
+  enforcement shape as `ekos-identity`'s `every_pipeline_custom_kind_is_registered`, because the
+  original leak was exactly "two methods were filtered and the other eighteen were not".
 
 **Known residual risks.** Redaction is pattern-based, so an unrecognised secret shape is still
 committed and cannot be removed. A crashed writer's lock file blocks that session's writers for up to 10 seconds
