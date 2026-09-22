@@ -83,9 +83,13 @@ ignore-patterns = [
 ]
 
 [llm]
-provider = "ollama"
-api-key-env = "ANTHROPIC_API_KEY"
-model = "llama3:latest"
+provider = "openai"
+base-url = "https://opencode.ai/zen/v1"
+model = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+[ai]
+max-tokens = 8192  # deepseek-v4-flash reasons; hidden reasoning tokens count against this
 
 [llm-description]
 # Temporarily disabled for the RFC 0139/0140/0141 measurement rebuild (2026-09-14) and the RFC
