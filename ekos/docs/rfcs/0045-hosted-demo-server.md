@@ -1,6 +1,6 @@
 # RFC 0045 — Hosted Demo Server (read-only, two-repo MVP)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19); the 5–10 minute demo script has not been rehearsed with a person
 **Author:** EKOS team
 **Created:** 2026-08-12
 

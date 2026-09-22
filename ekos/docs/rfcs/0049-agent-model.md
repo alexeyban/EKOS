@@ -1,6 +1,6 @@
 # RFC 0049 — Agent Model (definitions, beliefs, knowledge, observation)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-13
 

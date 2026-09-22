@@ -1,6 +1,6 @@
 # RFC 0033 — Discord/Slack Chat Connector
 
-**Status:** Draft
+**Status:** Draft — not started (no code exists; verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-07
 

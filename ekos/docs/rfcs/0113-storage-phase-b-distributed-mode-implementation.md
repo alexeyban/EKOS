@@ -1,6 +1,6 @@
 # RFC 0113 — Storage Phase B: Distributed Mode Implementation
 
-**Status:** Draft — **B1–B5 all landed 2026-08-29/30** (per user direction, building incrementally
+**Status:** Accepted — **B1–B5 all landed 2026-08-29/30** (per user direction, building incrementally
 against this RFC while it's still Draft, same as RFC 0111 Phase A). Phase B is feature-complete at
 the v1 scope, including **Service A's lease→real-pipeline binding** (2026-08-30): `ekos
 compile-worker run` executes the actual `build → recover → resolve → compile → commit` under a

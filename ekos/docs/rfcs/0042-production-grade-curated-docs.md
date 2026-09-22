@@ -1,6 +1,6 @@
 # RFC 0042 — Production-Grade Curated Documentation (Program Entities, Crate Topology, CI/CD)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-09
 

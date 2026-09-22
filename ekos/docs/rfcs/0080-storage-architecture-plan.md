@@ -1,6 +1,6 @@
 # RFC 0080 — Storage Architecture Plan: Six Gaps, Grounded and Prioritized
 
-**Status:** Draft (planning RFC — no implementation in this RFC; each phase gets its own
+**Status:** Accepted — Phases 1–3 of 6 implemented; Phase 4 (retention) is blocked on an unresolved append-only-invariant decision; Phase 5 (materialized views) is not started; Phase 6 (distribution) was superseded by RFC 0111/0113 (planning RFC — no implementation in this RFC; each phase gets its own
 implementation RFC before code, per the Mandatory Development Workflow)
 **Author:** EKOS team
 **Created:** 2026-08-22

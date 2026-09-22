@@ -1,6 +1,6 @@
 # RFC 0050 — Decision Engine, Action System, Simulation Engine
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-13
 

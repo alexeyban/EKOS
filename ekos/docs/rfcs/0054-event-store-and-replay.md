@@ -1,6 +1,6 @@
 # RFC 0054 — Event Store (closing Phase 12) and Simulation Replay (Phase 13)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-13
 

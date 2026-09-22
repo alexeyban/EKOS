@@ -1,6 +1,6 @@
 # RFC 0040 — Phase 2: Python/PySpark Analyzer (RFC 0038 Phase 2)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19); `.ipynb` support and interprocedural tracing are deferred
 **Author:** EKOS team
 **Created:** 2026-08-08
 

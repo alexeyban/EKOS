@@ -1,6 +1,6 @@
 # RFC 0048 — World Model (a read-only projection, not new storage)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-13
 

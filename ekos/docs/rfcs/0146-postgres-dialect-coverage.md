@@ -1,6 +1,6 @@
 # RFC 0146 — PostgreSQL dialect coverage for hand-written schemas
 
-**Status:** Phases 1, 2 and 3 implemented and verified (2026-09-16)
+**Status:** Accepted — Phases 1, 2 and 3 implemented and verified (2026-09-16)
 **Author:** EKOS team
 **Created:** 2026-09-16
 **Builds on:** RFC 0031 (`SqlDialectParser` trait + dialect registry), RFC 0057/0058/0059

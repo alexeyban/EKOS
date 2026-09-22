@@ -1,6 +1,6 @@
 # RFC 0123 — REASON: the Query Plan IR, rules planner, and typed Evidence Set
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-09-01
 **Phase 4 of:** RFC 0118 · **builds on:** RFC 0121 (understanding) + RFC 0122 (QUERY surface)

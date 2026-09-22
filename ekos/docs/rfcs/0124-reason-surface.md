@@ -1,6 +1,6 @@
 # RFC 0124 — Phase 5 of RFC 0118: the surface — `ekos ask` on REASON, MCP `ekos_query` / `ekos_retrieve`, EKL `SEMANTIC`
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-09-01
 **Phase 5 of:** RFC 0118 · **builds on:** RFC 0119 (retrieval seam) + 0121 (understanding) + 0122 (QUERY surface) + 0123 (REASON)

@@ -1,6 +1,6 @@
 # RFC 0068 — EKOS Architecture Documentation Standard & Deliverable Model
 
-**Status:** Proposed
+**Status:** Accepted — partially implemented: the first slice of the documentation standard shipped (crate topology, one container view, role classification); Terraform/Kubernetes/OpenAPI extractors, deployment/security/quality views, continuous drift and ADR generation are open (verified against the code 2026-09-19)
 **Author:** External contribution, filed into this repo's RFC sequence 2026-08-22
 **Created:** date unknown (source document undated); filed 2026-08-22
 **Parent RFCs:** [RFC 0065](0065-architecture-knowledge-model-v2.md) (EKOS-ARCHMODEL-002),

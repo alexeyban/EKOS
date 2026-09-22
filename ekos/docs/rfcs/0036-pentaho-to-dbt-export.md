@@ -1,6 +1,6 @@
 # RFC 0036 — Pentaho → dbt Model Export
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19); dbt adapter targeting, `tests:` emission and materialization choices remain open questions
 **Author:** EKOS team
 **Created:** 2026-08-07
 

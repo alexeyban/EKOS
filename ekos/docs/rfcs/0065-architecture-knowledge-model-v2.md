@@ -1,6 +1,6 @@
 # RFC 0065 — EKOS Architecture Knowledge Model & Iterative Intelligence Loop
 
-**Status:** Proposed
+**Status:** Accepted — partially implemented: Phases 1–3 (crate topology, LLM role classification, evaluation) shipped; the wider build-out is open (verified against the code 2026-09-19)
 **Author:** External contribution, filed into this repo's RFC sequence 2026-08-21
 **Created:** date unknown (source document undated); filed 2026-08-21
 **Supersedes:** [RFC 0064](0064-architecture-knowledge-model.md)

@@ -1,6 +1,6 @@
 # RFC 0122 — The QUERY surface: fact lookup + named graph operations
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-09-01
 **Phase 3 of:** RFC 0118 · **builds on:** RFC 0119/0121

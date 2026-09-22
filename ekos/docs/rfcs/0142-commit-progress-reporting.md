@@ -1,6 +1,6 @@
 # RFC 0142 — Telling the user what `ekos commit` is doing
 
-**Status:** Proposed
+**Status:** Accepted — implemented (2026-09-09; status header left at "Proposed" until 2026-09-19, when the code and tests were re-checked against this document)
 **Author:** EKOS team
 **Created:** 2026-09-09
 

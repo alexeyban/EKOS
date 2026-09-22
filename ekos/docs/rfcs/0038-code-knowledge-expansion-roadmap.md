@@ -1,6 +1,6 @@
 # RFC 0038 — Code Knowledge Expansion Roadmap
 
-**Status:** Draft
+**Status:** Accepted — roadmap; Phases 1–2 implemented (RFC 0039, RFC 0040), Phases 3–6 (Jupyter notebooks, Databricks connector, ADF connector, generalized parameterization) not started (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-07
 

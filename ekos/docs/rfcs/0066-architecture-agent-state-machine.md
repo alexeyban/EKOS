@@ -1,6 +1,6 @@
 # RFC 0066 — EKOS Architecture Agent State Machine & Investigation Orchestrator
 
-**Status:** Proposed
+**Status:** Accepted — partially implemented: the MVP investigation loop shipped; the rest is open (verified against the code 2026-09-19)
 **Author:** External contribution, filed into this repo's RFC sequence 2026-08-21
 **Created:** date unknown (source document undated); filed 2026-08-21
 **Depends on:** [RFC 0065](0065-architecture-knowledge-model-v2.md)

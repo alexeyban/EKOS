@@ -1,6 +1,6 @@
 # RFC 0120 — Rank fusion + the exact-name signal
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-09-01
 **Phase 1 of:** RFC 0118 · **builds on:** RFC 0119

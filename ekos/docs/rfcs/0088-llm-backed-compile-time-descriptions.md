@@ -1,6 +1,6 @@
 # RFC 0088 — LLM-Backed Compile-Time Descriptions (Modules, Subsystems, and Symbols)
 
-**Status:** Proposed
+**Status:** Accepted — implemented; not yet run at full scale on this repository (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-23
 **Revised:** 2026-08-23 — per-symbol (function/method-level) description generation folded into

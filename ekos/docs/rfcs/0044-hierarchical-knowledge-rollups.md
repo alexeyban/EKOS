@@ -1,6 +1,6 @@
 # RFC 0044 — Hierarchical Knowledge Rollups (+ a prerequisite object-identity fix)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19); per-sub-project curated docs, LLM prose per rollup and an `ekos_summarize` tool are deferred
 **Author:** EKOS team
 **Created:** 2026-08-10
 

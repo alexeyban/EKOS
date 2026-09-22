@@ -1,6 +1,6 @@
 # RFC 0035 — Generated Documentation from the Compiled Ledger
 
-**Status:** Draft
+**Status:** Accepted — implemented; the LLM-prose tier is the opt-in `--prose` flag rather than a `--no-prose` opt-out (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-07
 

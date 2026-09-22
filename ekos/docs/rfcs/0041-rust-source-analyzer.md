@@ -1,6 +1,6 @@
 # RFC 0041 — Rust Source Analyzer (real symbols + import graph + real Calls edges)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19); cross-file/crate call resolution is deferred
 **Author:** EKOS team
 **Created:** 2026-08-08
 

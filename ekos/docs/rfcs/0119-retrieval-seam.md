@@ -1,6 +1,6 @@
 # RFC 0119 — The retrieval seam: `KnowledgeStore::retrieve`
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-09-01
 **Phase 0 of:** RFC 0118 (Compiled-Knowledge Query Engine)

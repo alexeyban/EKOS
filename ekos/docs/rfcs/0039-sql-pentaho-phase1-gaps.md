@@ -1,6 +1,6 @@
 # RFC 0039 — Phase 1: Close SQL/Pentaho Gaps (RFC 0038 Phase 1)
 
-**Status:** Draft
+**Status:** Accepted — implemented (verified against the code 2026-09-19)
 **Author:** EKOS team
 **Created:** 2026-08-08
 

@@ -1,6 +1,6 @@
 # RFC 0111 — Partitioned, Tiered, and Distributed Fact-Segment Storage
 
-**Status:** Under Review — merges and supersedes RFC 0034 and RFC 0110 (below). 5 Open Questions
+**Status:** Accepted (Phase A implemented, Phase B v1 feature-complete via RFC 0113; several Open Questions remain — verified against the code 2026-09-19) — merges and supersedes RFC 0034 and RFC 0110 (below). 5 Open Questions
 remain (1 partially). Not yet Accepted.
 
 **Implementation note (updated 2026-08-29):** per explicit user direction, Phase A (Local mode) is
