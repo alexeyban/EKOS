@@ -484,6 +484,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -527,6 +528,7 @@ dependencies = [
 name = "ekos-identity"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "ekos-kir",
  "serde",
  "serde_json",

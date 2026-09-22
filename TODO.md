@@ -5486,10 +5486,12 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] LedgerSMB `SQL001` is 251 of 277 files — most legitimately declare no tables, but worth a pass to
     confirm none are silent losses.
 
-- [~] **RFC 0032 — DAO treasury compliance: payment ↔ approval matching — implemented 2026-09-19 (devlog_194), NOT live-verified.**
+- [~] **RFC 0032 — DAO treasury compliance: payment ↔ approval matching — implemented 2026-09-19, Snapshot half live-verified 2026-09-22 (devlog_194). Explorer half still NOT live-verified.**
   - [x] `ekos/plugins/treasury` (Etherscan-family explorer client) and `ekos/plugins/governance` (Snapshot GraphQL), each with a `Mock*Client`; `TreasuryAnalyzerPass` / `GovernanceAnalyzerPass`; `ekos_identity::treasury` scorer; `ekos treasury scan`; `ekos_identity_review` accepts `AuthorizedBy`.
   - [x] End-to-end fixture test through the real pipeline (`crates/cli/tests/treasury_pipeline.rs`).
-  - [ ] **Run `RealTreasuryClient` against a live explorer and `SnapshotClient` against the live hub** — parsing is unit-tested against the documented shapes only; rate limits, the explorer's 10,000-row cap and chain quirks are unverified. Needs an explorer API key and a real treasury address.
+  - [x] **`SnapshotClient` run against the live hub 2026-09-22** — field shapes, types, paging across a real boundary and short-page-is-the-end all confirmed; committed as `#[ignore]`d live tests (`plugins/governance/tests/live_snapshot.rs`, no API key needed). **Found a silent failure:** a renamed (`aave.eth` → `aavedao.eth`), misspelled or empty space id returns HTTP 200 with an empty proposal list and no GraphQL error — so zero proposals made `ekos treasury scan` report every payment as unapproved. Both observers now warn on an empty result.
+  - [ ] **Run `RealTreasuryClient` against a live explorer** — parsing is unit-tested against the documented shapes only; rate limits, the explorer's 10,000-row cap, chain quirks and casing differences are unverified. Needs an explorer API key and a real treasury address.
+  - [ ] `SnapshotClient` live coverage is read-path only — hub rate limiting under a long crawl and the `max_pages` × 100 ceiling on a >5,000-proposal space are still untested.
   - [ ] **Tune weights and the 0.3 floor on real DAO ground truth** — RFC 0029's values were reused unvalidated.
   - [ ] A Solana connector (EKOS's own token lives there) and a Discourse governance connector — both deliberately out of v1.
   - [ ] A first-class "payments with no approval" MCP tool, if the `ekos_state` / `ekos treasury scan` watchlist proves insufficient (EKL has no negation).

@@ -20,6 +20,7 @@ pub mod elixir_analyzer;
 pub mod embed;
 pub mod git_analyzer;
 pub mod github_analyzer;
+pub mod governance_analyzer;
 pub mod javascript_analyzer;
 pub mod llm;
 pub mod llm_description;
@@ -39,6 +40,7 @@ pub mod sql_comments;
 pub mod sql_dialect_registry;
 pub mod sql_transform_analyzer;
 mod statement_repair;
+pub mod treasury_analyzer;
 
 pub use anthropic::AnthropicProvider;
 pub use architecture_diff::{ArchitectureDiff, RoleChange, diff_architecture};
@@ -67,6 +69,7 @@ pub use embed::{
 };
 pub use git_analyzer::GitAnalyzerPass;
 pub use github_analyzer::GitHubAnalyzerPass;
+pub use governance_analyzer::GovernanceAnalyzerPass;
 pub use javascript_analyzer::{JavaScriptAnalyzerPass, JavaScriptStats};
 pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MOCK_MODEL_NAME, MockLlmProvider};
 pub use llm_description::{
@@ -90,6 +93,7 @@ pub use sql_dialect_registry::{
 pub use sql_transform_analyzer::{
     SqlTransformAnalyzerPass, SqlTransformStats, parse_sql_to_transform_graphs,
 };
+pub use treasury_analyzer::TreasuryAnalyzerPass;
 
 #[cfg(test)]
 mod relationship_determinism_guard {

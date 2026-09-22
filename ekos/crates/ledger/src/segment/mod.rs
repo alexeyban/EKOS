@@ -88,6 +88,20 @@ pub struct Batch {
     pub ops: Vec<(FactOp, Fact)>,
 }
 
+/// What [`SegmentStore::refresh_read_only`] found on disk (RFC 0112).
+#[derive(Debug)]
+pub enum StoreRefresh {
+    /// Nothing new is committed past this handle's watermark.
+    Unchanged,
+    /// The active segment grew: these are the newly committed batches, in tx order, and this
+    /// store's watermark and `next_tx` have already advanced past them.
+    Advanced(Vec<Batch>),
+    /// The change is not a pure active-segment append (a seal moved the active segment, the
+    /// manifest's sealed list or dictionary changed, or the file shrank) — the caller must
+    /// rebuild from a cold open, exactly what it did before this RFC.
+    Reopen,
+}
+
 /// A sealed, immutable segment as recorded in the manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SealedSegment {
@@ -553,6 +567,68 @@ impl SegmentStore {
         let bytes = self.read_active_committed()?;
         let (_, batches) = scan_batches_filtered(&bytes, keep, self.dict.as_ref());
         Ok(batches)
+    }
+
+    /// RFC 0112 — bring a **read-only** store forward to the latest committed watermark without
+    /// a cold reopen.
+    ///
+    /// The cost is one small `HEAD` read plus one `stat` of the active segment; nothing else is
+    /// touched when nothing changed. When the active segment has grown, only the appended tail is
+    /// read (from the old watermark, which is always frame-aligned) and decoded — the same
+    /// forward-only scan crash recovery and a cold open already do, just entered from where this
+    /// handle left off. No lock is taken: sealed segments are immutable, and the tail scan stops at
+    /// the first incomplete frame, so a writer mid-append is simply picked up by the next call.
+    ///
+    /// The tail is read *before* the manifest is re-read on purpose: the writer persists a new
+    /// attribute path in the manifest before it appends any fact that references it, so a manifest
+    /// read after the tail is always at least as new as every frame in it.
+    pub fn refresh_read_only(&mut self) -> Result<StoreRefresh, SegmentError> {
+        if self.active.is_some() {
+            // A writable store is the only writer; its in-memory state is always current.
+            return Ok(StoreRefresh::Unchanged);
+        }
+        if let Some(h) = std::fs::read(self.root.join("HEAD"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Head>(&b).ok())
+            && h.active_seq != self.head.active_seq
+        {
+            return Ok(StoreRefresh::Reopen); // a seal rolled the active segment
+        }
+        let path = segment_path(&self.root, self.head.active_seq);
+        let len = match std::fs::metadata(&path) {
+            Ok(m) => m.len(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(e.into()),
+        };
+        if len < self.head.committed_len {
+            return Ok(StoreRefresh::Reopen);
+        }
+        if len == self.head.committed_len {
+            return Ok(StoreRefresh::Unchanged);
+        }
+        let mut tail = Vec::with_capacity((len - self.head.committed_len) as usize);
+        {
+            use std::io::{Seek, SeekFrom};
+            let mut file = File::open(&path)?;
+            file.seek(SeekFrom::Start(self.head.committed_len))?;
+            file.read_to_end(&mut tail)?;
+        }
+        let fresh = load_manifest(self.backend.as_ref())?;
+        if fresh.sealed.len() != self.manifest.sealed.len()
+            || fresh.dict_version != self.manifest.dict_version
+        {
+            return Ok(StoreRefresh::Reopen);
+        }
+        self.manifest.attributes = fresh.attributes;
+        let (valid, batches) = scan_batches_filtered(&tail, &|_| true, self.dict.as_ref());
+        if valid == 0 {
+            return Ok(StoreRefresh::Unchanged); // an in-flight frame; the next call sees it whole
+        }
+        self.head.committed_len += valid;
+        if let Some(last) = batches.last() {
+            self.next_tx = self.next_tx.max(last.tx.0 + 1);
+        }
+        Ok(StoreRefresh::Advanced(batches))
     }
 
     /// Verify every sealed segment against its manifest hash — fails fast at

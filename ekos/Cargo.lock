@@ -888,12 +888,14 @@ dependencies = [
  "ekos-plugin-file",
  "ekos-plugin-git",
  "ekos-plugin-github",
+ "ekos-plugin-governance",
  "ekos-plugin-javascript",
  "ekos-plugin-localdocs",
  "ekos-plugin-pentaho",
  "ekos-plugin-perl",
  "ekos-plugin-python",
  "ekos-plugin-rust",
+ "ekos-plugin-treasury",
  "ekos-recovery",
  "ekos-runtime",
  "ekos-segment-backend",
@@ -1111,6 +1113,7 @@ dependencies = [
 name = "ekos-identity"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "ekos-kir",
  "serde",
  "serde_json",
@@ -1321,6 +1324,22 @@ dependencies = [
  "async-trait",
  "ekos-artifact",
  "ekos-common",
+ "ekos-observation-sdk",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ekos-plugin-governance"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ekos-artifact",
  "ekos-observation-sdk",
  "reqwest 0.12.28",
  "serde",
@@ -1553,6 +1572,22 @@ version = "0.1.0"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
+]
+
+[[package]]
+name = "ekos-plugin-treasury"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ekos-artifact",
+ "ekos-observation-sdk",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

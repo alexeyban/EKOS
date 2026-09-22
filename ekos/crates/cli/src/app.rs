@@ -129,6 +129,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: IdentityCommands,
     },
+    /// DAO treasury compliance: match on-chain payments to governance approvals (RFC 0032)
+    Treasury {
+        #[command(subcommand)]
+        subcommand: TreasuryCommands,
+    },
     /// Manage ledger branches
     Branch {
         #[command(subcommand)]
@@ -638,6 +643,15 @@ enum IdentityCommands {
 }
 
 #[derive(Subcommand)]
+enum TreasuryCommands {
+    /// Score committed `TreasuryPayment` objects against `GovernanceProposal` objects and write
+    /// each candidate as an `unconfirmed` `AuthorizedBy` relationship, then list the payments with
+    /// no candidate approval. Never confirms anything — review with the `ekos_identity_review`
+    /// MCP tool.
+    Scan,
+}
+
+#[derive(Subcommand)]
 enum BranchCommands {
     /// Create a new branch as a snapshot of the current ledger
     Create { name: String },
@@ -840,6 +854,9 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
         Commands::Identity { subcommand } => match subcommand {
             IdentityCommands::Scan => crate::commands::identity::scan(&config, &cwd),
+        },
+        Commands::Treasury { subcommand } => match subcommand {
+            TreasuryCommands::Scan => crate::commands::treasury::scan(&config, &cwd),
         },
         Commands::Compile => crate::commands::compile::run(&config, &cwd).await,
         Commands::Commit { yes } => {

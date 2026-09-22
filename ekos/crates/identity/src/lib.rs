@@ -14,6 +14,7 @@
 
 pub mod cross_system;
 pub mod similarity;
+pub mod treasury;
 
 use std::collections::HashMap;
 

@@ -11,10 +11,11 @@ use ekos_recovery::{
     ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
     DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
-    JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass, MockLlmProvider, OllamaProvider,
-    OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PerlAnalyzerPass,
-    PerlStats, PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass,
-    RustStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats,
+    GovernanceAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass,
+    MockLlmProvider, OllamaProvider, OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass,
+    PentahoStats, PerlAnalyzerPass, PerlStats, PythonAnalyzerPass, PythonStats,
+    RequirementsAnalyzerPass, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
+    SqlTransformAnalyzerPass, SqlTransformStats, TreasuryAnalyzerPass,
     anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
     llm::LlmProvider, resolve_dialect_name,
 };
@@ -285,6 +286,30 @@ pub async fn run_with(
             github_artifact_ids,
         );
         pass_manager.register(Box::new(github_pass));
+    }
+
+    // ── DAO treasury payments + governance proposals (RFC 0032) ───────────
+    let workspace_name = cwd
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let treasury_artifact_ids = collect_artifact_ids_for_connector(&*artifact_store, "treasury");
+    let treasury_payment_count = treasury_artifact_ids.len();
+    if !treasury_artifact_ids.is_empty() {
+        pass_manager.register(Box::new(TreasuryAnalyzerPass::new(
+            workspace_name.as_str(),
+            treasury_artifact_ids,
+        )));
+    }
+    let governance_artifact_ids =
+        collect_artifact_ids_for_connector(&*artifact_store, "governance");
+    let governance_proposal_count = governance_artifact_ids.len();
+    if !governance_artifact_ids.is_empty() {
+        pass_manager.register(Box::new(GovernanceAnalyzerPass::new(
+            workspace_name.as_str(),
+            governance_artifact_ids,
+        )));
     }
 
     // ── Confluence page artifacts (RFC 0022) ─────────────────────────────
@@ -826,7 +851,7 @@ pub async fn run_with(
 
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, CI/CD workflows, or dbt projects found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, treasury payments, governance proposals, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, CI/CD workflows, or dbt projects found)."
         );
         return Ok(());
     }
@@ -859,6 +884,12 @@ pub async fn run_with(
     }
     if github_item_count > 0 {
         println!("  GitHub issues/PRs analysed: {github_item_count}");
+    }
+    if treasury_payment_count > 0 {
+        println!("  Treasury payments analysed: {treasury_payment_count}");
+    }
+    if governance_proposal_count > 0 {
+        println!("  Governance proposals analysed: {governance_proposal_count}");
     }
     if confluence_page_count > 0 {
         println!("  Confluence pages analysed: {confluence_page_count}");

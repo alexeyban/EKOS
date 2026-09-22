@@ -37,6 +37,8 @@ members = [
     "plugins/clickhouse",
     "plugins/crypto",
     "plugins/github",
+    "plugins/treasury",
+    "plugins/governance",
     "plugins/confluence",
     "plugins/pentaho",
     "plugins/python",

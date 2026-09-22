@@ -16,7 +16,7 @@ pub use retrieval::{
 /// RFC 0113 — the storage-backend seam. Re-exported so `ekos_ledger::SegmentBackend` stays the
 /// import path; the impls live in the `ekos-segment-backend` crate.
 pub use ekos_segment_backend::{BackendError, LocalFsBackend, MemBackend, SegmentBackend};
-pub use fact_ledger::FactLedger;
+pub use fact_ledger::{FactLedger, RefreshOutcome};
 pub use partitioned::{
     PartitionCatalog, PartitionDimension, PartitionEntry, PartitionError, PartitionKey,
     PartitionedLedger, Tier, TimeBucket,
@@ -1753,6 +1753,12 @@ pub trait KnowledgeStore: Send {
     fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError>;
     /// What changed in `(from, to]`.
     fn diff(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError>;
+    /// RFC 0112 — bring a long-lived **read-only** handle up to date with a separate writer's
+    /// commits, cheaply and without locking. Default: [`RefreshOutcome::Unsupported`] — the caller
+    /// keeps whatever invalidation strategy it already had for that store kind.
+    fn refresh_snapshot(&self) -> Result<RefreshOutcome, LedgerError> {
+        Ok(RefreshOutcome::Unsupported)
+    }
 }
 
 macro_rules! delegate_store {
@@ -1838,6 +1844,9 @@ macro_rules! delegate_store {
             ) -> Result<retrieval::RankedResults, LedgerError> {
                 <$ty>::retrieve(self, req)
             }
+            fn refresh_snapshot(&self) -> Result<RefreshOutcome, LedgerError> {
+                <$ty>::refresh_snapshot(self)
+            }
             fn entry_count(&self) -> Result<usize, LedgerError> {
                 <$ty>::entry_count(self)
             }
@@ -1865,6 +1874,10 @@ macro_rules! delegate_store {
 }
 
 impl Ledger {
+    /// SQLite readers get WAL-mode isolation natively (RFC 0112 non-goal).
+    fn refresh_snapshot(&self) -> Result<RefreshOutcome, LedgerError> {
+        Ok(RefreshOutcome::Unsupported)
+    }
     fn diff_impl(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError> {
         diff_ledger(self, from, to)
     }

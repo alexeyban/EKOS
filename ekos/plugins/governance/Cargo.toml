@@ -1,0 +1,20 @@
+[package]
+name = "ekos-plugin-governance"
+description = "DAO governance proposal observer (RFC 0032) — Snapshot GraphQL API"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ekos-observation-sdk.workspace = true
+ekos-artifact.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

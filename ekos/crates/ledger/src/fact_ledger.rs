@@ -34,7 +34,7 @@ use uuid::Uuid;
 use crate::fact::{AttrId, Fact, FactOp, FactValue, TxId, decompose, diff, reconstruct};
 use crate::index::{FactIndexes, IndexEntry, ScanPrefix, entries_from_batches};
 use crate::search::SearchIndex;
-use crate::segment::{SEGMENT_SEAL_BYTES, SegmentError, SegmentStore};
+use crate::segment::{SEGMENT_SEAL_BYTES, SegmentError, SegmentStore, StoreRefresh};
 use crate::{
     LedgerDiff, LedgerEntryId, LedgerError, MergeConflict, MergeReport, content_signature,
 };
@@ -184,6 +184,9 @@ struct Inner {
     /// that batch was appended. Loaded from the `provenance.jsonl` sidecar on open, appended to
     /// it (and here) on each write. A batch written with no context set has no entry.
     provenance: HashMap<u64, crate::provenance::WriteContext>,
+    /// RFC 0112 — how many bytes of `provenance.jsonl` are already folded into `provenance`, so a
+    /// read-only refresh reads only the appended tail.
+    provenance_len: u64,
 }
 
 /// RFC 0135 Part B — `<root>/provenance.jsonl`, one `{"tx":N,"ctx":{…}}` line per write that had
@@ -193,12 +196,30 @@ fn provenance_path(root: &Path) -> PathBuf {
     root.join("provenance.jsonl")
 }
 
-fn load_provenance(root: &Path) -> HashMap<u64, crate::provenance::WriteContext> {
+/// Read the `provenance.jsonl` lines that start at byte `from`, returning them plus the offset of
+/// the first byte not consumed. Only whole (newline-terminated) lines count, so a line a writer is
+/// mid-way through appending is left for the next call instead of being half-parsed and lost.
+fn load_provenance_from(
+    root: &Path,
+    from: u64,
+) -> (HashMap<u64, crate::provenance::WriteContext>, u64) {
+    use std::io::{Read, Seek, SeekFrom};
     let mut out = HashMap::new();
-    let Ok(content) = std::fs::read_to_string(provenance_path(root)) else {
-        return out;
+    let Ok(mut file) = std::fs::File::open(provenance_path(root)) else {
+        return (out, from);
     };
-    for line in content.lines().filter(|l| !l.trim().is_empty()) {
+    if file.seek(SeekFrom::Start(from)).is_err() {
+        return (out, from);
+    }
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        return (out, from);
+    }
+    let consumed = bytes.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+    for line in String::from_utf8_lossy(&bytes[..consumed])
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+    {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
             && let Some(tx) = v.get("tx").and_then(|t| t.as_u64())
             && let Some(ctx) = v
@@ -208,7 +229,7 @@ fn load_provenance(root: &Path) -> HashMap<u64, crate::provenance::WriteContext>
             out.insert(tx, ctx);
         }
     }
-    out
+    (out, from + consumed as u64)
 }
 
 /// A real, designed cross-process write lock (RFC 0104 Phase 1) — a dedicated `write.lock` file
@@ -274,6 +295,25 @@ pub struct FactLedger {
     /// never read. `None` for a read-only handle, which must never hold this (see
     /// [`Self::open_read_only`]'s own doc comment for why).
     _write_lock: Option<std::fs::File>,
+    /// RFC 0112 — the sealed-segment backend a read-only handle was opened with, kept so
+    /// [`Self::refresh_snapshot`] can rebuild from a cold open when a change is not a pure
+    /// active-segment append. `None` for a writable handle and for the default local backend.
+    ro_backend: Option<Arc<dyn SegmentBackend>>,
+}
+
+/// RFC 0112 — what [`FactLedger::refresh_snapshot`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshOutcome {
+    /// Nothing new since the last call.
+    Unchanged,
+    /// State advanced: this many batches were folded into the in-memory view (`0` when only the
+    /// search index moved).
+    Incremental { batches: usize },
+    /// A seal, merge or format change moved more than the tail; the handle was rebuilt from a
+    /// cold open (the pre-RFC behaviour, now the exception rather than every change).
+    Reopened,
+    /// This store kind has no snapshot to refresh (SQLite gives readers WAL isolation natively).
+    Unsupported,
 }
 
 /// Commit buffered search-index upserts when a writable handle goes away.
@@ -363,6 +403,7 @@ impl FactLedger {
         }
         let (search, search_marker) = SearchIndex::open(&root.join("search"))?;
 
+        let (provenance, provenance_len) = load_provenance_from(root, 0);
         let mut inner = Inner {
             batch_times: store.batch_headers()?,
             memtable: entries_from_batches(&store.batches_after(runs_marker)?),
@@ -375,7 +416,8 @@ impl FactLedger {
             checkpoints: load_checkpoints(root),
             checkpoints_root: root.to_path_buf(),
             write_ctx: None,
-            provenance: load_provenance(root),
+            provenance,
+            provenance_len,
         };
 
         // Catch the search index up: entities committed past its marker get
@@ -400,6 +442,7 @@ impl FactLedger {
             inner: Mutex::new(inner),
             root: root.to_path_buf(),
             _write_lock: Some(write_lock),
+            ro_backend: None,
         })
     }
 
@@ -448,6 +491,22 @@ impl FactLedger {
     }
 
     fn open_ro(root: &Path, backend: Option<Arc<dyn SegmentBackend>>) -> Result<Self, LedgerError> {
+        let inner = Self::build_ro_inner(root, backend.clone())?;
+        Ok(Self {
+            inner: Mutex::new(inner),
+            root: root.to_path_buf(),
+            _write_lock: None,
+            ro_backend: backend,
+        })
+    }
+
+    /// The whole cold read-only open, as an [`Inner`] — used by [`Self::open_ro`] and by
+    /// [`Self::refresh_snapshot`]'s fallback, so a refresh that has to rebuild goes through the
+    /// exact same code as a fresh open (which is what keeps the two byte-identical).
+    fn build_ro_inner(
+        root: &Path,
+        backend: Option<Arc<dyn SegmentBackend>>,
+    ) -> Result<Inner, LedgerError> {
         if !root.exists() {
             return Err(LedgerError::NotFound(root.display().to_string()));
         }
@@ -495,7 +554,8 @@ impl FactLedger {
         }
         let (search, _search_marker) = SearchIndex::open_read_only(&search_dir)?;
 
-        let inner = Inner {
+        let (provenance, provenance_len) = load_provenance_from(root, 0);
+        Ok(Inner {
             batch_times: store.batch_headers()?,
             memtable: entries_from_batches(&store.batches_after(runs_marker)?),
             store,
@@ -507,14 +567,65 @@ impl FactLedger {
             checkpoints: load_checkpoints(root),
             checkpoints_root: root.to_path_buf(),
             write_ctx: None,
-            provenance: load_provenance(root),
-        };
-
-        Ok(Self {
-            inner: Mutex::new(inner),
-            root: root.to_path_buf(),
-            _write_lock: None,
+            provenance,
+            provenance_len,
         })
+    }
+
+    /// RFC 0112 — bring a **read-only** handle up to date with whatever a separate writer process
+    /// has committed since this handle last looked, without a cold reopen and without taking any
+    /// lock. Call it at the start of a read (`ekos mcp serve` does, on every tool call) to get
+    /// the same guarantee a new SQLite WAL read transaction gives: the read observes everything
+    /// committed before it started.
+    ///
+    /// - Nothing changed: one `HEAD` read + one `stat`, plus a tantivy reader reload.
+    /// - The active segment grew: only the appended tail is decoded and folded into the memtable,
+    ///   exactly as a cold open would have folded it, and provenance is read from its old offset.
+    /// - Anything else (a seal, run flush/merge, dictionary change, truncation): fall back to a
+    ///   full cold rebuild — the pre-RFC behaviour, now only when actually needed.
+    ///
+    /// A writable handle returns [`RefreshOutcome::Unchanged`]: it is the only writer, so its own
+    /// state is always current.
+    pub fn refresh_snapshot(&self) -> Result<RefreshOutcome, LedgerError> {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.read_only {
+            return Ok(RefreshOutcome::Unchanged);
+        }
+        let disk_marker = std::fs::read_to_string(self.root.join("indexes/last_tx"))
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .map(TxId);
+        if disk_marker != inner.runs_marker {
+            return self.rebuild_read_only(&mut inner);
+        }
+        let outcome = match inner.store.refresh_read_only()? {
+            StoreRefresh::Unchanged => RefreshOutcome::Unchanged,
+            StoreRefresh::Reopen => return self.rebuild_read_only(&mut inner),
+            StoreRefresh::Advanced(batches) => {
+                inner
+                    .batch_times
+                    .extend(batches.iter().map(|b| (b.tx, b.wall_time_us)));
+                inner.memtable.extend(entries_from_batches(&batches));
+                let (fresh, len) = load_provenance_from(&self.root, inner.provenance_len);
+                inner.provenance.extend(fresh);
+                inner.provenance_len = len;
+                RefreshOutcome::Incremental {
+                    batches: batches.len(),
+                }
+            }
+        };
+        // A writer commits the tantivy index on its own schedule (lazily, and on close), so the
+        // search side can move with no new segment frames at all — that still counts as a change.
+        let search_moved = inner.search.refresh_reader()?;
+        if search_moved && outcome == RefreshOutcome::Unchanged {
+            return Ok(RefreshOutcome::Incremental { batches: 0 });
+        }
+        Ok(outcome)
+    }
+
+    fn rebuild_read_only(&self, inner: &mut Inner) -> Result<RefreshOutcome, LedgerError> {
+        *inner = Self::build_ro_inner(&self.root, self.ro_backend.clone())?;
+        Ok(RefreshOutcome::Reopened)
     }
 
     // ── Append methods (same semantics as the SQLite backend) ─────────────
@@ -2017,6 +2128,193 @@ mod tests {
             .next()
             .unwrap();
         assert_eq!(reader.get_object(&id).unwrap().unwrap().name, "orders");
+    }
+
+    // ── RFC 0112: lock-free snapshot refresh ────────────────────────────────
+
+    fn named_obj(name: &str) -> KirObject {
+        KirObject::new(name, ObjectKind::Table)
+    }
+
+    fn sorted_json<T: serde::Serialize>(items: Vec<T>) -> Vec<String> {
+        let mut v: Vec<String> = items
+            .into_iter()
+            .map(|i| serde_json::to_string(&i).unwrap())
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn refresh_sees_a_live_writers_commits_without_a_reopen_and_without_blocking_on_its_lock() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        // The writer holds `write.lock` and tantivy's writer lock for the whole test.
+        let writer = FactLedger::open(&path).unwrap();
+        writer.append_object(&named_obj("seed")).unwrap();
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        assert_eq!(reader.object_count().unwrap(), 1);
+
+        for i in 0..5 {
+            let o = named_obj(&format!("orders_{i}"));
+            writer.append_object(&o).unwrap();
+            // Without a refresh the reader is pinned to its open-time state — the RFC 0104
+            // limitation this RFC closes.
+            assert_eq!(reader.object_count().unwrap(), 1 + i);
+            assert_eq!(
+                reader.refresh_snapshot().unwrap(),
+                RefreshOutcome::Incremental { batches: 1 }
+            );
+            assert_eq!(reader.object_count().unwrap(), 2 + i);
+            assert_eq!(reader.get_object(&o.id).unwrap().unwrap().name, o.name);
+        }
+        // Nothing new: cheap no-op.
+        assert_eq!(
+            reader.refresh_snapshot().unwrap(),
+            RefreshOutcome::Unchanged
+        );
+    }
+
+    #[test]
+    fn refresh_folds_a_multi_batch_delta_in_one_call() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let writer = FactLedger::open(&path).unwrap();
+        writer.append_object(&named_obj("seed")).unwrap();
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        for i in 0..7 {
+            writer.append_object(&named_obj(&format!("t{i}"))).unwrap();
+        }
+        assert_eq!(
+            reader.refresh_snapshot().unwrap(),
+            RefreshOutcome::Incremental { batches: 7 }
+        );
+        assert_eq!(reader.object_count().unwrap(), 8);
+    }
+
+    #[test]
+    fn incremental_fold_is_identical_to_a_cold_reopen_at_the_same_watermark() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let writer = FactLedger::open(&path).unwrap();
+        let a = named_obj("a");
+        let b = named_obj("b");
+        writer.append_object(&a).unwrap();
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        // Interleave new objects, an update to an existing one, and relationships.
+        writer.append_object(&b).unwrap();
+        reader.refresh_snapshot().unwrap();
+        let mut a2 = a.clone();
+        a2.name = "a-renamed".into();
+        writer.append_object(&a2).unwrap();
+        writer
+            .append_relationship(&KirRelationship::new(
+                ekos_kir::RelationshipKind::DependsOn,
+                a.id,
+                b.id,
+            ))
+            .unwrap();
+        writer.append_object(&named_obj("c")).unwrap();
+        reader.refresh_snapshot().unwrap();
+
+        let cold = FactLedger::open_read_only(&path).unwrap();
+        assert_eq!(reader.entry_count().unwrap(), cold.entry_count().unwrap());
+        assert_eq!(
+            sorted_json(reader.all_objects().unwrap()),
+            sorted_json(cold.all_objects().unwrap())
+        );
+        assert_eq!(
+            sorted_json(reader.all_relationships().unwrap()),
+            sorted_json(cold.all_relationships().unwrap())
+        );
+        assert_eq!(
+            reader.relationships_for(&a.id).unwrap().len(),
+            cold.relationships_for(&a.id).unwrap().len()
+        );
+        assert_eq!(reader.get_object(&a.id).unwrap().unwrap().name, "a-renamed");
+    }
+
+    #[test]
+    fn refresh_falls_back_to_a_rebuild_across_a_seal_and_still_matches_a_cold_open() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        // A tiny seal threshold makes the writer roll segments quickly.
+        let writer = FactLedger::open_with_seal_threshold(&path, 2_000).unwrap();
+        writer.append_object(&named_obj("seed")).unwrap();
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        let mut reopened = false;
+        for i in 0..40 {
+            writer
+                .append_object(&named_obj(&format!("obj_{i}")))
+                .unwrap();
+            match reader.refresh_snapshot().unwrap() {
+                RefreshOutcome::Reopened => reopened = true,
+                RefreshOutcome::Incremental { .. } | RefreshOutcome::Unchanged => {}
+                RefreshOutcome::Unsupported => panic!("a fact ledger supports refresh"),
+            }
+            assert_eq!(reader.object_count().unwrap(), i + 2, "after write {i}");
+        }
+        assert!(
+            reopened,
+            "40 writes at a 2 KB seal threshold must cross a seal"
+        );
+        let cold = FactLedger::open_read_only(&path).unwrap();
+        assert_eq!(
+            sorted_json(reader.all_objects().unwrap()),
+            sorted_json(cold.all_objects().unwrap())
+        );
+    }
+
+    #[test]
+    fn refresh_on_a_writable_handle_is_a_no_op() {
+        let dir = tempdir().unwrap();
+        let writer = FactLedger::open(&dir.path().join("factledger")).unwrap();
+        writer.append_object(&named_obj("x")).unwrap();
+        assert_eq!(
+            writer.refresh_snapshot().unwrap(),
+            RefreshOutcome::Unchanged
+        );
+        assert_eq!(writer.object_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn refresh_reloads_the_search_reader_so_new_commits_are_findable() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let writer = FactLedger::open(&path).unwrap();
+        writer.append_object(&named_obj("seed")).unwrap();
+        writer.find_objects("seed").unwrap(); // group-commit the search index
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        assert!(reader.find_objects("invoices").unwrap().is_empty());
+
+        writer.append_object(&named_obj("invoices")).unwrap();
+        writer.find_objects("invoices").unwrap(); // commits the new doc to the tantivy index
+        reader.refresh_snapshot().unwrap();
+        assert_eq!(
+            reader.find_objects("invoices").unwrap().len(),
+            1,
+            "the read side must reload tantivy's reader, not stay pinned to the open-time index"
+        );
+    }
+
+    #[test]
+    fn refresh_folds_provenance_written_after_the_reader_opened() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let writer = FactLedger::open(&path).unwrap();
+        let reader = FactLedger::open_read_only(&path).unwrap();
+        writer.set_write_context(Some(crate::provenance::WriteContext {
+            run_id: "run-1".into(),
+            stage: "build".into(),
+            source_artifact_id: None,
+        }));
+        let o = named_obj("orders");
+        writer.append_object(&o).unwrap();
+        assert!(reader.audit_trail(&o.id).unwrap().is_empty());
+        reader.refresh_snapshot().unwrap();
+        let trail = reader.audit_trail(&o.id).unwrap();
+        assert_eq!(trail.len(), 1);
+        assert_eq!(trail[0].stage.as_deref(), Some("build"));
     }
 
     /// A read-only open must not write to the workspace at all.

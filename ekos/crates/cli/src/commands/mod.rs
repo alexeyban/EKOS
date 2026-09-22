@@ -30,6 +30,7 @@ pub mod resolve;
 pub mod session;
 pub mod simulate;
 pub mod store;
+pub mod treasury;
 
 use ekos_compiler_core::EkosConfig;
 

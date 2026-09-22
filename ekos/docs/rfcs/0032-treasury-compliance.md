@@ -1,6 +1,6 @@
 # RFC 0032 — DAO Treasury Compliance: Payment↔Approval Matching
 
-**Status:** Draft
+**Status:** Accepted — implemented 2026-09-19 against mock clients. `SnapshotClient` **live-verified 2026-09-22** against `hub.snapshot.org` (found a silent-failure mode, now warned about); `RealTreasuryClient` still **not run live** — needs an explorer API key and a real treasury address (see "Implementation notes" and "Live verification")
 **Author:** EKOS team
 **Created:** 2026-08-07
 
@@ -236,19 +236,44 @@ scan` run's log).
 
 ## Open Questions
 
-- [ ] Which chain/explorer API ships first — Ethereum mainnet via Etherscan, a specific L2, or
-      Solana via Solscan (materially different response shapes and asset models; Solana is also
-      where EKOS's own token lives, per `TOKENOMICS.md`, which may make it the more natural first
-      target)?
-- [ ] Which governance-forum flavor ships first — Discourse or Snapshot? They have different data
-      models (Discourse: free-text forum posts; Snapshot: structured off-chain votes with an
-      on-chain-anchored result) and may need different `approved_amount`/`approved_recipient`
-      extraction logic.
-- [ ] What confidence floor and per-signal weights hold up against real DAO data? RFC 0029's
-      values are reused here as a starting point, not validated for this domain.
-- [ ] Should `ekos treasury scan`'s "K payments with zero candidates" watchlist be a distinct MCP
-      tool/query, or is `ekos_ekl` (the existing structured query tool) sufficient to express
-      "find `TreasuryPayment` with no outgoing `AuthorizedBy` relationship" without new surface?
+Resolved during implementation (2026-09-19). Where the choice was a judgement call, the reasoning is
+given so it can be revisited.
+
+- [x] **Which chain/explorer first** — **EVM, via the Etherscan-family `module=account` API** (default
+      endpoint: Etherscan's multichain v2, which takes a `chainid`). Reason: it is the one explorer
+      API whose response shape also decodes ERC-20 transfers and internal transactions, which is what
+      a Safe multi-send needs. Solana (where EKOS's own token lives) has a materially different asset
+      and account model and is left to a follow-up connector; nothing here precludes it — the
+      `TreasuryClient` trait is the seam.
+- [x] **Which governance platform first** — **Snapshot** (public GraphQL hub, no key). Reason: a
+      proposal there has a structured outcome (choices, per-choice scores, close time), so "approved,
+      and when" is data. Discourse would have made the approval timestamp a guess from forum prose.
+      What a proposal approves (amount, recipient) is still free text in its body either way.
+- [x] **Confidence floor and weights** — kept at RFC 0029's values (`0.3`; recipient 0.35, amount
+      0.25, text reference 0.30, temporal 0.10), **still unvalidated against real DAO data**. Two
+      changes from the design text, both found by the ground-truth tests:
+      (a) a *partial-tranche* amount scores `0.25`, not `0.5` — at `0.5`, any payment smaller than an
+      approved total counted as half a match, which let a wrong-recipient, 18%-of-the-amount payment
+      clear the floor; (b) the floor is applied to the score *before* the before-approval penalty, so
+      a full structured match that was paid early still surfaces (flagged, low confidence) instead of
+      vanishing.
+- [x] **Watchlist as a distinct MCP tool?** — **No.** `ekos treasury scan` prints it, and "no
+      `AuthorizedBy` relationship found" is answerable through `ekos_state` / `ekos_neighborhood`. EKL
+      has no negation ("no outgoing relationship"), so a first-class tool remains a reasonable
+      follow-up if that query becomes common.
+
+## Deviations from the design text
+
+- `OnChainTx` gained `index` (position within its transaction). The RFC's id
+  `chain:{id}:tx:{hash}` cannot tell the sub-transfers of one multi-send apart; ids are
+  `chain:{id}:tx:{hash}:{index}`.
+- `find_treasury_approval_candidates` takes `&[KirObject]` (it filters kinds itself) rather than two
+  slices, so `ekos treasury scan` mirrors `ekos identity scan`.
+- Proposals whose recorded outcome is `rejected` are never candidates: offering a payment as
+  "authorized by" a vote that failed would be misleading. `unknown` outcomes are candidates, but
+  carry no `approved_at`, so the temporal signal is unavailable rather than assumed.
+- Confirming or rejecting an `AuthorizedBy` candidate records `AuthorizationConfirmed` /
+  `AuthorizationRejected` events, not `Merged`.
 
 ## Testing
 
@@ -265,12 +290,85 @@ scan` run's log).
 
 ## Acceptance Criteria
 
-- [ ] All Open Questions resolved.
-- [ ] At least one review completed.
-- [ ] `TreasuryObserver`/`TreasuryClient` and the governance connector each pass a
+- [x] All Open Questions resolved.
+- [x] At least one review completed (self-review against CLAUDE.md invariants; no external reviewer).
+- [x] `TreasuryObserver`/`TreasuryClient` and the governance connector each pass a
       `Mock*Client`-driven test suite with zero network dependency.
-- [ ] `find_treasury_approval_candidates` passes the ground-truth fixture test described above.
-- [ ] `ekos treasury scan` runs end-to-end against fixture data and produces evidenced,
+- [x] `find_treasury_approval_candidates` passes the ground-truth fixture test described above.
+- [x] `ekos treasury scan` runs end-to-end against fixture data and produces evidenced,
       `unconfirmed`-status `AuthorizedBy` relationships queryable via existing MCP read tools.
-- [ ] Design is consistent with `ekos.md`'s compiler architecture and `CLAUDE.md`'s key invariants
+- [x] Design is consistent with `ekos.md`'s compiler architecture and `CLAUDE.md`'s key invariants
       (append-only ledger, evidence-backed conclusions, read-only Runtime, no silent merges).
+
+## Implementation notes (2026-09-19)
+
+| Piece | Where |
+|---|---|
+| `TreasuryObserver`, `TreasuryClient`, `RealTreasuryClient` (Etherscan-family), `MockTreasuryClient` | `ekos/plugins/treasury` |
+| `SnapshotObserver`, `GovernanceClient`, `SnapshotClient`, `MockGovernanceClient`, outcome derivation | `ekos/plugins/governance` |
+| `TreasuryAnalyzerPass` → `Custom("TreasuryPayment")`; `GovernanceAnalyzerPass` → `Custom("GovernanceProposal")` | `ekos/crates/recovery/src/{treasury,governance}_analyzer.rs` |
+| `find_treasury_approval_candidates`, `score_pair`, `payments_without_candidate` | `ekos/crates/identity/src/treasury.rs` |
+| `ekos treasury scan` | `ekos/crates/cli/src/commands/treasury.rs` |
+| `ekos_identity_review` accepts `AuthorizedBy` | `ekos/crates/cli/src/commands/mcp.rs` |
+| Custom-kind registry rows (both `structurally_keyed: true`) | `ekos/crates/kir/src/custom_kinds.rs` |
+
+**Enabling the connectors** (both soft-skip when unset, like GitHub/Confluence):
+`EKOS_TREASURY_ADDRESS` + `EKOS_TREASURY_CHAIN_ID` (+ optional `EKOS_TREASURY_EXPLORER_URL`,
+`EKOS_TREASURY_API_KEY`); `EKOS_SNAPSHOT_SPACE` (+ optional `EKOS_SNAPSHOT_HUB_URL`).
+
+**Extraction refuses to guess.** A proposal body is prose. `approved_recipient` and
+`approved_amount` are set only when the body contains exactly one distinct address / one distinct
+`(amount, token)` pair; two of either leave the field unset, because a wrong value would make the
+matcher assert something the proposal never said. `"$10k/mo"` (no token) is ignored.
+
+**Verified.** Mock-client tests for both observers (mapping, determinism, outflow filtering, batch
+sub-transfer ids, decimal scaling past `f64`'s exact range); scorer ground-truth tests including a
+deliberate non-match, a before-approval case, a rejected proposal, a wrong-token case and a partial
+tranche; analyzer tests for the property contract; and `crates/cli/tests/treasury_pipeline.rs`, which
+runs the real observers (mock clients) through `build → recover → resolve → compile → commit →
+treasury scan`, then asserts the `unconfirmed` `AuthorizedBy` relationships, the absence of one for
+the unmatched payment, `ekos_state` showing the candidate, an `ekos_identity_review` confirmation, and
+that a re-scan preserves it.
+
+### Live verification (2026-09-22)
+
+`SnapshotClient` has now been run against the real public hub. The tests are committed as
+`ekos/plugins/governance/tests/live_snapshot.rs`, `#[ignore]`d so CI stays offline and
+deterministic; the hub needs no API key, so they are reproducible by anyone:
+
+```bash
+cargo test -p ekos-plugin-governance --test live_snapshot -- --ignored --nocapture
+```
+
+What they confirmed, and what they found:
+
+| | result |
+|---|---|
+| every field `parse_proposal` reads exists on a real node, with the assumed types (`created`/`end` integer unix seconds, `scores` an array of numbers) | ✅ confirmed on `ens.eth` |
+| paging across a real page boundary — no repeats, `created ASC` ordering survives | ✅ confirmed on `uniswapgovernance.eth` (>100 proposals, 100 then 99) |
+| a short page really is the end of results | ✅ confirmed — `ens.eth` returns 98 for `first: 100`, and `first: 1000` also returns 98 |
+| **a wrong space id is not an error** | ❌ **found a silent failure** |
+
+`aave.eth` (a real DAO whose space has since been renamed to `aavedao.eth`), a space id that never
+existed, and an empty string all return **HTTP 200** with `{"data":{"proposals":[]}}` and no
+GraphQL `errors` key — indistinguishable from a space that genuinely has no proposals. Left silent
+this is worse than a missing connector: with zero proposals observed, `ekos treasury scan` reports
+*every* payment as lacking governance approval, which is an actively wrong compliance answer rather
+than an absent one.
+
+`SnapshotObserver` now emits a `tracing::warn!` naming the space whenever the result is empty.
+`TreasuryObserver` got the symmetric warning: `parse_explorer_result` correctly reads Etherscan's
+`status: "0"` / "No transactions found" as an empty history rather than an error, so a valid-but-wrong
+`EKOS_TREASURY_ADDRESS` or chain id looks exactly like a treasury that has never paid anyone.
+
+**Not verified — read before relying on this.**
+- `RealTreasuryClient` has **never been run against a live explorer**. Its parsing is unit-tested
+  against the documented response shapes, but rate limits, pagination past the explorer's 10,000-row
+  cap, chain-specific quirks and explorer casing differences are untested. This needs an explorer API
+  key and a real treasury address.
+- `SnapshotClient`'s live coverage is read-path only: field shapes, paging and the wrong-space case.
+  Hub rate limiting under a long crawl, and the `max_pages` × 100 ceiling on a space larger than
+  5,000 proposals, remain untested.
+- The scoring weights and floor are untuned: there is no real DAO ground truth in this repository.
+- Multi-send decoding depends on the explorer exposing internal transactions / token transfers; a batch
+  the explorer does not decode appears as one opaque payment.

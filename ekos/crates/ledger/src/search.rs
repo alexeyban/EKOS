@@ -336,6 +336,23 @@ impl SearchIndex {
         self.dirty = true;
     }
 
+    /// RFC 0112 — pick up segments a *separate* writer process has committed since this reader
+    /// last looked. A read-only handle never runs [`Self::commit`] (its `dirty` flag can never be
+    /// set), so without this its `IndexReader` stayed pinned to whatever index existed at open.
+    /// Tantivy's `reload` is a reader-side operation: it re-reads `meta.json` and never touches
+    /// the writer lock, so it cannot contend with a concurrent writer.
+    ///
+    /// Returns `true` when the reload actually moved the reader to a newer index generation, so a
+    /// caller can tell "the search index changed" apart from "nothing happened".
+    pub fn refresh_reader(&self) -> Result<bool, LedgerError> {
+        // `generation_id` bumps on every reload, changed or not; the segment set together with
+        // each segment's delete opstamp is what actually identifies the searchable contents.
+        let snapshot = |s: &tantivy::Searcher| s.generation().segments().clone();
+        let before = snapshot(&self.reader.searcher());
+        self.reader.reload().map_err(terr)?;
+        Ok(snapshot(&self.reader.searcher()) != before)
+    }
+
     /// Commit buffered upserts (if any) and record the watermark. A no-op
     /// when opened read-only — `dirty` can never become true there since
     /// [`Self::upsert`] already no-ops, but the writer-less case is also

@@ -12,12 +12,14 @@ use ekos_plugin_elixir::ElixirObserver;
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
+use ekos_plugin_governance::{DEFAULT_HUB_URL, SnapshotClient, SnapshotObserver};
 use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
 use ekos_plugin_pentaho::PentahoObserver;
 use ekos_plugin_perl::PerlObserver;
 use ekos_plugin_python::PythonObserver;
 use ekos_plugin_rust::RustObserver;
+use ekos_plugin_treasury::{DEFAULT_EXPLORER_URL, RealTreasuryClient, TreasuryObserver};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -46,6 +48,20 @@ const GITHUB_TOKEN_ENV: &str = "EKOS_GITHUB_TOKEN";
 /// history than that.
 const GITHUB_PER_PAGE_ENV: &str = "EKOS_GITHUB_PER_PAGE";
 const GITHUB_MAX_PAGES_ENV: &str = "EKOS_GITHUB_MAX_PAGES";
+
+/// Env vars for the DAO treasury connector (RFC 0032). Address **and** chain id must be set — the
+/// observer is only added when they are; absence is a normal state, same soft-skip as the
+/// connectors above. `EKOS_TREASURY_EXPLORER_URL` defaults to Etherscan's multichain v2 endpoint;
+/// `EKOS_TREASURY_API_KEY` is the explorer key.
+const TREASURY_ADDRESS_ENV: &str = "EKOS_TREASURY_ADDRESS";
+const TREASURY_CHAIN_ID_ENV: &str = "EKOS_TREASURY_CHAIN_ID";
+const TREASURY_EXPLORER_URL_ENV: &str = "EKOS_TREASURY_EXPLORER_URL";
+const TREASURY_API_KEY_ENV: &str = "EKOS_TREASURY_API_KEY";
+
+/// Env vars for the governance connector (RFC 0032) — a Snapshot space id, e.g. `ens.eth`. The hub
+/// is public and needs no key; `EKOS_SNAPSHOT_HUB_URL` overrides the default endpoint.
+const SNAPSHOT_SPACE_ENV: &str = "EKOS_SNAPSHOT_SPACE";
+const SNAPSHOT_HUB_URL_ENV: &str = "EKOS_SNAPSHOT_HUB_URL";
 
 /// Env vars naming the Confluence site/space to observe (see RFC 0022).
 /// Both base URL and space key must be set — the observer is only added
@@ -181,6 +197,43 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
         _ => {
             tracing::debug!(
                 "{GITHUB_OWNER_ENV}/{GITHUB_REPO_ENV} not set — github connector skipped (RFC 0020)"
+            );
+        }
+    }
+    match (
+        std::env::var(TREASURY_ADDRESS_ENV),
+        std::env::var(TREASURY_CHAIN_ID_ENV)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok()),
+    ) {
+        (Ok(address), Some(chain_id)) => {
+            let base = std::env::var(TREASURY_EXPLORER_URL_ENV)
+                .unwrap_or_else(|_| DEFAULT_EXPLORER_URL.to_string());
+            let key = std::env::var(TREASURY_API_KEY_ENV).ok();
+            observers.push(Box::new(TreasuryObserver::new(
+                Arc::new(RealTreasuryClient::new(base, chain_id, key)),
+                chain_id,
+                address,
+            )));
+        }
+        _ => {
+            tracing::debug!(
+                "{TREASURY_ADDRESS_ENV}/{TREASURY_CHAIN_ID_ENV} not set (or chain id not a number) — treasury connector skipped (RFC 0032)"
+            );
+        }
+    }
+    match std::env::var(SNAPSHOT_SPACE_ENV) {
+        Ok(space) => {
+            let hub =
+                std::env::var(SNAPSHOT_HUB_URL_ENV).unwrap_or_else(|_| DEFAULT_HUB_URL.to_string());
+            observers.push(Box::new(SnapshotObserver::new(
+                Arc::new(SnapshotClient::new(hub)),
+                space,
+            )));
+        }
+        Err(_) => {
+            tracing::debug!(
+                "{SNAPSHOT_SPACE_ENV} not set — governance connector skipped (RFC 0032)"
             );
         }
     }

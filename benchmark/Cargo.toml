@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
@@ -70,4 +71,8 @@ harness = false
 
 [[bench]]
 name = "retrieval_eval"
+harness = false
+
+[[bench]]
+name = "ledger_refresh"
 harness = false

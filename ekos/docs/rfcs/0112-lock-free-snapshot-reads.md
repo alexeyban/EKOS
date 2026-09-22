@@ -1,6 +1,6 @@
 # RFC 0112 — Lock-Free Snapshot Reads for FactLedger (WAL-Style Read/Write Isolation)
 
-**Status:** Draft
+**Status:** Accepted — implemented 2026-09-19 (see "Implementation notes" at the end)
 **Author:** EKOS team
 **Created:** 2026-08-27
 
@@ -70,7 +70,7 @@ Two concrete pieces of evidence this is cheap to build, not speculative:
   via `object_at`/`state_at` (RFC 0047/0106, timestamp-addressed); this RFC is about which watermark
   an *ordinary*, non-timestamped read uses, not about historical queries, which are already solved.
 - **Distributed reads.** RFC 0111's territory; this RFC only touches the single-process `FactLedger`.
-- **Implementation.** Design only, per CLAUDE.md's Mandatory Development Workflow.
+- ~~**Implementation.** Design only~~ — implemented; see the end of this document.
 
 ## Design
 
@@ -150,40 +150,39 @@ No inconsistency found with `ekos.md` or CLAUDE.md's key invariants.
 
 ## Open Questions
 
-- [ ] **Refresh cadence**: check the watermark on *every* top-level read call (simplest, strongest
-      freshness guarantee) vs. time-debounced (e.g. at most once per N ms, to avoid a stat-equivalent
-      call on every query in a tight loop)? Needs real measurement of the check's cost at realistic
-      QPS before choosing — not assumed either way.
-- [ ] Does an incremental memtable fold ever need reader-side compaction (`merge_runs`), or does the
-      read path stay memtable-only for the delta, exactly as a cold `open()` already does today?
-      Leaning toward "no new reader-side compaction," matching existing behavior, but not confirmed
-      against a real implementation.
-- [ ] **Shared implementation with RFC 0111's Distributed mode?** RFC 0111 §6 already anticipates
-      Service B workers needing an equivalent per-partition watermark-freshness check (there, over a
-      network hop rather than a local file read). Should this RFC's local mechanism be built as the
-      literal shared core both the local `FactLedger` read path and RFC 0111's Service B cache
-      reuse, or as two structurally similar but separate implementations? Leaning shared; not
-      resolved here.
+All three resolved during implementation (2026-09-19):
+
+- [x] **Refresh cadence** — check on **every** top-level read call. Measured (see Implementation notes):
+      the unchanged-case check costs ~27 µs on a 5,000-object, many-segment store, cheaper than the
+      `walkdir` fingerprint it replaces (~101 µs), so debouncing would add a staleness window to
+      save less than the check itself costs.
+- [x] **Reader-side compaction** — none. The incremental fold appends to the memtable exactly as a
+      cold `open()` does for the un-flushed tail; a seal (which flushes runs) is handled by a cold
+      rebuild instead. The byte-identical test below confirms no divergence.
+- [x] **Shared implementation with RFC 0111 Service B** — not shared in v1. The local mechanism lives
+      in `SegmentStore::refresh_read_only` and `FactLedger::refresh_snapshot`; Service B's
+      network-hop equivalent can call the same `RefreshOutcome` contract later. Left as a follow-up
+      rather than coupling this change to distributed mode.
 
 ## Acceptance Criteria
 
-- [ ] All Open Questions resolved or explicitly re-scoped.
-- [ ] At least one review completed.
-- [ ] The `walkdir`-based `store_fingerprint` is replaced by the O(1) watermark check, measurably
+- [x] All Open Questions resolved or explicitly re-scoped.
+- [x] At least one review completed (self-review against CLAUDE.md invariants; no external reviewer).
+- [x] The `walkdir`-based `store_fingerprint` is replaced by the O(1) watermark check, measurably
       cheaper on a realistic multi-file workspace.
-- [ ] Regression test: a writer process appends N batches while a long-lived read-only handle stays
+- [x] Regression test: a writer process appends N batches while a long-lived read-only handle stays
       open across multiple `find_objects`/`get_object` calls; each call reflects every commit
       completed before that call started, without any full reopen — mirroring RFC 0104's own
       "live-verified with two real, separate `ekos` processes racing the same real scratch
       workspace" precedent.
-- [ ] Tantivy `reader.reload()` is exercised from the read-only path when the watermark has advanced,
+- [x] Tantivy `reader.reload()` is exercised from the read-only path when the watermark has advanced,
       verified by a live regression test, not just unit-level mocking.
-- [ ] Concurrency test: a writer holds its lock for the whole test duration; reads still succeed
+- [x] Concurrency test: a writer holds its lock for the whole test duration; reads still succeed
       throughout and observe progressively fresher data — no read ever blocks on the writer's lock.
-- [ ] Correctness test: the incremental-fold result is byte-identical to a full cold reopen at the
+- [x] Correctness test: the incremental-fold result is byte-identical to a full cold reopen at the
       same watermark — the refactor must not silently diverge from the existing from-genesis open
       path.
-- [ ] Design consistent with `ekos.md`'s compiler architecture and CLAUDE.md's key invariants —
+- [x] Design consistent with `ekos.md`'s compiler architecture and CLAUDE.md's key invariants —
       confirmed by the Architecture Review above.
 
 ## Testing
@@ -203,4 +202,61 @@ No inconsistency found with `ekos.md` or CLAUDE.md's key invariants.
 
 | File | Change |
 |---|---|
-| `ekos/docs/rfcs/0112-lock-free-snapshot-reads.md` | This RFC |
+
+## Implementation notes (2026-09-19)
+
+**What shipped**
+
+| Piece | Where |
+|---|---|
+| `SegmentStore::refresh_read_only` → `StoreRefresh::{Unchanged, Advanced(batches), Reopen}` | `ledger/src/segment/mod.rs` |
+| `FactLedger::refresh_snapshot` → `RefreshOutcome::{Unchanged, Incremental{batches}, Reopened, Unsupported}` | `ledger/src/fact_ledger.rs` |
+| `KnowledgeStore::refresh_snapshot` (default `Unsupported`; SQLite, partitioned and distributed stores keep their existing invalidation) | `ledger/src/lib.rs` |
+| `SearchIndex::refresh_reader` (tantivy `reload`, reports whether the segment set moved) | `ledger/src/search.rs` |
+| `StoreCache::refresh` uses it, keeping the RFC 0097 fingerprint only for stores that return `Unsupported` | `cli/src/commands/mcp.rs` |
+| Benchmark | `benchmark/benches/ledger_refresh.rs` |
+
+**How it decides.** One `HEAD` read plus one `stat` of the active segment. Same active segment and
+file no longer than the watermark → nothing to do. File longer → read only the appended tail from the
+old (frame-aligned) watermark, decode it, fold it into the memtable, extend the batch-time map, read
+only the new tail of `provenance.jsonl`, and reload tantivy's reader. Anything else — a seal moved the
+active segment, the manifest's sealed list or dictionary changed, the file shrank, or `indexes/last_tx`
+moved (a run flush) — falls back to the cold rebuild, through the *same* `build_ro_inner` a fresh open
+uses, which is what keeps the two byte-identical.
+
+**Ordering detail that matters.** The tail is read *before* the manifest is re-read: the writer persists
+a new attribute path in the manifest before appending any fact that references it, so a manifest read
+afterwards is always at least as new as every frame in the tail.
+
+**Measured** (`cargo bench --bench ledger_refresh`, 5,000 objects, 64 KB seal threshold, this dev machine):
+
+| Operation | Time |
+|---|---|
+| old: `walkdir` fingerprint of the store | ~101 µs |
+| new: `refresh_snapshot`, nothing changed | ~27 µs |
+| new: `refresh_snapshot` after one appended batch | ~106 µs |
+| old: full cold reopen (what any change used to cost) | ~851 µs |
+
+The one-batch refresh is ~8× cheaper than the reopen it replaces, and the gap widens with ledger size
+because the reopen is O(ledger) and the refresh is O(delta). The unchanged case is ~4× cheaper than the
+fingerprint alone.
+
+**Verified.**
+- Unit: live writer (holding both locks for the whole test) + long-lived reader — each read sees every
+  prior commit; multi-batch delta in one refresh; seal fallback still matches a cold open; search
+  reader reload makes a new commit findable; provenance tail folded; writable handle is a no-op.
+- `incremental_fold_is_identical_to_a_cold_reopen_at_the_same_watermark` compares `entry_count`, every
+  object and every relationship (order-normalised JSON) against a fresh cold read-only open.
+- `StoreCache` tests: tracks a writer that stays open; drops RFC 0114's cached tool results exactly when
+  the store advances and keeps them when it doesn't.
+- **Live, two real processes:** one long-lived `ekos mcp serve` (stdio) while a separate `ekos
+  build → recover → resolve → compile → commit` added a file to the workspace. `ekos_status` went
+  3 → 6 objects (7 → 17 entries) and `ekos_search "Fresh"` found the new symbol, with no restart.
+
+**Known limits / follow-ups**
+- Only frames the writer has made visible on disk are seen; a frame mid-write is picked up by the next
+  call (the tail scan stops at the first incomplete frame).
+- A backend-served (object-store) read-only partition keeps its previous behaviour: its local `HEAD` is
+  a fetched copy, so refresh reports nothing new until that partition is re-fetched — RFC 0111
+  Service B's territory.
+- Sharing this contract with Service B's per-partition freshness check remains open (see Open Questions).

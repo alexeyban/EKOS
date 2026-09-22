@@ -39,7 +39,7 @@ use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
-use ekos_ledger::KnowledgeStore;
+use ekos_ledger::{KnowledgeStore, RefreshOutcome};
 use ekos_runtime::reason::{execute, plan_question};
 use ekos_runtime::retrieval::understand;
 use ekos_runtime::{
@@ -109,6 +109,25 @@ impl StoreCache {
     /// would only ever get invalidated by a call that happened to miss — an entry that keeps
     /// hitting would never notice the underlying store had changed underneath it.
     fn refresh(&mut self, config: &EkosConfig, workspace: &Path) -> Result<()> {
+        // RFC 0112 — a fact-engine store refreshes *itself*: one `HEAD` read plus one `stat` when
+        // nothing changed, only the appended tail decoded when the active segment grew, and a cold
+        // rebuild only when a seal/merge/format change moved more than the tail. No `walkdir`, no
+        // whole-store reopen for an ordinary one-batch change, and no lock taken on either side.
+        if let Some(store) = self.store.as_deref() {
+            match store.refresh_snapshot() {
+                Ok(RefreshOutcome::Unchanged) => return Ok(()),
+                Ok(RefreshOutcome::Incremental { .. } | RefreshOutcome::Reopened) => {
+                    self.result_cache.clear();
+                    return Ok(());
+                }
+                // No snapshot to refresh (SQLite, partitioned, distributed): fall through to the
+                // RFC 0097 fingerprint check below, unchanged.
+                Ok(RefreshOutcome::Unsupported) => {}
+                // A failed refresh (e.g. a segment mid-rewrite) must not leave a half-updated
+                // handle serving reads: drop it and reopen below.
+                Err(_) => self.store = None,
+            }
+        }
         let root = store_root(config, workspace);
         let current = store_fingerprint(&root);
         if self.store.is_none() || current != self.fingerprint {
@@ -1007,7 +1026,7 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_identity_review",
-            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger. A write-capable MCP tool; only Custom(\"SameAs\") relationships are reviewable this way.",
+            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger. A write-capable MCP tool; only Custom(\"SameAs\") and Custom(\"AuthorizedBy\") (RFC 0032 payment-approval) relationships are reviewable this way.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1232,7 +1251,6 @@ fn call_tool(
         let ledger = cache.get(config, workspace)?;
         return session_read(config, workspace, ledger, name, args);
     }
-
 
     let ledger = cache.get(config, workspace)?;
     let runtime = Runtime::over(ledger);
@@ -1668,6 +1686,19 @@ fn call_tool(
     }
 }
 
+/// The event recorded for a review decision. An identity merge is a `Merged` event; a payment
+/// authorization (RFC 0032) is not a merge of anything, so it gets its own named kinds rather than
+/// borrowing `Merged`'s meaning.
+fn review_event_kind(rel_kind: &RelationshipKind, decision: &str) -> EventKind {
+    let is_authorization = matches!(rel_kind, RelationshipKind::Custom(k) if k == "AuthorizedBy");
+    match (is_authorization, decision) {
+        (true, "confirmed") => EventKind::Custom("AuthorizationConfirmed".into()),
+        (true, _) => EventKind::Custom("AuthorizationRejected".into()),
+        (false, "confirmed") => EventKind::Merged,
+        (false, _) => EventKind::Modified,
+    }
+}
+
 /// `ekos_identity_review`'s implementation — the one write-capable MCP
 /// tool, deliberately bypassing `StoreCache` entirely (see `call_tool`'s own
 /// comment at its call site): opens a fresh, short-lived, writable store
@@ -1686,8 +1717,13 @@ fn identity_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Resul
     let mut rel = ledger
         .get_relationship(&rel_id)?
         .ok_or_else(|| anyhow::anyhow!("relationship not found: {rel_id}"))?;
-    if !matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs") {
-        anyhow::bail!("not a SameAs candidate, cannot be reviewed through this tool: {rel_id}");
+    // `SameAs` (RFC 0029/0063) and `AuthorizedBy` (RFC 0032) are structurally identical review
+    // candidates — an `unconfirmed` relationship a human or agent confirms or rejects — so they
+    // share this one write-capable tool rather than growing a parallel one.
+    if !matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs" || k == "AuthorizedBy") {
+        anyhow::bail!(
+            "not a SameAs or AuthorizedBy candidate, cannot be reviewed through this tool: {rel_id}"
+        );
     }
 
     rel.properties.insert("status".into(), json!(decision));
@@ -1695,11 +1731,7 @@ fn identity_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Resul
         .insert("reviewed_at".into(), json!(Utc::now().to_rfc3339()));
     ledger.append_relationship(&rel)?;
 
-    let event_kind = if decision == "confirmed" {
-        EventKind::Merged
-    } else {
-        EventKind::Modified
-    };
+    let event_kind = review_event_kind(&rel.kind, decision);
     let event = KirEvent {
         id: KirId::new(),
         kind: event_kind,
@@ -2274,6 +2306,64 @@ mod tests {
                 .unwrap_or_else(|e| panic!("call {i} failed: {e}"));
             assert!(store.object_count().unwrap() >= 1);
         }
+    }
+
+    #[test]
+    fn store_cache_tracks_a_writer_that_stays_open_without_reopening_or_blocking() {
+        // RFC 0112 — the writer holds `write.lock` and tantivy's writer lock for the whole test,
+        // which the old whole-store reopen tolerated only because it never took either. Every
+        // call must observe every commit that completed before it started.
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let facts = facts_dir(&config, dir);
+        let writer = ekos_ledger::FactLedger::open(&facts).unwrap();
+        writer
+            .append_object(&KirObject::new("seed", ObjectKind::Table))
+            .unwrap();
+
+        let mut cache = StoreCache::new();
+        assert_eq!(cache.get(&config, dir).unwrap().object_count().unwrap(), 1);
+        for i in 0..5usize {
+            writer
+                .append_object(&KirObject::new(format!("t{i}"), ObjectKind::Table))
+                .unwrap();
+            assert_eq!(
+                cache.get(&config, dir).unwrap().object_count().unwrap(),
+                i + 2,
+                "call after write {i} must see it"
+            );
+        }
+    }
+
+    #[test]
+    fn store_cache_drops_cached_tool_results_when_the_store_advances() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let facts = facts_dir(&config, dir);
+        let writer = ekos_ledger::FactLedger::open(&facts).unwrap();
+        writer
+            .append_object(&KirObject::new("seed", ObjectKind::Table))
+            .unwrap();
+        let mut cache = StoreCache::new();
+        cache.refresh(&config, dir).unwrap();
+        cache.cache_result("ekos_search", "{}", serde_json::json!({"n": 1}));
+        cache.refresh(&config, dir).unwrap();
+        assert!(
+            cache.cached_result("ekos_search", "{}").is_some(),
+            "unchanged store keeps the cache"
+        );
+        writer
+            .append_object(&KirObject::new("later", ObjectKind::Table))
+            .unwrap();
+        cache.refresh(&config, dir).unwrap();
+        assert!(
+            cache.cached_result("ekos_search", "{}").is_none(),
+            "an advanced store must clear it"
+        );
     }
 
     #[test]
@@ -3371,6 +3461,67 @@ mod tests {
         let rel = ledger.get_relationship(&rel_id).unwrap().unwrap();
         assert_eq!(rel.properties["status"], "confirmed");
         assert!(rel.properties.contains_key("reviewed_at"));
+    }
+
+    #[test]
+    fn identity_review_confirms_an_authorized_by_candidate() {
+        // RFC 0032 — `AuthorizedBy` shares this tool with `SameAs`, but confirming a payment's
+        // authorization must not be recorded as a `Merged` event.
+        use ekos_kir::{KirObject, KirRelationship, ObjectKind};
+        use ekos_ledger::Ledger;
+
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let ledger = Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let pay = KirObject::new(
+            "payment 0xaaaa",
+            ObjectKind::Custom("TreasuryPayment".into()),
+        );
+        let prop = KirObject::new(
+            "dao.eth: Fund",
+            ObjectKind::Custom("GovernanceProposal".into()),
+        );
+        ledger.append_object(&pay).unwrap();
+        ledger.append_object(&prop).unwrap();
+        let mut rel = KirRelationship::new(
+            RelationshipKind::Custom("AuthorizedBy".into()),
+            pay.id,
+            prop.id,
+        );
+        rel.properties.insert("status".into(), json!("unconfirmed"));
+        let rel_id = rel.id;
+        ledger.append_relationship(&rel).unwrap();
+        drop(ledger);
+
+        let line = req(
+            34,
+            "tools/call",
+            json!({ "name": "ekos_identity_review",
+                    "arguments": { "relationship_id": rel_id.to_string(), "decision": "confirmed" } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false, "{resp}");
+
+        let ledger = Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let rel = ledger.get_relationship(&rel_id).unwrap().unwrap();
+        assert_eq!(rel.properties["status"], "confirmed");
+    }
+
+    #[test]
+    fn review_event_kinds_distinguish_authorizations_from_identity_merges() {
+        let same_as = RelationshipKind::Custom("SameAs".into());
+        let auth = RelationshipKind::Custom("AuthorizedBy".into());
+        assert_eq!(review_event_kind(&same_as, "confirmed"), EventKind::Merged);
+        assert_eq!(review_event_kind(&same_as, "rejected"), EventKind::Modified);
+        assert_eq!(
+            review_event_kind(&auth, "confirmed"),
+            EventKind::Custom("AuthorizationConfirmed".into())
+        );
+        assert_eq!(
+            review_event_kind(&auth, "rejected"),
+            EventKind::Custom("AuthorizationRejected".into())
+        );
     }
 
     #[test]

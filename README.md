@@ -238,7 +238,18 @@ The same real-world entity observed under different names across systems (Inform
 Postgres `customers`, Databricks `gold.dim_customer`) can be linked too: `ekos identity scan`
 scores candidate cross-system matches (column overlap, naming-pattern similarity, type
 compatibility) and writes them as `unconfirmed` relationships — never a silent auto-merge — for
-review via the `ekos_identity_review` MCP tool. Same-source duplicates (`ekos resolve`/`ekos
+review via the `ekos_identity_review` MCP tool. **DAO treasury compliance (RFC 0032).** "Was this payment approved by governance?" is the same shape of
+problem: two independently observed records with no link between them, where a wrong auto-decision is
+worse than none. `EKOS_TREASURY_ADDRESS` + `EKOS_TREASURY_CHAIN_ID` observe a treasury's outgoing
+transfers through an Etherscan-family explorer (each sub-transfer of a Safe multi-send is its own
+payment); `EKOS_SNAPSHOT_SPACE` observes a Snapshot space's proposals and their outcomes.
+`ekos treasury scan` scores payment↔proposal candidates on recipient, amount, text reference and timing
+and writes each as an `unconfirmed` `AuthorizedBy` relationship with its evidence — a payment made
+*before* its approval is flagged and heavily penalised, a rejected proposal is never offered — then
+lists the payments with no candidate. Review with `ekos_identity_review`. **Status:** verified against
+mock clients and a full-pipeline fixture; the real explorer and Snapshot clients have not been run live.
+
+Same-source duplicates (`ekos resolve`/`ekos
 compile`, e.g. two `Table` objects both literally named `customers`) auto-merge only when the
 match is an exact normalized name; anything fuzzy goes through that same `unconfirmed`/review
 flow instead of an irreversible merge (RFC 0063) — no confidence threshold on the underlying
