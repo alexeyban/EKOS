@@ -50,10 +50,21 @@ jobs:
 
       # No `toolchain:` input — `rust-toolchain.toml` at the repository root pins the version,
       # and rustup honours it for every cargo invocation below.
+      #
+      # Deliberately no `targets:` input either. That installs the target into the toolchain the
+      # *action* selects (stable), while every cargo command here runs under the toolchain the
+      # file pins — so the cross targets had std for a toolchain nothing used, and the build died
+      # with `can't find crate for 'core'`. Host-native targets were unaffected, which is why
+      # four of six rows passed and only musl and x86_64-darwin failed. The target must be added
+      # in the working directory, where the toolchain file applies.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          targets: ${{ matrix.target }}
+
+      - name: Install the pinned toolchain and add the target to it
+        run: |
+          rustup show active-toolchain
+          rustup target add ${{ matrix.target }}
+          rustup target list --installed
 
       - name: Install cross-compilation packages
         if: matrix.packages != ''
@@ -71,8 +82,16 @@ jobs:
 
       # Default features only: the `distributed` feature pulls the whole object_store stack and
       # a stock build must never compile it (RFC 0113).
+      #
+      # `CC_x86_64_unknown_linux_musl`: the workspace compiles real C (bundled SQLite, zstd), and
+      # cc-rs looks for `x86_64-linux-musl-gcc` when targeting musl. Ubuntu's `musl-tools` package
+      # installs `musl-gcc` under that name and no other, so without this the musl row fails at
+      # the C stage with `ToolNotFound` even once its std is present. Harmless on every other row:
+      # the variable is target-scoped and nothing else reads it.
       - name: Build
         working-directory: ekos
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
         run: cargo build --release --locked -p ekos --target ${{ matrix.target }}
 
       - name: Package (unix)

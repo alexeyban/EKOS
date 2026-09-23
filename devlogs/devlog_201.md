@@ -94,6 +94,74 @@ bumping them would imply a stability promise nobody is making about them.
 - **The marker is matched literally, anywhere in the message.** The first fix added a paragraph
   *explaining* why the marker was omitted — and wrote it out, which re-armed the exact behaviour
   it was documenting. A commit message cannot quote it; it has to describe it.
+- **A `targets:` input and a `rust-toolchain.toml` are two different toolchains.** The action
+  installs into the one it selects; cargo uses the one the file pins. Nothing warns about the
+  mismatch — the target is genuinely installed, just not where it is needed, and the error that
+  surfaces (`can't find crate for 'core'`) names neither toolchain.
+- **Only non-host rows can expose a cross-compilation defect**, so a green matrix that happens to
+  be all-native proves nothing about the cross ones. Here four of six rows were their runner's
+  native triple and passed; both failures were the two that were not.
+- **cc-rs's tool name for musl is not the name Ubuntu ships.** It wants
+  `x86_64-linux-musl-gcc`; `musl-tools` provides `musl-gcc`. A workspace with no C dependencies
+  would never hit this — this one compiles bundled SQLite and zstd, so it does.
+- **Fixing one cross-compilation stage reveals the next.** The std fix alone would have produced
+  a second failed run with a completely different-looking error. Worth walking the whole chain
+  locally before re-triggering a public release, rather than one fix per run.
+
+---
+
+## The first real release run failed two of six targets
+
+Pushing the tag is what finally executed `.github/workflows/release.yml`, and it surfaced two
+defects that nothing local could have caught. Both are the same shape: a cross-compilation
+assumption that is invisible when you only ever build for the host.
+
+### 1. The pinned toolchain had no std for the cross targets
+
+`dtolnay/rust-toolchain@stable` with a `targets:` input installs that target into the toolchain
+**the action selects** — stable. Every `cargo` command in the job runs under the toolchain
+`rust-toolchain.toml` pins — 1.98.0. So the cross targets had std installed for a toolchain
+nothing used, and the build died on the first crate:
+
+```
+error[E0463]: can't find crate for `core`
+error: could not compile `cfg-if` (lib) due to 1 previous error
+```
+
+Host-native rows were unaffected — their std ships with the toolchain — which is exactly why
+**four of six passed and only `x86_64-unknown-linux-musl` and `x86_64-apple-darwin` failed**: the
+two rows that are not their runner's native triple. The fix is to add the target in the working
+directory, where the toolchain file applies, rather than through the action:
+
+```yaml
+- run: |
+    rustup show active-toolchain
+    rustup target add ${{ matrix.target }}
+```
+
+Verified locally before changing the workflow: `rustup target add x86_64-unknown-linux-musl` run
+inside the repository installs into `1.98.0-x86_64-unknown-linux-gnu (overridden by
+'…/rust-toolchain.toml')`, not into stable.
+
+### 2. `musl-tools` does not provide the binary cc-rs looks for
+
+Fixing the std problem locally moved the failure one stage later, to the C dependencies (bundled
+SQLite and zstd are real C):
+
+```
+error occurred in cc-rs: failed to find tool "x86_64-linux-musl-gcc":
+No such file or directory (os error 2)
+```
+
+cc-rs looks for `x86_64-linux-musl-gcc`. Ubuntu's `musl-tools` installs `musl-gcc` and nothing
+under the other name. So the musl row would have failed **again** on the next run, one stage
+further along, for an unrelated-looking reason. `CC_x86_64_unknown_linux_musl: musl-gcc` is the
+lever; confirmed locally by setting that variable to a compiler that does exist and watching the
+same `cargo check` go from `ToolNotFound` to `Finished`.
+
+**Honest limit of local verification:** without `musl-gcc` on this machine (it needs root to
+install), the two *mechanisms* were verified locally but the full static musl link was not. CI is
+the only thing that can confirm that one.
 
 ---
 
@@ -107,7 +175,7 @@ bumping them would imply a stability promise nobody is making about them.
 | `README.md` | versioning-roadmap note now says 1.0.0, released, and points at the changelog |
 | `TODO.md` | tag item ticked; the remaining step is the push |
 | `ekos/docs/rfcs/0153-…md` | v0.1.0 → v1.0.0 throughout |
-| `.github/workflows/release.yml` | example tag command |
+| `.github/workflows/release.yml` | example tag command; then the two cross-compilation fixes above |
 | `devlogs/devlog_200.md` | changelog row notes the renumbering |
 
 **Not a file change, but the most important thing in this devlog:** the release commit carries no
