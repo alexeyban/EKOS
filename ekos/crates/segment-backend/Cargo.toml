@@ -3,6 +3,10 @@ name = "ekos-segment-backend"
 description = "RFC 0113 — the storage-backend seam for sealed fact-segment objects (local FS / object storage)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [features]
 default = []

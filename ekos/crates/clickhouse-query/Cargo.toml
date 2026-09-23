@@ -3,6 +3,10 @@ name = "ekos-clickhouse-query"
 description = "Live NL-to-SQL query engine over a compiled ClickHouse schema (RFC 0056, Stage 2)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-kir.workspace = true

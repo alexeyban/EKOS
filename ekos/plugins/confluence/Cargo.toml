@@ -3,6 +3,10 @@ name = "ekos-plugin-confluence"
 description = "Confluence page observer plugin (proof-of-concept — see RFC 0022)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

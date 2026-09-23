@@ -3,6 +3,10 @@ name = "ekos-sql-dialect-sdk"
 description = "SqlDialectParser trait — the contract a pluggable SQL dialect crate implements (RFC 0031)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 sqlparser.workspace = true

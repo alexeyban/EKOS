@@ -3,6 +3,10 @@ name = "ekos-distributed"
 description = "RFC 0113 B4 — Distributed-mode read path: Service B query workers + the DistributedLedger gateway (impl KnowledgeStore)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [features]
 default = []

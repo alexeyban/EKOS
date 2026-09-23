@@ -3,6 +3,10 @@ name = "ekos-recovery"
 description = "Knowledge Recovery compiler passes: SqlAnalyzer, GitAnalyzer, LLM integration"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

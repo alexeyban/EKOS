@@ -3,6 +3,10 @@ name = "ekos-evals"
 description = "RFC 0138 — end-to-end agent/answer evaluation harness: scenario datasets, runners, evaluators, and the ekos eval report"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-kir.workspace = true

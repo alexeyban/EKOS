@@ -3,6 +3,10 @@ name = "ekos-plugin-clickhouse"
 description = "ClickHouse schema observer plugin — real HTTP client (RFC 0056)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

@@ -3,6 +3,10 @@ name = "ekos-runtime"
 description = "Read-only state reconstruction from the ledger"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-artifact.workspace = true

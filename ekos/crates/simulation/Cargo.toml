@@ -3,6 +3,10 @@ name = "ekos-simulation"
 description = "Deterministic multi-round simulation engine: agent decisions, actions, and world updates over the ledger (RFC 0050)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-kir.workspace = true
@@ -15,7 +19,7 @@ ekos-artifact.workspace = true
 ekos-compiler-core.workspace = true
 ekos-observation-sdk.workspace = true
 ekos-recovery.workspace = true
-ekos-plugin-localdocs = { path = "../../plugins/localdocs" }
+ekos-plugin-localdocs.workspace = true
 chrono.workspace = true
 rand.workspace = true
 serde.workspace = true

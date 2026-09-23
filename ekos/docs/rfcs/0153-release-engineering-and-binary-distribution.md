@@ -140,19 +140,32 @@ alongside the one-liner, and the checksum step is not optional.
 ## 6. crates.io (deferred, documented)
 
 For `cargo install ekos` to work, every internal crate must be published, because path
-dependencies are not resolvable from the registry. The dependency order is the workspace member
-order already encoded in `ekos/Cargo.toml`: `common` → `kir` → `artifact` → `compiler-core` →
-`scheduler`/`compiler-sdk`/`observation-sdk`/`sql-dialect-sdk` → `segment-backend` → `cluster` →
-`ledger` → `distributed` → `runtime` → `identity` → `recovery` → `ekl` → `semantic` → the
-`plugins/*` → `docs-gen`/`dbt-gen`/`marketing`/`session`/`evals` → `cli`.
+dependencies are not resolvable from the registry.
 
-Blockers to resolve first, all of them real:
+**Groundwork completed 2026-09-23 (devlog_202).** The counts in the original draft of this
+section were wrong: the workspace has **52 members**, and the dependency closure of the `ekos`
+binary is **44**, not 30. The order is not the workspace member order either — it is a validated
+topological sort of the real `cargo metadata` graph, and it now lives in
+`scripts/publish-crates.sh`, which is ordered, resumable and `--dry-run`-able.
 
-- Every crate needs `description` and `repository`; crates.io rejects a publish without them.
-- Every internal dependency must carry a `version` alongside its `path`.
-- Names: `ekos-common`, `ekos-kir` etc. must all be available, not just `ekos`.
-- 30 publishes is 30 irreversible acts. It should be done once, deliberately, with a dry run
-  (`cargo publish --dry-run`) per crate.
+Blockers, all now resolved:
+
+- ~~Every crate needs `description` and `repository`~~ — done. Note that `[workspace.package]`
+  values apply only where a member writes `<field>.workspace = true`; 51 of 52 crates had not,
+  so setting them at the workspace level alone changed nothing.
+- ~~Every internal dependency must carry a `version` alongside its `path`~~ — done, and all 16
+  member-level path declarations were converted to `.workspace = true` so the version exists in
+  exactly one place.
+- ~~Names must be available~~ — all 44 confirmed free by exact lookup (not the fuzzy search
+  endpoint, which only returns near-matches).
+- Size: all 44 together are 4.7 MB of tracked content, against a 10 MiB per-crate limit.
+
+The one thing that **cannot** be done in advance: a full dry run. `cargo package` fails for any
+crate whose internal dependencies are not yet on the registry (`no matching package named
+'ekos-common' found`), so only the 4 crates with no internal dependencies can be verified before
+the real publish begins. This is why the publish script is resumable rather than all-or-nothing.
+
+44 publishes is 44 irreversible acts, so it stays a deliberate human decision.
 
 Recommended interim step: publish `ekos` v0.0.0 as a placeholder pointing at the repository, to
 hold the name. This is mild name-holding and worth naming as such — the mitigating facts are that

@@ -3,6 +3,10 @@ name = "ekos-cluster"
 description = "RFC 0113 B3 — distributed-mode coordinator + compile-worker (partition catalog, write leases, fencing tokens, tx watermarks)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 serde = { workspace = true }

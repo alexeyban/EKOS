@@ -3,6 +3,10 @@ name = "ekos-artifact"
 description = "Content-addressable artifact types (Phase 2 — stub)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

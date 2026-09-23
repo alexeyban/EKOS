@@ -76,37 +76,53 @@ categories = ["development-tools", "command-line-utilities"]
 rust-version = "1.98"
 
 [workspace.dependencies]
-# Internal crates
-ekos-common    = { path = "crates/common" }
-ekos-kir       = { path = "crates/kir" }
-ekos-session   = { path = "crates/session" }
-ekos-artifact  = { path = "crates/artifact" }
-ekos-compiler-core = { path = "crates/compiler-core" }
-ekos-segment-backend = { path = "crates/segment-backend" }
-ekos-cluster   = { path = "crates/cluster" }
-ekos-ledger    = { path = "crates/ledger" }
-ekos-distributed = { path = "crates/distributed" }
-ekos-runtime   = { path = "crates/runtime" }
-ekos-simulation = { path = "crates/simulation" }
-ekos-identity  = { path = "crates/identity" }
-ekos-semantic  = { path = "crates/semantic" }
-ekos-observation-sdk = { path = "crates/observation-sdk" }
-ekos-sql-dialect-sdk = { path = "crates/sql-dialect-sdk" }
-ekos-plugin-sql-dialect-mysql = { path = "plugins/sql-dialect-mysql" }
-ekos-plugin-sql-dialect-postgres = { path = "plugins/sql-dialect-postgres" }
-ekos-plugin-sql-dialect-snowflake = { path = "plugins/sql-dialect-snowflake" }
-ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks" }
-ekos-plugin-sql-dialect-mssql = { path = "plugins/sql-dialect-mssql" }
-ekos-plugin-sql-dialect-clickhouse = { path = "plugins/sql-dialect-clickhouse" }
-ekos-plugin-clickhouse = { path = "plugins/clickhouse" }
-ekos-clickhouse-query = { path = "crates/clickhouse-query" }
-ekos-recovery       = { path = "crates/recovery" }
-ekos-ekl       = { path = "crates/ekl" }
-ekos-marketing = { path = "crates/marketing" }
-ekos-docs-gen  = { path = "crates/docs-gen" }
-ekos-dbt-gen   = { path = "crates/dbt-gen" }
-ekos-evals     = { path = "crates/evals" }
-ekos           = { path = "crates/cli" }
+# Internal crates. `version` alongside `path` is required to publish: cargo uses the path for
+# local builds and strips it on publish, leaving the registry version. Keeping every internal
+# version here — and nowhere else — means a release bumps this one block, not 40 manifests.
+ekos-common                        = { path = "crates/common", version = "1.0.1" }
+ekos                               = { path = "crates/cli", version = "1.0.1" }
+ekos-artifact                      = { path = "crates/artifact", version = "1.0.1" }
+ekos-clickhouse-query              = { path = "crates/clickhouse-query", version = "1.0.1" }
+ekos-cluster                       = { path = "crates/cluster", version = "1.0.1" }
+ekos-compiler-core                 = { path = "crates/compiler-core", version = "1.0.1" }
+ekos-dbt-gen                       = { path = "crates/dbt-gen", version = "1.0.1" }
+ekos-distributed                   = { path = "crates/distributed", version = "1.0.1" }
+ekos-docs-gen                      = { path = "crates/docs-gen", version = "1.0.1" }
+ekos-ekl                           = { path = "crates/ekl", version = "1.0.1" }
+ekos-evals                         = { path = "crates/evals", version = "1.0.1" }
+ekos-identity                      = { path = "crates/identity", version = "1.0.1" }
+ekos-kir                           = { path = "crates/kir", version = "1.0.1" }
+ekos-ledger                        = { path = "crates/ledger", version = "1.0.1" }
+ekos-marketing                     = { path = "crates/marketing", version = "1.0.1" }
+ekos-observation-sdk               = { path = "crates/observation-sdk", version = "1.0.1" }
+ekos-plugin-clickhouse             = { path = "plugins/clickhouse", version = "1.0.1" }
+ekos-plugin-confluence             = { path = "plugins/confluence", version = "1.0.1" }
+ekos-plugin-crypto                 = { path = "plugins/crypto", version = "1.0.1" }
+ekos-plugin-elixir                 = { path = "plugins/elixir", version = "1.0.1" }
+ekos-plugin-file                   = { path = "plugins/file", version = "1.0.1" }
+ekos-plugin-git                    = { path = "plugins/git", version = "1.0.1" }
+ekos-plugin-github                 = { path = "plugins/github", version = "1.0.1" }
+ekos-plugin-governance             = { path = "plugins/governance", version = "1.0.1" }
+ekos-plugin-javascript             = { path = "plugins/javascript", version = "1.0.1" }
+ekos-plugin-localdocs              = { path = "plugins/localdocs", version = "1.0.1" }
+ekos-plugin-pentaho                = { path = "plugins/pentaho", version = "1.0.1" }
+ekos-plugin-perl                   = { path = "plugins/perl", version = "1.0.1" }
+ekos-plugin-python                 = { path = "plugins/python", version = "1.0.1" }
+ekos-plugin-rust                   = { path = "plugins/rust", version = "1.0.1" }
+ekos-plugin-sql-dialect-clickhouse = { path = "plugins/sql-dialect-clickhouse", version = "1.0.1" }
+ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks", version = "1.0.1" }
+ekos-plugin-sql-dialect-mssql      = { path = "plugins/sql-dialect-mssql", version = "1.0.1" }
+ekos-plugin-sql-dialect-mysql      = { path = "plugins/sql-dialect-mysql", version = "1.0.1" }
+ekos-plugin-sql-dialect-postgres   = { path = "plugins/sql-dialect-postgres", version = "1.0.1" }
+ekos-plugin-sql-dialect-snowflake  = { path = "plugins/sql-dialect-snowflake", version = "1.0.1" }
+ekos-plugin-treasury               = { path = "plugins/treasury", version = "1.0.1" }
+ekos-recovery                      = { path = "crates/recovery", version = "1.0.1" }
+ekos-runtime                       = { path = "crates/runtime", version = "1.0.1" }
+ekos-segment-backend               = { path = "crates/segment-backend", version = "1.0.1" }
+ekos-semantic                      = { path = "crates/semantic", version = "1.0.1" }
+ekos-session                       = { path = "crates/session", version = "1.0.1" }
+ekos-simulation                    = { path = "crates/simulation", version = "1.0.1" }
+ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.0.1" }
 
 # Async
 tokio      = { version = "1", features = ["full"] }

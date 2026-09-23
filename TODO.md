@@ -5881,11 +5881,23 @@ into a running instance, and a first run could silently produce nothing.
     `.github/workflows/release.yml` and creates the public release. Until then `install.sh` has no
     release to resolve.
 
-- [ ] **crates.io publish (RFC 0153 §6)** — `cargo install ekos` needs all 30 internal crates
-  published in dependency order. Blockers: `description`/`repository` on every crate, a `version`
-  alongside every internal `path` dependency, per-crate `readme`, and name availability for
-  `ekos-*`. 30 irreversible acts; do it once, deliberately, with `--dry-run` per crate. The name
-  `ekos` was confirmed unclaimed on 2026-09-23.
+- [~] **crates.io publish (RFC 0153 §6)** — **groundwork done 2026-09-23 (devlog_202); the
+  publish itself is not done and is a deliberate human act.**
+  - *Done:* all 52 manifests carry `description`/`repository`/`license`/`rust-version`; every
+    internal dep carries a `version` in `[workspace.dependencies]` and nowhere else; 8 crates
+    marked `publish = false`; all 44 names confirmed free; total size 4.7 MB against a 10 MiB
+    per-crate limit; `scripts/publish-crates.sh` runs the validated topological order, skips
+    anything already published, and supports `--dry-run`.
+  - *Not 30 crates — 44.* The original estimate was wrong; the workspace has 52 members and the
+    `ekos` binary's closure is 44.
+  - *To publish:* `cargo login`, then `scripts/publish-crates.sh --dry-run` to read the plan, then
+    `scripts/publish-crates.sh`. 44 irreversible acts. A full dry run is impossible before
+    starting — `cargo package` cannot resolve internal deps that are not yet on the registry — so
+    the script is resumable instead.
+  - *Decide first:* `ekos-compiler-sdk` and `ekos-scheduler` are currently `publish = false`
+    because **nothing in the workspace depends on either**, despite `CLAUDE.md` describing them
+    as the public extension API and the pass-scheduling primitives. Confirm they are current
+    before publishing them, or retire them.
 
 - [ ] **Release signing** — `SHA256SUMS` only today. Sigstore/cosign or minisign, plus SLSA
   provenance, once there is a release cadence worth attesting.

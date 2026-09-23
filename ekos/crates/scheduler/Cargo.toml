@@ -3,6 +3,12 @@ name = "ekos-scheduler"
 description = "Re-exports scheduler types from compiler-core (Phase 1 — thin crate)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+# Not published to crates.io: nothing in the workspace depends on it; confirm it is current before publishing it.
+publish = false
 
 [dependencies]
 ekos-compiler-core.workspace = true

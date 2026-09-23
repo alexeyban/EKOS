@@ -3,6 +3,12 @@ name = "ekos-compiler-sdk"
 description = "Public SDK for extending the compiler (Phase 1 — stub)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+# Not published to crates.io: nothing in the workspace depends on it; confirm it is current before publishing it as a public API.
+publish = false
 
 [dependencies]
 ekos-compiler-core.workspace = true

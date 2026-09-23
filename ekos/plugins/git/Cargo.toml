@@ -3,6 +3,10 @@ name = "ekos-plugin-git"
 description = "Git repository observer plugin (Phase 4)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

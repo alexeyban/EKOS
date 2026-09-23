@@ -3,6 +3,10 @@ name = "ekos-plugin-elixir"
 description = "Elixir (.ex/.exs) observer plugin (RFC 0081)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

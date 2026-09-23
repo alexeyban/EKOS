@@ -3,6 +3,12 @@ name = "ekos-demo-server"
 description = "RFC 0045 — hosted, read-only demo server: static curated docs + one evidence-cited /ask endpoint, over a fixed two-repo catalog"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+# Not published to crates.io: an internal demo/prerender server, not part of the `ekos` binary.
+publish = false
 
 [lib]
 name = "ekos_demo_server"

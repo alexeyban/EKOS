@@ -3,6 +3,10 @@ name = "ekos-semantic"
 description = "Semantic compiler pass: KIR → Canonical Knowledge Model (Phase 8)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

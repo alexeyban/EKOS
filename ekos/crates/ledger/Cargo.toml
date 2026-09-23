@@ -3,6 +3,10 @@ name = "ekos-ledger"
 description = "Append-only semantic knowledge ledger (skeleton — SQLite backend)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

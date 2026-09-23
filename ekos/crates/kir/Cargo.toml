@@ -3,6 +3,10 @@ name = "ekos-kir"
 description = "Knowledge Intermediate Representation — the four canonical node types"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

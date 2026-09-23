@@ -1,6 +1,6 @@
 [package]
 name = "ekos"
-description = "Enterprise Knowledge Operating System — CLI"
+description = "A compiler for enterprise knowledge: observes source code, schemas, Git history and documents, compiles them into an evidence-backed append-only ledger, and serves it to AI agents over MCP"
 version.workspace = true
 edition.workspace = true
 # RFC 0153 — workspace package metadata applies only where a member opts in.
@@ -10,6 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
+readme = "README.md"
 
 [lib]
 name = "ekos"
@@ -47,22 +48,22 @@ ekos-docs-gen.workspace = true
 ekos-evals.workspace = true
 ekos-session.workspace = true
 ekos-dbt-gen.workspace = true
-ekos-semantic = { path = "../../crates/semantic" }
-ekos-plugin-file = { path = "../../plugins/file" }
-ekos-plugin-git  = { path = "../../plugins/git" }
-ekos-plugin-crypto = { path = "../../plugins/crypto" }
-ekos-plugin-github = { path = "../../plugins/github" }
-ekos-plugin-treasury = { path = "../../plugins/treasury" }
-ekos-plugin-governance = { path = "../../plugins/governance" }
-ekos-plugin-confluence = { path = "../../plugins/confluence" }
+ekos-semantic.workspace = true
+ekos-plugin-file.workspace = true
+ekos-plugin-git.workspace = true
+ekos-plugin-crypto.workspace = true
+ekos-plugin-github.workspace = true
+ekos-plugin-treasury.workspace = true
+ekos-plugin-governance.workspace = true
+ekos-plugin-confluence.workspace = true
 ekos-plugin-clickhouse.workspace = true
-ekos-plugin-localdocs = { path = "../../plugins/localdocs" }
-ekos-plugin-pentaho = { path = "../../plugins/pentaho" }
-ekos-plugin-python = { path = "../../plugins/python" }
-ekos-plugin-rust = { path = "../../plugins/rust" }
-ekos-plugin-elixir = { path = "../../plugins/elixir" }
-ekos-plugin-perl = { path = "../../plugins/perl" }
-ekos-plugin-javascript = { path = "../../plugins/javascript" }
+ekos-plugin-localdocs.workspace = true
+ekos-plugin-pentaho.workspace = true
+ekos-plugin-python.workspace = true
+ekos-plugin-rust.workspace = true
+ekos-plugin-elixir.workspace = true
+ekos-plugin-perl.workspace = true
+ekos-plugin-javascript.workspace = true
 clap.workspace = true
 uuid.workspace = true
 tokio.workspace = true

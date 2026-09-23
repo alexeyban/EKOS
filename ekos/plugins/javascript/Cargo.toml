@@ -3,6 +3,10 @@ name = "ekos-plugin-javascript"
 description = "JavaScript/TypeScript (.js/.jsx/.ts/.tsx/.mjs/.cjs) observer plugin (RFC 0085)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true

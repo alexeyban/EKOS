@@ -3,6 +3,10 @@ name = "ekos-docs-gen"
 description = "RFC 0035 — Generated Documentation: renders compiled ledger objects as Markdown/HTML/diagrams"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-kir.workspace = true

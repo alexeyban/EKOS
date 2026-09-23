@@ -3,6 +3,10 @@ name = "ekos-marketing"
 description = "RFC 0030 — Marketing Agent: devlog -> tweet draft -> human approval -> X publish"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-compiler-core.workspace = true

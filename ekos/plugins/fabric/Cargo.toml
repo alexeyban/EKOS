@@ -3,6 +3,12 @@ name = "ekos-plugin-fabric"
 description = "Microsoft Fabric workspace observer plugin (Phase 14, scaffold — see RFC 0012)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+# Not published to crates.io: scaffolded proof of concept against mock API shapes, never run against a live account.
+publish = false
 
 [dependencies]
 ekos-common.workspace = true

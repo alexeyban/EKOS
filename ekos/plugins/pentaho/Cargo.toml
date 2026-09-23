@@ -3,6 +3,10 @@ name = "ekos-plugin-pentaho"
 description = "Pentaho Kettle (.ktr/.kjb) observer plugin (RFC 0027 Phase 3)"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 ekos-common.workspace = true
