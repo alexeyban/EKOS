@@ -5894,6 +5894,10 @@ into a running instance, and a first run could silently produce nothing.
     `scripts/publish-crates.sh`. 44 irreversible acts. A full dry run is impossible before
     starting — `cargo package` cannot resolve internal deps that are not yet on the registry — so
     the script is resumable instead.
+  - *Expect ~6.5 hours.* crates.io rate-limits **new** crates to a burst of ~5 then ~1 every 10
+    minutes (rust-lang/crates.io#1643 shows a 429 at the 28th crate of a workspace). The script
+    waits each limit out and retries, so it can be left running; interrupting is safe. A limit
+    increase can be requested from crates.io support if that is too slow.
   - *Decide first:* `ekos-compiler-sdk` and `ekos-scheduler` are currently `publish = false`
     because **nothing in the workspace depends on either**, despite `CLAUDE.md` describing them
     as the public extension API and the pass-scheduling primitives. Confirm they are current
