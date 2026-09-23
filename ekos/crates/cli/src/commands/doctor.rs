@@ -220,7 +220,57 @@ fn collect_checks(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Vec<Ch
         checks.push(check);
     }
 
+    checks.push(coverage_check(config, cwd));
+
     checks
+}
+
+/// RFC 0152 — did the last compile actually produce objects for every input kind present?
+///
+/// `doctor` checked the environment and never the *result*, which is why five separate real
+/// workspaces compiled to nothing while every check here passed. An absent CKM is `ok`, not a
+/// failure: `doctor` is routinely the first command anyone runs, long before a first compile.
+fn coverage_check(config: &EkosConfig, cwd: &Path) -> Check {
+    let model = match crate::commands::coverage::load_model(config, cwd) {
+        Ok(m) => m,
+        Err(_) => {
+            return Check::ok(
+                "Coverage",
+                "not compiled yet — run the pipeline, then `ekos coverage`",
+            );
+        }
+    };
+    let detection = match crate::detect::detect_workspace(cwd, config) {
+        Ok(d) => d,
+        Err(e) => return Check::ok("Coverage", format!("workspace scan skipped: {e}")),
+    };
+
+    let report = crate::coverage::compute_coverage(&detection, &model);
+    let findings = report.findings();
+    if findings.is_empty() {
+        return Check::ok(
+            "Coverage",
+            format!(
+                "{} object(s); every input kind produced objects",
+                report.total_objects
+            ),
+        );
+    }
+
+    let named = findings
+        .iter()
+        .map(|r| format!("{} ({})", r.kind.label(), r.status.label()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let detail = format!("{named} — run `ekos coverage` for the likely cause");
+
+    // Only a genuine zero fails the doctor. `no-edges` is worth naming but a kind can honestly
+    // have no relationships (a lone manifest, a single-file script).
+    if report.has_zero_coverage() {
+        Check::fail("Coverage", detail)
+    } else {
+        Check::ok("Coverage", detail)
+    }
 }
 
 /// RFC 0145: the effective Ollama context window (the setting that silently truncated prompts

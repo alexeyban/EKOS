@@ -1,0 +1,10 @@
+# RFC 0153 — pin the toolchain so a release built today and rebuilt in six months is the same
+# compiler. "Reproducible builds" is one of this project's stated coding rules and, before this
+# file existed, nothing enforced it: CI, the release workflow and every developer machine each
+# resolved `stable` to whatever was current that day.
+#
+# Bumping this is a deliberate act: change the version, run the full local gate
+# (build + test + clippy + fmt from `ekos/`), and say so in the devlog.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]

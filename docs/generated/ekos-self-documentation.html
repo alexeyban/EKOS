@@ -82,6 +82,7 @@
   instead of guessing.</p>
 
   <nav class="toc" aria-label="On this page">
+    <a href="#install">Install &amp; first run</a>
     <a href="#pipeline">The pipeline</a>
     <a href="#connectors">Connectors</a>
     <a href="#recovery">Knowledge recovery</a>
@@ -99,6 +100,23 @@
     <a href="#clickhouse">ClickHouse connector</a>
     <a href="#evidence">Live evidence from this repo</a>
   </nav>
+
+  <!-- ═══════════════════════════════════════════════ INSTALL ═══ -->
+  <section class="cap" id="install">
+    <div class="cap-num">00</div>
+    <h2>Install &amp; first run</h2>
+    <p class="lede">One command, no Rust toolchain. The installer resolves the latest release,
+    verifies the download against that release's <code class="mono">SHA256SUMS</code>
+    <strong>before</strong> unpacking it, installs a single binary into
+    <code class="mono">~/.local/bin</code>, and never uses <code class="mono">sudo</code>.</p>
+    <pre class="mono" style="padding:1rem; overflow-x:auto;">curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh</pre>
+    <div class="feat-grid">
+      <div class="feat"><h3>Prebuilt binaries</h3><p>Linux x86_64 (glibc and fully static musl), Linux aarch64, macOS on Apple Silicon and Intel, Windows x86_64. Built from a toolchain pinned by <code class="mono">rust-toolchain.toml</code>, so a release rebuilt months later is the same compiler. Nothing in the dependency graph resists static linking: SQLite is bundled from source, TLS is rustls, and the one native tool (<code class="mono">tesseract</code>, for OCR) is shelled out to and degrades gracefully when absent rather than being linked.<span class="rfc">RFC 0153</span></p></div>
+      <div class="feat"><h3><code class="mono">ekos init --detect</code></h3><p>Writes an <code class="mono">ekos.toml</code> that reflects what is actually in the repository, instead of the inert seven-line default: the SQL dialect its schema is written in (scored from real markers across sampled files — a tie yields <code class="mono">generic</code> rather than a coin flip), exclusions for every third-party or generated directory found, and an inventory of the source kinds present. Every generated line carries the evidence behind it as a comment. Refuses to overwrite an existing config without <code class="mono">--force</code>; <code class="mono">--dry-run</code> previews and writes nothing.<span class="rfc">RFC 0152</span></p></div>
+      <div class="feat"><h3><code class="mono">ekos coverage</code></h3><p>Joins <em>inputs present in the tree</em> against <em>objects compiled into the model</em>, per source kind. A kind with files and zero objects is a named finding with its likely cause — not silence. Runs automatically as a one-line tail on <code class="mono">ekos compile</code> (and prints nothing at all when everything is healthy), as a <code class="mono">doctor</code> check, and as <code class="mono">ekos coverage --strict</code> for CI, which exits non-zero. <code class="mono">--json</code> emits the same verdict for machines.<span class="rfc">RFC 0152</span></p></div>
+    </div>
+    <p class="lede" style="font-size:0.92rem; margin-top:1.8rem;"><strong>Why this exists.</strong> Five separate real codebases compiled to nothing while every stage reported success: a wrong SQL dialect made a 103-table schema vanish behind one buried <code class="mono">SQL001</code>; an <code class="mono">[observe] paths</code> list of subdirectories made the git observer find zero commits with no error; a missing <code class="mono">.venv</code> exclusion made 50.9% of this project's own compiled objects describe numpy and scipy internals. The information needed to catch all of it was already in the workspace — nothing joined it. Now something does.</p>
+  </section>
 
   <!-- ═══════════════════════════════════════════════ PIPELINE ═══ -->
   <section class="cap" id="pipeline">

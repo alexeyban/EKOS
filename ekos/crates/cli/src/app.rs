@@ -23,7 +23,19 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize .ekos/ workspace directory
-    Init,
+    Init {
+        /// Scan the workspace and write an ekos.toml that reflects what is actually in it —
+        /// SQL dialect, exclusions for third-party/generated directories, detected inputs
+        /// (RFC 0152)
+        #[arg(long)]
+        detect: bool,
+        /// Print the config that would be written and write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Overwrite an existing ekos.toml
+        #[arg(long)]
+        force: bool,
+    },
     /// Run observation passes and write knowledge to the ledger
     Build,
     /// Run knowledge-recovery compiler passes (SQL + Git analysis)
@@ -54,6 +66,19 @@ enum Commands {
     },
     /// Clear the artifact cache (.ekos/artifacts/)
     Clean,
+    /// Report which input kinds compiled into objects — and which silently produced nothing
+    /// (RFC 0152)
+    Coverage {
+        /// Emit one machine-readable JSON object instead of the text table
+        #[arg(long)]
+        json: bool,
+        /// Exit non-zero when any input kind produced zero objects
+        #[arg(long)]
+        strict: bool,
+        /// Include kinds with no inputs in this workspace
+        #[arg(long)]
+        all: bool,
+    },
     /// Check the environment and configuration
     Doctor {
         /// Emit one machine-readable JSON object instead of the text checklist (RFC 0129 R5)
@@ -787,9 +812,10 @@ fn resolve_config_path(
 /// `--json` flags on these subcommands and with `graph export` (always machine output).
 fn emits_machine_output(command: &Commands) -> bool {
     match command {
-        Commands::Status { json, .. } | Commands::Doctor { json } | Commands::Ekl { json, .. } => {
-            *json
-        }
+        Commands::Status { json, .. }
+        | Commands::Doctor { json }
+        | Commands::Ekl { json, .. }
+        | Commands::Coverage { json, .. } => *json,
         Commands::Graph {
             subcommand: GraphCommands::Export { .. },
         } => true,
@@ -846,7 +872,22 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
     }
 
     match cli.command {
-        Commands::Init => crate::commands::init::run(&config, &cwd),
+        Commands::Init {
+            detect,
+            dry_run,
+            force,
+        } => crate::commands::init::run_with_options(
+            &config,
+            &cwd,
+            crate::commands::init::InitOptions {
+                detect,
+                dry_run,
+                force,
+            },
+        ),
+        Commands::Coverage { json, strict, all } => {
+            crate::commands::coverage::run(&config, &cwd, json, strict, all)
+        }
         Commands::Build => crate::commands::build::run_with(&config, &cwd, &extensions).await,
         Commands::Recover { parallel } => {
             crate::commands::recover::run_with(&config, &cwd, parallel, &extensions).await

@@ -3,6 +3,13 @@ name = "ekos"
 description = "Enterprise Knowledge Operating System — CLI"
 version.workspace = true
 edition.workspace = true
+# RFC 0153 — workspace package metadata applies only where a member opts in.
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "ekos"

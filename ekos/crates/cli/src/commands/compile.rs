@@ -64,6 +64,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     println!("  Objects:       {obj_count}");
     println!("  Relationships: {rel_count}");
     println!("  CKM written:   {}", written_path.display());
+    print!("{}", coverage_tail(config, cwd, &model));
     if ctx.diagnostics.lock().unwrap().has_warnings() {
         let warning_count = ctx.diagnostics.lock().unwrap().warning_count();
         // RFC 0076: "(check logs)" used to point nowhere real — diagnostics only ever logged at
@@ -84,6 +85,28 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// RFC 0152 — one line per coverage finding, and nothing at all on a clean run.
+///
+/// A source kind with files in the tree and zero objects in the model is the failure mode that
+/// cost this project five silent first runs (a whole 103-table schema, a whole git history, a
+/// whole .NET call graph). `compile`'s exit code is deliberately unchanged: a workspace can
+/// legitimately hold one `.sql` migration fragment that produces no tables, so the default is
+/// loud rather than fatal. `ekos coverage --strict` is the fatal form.
+///
+/// Detection failing is never allowed to fail `compile` — the compile itself succeeded, and a
+/// reporting step must not retroactively break it.
+fn coverage_tail(config: &EkosConfig, cwd: &Path, model: &CkModel) -> String {
+    match crate::detect::detect_workspace(cwd, config) {
+        Ok(detection) => crate::coverage::render_compile_tail(&crate::coverage::compute_coverage(
+            &detection, model,
+        )),
+        Err(e) => {
+            tracing::debug!("coverage detection skipped: {e}");
+            String::new()
+        }
+    }
 }
 
 /// SEM002 ("unknown from/to-id") fires for *every* relationship pointing at a `File` object,

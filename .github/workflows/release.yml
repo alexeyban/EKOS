@@ -1,0 +1,187 @@
+name: Release
+
+# RFC 0153 — build prebuilt `ekos` binaries for a tagged version and publish them as a GitHub
+# Release. Tag-triggered and deliberate: nothing here runs on a merge to main.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# `workflow_dispatch` builds the artifacts without creating a release, for testing the matrix.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One broken target must not cancel the others: a release missing one platform is worth
+      # more than no release at all, and the missing row is obvious in the artifact list.
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          # Fully static — runs on any glibc vintage, in Alpine, and in slim containers.
+          # glibc version skew is the most common "your binary doesn't run" report for Rust CLIs.
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            packages: musl-tools
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-15
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # No `toolchain:` input — `rust-toolchain.toml` at the repository root pins the version,
+      # and rustup honours it for every cargo invocation below.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation packages
+        if: matrix.packages != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: release-${{ matrix.target }}-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: release-${{ matrix.target }}-
+
+      # Default features only: the `distributed` feature pulls the whole object_store stack and
+      # a stock build must never compile it (RFC 0113).
+      - name: Build
+        working-directory: ekos
+        run: cargo build --release --locked -p ekos --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" = "tag" ] || version="dev"
+          stage="ekos-${version}-${{ matrix.target }}"
+          mkdir -p "dist/${stage}"
+          cp "ekos/target/${{ matrix.target }}/release/ekos" "dist/${stage}/"
+          cp README.md LICENSE "dist/${stage}/"
+          tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
+          if command -v shasum >/dev/null; then
+            (cd dist && shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
+          else
+            (cd dist && sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256")
+          fi
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v','' } else { 'dev' }
+          $stage = "ekos-$version-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "dist/$stage" | Out-Null
+          Copy-Item "ekos/target/${{ matrix.target }}/release/ekos.exe" "dist/$stage/"
+          Copy-Item README.md, LICENSE "dist/$stage/"
+          Compress-Archive -Path "dist/$stage" -DestinationPath "dist/$stage.zip"
+          $hash = (Get-FileHash "dist/$stage.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $stage.zip" | Out-File -Encoding ascii "dist/$stage.zip.sha256"
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ekos-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download every target's artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Build one SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+          echo "Release contains:"
+          cat SHA256SUMS
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes=CHANGELOG.md
+          if [ -f "$notes" ]; then
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --title "${GITHUB_REF_NAME}" --notes-file "$notes"
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
+
+  verify:
+    name: Verify install.sh
+    needs: release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The point of this job: a release nobody can install must fail here, not in a user's
+      # terminal. It installs the release that was just published, exactly as a reader would.
+      - name: Install from the published release
+        env:
+          EKOS_VERSION: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: sh ./install.sh
+
+      - name: The binary runs and reports its version
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          ekos --version
+          ekos --version | grep -qv '0\.0\.0'
+
+      - name: It works on a real workspace
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p /tmp/ws/db && cd /tmp/ws
+          printf 'CREATE TABLE t (id SERIAL PRIMARY KEY);\n' > db/schema.sql
+          ekos init --detect --dry-run | grep -q 'default-dialect = "postgres"'

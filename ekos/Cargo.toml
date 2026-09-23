@@ -60,6 +60,20 @@ version = "0.1.0"
 edition = "2024"
 authors = ["alexeyban"]
 license = "MIT"
+# RFC 0153 — release metadata. `repository` and `description` are also what crates.io requires
+# on every crate, so having them correct here is a prerequisite for the deferred publish (see
+# the RFC's §6 for the ordering and the blockers). No `readme` key: its path resolves relative
+# to each *member* crate, and a file outside a crate's own directory is not included in
+# `cargo package` — so a workspace-level value here would be wrong for every member. It belongs
+# per-crate, as part of the deferred crates.io work.
+description = "EKOS — a compiler for enterprise knowledge: observes source systems, compiles them through deterministic passes into a canonical knowledge model, and serves it to AI agents over MCP with evidence for every conclusion."
+repository = "https://github.com/alexeyban/EKOS"
+homepage = "https://alexeyban.github.io/EKOS/"
+keywords = ["knowledge", "compiler", "mcp", "ai", "ledger"]
+categories = ["development-tools", "command-line-utilities"]
+# The toolchain `rust-toolchain.toml` pins. Kept in step with it deliberately: this is the
+# contract for anyone building from source, that file is what CI and releases actually use.
+rust-version = "1.98"
 
 [workspace.dependencies]
 # Internal crates
@@ -196,3 +210,16 @@ tower-http = { version = "0.5", features = ["fs", "trace"] }
 
 # Markdown -> static HTML pre-render, offline bake step only (RFC 0045)
 pulldown-cmark = "0.12"
+
+# RFC 0153 — the profile releases are built with. Before this existed the workspace had no
+# `[profile.release]` at all, so a published binary would have shipped on defaults.
+[profile.release]
+# The single largest size win for a 34-crate workspace.
+strip = "symbols"
+# Cross-crate inlining across the whole pipeline. "fat" costs real CI minutes for little gain
+# at this size, so "thin" is the deliberate stopping point.
+lto = "thin"
+# NOT "abort", though it would be a further size win: RFC 0115's TCP transport spawns one OS
+# thread per connection and RFC 0113's cluster workers do the same. A panic while serving one
+# request must not take down a server that is serving others.
+panic = "unwind"

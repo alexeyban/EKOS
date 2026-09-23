@@ -9,6 +9,7 @@ pub mod cluster;
 pub mod commit;
 pub mod compile;
 pub mod config;
+pub mod coverage;
 pub mod dbt;
 pub mod diagnostics_log;
 pub mod diff;

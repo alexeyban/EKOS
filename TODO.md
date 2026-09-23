@@ -5840,3 +5840,48 @@ P0 ─► P1 ─► P2 ─► P3 ══► M1  manual loop works end to end (not
 - Read path: budget truncation, explicit no-memory result, pending notes shown separately.
 - Eval: negative controls, breakable-metric check, variance reporting.
 - Adversarial: poisoned-note, flood, crash-mid-append, concurrent sessions.
+
+---
+
+## RFC 0152 / 0153 — First-run self-verification and binary distribution (2026-09-23)
+
+Both shipped in one session (`devlog_200`). Two halves of one problem: nothing converted a reader
+into a running instance, and a first run could silently produce nothing.
+
+- [x] **RFC 0152 — first-run self-verification**
+  - *What:* `ekos init --detect` writes an `ekos.toml` matching the repository (SQL dialect scored
+    from real markers, exclusions for third-party/generated directories, an inventory of inputs,
+    every line carrying its evidence as a comment). `ekos coverage [--json] [--strict] [--all]`
+    joins inputs present against objects compiled, per source kind, and names a likely cause for
+    every finding. Wired into `compile` (a tail that is silent on a clean run) and `doctor` (a
+    check that fails only on a genuine zero).
+  - *Output:* `cli/src/detect.rs`, `cli/src/coverage.rs`, `cli/src/commands/coverage.rs`,
+    `--detect`/`--dry-run`/`--force` on `init`. 40 new tests.
+  - *Validated:* the wrong-dialect incident reproduced end to end — `recover` reported "SQL files
+    analysed: 1" and `compile` reported "Objects: 5" while zero tables existed; the coverage tail
+    caught it and `--strict` exited 1. `init --detect` on this repository: 3.0s over a 142GB tree.
+  - *Status:* Done. See `devlog_200.md`, including the two design errors only a real run exposed.
+
+- [x] **RFC 0153 — release engineering and binary distribution**
+  - *What:* `rust-toolchain.toml` (pinned 1.98.0), `[profile.release]`, workspace release
+    metadata, a six-target tag-triggered release workflow, a checksum-verifying POSIX installer,
+    `CHANGELOG.md`, and a README that leads with the binary.
+  - *Output:* `.github/workflows/release.yml`, `install.sh`, `CHANGELOG.md`, `rust-toolchain.toml`.
+  - *Validated:* installer tested end to end against a locally served release — clean install
+    succeeds; tampered archive, unlisted asset, 404, unsupported OS and unsupported arch each
+    refuse and install nothing.
+  - *Status:* Done, **except the tag itself** — see below.
+
+- [ ] **Cut the v0.1.0 tag** — the workflow, installer, changelog and README all exist and are
+  tested, but no tag has been pushed, so there is still no release and `install.sh` cannot resolve
+  one. This is a deliberate human act: `git tag v0.1.0 && git push origin v0.1.0`. Until then the
+  README's install command does not work.
+
+- [ ] **crates.io publish (RFC 0153 §6)** — `cargo install ekos` needs all 30 internal crates
+  published in dependency order. Blockers: `description`/`repository` on every crate, a `version`
+  alongside every internal `path` dependency, per-crate `readme`, and name availability for
+  `ekos-*`. 30 irreversible acts; do it once, deliberately, with `--dry-run` per crate. The name
+  `ekos` was confirmed unclaimed on 2026-09-23.
+
+- [ ] **Release signing** — `SHA256SUMS` only today. Sigstore/cosign or minisign, plus SLSA
+  provenance, once there is a release cadence worth attesting.

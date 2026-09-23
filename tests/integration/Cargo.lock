@@ -820,16 +820,19 @@ dependencies = [
  "ekos-plugin-file",
  "ekos-plugin-git",
  "ekos-plugin-github",
+ "ekos-plugin-governance",
  "ekos-plugin-javascript",
  "ekos-plugin-localdocs",
  "ekos-plugin-pentaho",
  "ekos-plugin-perl",
  "ekos-plugin-python",
  "ekos-plugin-rust",
+ "ekos-plugin-treasury",
  "ekos-recovery",
  "ekos-runtime",
  "ekos-segment-backend",
  "ekos-semantic",
+ "ekos-session",
  "ekos-simulation",
  "serde",
  "serde_json",
@@ -998,6 +1001,7 @@ dependencies = [
 name = "ekos-identity"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "ekos-kir",
  "serde",
  "serde_json",
@@ -1209,6 +1213,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-governance"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ekos-artifact",
+ "ekos-observation-sdk",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ekos-plugin-javascript"
 version = "0.1.0"
 dependencies = [
@@ -1366,6 +1386,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-treasury"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ekos-artifact",
+ "ekos-observation-sdk",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ekos-recovery"
 version = "0.1.0"
 dependencies = [
@@ -1452,6 +1488,21 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ekos-session"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ekos-common",
+ "ekos-kir",
+ "ekos-ledger",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
  "uuid",
 ]
 

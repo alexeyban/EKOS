@@ -129,9 +129,47 @@ parsed from files (RFC 0031); live PostgreSQL / SQL Server database connectors a
 
 ## Installation
 
-EKOS builds from source — there's no prebuilt binary release yet. **The Cargo workspace root is
-`ekos/`, not the repo root** — there is no top-level `Cargo.toml`, so `cargo` commands must be run
-from inside `ekos/` (or with `--manifest-path ekos/Cargo.toml`).
+### Prebuilt binary (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh
+```
+
+Installs a single `ekos` binary into `~/.local/bin` (override with `EKOS_INSTALL_DIR`). No Rust
+toolchain, no compiler, nothing else to install. The script resolves the latest release, verifies
+the download against the release's `SHA256SUMS` **before** unpacking it, and never uses `sudo`.
+
+Piping a script into a shell is a real supply-chain decision, so the script is short enough to
+read first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+Prebuilt binaries cover Linux (x86_64 glibc, x86_64 static musl, aarch64) and macOS (Apple
+Silicon and Intel). On Windows, download the `.zip` from the
+[releases page](https://github.com/alexeyban/EKOS/releases) — or use WSL2 and the command above.
+Every asset is listed in that release's `SHA256SUMS`.
+
+Then:
+
+```bash
+cd /path/to/your/repo
+ekos init --detect     # writes an ekos.toml that matches what's actually in this repository
+ekos doctor
+```
+
+`ekos init --detect` is worth using rather than plain `ekos init`: it detects the SQL dialect your
+schema is written in, excludes third-party and generated directories that would otherwise be
+compiled as if they were your own code, and prints an inventory of what it found. See
+[RFC 0152](ekos/docs/rfcs/0152-first-run-self-verification.md).
+
+### From source
+
+**The Cargo workspace root is `ekos/`, not the repo root** — there is no top-level `Cargo.toml`,
+so `cargo` commands must be run from inside `ekos/` (or with `--manifest-path ekos/Cargo.toml`).
+The toolchain is pinned by `rust-toolchain.toml`; rustup installs the right version automatically.
 
 Prerequisites on both platforms:
 - **Rust**, stable channel, via [rustup](https://rustup.rs) — 2024 edition needs rustc 1.85+;
@@ -140,7 +178,7 @@ Prerequisites on both platforms:
   source at build time, so a working `cc` is required even though the project itself is pure Rust.
 - **Git**, to clone the repo.
 
-### macOS
+#### macOS
 
 ```bash
 # 1. C toolchain (skip if already installed)
@@ -162,7 +200,7 @@ cargo install --path crates/cli
 (Homebrew's `rustup-init` — `brew install rustup-init && rustup-init` — works the same way if you
 prefer Homebrew-managed installs.)
 
-### Windows 11
+#### Windows 11
 
 Two supported paths — WSL2 is the path of least friction for a Unix-first Rust CLI project, since
 it gives you a real Linux toolchain; native Windows works too and is fully supported by Rust.
@@ -198,7 +236,7 @@ cargo build --release --workspace
 cargo install --path crates\cli
 ```
 
-### Verify the install
+#### Verify the install
 
 ```bash
 ekos --help                # or: cargo run -p ekos -- --help, from ekos/
