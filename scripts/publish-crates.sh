@@ -27,6 +27,13 @@ DRY_RUN=0
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$MANIFEST" | head -n 1)"
 [ -n "$VERSION" ] || { echo "could not read the workspace version from $MANIFEST" >&2; exit 1; }
 
+# Slightly over the ~10 minute refill, so a retry does not immediately re-trip the limit.
+RATE_LIMIT_WAIT="${EKOS_PUBLISH_RETRY_SECONDS:-660}"
+MAX_RATE_LIMIT_RETRIES="${EKOS_PUBLISH_MAX_RETRIES:-8}"
+LOG="$(mktemp)"
+RC="$(mktemp)"
+trap 'rm -f "$LOG" "$RC"' EXIT INT TERM
+
 # Dependency order. Regenerate with the metadata walk documented in devlog_202 if the graph
 # changes; `cargo package` fails loudly if a crate is published before one of its dependencies,
 # so a stale order here cannot silently produce a broken registry state.
@@ -81,7 +88,10 @@ printf 'EKOS crates.io publish — version %s, %s crates\n\n' "$VERSION" "$total
 if [ "$DRY_RUN" -eq 1 ]; then
     printf 'DRY RUN — nothing will be published.\n\n'
 else
-    printf 'This publishes %s crates to crates.io. Publishing cannot be undone.\n' "$total"
+    printf 'This publishes %s crates to crates.io. Publishing cannot be undone.\n\n' "$total"
+    printf 'crates.io rate-limits new crates to a burst of ~5, then ~1 every 10 minutes, so this\n'
+    printf 'run will take several hours. It waits out each rate limit and retries, so it can be\n'
+    printf 'left alone; interrupting it is safe, because re-running skips whatever succeeded.\n\n'
     printf 'Press Enter to continue, or Ctrl-C to stop.\n'
     read -r _
 fi
@@ -111,13 +121,42 @@ for crate in $CRATES; do
     fi
 
     printf '— publishing...\n'
-    # `cargo publish` blocks until the new version is visible in the index, so the next crate can
-    # resolve it. No manual sleep is needed or wanted.
-    if ! cargo publish --manifest-path "$MANIFEST" -p "$crate" --locked; then
-        printf '\nFAILED on %s (%d of %s).\n' "$crate" "$i" "$total" >&2
-        printf 'Fix the cause and run this script again — everything already published is skipped.\n' >&2
+
+    # crates.io rate-limits BRAND NEW crates hard: a burst of about 5, then roughly one every ten
+    # minutes. Publishing 44 new crates therefore takes hours, and a run that aborted on the first
+    # 429 would need babysitting for all of them. So a rate-limit response is not a failure here —
+    # it is waited out and retried. Every other failure still stops the run immediately.
+    #
+    # `cargo publish` itself blocks until the new version is visible in the index, so the next
+    # crate can resolve it. No manual sleep is needed for propagation, only for the rate limit.
+    attempt=1
+    while :; do
+        # The exit status of a pipeline is the LAST command's, so `cargo publish | tee` would
+        # report tee's success and hide a real failure. POSIX sh has no PIPESTATUS, so cargo's
+        # status is stashed in a file inside the pipeline, which keeps output streaming live
+        # through a run that takes hours.
+        { cargo publish --manifest-path "$MANIFEST" -p "$crate" --locked; echo $? > "$RC"; } 2>&1 \
+            | tee "$LOG"
+        if [ "$(cat "$RC")" = "0" ]; then
+            break
+        fi
+        if grep -qiE '429|too many requests|too many new crates|rate limit' "$LOG"; then
+            if [ "$attempt" -ge "$MAX_RATE_LIMIT_RETRIES" ]; then
+                printf '\nStill rate-limited on %s after %d attempts. Run the script again later;\n' \
+                    "$crate" "$attempt" >&2
+                printf 'everything already published is skipped.\n' >&2
+                exit 1
+            fi
+            printf '        rate-limited by crates.io — waiting %ss before retry %d/%s\n' \
+                "$RATE_LIMIT_WAIT" "$((attempt + 1))" "$MAX_RATE_LIMIT_RETRIES"
+            sleep "$RATE_LIMIT_WAIT"
+            attempt=$((attempt + 1))
+            continue
+        fi
+        printf '\nFAILED on %s (%d of %s) — not a rate limit.\n' "$crate" "$i" "$total" >&2
+        printf 'Fix the cause and run this script again; everything already published is skipped.\n' >&2
         exit 1
-    fi
+    done
 done
 
 if [ "$DRY_RUN" -eq 1 ]; then
