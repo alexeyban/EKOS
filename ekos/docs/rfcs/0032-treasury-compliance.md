@@ -362,10 +362,22 @@ than an absent one.
 `EKOS_TREASURY_ADDRESS` or chain id looks exactly like a treasury that has never paid anyone.
 
 **Not verified — read before relying on this.**
+- **`RealTreasuryClient` does not paginate at all.** `rows()` sends one request per endpoint with
+  `startblock=0`, `endblock=99999999999`, `sort=asc` and no `page`/`offset` parameter. Etherscan caps
+  a single query at 10,000 rows, so a treasury with more than 10,000 transfers on any one endpoint
+  (`txlist`, `txlistinternal`, `tokentx`) is **silently truncated** — and a truncated payment list
+  means payments that quietly do not exist, the same failure class as the empty-space bug above: a
+  confidently wrong compliance answer rather than an absent one. `SnapshotClient`, by contrast, does
+  page (`max_pages` ceiling + short-page stop). Fixing this means walking `startblock` forward from
+  the last row's block whenever a response comes back with exactly 10,000 rows. Not done; do it
+  before pointing this at any treasury large enough to matter.
 - `RealTreasuryClient` has **never been run against a live explorer**. Its parsing is unit-tested
-  against the documented response shapes, but rate limits, pagination past the explorer's 10,000-row
-  cap, chain-specific quirks and explorer casing differences are untested. This needs an explorer API
-  key and a real treasury address.
+  against the documented response shapes, but rate limits (three calls fire back-to-back with no
+  backoff), chain-specific quirks, explorer casing differences, and whether `result` can arrive as a
+  bare error string rather than an array (which `parse_explorer_result`'s catch-all `Err` arm would
+  surface) are untested. Needs an explorer API key (`EKOS_TREASURY_API_KEY` — one Etherscan key
+  covers every chain via the V2 multichain endpoint, selected by `EKOS_TREASURY_CHAIN_ID`) and a real
+  treasury address. Deferred 2026-09-23: only needed when the treasury feature is actually used.
 - `SnapshotClient`'s live coverage is read-path only: field shapes, paging and the wrong-space case.
   Hub rate limiting under a long crawl, and the `max_pages` × 100 ceiling on a space larger than
   5,000 proposals, remain untested.
