@@ -5889,3 +5889,16 @@ into a running instance, and a first run could silently produce nothing.
 
 - [ ] **Release signing** — `SHA256SUMS` only today. Sigstore/cosign or minisign, plus SLSA
   provenance, once there is a release cadence worth attesting.
+
+- [ ] **`aarch64-unknown-linux-musl` release row** — x86_64 Linux has a static fallback when the
+  glibc build will not start (v1.0.1); aarch64 Linux does not, so a machine older than glibc 2.35
+  there must build from source. Not added alongside the v1.0.1 fix on purpose: a speculative
+  matrix row that fails takes the whole `release` job with it, since `release` needs every
+  `build`. Add it on its own, with a `workflow_dispatch` run to prove it builds before a tag
+  depends on it.
+
+- [ ] **Verify a release install on an image that did not build it** — the `verify install.sh`
+  job runs on the same `ubuntu-latest` that produces the binary, so it cannot catch a glibc-floor
+  regression (exactly what shipped in v1.0.0). Add a matrix over a couple of older/other images,
+  or a container step, so the check differs from the build environment in the dimension it claims
+  to verify.

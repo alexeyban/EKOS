@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.1 — 2026-09-23
+
+A packaging fix. No code changes to EKOS itself; if `ekos --version` already works for you, there
+is nothing here you need.
+
+**The Linux x86_64 binary in v1.0.0 would not start on most machines.** It was built on Ubuntu
+24.04 and therefore required `GLIBC_2.39`, so it failed on Ubuntu 22.04, Debian 12 and RHEL 9 with:
+
+```
+/lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+```
+
+Two fixes, because either alone leaves a gap:
+
+- The glibc builds are now produced on the **oldest supported runner** (Ubuntu 22.04, glibc 2.35)
+  rather than the newest, for both x86_64 and aarch64. A glibc binary runs on that version or
+  newer, so building on the newest image is exactly backwards.
+- `install.sh` now **runs the binary it downloaded** before installing it, and on x86_64 Linux
+  falls back to the fully static musl build if it will not start. Checking empirically covers
+  every reason a build might not run on a machine, not only the glibc one.
+
+If you installed v1.0.0 on Linux and it did not run, re-running the install command is enough.
+
 ## v1.0.0 — 2026-09-23
 
 The first tagged release of EKOS, and the first one you can install without a Rust toolchain.
@@ -95,6 +118,8 @@ These are real and shipped as-is; 1.0.0 is a stability promise, not a claim of c
 - Not published to crates.io: `cargo install ekos` requires publishing 30 internal crates in
   dependency order, which is deliberately a separate, careful piece of work.
 - Releases are checksummed (`SHA256SUMS`) but not signed. No Sigstore/cosign, no SLSA provenance.
+- There is no static musl build for aarch64 Linux, so `install.sh` has no fallback there: an
+  aarch64 machine older than glibc 2.35 must build from source. x86_64 Linux has the fallback.
 - The compiled .NET/JVM binary decompiler is a separately licensed extension build, not part of
   this release (RFC 0148/0149).
 

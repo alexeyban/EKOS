@@ -29,15 +29,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Pinned to the OLDEST supported runner, not `ubuntu-latest`, and this is load-bearing:
+          # a glibc build only runs on glibc >= the one it was built against. Built on 24.04 it
+          # required GLIBC_2.39 and would not start on Ubuntu 22.04, Debian 12 or RHEL 9 — which
+          # is most machines in use. 22.04 gives a 2.35 baseline. Verified by the v1.0.0 release
+          # failing to run on a 2.35 host; see devlog_201.
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          # Fully static — runs on any glibc vintage, in Alpine, and in slim containers.
-          # glibc version skew is the most common "your binary doesn't run" report for Rust CLIs.
+            runner: ubuntu-22.04
+          # Fully static — runs on any glibc vintage, in Alpine, and in slim containers, so the
+          # builder's own glibc is irrelevant here. This is also the fallback `install.sh` drops
+          # to when the gnu build will not start.
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             packages: musl-tools
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-22.04-arm
           - target: aarch64-apple-darwin
             runner: macos-14
           - target: x86_64-apple-darwin

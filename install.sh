@@ -70,6 +70,15 @@ esac
 
 target="${arch_part}-${os_part}"
 
+# A glibc binary only runs on glibc >= the one it was built against, and no amount of care at
+# build time makes that check unnecessary on the user's machine. On x86_64 Linux there is a
+# fully static musl build to fall back to when the gnu one will not start. Everywhere else there
+# is no second artifact, and the script says so rather than failing obscurely.
+fallback=""
+if [ "$os" = "Linux" ] && [ "$arch_part" = "x86_64" ]; then
+    fallback="x86_64-unknown-linux-musl"
+fi
+
 # ── Version ───────────────────────────────────────────────────────────────────
 version="${EKOS_VERSION:-}"
 if [ -z "$version" ]; then
@@ -84,48 +93,78 @@ bare="${version#v}"
 asset="ekos-${bare}-${target}.tar.gz"
 base="https://github.com/$REPO/releases/download/$version"
 
-# ── Download ──────────────────────────────────────────────────────────────────
+# ── Download, verify, unpack ──────────────────────────────────────────────────
 tmp="$(mktemp -d)"
 # `trap` on EXIT rather than a cleanup call at the end: a failed download must not leave the
 # archive lying in /tmp either.
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-printf 'Downloading %s (%s)...\n' "$asset" "$version"
-fetch "$base/$asset" "$tmp/$asset" \
-    || die "could not download $base/$asset — check that $version has a build for $target at
+base="https://github.com/$REPO/releases/download/$version"
+
+# Fetches one target's archive, verifies it against SHA256SUMS, unpacks it, and sets $binary.
+fetch_target() {
+    _t="$1"
+    _asset="ekos-${bare}-${_t}.tar.gz"
+
+    printf 'Downloading %s (%s)...\n' "$_asset" "$version"
+    fetch "$base/$_asset" "$tmp/$_asset" \
+        || die "could not download $base/$_asset — check that $version has a build for $_t at
 https://github.com/$REPO/releases/tag/$version"
 
-# ── Verify before unpacking ───────────────────────────────────────────────────
-# Not optional: an unverified archive is unpacked code from the network.
-fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS" \
-    || die "could not download the checksum file for $version — refusing to install unverified"
+    # Not optional: an unverified archive is unpacked code from the network.
+    if [ ! -f "$tmp/SHA256SUMS" ]; then
+        fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS" \
+            || die "could not download the checksum file for $version — refusing to install unverified"
+    fi
 
-# The asset name goes into a regex, and it is full of `.` characters that would otherwise match
-# any byte — so a line for a *different* file could satisfy the lookup. Escape it first.
-asset_re="$(printf '%s' "$asset" | sed 's/[].[^$*\\/]/\\&/g')"
-expected="$(sed -n "s/^\([0-9a-f]\{64\}\)[ *][ *]*${asset_re}\$/\1/p" "$tmp/SHA256SUMS" | head -n 1)"
-[ -n "$expected" ] || die "$asset is not listed in SHA256SUMS — refusing to install unverified"
+    # The asset name goes into a regex, and it is full of `.` characters that would otherwise
+    # match any byte — so a line for a *different* file could satisfy the lookup. Escape it first.
+    _asset_re="$(printf '%s' "$_asset" | sed 's/[].[^$*\\/]/\\&/g')"
+    _expected="$(sed -n "s/^\([0-9a-f]\{64\}\)[ *][ *]*${_asset_re}\$/\1/p" "$tmp/SHA256SUMS" | head -n 1)"
+    [ -n "$_expected" ] || die "$_asset is not listed in SHA256SUMS — refusing to install unverified"
 
-if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$tmp/$asset" | cut -d' ' -f1)"
-elif command -v shasum >/dev/null 2>&1; then
-    actual="$(shasum -a 256 "$tmp/$asset" | cut -d' ' -f1)"
-else
-    die "this installer needs sha256sum or shasum to verify the download"
-fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        _actual="$(sha256sum "$tmp/$_asset" | cut -d' ' -f1)"
+    elif command -v shasum >/dev/null 2>&1; then
+        _actual="$(shasum -a 256 "$tmp/$_asset" | cut -d' ' -f1)"
+    else
+        die "this installer needs sha256sum or shasum to verify the download"
+    fi
 
-[ "$actual" = "$expected" ] || die "checksum mismatch for $asset
-  expected $expected
-  actual   $actual
+    [ "$_actual" = "$_expected" ] || die "checksum mismatch for $_asset
+  expected $_expected
+  actual   $_actual
 Refusing to install. Report this at https://github.com/$REPO/issues"
 
-printf 'Checksum verified.\n'
+    printf 'Checksum verified.\n'
 
-# ── Install ───────────────────────────────────────────────────────────────────
-tar -C "$tmp" -xzf "$tmp/$asset"
-binary="$tmp/ekos-${bare}-${target}/ekos"
-[ -f "$binary" ] || die "the archive did not contain the expected binary at ekos/"
+    tar -C "$tmp" -xzf "$tmp/$_asset"
+    binary="$tmp/ekos-${bare}-${_t}/ekos"
+    [ -f "$binary" ] || die "the archive did not contain the expected binary at ekos/"
+    chmod 755 "$binary"
+}
 
+fetch_target "$target"
+
+# Verify it actually runs here before installing it. Checking the binary empirically beats
+# parsing `ldd --version`: it covers every reason a build might not start on this machine, not
+# just the glibc one we happen to know about.
+if ! "$binary" --version >/dev/null 2>&1; then
+    if [ -n "$fallback" ]; then
+        printf '\nThe %s build does not run on this system (most likely an older glibc).\n' "$target"
+        printf 'Falling back to the fully static %s build.\n\n' "$fallback"
+        fetch_target "$fallback"
+        "$binary" --version >/dev/null 2>&1 \
+            || die "neither the $target nor the $fallback build runs on this system. Please open
+an issue with your OS and \`uname -m\`: https://github.com/$REPO/issues"
+    else
+        die "the $target build does not run on this system, and there is no fallback build for
+this platform. Please open an issue with your OS and \`uname -m\`, or build from source:
+https://github.com/$REPO#installation"
+    fi
+fi
+
+# ── Install ──────────────────────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR"
 # `cp` then `chmod`, not `install`: BusyBox and some minimal images lack `install(1)`.
 cp "$binary" "$INSTALL_DIR/ekos"

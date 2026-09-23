@@ -1,4 +1,4 @@
-# Devlog 201 — v1.0.0: the first release, and what the number promises
+# Devlog 201 — v1.0.0 and v1.0.1: the first release, and what shipping it taught
 
 **Date:** 2026-09-23
 **PRs:** none (local `main`, `[skip ci]`)
@@ -107,6 +107,22 @@ bumping them would imply a stability promise nobody is making about them.
 - **Fixing one cross-compilation stage reveals the next.** The std fix alone would have produced
   a second failed run with a completely different-looking error. Worth walking the whole chain
   locally before re-triggering a public release, rather than one fix per run.
+- **Build release binaries on the OLDEST supported runner, never `ubuntu-latest`.** A glibc
+  binary runs on its build-time glibc or newer. `ubuntu-latest` silently tracks the newest image,
+  so it quietly raises the floor under every user each time GitHub moves it — the single most
+  common "your binary doesn't run" report for Rust CLIs, reproduced here on the first try.
+- **A CI job that verifies an install on the image that built it verifies nothing.** The `verify
+  install.sh` job passed on the same `ubuntu-latest` that produced the binary, so the one glibc
+  version certain to work was the only one tested. The defect was found by a human running the
+  public one-liner on a different machine. Pinning the build runner narrows this, but the real
+  lesson is that a verification step has to differ from the build environment in the dimension it
+  claims to check.
+- **Prefer an empirical check over a version heuristic.** `install.sh` could have parsed
+  `ldd --version` and compared numbers. Running `--version` on the binary it just verified is
+  shorter, has no parsing to get wrong, and catches reasons to fail that nobody enumerated.
+- **A green release pipeline is not a working release.** Six assets, all jobs green, and the
+  primary Linux artifact did not start. Nothing short of installing the published thing on a
+  machine that did not build it would have shown that.
 
 ---
 
@@ -165,6 +181,62 @@ the only thing that can confirm that one.
 
 ---
 
+## v1.0.1 — the published binary did not run on the machine that built it
+
+v1.0.0 published six assets and the workflow went green, including the `verify install.sh` job.
+Then installing it here, through the public one-liner, exactly as a reader would:
+
+```
+/lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+```
+
+The `x86_64-unknown-linux-gnu` asset was built on `ubuntu-latest` — 24.04, glibc 2.39. A glibc
+binary runs on that version **or newer**, never older, so building the release on the newest
+available image is exactly backwards. This machine runs glibc 2.35, and so do Ubuntu 22.04,
+Debian 12 and RHEL 9. The default Linux asset — the one `install.sh` picks for the most common
+platform there is — could not start on a large share of real machines.
+
+Worse, **CI could not have caught it.** The `verify` job installs on `ubuntu-latest`, the same
+image that produced the binary, so the one glibc version guaranteed to work is the one being
+tested. A green verify job proved nothing about the property that actually mattered.
+
+The musl asset, checked on the same machine, is `static-pie linked` and runs fine. Two fixes,
+because either alone leaves a gap:
+
+1. **Build glibc targets on the oldest supported runner**, `ubuntu-22.04` / `ubuntu-22.04-arm`
+   (glibc 2.35), not `ubuntu-latest`. This lowers the floor for everyone without musl's
+   allocator cost.
+2. **`install.sh` runs the binary before installing it**, and on x86_64 Linux falls back to the
+   static musl build when it will not start. Checking empirically beats parsing `ldd --version`:
+   it covers every reason a build might not start on a machine, not only the glibc one we now
+   know about.
+
+The fallback was verified against the **real, published v1.0.0 release** on this machine — which
+genuinely cannot run that release's gnu binary, making it an honest test rig rather than a mock:
+
+```
+Downloading ekos-1.0.0-x86_64-unknown-linux-gnu.tar.gz (v1.0.0)...
+Checksum verified.
+
+The x86_64-unknown-linux-gnu build does not run on this system (most likely an older glibc).
+Falling back to the fully static x86_64-unknown-linux-musl build.
+
+Downloading ekos-1.0.0-x86_64-unknown-linux-musl.tar.gz (v1.0.0)...
+Checksum verified.
+Installed ekos v1.0.0
+```
+
+Shipped as **v1.0.1**. v1.0.0 is left published rather than deleted: `install.sh` resolves
+`latest`, so every new install gets the fix, and retracting a release someone may already hold is
+worse practice than a fast patch.
+
+Remaining gap, stated in `CHANGELOG.md` rather than left implicit: there is no musl build for
+aarch64 Linux, so that platform has no fallback. Adding the row was deliberately not done in the
+same change — a speculative matrix row that fails takes the whole `release` job with it, because
+`release` needs every `build`.
+
+---
+
 ## Files Changed
 
 | File | Change summary |
@@ -175,7 +247,9 @@ the only thing that can confirm that one.
 | `README.md` | versioning-roadmap note now says 1.0.0, released, and points at the changelog |
 | `TODO.md` | tag item ticked; the remaining step is the push |
 | `ekos/docs/rfcs/0153-…md` | v0.1.0 → v1.0.0 throughout |
-| `.github/workflows/release.yml` | example tag command; then the two cross-compilation fixes above |
+| `.github/workflows/release.yml` | example tag command; the two cross-compilation fixes; then glibc runners pinned to 22.04 |
+| `install.sh` | runs the binary before installing, with a static-musl fallback on x86_64 Linux |
+| `CHANGELOG.md` | v1.0.1 entry; aarch64 fallback gap named in known limitations |
 | `devlogs/devlog_200.md` | changelog row notes the renumbering |
 
 **Not a file change, but the most important thing in this devlog:** the release commit carries no
