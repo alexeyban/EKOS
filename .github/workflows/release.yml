@@ -3,7 +3,7 @@ name: Release
 # RFC 0153 — build prebuilt `ekos` binaries for a tagged version and publish them as a GitHub
 # Release. Tag-triggered and deliberate: nothing here runs on a merge to main.
 #
-#   git tag v0.1.0 && git push origin v0.1.0
+#   git tag v1.0.0 && git push origin v1.0.0
 #
 # `workflow_dispatch` builds the artifacts without creating a release, for testing the matrix.
 

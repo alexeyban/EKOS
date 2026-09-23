@@ -111,7 +111,7 @@ already off by default. The one real gap was reproducibility — no `rust-toolch
 | `[workspace.package]` | `description`/`repository`/`homepage`/`keywords`/`categories`/`rust-version` |
 | `.github/workflows/release.yml` | six targets on a `v*` tag → tarballs + one `SHA256SUMS` → `gh release create` → a `verify` job that installs what was just published |
 | `install.sh` | POSIX `sh`; resolves the release, verifies the checksum **before** unpacking, installs to `~/.local/bin`, no `sudo` |
-| `CHANGELOG.md` | v0.1.0 release notes, hand-written, including a real known-limitations section |
+| `CHANGELOG.md` | v1.0.0 release notes, hand-written, including a real known-limitations section |
 | `README.md` | `## Installation` leads with the binary; source build demoted to a subsection |
 
 ### Implementation details worth remembering
@@ -187,7 +187,7 @@ already off by default. The one real gap was reproducibility — no `rust-toolch
 | `rust-toolchain.toml` | new — pinned toolchain |
 | `.github/workflows/release.yml` | new — six-target build, release, and install verification |
 | `install.sh` | new — checksum-verifying POSIX installer |
-| `CHANGELOG.md` | new — v0.1.0 notes |
+| `CHANGELOG.md` | new — v1.0.0 notes (numbered v0.1.0 when first written; see devlog_201) |
 | `README.md` | Installation leads with the binary |
 | `docs/generated/ekos-self-documentation.html` | new §00 "Install & first run" |
 | `TODO.md` | RFC 0152/0153 entries ticked |

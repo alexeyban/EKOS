@@ -46,7 +46,7 @@ The one real gap is reproducibility: there is no `rust-toolchain.toml` and no `r
 
 **Goals**
 
-- A tagged `v0.1.0` GitHub Release carrying prebuilt, checksummed `ekos` binaries for the
+- A tagged `v1.0.0` GitHub Release carrying prebuilt, checksummed `ekos` binaries for the
   platforms a reader of this project plausibly has.
 - A one-line install that works without a Rust toolchain.
 - A pinned toolchain, so a release built today and rebuilt in six months is the same compiler.
@@ -65,7 +65,7 @@ The one real gap is reproducibility: there is no `rust-toolchain.toml` and no `r
 - Homebrew tap, Nix flake, Debian/RPM packaging, Docker image for the CLI, `winget`/Chocolatey.
   All are downstream of having a release to package; none should gate the first one.
 - Signing (Sigstore/cosign) or SLSA provenance. Correct eventually; a SHA256SUMS file is the
-  honest v0.1.0 posture and the RFC says so rather than implying more.
+  honest v1.0.0 posture and the RFC says so rather than implying more.
 - Auto-publishing on every merge to `main`. Releases are tag-triggered and deliberate.
 
 ## 3. Targets
@@ -110,7 +110,7 @@ one connection must not kill a server serving others.
    `LICENSE`. Emit a per-target `.sha256`.
 2. **`release`** — download every artifact, concatenate the per-target sums into one
    `SHA256SUMS`, create the GitHub Release with `gh release create`, attach everything.
-3. The release body is hand-written for `v0.1.0` (`CHANGELOG.md`) — not generated from devlogs.
+3. The release body is hand-written for `v1.0.0` (`CHANGELOG.md`) — not generated from devlogs.
    199 devlogs are an engineering record written for this project's own memory; a release note is
    a different document with a different reader.
 
@@ -163,7 +163,7 @@ once the marketing push in RFC 0153's sibling work begins.
 
 | Alternative | Verdict |
 |---|---|
-| `cargo-dist` | Rejected for v0.1.0. It generates a workflow very close to this one and adds a build-time dependency on a tool whose generated config must still be reviewed. A ~120-line workflow this project owns outright is easier to debug when a target breaks, and this repository's whole culture is explicit-over-magic. Reconsider once there are more than six targets. |
+| `cargo-dist` | Rejected for v1.0.0. It generates a workflow very close to this one and adds a build-time dependency on a tool whose generated config must still be reviewed. A ~120-line workflow this project owns outright is easier to debug when a target breaks, and this repository's whole culture is explicit-over-magic. Reconsider once there are more than six targets. |
 | Docker image as the primary distribution | Rejected as primary. `ekos` is a CLI that reads the user's own working tree and writes `.ekos/` in it; running it in a container means bind-mounting the workspace and fighting file ownership for every invocation. A container is right for the web console and for CI, and can come later. |
 | GitHub Releases without musl | Rejected. glibc version skew is the single most common "your binary doesn't run" report for Rust CLIs, and musl costs one extra matrix row. |
 | Build the whole workspace in release | Rejected. Only `-p ekos` ships; building 34 crates' release artifacts multiplies CI time for binaries nobody downloads. |

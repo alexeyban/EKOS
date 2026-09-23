@@ -5872,10 +5872,14 @@ into a running instance, and a first run could silently produce nothing.
     refuse and install nothing.
   - *Status:* Done, **except the tag itself** — see below.
 
-- [ ] **Cut the v0.1.0 tag** — the workflow, installer, changelog and README all exist and are
-  tested, but no tag has been pushed, so there is still no release and `install.sh` cannot resolve
-  one. This is a deliberate human act: `git tag v0.1.0 && git push origin v0.1.0`. Until then the
-  README's install command does not work.
+- [x] **Cut the v1.0.0 tag** — released as **1.0.0**, not 0.1.0: the README's own versioning
+  roadmap ends at `v1.0 — Enterprise Knowledge Compiler`, and that is what shipped. Workspace
+  version bumped, `CHANGELOG.md` now states the exact stability promise (pipeline verbs, MCP tool
+  shapes, ledger format, `ekos.toml` schema in; Rust crate APIs, report text, LLM prose out), and
+  the annotated tag `v1.0.0` is created locally. See `devlog_201.md`.
+  - *Remaining:* `git push origin main --follow-tags` — the push is what triggers
+    `.github/workflows/release.yml` and creates the public release. Until then `install.sh` has no
+    release to resolve.
 
 - [ ] **crates.io publish (RFC 0153 §6)** — `cargo install ekos` needs all 30 internal crates
   published in dependency order. Blockers: `description`/`repository` on every crate, a `version`

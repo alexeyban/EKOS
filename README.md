@@ -1382,8 +1382,9 @@ the canonical facts in [TOKENOMICS.md](TOKENOMICS.md); the phased utility roadma
 | v0.7 | AI Layer |
 | v1.0 | Enterprise Knowledge Compiler |
 
-The workspace is versioned `0.1.0`; the table above is the original plan. What has actually shipped — RFCs up to
-0150 and 193 devlogs so far — is tracked phase by phase in [TODO.md](TODO.md) and the devlogs, not by this table.
+The workspace is versioned `1.0.0`, released 2026-09-23 — the `v1.0` row above. What has actually
+shipped — RFCs up to 0153 and 201 devlogs so far — is tracked phase by phase in [TODO.md](TODO.md)
+and the devlogs, not by this table. See [CHANGELOG.md](CHANGELOG.md) for what 1.0.0 commits to.
 
 ## Team
 
