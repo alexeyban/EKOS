@@ -53,6 +53,13 @@ class JobRunner:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        # Fire-and-forget `on_done` callbacks (RFC 0132 webhooks) are otherwise still pending when
+        # the loop closes, which both loses the notification and logs "Task was destroyed but it
+        # is pending!". Give them a bounded chance to finish, then drop them.
+        if self._bg:
+            _done, pending = await asyncio.wait(set(self._bg), timeout=5.0)
+            for task in pending:
+                task.cancel()
 
     # ── submission ───────────────────────────────────────────────────────────
 
@@ -137,6 +144,22 @@ class JobRunner:
     # ── worker ───────────────────────────────────────────────────────────────
 
     async def _worker(self, workspace_id: str, ws_path: str) -> None:
+        """One worker per workspace, for the lifetime of the process.
+
+        The loop body is guarded because **this task dying is unrecoverable**: there is one worker
+        per workspace, nothing supervises or restarts it, and `submit` only creates one when the
+        queue does not yet exist. If an exception escapes here the task ends, that workspace's
+        queue is never drained again, and every subsequent run sits at "queued" until the queue
+        fills and every request 429s — with no error anywhere pointing at the cause.
+
+        `_execute` has its own handler, but not everything runs inside it: the cancelled-branch
+        `update_run` below, `_notify_done`, and `_execute`'s own final status write all sit
+        outside it, and any of them can raise if the database is briefly unavailable. A single
+        transient failure would have cost that workspace its runner permanently.
+
+        `CancelledError` is BaseException and is deliberately not caught — `aclose` cancels these
+        tasks on shutdown and must be able to.
+        """
         queue = self._queues[workspace_id]
         while True:
             run_id, params = await queue.get()
@@ -146,6 +169,16 @@ class JobRunner:
                     self._notify_done(run_id)
                     continue
                 await self._execute(run_id, ws_path, params)
+            except Exception:
+                log.exception(
+                    "run %s failed outside the execute handler; worker for workspace %s survives",
+                    run_id,
+                    workspace_id,
+                )
+                # Best effort: never leave the row stuck at "running"/"queued" just because the
+                # bookkeeping is what failed.
+                with contextlib.suppress(Exception):
+                    models.update_run(run_id, status="failed", ended_at=models._now())
             finally:
                 queue.task_done()
 
@@ -177,9 +210,12 @@ class JobRunner:
                 final = _status_for(run_id, code, self._cancelled)
                 models.update_run(run_id, exit_code=code)
         except Exception as exc:  # never leave a run stuck at "running"
-            with log_path.open("a") as fh:
-                fh.write(f"\n[console] run failed: {exc!r}\n")
             final = "failed"
+            # The log write is itself allowed to fail (full disk, unlinked run directory) without
+            # masking the original error or escaping into the worker loop.
+            with contextlib.suppress(OSError):
+                with log_path.open("a", encoding="utf-8") as fh:
+                    fh.write(f"\n[console] run failed: {exc!r}\n")
         finally:
             self._running.pop(run_id, None)
             self._cancelled.discard(run_id)
@@ -195,7 +231,10 @@ class JobRunner:
         log_path: Path,
         register,
     ) -> str:
-        stages = list(models.get_run(run_id).stages)
+        run = models.get_run(run_id)
+        if run is None:  # deleted mid-flight; nothing to chain
+            return "failed"
+        stages = list(run.stages)
         for i, stage in enumerate(stages):
             if run_id in self._cancelled:
                 stage["status"] = "cancelled"

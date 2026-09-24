@@ -38,7 +38,9 @@ def test_config_path_rejects_a_symlinked_ekos_toml_escaping_the_workspace(tmp_pa
     workspace.mkdir()
     (workspace / "ekos.toml").symlink_to(outside)
 
-    with pytest.raises(config_io.ConfigError, match="escapes workspace root"):
+    # The message deliberately names no paths — it is returned verbatim to API callers
+    # (CWE-209); the real paths go to the log instead. See the leak test further down.
+    with pytest.raises(config_io.ConfigError, match="resolves outside the workspace root"):
         config_io.config_path(str(workspace))
 
 
@@ -80,3 +82,93 @@ def test_write_config_refuses_malformed_toml_before_touching_the_file(tmp_path: 
         config_io.write_config(str(tmp_path), "[observe\n")
     assert cfg.read_text() == SAMPLE
     assert not (tmp_path / "ekos.toml.bak").exists()
+
+
+# ── RFC 0130 hardening: security fixes (devlog_203) ──────────────────────────
+
+
+def test_error_messages_never_leak_absolute_server_paths(tmp_path):
+    """`ConfigError` is surfaced verbatim as an HTTPException detail, so anything interpolated
+    into it is returned to the API caller (CWE-209)."""
+    with pytest.raises(config_io.ConfigError) as missing:
+        config_io.read_config(str(tmp_path))
+    assert str(tmp_path) not in str(missing.value)
+    assert "ekos.toml" in str(missing.value)
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    outside = tmp_path / "outside.toml"
+    outside.write_text("[observe]\n")
+    (workspace / "ekos.toml").symlink_to(outside)
+    with pytest.raises(config_io.ConfigError) as escape:
+        config_io.config_path(str(workspace))
+    assert str(tmp_path) not in str(escape.value)
+    assert str(outside) not in str(escape.value)
+
+
+def test_atomic_write_replaces_a_symlink_instead_of_following_it(tmp_path):
+    """The TOCTOU window `config_path` cannot close on its own.
+
+    `config_path` resolves, so a symlink that already exists at check time is followed and the
+    *target* is what gets validated and written — by design, since the target must still be
+    inside the workspace. The window is the other ordering: the check passes on a plain path,
+    and a symlink appears at that name before the write lands. `write_text` would follow it;
+    `os.replace` swaps the directory entry, so the planted link is destroyed rather than obeyed.
+    """
+    victim = tmp_path / "victim"
+    victim.write_text("ORIGINAL")
+    planted = tmp_path / "ekos.toml"
+    planted.symlink_to(victim)
+
+    config_io._atomic_write(planted, "REPLACED")
+
+    assert victim.read_text() == "ORIGINAL", "the symlink target must not be written through"
+    assert not planted.is_symlink(), "the planted symlink itself must be replaced"
+    assert planted.read_text() == "REPLACED"
+
+
+def test_write_config_keeps_the_resolved_target_inside_the_workspace(tmp_path):
+    """Documents the deliberate half: an in-workspace symlink present at check time IS followed,
+    because `config_path` resolved it and confirmed the target is still directly inside the
+    workspace root. Nothing escapes; the write simply lands on the resolved file."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    target = workspace / "other.toml"
+    target.write_text("[observe]\npaths = ['ORIGINAL']\n")
+    (workspace / "ekos.toml").symlink_to(target)
+
+    config_io.write_config(str(workspace), "[observe]\npaths = ['NEW']\n")
+
+    assert "NEW" in target.read_text()
+    assert not (tmp_path / "victim.toml").exists()
+
+
+def test_written_config_and_backup_are_owner_only(tmp_path):
+    config_io.write_config(str(tmp_path), "[observe]\npaths = ['.']\n")
+    config_io.write_config(str(tmp_path), "[observe]\npaths = ['src']\n")
+    assert (tmp_path / "ekos.toml").stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "ekos.toml.bak").stat().st_mode & 0o777 == 0o600
+
+
+def test_oversized_config_is_rejected_before_parsing(tmp_path):
+    huge = "# " + "x" * config_io.MAX_CONFIG_BYTES + "\n"
+    with pytest.raises(config_io.ConfigError, match="larger than"):
+        config_io.parse(huge)
+
+    (tmp_path / "ekos.toml").write_text(huge)
+    with pytest.raises(config_io.ConfigError, match="larger than"):
+        config_io.read_config(str(tmp_path))
+
+
+def test_a_failed_write_leaves_no_temp_file_behind(tmp_path, monkeypatch):
+    (tmp_path / "ekos.toml").write_text("[observe]\n")
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(config_io.os, "replace", boom)
+    with pytest.raises(OSError):
+        config_io.write_config(str(tmp_path), "[observe]\npaths = ['.']\n")
+
+    leftovers = list(tmp_path.glob(".ekos-toml-*"))
+    assert leftovers == [], f"temp files leaked: {leftovers}"

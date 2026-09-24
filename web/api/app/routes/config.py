@@ -7,6 +7,7 @@ read-only subprocess allowlist so there is one source of truth for the checks.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -46,11 +47,19 @@ def _bin(s: Settings) -> str:
 
 async def _validate_text(settings: Settings, ws_path: str, raw: str) -> dict[str, Any]:
     """Run `ekos config validate --json` against `raw` written to a temp file, with the walk
-    still rooted at the real workspace (so `observe-path-missing` resolves correctly)."""
-    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as tf:
-        tf.write(raw)
-        tmp = tf.name
+    still rooted at the real workspace (so `observe-path-missing` resolves correctly).
+
+    `tmp` is bound before anything is written, and the `try` starts immediately: previously the
+    name was captured *after* `tf.write(raw)`, so a failing write (a full disk, or a body large
+    enough to fill the temp filesystem) left the file on disk forever with nothing holding a
+    reference to delete it. Every such request leaked one temp file.
+    """
+    fd, tmp = tempfile.mkstemp(suffix=".toml", prefix="ekos-config-")
     try:
+        # mkstemp gives 0600, which NamedTemporaryFile also does — worth keeping, since this file
+        # holds the caller's full config while `ekos` reads it.
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(raw)
         return await readproc.read_json(
             _bin(settings), ws_path, ["config", "validate", "--json", "--file", tmp]
         )

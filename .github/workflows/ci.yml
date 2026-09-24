@@ -10,6 +10,15 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Declared explicitly rather than inherited. With no `permissions:` key at all, every job gets
+# the repository's *default* GITHUB_TOKEN scopes — a repository setting, invisible from here, and
+# one that silently widens every workflow the day it is changed. This workflow also runs on
+# `pull_request`, so the token is exposed to code from a branch that has not been reviewed yet.
+# Nothing in any of these four jobs writes to the repository: they check out, build, test and
+# upload an artifact (which uses the Actions runtime token, not this one).
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: Build & Test
