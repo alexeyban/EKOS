@@ -16,13 +16,22 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Least privilege, declared per job rather than once at the top. A workflow-level
+# `contents: write` grants it to EVERY job — here that would have been the six build jobs and the
+# verify job, none of which do anything but check out code. Only `release` needs write, and only
+# because `gh release create` uploads the assets. A top-level `contents: read` also zeroes every
+# other scope (packages, id-token, ...), so each job gets exactly what it asks for and no more.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    # Checkout only. Artifact upload uses the Actions runtime token, not GITHUB_TOKEN, so it
+    # needs no permission entry here.
+    permissions:
+      contents: read
     strategy:
       # One broken target must not cancel the others: a release missing one platform is worth
       # more than no release at all, and the missing row is obvious in the artifact list.
@@ -146,6 +155,10 @@ jobs:
     needs: build
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    # The only job in this workflow that writes anything: `gh release create` creates the release
+    # and uploads its assets.
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v7
@@ -160,9 +173,35 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
-          cat *.sha256 > SHA256SUMS
-          rm -f *.sha256
-          echo "Release contains:"
+          shopt -s nullglob
+
+          # `./*.sha256`, never a bare `*.sha256`: a file whose name begins with "-" would
+          # otherwise be handed to cat/rm as an option (ShellCheck SC2035). Collected into arrays
+          # and quoted so a name containing whitespace cannot split either.
+          sums=(./*.sha256)
+          archives=(./*.tar.gz ./*.zip)
+
+          # Every archive must have contributed a checksum. Without this check a target whose
+          # upload half-failed would still be attached to the release, and `install.sh` would
+          # then refuse it at the verification step — "not listed in SHA256SUMS" — for a user,
+          # after publication, rather than here.
+          if [ "${#sums[@]}" -eq 0 ]; then
+            echo "no per-target checksum files found in dist/" >&2
+            ls -la >&2
+            exit 1
+          fi
+          if [ "${#sums[@]}" -ne "${#archives[@]}" ]; then
+            echo "checksum/archive mismatch: ${#sums[@]} checksums, ${#archives[@]} archives" >&2
+            ls -la >&2
+            exit 1
+          fi
+
+          # `sort` rather than `cat`: the glob order is locale-dependent, so this keeps SHA256SUMS
+          # byte-identical when the same tag is rebuilt.
+          sort "${sums[@]}" > SHA256SUMS
+          rm -f "${sums[@]}"
+
+          echo "Release contains ${#archives[@]} archives:"
           cat SHA256SUMS
 
       - name: Create the release
@@ -184,6 +223,8 @@ jobs:
     needs: release
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v7
@@ -191,9 +232,11 @@ jobs:
       # The point of this job: a release nobody can install must fail here, not in a user's
       # terminal. It installs the release that was just published, exactly as a reader would.
       - name: Install from the published release
+        # No GH_TOKEN: `install.sh` authenticates nothing — it fetches public release assets with
+        # plain curl — and EKOS_VERSION means it never even calls the API. Passing a token here
+        # exposed a credential to a downloaded-and-executed script for no reason.
         env:
           EKOS_VERSION: ${{ github.ref_name }}
-          GH_TOKEN: ${{ github.token }}
         run: sh ./install.sh
 
       - name: The binary runs and reports its version
