@@ -147,23 +147,127 @@ curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh -o i
 less install.sh && sh install.sh
 ```
 
-Prebuilt binaries cover Linux (x86_64 glibc, x86_64 static musl, aarch64) and macOS (Apple
-Silicon and Intel). On Windows, download the `.zip` from the
-[releases page](https://github.com/alexeyban/EKOS/releases) — or use WSL2 and the command above.
-Every asset is listed in that release's `SHA256SUMS`.
+The script also takes `EKOS_VERSION` to pin a release (`EKOS_VERSION=v1.0.3 sh install.sh`) and
+`EKOS_INSTALL_DIR` to change where it lands.
 
-Then:
+### Prebuilt binary, downloaded by hand
+
+If you would rather not pipe a script into a shell, every release is a plain archive on the
+[releases page](https://github.com/alexeyban/EKOS/releases). Pick the one for your machine:
+
+| Your machine | Asset |
+|---|---|
+| Linux, Intel/AMD 64-bit | `ekos-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux, Intel/AMD, old or unusual distro | `ekos-<version>-x86_64-unknown-linux-musl.tar.gz` |
+| Linux, ARM 64-bit (Raspberry Pi 4+, Graviton, Ampere) | `ekos-<version>-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple Silicon (M1 and later) | `ekos-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `ekos-<version>-x86_64-apple-darwin.tar.gz` |
+| Windows, 64-bit | `ekos-<version>-x86_64-pc-windows-msvc.zip` |
+
+`uname -sm` tells you which you are on if you are not sure: `Linux x86_64`, `Darwin arm64`, and
+so on.
+
+**glibc or musl?** Take the `gnu` build first — it is the faster of the two. If it refuses to
+start with something like `version 'GLIBC_2.x' not found`, your distribution is older than the
+one the release was built on: take the `musl` build instead, which is fully static and depends on
+nothing. (`install.sh` does this fallback automatically.)
+
+#### Linux and macOS
 
 ```bash
+VERSION=v1.0.3
+TARGET=x86_64-unknown-linux-gnu          # from the table above
+ASSET="ekos-${VERSION#v}-$TARGET.tar.gz"
+BASE="https://github.com/alexeyban/EKOS/releases/download/$VERSION"
+
+curl -fsSLO "$BASE/$ASSET"
+curl -fsSLO "$BASE/SHA256SUMS"
+
+# Verify before unpacking. Feeding one line to -c keeps it quiet about the five assets
+# you did not download, and works with both GNU sha256sum and macOS's shasum.
+grep "$ASSET" SHA256SUMS | sha256sum -c -        # macOS: shasum -a 256 -c -
+
+tar xzf "$ASSET"
+mkdir -p ~/.local/bin                    # install(1) will not create it for you
+install -m 755 "ekos-${VERSION#v}-$TARGET/ekos" ~/.local/bin/ekos
+```
+
+That prints `<asset>: OK` and exits 0. Anything else — `FAILED`, or nothing matched — means do
+not unpack it; open an issue instead.
+
+Worth being precise about what this proves: releases are checksummed but **not** signed — there
+is no Sigstore/cosign signature or SLSA provenance yet. `SHA256SUMS` tells you the archive
+arrived intact and matches what the release publishes; it does not, on its own, prove who built
+it.
+
+`~/.local/bin` needs to be on your `PATH`; add `export PATH="$HOME/.local/bin:$PATH"` to your
+shell profile if `ekos --version` comes back "command not found". Any directory on `PATH` works —
+`/usr/local/bin` needs `sudo`, which is the only reason it is not the default here.
+
+**macOS, one extra step.** These binaries are not code-signed or notarised. A file downloaded
+with a *browser* is quarantined by Gatekeeper and refuses to run ("cannot be opened because the
+developer cannot be verified"). Clear the flag on the extracted binary:
+
+```bash
+xattr -d com.apple.quarantine ~/.local/bin/ekos
+```
+
+Downloading with `curl` — as above, and as `install.sh` does — does not set that flag, so this
+step only applies if you clicked the link in a browser.
+
+#### Windows
+
+```powershell
+$Version = "v1.0.3"
+$Asset   = "ekos-$($Version -replace '^v','')-x86_64-pc-windows-msvc.zip"
+$Base    = "https://github.com/alexeyban/EKOS/releases/download/$Version"
+
+Invoke-WebRequest "$Base/$Asset" -OutFile $Asset
+Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
+
+# Verify before unpacking.
+$actual = (Get-FileHash $Asset -Algorithm SHA256).Hash.ToLower()
+$line   = Select-String -Path SHA256SUMS -SimpleMatch $Asset
+if (-not $line) { throw "$Asset is not listed in SHA256SUMS - do not use this file" }
+$expected = $line.Line.Split()[0]
+if ($actual -ne $expected) { throw "checksum mismatch - do not use this file" }
+
+Expand-Archive $Asset -DestinationPath .
+```
+
+`ekos.exe` is inside the extracted folder. Move it somewhere on your `PATH`, or add that folder
+to `PATH`. SmartScreen may warn the first time you run it, for the same reason as macOS: the
+binary is unsigned.
+
+(The Linux/macOS block above was run verbatim against the real v1.0.3 release. This PowerShell
+one was not — no Windows machine was available — so treat it as carefully written rather than
+proven, and please open an issue if it misbehaves.)
+
+### First run
+
+However you installed it:
+
+```bash
+ekos --version
 cd /path/to/your/repo
 ekos init --detect     # writes an ekos.toml that matches what's actually in this repository
 ekos doctor
+ekos build && ekos recover && ekos resolve && ekos compile && ekos commit
+ekos coverage          # confirms every input kind actually produced objects
+ekos ask "what does this system do?"
 ```
 
 `ekos init --detect` is worth using rather than plain `ekos init`: it detects the SQL dialect your
 schema is written in, excludes third-party and generated directories that would otherwise be
 compiled as if they were your own code, and prints an inventory of what it found. See
 [RFC 0152](ekos/docs/rfcs/0152-first-run-self-verification.md).
+
+### Upgrading and removing
+
+Re-running the install command replaces the binary in place with the latest release; there is no
+package database and nothing else to update. To remove it, delete the binary
+(`rm ~/.local/bin/ekos`) — EKOS keeps no files outside the `.ekos/` directory inside each
+workspace you compiled, which you can delete separately.
 
 ### From source
 
