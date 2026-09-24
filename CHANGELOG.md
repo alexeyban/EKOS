@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.2 — 2026-09-24
+
+A packaging release. **No code changes since v1.0.1** — not one `.rs` file differs — so the
+binaries are functionally identical and there is no reason to upgrade for behaviour.
+
+What it does contain is the metadata that makes the workspace publishable to crates.io: every
+crate now carries `license`, `repository`, `homepage` and `rust-version`; every internal
+dependency carries a version; and the eight crates that should not be on the registry are marked
+`publish = false`.
+
+It exists as its own version so that the registry, the git tag and the release binaries all
+describe the same tree. Publishing the crates under `1.0.1` would have put content on crates.io
+that did not match the `v1.0.1` tag, and a published version can never be replaced.
+
 ## v1.0.1 — 2026-09-23
 
 A packaging fix. No code changes to EKOS itself; if `ekos --version` already works for you, there
@@ -115,8 +129,9 @@ These are real and shipped as-is; 1.0.0 is a stability promise, not a claim of c
   against mock API shapes — they have not been exercised against live accounts.
 - Call-graph recovery is intraprocedural and within-file for most languages; cross-file call-chain
   tracing is not implemented. Perl has no call graph at all (dispatch is fully dynamic).
-- Not published to crates.io: `cargo install ekos` requires publishing 30 internal crates in
-  dependency order, which is deliberately a separate, careful piece of work.
+- crates.io: the workspace is publish-ready as of 1.0.2 but the crates are published separately
+  (44 of them, rate-limited by crates.io to roughly one new crate per ten minutes). Until that
+  completes, `cargo install ekos` does not work — use the prebuilt binary above.
 - Releases are checksummed (`SHA256SUMS`) but not signed. No Sigstore/cosign, no SLSA provenance.
 - There is no static musl build for aarch64 Linux, so `install.sh` has no fallback there: an
   aarch64 machine older than glibc 2.35 must build from source. x86_64 Linux has the fallback.
