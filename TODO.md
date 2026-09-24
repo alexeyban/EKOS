@@ -5918,3 +5918,117 @@ into a running instance, and a first run could silently produce nothing.
   regression (exactly what shipped in v1.0.0). Add a matrix over a couple of older/other images,
   or a container step, so the check differs from the build environment in the dimension it claims
   to verify.
+
+---
+
+# EKOS Migrate — evidence-backed PostgreSQL → analytical-target migration (RFC 0154–0167)
+
+**Goal:** Prove a migrated platform does what the old one did — or differs exactly where, and only
+where, a named human decided it should. Positioned as a migration *proof* system, not a SQL
+converter: DDL conversion is commoditized, evidence is not.
+
+**Status:** All 14 RFCs drafted 2026-09-24 (`ekos/docs/rfcs/0154`–`0167`). No code. No RFC accepted
+yet — per the Mandatory Development Workflow, no phase below starts before its own RFC is accepted.
+
+**Standing decisions** (RFC 0154): in-tree and public, not private behind the RFC 0149 seam — that
+seam has no CLI-subcommand hook and its MCP hook is read-only. ClickHouse first, Delta second. The
+whole PostgreSQL surface is in scope; nothing about it is a non-goal.
+
+---
+
+## Migrate Phase 0 — Foundation (RFC 0154)
+
+- [ ] `ekos-migrate` crate: project model, migration units, state machine
+- [ ] Transition = re-append the object + append a `MigrationTransition` event (per `session::lifecycle`)
+- [ ] `MigrationConnectionRef`, secret handling, sandbox/staging/production environments
+- [ ] `[migrate]` section in `EkosConfig` (`deny_unknown_fields` — must exist before any `ekos.toml` sets it)
+- [ ] REGISTRY rows for every `Migration*` kind, `structurally_keyed: true`
+- [ ] **Extend `every_pipeline_custom_kind_is_registered` to scan `migrate/src`** — it scans only
+      `recovery/src` and `semantic/src` today, so a new crate is uncovered
+- [ ] PostgreSQL + ClickHouse services in `docker-compose.dev.yml` (neither exists today)
+- [ ] `ekos migrate init` / `status`
+- [ ] Ledger-scan test: zero credentials, zero row values
+- [ ] Source-scan test: `commands/mcp.rs` cannot reach the approval lifecycle
+- [ ] **Decide the executor's concurrency model** against the non-`Sync` `KnowledgeStore`
+      (`extension.rs:22-26` — `block_on`, never spawned). Decide before writing the executor.
+
+## Migrate Phase 1 — The validator, before the connector (RFC 0155, 0156)
+
+Deliberately first: the differentiator needs only two engines and fixture tables, and its failure
+mode is a false green. If cross-engine hash canonicalization is wrong, that must surface in weeks.
+
+- [ ] Canonical value serialization: per-type rules, `\N` sentinel + escaping, `US` separator
+- [ ] Row hash, bucketing, order-independent `(count, sum)` bucket checksum
+- [ ] Golden fixtures with **literal** expected hashes; three-way agreement PG / ClickHouse / Rust
+- [ ] Validation tiers V0–V4; independent-oracle rule; bisect to exact keys
+- [ ] Divergence classification: expected / explained / unexplained
+- [ ] Planted-defect control suite; a tier that misses its control reports **failed**
+- [ ] Clean-run assertion: zero divergences on all corpora after a correct migration
+
+## Migrate Phase 2 — Discover and profile (RFC 0157)
+
+- [ ] `ekos-pg-live`: full catalog introspection, reconciled against RFC 0146 file facts (drift = finding)
+- [ ] Session safety: read-only, timeouts, replica preference, lag guard, `application_name` = `run_id`
+- [ ] P0 / P1 / P2 profiling tiers with `EXPLAIN` cost estimates and budget approval
+- [ ] **Redaction at the third raw-content entry point**; no top-k at all for PII columns
+- [ ] PII classification, applied conservatively on sight
+
+## Migrate Phase 3 — Assess (RFC 0158)
+
+- [ ] DQ rule families; inferred FKs seeded by real code joins
+- [ ] Target-compatibility rules measuring **affected rows**, not just types
+- [ ] Doc-vs-data conflict findings (no `ConflictingEvidence` path exists today — new work)
+- [ ] **Completeness check**: every catalog object → a fact and a disposition, or sign-off is refused
+- [ ] Synthetic fixture per rule; a rule without a fixture fails CI
+
+## Migrate Phase 4 — Map, design, generate, execute (RFC 0159, 0160)
+
+- [ ] `ekos-typemap` with lossiness classes; `narrowing-safe` cites the profile that proves it
+- [ ] Growing-column guard: never narrow identity/sequence columns on observed maximum
+- [ ] ClickHouse design: engine, `ORDER BY` from query shapes, partition guard, codecs, nullability
+- [ ] `ReplacingMergeTree` always emits the eventual-dedup finding
+- [ ] Statement classifier generalizing `validate_select_only` into `StatementClass`
+- [ ] Artifact hash pinning: executed hash must equal approved hash, no override
+- [ ] Chunked, resumable, throttled engine-native load; dry-run gate
+
+## Migrate Phase 5 — Risk, approval, report (RFC 0161, 0162)
+
+- [ ] Computed risk: statement class × environment × lossiness × blast radius × affected rows
+- [ ] Evidence snapshots: an approval whose evidence changed is dead, not re-validated
+- [ ] Two distinct approvers for R4; typed confirmation
+- [ ] `migrate.policy.toml`, its content hash recorded on every approval
+- [ ] Report compiled from ledger queries; citation verification; groundedness gate
+- [ ] Five mechanical sign-off preconditions, each independently enforced
+
+## Migrate Phase 6 — Full logic coverage (RFC 0163, 0164) — **required, not optional**
+
+- [ ] PL/pgSQL parser → `ProcedureIr` (dollar-quoting lexer, recursive descent, local recovery)
+- [ ] Fidelity labels computed from the IR; nothing labelled `Statements` that contains a gap
+- [ ] Trigger recovery and structural classification; never auto-translated
+- [ ] Deterministic lowering with round-trip checking; CH incremental-MV semantics trap handled
+- [ ] Anti-invention check — meaningful only now that a real node set exists
+- [ ] Fidelity gate: `Partial` objects are ineligible for reconstruction
+- [ ] V5 differential execution on IR-derived fixtures; branch coverage reported with a ratchet
+
+## Migrate Phase 7 — Second target (RFC 0165)
+
+- [ ] Spark SQL / Delta type map, target design, dialect emitter
+- [ ] Databricks SQL Statement Execution API primary; Thrift secondary; Spark Connect evaluated only
+- [ ] Pinned session timezone and calendar rebase, recorded per execution
+- [ ] delta-rs independent reader — the clean form of the independent-oracle rule
+
+## Migrate Phase 8 — Incremental, CDC, parallel run, cutover (RFC 0166)
+
+- [ ] Watermark sync with a measured late-arrival window; xmin preferred over wall clock
+- [ ] Delete detection: soft-delete / key-set diff / CDC, chosen per unit by evidence
+- [ ] Logical replication consumer; `REPLICA IDENTITY` checked up front; slot lag monitored and cleaned up
+- [ ] Parallel run with rolling validation and a divergence **trend**, not a single green run
+- [ ] Cutover checklist compiled from ledger state; final-sync LSN recorded on sign-off
+
+## Migrate Phase 9 — Agent pack (RFC 0167)
+
+- [ ] Read and propose/request MCP tools; no approve, execute or sign-off tool exists
+- [ ] Enforcement in layers: absent handlers, source scan, whole-list assertion, audit guard
+- [ ] Eight subagents with allowlists (ergonomics, explicitly not the security boundary)
+- [ ] Eval scenarios in `ekos eval`: grounding, gap honesty, escalation, **containment**
+- [ ] Headless end-to-end demo: Pagila → ClickHouse, real approvals, recorded transcripts
