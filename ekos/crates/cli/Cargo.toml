@@ -46,6 +46,7 @@ ekos-ekl.workspace = true
 ekos-marketing.workspace = true
 ekos-docs-gen.workspace = true
 ekos-evals.workspace = true
+ekos-migrate.workspace = true
 ekos-session.workspace = true
 ekos-dbt-gen.workspace = true
 ekos-semantic.workspace = true

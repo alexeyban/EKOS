@@ -5936,21 +5936,25 @@ whole PostgreSQL surface is in scope; nothing about it is a non-goal.
 
 ---
 
-## Migrate Phase 0 — Foundation (RFC 0154)
+## Migrate Phase 0 — Foundation (RFC 0154) — **done 2026-09-24, devlog_205**
 
-- [ ] `ekos-migrate` crate: project model, migration units, state machine
-- [ ] Transition = re-append the object + append a `MigrationTransition` event (per `session::lifecycle`)
-- [ ] `MigrationConnectionRef`, secret handling, sandbox/staging/production environments
-- [ ] `[migrate]` section in `EkosConfig` (`deny_unknown_fields` — must exist before any `ekos.toml` sets it)
-- [ ] REGISTRY rows for every `Migration*` kind, `structurally_keyed: true`
-- [ ] **Extend `every_pipeline_custom_kind_is_registered` to scan `migrate/src`** — it scans only
-      `recovery/src` and `semantic/src` today, so a new crate is uncovered
-- [ ] PostgreSQL + ClickHouse services in `docker-compose.dev.yml` (neither exists today)
-- [ ] `ekos migrate init` / `status`
-- [ ] Ledger-scan test: zero credentials, zero row values
-- [ ] Source-scan test: `commands/mcp.rs` cannot reach the approval lifecycle
+- [x] `ekos-migrate` crate: project model, migration units, state machine
+- [x] Transition = re-append the object + append a `MigrationTransition` event (per `session::lifecycle`)
+- [x] `MigrationConnectionRef`, secret handling, sandbox/staging/production environments
+- [x] `[migrate]` section in `EkosConfig` (`deny_unknown_fields` — must exist before any `ekos.toml` sets it)
+- [x] REGISTRY rows for every `Migration*` kind, `structurally_keyed: true`
+- [x] **Extend `every_pipeline_custom_kind_is_registered` to scan `migrate/src`** — done, *and*
+      backed by `every_migrate_kind_has_a_registry_row`, because that guard only sees
+      `ObjectKind::Custom("…")` **string literals** and this crate builds kinds from constants
+- [x] PostgreSQL + ClickHouse services — new `docker-compose.migrate.yml`, not `docker-compose.dev.yml`
+      (that file is a build container; nothing in a normal `cargo build` needs a database running)
+- [x] `ekos migrate init` / `status`
+- [x] Ledger-scan test: zero credentials (zero row values arrives with RFC 0157's profiler)
+- [x] Source-scan test: `commands/mcp.rs` cannot reach the approval lifecycle, plus a test that
+      `lifecycle::Actor` never grows an `Agent` variant
 - [ ] **Decide the executor's concurrency model** against the non-`Sync` `KnowledgeStore`
-      (`extension.rs:22-26` — `block_on`, never spawned). Decide before writing the executor.
+      (`extension.rs:22-26` — `block_on`, never spawned). Still open: it is not needed until
+      RFC 0160 and deciding it without a real executor to measure would be a guess.
 
 ## Migrate Phase 1 — The validator, before the connector (RFC 0155, 0156)
 

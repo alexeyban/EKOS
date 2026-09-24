@@ -1,0 +1,77 @@
+# RFC 0154 Phase 0 — the source and target sandboxes EKOS Migrate develops and tests against.
+#
+# Kept separate from docker-compose.dev.yml on purpose: that file is a build container for a
+# machine with no local Rust, and nothing in the normal workspace needs a database running. These
+# services are only for migration work, and starting a PostgreSQL and a ClickHouse for every
+# `cargo build` would be a poor trade.
+#
+# Usage:
+#   docker compose -f docker-compose.migrate.yml up -d
+#   docker compose -f docker-compose.migrate.yml down -v      # -v also drops the data
+#
+# Credentials here are deliberately weak and deliberately local-only. They exist so a developer can
+# run the suite, and they are passed by environment variable so nothing ever reaches an `ekos.toml`
+# or a connection string — the ledger stores the *name* of a secret's variable, never its value
+# (RFC 0154, `MigrationConnectionRef`).
+services:
+  migrate-pg:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ekos
+      POSTGRES_PASSWORD: ekos-local-only
+      POSTGRES_DB: ekos_migrate_fixtures
+      # Deterministic collation and timezone: RFC 0155's canonical form is pinned by golden tests,
+      # and a server whose locale differs from CI's would make those tests machine-dependent.
+      LANG: C
+      TZ: UTC
+    command:
+      - postgres
+      # A migration source is read at volume. These are development defaults, not production ones.
+      - -c
+      - max_connections=200
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      # RFC 0157 reads pg_stat_statements for query shapes, and RFC 0166 needs logical replication
+      # for CDC. Both have to be on at server start, so they belong here rather than in a fixture.
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=8
+      - -c
+      - track_activity_query_size=4096
+    ports:
+      - "55432:5432"
+    volumes:
+      - migrate-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ekos -d ekos_migrate_fixtures"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate-clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    environment:
+      CLICKHOUSE_USER: ekos
+      CLICKHOUSE_PASSWORD: ekos-local-only
+      CLICKHOUSE_DB: ekos_migrate_sandbox
+      # RFC 0160: the sandbox is a separate database, never a prefix convention inside a real one.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    ports:
+      - "58123:8123"   # HTTP — the interface `ekos-plugin-clickhouse` already speaks
+      - "59000:9000"   # native
+    volumes:
+      - migrate-ch-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  migrate-pg-data:
+  migrate-ch-data:

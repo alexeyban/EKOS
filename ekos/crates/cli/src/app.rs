@@ -252,10 +252,43 @@ enum Commands {
         #[command(subcommand)]
         subcommand: EvalCommands,
     },
+    /// Evidence-backed migration to an analytical target (RFC 0154) — needs `[migrate] enabled = true`
+    Migrate {
+        #[command(subcommand)]
+        subcommand: MigrateCommands,
+    },
     /// Agent session memory inbox (RFC 0151) — needs `[session-memory] enabled = true`
     Session {
         #[command(subcommand)]
         subcommand: SessionCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum MigrateCommands {
+    /// Create a migration project and its connection references (no credentials are ever stored)
+    Init {
+        /// Project name
+        #[arg(long)]
+        name: String,
+        /// Source, as `postgres://<alias>/<database>` — a DSN carrying a password is refused
+        #[arg(long)]
+        source: String,
+        /// Target, as `clickhouse://<alias>/<database>` or `delta://<alias>/<catalog>`
+        #[arg(long)]
+        target: String,
+        /// Name of the environment variable holding the source password
+        #[arg(long)]
+        source_secret_env: Option<String>,
+        /// Name of the environment variable holding the target password
+        #[arg(long)]
+        target_secret_env: Option<String>,
+    },
+    /// Units by state, and what is blocking
+    Status {
+        /// Project name (default: `[migrate] project` from ekos.toml)
+        #[arg(long)]
+        project: Option<String>,
     },
 }
 
@@ -1160,6 +1193,26 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             round,
             ledger,
         } => crate::commands::replay::run(&config, &cwd, &scenario, round, ledger),
+        Commands::Migrate { subcommand } => match subcommand {
+            MigrateCommands::Init {
+                name,
+                source,
+                target,
+                source_secret_env,
+                target_secret_env,
+            } => crate::commands::migrate::init(
+                &config,
+                &cwd,
+                name,
+                source,
+                target,
+                source_secret_env,
+                target_secret_env,
+            ),
+            MigrateCommands::Status { project } => {
+                crate::commands::migrate::status(&config, &cwd, project)
+            }
+        },
         Commands::Session { subcommand } => match subcommand {
             SessionCommands::Note {
                 text,

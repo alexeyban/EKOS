@@ -1110,6 +1110,30 @@ ekos replay scenario.yaml               # read back every recorded round, read-o
 ekos replay scenario.yaml --round 2     # narrow to one round
 ```
 
+### EKOS Migrate (foundation only, opt-in)
+
+Evidence-backed migration of a PostgreSQL database to an analytical target — a migration *proof*
+system rather than a SQL converter. Every scope decision, finding, mapping, validation result and
+human approval is a ledger fact with provenance, and the report cites those facts or does not ship.
+It covers the whole PostgreSQL surface, views, triggers and PL/pgSQL included: every source object
+is recovered, classified and dispositioned, never silently dropped or approximated
+(`ekos/docs/rfcs/0154`-`0167`).
+
+**Shipped today is the foundation only** — the project model, migration units and the append-only
+state machine. Nothing yet connects to a real database.
+
+```bash
+ekos migrate init --name ledgersmb \
+  --source postgres://pg-prod/ledgersmb \
+  --target clickhouse://ch-dev/ledgersmb \
+  --source-secret-env PG_PASSWORD      # the variable's NAME; the value is never stored
+ekos migrate status                     # units by state, and what is blocking
+```
+
+A connection string carrying a password is refused rather than parsed and stripped — a password
+that reached argv has already leaked into shell history. Needs `[migrate] enabled = true` in
+`ekos.toml`; a PostgreSQL and a ClickHouse sandbox are in `docker-compose.migrate.yml`.
+
 A scenario's `world: { sources: [reports/report_01.md] }` ingests real documents (PDF/DOCX/text/
 Markdown/HTML/email) into its starting world; an agent's `knowledge:`/`relationships:` can
 reference an ingested document by that same path string.

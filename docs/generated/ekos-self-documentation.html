@@ -98,6 +98,7 @@
     <a href="#marketing">Marketing agent</a>
     <a href="#worldengine">World Engine simulation</a>
     <a href="#clickhouse">ClickHouse connector</a>
+    <a href="#migrate">EKOS Migrate</a>
     <a href="#evidence">Live evidence from this repo</a>
   </nav>
 
@@ -338,9 +339,18 @@
     <p class="lede" style="max-width:56rem;">Two independent pieces. <strong>Compiled metadata</strong>: <code class="mono">ekos build</code>/<code class="mono">recover</code> observe a configured ClickHouse database's live schema over its stock HTTP interface and compile every table into a real, searchable, cross-system identity-resolvable <code class="mono">Table</code> object. <strong>Live NL-to-SQL</strong> (<code class="mono">ekos clickhouse ask "…"</code>): the one path in EKOS that intentionally crosses the "AI never touches raw systems directly" invariant — an LLM builds a ClickHouse <code class="mono">SELECT</code>, it's parsed and hard-rejected unless it's exactly one read-only statement, then run live, redacted, and returned, with every call recorded as an Evidence/Event pair for audit. The matching <code class="mono">ekos_clickhouse_query</code> MCP tool is off by default, gated behind an explicit <code class="mono">ekos.toml</code> opt-in.<span class="rfc">RFC 0056</span></p>
   </section>
 
+  <!-- ═══════════════════════════════════════════════ MIGRATE ═══ -->
+  <section class="cap" id="migrate">
+    <div class="cap-num">16</div>
+    <h2>EKOS Migrate <span style="font-size:0.6em; color:var(--ink-soft); font-weight:500;">(foundation only, opt-in)</span></h2>
+    <p class="lede" style="max-width:56rem;">Evidence-backed migration of a PostgreSQL database to an analytical target &mdash; positioned as a migration <em>proof</em> system rather than a SQL converter, since DDL conversion is commoditized and evidence is not. Every scope decision, finding, mapping, execution, validation result and human approval is a ledger fact with provenance, and the migration report cites those facts or does not ship. It covers the <strong>whole PostgreSQL surface</strong>, including views, triggers and PL/pgSQL: every source object is recovered, classified and dispositioned &mdash; translated with evidence, or a finding a named human decided on. Nothing is silently dropped or approximated.</p>
+    <p class="lede" style="max-width:56rem;"><strong>Shipped today (RFC 0154 Phase 0):</strong> <code class="mono">ekos migrate init</code> creates a migration project and its connection <em>references</em>; <code class="mono">ekos migrate status</code> reports units by state. A connection string carrying a password is <em>refused</em>, not parsed and stripped &mdash; the ledger stores a host alias and the <em>name</em> of a secret's environment variable, never a secret. State changes are append-only: the unit object is re-appended with its new state and a <code class="mono">MigrationTransition</code> event is recorded, so <code class="mono">ekos ledger audit</code> shows the full history and nothing is ever edited or deleted. Approval, execution outside a sandbox and sign-off are human-only, enforced by a source-scanning test that <code class="mono">commands/mcp.rs</code> cannot reach the lifecycle module &mdash; an absent capability is verifiable where a permission check is only probable. Off by default; needs <code class="mono">[migrate] enabled = true</code>.</p>
+    <p class="lede" style="max-width:56rem;"><strong>Not yet implemented:</strong> everything that touches a real database. Profiling, data-quality and target-compatibility rules, type mapping, target design, generation, execution, the validation tiers and their planted-defect controls, risk and approval, the report, PL/pgSQL recovery, Delta, CDC and the agent pack are designed but unbuilt.<span class="rfc">RFC 0154&ndash;0167</span></p>
+  </section>
+
   <!-- ═══════════════════════════════════════════════ EVIDENCE ═══ -->
   <section class="cap" id="evidence">
-    <div class="cap-num">16</div>
+    <div class="cap-num">17</div>
     <h2>Live, generated evidence: this repo, compiled by itself</h2>
     <p class="lede">Everything below this line is rendered straight from <code class="mono">ekos docs generate --layout curated</code> and <code class="mono">--layout solution-architect</code>'s own output, run against EKOS's real, currently-committed ledger — the same commands and output shape any other project gets. Nothing here is hand-typed.</p>
 

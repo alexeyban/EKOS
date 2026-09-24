@@ -38,6 +38,8 @@ pub struct EkosConfig {
     pub retrieval: RetrievalConfig,
     #[serde(default)]
     pub session_memory: SessionMemoryConfig,
+    #[serde(default)]
+    pub migrate: MigrateConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,6 +206,50 @@ pub struct SessionMemoryConfig {
     /// metered call — leave off unless that is intended.
     #[serde(default)]
     pub extraction: bool,
+}
+
+/// RFC 0154 — `[migrate]`. Off by default; `ekos migrate` refuses to do anything until
+/// `enabled = true`.
+///
+/// The section exists from Phase 0 on purpose: `EkosConfig` is `deny_unknown_fields`, so an
+/// `ekos.toml` carrying `[migrate]` would fail to parse against a build that does not know the
+/// section — the same reason RFC 0149 keeps `[binary-reconstruction]` public.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MigrateConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// The active migration project's name. `ekos migrate init` writes it; every other verb reads
+    /// it unless `--project` overrides.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Which environment writes target by default. Never `production`: promoting to production is
+    /// an explicit act with an approval behind it (RFC 0160/0161), not a config default somebody
+    /// set once and forgot.
+    #[serde(default = "default_migrate_environment")]
+    pub default_environment: String,
+    /// Path to the approval policy file, relative to the workspace root (RFC 0161).
+    #[serde(default = "default_migrate_policy_path")]
+    pub policy: PathBuf,
+}
+
+fn default_migrate_environment() -> String {
+    "sandbox".to_string()
+}
+
+fn default_migrate_policy_path() -> PathBuf {
+    PathBuf::from("migrate.policy.toml")
+}
+
+impl Default for MigrateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            project: None,
+            default_environment: default_migrate_environment(),
+            policy: default_migrate_policy_path(),
+        }
+    }
 }
 
 fn default_session_retention_days() -> u64 {
@@ -630,6 +676,7 @@ impl Default for EkosConfig {
             storage: StorageConfig::default(),
             retrieval: RetrievalConfig::default(),
             session_memory: SessionMemoryConfig::default(),
+            migrate: MigrateConfig::default(),
         }
     }
 }

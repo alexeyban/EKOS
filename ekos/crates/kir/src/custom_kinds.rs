@@ -150,6 +150,21 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "inbox entry_id (content hash) — RFC 0151; never a merge candidate",
     },
     CustomKind {
+        name: "MigrationProject",
+        structurally_keyed: true,
+        note: "(project name) — RFC 0154; one per (source, target) pair",
+    },
+    CustomKind {
+        name: "MigrationUnit",
+        structurally_keyed: true,
+        note: "(project, qualified object key) — RFC 0154; a shared name prefix across a migration's units is the rule, not the exception",
+    },
+    CustomKind {
+        name: "MigrationConnectionRef",
+        structurally_keyed: true,
+        note: "(project, role, dsn) — RFC 0154; holds an alias and a secret's *name*, never a secret",
+    },
+    CustomKind {
         name: "ArchitectureGap",
         structurally_keyed: true,
         note: "(crate, unresolved dependency name) — RFC 0065",

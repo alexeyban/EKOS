@@ -23,6 +23,7 @@ members = [
     "crates/docs-gen",
     "crates/dbt-gen",
     "crates/session",
+    "crates/migrate",
     "crates/cli",
     "crates/evals",
     "crates/demo-server",
@@ -121,6 +122,7 @@ ekos-runtime                       = { path = "crates/runtime", version = "1.0.3
 ekos-segment-backend               = { path = "crates/segment-backend", version = "1.0.3" }
 ekos-semantic                      = { path = "crates/semantic", version = "1.0.3" }
 ekos-session                       = { path = "crates/session", version = "1.0.3" }
+ekos-migrate                       = { path = "crates/migrate", version = "1.0.3" }
 ekos-simulation                    = { path = "crates/simulation", version = "1.0.3" }
 ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.0.3" }
 

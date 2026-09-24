@@ -23,6 +23,7 @@ pub mod init;
 pub mod ledger;
 pub mod marketing;
 pub mod mcp;
+pub mod migrate;
 pub mod query;
 pub mod query_log;
 pub mod recover;

@@ -880,6 +880,7 @@ dependencies = [
  "ekos-kir",
  "ekos-ledger",
  "ekos-marketing",
+ "ekos-migrate",
  "ekos-observation-sdk",
  "ekos-plugin-clickhouse",
  "ekos-plugin-confluence",
@@ -1178,6 +1179,20 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ekos-migrate"
+version = "1.0.3"
+dependencies = [
+ "chrono",
+ "ekos-kir",
+ "ekos-ledger",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
  "uuid",
 ]
 

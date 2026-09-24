@@ -1677,7 +1677,7 @@ mod tests {
         let crates_dir = manifest.parent().expect("crates/identity has a parent");
 
         let mut emitted: BTreeSet<String> = BTreeSet::new();
-        for sub in ["recovery/src", "semantic/src"] {
+        for sub in ["recovery/src", "semantic/src", "migrate/src"] {
             let root = crates_dir.join(sub);
             for entry in walkdir::WalkDir::new(&root)
                 .into_iter()
