@@ -103,3 +103,54 @@ async def test_timeout_still_reports_124(tmp_path):
     )
     assert code == 124
     assert "killed after" in log.read_text()
+
+
+@pytest.mark.asyncio
+async def test_log_lines_keep_their_order_through_the_threaded_writer(tmp_path):
+    """The risk introduced by moving writes off the event loop (`_afile`, python:S7493): each
+    write now happens on a worker thread, so ordering is only preserved because every call is
+    awaited before the next is issued. If that ever stops being true, the log interleaves."""
+    log = tmp_path / "run.log"
+    code = await _proc.run_streaming(
+        _python("import sys\nfor i in range(500): print(i)"),
+        cwd=str(tmp_path),
+        log_path=log,
+        register=lambda p: None,
+        timeout_s=30,
+    )
+
+    assert code == 0
+    lines = [ln for ln in log.read_text().splitlines() if ln.strip()]
+    assert lines == [str(i) for i in range(500)], "log lines must stay in emission order"
+
+
+@pytest.mark.asyncio
+async def test_the_event_loop_keeps_running_while_a_chatty_process_streams(tmp_path):
+    """The point of the whole change: a run that writes thousands of log lines must not stall
+    the loop that is also serving every other request."""
+    log = tmp_path / "run.log"
+    ticks = 0
+    stop = asyncio.Event()
+
+    async def heartbeat() -> None:
+        nonlocal ticks
+        while not stop.is_set():
+            ticks += 1
+            await asyncio.sleep(0.001)
+
+    beat = asyncio.create_task(heartbeat())
+    try:
+        code = await _proc.run_streaming(
+            _python("for i in range(2000): print('line', i)"),
+            cwd=str(tmp_path),
+            log_path=log,
+            register=lambda p: None,
+            timeout_s=30,
+        )
+    finally:
+        stop.set()
+        await beat
+
+    assert code == 0
+    assert len(log.read_text().splitlines()) == 2000
+    assert ticks > 10, f"the event loop only got {ticks} slices while the run streamed"

@@ -13,6 +13,8 @@ import signal
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from . import _afile
+
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 # asyncio's StreamReader defaults to a 64 KiB limit and `readline()` raises ValueError — not EOF,
@@ -70,7 +72,7 @@ async def run_streaming(
     and (optionally) calling `on_line`. `register` is handed the live process so the caller can
     cancel it. Returns the exit code; a timeout SIGKILLs and returns 124.
     """
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    await _afile.mkdirs(log_path.parent)
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=cwd,
@@ -82,7 +84,11 @@ async def run_streaming(
 
     async def pump() -> None:
         assert proc.stdout is not None
-        with log_path.open("a", encoding="utf-8") as fh:
+        # Opened, written and closed off the event loop (`_afile`): this handle is written once
+        # per output line of a process that can run for minutes, so it is by far the largest
+        # source of blocking I/O in the console.
+        fh = await _afile.open_append(log_path)
+        try:
             while True:
                 try:
                     raw = await proc.stdout.readline()
@@ -91,16 +97,18 @@ async def run_streaming(
                     # buffer when it raises, so the stream stays usable and the right move is to
                     # note the loss and keep going — failing the run over one pathological line
                     # is strictly worse than losing the line.
-                    fh.write(f"[console] dropped a line longer than {STREAM_LIMIT} bytes\n")
-                    fh.flush()
+                    await _afile.write_line(
+                        fh, f"[console] dropped a line longer than {STREAM_LIMIT} bytes\n"
+                    )
                     continue
                 if not raw:
                     return
                 line = strip_ansi(raw.decode(errors="replace").rstrip("\n"))
-                fh.write(line + "\n")
-                fh.flush()
+                await _afile.write_line(fh, line + "\n")
                 if on_line is not None:
                     await on_line(line)
+        finally:
+            await _afile.close(fh)
 
     try:
         async with asyncio.timeout(timeout_s):
@@ -109,8 +117,7 @@ async def run_streaming(
         with contextlib.suppress(ProcessLookupError):
             proc.kill()
         await proc.wait()
-        with log_path.open("a", encoding="utf-8") as fh:
-            fh.write(f"\n[console] killed after {timeout_s}s timeout\n")
+        await _afile.append_text(log_path, f"\n[console] killed after {timeout_s}s timeout\n")
         return 124
     except BaseException:
         # Any other failure — a log write error, `on_line` raising, the caller cancelling — used

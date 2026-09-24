@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from . import _proc, models
+from . import _afile, _proc, models
 from .commands import BY_NAME, Command
 from .models import Run
 from .settings import Settings
@@ -188,7 +188,7 @@ class JobRunner:
             return
         command = BY_NAME[run.command]
         log_path = Path(run.log_path)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        await _afile.mkdirs(log_path.parent)
         models.update_run(run_id, status="running", started_at=models._now())
 
         def register(proc: asyncio.subprocess.Process) -> None:
@@ -214,8 +214,7 @@ class JobRunner:
             # The log write is itself allowed to fail (full disk, unlinked run directory) without
             # masking the original error or escaping into the worker loop.
             with contextlib.suppress(OSError):
-                with log_path.open("a", encoding="utf-8") as fh:
-                    fh.write(f"\n[console] run failed: {exc!r}\n")
+                await _afile.append_text(log_path, f"\n[console] run failed: {exc!r}\n")
         finally:
             self._running.pop(run_id, None)
             self._cancelled.discard(run_id)
@@ -240,8 +239,7 @@ class JobRunner:
                 stage["status"] = "cancelled"
                 models.update_run(run_id, stages=stages)
                 return "cancelled"
-            with log_path.open("a") as fh:
-                fh.write(f"\n[console] === stage: {stage['name']} ===\n")
+            await _afile.append_text(log_path, f"\n[console] === stage: {stage['name']} ===\n")
             stage["status"] = "running"
             models.update_run(run_id, stages=list(stages))
             stage_argv = [self._settings.ekos_bin, stage["name"]]

@@ -120,6 +120,49 @@ Now any non-timeout exit path reaps the child before the exception leaves.
 
 ---
 
+## Follow-up: the actual Sonar finding was none of the above
+
+The reliability rating on these three files stayed at **C** after everything above, so rather
+than guess again the findings came from the SonarCloud API directly:
+
+```
+$ curl .../api/issues/search?componentKeys=alexeyban_EKOS&types=BUG
+total bugs: 3
+MAJOR  python:S7493  web/api/app/_proc.py:112          Use an asynchronous file API ...
+MAJOR  python:S7493  web/api/app/routes/config.py:61   Use an asynchronous file API ...
+MAJOR  python:S7493  web/api/app/runner.py:217         Use an asynchronous file API ...
+```
+
+Three instances of one rule: **synchronous file I/O inside an `async def`**. Every one of these
+call sites shares a single event loop with every other request. `open()`, `write()`, `flush()`
+and `mkdir()` are blocking syscalls, so on a busy, slow or full disk they stall the *whole* API —
+the health endpoint stops answering and queued runs stop being picked up, for a reason nothing
+logs. The worst offender by far is the log pump, which writes and flushes **once per output
+line** of a process that can run for minutes.
+
+Fixed with a new `app/_afile.py`: thin `asyncio.to_thread` wrappers over the handful of
+operations actually used (`mkdirs`, `append_text`, `open_append`, `write_line`, `close`,
+`write_new`, `unlink`). Stdlib rather than an `aiofiles` dependency — the set is small enough
+that a dependency would be the more expensive answer.
+
+Swept the same class of call out of all three files, not just the three flagged lines: the
+`mkdir` in `run_streaming` and `_execute`, the stage-header write in `_run_chain`, the temp-file
+creation in `_validate_text`, and the blocking `config_io.read_config` / `write_config` calls
+that async route handlers were making directly (those are sync functions, so Sonar could not see
+them, but they block the loop exactly the same way).
+
+Two consequences worth stating rather than discovering later:
+
+- **Ordering is now a contract, not a property.** Writes happen on worker threads, so log lines
+  stay in order only because every call is awaited before the next is issued. `_afile`'s module
+  docstring says so, and a test asserts 500 lines come back in emission order.
+- **Offloading removed an incidental serialisation.** `config_io.write_config` used to run *on*
+  the loop, so two concurrent PUTs for one workspace could not interleave inside it. They can
+  now. It is still safe — `os.replace` means each file is atomically one version or the other,
+  never a blend — but it is last-writer-wins rather than ordered. Noted at the call site.
+
+---
+
 ## Knowledge Captured
 
 - **A test can disprove the reasoning behind its own fix, and that is the point.** The claim
@@ -141,6 +184,18 @@ Now any non-timeout exit path reaps the child before the exception leaves.
   useful than claiming a severity the evidence does not support.
 - **A test that passes before the fix is not a regression test.** Each fix here was confirmed by
   reverting it and watching the test fail — which is how the worker-death test earned its keep.
+- **Ask the scanner what it found instead of inferring it from the rating.** Seven real bugs were
+  fixed in the first pass and the reliability rating did not move, because the rating is driven
+  by the *worst open issue* and all three open ones were a rule nothing here had considered.
+  `api/issues/search?componentKeys=…&types=BUG` on a public project answers in one call and needs
+  no token.
+- **Sync file I/O in an `async def` is a reliability bug, not a style preference.** One blocking
+  `write`+`flush` per log line, on the loop that serves every request, is the difference between
+  a slow disk degrading one run and a slow disk hanging the entire console.
+- **Moving I/O to a thread can silently remove serialisation you were relying on.** The event
+  loop was serialising config writes for free; `asyncio.to_thread` stops doing that. Here the
+  atomic `os.replace` already covered it, but the guarantee changed and that is worth writing
+  down rather than rediscovering during an incident.
 
 ---
 
@@ -154,5 +209,6 @@ Now any non-timeout exit path reaps the child before the exception leaves.
 | `web/api/app/runner.py` | guarded worker loop, `None`-safe `_run_chain`, log-write failure contained, `aclose` drains callback tasks |
 | `web/api/app/routes/config.py` | temp file created before it is written, so a failed write cannot leak it |
 | `web/api/tests/test_config_io.py` | 5 new tests + one existing assertion updated to the path-free message |
-| `web/api/tests/test_proc_reliability.py` | new — 5 tests |
+| `web/api/app/_afile.py` | new — `asyncio.to_thread` wrappers so no blocking file I/O runs on the event loop |
+| `web/api/tests/test_proc_reliability.py` | new — 7 tests |
 | `web/api/tests/test_runner.py` | new worker-survival test |
