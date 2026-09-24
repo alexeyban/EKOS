@@ -1,0 +1,28 @@
+Text
+  coalesce(replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f'), '\N')
+Char
+  coalesce(replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f'), '\N')
+Bool
+  coalesce((case when "flag" then 't' else 'f' end), '\N')
+Int
+  coalesce("n"::text, '\N')
+Decimal(2)
+  coalesce(trim(to_char("amt", 'FM9999999999999999999990.00')), '\N')
+TimestampUtc
+  coalesce(to_char("ts" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US'), '\N')
+TimestampNaive
+  coalesce(to_char("ts_naive", 'YYYY-MM-DD"T"HH24:MI:SS.US'), '\N')
+Date
+  coalesce(to_char("d", 'YYYY-MM-DD'), '\N')
+Time
+  coalesce(to_char("t", 'HH24:MI:SS.US'), '\N')
+Uuid
+  coalesce(lower("u"::text), '\N')
+Bytes
+  coalesce(encode("b", 'hex'), '\N')
+Inet
+  coalesce(replace(replace("ip"::text, '\', '\\'), chr(31), '\x1f'), '\N')
+ROW_HASH
+  md5(coalesce(replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f'), '\N') || chr(31) || coalesce(replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f'), '\N'))
+BUCKET_QUERY
+  SELECT (('x' || substr(md5(coalesce("id"::text, '\N')), 1, 15))::bit(60))::bigint % 4096 AS bucket, count(*) AS row_count, sum(((('x' || substr(md5(coalesce(replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f'), '\N') || chr(31) || coalesce(replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f'), '\N')), 1, 15))::bit(60))::bigint)::numeric) AS hash_sum FROM s.orders GROUP BY bucket ORDER BY bucket

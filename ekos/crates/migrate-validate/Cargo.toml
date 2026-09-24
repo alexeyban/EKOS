@@ -1,0 +1,17 @@
+[package]
+name = "ekos-migrate-validate"
+description = "RFC 0155 — canonical value serialization and cross-engine checksums for EKOS Migrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+md-5.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

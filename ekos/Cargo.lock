@@ -1197,6 +1197,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-migrate-validate"
+version = "1.0.3"
+dependencies = [
+ "chrono",
+ "md-5 0.10.6",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "ekos-observation-sdk"
 version = "1.0.3"
 dependencies = [

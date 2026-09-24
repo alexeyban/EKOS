@@ -5961,13 +5961,21 @@ whole PostgreSQL surface is in scope; nothing about it is a non-goal.
 Deliberately first: the differentiator needs only two engines and fixture tables, and its failure
 mode is a false green. If cross-engine hash canonicalization is wrong, that must surface in weeks.
 
-- [ ] Canonical value serialization: per-type rules, `\N` sentinel + escaping, `US` separator
-- [ ] Row hash, bucketing, order-independent `(count, sum)` bucket checksum
-- [ ] Golden fixtures with **literal** expected hashes; three-way agreement PG / ClickHouse / Rust
-- [ ] Validation tiers V0–V4; independent-oracle rule; bisect to exact keys
-- [ ] Divergence classification: expected / explained / unexplained
-- [ ] Planted-defect control suite; a tier that misses its control reports **failed**
-- [ ] Clean-run assertion: zero divergences on all corpora after a correct migration
+**RFC 0155 landed 2026-09-24 (devlog_206), with one leg missing — see below.**
+
+- [x] Canonical value serialization: per-type rules, `\N` sentinel + escaping, `US` separator
+- [x] Row hash, bucketing, order-independent `(count, sum)` bucket checksum
+- [x] Golden fixtures with **literal** expected hashes — 35 awkward values, frozen
+- [x] Dialect SQL generation for PostgreSQL and ClickHouse, pinned by snapshot
+- [x] Planted-defect control suite for the serialization layer (9 controls) + catalogue-completeness
+      test; clean-run and row-order assertions
+- [ ] **Three-way engine agreement (PG / ClickHouse / Rust).** Blocked on RFC 0157's driver —
+      nothing in the workspace can execute a query yet. The SQL is a reviewed draft, *not*
+      verified, and RFC 0155's acceptance criterion is not met until it runs. First thing to do
+      once the driver exists.
+- [ ] Validation tiers V0–V4; independent-oracle rule; bisect to exact keys (RFC 0156)
+- [ ] Divergence classification: expected / explained / unexplained (RFC 0156)
+- [ ] Clean-run assertion across all corpora after a correct migration (RFC 0156)
 
 ## Migrate Phase 2 — Discover and profile (RFC 0157)
 
