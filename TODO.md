@@ -5969,10 +5969,12 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 - [x] Dialect SQL generation for PostgreSQL and ClickHouse, pinned by snapshot
 - [x] Planted-defect control suite for the serialization layer (9 controls) + catalogue-completeness
       test; clean-run and row-order assertions
-- [ ] **Three-way engine agreement (PG / ClickHouse / Rust).** Blocked on RFC 0157's driver —
-      nothing in the workspace can execute a query yet. The SQL is a reviewed draft, *not*
-      verified, and RFC 0155's acceptance criterion is not met until it runs. First thing to do
-      once the driver exists.
+- [x] **Three-way engine agreement (PG / ClickHouse / Rust)** — verified live 2026-09-24
+      (devlog_207) against PostgreSQL 16 and ClickHouse 24.8 from `docker-compose.migrate.yml`.
+      31 PG cases, 29 CH cases, plus the row hash and the bucket prefix. Found three real
+      cross-engine defects that review had passed. `EKOS_MIGRATE_LIVE=1 cargo test -p
+      ekos-migrate-validate --test live_engines`; skipped without the sandboxes.
+      **RFC 0155's acceptance criterion is now met.**
 - [ ] Validation tiers V0–V4; independent-oracle rule; bisect to exact keys (RFC 0156)
 - [ ] Divergence classification: expected / explained / unexplained (RFC 0156)
 - [ ] Clean-run assertion across all corpora after a correct migration (RFC 0156)

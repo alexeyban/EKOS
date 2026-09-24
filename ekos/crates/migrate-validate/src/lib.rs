@@ -9,20 +9,27 @@
 //! between PostgreSQL, ClickHouse and this implementation against a fixed expectation, never
 //! two-way agreement between two implementations that can be wrong the same way.
 //!
-//! # What is proven today, and what is not
+//! # What is proven
 //!
-//! **Proven:** the Rust canonical form and row hash, against committed literals
-//! (`tests/golden.rs`); that only NULL renders as the null sentinel and no value can forge a
-//! column boundary; that every serialization-layer planted defect from RFC 0156 changes the bucket
-//! checksum, and that a clean run changes nothing (`tests/controls.rs`).
+//! **Three-way agreement, verified live** (`tests/live_engines.rs`, PostgreSQL 16 and ClickHouse
+//! 24.8 from `docker-compose.migrate.yml`): 31 cases on PostgreSQL and 29 on ClickHouse each
+//! reproduce the canonical form frozen in `tests/golden.rs`, and both engines reproduce the row
+//! hash and the 60-bit bucket prefix. Every assertion is against the committed literal, never
+//! against the other engine.
 //!
-//! **Not proven:** that PostgreSQL and ClickHouse produce the same bytes from the pushed-down SQL
-//! in [`dialect`]. Nothing in this workspace can execute a query against either engine until
-//! RFC 0157 adds a driver. The expressions are reasoned carefully — see the endianness note on
-//! [`dialect::prefix60_expr`] for why that reasoning is not sufficient on its own — and pinned by
-//! a snapshot test so they cannot drift unreviewed, but RFC 0155's acceptance criterion is **not
-//! met** until those queries have run against live engines and matched `tests/golden.rs`'s
-//! literals. Treat the SQL as a reviewed draft, not as verified.
+//! Also proven: only NULL renders as the null sentinel and no value can forge a column boundary
+//! (`tests/golden.rs`); every serialization-layer planted defect from RFC 0156 changes the bucket
+//! checksum, and a clean run or a reordered scan changes nothing (`tests/controls.rs`).
+//!
+//! **Known gaps, each named with a reason** in [`fixtures::UNMAPPED_LIVE_CASES`] and asserted
+//! complete by the harness: intervals and arrays need the RFC 0159 mappings before there is
+//! anything to render, ClickHouse has no standalone time-of-day type, and a pre-1900 date is a
+//! *compatibility finding* rather than a serialization case — ClickHouse `Date32` bottoms out at
+//! 1900-01-01 and silently clamps to it.
+//!
+//! Three real cross-engine defects were found only by running this, never by review: the
+//! ClickHouse NULL-literal escape, `toString` stripping a decimal's trailing zeros, and
+//! `reinterpretAsUInt64`'s endianness. See their doc comments in [`dialect`].
 
 pub mod canon;
 pub mod dialect;
@@ -31,7 +38,7 @@ pub mod hash;
 pub mod value;
 
 pub use canon::{NULL_SENTINEL, UNIT_SEPARATOR, canon, row_canonical};
-pub use dialect::{ColumnRule, Dialect, bucket_checksum_query, canon_expr};
+pub use dialect::{ColumnRule, Dialect, bucket_checksum_query, canon_expr, canon_expr_of};
 pub use hash::{BucketChecksum, bucket_of, checksum_buckets, prefix60, row_hash};
 pub use value::Value;
 

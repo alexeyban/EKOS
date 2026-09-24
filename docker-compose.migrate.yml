@@ -67,7 +67,10 @@ services:
     volumes:
       - migrate-ch-data:/var/lib/clickhouse
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      # 127.0.0.1, not localhost: inside this image `localhost` resolves to ::1 first and the
+      # server is not listening on IPv6, so the healthcheck never goes green while the port is in
+      # fact serving fine from outside. Verified against 24.8-alpine.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20

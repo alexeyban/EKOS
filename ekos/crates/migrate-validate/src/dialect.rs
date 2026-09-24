@@ -8,7 +8,7 @@
 //! rather than written per call site, and the golden tests assert the engine output against the
 //! same committed literals the Rust implementation is asserted against.
 
-use crate::canon::{NULL_SENTINEL, UNIT_SEPARATOR};
+use crate::canon::UNIT_SEPARATOR;
 
 /// Which engine an expression is being generated for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +36,23 @@ pub enum ColumnRule {
     Inet,
 }
 
+/// The null sentinel **as a SQL string literal**, which is not the same text on both engines.
+///
+/// ClickHouse treats `\N` inside a string literal as its NULL escape: `SELECT '\N'` returns NULL,
+/// not the two characters. So the sentinel has to be written `'\\N'` there, while PostgreSQL —
+/// with `standard_conforming_strings` on, the default since 9.1 — takes `'\N'` literally.
+///
+/// Caught by the live harness, not by review: every unit test passed and the ClickHouse side
+/// silently rendered NULL for *every* null column, which would have made every row containing a
+/// null hash differently on the two sides. A total mismatch rather than a subtle one, but only
+/// because nothing else depended on it.
+fn null_literal(d: Dialect) -> &'static str {
+    match d {
+        Dialect::Postgres => "'\\N'",
+        Dialect::ClickHouse => "'\\\\N'",
+    }
+}
+
 fn quote_ident(d: Dialect, name: &str) -> String {
     // Both engines use double quotes and both escape an embedded quote by doubling it. Identifiers
     // are never concatenated raw: RFC 0160's rule, applied here too.
@@ -61,7 +78,16 @@ fn escape_sql(d: Dialect, inner: &str) -> String {
 
 /// The canonical-form expression for one column.
 pub fn canon_expr(d: Dialect, column: &str, rule: ColumnRule) -> String {
-    let c = quote_ident(d, column);
+    canon_expr_of(d, &quote_ident(d, column), rule)
+}
+
+/// The canonical-form expression over an arbitrary sub-expression rather than a column.
+///
+/// Exists so the live cross-engine harness can apply exactly the same rendering to a *literal*,
+/// which is what makes it a real check: if the harness rebuilt the expression itself, it would be
+/// testing its own copy rather than the one tiers V1–V3 actually push down.
+pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
+    let c = expr.to_string();
     let body = match (d, rule) {
         (Dialect::Postgres, ColumnRule::Text | ColumnRule::Char | ColumnRule::Inet) => {
             escape_sql(d, &format!("{c}::text"))
@@ -79,8 +105,12 @@ pub fn canon_expr(d: Dialect, column: &str, rule: ColumnRule) -> String {
             "trim(to_char({c}, 'FM9999999999999999999990.{}'))",
             "0".repeat(s as usize)
         ),
+        // `toString` on a Decimal **strips trailing zeros** (1.50 renders as "1.5"), which breaks
+        // the fixed-scale rule and makes every decimal disagree with PostgreSQL.
+        // `toDecimalString` renders at an exact scale, and normalizes -0.00 to 0.00 the way
+        // `canon_decimal` does. Caught by the live harness, not by review.
         (Dialect::ClickHouse, ColumnRule::Decimal(s)) => {
-            format!("toString(toDecimal128({c}, {s}))")
+            format!("toDecimalString(toDecimal128({c}, {s}), {s})")
         }
         (Dialect::Postgres, ColumnRule::TimestampUtc) => {
             format!("to_char({c} at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')")
@@ -104,9 +134,10 @@ pub fn canon_expr(d: Dialect, column: &str, rule: ColumnRule) -> String {
         (Dialect::ClickHouse, ColumnRule::Bytes) => format!("lower(hex({c}))"),
     };
     // NULL is applied last, over the rendered value, so no rule has to handle it itself.
+    let null = null_literal(d);
     match d {
-        Dialect::Postgres => format!("coalesce({body}, '{NULL_SENTINEL}')"),
-        Dialect::ClickHouse => format!("if(isNull({c}), '{NULL_SENTINEL}', {body})"),
+        Dialect::Postgres => format!("coalesce({body}, {null})"),
+        Dialect::ClickHouse => format!("if(isNull({c}), {null}, {body})"),
     }
 }
 
@@ -206,7 +237,12 @@ mod tests {
 
     #[test]
     fn decimal_expressions_carry_the_approved_scale() {
-        assert!(canon_expr(Dialect::ClickHouse, "amt", ColumnRule::Decimal(2)).contains(", 2)"));
+        let ch = canon_expr(Dialect::ClickHouse, "amt", ColumnRule::Decimal(2));
+        assert!(
+            ch.contains("toDecimalString"),
+            "toString strips trailing zeros: {ch}"
+        );
+        assert!(ch.contains(", 2)"), "{ch}");
         assert!(canon_expr(Dialect::Postgres, "amt", ColumnRule::Decimal(2)).contains(".00"));
     }
 
