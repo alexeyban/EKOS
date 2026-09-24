@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.3 — 2026-09-24
+
+**No functional change to the `ekos` binary.** Not one `.rs` file differs from v1.0.2, so these
+binaries behave identically. If v1.0.2 works for you there is nothing here to upgrade for.
+
+This release exists to exercise the release pipeline itself. The `release` job only runs on a
+tag, so two changes made to it — per-job least-privilege permissions, and a rewritten checksum
+step that validates every archive contributed a `SHA256SUMS` line — had never actually executed.
+Proving them on a release that cannot regress anything is cheaper than discovering a broken
+release job during one that matters.
+
+Everything else since v1.0.2 is the web console and repository tooling, none of which ships in
+the binary:
+
+- Web console: three security fixes (absolute paths disclosed in API errors, a non-atomic
+  symlink-following config write, an unbounded read/parse) and several reliability fixes — most
+  importantly a job runner whose worker task could die permanently on one transient database
+  error, silently stalling every future run on that workspace. Also removed all blocking file I/O
+  from the event loop, which could stall the whole API on a slow disk.
+- CI workflow now declares `contents: read` rather than inheriting repository defaults.
+- SonarCloud analysis excludes demo material.
+
 ## v1.0.2 — 2026-09-24
 
 A packaging release. **No code changes since v1.0.1** — not one `.rs` file differs — so the
