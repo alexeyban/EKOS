@@ -687,6 +687,204 @@ fn report_findings(findings: &[ekos_migrate_dq::Finding], measured: bool) {
     }
 }
 
+/// `ekos migrate map` — choose target types and a table design for each unit, and emit DDL.
+///
+/// Everything it decides is derived from what the profiler measured, and everything it cannot
+/// derive it says it cannot derive. The DDL carries its own reasoning in comments, so a human
+/// approving it is not asked to go and find a report somewhere else.
+pub fn map(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    unit: Option<String>,
+    emit: Option<std::path::PathBuf>,
+) -> Result<()> {
+    use ekos_migrate_target_clickhouse as ch;
+
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+    let dsn = project_source(store.as_ref(), &name)?;
+    let target_db = ConnectionRef::parse(&project_target(store.as_ref(), &name)?)?.database;
+
+    let units = Unit::all_in(store.as_ref(), &name)?;
+    let targets: Vec<String> = units
+        .iter()
+        .filter(|(o, _)| unit.as_ref().is_none_or(|u| &o.name == u))
+        .map(|(o, _)| o.name.clone())
+        .collect();
+    if targets.is_empty() {
+        bail!("no matching units. Run `ekos migrate discover` first.");
+    }
+
+    let measured = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        let mut out = Vec::new();
+        for table in &targets {
+            let profile = ekos_pg_live::profile::profile_table_p0(&src, table)?;
+            let cols =
+                ekos_pg_live::profile::profile_columns_p0(&src, table, &config.redaction_config())?;
+            let cols = ekos_pg_live::profile::profile_columns_p1(&src, table, cols, 10.0, 500)?;
+            let nullability = column_nullability(&src, table)?;
+            let pk = primary_key_columns(&src, table)?;
+            out.push((table.clone(), profile, cols, nullability, pk));
+        }
+        Ok(out)
+    })?;
+
+    let mut emitted = Vec::new();
+    for (table, profile, cols, nullability, pk) in &measured {
+        let mappings: Vec<ch::Mapping> = cols
+            .iter()
+            .map(|c| {
+                let column = c.qualified_name.rsplit('.').next().unwrap_or_default();
+                let distinct =
+                    ekos_pg_live::profile::distinct_count(c.distinct_estimate, profile.row_count);
+                let evidence = ch::ColumnEvidence {
+                    null_fraction: Some(c.null_fraction),
+                    distinct,
+                    row_count: profile.row_count,
+                    numeric_precision_used: c.numeric_precision_used,
+                    numeric_scale_used: c.numeric_scale_used,
+                    // The guard that stops the profiler's biggest win from becoming its biggest
+                    // mistake: a monotonic column's domain keeps growing, so no measurement of its
+                    // past can make a narrowing safe.
+                    growing: c.monotonic == Some(true),
+                    profile_ref: Some(format!("profile:{}", c.qualified_name)),
+                };
+                ch::map_column(
+                    column,
+                    &c.data_type,
+                    nullability.get(column).copied().unwrap_or(true),
+                    &evidence,
+                )
+            })
+            .collect();
+
+        let design_columns: Vec<ch::DesignColumn> = cols
+            .iter()
+            .zip(&mappings)
+            .map(|(c, m)| ch::DesignColumn {
+                name: m.column.clone(),
+                target_type: m.target_type.clone(),
+                distinct: ekos_pg_live::profile::distinct_count(
+                    c.distinct_estimate,
+                    profile.row_count,
+                ),
+                monotonic: c.monotonic,
+            })
+            .collect();
+
+        let evidence = ch::TableEvidence {
+            row_count: profile.row_count,
+            has_updates: profile.has_updates(),
+            update_time_column: cols
+                .iter()
+                .map(|c| c.qualified_name.rsplit('.').next().unwrap_or_default())
+                .find(|n| matches!(*n, "updated_at" | "modified_at" | "last_modified"))
+                .map(str::to_string),
+            primary_key: pk.clone(),
+            // Query-shape evidence arrives with pg_stat_statements seeding; until then the design
+            // says it has none rather than pretending otherwise.
+            filter_columns: Vec::new(),
+            time_column: None,
+        };
+
+        let d = ch::design(table, &evidence, &design_columns);
+        report_mapping(table, &mappings, &d);
+
+        match ch::create_table(&d, &mappings, &target_db) {
+            Ok(sql) => emitted.push(format!("{}\n{sql};\n", ch::rationale_comment(&d))),
+            Err(e) => println!("  DDL not emitted: {e}"),
+        }
+    }
+
+    if let Some(path) = emit {
+        std::fs::write(&path, emitted.join("\n"))?;
+        println!(
+            "\nDDL for {} table(s) written to {}",
+            emitted.len(),
+            path.display()
+        );
+    } else if !emitted.is_empty() {
+        println!("\nRe-run with --emit <path> to write the DDL.");
+    }
+    Ok(())
+}
+
+fn report_mapping(
+    table: &str,
+    mappings: &[ekos_migrate_target_clickhouse::Mapping],
+    design: &ekos_migrate_target_clickhouse::TargetDesign,
+) {
+    use ekos_migrate_target_clickhouse::Lossiness;
+    println!("\n{table}");
+    println!("  engine   : {}", design.engine.render());
+    println!("             {}", design.engine_rationale);
+    println!("  order by : {}", design.order_by.join(", "));
+    println!("             {}", design.order_by_rationale);
+    if let Some(p) = &design.partition_by {
+        println!("  partition: {p}");
+    }
+    println!("  columns  :");
+    for m in mappings {
+        let mark = match m.lossiness {
+            Lossiness::Lossy => "LOSSY",
+            Lossiness::NarrowingSafe => "narrow",
+            _ => "      ",
+        };
+        println!(
+            "    {mark} {:<22} {:<28} -> {}",
+            m.column, m.source_type, m.target_type
+        );
+        if m.lossiness != Lossiness::Exact {
+            println!("           {}", m.rationale);
+        }
+    }
+    let lossy = mappings
+        .iter()
+        .filter(|m| m.lossiness.needs_approval())
+        .count();
+    if lossy > 0 {
+        println!("  {lossy} lossy mapping(s) need an R3 approval before this design is used.");
+    }
+    for f in &design.findings {
+        println!("  NEEDS A DECISION: {f}");
+    }
+}
+
+fn project_target(store: &dyn ekos_ledger::KnowledgeStore, name: &str) -> Result<String> {
+    let obj = Project::load(store, name)?
+        .ok_or_else(|| anyhow::anyhow!("no migration project named '{name}'"))?;
+    obj.properties
+        .get("target")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("project '{name}' has no target connection"))
+}
+
+/// Which columns the source declares nullable.
+fn column_nullability(
+    src: &PgSource,
+    table: &str,
+) -> Result<std::collections::BTreeMap<String, bool>> {
+    let (schema, name) = table.split_once('.').unwrap_or(("public", table));
+    let rows = src.raw_query(&format!(
+        "SELECT a.attname, NOT a.attnotnull FROM pg_attribute a \
+         JOIN pg_class c ON c.oid = a.attrelid \
+         JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '{}' AND c.relname = '{}' AND a.attnum > 0 AND NOT a.attisdropped",
+        schema.replace('\'', "''"),
+        name.replace('\'', "''")
+    ))?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| r.len() >= 2)
+        .map(|r| (r[0].clone(), r[1] == "t"))
+        .collect())
+}
+
 /// Infer undeclared foreign keys from real code joins, then measure whether they hold.
 ///
 /// A candidate is a hypothesis: the code says two columns reference each other, and an inclusion

@@ -313,6 +313,16 @@ enum MigrateCommands {
         #[arg(long)]
         no_measure: bool,
     },
+    /// Choose target types and a table design for each unit, and emit DDL
+    Map {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        unit: Option<String>,
+        /// Write the generated DDL to this path
+        #[arg(long)]
+        emit: Option<std::path::PathBuf>,
+    },
     /// Units by state, and what is blocking
     Status {
         /// Project name (default: `[migrate] project` from ekos.toml)
@@ -1251,6 +1261,11 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 unit,
                 no_measure,
             } => crate::commands::migrate::assess(&config, &cwd, project, unit, !no_measure),
+            MigrateCommands::Map {
+                project,
+                unit,
+                emit,
+            } => crate::commands::migrate::map(&config, &cwd, project, unit, emit),
             MigrateCommands::Status { project } => {
                 crate::commands::migrate::status(&config, &cwd, project)
             }

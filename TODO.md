@@ -6047,10 +6047,22 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 
 ## Migrate Phase 4 — Map, design, generate, execute (RFC 0159, 0160)
 
-- [ ] `ekos-typemap` with lossiness classes; `narrowing-safe` cites the profile that proves it
-- [ ] Growing-column guard: never narrow identity/sequence columns on observed maximum
-- [ ] ClickHouse design: engine, `ORDER BY` from query shapes, partition guard, codecs, nullability
-- [ ] `ReplacingMergeTree` always emits the eventual-dedup finding
+**RFC 0159 landed 2026-09-25 (devlog_215). Generated DDL executes against live ClickHouse 24.8.**
+
+- [x] `ekos-migrate-target-clickhouse` type map with lossiness classes; `narrowing-safe` cites the
+      profile that proves it, and a lossy mapping cites nothing because it has nothing to cite
+- [x] Growing-column guard: a monotonic column is never narrowed on observed maximum
+- [x] ClickHouse design: engine, `ORDER BY`, partition guard (refuses a projected explosion), codecs,
+      nullability dropped only where the profile proves it
+- [x] `ReplacingMergeTree` always emits the eventual-dedup finding; a missing version column is a
+      finding, never an invented `now()`
+- [x] `ekos migrate map --emit` writes DDL carrying its own reasoning as comments
+- [ ] `ORDER BY` from real query shapes — the derivation is built and ranked, but nothing feeds it
+      yet. Needs `pg_stat_statements` harvesting; until then every design honestly reports "no
+      query-shape evidence" and falls back to the primary key.
+- [ ] Persist `MigrationTargetDesign` / `MigrationTypeMapping` facts and gate on approval (RFC 0161)
+- [ ] Statement classifier generalizing `validate_select_only` (RFC 0160)
+- [ ] Artifact hash pinning, chunked resumable load, dry-run gate (RFC 0160)
 - [ ] Statement classifier generalizing `validate_select_only` into `StatementClass`
 - [ ] Artifact hash pinning: executed hash must equal approved hash, no override
 - [ ] Chunked, resumable, throttled engine-native load; dry-run gate
