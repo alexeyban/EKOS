@@ -66,6 +66,9 @@ services:
       - "59000:9000"   # native
     volumes:
       - migrate-ch-data:/var/lib/clickhouse
+      # RFC 0160: the source credential lives in server config, never in a generated statement.
+      - ./docker/clickhouse/named-collections.xml:/etc/clickhouse-server/config.d/named-collections.xml:ro
+      - ./docker/clickhouse/ekos-user.xml:/etc/clickhouse-server/users.d/ekos-user.xml:ro
     healthcheck:
       # 127.0.0.1, not localhost: inside this image `localhost` resolves to ::1 first and the
       # server is not listening on IPv6, so the healthcheck never goes green while the port is in

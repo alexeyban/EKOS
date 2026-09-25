@@ -14,13 +14,19 @@
 //!    primary key *and says that is what it is doing*, rather than presenting a guess as a
 //!    derivation.
 
+pub mod classify;
 pub mod ddl;
 pub mod design;
+pub mod execute;
 pub mod typemap;
 
+pub use classify::{Classified, ClassifyError, StatementClass, batch_class, classify};
 pub use ddl::{DdlError, create_table, rationale_comment};
 pub use design::{
     DesignColumn, Engine, MAX_PARTITIONS, MIN_ROWS_TO_PARTITION, TableEvidence, TargetDesign,
     design,
+};
+pub use execute::{
+    Approval, Artifact, Chunk, Environment, ExecuteError, authorize, chunk_insert, plan_chunks,
 };
 pub use typemap::{ColumnEvidence, Lossiness, Mapping, map_column};

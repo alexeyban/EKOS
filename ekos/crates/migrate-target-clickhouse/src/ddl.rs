@@ -22,6 +22,18 @@ pub enum DdlError {
          disagree"
     )]
     OrderByUnknownColumn { table: String, column: String },
+    #[error(
+        "{table}'s design calls for PARTITION BY {expression}, and the RFC 0160 classifier cannot \
+         parse a PARTITION BY clause. Emitting it would mean a statement reaching the database \
+         without passing the control; dropping it silently would mean a {rows}-row table quietly \
+         losing its partitioning. Neither is acceptable, so the DDL is not emitted: apply the \
+         partitioning by hand, or extend the ClickHouse dialect parser."
+    )]
+    UnverifiablePartitioning {
+        table: String,
+        expression: String,
+        rows: String,
+    },
 }
 
 fn ident(s: &str) -> String {
@@ -29,6 +41,18 @@ fn ident(s: &str) -> String {
 }
 
 /// Emit `CREATE TABLE`.
+///
+/// **Codecs are not emitted**, and that is a deliberate trade rather than an oversight. RFC 0160's
+/// classifier is the control every statement passes through, and `sqlparser`'s ClickHouse dialect
+/// does not parse a `CODEC(...)` column annotation — in a `CREATE TABLE` or in an
+/// `ALTER TABLE ... MODIFY COLUMN` (both probed against the parser). The options were to weaken the
+/// control so the optimization fits, or to drop the optimization.
+///
+/// A codec is a compression choice. The classifier is a safety one. Preprocessing the text before
+/// classification would mean the classified statement is not the executed statement, which is the
+/// hole the whole control exists to close, so the codecs are carried into
+/// [`rationale_comment`] instead — visible to whoever reviews the DDL, and applied by hand or by a
+/// later `ALTER` if they are worth it.
 pub fn create_table(
     design: &TargetDesign,
     mappings: &[Mapping],
@@ -55,15 +79,6 @@ pub fn create_table(
         }
     }
 
-    let codec_for = |column: &str| {
-        design
-            .codecs
-            .iter()
-            .find(|(c, _)| c == column)
-            .map(|(_, codec)| format!(" {codec}"))
-            .unwrap_or_default()
-    };
-
     // The bare table name inside the target database: a migration's sandbox is a separate database,
     // never a prefix inside a real one (RFC 0160).
     let bare = design.table.rsplit('.').next().unwrap_or(&design.table);
@@ -74,20 +89,20 @@ pub fn create_table(
     );
     let body: Vec<String> = mappings
         .iter()
-        .map(|m| {
-            format!(
-                "    {} {}{}",
-                ident(&m.column),
-                m.target_type,
-                codec_for(&m.column)
-            )
-        })
+        .map(|m| format!("    {} {}", ident(&m.column), m.target_type))
         .collect();
     sql.push_str(&body.join(",\n"));
     sql.push_str("\n)\n");
     sql.push_str(&format!("ENGINE = {}\n", design.engine.render()));
+    // See `UnverifiablePartitioning`: the classifier cannot read a PARTITION BY clause, and neither
+    // bypassing the control nor silently dropping a design decision is an acceptable way to ship
+    // one.
     if let Some(p) = &design.partition_by {
-        sql.push_str(&format!("PARTITION BY {p}\n"));
+        return Err(DdlError::UnverifiablePartitioning {
+            table: design.table.clone(),
+            expression: p.clone(),
+            rows: "large".into(),
+        });
     }
     sql.push_str(&format!(
         "ORDER BY ({})",
@@ -110,6 +125,24 @@ pub fn rationale_comment(design: &TargetDesign) -> String {
         format!("-- order by: {}", design.order_by_rationale),
         format!("-- partitioning: {}", design.partition_rationale),
     ];
+    if let Some(p) = &design.partition_by {
+        out.push(format!(
+            "-- PARTITION BY {p} — chosen, and NOT emitted: the RFC 0160 classifier cannot parse a"
+        ));
+        out.push(
+            "-- PARTITION BY clause, so this must be applied deliberately by an operator.".into(),
+        );
+    }
+    if !design.codecs.is_empty() {
+        out.push(
+            "-- codecs chosen from the profile, NOT emitted: the RFC 0160 classifier cannot parse a"
+                .into(),
+        );
+        out.push("-- CODEC clause, and the control is worth more than the compression.".into());
+        for (column, codec) in &design.codecs {
+            out.push(format!("--   {column}: {codec}"));
+        }
+    }
     for f in &design.findings {
         out.push(format!("-- NEEDS A DECISION: {f}"));
     }
@@ -150,8 +183,61 @@ mod tests {
         assert!(sql.contains("`id` Int64"), "{sql}");
         assert!(sql.contains("ENGINE = MergeTree"), "{sql}");
         assert!(sql.contains("ORDER BY (`id`)"), "{sql}");
-        // A monotonic integer gets a Delta codec, inline.
-        assert!(sql.contains("CODEC(Delta, ZSTD(1))"), "{sql}");
+        // Codecs are chosen, and deliberately not emitted — see the note on `create_table`.
+        assert!(!sql.contains("CODEC"), "{sql}");
+        assert!(
+            rationale_comment(&d).contains("CODEC(Delta, ZSTD(1))"),
+            "the choice must survive into the comment even though it is not emitted"
+        );
+    }
+
+    /// The invariant that would have caught the codec problem at build time rather than at the
+    /// first real load: **everything this emitter produces must pass the RFC 0160 classifier.**
+    /// The classifier is what stands between a generated statement and a production database, so
+    /// emitting SQL it cannot read is not a limitation to work around — it is a bug here.
+    #[test]
+    fn every_generated_statement_passes_the_classifier() {
+        use crate::classify::{StatementClass, batch_class};
+        use crate::design::{TableEvidence, design};
+
+        let cases: Vec<(TargetDesign, Vec<Mapping>)> =
+            vec![(simple_design(), vec![mapping("id", "bigint")]), {
+                let ev = TableEvidence {
+                    row_count: 500_000_000,
+                    has_updates: true,
+                    update_time_column: Some("updated_at".into()),
+                    primary_key: vec!["id".into()],
+                    time_column: Some(("created_at".into(), 36)),
+                    ..Default::default()
+                };
+                let cols = ["id", "updated_at", "created_at"]
+                    .iter()
+                    .map(|n| DesignColumn {
+                        name: (*n).into(),
+                        target_type: "Int64".into(),
+                        distinct: None,
+                        monotonic: Some(true),
+                    })
+                    .collect::<Vec<_>>();
+                let mut d = design("public.orders", &ev, &cols);
+                // Partitioned designs are refused by `create_table` (see UnverifiablePartitioning),
+                // so the invariant is asserted over what it will actually emit.
+                d.partition_by = None;
+                let m = vec![
+                    mapping("id", "bigint"),
+                    mapping("updated_at", "timestamp without time zone"),
+                    mapping("created_at", "timestamp without time zone"),
+                ];
+                (d, m)
+            }];
+
+        for (d, m) in cases {
+            let sql = create_table(&d, &m, "sandbox").unwrap();
+            let class = batch_class(&sql).unwrap_or_else(|e| {
+                panic!("generated DDL does not pass the classifier: {e}\n{sql}")
+            });
+            assert_eq!(class, StatementClass::DdlCreate, "{sql}");
+        }
     }
 
     /// The emitter refuses rather than producing a statement it knows the server will reject.
@@ -225,21 +311,30 @@ mod tests {
                 version_column: Some("updated_at".into())
             }
         );
-        let sql = create_table(
-            &d,
-            &[
-                mapping("id", "bigint"),
-                mapping("updated_at", "timestamp without time zone"),
-                mapping("created_at", "timestamp without time zone"),
-            ],
-            "sandbox",
-        )
-        .unwrap();
+        let m = [
+            mapping("id", "bigint"),
+            mapping("updated_at", "timestamp without time zone"),
+            mapping("created_at", "timestamp without time zone"),
+        ];
+        // The design partitions, so emission is refused rather than bypassing the classifier or
+        // silently dropping the decision.
+        assert!(matches!(
+            create_table(&d, &m, "sandbox"),
+            Err(DdlError::UnverifiablePartitioning { .. })
+        ));
+        assert!(
+            rationale_comment(&d).contains("PARTITION BY toYYYYMM(created_at)"),
+            "the decision must survive into the comment"
+        );
+
+        // Without partitioning the same design emits, and the engine renders.
+        let mut unpartitioned = d.clone();
+        unpartitioned.partition_by = None;
+        let sql = create_table(&unpartitioned, &m, "sandbox").unwrap();
         assert!(
             sql.contains("ENGINE = ReplacingMergeTree(updated_at)"),
             "{sql}"
         );
-        assert!(sql.contains("PARTITION BY toYYYYMM(created_at)"), "{sql}");
     }
 
     /// The DDL a human reviews carries the reasoning, so approving it does not mean going to find a

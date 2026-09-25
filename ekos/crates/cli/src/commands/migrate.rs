@@ -687,6 +687,418 @@ fn report_findings(findings: &[ekos_migrate_dq::Finding], measured: bool) {
     }
 }
 
+/// A ClickHouse HTTP client for the executor. Read and write share one path so the classifier
+/// gates both.
+struct ChClient {
+    url: String,
+}
+
+impl ChClient {
+    /// The target resolves through `[migrate.connections.<alias>]`, exactly like the source: the
+    /// DSN names an alias, the alias names a host, and the password lives in the environment
+    /// variable the config only *names*.
+    fn from_alias(config: &EkosConfig, alias: &str) -> Result<Self> {
+        let settings = resolve_alias(config, alias)?;
+        let password = settings
+            .secret_env
+            .as_ref()
+            .and_then(|v| std::env::var(v).ok())
+            .unwrap_or_default();
+        Ok(Self {
+            url: format!(
+                "http://{}:{}/?user={}&password={}",
+                settings.host, settings.port, settings.user, password
+            ),
+        })
+    }
+
+    fn run(&self, sql: &str) -> Result<String> {
+        let out = std::process::Command::new("curl")
+            .args(["-s", "--fail-with-body", &self.url, "--data-binary", sql])
+            .output()?;
+        let body = String::from_utf8_lossy(&out.stdout).to_string();
+        if !out.status.success() {
+            anyhow::bail!("clickhouse: {body}");
+        }
+        Ok(body)
+    }
+}
+
+impl ekos_migrate_validate::EngineReader for ChClient {
+    fn dialect(&self) -> ekos_migrate_validate::Dialect {
+        ekos_migrate_validate::Dialect::ClickHouse
+    }
+    fn label(&self) -> &str {
+        // RFC 0156's independent-oracle rule in its smallest honest form: the label records *which
+        // path* read the target, which is what makes the rule auditable rather than aspirational.
+        "clickhouse:reader"
+    }
+    fn query(&self, sql: &str) -> Result<Vec<Vec<String>>, ekos_migrate_validate::ReadError> {
+        // TabSeparatedRaw, because the default format escapes backslashes on output and the
+        // canonical form is full of them (devlog_207).
+        let body = self
+            .run(&format!("{sql} FORMAT TabSeparatedRaw"))
+            .map_err(|e| ekos_migrate_validate::ReadError::Query {
+                engine: "clickhouse".into(),
+                message: e.to_string(),
+            })?;
+        Ok(body
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.split('\t').map(str::to_string).collect())
+            .collect())
+    }
+}
+
+/// `ekos migrate validate` — run the RFC 0156 tiers over a loaded unit.
+pub fn validate(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    unit: String,
+    tier: String,
+) -> Result<()> {
+    use ekos_migrate_target_clickhouse as ch;
+    use ekos_migrate_validate as v;
+
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+    let dsn = project_source(store.as_ref(), &name)?;
+    let target_ref = ConnectionRef::parse(&project_target(store.as_ref(), &name)?)?;
+    let target_db = target_ref.database.clone();
+    let bare = unit.rsplit('.').next().unwrap_or(&unit).to_string();
+
+    let target = ChClient::from_alias(config, &target_ref.alias)?;
+
+    // The plan needs the same column list on both sides, rendered per dialect. It is built from the
+    // mapping so the two sides agree on order — RFC 0155 joins columns in the *approved target*
+    // order, not the source catalog's.
+    let outcome = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        let lsn = src.current_lsn()?;
+        let cols =
+            ekos_pg_live::profile::profile_columns_p0(&src, &unit, &config.redaction_config())?;
+        let nullability = column_nullability(&src, &unit)?;
+        let pk = primary_key_columns(&src, &unit)?;
+        let key = pk
+            .first()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("{unit} has no primary key to bucket on"))?;
+
+        let mut source_columns = Vec::new();
+        let mut target_columns = Vec::new();
+        let mut names = Vec::new();
+        for c in &cols {
+            let column = c.qualified_name.rsplit('.').next().unwrap_or_default();
+            let mapping = ch::map_column(
+                column,
+                &c.data_type,
+                nullability.get(column).copied().unwrap_or(true),
+                &ch::ColumnEvidence::default(),
+            );
+            let Some(rule) = column_rule_for(&c.data_type, &mapping.target_type) else {
+                // A column whose canonical form has no rule is skipped and named, never silently
+                // folded into the hash on one side only.
+                println!("  skipping {column}: no canonical rule for {}", c.data_type);
+                continue;
+            };
+            source_columns.push(v::canon_expr(v::Dialect::Postgres, column, rule));
+            target_columns.push(v::canon_expr(v::Dialect::ClickHouse, column, rule));
+            names.push(column.to_string());
+        }
+
+        let (schema, table) = unit.split_once('.').unwrap_or(("public", &unit));
+        let plan = v::UnitPlan {
+            unit: unit.clone(),
+            source_table: format!("\"{schema}\".\"{table}\""),
+            target_table: format!("`{target_db}`.`{bare}`"),
+            source_pk: v::canon_expr(v::Dialect::Postgres, &key, v::ColumnRule::Int),
+            target_pk: v::canon_expr(v::Dialect::ClickHouse, &key, v::ColumnRule::Int),
+            source_columns,
+            target_columns,
+            buckets: 64,
+        };
+
+        let mut outcomes = Vec::new();
+        outcomes.push(v::tiers::run_v1(&plan, &src, &target)?);
+        if tier != "v1" {
+            outcomes.push(v::tiers::run_v2(&plan, &src, &target, &names)?);
+        }
+        if tier == "v3" || tier == "v4" {
+            outcomes.push(v::tiers::run_v3(&plan, &src, &target)?);
+        }
+        Ok((outcomes, lsn, plan))
+    })?;
+    let (outcomes, lsn, plan) = outcome;
+
+    println!("{unit} -> {target_db}.{bare}");
+    println!("  source LSN: {lsn}");
+    let mut all_passed = true;
+    for o in &outcomes {
+        println!("  {}", o.verdict());
+        println!("    read via {} and {}", o.source_path, o.target_path);
+        for d in &o.divergences {
+            println!("    {} — {}", d.locus, d.detail);
+        }
+        all_passed &= o.passed();
+    }
+
+    if all_passed {
+        println!(
+            "\nEvery tier run passed. Note: no planted controls were run, so this says the \
+                  tiers found nothing — not that they would have."
+        );
+        if let Some((obj, _)) = units_named(store.as_ref(), &name, &unit)? {
+            let _ = project::transition(
+                store.as_ref(),
+                &obj.id,
+                UnitState::Validated,
+                "policy",
+                &format!("validated at {tier} against source LSN {lsn}"),
+                &run_id,
+            );
+        }
+    } else {
+        println!("\nValidation failed. Bisect the failed buckets with RFC 0156's V4 path.");
+    }
+    let _ = plan;
+    Ok(())
+}
+
+/// Which RFC 0155 canonical rule applies to a source type.
+fn column_rule_for(
+    source_type: &str,
+    _target_type: &str,
+) -> Option<ekos_migrate_validate::ColumnRule> {
+    use ekos_migrate_validate::ColumnRule as R;
+    let base = source_type
+        .split_once('(')
+        .map(|(h, _)| h)
+        .unwrap_or(source_type)
+        .trim();
+    Some(match base {
+        "bigint" | "integer" | "smallint" => R::Int,
+        "boolean" => R::Bool,
+        "text" | "character varying" => R::Text,
+        "character" => R::Char,
+        "numeric" | "decimal" => {
+            let scale = source_type
+                .split_once(',')
+                .and_then(|(_, s)| s.trim_end_matches(')').trim().parse().ok())
+                .unwrap_or(0);
+            R::Decimal(scale)
+        }
+        "timestamp with time zone" => R::TimestampUtc,
+        "timestamp without time zone" => R::TimestampNaive,
+        "date" => R::Date,
+        "uuid" => R::Uuid,
+        "bytea" => R::Bytes,
+        "inet" | "cidr" => R::Inet,
+        // Floats and JSON are excluded from hashing by RFC 0155, and anything unrecognized is
+        // skipped rather than guessed at.
+        _ => return None,
+    })
+}
+
+/// `ekos migrate load` — create the target table and copy the data, chunk by chunk.
+///
+/// Every statement goes through the RFC 0160 gate before it runs: parsed, classified, checked for an
+/// inline credential, and — outside a sandbox — matched against an approval by artifact id, hash and
+/// environment.
+pub fn load(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    unit: String,
+    environment: String,
+    chunk_rows: i64,
+    dry_run: bool,
+) -> Result<()> {
+    use ekos_migrate_target_clickhouse as ch;
+
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+    let dsn = project_source(store.as_ref(), &name)?;
+    let target_ref = ConnectionRef::parse(&project_target(store.as_ref(), &name)?)?;
+    let target_db = target_ref.database.clone();
+
+    let env: ch::Environment = match environment.as_str() {
+        "sandbox" => ch::Environment::Sandbox,
+        "staging" => ch::Environment::Staging,
+        "production" | "prod" => ch::Environment::Production,
+        other => bail!("unknown environment '{other}' (sandbox | staging | production)"),
+    };
+
+    let (ddl, key_column, key_range) = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        let ddl = generate_ddl_for(config, &src, &unit, &target_db, &run_id)?;
+        let pk = primary_key_columns(&src, &unit)?;
+        let key = pk.first().cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "{unit} has no primary key, so the load cannot be chunked by key range. \
+                 RFC 0160's ctid fallback is not implemented yet."
+            )
+        })?;
+        let (schema, table) = unit.split_once('.').unwrap_or(("public", &unit));
+        let rows = src.raw_query(&format!(
+            "SELECT COALESCE(min(\"{k}\"), 0), COALESCE(max(\"{k}\"), -1) FROM \"{s}\".\"{t}\"",
+            k = key.replace('"', "\"\""),
+            s = schema.replace('"', "\"\""),
+            t = table.replace('"', "\"\"")
+        ))?;
+        let lo: i64 = rows[0][0].trim().parse().unwrap_or(0);
+        let hi: i64 = rows[0][1].trim().parse().unwrap_or(-1);
+        Ok((ddl, key, (lo, hi)))
+    })?;
+
+    let bare = unit.rsplit('.').next().unwrap_or(&unit).to_string();
+    let (schema, source_table) = unit.split_once('.').unwrap_or(("public", &unit));
+    let chunks = ch::plan_chunks(key_range.0, key_range.1, chunk_rows);
+
+    // Every artifact, gated before any of them runs — so a batch is refused as a batch rather than
+    // half-executed and then refused.
+    let mut artifacts = vec![ch::Artifact::new(format!("{unit}:ddl"), ddl)];
+    for c in &chunks {
+        artifacts.push(ch::Artifact::new(
+            format!("{unit}:chunk:{}", c.index),
+            ch::chunk_insert(
+                &target_db,
+                &bare,
+                schema,
+                source_table,
+                &config.migrate.source_named_collection,
+                &key_column,
+                c,
+            ),
+        ));
+    }
+
+    println!(
+        "{unit} -> {target_db}.{bare} ({}, {} chunk(s))",
+        env.as_str(),
+        chunks.len()
+    );
+    for a in &artifacts {
+        // RFC 0161 will supply real approvals; until then a non-sandbox write has none, which is
+        // the correct answer rather than a missing feature.
+        match ch::authorize(a, env, None) {
+            Ok(class) => {
+                if dry_run {
+                    println!("  [{}] {} ({})", class.as_str(), a.id, &a.hash[..12]);
+                } else {
+                    let client = ChClient::from_alias(config, &target_ref.alias)?;
+                    client.run(&a.sql)?;
+                    println!("  [{}] {} ok", class.as_str(), a.id);
+                }
+            }
+            Err(e) => bail!("{} refused: {e}", a.id),
+        }
+    }
+
+    if dry_run {
+        println!(
+            "\nDry run: nothing executed. {} artifact(s) passed the gate.",
+            artifacts.len()
+        );
+        return Ok(());
+    }
+
+    // Loading is what `mapped -> loaded` means.
+    if let Some((obj, _)) = units_named(store.as_ref(), &name, &unit)? {
+        let _ = project::transition(
+            store.as_ref(),
+            &obj.id,
+            UnitState::Loaded,
+            "policy",
+            &format!("loaded into {} in {}", target_db, env.as_str()),
+            &run_id,
+        );
+    }
+    println!("\nLoaded. Validate with `ekos migrate validate --unit {unit}`.");
+    Ok(())
+}
+
+fn units_named(
+    store: &dyn ekos_ledger::KnowledgeStore,
+    project: &str,
+    unit: &str,
+) -> Result<Option<(ekos_kir::KirObject, UnitState)>> {
+    Ok(Unit::all_in(store, project)?
+        .into_iter()
+        .find(|(o, _)| o.name == unit))
+}
+
+/// Re-derive the DDL for one unit. Kept separate from `map` so a load never depends on someone
+/// having run `map --emit` first and kept the file.
+fn generate_ddl_for(
+    config: &EkosConfig,
+    src: &PgSource,
+    unit: &str,
+    target_db: &str,
+    _run_id: &str,
+) -> Result<String> {
+    use ekos_migrate_target_clickhouse as ch;
+
+    let profile = ekos_pg_live::profile::profile_table_p0(src, unit)?;
+    let cols = ekos_pg_live::profile::profile_columns_p0(src, unit, &config.redaction_config())?;
+    let cols = ekos_pg_live::profile::profile_columns_p1(src, unit, cols, 10.0, 500)?;
+    let nullability = column_nullability(src, unit)?;
+    let pk = primary_key_columns(src, unit)?;
+    let shapes = ekos_pg_live::workload::harvest(src, &config.redaction_config(), 2000)?;
+    let (filters, _) = ekos_pg_live::workload::analyze(&shapes);
+
+    let mappings: Vec<ch::Mapping> = cols
+        .iter()
+        .map(|c| {
+            let column = c.qualified_name.rsplit('.').next().unwrap_or_default();
+            ch::map_column(
+                column,
+                &c.data_type,
+                nullability.get(column).copied().unwrap_or(true),
+                &ch::ColumnEvidence {
+                    null_fraction: Some(c.null_fraction),
+                    distinct: ekos_pg_live::profile::distinct_count(
+                        c.distinct_estimate,
+                        profile.row_count,
+                    ),
+                    row_count: profile.row_count,
+                    numeric_precision_used: c.numeric_precision_used,
+                    numeric_scale_used: c.numeric_scale_used,
+                    growing: c.monotonic == Some(true),
+                    profile_ref: Some(format!("profile:{}", c.qualified_name)),
+                },
+            )
+        })
+        .collect();
+    let design_columns: Vec<ch::DesignColumn> = cols
+        .iter()
+        .zip(&mappings)
+        .map(|(c, m)| ch::DesignColumn {
+            name: m.column.clone(),
+            target_type: m.target_type.clone(),
+            distinct: ekos_pg_live::profile::distinct_count(c.distinct_estimate, profile.row_count),
+            monotonic: c.monotonic,
+        })
+        .collect();
+    let design = ch::design(
+        unit,
+        &ch::TableEvidence {
+            row_count: profile.row_count,
+            has_updates: profile.has_updates(),
+            update_time_column: None,
+            primary_key: pk,
+            filter_columns: ekos_pg_live::workload::filters_for(&filters, unit),
+            time_column: None,
+        },
+        &design_columns,
+    );
+    Ok(ch::create_table(&design, &mappings, target_db)?)
+}
+
 /// `ekos migrate map` — choose target types and a table design for each unit, and emit DDL.
 ///
 /// Everything it decides is derived from what the profiler measured, and everything it cannot

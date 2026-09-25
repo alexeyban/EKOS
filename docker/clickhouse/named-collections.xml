@@ -1,0 +1,29 @@
+<!--
+  RFC 0160 — the source credential lives here, in ClickHouse's own server configuration, and never
+  in a statement EKOS generates.
+
+  ClickHouse's `postgresql()` table function can take a password inline:
+
+      postgresql('host:5432', 'db', 'orders', 'user', 'hunter2')
+
+  EKOS refuses to emit that form. A generated statement is hashed, pinned to an approval, printed in
+  a dry run and frequently pasted into a ticket — putting a production password through all of that
+  is a leak with a workflow around it. A named collection keeps the credential server-side, where it
+  is administered by whoever runs ClickHouse, and the generated statement reads:
+
+      postgresql(ekos_migrate_source, table = 'orders', schema = 'public')
+
+  This file is the sandbox's version. A real deployment configures the same collection with its own
+  credentials and never checks them in.
+-->
+<clickhouse>
+    <named_collections>
+        <ekos_migrate_source>
+            <host>migrate-pg</host>
+            <port>5432</port>
+            <database>ekos_migrate_fixtures</database>
+            <user>ekos</user>
+            <password>ekos-local-only</password>
+        </ekos_migrate_source>
+    </named_collections>
+</clickhouse>

@@ -6063,9 +6063,20 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       through the Postgres dialect, filter predicates attributed to tables and weighted by call
       count. Live-verified: a column filtered in 40 calls leads the ordering, with the primary key
       following, where the same table previously ordered by the PK alone.
-- [ ] Persist `MigrationTargetDesign` / `MigrationTypeMapping` facts and gate on approval (RFC 0161)
-- [ ] Statement classifier generalizing `validate_select_only` (RFC 0160)
-- [ ] Artifact hash pinning, chunked resumable load, dry-run gate (RFC 0160)
+- [x] **Statement classifier** generalizing `validate_select_only` (devlog_217) — parse never match,
+      unparseable refused, batch class = max of parts, `Unknown` refused, unfiltered `DELETE`/`UPDATE`
+      is destructive, and **inline credentials refused on the AST**
+- [x] **Artifact hash pinning, environments, chunked load, dry-run gate** — `ekos migrate load`
+- [x] `ekos migrate validate` — RFC 0156 tiers across engines. **A real PG → ClickHouse migration
+      ran and validated V1/V2/V3**, and a planted one-row change was caught by V3 with V1 and V2
+      correctly blind.
+- [ ] Persist `MigrationTargetDesign` / `MigrationTypeMapping` / `MigrationExecution` facts and gate
+      on real approvals (RFC 0161) — `authorize` takes `Option<&Approval>` and is passed `None`
+      today, which is why only sandbox writes succeed
+- [ ] **Extend the ClickHouse dialect parser for `CODEC` and `PARTITION BY`** — the classifier
+      cannot read either, so codecs are emitted as comments and a partitioned design refuses to
+      emit. Neither weakens the control, and both cost a real feature until the parser catches up.
+- [ ] Resume a load from recorded chunk facts; `ctid`-range chunking for tables with no key
 - [ ] Statement classifier generalizing `validate_select_only` into `StatementClass`
 - [ ] Artifact hash pinning: executed hash must equal approved hash, no override
 - [ ] Chunked, resumable, throttled engine-native load; dry-run gate

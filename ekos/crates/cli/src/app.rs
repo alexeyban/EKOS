@@ -323,6 +323,32 @@ enum MigrateCommands {
         #[arg(long)]
         emit: Option<std::path::PathBuf>,
     },
+    /// Create the target table and copy the data, chunk by chunk
+    Load {
+        #[arg(long)]
+        project: Option<String>,
+        /// The unit to load
+        #[arg(long)]
+        unit: String,
+        #[arg(long, default_value = "sandbox")]
+        env: String,
+        /// Key-range width per chunk
+        #[arg(long, default_value_t = 100_000)]
+        chunk_rows: i64,
+        /// Gate every statement and print it, executing nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Run the RFC 0156 validation tiers over a loaded unit
+    Validate {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        unit: String,
+        /// v1 | v2 | v3
+        #[arg(long, default_value = "v3")]
+        tier: String,
+    },
     /// Units by state, and what is blocking
     Status {
         /// Project name (default: `[migrate] project` from ekos.toml)
@@ -1266,6 +1292,20 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 unit,
                 emit,
             } => crate::commands::migrate::map(&config, &cwd, project, unit, emit),
+            MigrateCommands::Load {
+                project,
+                unit,
+                env,
+                chunk_rows,
+                dry_run,
+            } => crate::commands::migrate::load(
+                &config, &cwd, project, unit, env, chunk_rows, dry_run,
+            ),
+            MigrateCommands::Validate {
+                project,
+                unit,
+                tier,
+            } => crate::commands::migrate::validate(&config, &cwd, project, unit, tier),
             MigrateCommands::Status { project } => {
                 crate::commands::migrate::status(&config, &cwd, project)
             }

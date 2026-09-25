@@ -1,0 +1,15 @@
+<!--
+  Sandbox-only. Gives the `ekos` user the grant needed to *use* the named collection defined in
+  named-collections.xml. Seeing the collection and reading through it are separate privileges from
+  holding the credential, which is the point: a real deployment grants this to the migration role and
+  keeps the password in server config the role cannot read.
+-->
+<clickhouse>
+    <users>
+        <ekos>
+            <access_management>1</access_management>
+            <named_collection_control>1</named_collection_control>
+            <show_named_collections>1</show_named_collections>
+        </ekos>
+    </users>
+</clickhouse>

@@ -9,6 +9,8 @@ homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sqlparser.workspace = true
+ekos-common.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

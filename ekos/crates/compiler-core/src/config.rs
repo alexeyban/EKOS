@@ -231,6 +231,13 @@ pub struct MigrateConfig {
     /// Path to the approval policy file, relative to the workspace root (RFC 0161).
     #[serde(default = "default_migrate_policy_path")]
     pub policy: PathBuf,
+    /// The ClickHouse **named collection** holding the source connection (RFC 0160).
+    ///
+    /// EKOS never emits a credential inside a statement — a generated statement is hashed, pinned
+    /// to an approval, printed in a dry run and pasted into tickets. The collection is configured
+    /// in ClickHouse's own server config by whoever administers it.
+    #[serde(default = "default_source_named_collection")]
+    pub source_named_collection: String,
     /// How a connection *alias* resolves to a host. The alias is what a `MigrationConnectionRef`
     /// stores and what a DSN names, so the ledger never holds a hostname-with-credentials and a
     /// workspace can be pointed at a different environment by editing config, not facts.
@@ -252,6 +259,10 @@ pub struct MigrateConnection {
     /// Maximum replica lag tolerated before a run is refused (RFC 0157).
     #[serde(default = "default_max_replica_lag")]
     pub max_replica_lag_seconds: f64,
+}
+
+fn default_source_named_collection() -> String {
+    "ekos_migrate_source".to_string()
 }
 
 fn default_pg_port() -> u16 {
@@ -277,6 +288,7 @@ impl Default for MigrateConfig {
             project: None,
             default_environment: default_migrate_environment(),
             policy: default_migrate_policy_path(),
+            source_named_collection: default_source_named_collection(),
             connections: Default::default(),
         }
     }
