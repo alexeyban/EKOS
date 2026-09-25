@@ -5952,9 +5952,11 @@ whole PostgreSQL surface is in scope; nothing about it is a non-goal.
 - [x] Ledger-scan test: zero credentials (zero row values arrives with RFC 0157's profiler)
 - [x] Source-scan test: `commands/mcp.rs` cannot reach the approval lifecycle, plus a test that
       `lifecycle::Actor` never grows an `Agent` variant
-- [ ] **Decide the executor's concurrency model** against the non-`Sync` `KnowledgeStore`
-      (`extension.rs:22-26` — `block_on`, never spawned). Still open: it is not needed until
-      RFC 0160 and deciding it without a real executor to measure would be a guess.
+- [x] **Decide the executor's concurrency model** against the non-`Sync` `KnowledgeStore`
+      (`extension.rs:22-26` — `block_on`, never spawned). Answered by RFC 0157 (devlog_209):
+      a **synchronous** driver, so there is no runtime to coexist with. Chunk parallelism (RFC 0160)
+      gets a pool of independent sessions on separate threads, each owning its connection, results
+      collected before anything touches the store.
 
 ## Migrate Phase 1 — The validator, before the connector (RFC 0155, 0156)
 
@@ -5992,11 +5994,22 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 
 ## Migrate Phase 2 — Discover and profile (RFC 0157)
 
-- [ ] `ekos-pg-live`: full catalog introspection, reconciled against RFC 0146 file facts (drift = finding)
-- [ ] Session safety: read-only, timeouts, replica preference, lag guard, `application_name` = `run_id`
+**Connector landed 2026-09-25 (devlog_209). Driver decision made: the synchronous `postgres` crate.**
+
+- [x] `ekos-pg-live` crate, `PgSource` implementing RFC 0156's `EngineReader` — the tiers now run
+      over a real driver, no shell-out
+- [x] Session safety: `default_transaction_read_only`, statement/lock/idle timeouts, low `work_mem`,
+      `application_name = ekos-migrate/<run_id>`, LSN and replica-lag readers
+- [x] Write probe that sees through the session setting to the **role's** privileges
+- [x] Catalog introspection: 23 object kinds, reconciled against the server's own counts from a
+      different query shape
+- [x] **Redaction at the third raw-content entry point** — comments, defaults, view definitions,
+      function bodies, RLS predicates
+- [ ] Drift reconciliation against RFC 0146's file-based DDL facts (three finding shapes)
 - [ ] P0 / P1 / P2 profiling tiers with `EXPLAIN` cost estimates and budget approval
-- [ ] **Redaction at the third raw-content entry point**; no top-k at all for PII columns
-- [ ] PII classification, applied conservatively on sight
+- [ ] PII classification, applied conservatively on sight; no top-k at all for PII columns
+- [ ] Replica-lag *guard* (refuse a run above the policy threshold) — the reader exists, the policy
+      check does not
 
 ## Migrate Phase 3 — Assess (RFC 0158)
 

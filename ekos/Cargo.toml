@@ -25,6 +25,7 @@ members = [
     "crates/session",
     "crates/migrate",
     "crates/migrate-validate",
+    "crates/pg-live",
     "crates/cli",
     "crates/evals",
     "crates/demo-server",
@@ -125,6 +126,7 @@ ekos-semantic                      = { path = "crates/semantic", version = "1.0.
 ekos-session                       = { path = "crates/session", version = "1.0.3" }
 ekos-migrate                       = { path = "crates/migrate", version = "1.0.3" }
 ekos-migrate-validate              = { path = "crates/migrate-validate", version = "1.0.3" }
+ekos-pg-live                       = { path = "crates/pg-live", version = "1.0.3" }
 ekos-simulation                    = { path = "crates/simulation", version = "1.0.3" }
 ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.0.3" }
 
@@ -159,6 +161,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Hashing
 sha2 = "0.10"
 md-5 = "0.10"
+postgres = "0.19"
 hex  = "0.4"
 
 # Storage
