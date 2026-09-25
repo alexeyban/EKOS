@@ -5975,9 +5975,20 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       cross-engine defects that review had passed. `EKOS_MIGRATE_LIVE=1 cargo test -p
       ekos-migrate-validate --test live_engines`; skipped without the sandboxes.
       **RFC 0155's acceptance criterion is now met.**
-- [ ] Validation tiers V0–V4; independent-oracle rule; bisect to exact keys (RFC 0156)
-- [ ] Divergence classification: expected / explained / unexplained (RFC 0156)
-- [ ] Clean-run assertion across all corpora after a correct migration (RFC 0156)
+- [x] Validation tiers V1–V4, independent-oracle read seam, bisect to exact keys (RFC 0156,
+      devlog_208) — verified live: a 5,000-row table in PG + CH, defects planted one at a time,
+      each caught by the tier RFC 0156 claims. Masked keys in facts.
+- [x] Divergence classification: expected / explained / unexplained; a disposition outranks a rule;
+      classification is idempotent
+- [x] Control gating: `TierOutcome::passed()` requires zero blocking divergences **and** every
+      control fired; `verdict()` never says "passed" when a control was missed
+- [x] Clean-run assertion — a correct migration is silent at V1, V2 and V3 on the live fixture
+- [ ] **V0 structural** — needs RFC 0159's `MigrationTargetDesign` to compare against; there is no
+      approved design to check a catalog against yet
+- [ ] Wire tier outcomes into `MigrationValidationRun` / `MigrationValidationResult` facts and
+      `ekos migrate validate` (needs the RFC 0157 connector to reach a real source)
+- [ ] Clean-run + control suite across the *corpora* (LedgerSMB, Pagila, TPC-H), not just the
+      synthetic fixture — needs the connector
 
 ## Migrate Phase 2 — Discover and profile (RFC 0157)
 

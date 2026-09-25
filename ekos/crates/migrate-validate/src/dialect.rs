@@ -207,9 +207,131 @@ pub fn bucket_checksum_query(
     )
 }
 
+/// The bucket expression on its own, so bisect can both group by it and filter on it.
+pub fn bucket_expr(d: Dialect, pk_expr: &str, buckets: u32) -> String {
+    let pk_hash = match d {
+        Dialect::Postgres => format!("md5({pk_expr})"),
+        Dialect::ClickHouse => format!("lower(hex(MD5({pk_expr})))"),
+    };
+    format!("{} % {buckets}", prefix60_expr(d, &pk_hash))
+}
+
+/// RFC 0156 bisect step: re-bucket one coarse bucket's rows at a finer fan-out.
+///
+/// The coarse predicate goes in `WHERE` rather than `HAVING` so the engine can discard rows before
+/// aggregating — on a large table that difference is the whole cost of the step.
+pub fn sub_bucket_checksum_query(
+    d: Dialect,
+    table: &str,
+    pk_expr: &str,
+    column_exprs: &[String],
+    coarse_buckets: u32,
+    coarse_bucket: u32,
+    fine_buckets: u32,
+) -> String {
+    let row = row_hash_expr(d, column_exprs);
+    let coarse = bucket_expr(d, pk_expr, coarse_buckets);
+    let fine = bucket_expr(d, pk_expr, fine_buckets);
+    let sum = match d {
+        Dialect::Postgres => format!("sum(({})::numeric)", prefix60_expr(d, &row)),
+        Dialect::ClickHouse => format!("sum(toDecimal128({}, 0))", prefix60_expr(d, &row)),
+    };
+    format!(
+        "SELECT {fine} AS bucket, count(*) AS row_count, {sum} AS hash_sum \
+         FROM {table} WHERE {coarse} = {coarse_bucket} GROUP BY bucket ORDER BY bucket"
+    )
+}
+
+/// RFC 0156 bisect endpoint: the `(pk, row_hash)` pairs of one bucket.
+///
+/// This is the only query in the tier stack that returns per-row data, and it is bounded by the
+/// bisect threshold before it is ever issued. Full rows are fetched separately, for divergent keys
+/// only, and are never persisted (RFC 0154's ledger-scan test).
+pub fn key_hash_query(
+    d: Dialect,
+    table: &str,
+    pk_expr: &str,
+    column_exprs: &[String],
+    buckets: u32,
+    bucket: u32,
+) -> String {
+    let row = row_hash_expr(d, column_exprs);
+    let b = bucket_expr(d, pk_expr, buckets);
+    format!(
+        "SELECT {pk_expr} AS pk, {row} AS row_hash \
+         FROM {table} WHERE {b} = {bucket} ORDER BY pk"
+    )
+}
+
+/// RFC 0156 V1: the row count.
+pub fn count_query(d: Dialect, table: &str) -> String {
+    let _ = d;
+    format!("SELECT count(*) FROM {table}")
+}
+
+/// RFC 0156 V2: the per-column aggregate pack.
+///
+/// Every aggregate is taken over the *canonical* form, not the raw column, so a V2 disagreement
+/// means the same thing a V3 disagreement means and the two tiers cannot contradict each other over
+/// a rendering difference. `min`/`max` over canonical text also side-steps collation: the canonical
+/// form is binary-comparable by construction.
+pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> String {
+    let null = match d {
+        Dialect::Postgres => "'\\N'",
+        Dialect::ClickHouse => "'\\\\N'",
+    };
+    let mut parts = Vec::new();
+    for (i, e) in column_exprs.iter().enumerate() {
+        parts.push(format!(
+            "sum(case when {e} = {null} then 1 else 0 end) AS nulls_{i}"
+        ));
+        parts.push(format!("min({e}) AS min_{i}"));
+        parts.push(format!("max({e}) AS max_{i}"));
+        parts.push(format!("sum(length({e})) AS len_{i}"));
+    }
+    // ClickHouse has no `case when` shorthand difference here, but `sum(case when …)` is valid in
+    // both, so one form serves both dialects and there is one less place to diverge.
+    format!("SELECT {} FROM {table}", parts.join(", "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bisect_filters_in_where_not_having() {
+        let q = sub_bucket_checksum_query(Dialect::Postgres, "t", "pk", &["a".into()], 16, 3, 256);
+        assert!(q.contains("WHERE"), "{q}");
+        assert!(
+            !q.contains("HAVING"),
+            "a HAVING filter would aggregate every row first: {q}"
+        );
+        assert!(q.contains("% 256 AS bucket"), "{q}");
+        assert!(q.contains("% 16 = 3"), "{q}");
+    }
+
+    #[test]
+    fn the_key_hash_query_is_the_only_one_returning_rows() {
+        let q = key_hash_query(Dialect::ClickHouse, "t", "pk", &["a".into()], 16, 3);
+        assert!(q.contains("AS row_hash"), "{q}");
+        assert!(!q.contains("count(*)"), "{q}");
+        assert!(q.contains("WHERE"), "bisect must bound the row set: {q}");
+    }
+
+    #[test]
+    fn aggregates_are_taken_over_the_canonical_form() {
+        for d in [Dialect::Postgres, Dialect::ClickHouse] {
+            let e = canon_expr(d, "c", ColumnRule::Text);
+            let q = aggregate_query(d, "t", std::slice::from_ref(&e));
+            assert!(
+                q.contains(&e),
+                "{d:?} aggregated the raw column, not the canonical form"
+            );
+            for agg in ["nulls_0", "min_0", "max_0", "len_0"] {
+                assert!(q.contains(agg), "{d:?} missing {agg}: {q}");
+            }
+        }
+    }
 
     #[test]
     fn null_handling_wraps_every_rule() {

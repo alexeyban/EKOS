@@ -31,15 +31,22 @@
 //! ClickHouse NULL-literal escape, `toString` stripping a decimal's trailing zeros, and
 //! `reinterpretAsUInt64`'s endianness. See their doc comments in [`dialect`].
 
+pub mod bisect;
 pub mod canon;
 pub mod dialect;
+pub mod divergence;
 pub mod fixtures;
 pub mod hash;
+pub mod reader;
+pub mod tiers;
 pub mod value;
 
 pub use canon::{NULL_SENTINEL, UNIT_SEPARATOR, canon, row_canonical};
 pub use dialect::{ColumnRule, Dialect, bucket_checksum_query, canon_expr, canon_expr_of};
+pub use divergence::{Class, Divergence};
 pub use hash::{BucketChecksum, bucket_of, checksum_buckets, prefix60, row_hash};
+pub use reader::{EngineReader, MockReader, ReadError};
+pub use tiers::{ControlResult, Tier, TierOutcome, UnitPlan};
 pub use value::Value;
 
 /// Per-column rendering parameters that come from the **approved** mapping rather than from the
