@@ -26,7 +26,7 @@ pub mod state;
 
 pub use connection::{ConnectionError, ConnectionRef, EngineKind, Environment};
 pub use drift::{ColumnRef, Drift, DriftDetail, TableRef, TableShape};
-pub use profile_facts::{ColumnProfileFact, TableProfileFact};
+pub use profile_facts::{ColumnProfileFact, FindingFact, TableProfileFact};
 pub use project::{Project, Unit, transition};
 pub use state::{ALL_STATES, UnitState};
 

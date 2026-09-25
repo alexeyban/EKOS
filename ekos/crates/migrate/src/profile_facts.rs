@@ -133,6 +133,64 @@ fn write_table_profile_inner(
     Ok(obj.id)
 }
 
+pub fn finding_id(project: &str, rule: &str, object: &str) -> KirId {
+    det_id(&format!("migration-finding:{project}:{rule}:{object}"))
+}
+
+/// One rule that fired, as a fact.
+///
+/// `affected_rows` is `Option` on purpose. A finding that was never measured is not a finding that
+/// affects zero rows, and the report must be able to tell them apart — "not measured" is a gap, and
+/// "zero" is the cheapest possible disposition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FindingFact {
+    pub rule_id: String,
+    pub family: String,
+    pub severity: String,
+    pub target: Option<String>,
+    pub lossiness: Option<String>,
+    pub object: String,
+    pub message: String,
+    pub affected_rows: Option<i64>,
+    pub evidence_sql: Option<String>,
+    pub blocks: bool,
+}
+
+/// Write findings. Each is a fact with the query behind it, so a reviewer can re-run the
+/// measurement rather than take it on trust.
+pub fn write_findings(
+    store: &dyn KnowledgeStore,
+    project: &str,
+    findings: &[FindingFact],
+    run_id: &str,
+) -> Result<usize, Error> {
+    store.set_write_context(Some(write_context("assess", run_id)));
+    let result = (|| {
+        for f in findings {
+            let mut obj = KirObject::new(
+                f.object.clone(),
+                ObjectKind::Custom(kinds::FINDING_KIND.into()),
+            );
+            obj.id = finding_id(project, &f.rule_id, &f.object);
+            obj.properties.insert("project".into(), json!(project));
+            let serde_json::Value::Object(map) = serde_json::to_value(f)? else {
+                unreachable!("a struct serializes to an object");
+            };
+            obj.properties.extend(map);
+            store.append_object(&obj)?;
+            store.append_relationship(&KirRelationship::deterministic(
+                RelationshipKind::References,
+                project_id(project),
+                obj.id,
+                &f.rule_id,
+            ))?;
+        }
+        Ok::<usize, Error>(findings.len())
+    })();
+    store.set_write_context(None);
+    result
+}
+
 /// Write drift findings. Each is a fact so a reviewer can disposition it, not a log line.
 pub fn write_drift(
     store: &dyn KnowledgeStore,

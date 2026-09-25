@@ -6023,11 +6023,22 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 
 ## Migrate Phase 3 — Assess (RFC 0158)
 
-- [ ] DQ rule families; inferred FKs seeded by real code joins
-- [ ] Target-compatibility rules measuring **affected rows**, not just types
+**Rule catalog + `ekos migrate assess` landed 2026-09-25 (devlog_213), live-verified.**
+
+- [x] `ekos-migrate-dq` crate: source-independent rule model, 10 column rules + 3 table rules
+- [x] Target-compatibility rules measuring **affected rows**, not just types — live run on a
+      1,000-row fixture returned real counts (20 padded `char(n)`, 40 malformed JSON, 5 pre-1900
+      dates, 3 infinite timestamps)
+- [x] **Behavioural** lossiness as a first-class class — losing FK/uniqueness enforcement blocks
+      even at `Warn` severity, because it breaks nothing on load day
+- [x] Synthetic fixture per rule, **positive and negative**; a rule without one fails CI
+- [x] Completeness check: denominator per kind, never a percentage; wired into `assess`
+- [x] `MigrationFinding` facts carrying the evidence SQL, so a reviewer re-runs the measurement
+      rather than trusting it
+- [ ] Inferred FKs seeded by real code joins from the CKM — the EKOS-specific advantage, and the
+      largest remaining piece of RFC 0158
 - [ ] Doc-vs-data conflict findings (no `ConflictingEvidence` path exists today — new work)
-- [ ] **Completeness check**: every catalog object → a fact and a disposition, or sign-off is refused
-- [ ] Synthetic fixture per rule; a rule without a fixture fails CI
+- [ ] Gate the completeness check on real dispositions rather than reporting it (needs RFC 0161)
 
 ## Migrate Phase 4 — Map, design, generate, execute (RFC 0159, 0160)
 

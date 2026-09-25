@@ -231,6 +231,39 @@ pub fn profile_columns_p0(
     Ok(out)
 }
 
+/// Interpret a `(count, a, b)` sample result, returning `None` when the sample was empty.
+///
+/// **An empty sample is not a measurement of zero.** `TABLESAMPLE SYSTEM` reads whole pages, so on a
+/// table small enough to fit in a handful of them a 10% sample very often selects *no* pages at all
+/// — not rarely, and not only on tiny tables. Observed live: four consecutive `SYSTEM (10)` samples
+/// of the same 1,000-row table returned 82, 82, 82 and 0 rows.
+///
+/// If the aggregates are coalesced to zero, that empty draw becomes "the data uses precision 0,
+/// scale 0", and RFC 0159 is told a `Decimal(1, 0)` mapping is narrowing-safe for a money column.
+/// That is the exact direction in which `narrowing-safe` must never be wrong, so the absence of a
+/// measurement has to stay absent all the way to the rule, which already says "has not been
+/// profiled" rather than choosing.
+///
+/// `min_rows` is a floor, not just a zero check: a two-row sample is not evidence about a
+/// million-row column either.
+fn sampled_or_none(row: &[String], min_rows: u64) -> Option<(Option<i32>, Option<i32>)> {
+    let count: u64 = row.first()?.trim().parse().ok()?;
+    if count < min_rows {
+        return None;
+    }
+    let parse = |i: usize| -> Option<i32> {
+        let v = row.get(i)?;
+        // The simple query protocol renders SQL NULL as an empty string; an empty aggregate is
+        // "nothing to measure", never zero.
+        if v.trim().is_empty() {
+            None
+        } else {
+            v.trim().parse().ok()
+        }
+    };
+    Some((parse(1), parse(2)))
+}
+
 /// Parse `histogram_bounds` from its array-literal text form.
 ///
 /// `pg_stats.histogram_bounds` is declared `anyarray`, which PostgreSQL refuses to cast to `text[]`
@@ -340,18 +373,22 @@ pub fn profile_columns_p1(
         // Numeric scale and precision actually used — the measurement that makes a narrowing-safe
         // mapping possible. Aggregates only; no value leaves the server.
         if c.data_type.starts_with("numeric") {
+            // `count(*)` first, and **no `COALESCE`** on the aggregates. See `sampled_or_none`:
+            // `TABLESAMPLE SYSTEM` is page-based and routinely selects zero pages on a small
+            // table, and a `COALESCE(max(...), 0)` turns that into "precision 0, scale 0" — which
+            // RFC 0159 would read as a licence to map a money column to `Decimal(1, 0)`.
             let rows = src.rows(&format!(
-                "SELECT COALESCE(max(length(replace(trim(leading '-' from {col}::text), '.', ''))), 0), \
-                        COALESCE(max(scale({col})), 0) \
+                "SELECT count(*), \
+                        max(length(replace(trim(leading '-' from {col}::text), '.', ''))), \
+                        max(scale({col})) \
                  FROM {sch}.{tbl} TABLESAMPLE SYSTEM ({percent}) WHERE {col} IS NOT NULL",
                 col = ident(&column),
                 sch = ident(schema),
                 tbl = ident(table),
             ))?;
-            if let Some(r) = rows.first() {
-                c.numeric_precision_used = r.first().and_then(|v| v.parse().ok());
-                c.numeric_scale_used = r.get(1).and_then(|v| v.parse().ok());
-            }
+            let measured = rows.first().and_then(|r| sampled_or_none(r, 2));
+            c.numeric_precision_used = measured.and_then(|(p, _)| p);
+            c.numeric_scale_used = measured.and_then(|(_, s)| s);
         }
 
         // Monotonicity, for a watermark candidate. Measured over the sample only, so it is a
@@ -571,6 +608,29 @@ mod tests {
     fn a_plan_with_no_children_uses_its_own_rows() {
         let plan = serde_json::json!({ "Node Type": "Seq Scan", "Plan Rows": 42 });
         assert_eq!(widest_plan_rows(&plan), 42.0);
+    }
+
+    /// The bug this guards, observed live: `TABLESAMPLE SYSTEM (10)` on a 1,000-row table returned
+    /// 82, 82, 82 then **0** rows across four executions. With a `COALESCE(..., 0)` the empty draw
+    /// reads as "precision 0, scale 0" and a money column becomes `Decimal(1, 0)`.
+    #[test]
+    fn an_empty_sample_is_not_a_measurement_of_zero() {
+        let empty = vec!["0".to_string(), String::new(), String::new()];
+        assert_eq!(sampled_or_none(&empty, 2), None);
+
+        let tiny = vec!["1".to_string(), "18".into(), "16".into()];
+        assert_eq!(sampled_or_none(&tiny, 2), None, "one row is not evidence");
+
+        let real = vec!["82".to_string(), "18".into(), "16".into()];
+        assert_eq!(sampled_or_none(&real, 2), Some((Some(18), Some(16))));
+    }
+
+    /// A non-empty sample where the aggregate itself is NULL — every sampled value was NULL — is
+    /// also "nothing measured", not zero.
+    #[test]
+    fn a_null_aggregate_over_a_non_empty_sample_is_still_unmeasured() {
+        let row = vec!["50".to_string(), String::new(), String::new()];
+        assert_eq!(sampled_or_none(&row, 2), Some((None, None)));
     }
 
     #[test]

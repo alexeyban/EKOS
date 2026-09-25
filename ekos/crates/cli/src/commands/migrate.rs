@@ -482,6 +482,288 @@ fn profile_table_p0_at(src: &PgSource, table: &str, tier: &str) -> Result<pgprof
     Ok(p)
 }
 
+/// `ekos migrate assess` — run the rule catalog against the live source, measure affected rows,
+/// and record every finding as a fact.
+pub fn assess(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    unit: Option<String>,
+    measure: bool,
+) -> Result<()> {
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+    let dsn = project_source(store.as_ref(), &name)?;
+
+    let units = Unit::all_in(store.as_ref(), &name)?;
+    let targets: Vec<String> = units
+        .iter()
+        .filter(|(o, _)| unit.as_ref().is_none_or(|u| &o.name == u))
+        .map(|(o, _)| o.name.clone())
+        .collect();
+    if targets.is_empty() {
+        bail!("no matching units. Run `ekos migrate discover` first.");
+    }
+
+    // Everything the rules need to decide, read from the profile facts already in the ledger plus
+    // the live catalog. Then the measurements. All of it on the database thread.
+    let findings = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        let mut out: Vec<ekos_migrate_dq::Finding> = Vec::new();
+        for table in &targets {
+            let profile = ekos_pg_live::profile::profile_table_p0(&src, table)?;
+            let cols =
+                ekos_pg_live::profile::profile_columns_p0(&src, table, &config.redaction_config())?;
+            let cols = ekos_pg_live::profile::profile_columns_p1(&src, table, cols, 10.0, 500)?;
+
+            out.extend(ekos_migrate_dq::evaluate_table(
+                &ekos_migrate_dq::TableContext {
+                    table: table.clone(),
+                    row_count: profile.row_count,
+                    has_updates: profile.has_updates(),
+                    looks_static: profile.looks_static(),
+                    unvalidated_constraints: unvalidated_constraints(&src, table)?,
+                    primary_key_columns: primary_key_columns(&src, table)?,
+                },
+            ));
+
+            for c in &cols {
+                let column = c
+                    .qualified_name
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                let ctx = ekos_migrate_dq::ColumnContext {
+                    table: table.clone(),
+                    column,
+                    data_type: c.data_type.clone(),
+                    nullable: c.null_fraction > 0.0 || c.data_type.is_empty(),
+                    null_fraction: Some(c.null_fraction),
+                    distinct_estimate: c.distinct_estimate,
+                    numeric_precision_used: c.numeric_precision_used,
+                    numeric_scale_used: c.numeric_scale_used,
+                    pii: c.values_suppressed,
+                    row_count: profile.row_count,
+                };
+                for mut f in ekos_migrate_dq::evaluate_column(&ctx) {
+                    // A measurement that fails is left unmeasured rather than recorded as zero:
+                    // "we could not count" and "there are none" are different answers, and only one
+                    // of them is a disposition.
+                    if let (true, Some(sql)) = (measure, &f.evidence_sql) {
+                        f.affected_rows = ekos_pg_live::profile::estimate_cost(&src, sql)
+                            .ok()
+                            .and(src.raw_query(sql).ok())
+                            .and_then(|rows| rows.first()?.first()?.trim().parse::<i64>().ok());
+                    }
+                    out.push(f);
+                }
+            }
+        }
+        Ok(out)
+    })?;
+
+    let facts: Vec<ekos_migrate::FindingFact> = findings
+        .iter()
+        .map(|f| ekos_migrate::FindingFact {
+            rule_id: f.rule_id.clone(),
+            family: f.family.as_str().to_string(),
+            severity: format!("{:?}", f.severity).to_lowercase(),
+            target: f.target.map(|t| t.as_str().to_string()),
+            lossiness: f.lossiness.map(|l| l.as_str().to_string()),
+            object: f.object.clone(),
+            message: f.message.clone(),
+            affected_rows: f.affected_rows,
+            evidence_sql: f.evidence_sql.clone(),
+            blocks: f.blocks(),
+        })
+        .collect();
+    profile_facts::write_findings(store.as_ref(), &name, &facts, &run_id)?;
+
+    report_findings(&findings, measure);
+
+    // RFC 0154's coverage promise, made visible. Dispositions arrive with RFC 0161, so today this
+    // reports the denominator and what is unaccounted for rather than gating on it — but it reports
+    // the real denominator, which is the part that stops "we handled what we thought of" from
+    // looking like completeness.
+    // Scoped to the schemas the assessed units live in. An unscoped introspection would put every
+    // other schema in the database into the denominator, which makes the number honest about the
+    // server and dishonest about the migration.
+    let schemas: Vec<String> = targets
+        .iter()
+        .filter_map(|t| t.split_once('.').map(|(s, _)| s.to_string()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let catalog = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        Ok(ekos_pg_live::introspect(
+            &src,
+            &schemas,
+            &config.redaction_config(),
+        )?)
+    })?;
+    report_completeness(&catalog, &findings);
+
+    // Assessment is what `profiled → assessed` means. Units with a blocking finding stay put:
+    // advancing them would say the findings had been dealt with.
+    let blocked: std::collections::BTreeSet<&str> = findings
+        .iter()
+        .filter(|f| f.blocks() && !f.is_theoretical())
+        .map(|f| f.object.as_str())
+        .collect();
+    for (obj, state) in &units {
+        if *state != UnitState::Profiled || !targets.contains(&obj.name) {
+            continue;
+        }
+        if blocked.iter().any(|b| b.starts_with(&obj.name)) {
+            continue;
+        }
+        project::transition(
+            store.as_ref(),
+            &obj.id,
+            UnitState::Assessed,
+            "policy",
+            "assessed with no blocking findings",
+            &run_id,
+        )?;
+    }
+    Ok(())
+}
+
+fn report_findings(findings: &[ekos_migrate_dq::Finding], measured: bool) {
+    if findings.is_empty() {
+        println!("No findings.");
+        return;
+    }
+    let blocking: Vec<_> = findings
+        .iter()
+        .filter(|f| f.blocks() && !f.is_theoretical())
+        .collect();
+    let theoretical = findings.iter().filter(|f| f.is_theoretical()).count();
+
+    println!("{} finding(s):\n", findings.len());
+    for f in findings {
+        let rows = match (f.affected_rows, measured) {
+            (Some(n), _) => format!("{n} rows"),
+            // The distinction the whole design rests on: a rule nobody ran is not a rule that
+            // found nothing.
+            (None, true) => "not measurable".into(),
+            (None, false) => "not measured".into(),
+        };
+        let mark = if f.blocks() && !f.is_theoretical() {
+            "BLOCK"
+        } else {
+            "     "
+        };
+        println!("  {mark} {:<34} {:<14} {}", f.rule_id, rows, f.object);
+        println!("        {}", f.message);
+    }
+
+    println!();
+    if theoretical > 0 {
+        println!(
+            "{theoretical} rule(s) matched but affect zero rows — the cheapest disposition there is."
+        );
+    }
+    if blocking.is_empty() {
+        println!("Nothing blocking.");
+    } else {
+        println!(
+            "{} blocking finding(s) need a disposition before these units can advance.",
+            blocking.len()
+        );
+    }
+}
+
+/// Report how much of the source is accounted for, per RFC 0158's completeness check.
+fn report_completeness(
+    catalog: &ekos_pg_live::CatalogSnapshot,
+    findings: &[ekos_migrate_dq::Finding],
+) {
+    use ekos_migrate_dq::completeness::{self, SourceObject};
+
+    // Columns are covered by their table; counting them separately would make the denominator
+    // dominated by a number nobody dispositions individually.
+    let objects: Vec<SourceObject> = catalog
+        .objects
+        .iter()
+        .filter(|o| o.kind != ObjectKind::Column && o.kind != ObjectKind::Schema)
+        .map(|o| SourceObject {
+            qualified_name: o.qualified_name.clone(),
+            kind: o.kind.as_str().to_string(),
+            no_target_equivalent: o.kind.has_no_target_equivalent(),
+        })
+        .collect();
+
+    // A finding is not an accounting — it is the *start* of one. What counts today is that the
+    // object has been looked at by a rule; a real `Accounted::Dispositioned` needs RFC 0161.
+    let mut accounted = std::collections::BTreeMap::new();
+    for f in findings {
+        let owner = f
+            .object
+            .rsplit_once('.')
+            .map_or(f.object.as_str(), |(t, _)| t);
+        accounted.insert(
+            owner.to_string(),
+            completeness::Accounted::Translated {
+                evidence: f.rule_id.clone(),
+            },
+        );
+    }
+
+    let report = completeness::check(&objects, &accounted);
+    println!("\nCoverage (RFC 0158): {}", report.summary());
+    if !report.passes() {
+        let no_equivalent: usize = objects
+            .iter()
+            .filter(|o| {
+                o.no_target_equivalent
+                    && report.gaps.values().any(|v| v.contains(&o.qualified_name))
+            })
+            .count();
+        if no_equivalent > 0 {
+            println!(
+                "  {no_equivalent} of the unclassified have no target equivalent at all (triggers, \
+                 RLS policies, procedures). Those can only ever be dispositioned, never translated."
+            );
+        }
+        println!(
+            "  Dispositions arrive with RFC 0161. Until then this is the denominator, not a gate."
+        );
+    }
+}
+
+/// Constraints that are declared and were never validated. Their existence is not a guarantee.
+fn unvalidated_constraints(src: &PgSource, table: &str) -> Result<Vec<String>> {
+    let (schema, name) = table.split_once('.').unwrap_or(("public", table));
+    let rows = src.raw_query(&format!(
+        "SELECT con.conname FROM pg_constraint con \
+         JOIN pg_class c ON c.oid = con.conrelid \
+         JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '{}' AND c.relname = '{}' AND NOT con.convalidated",
+        schema.replace('\'', "''"),
+        name.replace('\'', "''")
+    ))?;
+    Ok(rows.into_iter().filter_map(|mut r| r.pop()).collect())
+}
+
+fn primary_key_columns(src: &PgSource, table: &str) -> Result<Vec<String>> {
+    let (schema, name) = table.split_once('.').unwrap_or(("public", table));
+    let rows = src.raw_query(&format!(
+        "SELECT a.attname FROM pg_constraint con \
+         JOIN pg_class c ON c.oid = con.conrelid \
+         JOIN pg_namespace n ON n.oid = c.relnamespace \
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(con.conkey) \
+         WHERE n.nspname = '{}' AND c.relname = '{}' AND con.contype = 'p'",
+        schema.replace('\'', "''"),
+        name.replace('\'', "''")
+    ))?;
+    Ok(rows.into_iter().filter_map(|mut r| r.pop()).collect())
+}
+
 fn whoami() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))

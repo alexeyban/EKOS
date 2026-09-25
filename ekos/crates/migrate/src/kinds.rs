@@ -22,16 +22,19 @@ pub const TABLE_PROFILE_KIND: &str = "MigrationTableProfile";
 pub const COLUMN_PROFILE_KIND: &str = "MigrationColumnProfile";
 /// A difference between the live catalog and the repository's own DDL (RFC 0157).
 pub const DRIFT_KIND: &str = "MigrationDrift";
+/// A data-quality or target-compatibility finding (RFC 0158).
+pub const FINDING_KIND: &str = "MigrationFinding";
 
 /// Every object kind this crate writes. The CLI guard test in `ekos-identity` asserts each has a
 /// registry row; this constant is what makes that list reviewable in one place.
-pub const ALL_KINDS: [&str; 6] = [
+pub const ALL_KINDS: [&str; 7] = [
     PROJECT_KIND,
     UNIT_KIND,
     CONNECTION_KIND,
     TABLE_PROFILE_KIND,
     COLUMN_PROFILE_KIND,
     DRIFT_KIND,
+    FINDING_KIND,
 ];
 
 /// Emitted on every state transition (RFC 0154 — the state machine's second write).

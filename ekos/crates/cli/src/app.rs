@@ -302,6 +302,17 @@ enum MigrateCommands {
         #[arg(long)]
         unit: Option<String>,
     },
+    /// Run the data-quality and target-compatibility rules against the live source
+    Assess {
+        #[arg(long)]
+        project: Option<String>,
+        /// One unit only (default: all)
+        #[arg(long)]
+        unit: Option<String>,
+        /// Skip the affected-row measurements (rules only, no scans)
+        #[arg(long)]
+        no_measure: bool,
+    },
     /// Units by state, and what is blocking
     Status {
         /// Project name (default: `[migrate] project` from ekos.toml)
@@ -1235,6 +1246,11 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 tier,
                 unit,
             } => crate::commands::migrate::profile(&config, &cwd, project, tier, unit),
+            MigrateCommands::Assess {
+                project,
+                unit,
+                no_measure,
+            } => crate::commands::migrate::assess(&config, &cwd, project, unit, !no_measure),
             MigrateCommands::Status { project } => {
                 crate::commands::migrate::status(&config, &cwd, project)
             }

@@ -897,6 +897,7 @@ dependencies = [
  "ekos-ledger",
  "ekos-marketing",
  "ekos-migrate",
+ "ekos-migrate-dq",
  "ekos-observation-sdk",
  "ekos-pg-live",
  "ekos-plugin-clickhouse",
@@ -1211,6 +1212,16 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "ekos-migrate-dq"
+version = "1.0.3"
+dependencies = [
+ "ekos-migrate",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

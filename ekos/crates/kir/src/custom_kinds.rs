@@ -181,6 +181,11 @@ prefixes constantly",
         note: "(project, object, drift kind) — RFC 0157 live-vs-repo difference",
     },
     CustomKind {
+        name: "MigrationFinding",
+        structurally_keyed: true,
+        note: "(project, rule id, object) — RFC 0158 DQ / compatibility finding",
+    },
+    CustomKind {
         name: "ArchitectureGap",
         structurally_keyed: true,
         note: "(crate, unresolved dependency name) — RFC 0065",
