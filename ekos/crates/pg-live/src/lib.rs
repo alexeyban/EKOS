@@ -21,9 +21,13 @@
 //! this is a choice of API surface rather than of implementation.
 
 pub mod catalog;
+pub mod pii;
+pub mod profile;
 pub mod session;
 
 pub use catalog::{CatalogObject, CatalogSnapshot, ObjectKind, introspect, reconcile};
+pub use pii::{Classification, PiiClass};
+pub use profile::{ColumnProfile, ProfileTier, TableProfile};
 pub use session::{PgSource, SessionPolicy, WriteCheck};
 
 #[derive(Debug, thiserror::Error)]
@@ -51,6 +55,12 @@ pub enum PgError {
         expected: usize,
         got: usize,
     },
+    #[error(
+        "replica lag is {lag_seconds:.1}s, above the {max_seconds:.1}s policy limit. A run against \
+         a lagging replica produces divergences that are really just lag — wait, or point at the \
+         primary deliberately."
+    )]
+    ReplicaLagTooHigh { lag_seconds: f64, max_seconds: f64 },
     #[error(
         "unknown pg_class.relkind {0:?} — add it to catalog::ObjectKind rather than skipping it"
     )]

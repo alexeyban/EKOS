@@ -179,6 +179,25 @@ impl PgSource {
         }
     }
 
+    /// Refuse to proceed if this session is a replica lagging beyond `max_lag_seconds`.
+    ///
+    /// Called before a profiling or validation run, not during: a run started against a lagging
+    /// replica produces divergences that are really just lag, and those are the most expensive kind
+    /// of false positive because they look exactly like real ones. A primary always passes.
+    ///
+    /// Returns the observed lag so the caller can record it on the run fact alongside the LSN —
+    /// "which source state did we compare?" needs both.
+    pub fn guard_replica_lag(&self, max_lag_seconds: f64) -> Result<Option<f64>, PgError> {
+        match self.replica_lag_seconds()? {
+            None => Ok(None),
+            Some(lag) if lag <= max_lag_seconds => Ok(Some(lag)),
+            Some(lag) => Err(PgError::ReplicaLagTooHigh {
+                lag_seconds: lag,
+                max_seconds: max_lag_seconds,
+            }),
+        }
+    }
+
     /// The write-ahead LSN this session is reading at. Recorded on a validation run so "which source
     /// state did we compare?" has an exact answer afterwards (RFC 0156).
     pub fn current_lsn(&self) -> Result<String, PgError> {

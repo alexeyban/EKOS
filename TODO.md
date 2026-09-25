@@ -6005,11 +6005,15 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       different query shape
 - [x] **Redaction at the third raw-content entry point** — comments, defaults, view definitions,
       function bodies, RLS predicates
-- [ ] Drift reconciliation against RFC 0146's file-based DDL facts (three finding shapes)
-- [ ] P0 / P1 / P2 profiling tiers with `EXPLAIN` cost estimates and budget approval
-- [ ] PII classification, applied conservatively on sight; no top-k at all for PII columns
-- [ ] Replica-lag *guard* (refuse a run above the policy threshold) — the reader exists, the policy
-      check does not
+- [x] P0 / P1 / P2 profiling tiers with `EXPLAIN` cost estimates and a budget that refuses
+      (devlog_210)
+- [x] PII classification, applied conservatively on sight — no bounds and no top-k for a classified
+      column, at **any** tier, including `pg_stats`
+- [x] Replica-lag guard — refuses a run above the policy threshold, reports the lag for the run fact
+- [ ] Drift reconciliation against RFC 0146's file-based DDL facts (three finding shapes) — the last
+      Phase 2 item; needs the ledger side, not the connector
+- [ ] Persist profiles as `MigrationTableProfile` / `MigrationColumnProfile` facts and wire
+      `ekos migrate profile` (needs the RFC 0154 fact writers extended)
 
 ## Migrate Phase 3 — Assess (RFC 0158)
 
