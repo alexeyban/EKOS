@@ -17,6 +17,7 @@
 //! reporting are RFCs 0155–0167.
 
 pub mod connection;
+pub mod drift;
 pub mod kinds;
 pub mod lifecycle;
 pub mod profile_facts;
@@ -24,7 +25,8 @@ pub mod project;
 pub mod state;
 
 pub use connection::{ConnectionError, ConnectionRef, EngineKind, Environment};
-pub use profile_facts::{ColumnProfileFact, DriftFact, DriftKind, TableProfileFact};
+pub use drift::{ColumnRef, Drift, DriftDetail, TableRef, TableShape};
+pub use profile_facts::{ColumnProfileFact, TableProfileFact};
 pub use project::{Project, Unit, transition};
 pub use state::{ALL_STATES, UnitState};
 

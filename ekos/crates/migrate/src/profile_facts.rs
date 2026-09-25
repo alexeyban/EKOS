@@ -71,36 +71,6 @@ pub struct ColumnProfileFact {
     pub values_suppressed: bool,
 }
 
-/// How the live catalog differs from the repository's own DDL.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DriftKind {
-    /// Deployed but not in the repository. The migration would miss it entirely if it trusted the
-    /// repo — which is the usual direction of surprise.
-    LiveOnly,
-    /// In the repository but not deployed. Usually dead DDL; occasionally a failed deploy.
-    RepoOnly,
-    /// Present in both, structurally different.
-    Differs,
-}
-
-impl DriftKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::LiveOnly => "live_only",
-            Self::RepoOnly => "repo_only",
-            Self::Differs => "differs",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DriftFact {
-    pub object: String,
-    pub kind: DriftKind,
-    pub detail: String,
-}
-
 /// Write a table profile and its columns, linked to the unit they describe.
 pub fn write_table_profile(
     store: &dyn KnowledgeStore,
@@ -167,7 +137,7 @@ fn write_table_profile_inner(
 pub fn write_drift(
     store: &dyn KnowledgeStore,
     project: &str,
-    drifts: &[DriftFact],
+    drifts: &[crate::drift::Drift],
     run_id: &str,
 ) -> Result<usize, Error> {
     store.set_write_context(Some(write_context("discover", run_id)));
@@ -177,17 +147,21 @@ pub fn write_drift(
                 d.object.clone(),
                 ObjectKind::Custom(kinds::DRIFT_KIND.into()),
             );
-            obj.id = drift_id(project, &d.object, d.kind.as_str());
+            obj.id = drift_id(project, &d.object, d.detail.as_str());
             obj.properties.insert("project".into(), json!(project));
             obj.properties
-                .insert("drift_kind".into(), json!(d.kind.as_str()));
-            obj.properties.insert("detail".into(), json!(d.detail));
+                .insert("drift_kind".into(), json!(d.detail.as_str()));
+            obj.properties.insert("detail".into(), json!(d.message));
+            // Structural drift changes what a migration would produce, not only what it is called.
+            // RFC 0158 blocks on these; the rest inform.
+            obj.properties
+                .insert("structural".into(), json!(d.detail.is_structural()));
             store.append_object(&obj)?;
             store.append_relationship(&KirRelationship::deterministic(
                 RelationshipKind::References,
                 project_id(project),
                 obj.id,
-                d.kind.as_str(),
+                d.detail.as_str(),
             ))?;
         }
         Ok::<usize, Error>(drifts.len())
@@ -196,74 +170,9 @@ pub fn write_drift(
     result
 }
 
-/// Compare the live table list against the repository's, producing one fact per difference.
-///
-/// Names are compared after normalizing case, because the repository's DDL and the live catalog
-/// routinely disagree on it and a case difference is not drift — it is the same table.
-pub fn reconcile_tables(live: &[String], repo: &[String]) -> Vec<DriftFact> {
-    let norm = |s: &str| s.to_ascii_lowercase();
-    let live_set: std::collections::BTreeSet<String> = live.iter().map(|s| norm(s)).collect();
-    let repo_set: std::collections::BTreeSet<String> = repo.iter().map(|s| norm(s)).collect();
-
-    let mut out = Vec::new();
-    for name in live_set.difference(&repo_set) {
-        out.push(DriftFact {
-            object: name.clone(),
-            kind: DriftKind::LiveOnly,
-            detail: "deployed but absent from the repository's DDL".into(),
-        });
-    }
-    for name in repo_set.difference(&live_set) {
-        out.push(DriftFact {
-            object: name.clone(),
-            kind: DriftKind::RepoOnly,
-            detail: "present in the repository's DDL but not deployed".into(),
-        });
-    }
-    out.sort_by(|a, b| {
-        (a.object.as_str(), a.kind.as_str()).cmp(&(b.object.as_str(), b.kind.as_str()))
-    });
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reconcile_finds_both_directions_and_ignores_case() {
-        let live = vec![
-            "public.orders".into(),
-            "public.Customers".into(),
-            "public.audit".into(),
-        ];
-        let repo = vec![
-            "public.ORDERS".into(),
-            "public.customers".into(),
-            "public.legacy".into(),
-        ];
-        let d = reconcile_tables(&live, &repo);
-        assert_eq!(d.len(), 2, "{d:?}");
-        assert_eq!(d[0].object, "public.audit");
-        assert_eq!(d[0].kind, DriftKind::LiveOnly);
-        assert_eq!(d[1].object, "public.legacy");
-        assert_eq!(d[1].kind, DriftKind::RepoOnly);
-    }
-
-    #[test]
-    fn identical_catalogs_produce_no_drift() {
-        let a = vec!["public.orders".into(), "public.customers".into()];
-        assert!(reconcile_tables(&a, &a).is_empty());
-    }
-
-    /// The direction that matters most: a table deployed but missing from the repository is one a
-    /// repo-only migration would never see.
-    #[test]
-    fn a_live_only_table_is_reported_even_when_the_repo_is_empty() {
-        let d = reconcile_tables(&["public.secret_audit".into()], &[]);
-        assert_eq!(d.len(), 1);
-        assert_eq!(d[0].kind, DriftKind::LiveOnly);
-    }
 
     #[test]
     fn profile_ids_are_deterministic_and_tier_scoped() {

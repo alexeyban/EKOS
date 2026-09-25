@@ -8,7 +8,8 @@
 
 use anyhow::{Result, bail};
 use ekos_compiler_core::{EkosConfig, MigrateConnection};
-use ekos_migrate::profile_facts::{self, DriftKind};
+use ekos_migrate::drift::{self, ColumnRef, TableRef, TableShape};
+use ekos_migrate::profile_facts;
 use ekos_migrate::project::{self, Unit};
 use ekos_migrate::{ALL_STATES, ConnectionRef, Project, UnitState};
 use ekos_pg_live::catalog::ObjectKind;
@@ -248,10 +249,13 @@ pub fn discover(
     // do something with them; creating them now would put units in the state machine that nothing
     // can advance.
     let mut created = 0;
-    let mut live_tables = Vec::new();
+    let mut live_shapes: Vec<TableShape> = Vec::new();
     for kind in [ObjectKind::Table, ObjectKind::PartitionedTable] {
         for o in snapshot.of_kind(kind) {
-            live_tables.push(o.qualified_name.clone());
+            live_shapes.push(TableShape {
+                table: TableRef::parse(&o.qualified_name),
+                columns: columns_of(&snapshot, &o.qualified_name),
+            });
             Unit {
                 project: name.clone(),
                 key: o.qualified_name.clone(),
@@ -264,21 +268,8 @@ pub fn discover(
     }
 
     // Drift against what the compiled ledger already knows from the repository's DDL (RFC 0146).
-    let repo_tables: Vec<String> = store
-        .all_objects()?
-        .into_iter()
-        .filter(|o| matches!(o.kind, ekos_kir::ObjectKind::Table))
-        .map(|o| o.name)
-        .collect();
-    let drifts = profile_facts::reconcile_tables(&live_tables, &repo_tables);
-    let live_only = drifts
-        .iter()
-        .filter(|d| d.kind == DriftKind::LiveOnly)
-        .count();
-    let repo_only = drifts
-        .iter()
-        .filter(|d| d.kind == DriftKind::RepoOnly)
-        .count();
+    let repo_shapes = repo_table_shapes(store.as_ref())?;
+    let drifts = drift::reconcile(&live_shapes, &repo_shapes);
     profile_facts::write_drift(store.as_ref(), &name, &drifts, &run_id)?;
 
     println!("\nCatalog:");
@@ -286,16 +277,97 @@ pub fn discover(
         println!("  {:<22} {count}", kind.as_str());
     }
     println!("\n{created} migration unit(s) discovered.");
-    if repo_tables.is_empty() {
+    if repo_shapes.is_empty() {
+        // Reporting "0 drift" from an empty comparison would be a clean bill of health nobody
+        // earned — the same failure shape as a tier reporting green with no controls.
         println!(
-            "Drift: not checked — this ledger has no compiled Table objects to compare against.\n\
+            "\nDrift: not checked — this ledger has no compiled Table objects to compare against.\n\
              Run `ekos build && ekos recover && ekos compile && ekos commit` over the repository \
              that owns this schema first."
         );
+    } else if drifts.is_empty() {
+        println!("\nDrift: none. The live schema matches the repository's DDL.");
     } else {
-        println!("Drift: {live_only} live-only, {repo_only} repo-only (recorded as facts).");
+        println!("\nDrift ({} finding(s), recorded as facts):", drifts.len());
+        let mut by_kind: std::collections::BTreeMap<&str, usize> = Default::default();
+        for d in &drifts {
+            *by_kind.entry(d.detail.as_str()).or_default() += 1;
+        }
+        for (kind, n) in &by_kind {
+            println!("  {kind:<22} {n}");
+        }
+        let structural = drifts.iter().filter(|d| d.detail.is_structural()).count();
+        if structural > 0 {
+            println!(
+                "\n  {structural} of these change what a migration would produce. The first few:"
+            );
+            for d in drifts.iter().filter(|d| d.detail.is_structural()).take(5) {
+                println!("    {} — {}", d.object, d.message);
+            }
+        }
     }
     Ok(())
+}
+
+/// The columns of one table, from the catalog snapshot.
+///
+/// Column objects are named `schema.table.column`, so the table's own qualified name plus a dot is
+/// the prefix — and the *rightmost* dot separates the column, because a schema or table name can
+/// itself contain one.
+fn columns_of(snapshot: &ekos_pg_live::CatalogSnapshot, table: &str) -> Vec<ColumnRef> {
+    let prefix = format!("{table}.");
+    snapshot
+        .of_kind(ObjectKind::Column)
+        .filter(|c| c.qualified_name.starts_with(&prefix))
+        .map(|c| ColumnRef {
+            name: c.qualified_name[prefix.len()..].to_string(),
+            data_type: c
+                .detail
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        })
+        .collect()
+}
+
+/// Read the repository's own view of its tables out of the compiled ledger (RFC 0146).
+///
+/// `ekos_recovery`'s SQL analyzer stores a table's columns as a `columns` property — an array of
+/// `{name, data_type}` — rather than as separate `Column` objects, so this reads that shape. A
+/// `Table` with no `columns` property contributes a table with no columns, which reconciliation
+/// treats as "nothing to compare" rather than "every column was deleted".
+fn repo_table_shapes(store: &dyn ekos_ledger::KnowledgeStore) -> Result<Vec<TableShape>> {
+    let mut out = Vec::new();
+    for o in store.all_objects()? {
+        if !matches!(o.kind, ekos_kir::ObjectKind::Table) {
+            continue;
+        }
+        let columns = o
+            .properties
+            .get("columns")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| {
+                        Some(ColumnRef {
+                            name: c.get("name")?.as_str()?.to_string(),
+                            data_type: c
+                                .get("data_type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(TableShape {
+            table: TableRef::parse(&o.name),
+            columns,
+        });
+    }
+    Ok(out)
 }
 
 /// `ekos migrate profile` — profile every discovered unit at the requested tier.
@@ -551,6 +623,77 @@ mod tests {
             err.to_string().contains("cannot connect"),
             "expected a connection error, got: {err}"
         );
+    }
+
+    /// A repository `Table` fact, shaped exactly as `ekos_recovery`'s SQL analyzer writes one:
+    /// a bare `CREATE TABLE` name and a `columns` property of `{name, data_type}`.
+    fn repo_table(name: &str, cols: &[(&str, &str)]) -> ekos_kir::KirObject {
+        let mut o = ekos_kir::KirObject::new(name, ekos_kir::ObjectKind::Table);
+        o.properties.insert(
+            "columns".into(),
+            serde_json::json!(
+                cols.iter()
+                    .map(|(n, d)| serde_json::json!({ "name": n, "data_type": d }))
+                    .collect::<Vec<_>>()
+            ),
+        );
+        o
+    }
+
+    /// The whole point of reading `columns`: a `Table` fact with no such property must not read as
+    /// "every column was deleted".
+    #[test]
+    fn a_repo_table_without_a_columns_property_contributes_no_column_drift() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = enabled();
+        let store = crate::commands::store::open_store(&cfg, d.path()).unwrap();
+        let bare = ekos_kir::KirObject::new("orders", ekos_kir::ObjectKind::Table);
+        store.append_object(&bare).unwrap();
+
+        let shapes = repo_table_shapes(store.as_ref()).unwrap();
+        assert_eq!(shapes.len(), 1);
+        assert!(shapes[0].columns.is_empty());
+
+        let live = vec![TableShape {
+            table: TableRef::parse("public.orders"),
+            columns: vec![ColumnRef {
+                name: "id".into(),
+                data_type: "bigint".into(),
+            }],
+        }];
+        let drifts = drift::reconcile(&live, &shapes);
+        assert!(
+            drifts
+                .iter()
+                .all(|x| x.detail != drift::DriftDetail::ColumnRepoOnly),
+            "no columns to compare must not read as deleted columns: {drifts:?}"
+        );
+    }
+
+    #[test]
+    fn repo_table_shapes_reads_the_sql_analyzers_columns_property() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = enabled();
+        let store = crate::commands::store::open_store(&cfg, d.path()).unwrap();
+        store
+            .append_object(&repo_table(
+                "orders",
+                &[("id", "BIGINT"), ("total", "NUMERIC(12,2)")],
+            ))
+            .unwrap();
+        // A non-Table object must be ignored.
+        store
+            .append_object(&ekos_kir::KirObject::new(
+                "some.file.rs",
+                ekos_kir::ObjectKind::File,
+            ))
+            .unwrap();
+
+        let shapes = repo_table_shapes(store.as_ref()).unwrap();
+        assert_eq!(shapes.len(), 1, "only Table objects contribute");
+        assert_eq!(shapes[0].table.name, "orders");
+        assert_eq!(shapes[0].columns.len(), 2);
+        assert_eq!(shapes[0].columns[1].data_type, "NUMERIC(12,2)");
     }
 
     #[test]

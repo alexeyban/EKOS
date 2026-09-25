@@ -6016,9 +6016,10 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       real ledger finds zero row values and zero credentials.
 - [x] `[migrate.connections.<alias>]` config — the alias in a DSN resolves to host/port/user here,
       and `secret-env` names the password variable rather than holding it
-- [x] Drift reconciliation: live-only / repo-only table findings, written as `MigrationDrift` facts
-- [ ] Column-level drift (`Differs`): a table present in both whose columns or types changed. The
-      `DriftKind` exists; the comparison needs RFC 0146's column facts, not just table names.
+- [x] Drift reconciliation, **down to the column** (devlog_212): table live-only/repo-only/ambiguous,
+      column live-only/repo-only, and column type changes — written as `MigrationDrift` facts with a
+      `structural` flag. Verified end-to-end through the real RFC 0146 pipeline: 4 real findings,
+      zero false positives, on a fixture designed to trip both normalizations.
 
 ## Migrate Phase 3 — Assess (RFC 0158)
 
