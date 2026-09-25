@@ -10,6 +10,7 @@ rust-version.workspace = true
 
 [dependencies]
 postgres.workspace = true
+sqlparser.workspace = true
 ekos-common.workspace = true
 ekos-migrate.workspace = true
 ekos-migrate-validate.workspace = true

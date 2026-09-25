@@ -24,11 +24,13 @@ pub mod catalog;
 pub mod pii;
 pub mod profile;
 pub mod session;
+pub mod workload;
 
 pub use catalog::{CatalogObject, CatalogSnapshot, ObjectKind, introspect, reconcile};
 pub use pii::{Classification, PiiClass};
 pub use profile::{ColumnProfile, ProfileTier, TableProfile};
 pub use session::{PgSource, SessionPolicy, WriteCheck};
+pub use workload::{QueryShape, WorkloadJoin};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PgError {

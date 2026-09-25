@@ -6040,8 +6040,10 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       verdicts `clean_relationship` / `relationship_with_orphans` / `unclear` / `not_a_relationship`.
       Live-verified: a real undeclared FK (99.60%, 2 orphans of 500) recorded as a finding, and a
       join whose values never line up (0.00%) correctly *not* claimed.
-- [ ] Seed inference from `pg_stat_statements` query shapes as well as the compiled IR — the IR
-      covers views/SQL/ETL in the repository, not queries only the running application issues
+- [x] **Seed inference from `pg_stat_statements` as well as the compiled IR** (devlog_216) — both
+      explicit `JOIN … ON` and implicit `WHERE a.x = b.y`. Live-verified: a join existing only in the
+      workload was found and measured, and a join present in both sources had its confidence raised
+      from one place to two.
 - [ ] Doc-vs-data conflict findings (no `ConflictingEvidence` path exists today — new work)
 - [ ] Gate the completeness check on real dispositions rather than reporting it (needs RFC 0161)
 
@@ -6057,9 +6059,10 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 - [x] `ReplacingMergeTree` always emits the eventual-dedup finding; a missing version column is a
       finding, never an invented `now()`
 - [x] `ekos migrate map --emit` writes DDL carrying its own reasoning as comments
-- [ ] `ORDER BY` from real query shapes — the derivation is built and ranked, but nothing feeds it
-      yet. Needs `pg_stat_statements` harvesting; until then every design honestly reports "no
-      query-shape evidence" and falls back to the primary key.
+- [x] **`ORDER BY` from real query shapes** (devlog_216) — `pg_stat_statements` harvested, parsed
+      through the Postgres dialect, filter predicates attributed to tables and weighted by call
+      count. Live-verified: a column filtered in 40 calls leads the ordering, with the primary key
+      following, where the same table previously ordered by the PK alone.
 - [ ] Persist `MigrationTargetDesign` / `MigrationTypeMapping` facts and gate on approval (RFC 0161)
 - [ ] Statement classifier generalizing `validate_select_only` (RFC 0160)
 - [ ] Artifact hash pinning, chunked resumable load, dry-run gate (RFC 0160)

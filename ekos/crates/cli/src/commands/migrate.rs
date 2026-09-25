@@ -718,8 +718,11 @@ pub fn map(
         bail!("no matching units. Run `ekos migrate discover` first.");
     }
 
-    let measured = off_runtime(|| {
+    let (measured, shape_count, filter_counts) = off_runtime(|| {
         let src = open_source(config, &dsn, &run_id)?;
+        // The workload is what turns an ORDER BY from a default into a derivation.
+        let shapes = ekos_pg_live::workload::harvest(&src, &config.redaction_config(), 2000)?;
+        let (filters, _) = ekos_pg_live::workload::analyze(&shapes);
         let mut out = Vec::new();
         for table in &targets {
             let profile = ekos_pg_live::profile::profile_table_p0(&src, table)?;
@@ -730,8 +733,17 @@ pub fn map(
             let pk = primary_key_columns(&src, table)?;
             out.push((table.clone(), profile, cols, nullability, pk));
         }
-        Ok(out)
+        Ok((out, shapes.len(), filters))
     })?;
+
+    if shape_count == 0 {
+        println!(
+            "No workload evidence: pg_stat_statements is not installed, or holds nothing. Every \
+             ORDER BY below falls back to the primary key and says so."
+        );
+    } else {
+        println!("Workload: {shape_count} query shape(s) read from pg_stat_statements.");
+    }
 
     let mut emitted = Vec::new();
     for (table, profile, cols, nullability, pk) in &measured {
@@ -785,9 +797,10 @@ pub fn map(
                 .find(|n| matches!(*n, "updated_at" | "modified_at" | "last_modified"))
                 .map(str::to_string),
             primary_key: pk.clone(),
-            // Query-shape evidence arrives with pg_stat_statements seeding; until then the design
-            // says it has none rather than pretending otherwise.
-            filter_columns: Vec::new(),
+            filter_columns: ekos_pg_live::workload::filters_for(&filter_counts, table),
+            // A partition column needs a distinct-month estimate, which needs a scan the mapper
+            // does not take. Left absent rather than guessed: an unpartitioned table is a safe
+            // default and a wrongly-partitioned one is not.
             time_column: None,
         };
 
@@ -904,11 +917,42 @@ fn assess_inferred_keys(
     targets: &[String],
     measure: bool,
 ) -> Result<()> {
-    let observations = harvest_join_observations(store)?;
+    let mut observations = harvest_join_observations(store)?;
+
+    // The second seed: joins that exist only in queries the running application issues, and never
+    // in the repository. `pg_stat_statements` is the only place they are visible.
+    let workload_joins = off_runtime(|| {
+        let src = open_source(config, dsn, run_id)?;
+        let shapes = ekos_pg_live::workload::harvest(&src, &config.redaction_config(), 2000)?;
+        Ok(ekos_pg_live::workload::analyze(&shapes).1)
+    })?;
+    let from_workload = workload_joins.len();
+    observations.extend(
+        workload_joins
+            .into_iter()
+            .map(|j| ekos_migrate_dq::JoinObservation {
+                left_table: j.left_table,
+                left_column: j.left_column,
+                right_table: j.right_table,
+                right_column: j.right_column,
+                source: "pg_stat_statements".into(),
+            }),
+    );
+    if from_workload > 0 {
+        // Before scoping: this counts every join in the workload, including ones against tables
+        // outside the migration and against the system catalogs. Saying "joins not in the
+        // repository" here would over-claim.
+        println!(
+            "\n{from_workload} join predicate(s) harvested from the live workload, before scoping \
+             to the tables under migration."
+        );
+    }
+
     if observations.is_empty() {
         println!(
-            "\nInferred keys: no join predicates in this ledger. `ekos recover` compiles views, SQL \
-             and ETL into the Transformation IR — without that, there is nothing to infer from."
+            "\nInferred keys: no join predicates found. `ekos recover` compiles views, SQL and ETL \
+             into the Transformation IR, and pg_stat_statements holds what the application runs — \
+             without either, there is nothing to infer from."
         );
         return Ok(());
     }
