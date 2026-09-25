@@ -165,6 +165,22 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(project, role, dsn) — RFC 0154; holds an alias and a secret's *name*, never a secret",
     },
     CustomKind {
+        name: "MigrationTableProfile",
+        structurally_keyed: true,
+        note: "(project, qualified table, tier) — RFC 0157; aggregates only, never row values",
+    },
+    CustomKind {
+        name: "MigrationColumnProfile",
+        structurally_keyed: true,
+        note: "(project, qualified column, tier) — RFC 0157; a migration's columns share name \
+prefixes constantly",
+    },
+    CustomKind {
+        name: "MigrationDrift",
+        structurally_keyed: true,
+        note: "(project, object, drift kind) — RFC 0157 live-vs-repo difference",
+    },
+    CustomKind {
         name: "ArchitectureGap",
         structurally_keyed: true,
         note: "(crate, unresolved dependency name) — RFC 0065",

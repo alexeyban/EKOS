@@ -19,10 +19,12 @@
 pub mod connection;
 pub mod kinds;
 pub mod lifecycle;
+pub mod profile_facts;
 pub mod project;
 pub mod state;
 
 pub use connection::{ConnectionError, ConnectionRef, EngineKind, Environment};
+pub use profile_facts::{ColumnProfileFact, DriftFact, DriftKind, TableProfileFact};
 pub use project::{Project, Unit, transition};
 pub use state::{ALL_STATES, UnitState};
 
@@ -30,6 +32,8 @@ pub use state::{ALL_STATES, UnitState};
 pub enum Error {
     #[error(transparent)]
     Ledger(#[from] ekos_ledger::LedgerError),
+    #[error("cannot serialize a fact: {0}")]
+    Serialize(#[from] serde_json::Error),
     #[error(transparent)]
     Connection(#[from] ConnectionError),
     #[error("not a migration unit: {0}")]

@@ -7,9 +7,12 @@
 //! with RFCs 0155–0167.
 
 use anyhow::{Result, bail};
-use ekos_compiler_core::EkosConfig;
-use ekos_migrate::project::Unit;
+use ekos_compiler_core::{EkosConfig, MigrateConnection};
+use ekos_migrate::profile_facts::{self, DriftKind};
+use ekos_migrate::project::{self, Unit};
 use ekos_migrate::{ALL_STATES, ConnectionRef, Project, UnitState};
+use ekos_pg_live::catalog::ObjectKind;
+use ekos_pg_live::{PgSource, SessionPolicy, profile as pgprofile};
 use std::path::Path;
 
 /// One id per `ekos migrate` invocation, grouping every write that verb makes (RFC 0135 Part B).
@@ -144,6 +147,269 @@ pub fn status(config: &EkosConfig, cwd: &Path, project: Option<String>) -> Resul
     Ok(())
 }
 
+/// Resolve a connection alias through `[migrate.connections.<alias>]`.
+///
+/// The alias is what the ledger stores; the host, port and user live in config and the password
+/// lives in an environment variable the config only *names*. A missing alias is an error with the
+/// TOML to add, because guessing `localhost:5432` would silently point a migration at the wrong
+/// database.
+fn resolve_alias<'a>(config: &'a EkosConfig, alias: &str) -> Result<&'a MigrateConnection> {
+    config.migrate.connections.get(alias).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no connection named '{alias}'. Add it to ekos.toml:\n\n\
+             [migrate.connections.{alias}]\nhost = \"…\"\nport = 5432\nuser = \"…\"\n\
+             secret-env = \"MY_PASSWORD_VAR\""
+        )
+    })
+}
+
+/// Run database work on a dedicated OS thread, outside the tokio runtime.
+///
+/// **Why this exists.** `bin/ekos.rs` is `#[tokio::main]`, so every CLI command already runs inside
+/// a runtime. The synchronous `postgres` crate builds its own runtime internally, and starting a
+/// runtime from within one panics: *"Cannot start a runtime from within a runtime."*
+///
+/// RFC 0157 chose the synchronous driver on the reasoning that it avoids having to answer how a
+/// chunk-parallel executor coexists with the non-`Sync` `KnowledgeStore`. That reasoning held; the
+/// claim that it left *nothing* to arrange did not. The arrangement is this function, and it is the
+/// same shape RFC 0160's chunk parallelism will use: database work happens on its own thread, and
+/// **results are collected before anything touches the store**. The ledger handle never crosses the
+/// boundary, so its thread-safety stays nobody else's problem.
+fn off_runtime<T, F>(f: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T> + Send,
+    T: Send,
+{
+    std::thread::scope(|s| {
+        s.spawn(f)
+            .join()
+            .map_err(|_| anyhow::anyhow!("the database worker thread panicked"))?
+    })
+}
+
+/// Open the source described by a project's `source` DSN.
+fn open_source(config: &EkosConfig, dsn: &str, run_id: &str) -> Result<PgSource> {
+    let conn = ConnectionRef::parse(dsn)?.require_source()?;
+    let settings = resolve_alias(config, &conn.alias)?;
+    let conn = conn.with_secret_env(settings.secret_env.clone());
+    let src = PgSource::connect(
+        &conn,
+        &settings.host,
+        settings.port,
+        &settings.user,
+        run_id,
+        &SessionPolicy::default(),
+    )?;
+
+    // RFC 0157: refuse before doing work, not halfway through. A run against a lagging replica
+    // produces divergences that are really just lag.
+    if let Some(lag) = src.guard_replica_lag(settings.max_replica_lag_seconds)? {
+        println!(
+            "  replica lag : {lag:.1}s (within {:.1}s)",
+            settings.max_replica_lag_seconds
+        );
+    }
+    Ok(src)
+}
+
+fn project_source(store: &dyn ekos_ledger::KnowledgeStore, name: &str) -> Result<String> {
+    let obj = Project::load(store, name)?
+        .ok_or_else(|| anyhow::anyhow!("no migration project named '{name}'"))?;
+    obj.properties
+        .get("source")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("project '{name}' has no source connection"))
+}
+
+/// `ekos migrate discover` — read the live catalog, create a unit per table, record drift.
+pub fn discover(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    schemas: Vec<String>,
+) -> Result<()> {
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+    let dsn = project_source(store.as_ref(), &name)?;
+
+    println!("Discovering {dsn}");
+    // Database work on its own thread; the store is not touched inside it.
+    let snapshot = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        let snapshot = ekos_pg_live::introspect(&src, &schemas, &config.redaction_config())?;
+        ekos_pg_live::reconcile(&src, &snapshot, &schemas)?;
+        Ok(snapshot)
+    })?;
+
+    // One unit per table-shaped relation. Views and functions become units when RFC 0163/0164 can
+    // do something with them; creating them now would put units in the state machine that nothing
+    // can advance.
+    let mut created = 0;
+    let mut live_tables = Vec::new();
+    for kind in [ObjectKind::Table, ObjectKind::PartitionedTable] {
+        for o in snapshot.of_kind(kind) {
+            live_tables.push(o.qualified_name.clone());
+            Unit {
+                project: name.clone(),
+                key: o.qualified_name.clone(),
+                state: UnitState::Discovered,
+                wave: None,
+            }
+            .create(store.as_ref(), &run_id)?;
+            created += 1;
+        }
+    }
+
+    // Drift against what the compiled ledger already knows from the repository's DDL (RFC 0146).
+    let repo_tables: Vec<String> = store
+        .all_objects()?
+        .into_iter()
+        .filter(|o| matches!(o.kind, ekos_kir::ObjectKind::Table))
+        .map(|o| o.name)
+        .collect();
+    let drifts = profile_facts::reconcile_tables(&live_tables, &repo_tables);
+    let live_only = drifts
+        .iter()
+        .filter(|d| d.kind == DriftKind::LiveOnly)
+        .count();
+    let repo_only = drifts
+        .iter()
+        .filter(|d| d.kind == DriftKind::RepoOnly)
+        .count();
+    profile_facts::write_drift(store.as_ref(), &name, &drifts, &run_id)?;
+
+    println!("\nCatalog:");
+    for (kind, count) in snapshot.counts() {
+        println!("  {:<22} {count}", kind.as_str());
+    }
+    println!("\n{created} migration unit(s) discovered.");
+    if repo_tables.is_empty() {
+        println!(
+            "Drift: not checked — this ledger has no compiled Table objects to compare against.\n\
+             Run `ekos build && ekos recover && ekos compile && ekos commit` over the repository \
+             that owns this schema first."
+        );
+    } else {
+        println!("Drift: {live_only} live-only, {repo_only} repo-only (recorded as facts).");
+    }
+    Ok(())
+}
+
+/// `ekos migrate profile` — profile every discovered unit at the requested tier.
+pub fn profile(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    tier: String,
+    unit: Option<String>,
+) -> Result<()> {
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+    let dsn = project_source(store.as_ref(), &name)?;
+
+    let units = Unit::all_in(store.as_ref(), &name)?;
+    let targets: Vec<_> = units
+        .iter()
+        .filter(|(o, _)| unit.as_ref().is_none_or(|u| &o.name == u))
+        .collect();
+    if targets.is_empty() {
+        bail!("no matching units. Run `ekos migrate discover` first.");
+    }
+    let names: Vec<String> = targets.iter().map(|(o, _)| o.name.clone()).collect();
+
+    // Every database read first, on its own thread. Nothing here touches the ledger.
+    let measured = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        let mut out = Vec::new();
+        for name in &names {
+            let table = profile_table_p0_at(&src, name, &tier)?;
+            let mut cols =
+                ekos_pg_live::profile::profile_columns_p0(&src, name, &config.redaction_config())?;
+            if tier != "p0" {
+                cols = ekos_pg_live::profile::profile_columns_p1(&src, name, cols, 10.0, 500)?;
+            }
+            out.push((table, cols));
+        }
+        Ok(out)
+    })?;
+
+    // Then the writes, on the main thread, with the ledger handle that never left it.
+    let mut suppressed_columns = 0usize;
+    for ((obj, state), (table, cols)) in targets.iter().zip(&measured) {
+        suppressed_columns += cols.iter().filter(|c| c.values_suppressed).count();
+
+        let table_fact = ekos_migrate::TableProfileFact::from(table);
+        let col_facts: Vec<ekos_migrate::ColumnProfileFact> = cols.iter().map(Into::into).collect();
+        profile_facts::write_table_profile(
+            store.as_ref(),
+            &name,
+            &table_fact,
+            &col_facts,
+            &run_id,
+        )?;
+
+        println!(
+            "  {:<40} {:>10} rows  {:>3} cols{}",
+            obj.name,
+            table.row_count,
+            cols.len(),
+            if table.row_count_is_exact {
+                ""
+            } else {
+                " (est)"
+            }
+        );
+
+        // Profiling is what `discovered → profiled` means; the transition is a fact like any other.
+        if *state == UnitState::Discovered {
+            project::transition(
+                store.as_ref(),
+                &obj.id,
+                UnitState::Profiled,
+                "policy",
+                &format!("profiled at {tier}"),
+                &run_id,
+            )?;
+        }
+    }
+
+    println!("\n{} unit(s) profiled at {tier}.", targets.len());
+    if suppressed_columns > 0 {
+        println!(
+            "{suppressed_columns} column(s) classified as personal data: no bounds and no top-k \
+             recorded for them, at any tier."
+        );
+    }
+    Ok(())
+}
+
+fn profile_table_p0_at(src: &PgSource, table: &str, tier: &str) -> Result<pgprofile::TableProfile> {
+    let mut p = pgprofile::profile_table_p0(src, table)?;
+    if tier == "p2" {
+        // P2 asks the planner first and refuses above budget rather than scanning (RFC 0157).
+        match pgprofile::exact_row_count(src, table, 50_000_000.0)? {
+            Ok(n) => {
+                p.row_count = n;
+                p.row_count_is_exact = true;
+                p.tier = pgprofile::ProfileTier::P2;
+            }
+            Err(over) => bail!(
+                "exact count of {table} would scan an estimated {:.0} rows, above the \
+                 {:.0}-row budget. RFC 0161 turns this into an approval request; for now, \
+                 profile at p0 or p1.",
+                over.estimate.estimated_rows,
+                over.budget_rows
+            ),
+        }
+    }
+    Ok(p)
+}
+
 fn whoami() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
@@ -251,6 +517,40 @@ mod tests {
             .next()
             .unwrap();
         assert_eq!(body.trim(), "Human,", "Actor gained a variant: {body:?}");
+    }
+
+    /// The regression test for "Cannot start a runtime from within a runtime".
+    ///
+    /// `bin/ekos.rs` is `#[tokio::main]`, and the synchronous `postgres` crate builds its own
+    /// runtime internally. Calling it directly from a command panics — which no ordinary `#[test]`
+    /// can catch, because a plain test has no runtime. This one deliberately has one.
+    ///
+    /// It connects to a closed port: the assertion is that the failure is an ordinary connection
+    /// error rather than a panic, which is exactly the difference `off_runtime` makes.
+    #[tokio::test]
+    async fn database_work_survives_being_called_from_inside_the_runtime() {
+        let result = off_runtime(|| {
+            let conn = ConnectionRef::parse("postgres://local/nope").unwrap();
+            // Port 1 is reserved and nothing listens there.
+            ekos_pg_live::PgSource::connect(
+                &conn,
+                "127.0.0.1",
+                1,
+                "nobody",
+                "run-test",
+                &ekos_pg_live::SessionPolicy::default(),
+            )
+            .map(|_| ())
+            .map_err(anyhow::Error::from)
+        });
+        let err = match result {
+            Ok(()) => panic!("connecting to a closed port must fail"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string().contains("cannot connect"),
+            "expected a connection error, got: {err}"
+        );
     }
 
     #[test]

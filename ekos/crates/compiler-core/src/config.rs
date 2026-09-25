@@ -231,6 +231,35 @@ pub struct MigrateConfig {
     /// Path to the approval policy file, relative to the workspace root (RFC 0161).
     #[serde(default = "default_migrate_policy_path")]
     pub policy: PathBuf,
+    /// How a connection *alias* resolves to a host. The alias is what a `MigrationConnectionRef`
+    /// stores and what a DSN names, so the ledger never holds a hostname-with-credentials and a
+    /// workspace can be pointed at a different environment by editing config, not facts.
+    #[serde(default)]
+    pub connections: std::collections::BTreeMap<String, MigrateConnection>,
+}
+
+/// One connection alias. **No password field, deliberately** — `secret_env` names the environment
+/// variable that holds it, and `ekos.toml` is a file people commit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MigrateConnection {
+    pub host: String,
+    #[serde(default = "default_pg_port")]
+    pub port: u16,
+    pub user: String,
+    #[serde(default)]
+    pub secret_env: Option<String>,
+    /// Maximum replica lag tolerated before a run is refused (RFC 0157).
+    #[serde(default = "default_max_replica_lag")]
+    pub max_replica_lag_seconds: f64,
+}
+
+fn default_pg_port() -> u16 {
+    5432
+}
+
+fn default_max_replica_lag() -> f64 {
+    30.0
 }
 
 fn default_migrate_environment() -> String {
@@ -248,6 +277,7 @@ impl Default for MigrateConfig {
             project: None,
             default_environment: default_migrate_environment(),
             policy: default_migrate_policy_path(),
+            connections: Default::default(),
         }
     }
 }

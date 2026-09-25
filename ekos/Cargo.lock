@@ -898,6 +898,7 @@ dependencies = [
  "ekos-marketing",
  "ekos-migrate",
  "ekos-observation-sdk",
+ "ekos-pg-live",
  "ekos-plugin-clickhouse",
  "ekos-plugin-confluence",
  "ekos-plugin-crypto",

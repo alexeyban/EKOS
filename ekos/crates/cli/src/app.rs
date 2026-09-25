@@ -284,6 +284,24 @@ enum MigrateCommands {
         #[arg(long)]
         target_secret_env: Option<String>,
     },
+    /// Read the live catalog, create a unit per table, and record live-vs-repo drift
+    Discover {
+        #[arg(long)]
+        project: Option<String>,
+        /// Restrict to these schemas (default: every non-system schema)
+        #[arg(long = "schema")]
+        schemas: Vec<String>,
+    },
+    /// Profile discovered units (p0: catalog only, p1: bounded sample, p2: exact, budgeted)
+    Profile {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long, default_value = "p1")]
+        tier: String,
+        /// One unit only (default: all)
+        #[arg(long)]
+        unit: Option<String>,
+    },
     /// Units by state, and what is blocking
     Status {
         /// Project name (default: `[migrate] project` from ekos.toml)
@@ -1209,6 +1227,14 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 source_secret_env,
                 target_secret_env,
             ),
+            MigrateCommands::Discover { project, schemas } => {
+                crate::commands::migrate::discover(&config, &cwd, project, schemas)
+            }
+            MigrateCommands::Profile {
+                project,
+                tier,
+                unit,
+            } => crate::commands::migrate::profile(&config, &cwd, project, tier, unit),
             MigrateCommands::Status { project } => {
                 crate::commands::migrate::status(&config, &cwd, project)
             }

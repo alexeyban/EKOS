@@ -6010,10 +6010,15 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 - [x] PII classification, applied conservatively on sight — no bounds and no top-k for a classified
       column, at **any** tier, including `pg_stats`
 - [x] Replica-lag guard — refuses a run above the policy threshold, reports the lag for the run fact
-- [ ] Drift reconciliation against RFC 0146's file-based DDL facts (three finding shapes) — the last
-      Phase 2 item; needs the ledger side, not the connector
-- [ ] Persist profiles as `MigrationTableProfile` / `MigrationColumnProfile` facts and wire
-      `ekos migrate profile` (needs the RFC 0154 fact writers extended)
+- [x] Persist profiles as `MigrationTableProfile` / `MigrationColumnProfile` facts; `ekos migrate
+      discover` and `ekos migrate profile` (devlog_211). End-to-end verified against the sandbox:
+      `init → discover → profile → status`, facts queryable through `ekos ekl`, and a scan of the
+      real ledger finds zero row values and zero credentials.
+- [x] `[migrate.connections.<alias>]` config — the alias in a DSN resolves to host/port/user here,
+      and `secret-env` names the password variable rather than holding it
+- [x] Drift reconciliation: live-only / repo-only table findings, written as `MigrationDrift` facts
+- [ ] Column-level drift (`Differs`): a table present in both whose columns or types changed. The
+      `DriftKind` exists; the comparison needs RFC 0146's column facts, not just table names.
 
 ## Migrate Phase 3 — Assess (RFC 0158)
 

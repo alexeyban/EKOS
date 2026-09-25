@@ -72,3 +72,112 @@ pub enum PgError {
     #[error("unknown pg_type.typtype {0:?}")]
     UnknownTypeKind(String),
 }
+
+/// Convert a connector profile into the source-independent fact shape `ekos-migrate` persists.
+///
+/// The conversion is where the "no row values" rule is re-checked rather than assumed: `min`/`max`
+/// are copied only when the connector did not suppress them, so a future change that forgets to
+/// clear a bound cannot leak one through this path either.
+impl From<&profile::TableProfile> for ekos_migrate::TableProfileFact {
+    fn from(p: &profile::TableProfile) -> Self {
+        Self {
+            qualified_name: p.qualified_name.clone(),
+            tier: format!("{:?}", p.tier).to_lowercase(),
+            row_count: p.row_count,
+            row_count_is_exact: p.row_count_is_exact,
+            total_bytes: p.total_bytes,
+            last_analyze: p.last_analyze.clone(),
+            inserts: p.inserts,
+            updates: p.updates,
+            deletes: p.deletes,
+        }
+    }
+}
+
+impl From<&profile::ColumnProfile> for ekos_migrate::ColumnProfileFact {
+    fn from(c: &profile::ColumnProfile) -> Self {
+        let suppressed = c.values_suppressed;
+        Self {
+            qualified_name: c.qualified_name.clone(),
+            tier: format!("{:?}", c.tier).to_lowercase(),
+            data_type: c.data_type.clone(),
+            null_fraction: c.null_fraction,
+            distinct_estimate: c.distinct_estimate,
+            // Belt and braces: the connector already clears these for a suppressed column.
+            min: if suppressed { None } else { c.min.clone() },
+            max: if suppressed { None } else { c.max.clone() },
+            numeric_precision_used: c.numeric_precision_used,
+            numeric_scale_used: c.numeric_scale_used,
+            monotonic: c.monotonic,
+            pii_class: c
+                .pii
+                .as_ref()
+                .map(|p| format!("{:?}", p.class).to_lowercase()),
+            pii_method: c
+                .pii
+                .as_ref()
+                .map(|p| format!("{:?}", p.method).to_lowercase()),
+            values_suppressed: suppressed,
+        }
+    }
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::*;
+
+    #[test]
+    fn a_suppressed_column_cannot_carry_bounds_through_the_conversion() {
+        let c = profile::ColumnProfile {
+            qualified_name: "s.t.email".into(),
+            tier: profile::ProfileTier::P1,
+            data_type: "text".into(),
+            null_fraction: 0.0,
+            distinct_estimate: None,
+            avg_width: 32,
+            // Deliberately populated, as a change upstream might leave them.
+            min: Some("aaa@example.com".into()),
+            max: Some("zzz@example.com".into()),
+            numeric_precision_used: None,
+            numeric_scale_used: None,
+            monotonic: None,
+            pii: Some(pii::Classification {
+                class: pii::PiiClass::Email,
+                method: pii::Method::ColumnName,
+                confidence: 0.6,
+            }),
+            values_suppressed: true,
+        };
+        let f: ekos_migrate::ColumnProfileFact = (&c).into();
+        assert_eq!(
+            f.min, None,
+            "a suppressed bound must not survive the conversion"
+        );
+        assert_eq!(f.max, None);
+        assert_eq!(f.pii_class.as_deref(), Some("email"));
+        assert!(f.values_suppressed);
+    }
+
+    #[test]
+    fn an_unsuppressed_numeric_column_keeps_its_bounds() {
+        let c = profile::ColumnProfile {
+            qualified_name: "s.t.amount".into(),
+            tier: profile::ProfileTier::P0,
+            data_type: "numeric".into(),
+            null_fraction: 0.0,
+            distinct_estimate: Some(-1.0),
+            avg_width: 8,
+            min: Some("1.00".into()),
+            max: Some("99.00".into()),
+            numeric_precision_used: Some(4),
+            numeric_scale_used: Some(2),
+            monotonic: None,
+            pii: None,
+            values_suppressed: false,
+        };
+        let f: ekos_migrate::ColumnProfileFact = (&c).into();
+        assert_eq!(f.min.as_deref(), Some("1.00"));
+        assert_eq!(f.tier, "p0");
+        assert_eq!(f.numeric_scale_used, Some(2));
+    }
+}

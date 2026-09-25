@@ -16,10 +16,23 @@ pub const PROJECT_KIND: &str = "MigrationProject";
 pub const UNIT_KIND: &str = "MigrationUnit";
 /// A named connection: kind, host alias and database. **Never a credential.**
 pub const CONNECTION_KIND: &str = "MigrationConnectionRef";
+/// Table-level profile (RFC 0157). Aggregates only — never a row value.
+pub const TABLE_PROFILE_KIND: &str = "MigrationTableProfile";
+/// Column-level profile (RFC 0157). Bounds appear only for non-PII, non-text columns.
+pub const COLUMN_PROFILE_KIND: &str = "MigrationColumnProfile";
+/// A difference between the live catalog and the repository's own DDL (RFC 0157).
+pub const DRIFT_KIND: &str = "MigrationDrift";
 
 /// Every object kind this crate writes. The CLI guard test in `ekos-identity` asserts each has a
 /// registry row; this constant is what makes that list reviewable in one place.
-pub const ALL_KINDS: [&str; 3] = [PROJECT_KIND, UNIT_KIND, CONNECTION_KIND];
+pub const ALL_KINDS: [&str; 6] = [
+    PROJECT_KIND,
+    UNIT_KIND,
+    CONNECTION_KIND,
+    TABLE_PROFILE_KIND,
+    COLUMN_PROFILE_KIND,
+    DRIFT_KIND,
+];
 
 /// Emitted on every state transition (RFC 0154 — the state machine's second write).
 pub const TRANSITION_EVENT: &str = "MigrationTransition";
@@ -28,4 +41,6 @@ pub const STATUS_CHANGED_EVENT: &str = "MigrationStatusChanged";
 
 /// `project → unit` containment, and `unit → superseding unit`.
 pub const HAS_UNIT: &str = "HasMigrationUnit";
+/// `unit → its profile`, and `table profile → column profile`.
+pub const HAS_PROFILE: &str = "HasMigrationProfile";
 pub const SUPERSEDES: &str = "Supersedes";
