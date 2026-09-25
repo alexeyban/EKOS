@@ -14,10 +14,12 @@
 
 pub mod catalog;
 pub mod completeness;
+pub mod infer;
 pub mod model;
 
 pub use catalog::{COLUMN_RULES, TABLE_RULES, rule_by_id};
 pub use completeness::{Accounted, CompletenessReport, SourceObject, check};
+pub use infer::{Direction, FkCandidate, InclusionResult, JoinObservation, Verdict};
 pub use model::{ColumnContext, Family, Finding, Lossiness, Rule, Severity, TableContext, Target};
 
 /// Run every column rule that applies, returning findings without their measurements.

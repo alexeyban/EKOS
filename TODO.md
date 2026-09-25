@@ -6035,8 +6035,13 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 - [x] Completeness check: denominator per kind, never a percentage; wired into `assess`
 - [x] `MigrationFinding` facts carrying the evidence SQL, so a reviewer re-runs the measurement
       rather than trusting it
-- [ ] Inferred FKs seeded by real code joins from the CKM — the EKOS-specific advantage, and the
-      largest remaining piece of RFC 0158
+- [x] **Inferred FKs seeded by real code joins from the CKM** (devlog_214) — the EKOS-specific
+      advantage. Joins harvested from the Transformation IR, candidates measured by inclusion check,
+      verdicts `clean_relationship` / `relationship_with_orphans` / `unclear` / `not_a_relationship`.
+      Live-verified: a real undeclared FK (99.60%, 2 orphans of 500) recorded as a finding, and a
+      join whose values never line up (0.00%) correctly *not* claimed.
+- [ ] Seed inference from `pg_stat_statements` query shapes as well as the compiled IR — the IR
+      covers views/SQL/ETL in the repository, not queries only the running application issues
 - [ ] Doc-vs-data conflict findings (no `ConflictingEvidence` path exists today — new work)
 - [ ] Gate the completeness check on real dispositions rather than reporting it (needs RFC 0161)
 

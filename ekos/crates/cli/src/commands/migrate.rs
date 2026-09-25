@@ -606,6 +606,15 @@ pub fn assess(
         )?)
     })?;
     report_completeness(&catalog, &findings);
+    assess_inferred_keys(
+        config,
+        store.as_ref(),
+        &name,
+        &dsn,
+        &run_id,
+        &targets,
+        measure,
+    )?;
 
     // Assessment is what `profiled → assessed` means. Units with a blocking finding stay put:
     // advancing them would say the findings had been dealt with.
@@ -676,6 +685,369 @@ fn report_findings(findings: &[ekos_migrate_dq::Finding], measured: bool) {
             blocking.len()
         );
     }
+}
+
+/// Infer undeclared foreign keys from real code joins, then measure whether they hold.
+///
+/// A candidate is a hypothesis: the code says two columns reference each other, and an inclusion
+/// check says whether the data agrees. Both halves are needed — a join in a view proves a developer
+/// believed it, not that the values line up.
+///
+/// Takes the caller's already-open `store`: the fact ledger allows exactly one writable process, so
+/// opening a second handle here deadlocks against the first. The error is clear when it happens
+/// ("another writable process already holds the ledger's write lock") but the cause is not, because
+/// the second opener is inside the same process.
+fn assess_inferred_keys(
+    config: &EkosConfig,
+    store: &dyn ekos_ledger::KnowledgeStore,
+    project: &str,
+    dsn: &str,
+    run_id: &str,
+    targets: &[String],
+    measure: bool,
+) -> Result<()> {
+    let observations = harvest_join_observations(store)?;
+    if observations.is_empty() {
+        println!(
+            "\nInferred keys: no join predicates in this ledger. `ekos recover` compiles views, SQL \
+             and ETL into the Transformation IR — without that, there is nothing to infer from."
+        );
+        return Ok(());
+    }
+
+    // Only candidates whose *both* sides are tables under migration: a join against something out
+    // of scope is real but not this migration's problem.
+    let in_scope: std::collections::BTreeSet<String> =
+        targets.iter().map(|t| bare_table(t)).collect();
+    let qualify =
+        |bare: &str| -> Option<String> { targets.iter().find(|t| bare_table(t) == bare).cloned() };
+
+    // Scoped to the schemas under migration. Both queries return **bare** table names, because
+    // join predicates recovered from code carry whatever alias the query used and cannot be
+    // qualified — so an unscoped query lets `archive.orders` suppress a genuine finding about
+    // `public.orders`. Observed: a declared FK in an unrelated fixture schema silently hid the one
+    // this fixture was built to find.
+    let schemas: Vec<String> = targets
+        .iter()
+        .filter_map(|t| t.split_once('.').map(|(s, _)| s.to_string()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let (declared, keyed) = off_runtime(|| {
+        let src = open_source(config, dsn, run_id)?;
+        Ok((
+            declared_foreign_keys(&src, &schemas)?,
+            keyed_columns(&src, &schemas)?,
+        ))
+    })?;
+
+    let candidates: Vec<_> = ekos_migrate_dq::infer::candidates(&observations, &declared, &keyed)
+        .into_iter()
+        .filter(|c| in_scope.contains(&c.child_table) && in_scope.contains(&c.parent_table))
+        .collect();
+
+    if candidates.is_empty() {
+        println!("\nInferred keys: none beyond what the schema already declares.");
+        return Ok(());
+    }
+
+    println!(
+        "\nInferred keys ({} candidate(s) from real code joins):",
+        candidates.len()
+    );
+    if !measure {
+        for c in &candidates {
+            println!(
+                "  {}.{} -> {}.{}  seen in {} place(s), not measured",
+                c.child_table, c.child_column, c.parent_table, c.parent_column, c.observations
+            );
+        }
+        return Ok(());
+    }
+
+    let measured = off_runtime(|| {
+        let src = open_source(config, dsn, run_id)?;
+        let mut out = Vec::new();
+        for c in &candidates {
+            // Resolve the bare names against the live catalog before touching the database.
+            let (Some(child), Some(parent)) = (qualify(&c.child_table), qualify(&c.parent_table))
+            else {
+                continue;
+            };
+            let resolved = ekos_migrate_dq::FkCandidate {
+                child_table: child,
+                parent_table: parent,
+                ..c.clone()
+            };
+            let count = |sql: &str| -> Option<i64> {
+                src.raw_query(sql)
+                    .ok()
+                    .and_then(|r| r.first()?.first()?.trim().parse().ok())
+            };
+            let result = match (
+                count(&resolved.orphan_sql()),
+                count(&resolved.population_sql()),
+            ) {
+                (Some(orphans), Some(population)) => Some(ekos_migrate_dq::InclusionResult {
+                    orphans,
+                    population,
+                }),
+                // A measurement that errors stays unmeasured. The usual reason is a type mismatch
+                // between the two columns — which is itself evidence the join was never a key.
+                _ => None,
+            };
+            out.push((resolved, result));
+        }
+        Ok(out)
+    })?;
+
+    let mut facts = Vec::new();
+    for (c, result) in &measured {
+        let verdict = result
+            .as_ref()
+            .map(ekos_migrate_dq::InclusionResult::verdict);
+        let rate = result.as_ref().and_then(|r| r.inclusion_rate());
+        let detail = match (&verdict, rate) {
+            (Some(v), Some(r)) => format!("{} ({:.2}% of values match)", v.as_str(), r * 100.0),
+            (Some(v), None) => v.as_str().to_string(),
+            (None, _) => "not measurable".to_string(),
+        };
+        println!(
+            "  {}.{} -> {}.{}  seen in {} place(s) ({:?})  {}",
+            c.child_table,
+            c.child_column,
+            c.parent_table,
+            c.parent_column,
+            c.observations,
+            c.direction,
+            detail
+        );
+        if let Some(r) = result {
+            println!(
+                "        {} orphan(s) of {} non-null values; joined in: {}",
+                r.orphans,
+                r.population,
+                c.sources.join(", ")
+            );
+        }
+
+        if verdict.is_some_and(ekos_migrate_dq::Verdict::is_relationship) {
+            let orphans = result.as_ref().map(|r| r.orphans).unwrap_or_default();
+            facts.push(ekos_migrate::FindingFact {
+                rule_id: "DQ.REFINT.002".into(),
+                family: "referential_integrity".into(),
+                severity: "blocking".into(),
+                target: None,
+                lossiness: None,
+                object: format!("{}.{}", c.child_table, c.child_column),
+                message: format!(
+                    "undeclared foreign key to {}.{}, inferred from joins in {}. \
+                     {orphans} orphan row(s). The schema does not declare it, so a schema-only \
+                     migration would not order the load by it — and the target enforces nothing, \
+                     so whatever the application was maintaining is now maintained by nothing.",
+                    c.parent_table,
+                    c.parent_column,
+                    c.sources.join(", ")
+                ),
+                affected_rows: Some(orphans),
+                evidence_sql: Some(c.orphan_sql()),
+                blocks: true,
+            });
+        }
+    }
+
+    if !facts.is_empty() {
+        profile_facts::write_findings(store, project, &facts, run_id)?;
+        println!(
+            "\n{} inferred relationship(s) recorded as findings.",
+            facts.len()
+        );
+    }
+    Ok(())
+}
+
+/// A `schema IN (…)` fragment, or a predicate that matches nothing when the list is empty.
+///
+/// An empty list must not silently become "every schema": that is how the unscoped version of these
+/// queries let an unrelated schema suppress a real finding.
+fn schema_in(column: &str, schemas: &[String]) -> String {
+    if schemas.is_empty() {
+        return "false".into();
+    }
+    let list = schemas
+        .iter()
+        .map(|s| format!("'{}'", s.replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{column} IN ({list})")
+}
+
+/// Foreign keys the schema already declares, so inference does not re-report them.
+fn declared_foreign_keys(
+    src: &PgSource,
+    schemas: &[String],
+) -> Result<Vec<(String, String, String, String)>> {
+    let rows = src.raw_query(&format!(
+        "SELECT c.relname, a.attname, pc.relname, pa.attname \
+         FROM pg_constraint con \
+         JOIN pg_class c ON c.oid = con.conrelid \
+         JOIN pg_namespace n ON n.oid = c.relnamespace \
+         JOIN pg_class pc ON pc.oid = con.confrelid \
+         JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = con.conkey[1] \
+         JOIN pg_attribute pa ON pa.attrelid = con.confrelid AND pa.attnum = con.confkey[1] \
+         WHERE con.contype = 'f' AND {}",
+        schema_in("n.nspname", schemas)
+    ))?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| r.len() >= 4)
+        .map(|r| (r[0].clone(), r[1].clone(), r[2].clone(), r[3].clone()))
+        .collect())
+}
+
+/// Columns backed by a primary key or unique constraint. A foreign key points at one of these, so
+/// this is what decides a candidate's direction without touching the data.
+fn keyed_columns(src: &PgSource, schemas: &[String]) -> Result<Vec<(String, String)>> {
+    let rows = src.raw_query(&format!(
+        "SELECT c.relname, a.attname FROM pg_constraint con \
+         JOIN pg_class c ON c.oid = con.conrelid \
+         JOIN pg_namespace n ON n.oid = c.relnamespace \
+         JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(con.conkey) \
+         WHERE con.contype IN ('p', 'u') AND {}",
+        schema_in("n.nspname", schemas)
+    ))?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| r.len() >= 2)
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect())
+}
+
+/// Harvest every `JOIN … ON a.x = b.y` the compiler has already recovered from the estate.
+///
+/// This is the part a schema-only migration tool cannot do. `ekos recover` has already compiled
+/// views, SQL and ETL into the Transformation IR (RFC 0027), and every join in it is a developer's
+/// claim that two columns reference each other — a claim nobody wrote into the schema.
+///
+/// The IR lowers each node to a `Custom("TransformNode")` object named `<source path>:<index>`,
+/// with a `Join` node carrying `keys` plus the *node indices* of its operands. Those indices are
+/// only meaningful inside one graph, so resolution walks upstream through `FeedsInto` edges from
+/// each operand until it reaches a `Source` node, which carries the real `object_name`. An operand
+/// that does not reach one is skipped rather than guessed at.
+fn harvest_join_observations(
+    store: &dyn ekos_ledger::KnowledgeStore,
+) -> Result<Vec<ekos_migrate_dq::JoinObservation>> {
+    use std::collections::HashMap;
+
+    let objects = store.all_objects()?;
+    let nodes: HashMap<ekos_kir::KirId, &ekos_kir::KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == "TransformNode"))
+        .map(|o| (o.id, o))
+        .collect();
+    if nodes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // `<source path>:<index>` → the object, so a join's operand indices can be resolved within its
+    // own graph and never across graphs.
+    let by_slot: HashMap<(String, u64), &ekos_kir::KirObject> = nodes
+        .values()
+        .filter_map(|o| {
+            let (path, idx) = o.name.rsplit_once(':')?;
+            Some(((path.to_string(), idx.parse().ok()?), *o))
+        })
+        .collect();
+
+    let mut out = Vec::new();
+    for o in nodes.values() {
+        if o.properties.get("node_type").and_then(|v| v.as_str()) != Some("Join") {
+            continue;
+        }
+        let Some((path, _)) = o.name.rsplit_once(':') else {
+            continue;
+        };
+        let operand = |key: &str| -> Option<String> {
+            let idx = o.properties.get(key)?.as_u64()?;
+            let start = by_slot.get(&(path.to_string(), idx))?;
+            source_object_name(start, &by_slot, path, store)
+        };
+        let (Some(left_table), Some(right_table)) = (operand("left"), operand("right")) else {
+            continue;
+        };
+
+        let Some(keys) = o.properties.get("keys").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for k in keys {
+            // `keys` is a list of `[left_column, right_column]` pairs.
+            let Some(pair) = k.as_array() else { continue };
+            let (Some(lc), Some(rc)) = (
+                pair.first().and_then(|v| v.as_str()),
+                pair.get(1).and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            out.push(ekos_migrate_dq::JoinObservation {
+                left_table: bare_table(&left_table),
+                left_column: bare_column(lc),
+                right_table: bare_table(&right_table),
+                right_column: bare_column(rc),
+                source: path.to_string(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Walk upstream from a node until a `Source` is reached, and return its `object_name`.
+///
+/// Bounded: a malformed graph with a cycle would otherwise loop, and a deep pipeline is not more
+/// informative than a shallow one about which table a join operand came from.
+fn source_object_name(
+    start: &ekos_kir::KirObject,
+    by_slot: &std::collections::HashMap<(String, u64), &ekos_kir::KirObject>,
+    path: &str,
+    store: &dyn ekos_ledger::KnowledgeStore,
+) -> Option<String> {
+    let mut current = start;
+    for _ in 0..8 {
+        if current.properties.get("node_type").and_then(|v| v.as_str()) == Some("Source") {
+            return current
+                .properties
+                .get("object_name")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+        }
+        // Follow the one `FeedsInto` edge that points *into* this node.
+        let upstream = store
+            .relationships_for(&current.id)
+            .ok()?
+            .into_iter()
+            .find(|r| {
+                r.to == current.id
+                    && matches!(&r.kind, ekos_kir::RelationshipKind::Custom(k) if k == "FeedsInto")
+            })?;
+        current = by_slot
+            .values()
+            .find(|o| o.id == upstream.from)
+            .filter(|o| o.name.starts_with(path))?;
+    }
+    None
+}
+
+/// `dbo.cust_mstr` → `cust_mstr`, and `c.customer_id` → `customer_id`.
+///
+/// Join predicates in recovered SQL are written against whatever alias the query used, and an alias
+/// is not a table. Reducing both sides to a bare name is what lets a candidate be matched against
+/// the live catalog at all; the cost is that two same-named tables in different schemas collapse,
+/// which the caller resolves against the live catalog.
+fn bare_table(raw: &str) -> String {
+    raw.rsplit('.').next().unwrap_or(raw).to_lowercase()
+}
+
+fn bare_column(raw: &str) -> String {
+    raw.rsplit('.').next().unwrap_or(raw).to_lowercase()
 }
 
 /// Report how much of the source is accounted for, per RFC 0158's completeness check.
@@ -976,6 +1348,52 @@ mod tests {
         assert_eq!(shapes[0].table.name, "orders");
         assert_eq!(shapes[0].columns.len(), 2);
         assert_eq!(shapes[0].columns[1].data_type, "NUMERIC(12,2)");
+    }
+
+    /// The bug this guards: unscoped, a declared foreign key in *any* schema suppressed an
+    /// inferred one in the schema under migration, because join predicates recovered from code
+    /// carry bare table names and cannot be qualified. Observed live — a fixture in an unrelated
+    /// schema silently hid the finding the test was built to produce.
+    #[test]
+    fn an_empty_schema_list_matches_nothing_rather_than_everything() {
+        assert_eq!(schema_in("n.nspname", &[]), "false");
+        let one = schema_in("n.nspname", &["public".into()]);
+        assert_eq!(one, "n.nspname IN ('public')");
+        let quoted = schema_in("n.nspname", &["o'brien".into()]);
+        assert!(
+            quoted.contains("'o''brien'"),
+            "a quote must be doubled: {quoted}"
+        );
+    }
+
+    #[test]
+    fn join_operands_are_reduced_to_bare_names() {
+        // Recovered SQL writes whatever the query used: a schema qualifier, an alias, or neither.
+        assert_eq!(bare_table("dbo.cust_mstr"), "cust_mstr");
+        assert_eq!(bare_table("ekos_fk.orders"), "orders");
+        assert_eq!(bare_table("Orders"), "orders");
+        assert_eq!(bare_column("o.customer_id"), "customer_id");
+        assert_eq!(bare_column("customer_id"), "customer_id");
+    }
+
+    /// A ledger with no Transformation IR yields no candidates, and must say why rather than
+    /// reporting "no inferred keys" — which would read as a clean bill of health.
+    #[test]
+    fn a_ledger_without_transform_nodes_harvests_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = enabled();
+        let store = crate::commands::store::open_store(&cfg, d.path()).unwrap();
+        store
+            .append_object(&ekos_kir::KirObject::new(
+                "orders",
+                ekos_kir::ObjectKind::Table,
+            ))
+            .unwrap();
+        assert!(
+            harvest_join_observations(store.as_ref())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
