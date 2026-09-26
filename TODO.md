@@ -6070,9 +6070,13 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 - [x] `ekos migrate validate` — RFC 0156 tiers across engines. **A real PG → ClickHouse migration
       ran and validated V1/V2/V3**, and a planted one-row change was caught by V3 with V1 and V2
       correctly blind.
-- [ ] Persist `MigrationTargetDesign` / `MigrationTypeMapping` / `MigrationExecution` facts and gate
-      on real approvals (RFC 0161) — `authorize` takes `Option<&Approval>` and is passed `None`
-      today, which is why only sandbox writes succeed
+- [x] **Gate on real approvals (RFC 0161, devlog_218)** — `ekos-migrate-approval`: risk computed from
+      statement class × environment × lossiness × blast radius × affected rows, requests pinned to an
+      evidence snapshot, `review` / `approve` / `reject`. Live-verified: a staging load refused with
+      its computed class and reasons, self-approval refused, a second person approved, and the load
+      then passed the gate.
+- [ ] Persist `MigrationTargetDesign` / `MigrationTypeMapping` / `MigrationExecution` facts (the
+      approval request and its decision already persist as `MigrationApproval`)
 - [ ] **Extend the ClickHouse dialect parser for `CODEC` and `PARTITION BY`** — the classifier
       cannot read either, so codecs are emitted as comments and a partitioned design refuses to
       emit. Neither weakens the control, and both cost a real feature until the parser catches up.

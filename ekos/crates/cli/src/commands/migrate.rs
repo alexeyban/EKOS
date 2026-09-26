@@ -687,6 +687,350 @@ fn report_findings(findings: &[ekos_migrate_dq::Finding], measured: bool) {
     }
 }
 
+/// `ekos migrate review` — list pending requests, or raise one for a unit.
+pub fn review(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    unit: Option<String>,
+    environment: String,
+) -> Result<()> {
+    use ekos_migrate_approval as ap;
+
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+
+    let Some(unit) = unit else {
+        let requests = load_approvals(store.as_ref(), &name)?;
+        if requests.is_empty() {
+            println!("No approval requests. Raise one with `ekos migrate review --unit <unit>`.");
+            return Ok(());
+        }
+        println!("{} request(s):", requests.len());
+        for r in &requests {
+            println!(
+                "  {:<28} {:<4} {}",
+                r.id,
+                r.risk.class.as_str(),
+                status_word(&r.status)
+            );
+            println!("        {}", r.risk.summary());
+        }
+        return Ok(());
+    };
+
+    // Raising a request is not approving one, so an agent may do it — and the requester is recorded
+    // precisely so that whoever approves cannot be the same identity.
+    let dsn = project_source(store.as_ref(), &name)?;
+    let target_db = ConnectionRef::parse(&project_target(store.as_ref(), &name)?)?.database;
+    let env: EnvArg = environment
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let policy = ap::load_policy(&cwd.join(&config.migrate.policy))?;
+    let blast = blast_radius(store.as_ref(), &unit);
+
+    // A request covers **every** artifact the load will execute, not just the DDL. RFC 0161 says
+    // "the artifact ids and their content hashes", plural, and the first version froze only the DDL
+    // — which approved the create and then refused the very first chunk. One decision, one set of
+    // statements.
+    let artifacts = off_runtime(|| {
+        let src = open_source(config, &dsn, &run_id)?;
+        plan_artifacts(config, &src, &unit, &target_db, env.0, &run_id)
+    })?;
+    let artifact = artifacts
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("{unit} produced no artifacts to approve"))?;
+
+    // The evidence: every profile and finding fact the decision rests on, with its content hash
+    // frozen. If any of it changes, the request dies rather than being silently re-validated.
+    let evidence = ap::EvidenceSnapshot::of(evidence_for(store.as_ref(), &name, &unit)?);
+
+    let risk = ap::assess(
+        &ap::ActionFacts {
+            statement_class: ekos_migrate_target_clickhouse::batch_class(&artifact.sql)?
+                .as_str()
+                .to_string(),
+            environment: env.0.as_str().to_string(),
+            lossiness: None,
+            blast_radius: blast,
+            affected_rows: None,
+        },
+        &policy.policy.thresholds,
+    );
+
+    let request = ap::ApprovalRequest {
+        id: format!("REQ:{unit}:{}", env.0.as_str()),
+        artifacts: artifacts
+            .iter()
+            .map(|a| ap::EvidenceRef {
+                fact_id: a.id.clone(),
+                content_hash: a.hash.clone(),
+            })
+            .collect(),
+        risk: risk.clone(),
+        evidence,
+        requester: format!("cli:{}", whoami()),
+        status: ap::RequestStatus::Pending,
+        evidence_shown: false,
+        typed_confirmation: None,
+    };
+
+    profile_facts::write_approval(
+        store.as_ref(),
+        &name,
+        &request.id,
+        &serde_json::to_value(&request)?,
+        &run_id,
+    )?;
+
+    println!("Raised {}", request.id);
+    println!("  risk     : {}", risk.summary());
+    println!(
+        "  needs    : {} distinct approver(s)",
+        risk.class.approvers_required()
+    );
+    if risk.class.requires_evidence_review() {
+        println!("  evidence : must be rendered and that recorded (pass --show-evidence)");
+    }
+    if risk.class.requires_typed_confirmation() {
+        println!("  confirm  : the approver must type `{unit}` exactly");
+    }
+    println!(
+        "  covers   : {} artifact(s) — the DDL and every chunk, so one decision covers the load",
+        request.artifacts.len()
+    );
+    println!(
+        "  evidence : {} fact(s) frozen",
+        request.evidence.refs.len()
+    );
+    println!(
+        "  requester: {} — whoever approves must be someone else",
+        request.requester
+    );
+    println!(
+        "\nApprove with `ekos migrate approve {} --as <you>`.",
+        request.id
+    );
+    Ok(())
+}
+
+/// What a human decided, and the evidence they were shown.
+pub struct Decision {
+    pub request_id: String,
+    pub subjects: Vec<String>,
+    /// `Some` rejects with this reason; `None` approves.
+    pub reject_reason: Option<String>,
+    pub typed_confirmation: Option<String>,
+    pub evidence_shown: bool,
+}
+
+/// `ekos migrate approve` / `reject`.
+pub fn decide(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    decision: Decision,
+) -> Result<()> {
+    let Decision {
+        request_id,
+        subjects,
+        reject_reason,
+        typed_confirmation: confirm,
+        evidence_shown: show_evidence,
+    } = decision;
+    use ekos_migrate_approval as ap;
+
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let run_id = new_run_id();
+    let store = crate::commands::store::open_store(config, cwd)?;
+
+    let mut request = load_approvals(store.as_ref(), &name)?
+        .into_iter()
+        .find(|r| r.id == request_id)
+        .ok_or_else(|| {
+            anyhow::anyhow!("no request {request_id}. `ekos migrate review` lists them.")
+        })?;
+
+    let unit = request_id
+        .strip_prefix("REQ:")
+        .and_then(|r| r.rsplit_once(':').map(|(u, _)| u.to_string()))
+        .unwrap_or_default();
+
+    if let Some(reason) = reject_reason {
+        let who = subjects.first().cloned().unwrap_or_else(whoami);
+        ap::lifecycle::reject(&mut request, ap::Actor::Human, &who, &reason)?;
+        println!("Rejected {request_id}: {reason}");
+    } else {
+        if subjects.is_empty() {
+            bail!("who is approving? Pass --as <subject> (twice for an R4 action).");
+        }
+        request.evidence_shown = show_evidence;
+        // The evidence is re-hashed from the ledger *now*, never trusted from the request.
+        let current = current_hashes(store.as_ref(), &name)?;
+        ap::lifecycle::approve(
+            &mut request,
+            ap::Actor::Human,
+            &subjects,
+            &unit,
+            confirm.as_deref(),
+            &|id| current.get(id).cloned(),
+            &chrono::Utc::now().to_rfc3339(),
+        )?;
+        println!("Approved {request_id} ({})", request.risk.class.as_str());
+    }
+
+    profile_facts::write_approval(
+        store.as_ref(),
+        &name,
+        &request.id,
+        &serde_json::to_value(&request)?,
+        &run_id,
+    )?;
+    Ok(())
+}
+
+fn status_word(s: &ekos_migrate_approval::RequestStatus) -> &'static str {
+    use ekos_migrate_approval::RequestStatus as S;
+    match s {
+        S::Pending => "pending",
+        S::Approved { .. } => "approved",
+        S::Rejected { .. } => "rejected",
+        S::Dead { .. } => "dead (evidence changed)",
+    }
+}
+
+/// A newtype so `--env` parses once, in one place.
+struct EnvArg(ekos_migrate_target_clickhouse::Environment);
+
+impl std::str::FromStr for EnvArg {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        use ekos_migrate_target_clickhouse::Environment as E;
+        Ok(EnvArg(match s {
+            "sandbox" => E::Sandbox,
+            "staging" => E::Staging,
+            "production" | "prod" => E::Production,
+            other => return Err(format!("unknown environment '{other}'")),
+        }))
+    }
+}
+
+/// The facts a decision about `unit` rests on: its profiles and its findings.
+fn evidence_for(
+    store: &dyn ekos_ledger::KnowledgeStore,
+    project: &str,
+    unit: &str,
+) -> Result<Vec<ekos_migrate_approval::EvidenceRef>> {
+    Ok(current_hashes(store, project)?
+        .into_iter()
+        .filter(|(id, _)| id.contains(unit))
+        .map(
+            |(fact_id, content_hash)| ekos_migrate_approval::EvidenceRef {
+                fact_id,
+                content_hash,
+            },
+        )
+        .collect())
+}
+
+/// Every migration fact's current content hash, keyed by name.
+///
+/// Keyed by *name* rather than KirId so the snapshot survives a re-profile that writes a new version
+/// of the same logical fact — which is exactly the change that must invalidate an approval.
+fn current_hashes(
+    store: &dyn ekos_ledger::KnowledgeStore,
+    project: &str,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut out = std::collections::BTreeMap::new();
+    for o in store.all_objects()? {
+        let ekos_kir::ObjectKind::Custom(kind) = &o.kind else {
+            continue;
+        };
+        if !matches!(
+            kind.as_str(),
+            k if k == ekos_migrate::kinds::TABLE_PROFILE_KIND
+                || k == ekos_migrate::kinds::COLUMN_PROFILE_KIND
+                || k == ekos_migrate::kinds::FINDING_KIND
+        ) {
+            continue;
+        }
+        if o.properties.get("project").and_then(|v| v.as_str()) != Some(project) {
+            continue;
+        }
+        // **Sorted** before hashing. `KirObject::properties` is a `HashMap`, and serializing one
+        // gives a different key order on every read — so a hash taken over it is not a content hash
+        // at all, and an evidence snapshot compared against it reports *every* fact as changed
+        // immediately after being frozen. Caught the first time a request was raised and approved
+        // back to back.
+        let sorted: std::collections::BTreeMap<&String, &serde_json::Value> =
+            o.properties.iter().collect();
+        let body = serde_json::to_string(&sorted).unwrap_or_default();
+        out.insert(
+            format!("{kind}:{}", o.name),
+            ekos_common::ContentHash::of_str(&body).as_str().to_string(),
+        );
+    }
+    Ok(out)
+}
+
+/// How many objects depend on the unit being changed.
+///
+/// RFC 0161's blast radius, and the number EKOS has that a schema-only migration tool does not: the
+/// compiled CKM already knows which views, functions, ETL steps and application files reference this
+/// table. A change touching one consumer and a change touching forty are genuinely different
+/// actions, and this is what tells them apart.
+fn blast_radius(store: &dyn ekos_ledger::KnowledgeStore, unit: &str) -> usize {
+    let bare = unit.rsplit('.').next().unwrap_or(unit).to_ascii_lowercase();
+    let Ok(objects) = store.all_objects() else {
+        return 0;
+    };
+    let Some(target) = objects.iter().find(|o| {
+        matches!(o.kind, ekos_kir::ObjectKind::Table)
+            && o.name.to_ascii_lowercase().ends_with(&bare)
+    }) else {
+        // No compiled Table object means no impact graph to consult — which reads as zero, and the
+        // assessment's own "not measured" language is what keeps that honest.
+        return 0;
+    };
+    store
+        .relationships_for(&target.id)
+        .map(|rels| {
+            rels.into_iter()
+                .filter(|r| r.to == target.id)
+                .map(|r| r.from.to_string())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        })
+        .unwrap_or(0)
+}
+
+/// Approval requests recorded for this project.
+fn load_approvals(
+    store: &dyn ekos_ledger::KnowledgeStore,
+    project: &str,
+) -> Result<Vec<ekos_migrate_approval::ApprovalRequest>> {
+    let mut out = Vec::new();
+    for o in store.all_objects()? {
+        if !matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == ekos_migrate::kinds::APPROVAL_KIND)
+        {
+            continue;
+        }
+        if o.properties.get("project").and_then(|v| v.as_str()) != Some(project) {
+            continue;
+        }
+        if let Some(body) = o.properties.get("request")
+            && let Ok(r) = serde_json::from_value(body.clone())
+        {
+            out.push(r);
+        }
+    }
+    Ok(out)
+}
+
 /// A ClickHouse HTTP client for the executor. Read and write share one path so the classifier
 /// gates both.
 struct ChClient {
@@ -919,6 +1263,14 @@ pub fn load(
     use ekos_migrate_target_clickhouse as ch;
 
     require_enabled(config)?;
+    // The flag overrides the config for this run. `review` reads the config, so overriding it here
+    // deliberately changes the artifact set and invalidates an approval raised without the override
+    // — which the hash check then catches, rather than quietly loading a different set of chunks.
+    let mut config = config.clone();
+    if chunk_rows > 0 {
+        config.migrate.chunk_rows = chunk_rows;
+    }
+    let config = &config;
     let name = active_project(config, project)?;
     let run_id = new_run_id();
     let store = crate::commands::store::open_store(config, cwd)?;
@@ -933,59 +1285,78 @@ pub fn load(
         other => bail!("unknown environment '{other}' (sandbox | staging | production)"),
     };
 
-    let (ddl, key_column, key_range) = off_runtime(|| {
+    // The same planner `review` used, so an approval covers the statements that actually run.
+    let artifacts = off_runtime(|| {
         let src = open_source(config, &dsn, &run_id)?;
-        let ddl = generate_ddl_for(config, &src, &unit, &target_db, &run_id)?;
-        let pk = primary_key_columns(&src, &unit)?;
-        let key = pk.first().cloned().ok_or_else(|| {
-            anyhow::anyhow!(
-                "{unit} has no primary key, so the load cannot be chunked by key range. \
-                 RFC 0160's ctid fallback is not implemented yet."
-            )
-        })?;
-        let (schema, table) = unit.split_once('.').unwrap_or(("public", &unit));
-        let rows = src.raw_query(&format!(
-            "SELECT COALESCE(min(\"{k}\"), 0), COALESCE(max(\"{k}\"), -1) FROM \"{s}\".\"{t}\"",
-            k = key.replace('"', "\"\""),
-            s = schema.replace('"', "\"\""),
-            t = table.replace('"', "\"\"")
-        ))?;
-        let lo: i64 = rows[0][0].trim().parse().unwrap_or(0);
-        let hi: i64 = rows[0][1].trim().parse().unwrap_or(-1);
-        Ok((ddl, key, (lo, hi)))
+        plan_artifacts(config, &src, &unit, &target_db, env, &run_id)
     })?;
-
+    let chunks = artifacts.len().saturating_sub(1);
     let bare = unit.rsplit('.').next().unwrap_or(&unit).to_string();
-    let (schema, source_table) = unit.split_once('.').unwrap_or(("public", &unit));
-    let chunks = ch::plan_chunks(key_range.0, key_range.1, chunk_rows);
 
-    // Every artifact, gated before any of them runs — so a batch is refused as a batch rather than
-    // half-executed and then refused.
-    let mut artifacts = vec![ch::Artifact::new(format!("{unit}:ddl"), ddl)];
-    for c in &chunks {
-        artifacts.push(ch::Artifact::new(
-            format!("{unit}:chunk:{}", c.index),
-            ch::chunk_insert(
-                &target_db,
-                &bare,
-                schema,
-                source_table,
-                &config.migrate.source_named_collection,
-                &key_column,
-                c,
-            ),
-        ));
-    }
+    // RFC 0161: compute the risk from the situation, not the category, and gate anything above R1
+    // on a real approval whose evidence still matches. `blast_radius` is the number EKOS has and a
+    // schema-only migration tool does not.
+    let policy = ekos_migrate_approval::load_policy(&cwd.join(&config.migrate.policy))?;
+    let blast = blast_radius(store.as_ref(), &unit);
+    let approvals = load_approvals(store.as_ref(), &name)?;
 
     println!(
         "{unit} -> {target_db}.{bare} ({}, {} chunk(s))",
         env.as_str(),
-        chunks.len()
+        chunks
     );
+    if !policy.from_file {
+        println!(
+            "  policy   : defaults ({} not found). Worth saying in a report: \"the default policy \
+             allowed it\" is a different statement from \"our policy allowed it\".",
+            config.migrate.policy.display()
+        );
+    }
+
     for a in &artifacts {
-        // RFC 0161 will supply real approvals; until then a non-sandbox write has none, which is
-        // the correct answer rather than a missing feature.
-        match ch::authorize(a, env, None) {
+        let risk = ekos_migrate_approval::assess(
+            &ekos_migrate_approval::ActionFacts {
+                statement_class: ch::batch_class(&a.sql)?.as_str().to_string(),
+                environment: env.as_str().to_string(),
+                lossiness: None,
+                blast_radius: blast,
+                affected_rows: None,
+            },
+            &policy.policy.thresholds,
+        );
+
+        // The two gates compose rather than duplicate: RFC 0161 decides *whether* an approval is
+        // needed and finds it, RFC 0160 checks that the approval matches this artifact's hash and
+        // environment. Neither is sufficient alone — a valid approval for a different statement is
+        // exactly what the hash check exists to catch.
+        let approval = if risk.class.is_automatic() {
+            None
+        } else {
+            match approvals.iter().find(|r| r.authorizes(&a.id, &a.hash)) {
+                Some(req) => Some(ch::Approval {
+                    artifact_id: a.id.clone(),
+                    artifact_hash: a.hash.clone(),
+                    environment: env,
+                    approver: match &req.status {
+                        ekos_migrate_approval::RequestStatus::Approved { approvers, .. } => {
+                            approvers.join(", ")
+                        }
+                        _ => String::new(),
+                    },
+                }),
+                None => bail!(
+                    "{} is {} and has no matching approval.\n  {}\n\nRaise one with \
+                     `ekos migrate review --unit {unit} --env {}`, then approve it. Approving is \
+                     human-only and has no MCP equivalent, by design.",
+                    a.id,
+                    risk.class.as_str(),
+                    risk.summary(),
+                    env.as_str()
+                ),
+            }
+        };
+
+        match ch::authorize(a, env, approval.as_ref()) {
             Ok(class) => {
                 if dry_run {
                     println!("  [{}] {} ({})", class.as_str(), a.id, &a.hash[..12]);
@@ -1030,6 +1401,58 @@ fn units_named(
     Ok(Unit::all_in(store, project)?
         .into_iter()
         .find(|(o, _)| o.name == unit))
+}
+
+/// Every artifact a load of `unit` will execute, in order.
+///
+/// Shared by `review` and `load` on purpose: if the two built the set separately they could disagree,
+/// and an approval covering a different set of statements than the one that runs is precisely what
+/// the hash check exists to catch — better not to create the opportunity.
+fn plan_artifacts(
+    config: &EkosConfig,
+    src: &PgSource,
+    unit: &str,
+    target_db: &str,
+    _env: ekos_migrate_target_clickhouse::Environment,
+    run_id: &str,
+) -> Result<Vec<ekos_migrate_target_clickhouse::Artifact>> {
+    use ekos_migrate_target_clickhouse as ch;
+
+    let ddl = generate_ddl_for(config, src, unit, target_db, run_id)?;
+    let pk = primary_key_columns(src, unit)?;
+    let key = pk.first().cloned().ok_or_else(|| {
+        anyhow::anyhow!(
+            "{unit} has no primary key, so the load cannot be chunked by key range. RFC 0160's \
+             ctid fallback is not implemented yet."
+        )
+    })?;
+    let (schema, table) = unit.split_once('.').unwrap_or(("public", unit));
+    let rows = src.raw_query(&format!(
+        "SELECT COALESCE(min(\"{k}\"), 0), COALESCE(max(\"{k}\"), -1) FROM \"{s}\".\"{t}\"",
+        k = key.replace('"', "\"\""),
+        s = schema.replace('"', "\"\""),
+        t = table.replace('"', "\"\"")
+    ))?;
+    let lo: i64 = rows[0][0].trim().parse().unwrap_or(0);
+    let hi: i64 = rows[0][1].trim().parse().unwrap_or(-1);
+
+    let bare = unit.rsplit('.').next().unwrap_or(unit);
+    let mut out = vec![ch::Artifact::new(format!("{unit}:ddl"), ddl)];
+    for c in ch::plan_chunks(lo, hi, config.migrate.chunk_rows) {
+        out.push(ch::Artifact::new(
+            format!("{unit}:chunk:{}", c.index),
+            ch::chunk_insert(
+                target_db,
+                bare,
+                schema,
+                table,
+                &config.migrate.source_named_collection,
+                &key,
+                &c,
+            ),
+        ));
+    }
+    Ok(out)
 }
 
 /// Re-derive the DDL for one unit. Kept separate from `map` so a load never depends on someone
@@ -1877,11 +2300,21 @@ mod tests {
     #[test]
     fn no_mcp_code_can_reach_the_migration_lifecycle() {
         let mcp = include_str!("mcp.rs");
-        assert!(
-            !mcp.contains("ekos_migrate::lifecycle"),
-            "approval, execution outside the sandbox and sign-off must stay human-only (CLI)"
-        );
-        assert!(!mcp.contains("Actor::Human"));
+        for forbidden in [
+            "ekos_migrate::lifecycle",
+            // RFC 0161's decision path. Added when the approval crate landed: a second lifecycle
+            // module is a second way in, and the guard has to name both or it only protects the one
+            // somebody remembered.
+            "ekos_migrate_approval::lifecycle",
+            "ApprovalRequest",
+            "Actor::Human",
+        ] {
+            assert!(
+                !mcp.contains(forbidden),
+                "{forbidden} must stay out of the MCP surface: approving, executing outside a \
+                 sandbox and signing off are human-only (RFC 0154/0161)"
+            );
+        }
     }
 
     /// The `Actor` enum must never grow an `Agent` variant: an absent variant cannot be

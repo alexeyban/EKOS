@@ -238,6 +238,10 @@ pub struct MigrateConfig {
     /// in ClickHouse's own server config by whoever administers it.
     #[serde(default = "default_source_named_collection")]
     pub source_named_collection: String,
+    /// Key-range width per load chunk. Shared by `review` and `load` so the two agree on the
+    /// artifact set they are respectively approving and executing.
+    #[serde(default = "default_chunk_rows")]
+    pub chunk_rows: i64,
     /// How a connection *alias* resolves to a host. The alias is what a `MigrationConnectionRef`
     /// stores and what a DSN names, so the ledger never holds a hostname-with-credentials and a
     /// workspace can be pointed at a different environment by editing config, not facts.
@@ -259,6 +263,10 @@ pub struct MigrateConnection {
     /// Maximum replica lag tolerated before a run is refused (RFC 0157).
     #[serde(default = "default_max_replica_lag")]
     pub max_replica_lag_seconds: f64,
+}
+
+fn default_chunk_rows() -> i64 {
+    100_000
 }
 
 fn default_source_named_collection() -> String {
@@ -289,6 +297,7 @@ impl Default for MigrateConfig {
             default_environment: default_migrate_environment(),
             policy: default_migrate_policy_path(),
             source_named_collection: default_source_named_collection(),
+            chunk_rows: default_chunk_rows(),
             connections: Default::default(),
         }
     }

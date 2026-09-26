@@ -897,6 +897,7 @@ dependencies = [
  "ekos-ledger",
  "ekos-marketing",
  "ekos-migrate",
+ "ekos-migrate-approval",
  "ekos-migrate-dq",
  "ekos-migrate-target-clickhouse",
  "ekos-migrate-validate",
@@ -1214,6 +1215,19 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "ekos-migrate-approval"
+version = "1.0.3"
+dependencies = [
+ "chrono",
+ "ekos-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]

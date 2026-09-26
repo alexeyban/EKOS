@@ -191,6 +191,51 @@ pub fn write_findings(
     result
 }
 
+pub fn approval_id(project: &str, request: &str) -> KirId {
+    det_id(&format!("migration-approval:{project}:{request}"))
+}
+
+/// Persist an approval request and its decision.
+///
+/// The whole request is stored as one JSON body rather than exploded into properties: it is a
+/// document a human decided on, and re-appending it on every status change keeps the full sequence
+/// readable through `ekos ledger audit` (the ledger is append-only, so nothing is edited).
+pub fn write_approval(
+    store: &dyn KnowledgeStore,
+    project: &str,
+    request_id: &str,
+    body: &serde_json::Value,
+    run_id: &str,
+) -> Result<KirId, Error> {
+    store.set_write_context(Some(write_context("approval", run_id)));
+    let result = (|| {
+        let mut obj = KirObject::new(
+            request_id.to_string(),
+            ObjectKind::Custom(kinds::APPROVAL_KIND.into()),
+        );
+        obj.id = approval_id(project, request_id);
+        obj.properties.insert("project".into(), json!(project));
+        obj.properties.insert("request".into(), body.clone());
+        obj.properties.insert(
+            "status".into(),
+            body.get("status")
+                .and_then(|s| s.get("status"))
+                .cloned()
+                .unwrap_or(json!("pending")),
+        );
+        store.append_object(&obj)?;
+        store.append_relationship(&KirRelationship::deterministic(
+            RelationshipKind::References,
+            project_id(project),
+            obj.id,
+            "approval",
+        ))?;
+        Ok::<KirId, Error>(obj.id)
+    })();
+    store.set_write_context(None);
+    result
+}
+
 /// Write drift findings. Each is a fact so a reviewer can disposition it, not a log line.
 pub fn write_drift(
     store: &dyn KnowledgeStore,

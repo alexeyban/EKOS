@@ -186,6 +186,11 @@ prefixes constantly",
         note: "(project, rule id, object) — RFC 0158 DQ / compatibility finding",
     },
     CustomKind {
+        name: "MigrationApproval",
+        structurally_keyed: true,
+        note: "(project, request id) — RFC 0161 approval request and decision",
+    },
+    CustomKind {
         name: "ArchitectureGap",
         structurally_keyed: true,
         note: "(crate, unresolved dependency name) — RFC 0065",

@@ -349,6 +349,41 @@ enum MigrateCommands {
         #[arg(long, default_value = "v3")]
         tier: String,
     },
+    /// List approval requests, or raise one for a unit
+    Review {
+        #[arg(long)]
+        project: Option<String>,
+        /// Raise a request for this unit (omit to list)
+        #[arg(long)]
+        unit: Option<String>,
+        #[arg(long, default_value = "staging")]
+        env: String,
+    },
+    /// Approve a request (human-only; there is deliberately no MCP equivalent)
+    Approve {
+        request: String,
+        #[arg(long)]
+        project: Option<String>,
+        /// Who is approving; pass twice for an R4 action
+        #[arg(long = "as")]
+        subjects: Vec<String>,
+        /// The object name, typed exactly, for an R4 action
+        #[arg(long)]
+        confirm: Option<String>,
+        /// Record that the evidence was rendered and reviewed (required at R3+)
+        #[arg(long)]
+        show_evidence: bool,
+    },
+    /// Reject a request
+    Reject {
+        request: String,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long = "as")]
+        subjects: Vec<String>,
+        #[arg(long)]
+        reason: String,
+    },
     /// Units by state, and what is blocking
     Status {
         /// Project name (default: `[migrate] project` from ekos.toml)
@@ -1306,6 +1341,44 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 unit,
                 tier,
             } => crate::commands::migrate::validate(&config, &cwd, project, unit, tier),
+            MigrateCommands::Review { project, unit, env } => {
+                crate::commands::migrate::review(&config, &cwd, project, unit, env)
+            }
+            MigrateCommands::Approve {
+                request,
+                project,
+                subjects,
+                confirm,
+                show_evidence,
+            } => crate::commands::migrate::decide(
+                &config,
+                &cwd,
+                project,
+                crate::commands::migrate::Decision {
+                    request_id: request,
+                    subjects,
+                    reject_reason: None,
+                    typed_confirmation: confirm,
+                    evidence_shown: show_evidence,
+                },
+            ),
+            MigrateCommands::Reject {
+                request,
+                project,
+                subjects,
+                reason,
+            } => crate::commands::migrate::decide(
+                &config,
+                &cwd,
+                project,
+                crate::commands::migrate::Decision {
+                    request_id: request,
+                    subjects,
+                    reject_reason: Some(reason),
+                    typed_confirmation: None,
+                    evidence_shown: false,
+                },
+            ),
             MigrateCommands::Status { project } => {
                 crate::commands::migrate::status(&config, &cwd, project)
             }
