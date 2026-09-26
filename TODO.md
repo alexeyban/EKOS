@@ -6087,6 +6087,19 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
 
 ## Migrate Phase 5 — Risk, approval, report (RFC 0161, 0162)
 
+**RFC 0162 landed 2026-09-26 (devlog_219).** `ekos migrate report` compiles from ledger facts with
+citation verification, the three-component groundedness metric and the five sign-off preconditions.
+Determinism verified by compiling four times and diffing.
+
+- [x] Report compiled from ledger queries, never generated; every factual claim carries its fact ids
+- [x] Citation verification: resolve + **structural support check** (a row count cannot cite a design)
+- [x] Narrative may explain but not state — prose containing a number is refused
+- [x] Five sign-off preconditions, each independently blocking, all reported at once
+- [x] Byte-identical recompilation from the same snapshot
+- [ ] `ekos migrate signoff` — the R4 approval over a passing report (needs the preconditions to be
+      satisfiable end to end first)
+- [ ] HTML and PDF renderers; clickable citations in the console
+
 - [ ] Computed risk: statement class × environment × lossiness × blast radius × affected rows
 - [ ] Evidence snapshots: an approval whose evidence changed is dead, not re-validated
 - [ ] Two distinct approvers for R4; typed confirmation

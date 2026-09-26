@@ -899,6 +899,7 @@ dependencies = [
  "ekos-migrate",
  "ekos-migrate-approval",
  "ekos-migrate-dq",
+ "ekos-migrate-report",
  "ekos-migrate-target-clickhouse",
  "ekos-migrate-validate",
  "ekos-observation-sdk",
@@ -1235,6 +1236,16 @@ name = "ekos-migrate-dq"
 version = "1.0.3"
 dependencies = [
  "ekos-migrate",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ekos-migrate-report"
+version = "1.0.3"
+dependencies = [
+ "ekos-common",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

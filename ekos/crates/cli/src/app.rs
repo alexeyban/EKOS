@@ -384,6 +384,17 @@ enum MigrateCommands {
         #[arg(long)]
         reason: String,
     },
+    /// Compile the migration report from ledger facts
+    Report {
+        #[arg(long)]
+        project: Option<String>,
+        /// Groundedness the report must reach to be signable
+        #[arg(long, default_value_t = 0.95)]
+        threshold: f64,
+        /// Write to this path instead of stdout
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Units by state, and what is blocking
     Status {
         /// Project name (default: `[migrate] project` from ekos.toml)
@@ -1379,6 +1390,11 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                     evidence_shown: false,
                 },
             ),
+            MigrateCommands::Report {
+                project,
+                threshold,
+                out,
+            } => crate::commands::migrate::report(&config, &cwd, project, threshold, out),
             MigrateCommands::Status { project } => {
                 crate::commands::migrate::status(&config, &cwd, project)
             }

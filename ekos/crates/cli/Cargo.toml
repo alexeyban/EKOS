@@ -49,6 +49,7 @@ ekos-evals.workspace = true
 ekos-migrate.workspace = true
 ekos-migrate-approval.workspace = true
 ekos-migrate-dq.workspace = true
+ekos-migrate-report.workspace = true
 ekos-migrate-validate.workspace = true
 ekos-migrate-target-clickhouse.workspace = true
 ekos-pg-live.workspace = true

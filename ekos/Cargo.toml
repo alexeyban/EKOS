@@ -29,6 +29,7 @@ members = [
     "crates/migrate-dq",
     "crates/migrate-target-clickhouse",
     "crates/migrate-approval",
+    "crates/migrate-report",
     "crates/cli",
     "crates/evals",
     "crates/demo-server",
@@ -133,6 +134,7 @@ ekos-pg-live                       = { path = "crates/pg-live", version = "1.0.3
 ekos-migrate-dq                    = { path = "crates/migrate-dq", version = "1.0.3" }
 ekos-migrate-target-clickhouse     = { path = "crates/migrate-target-clickhouse", version = "1.0.3" }
 ekos-migrate-approval              = { path = "crates/migrate-approval", version = "1.0.3" }
+ekos-migrate-report                = { path = "crates/migrate-report", version = "1.0.3" }
 ekos-simulation                    = { path = "crates/simulation", version = "1.0.3" }
 ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.0.3" }
 

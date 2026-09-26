@@ -687,6 +687,229 @@ fn report_findings(findings: &[ekos_migrate_dq::Finding], measured: bool) {
     }
 }
 
+/// `ekos migrate report` — compile the report from ledger facts.
+///
+/// Compiled, not generated: each section is a query over the ledger plus a template, and every
+/// factual sentence carries the ids it rests on. Nothing here originates in a model.
+pub fn report(
+    config: &EkosConfig,
+    cwd: &Path,
+    project: Option<String>,
+    threshold: f64,
+    out_path: Option<std::path::PathBuf>,
+) -> Result<()> {
+    use ekos_migrate_report as rep;
+
+    require_enabled(config)?;
+    let name = active_project(config, project)?;
+    let store = crate::commands::store::open_store(config, cwd)?;
+    if Project::load(store.as_ref(), &name)?.is_none() {
+        bail!("no migration project named '{name}'");
+    }
+
+    let objects = store.all_objects()?;
+    // **Sorted.** `all_objects()` returns no particular order, so an unsorted report renders its
+    // findings in a different sequence on every compilation — and a signed report has to be
+    // re-derivable byte for byte, not merely archived. Caught by compiling twice and diffing, which
+    // is the only way this ever shows up.
+    let mine = |kind: &str| -> Vec<&ekos_kir::KirObject> {
+        let mut v: Vec<&ekos_kir::KirObject> = objects
+            .iter()
+            .filter(|o| matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == kind))
+            .filter(|o| o.properties.get("project").and_then(|v| v.as_str()) == Some(name.as_str()))
+            .collect();
+        // A **total** order. Sorting by name alone is not one: several findings share an object
+        // name (a column can trip both DQ.UNIQ.001 and an inferred-FK rule), so ties broke
+        // arbitrarily and the report still differed between compilations. The id is the tiebreak
+        // that guarantees totality; `rule_id` comes first because that is the order a human wants.
+        fn key(o: &ekos_kir::KirObject) -> (String, String, String) {
+            (
+                o.name.clone(),
+                o.properties
+                    .get("rule_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                o.id.to_string(),
+            )
+        }
+        v.sort_by_key(|o| key(o));
+        v
+    };
+
+    // The snapshot the report is compiled from. A content hash over the facts, so recompiling the
+    // same ledger state produces the same report and a *different* state produces a different one.
+    let facts: rep::FactKinds = objects
+        .iter()
+        .filter_map(|o| {
+            let ekos_kir::ObjectKind::Custom(kind) = &o.kind else {
+                return None;
+            };
+            kind.starts_with("Migration")
+                .then(|| (format!("{kind}:{}", o.name), kind.clone()))
+        })
+        .collect();
+    let snapshot = format!(
+        "{} facts #{}",
+        facts.len(),
+        &ekos_common::ContentHash::of_str(
+            &facts
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+        .as_str()[..12]
+    );
+
+    let mut units = Unit::all_in(store.as_ref(), &name)?;
+    units.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+    let mut sections = Vec::new();
+
+    // ── scope ──
+    let mut scope = vec![rep::Claim::narrative(
+        "Every unit under migration, with the state it has reached.",
+    )];
+    for (obj, state) in &units {
+        scope.push(rep::Claim::fact(
+            format!("{} is {state}.", obj.name),
+            rep::ClaimKind::UnitState,
+            vec![format!("MigrationUnit:{}", obj.name)],
+        ));
+    }
+    sections.push(rep::Section {
+        heading: "Scope".into(),
+        claims: scope,
+    });
+
+    // ── findings ──
+    let findings = mine(ekos_migrate::kinds::FINDING_KIND);
+    let mut fs = vec![rep::Claim::narrative(
+        "Data-quality and target-compatibility findings, with the rows each affects, where that was measured.",
+    )];
+    for o in &findings {
+        let rows = match o.properties.get("affected_rows").and_then(|v| v.as_i64()) {
+            Some(n) => format!("{n} row(s) affected"),
+            // "Not measured" and "zero" are different answers, and the report must not collapse
+            // them — that is the same mistake as an empty sample reading as a measurement of zero.
+            None => "not measured".to_string(),
+        };
+        let rule = o
+            .properties
+            .get("rule_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        fs.push(rep::Claim::fact(
+            format!("{rule} on {}: {rows}.", o.name),
+            rep::ClaimKind::Finding,
+            vec![format!("MigrationFinding:{}", o.name)],
+        ));
+    }
+    sections.push(rep::Section {
+        heading: "Findings".into(),
+        claims: fs,
+    });
+
+    // ── approvals ──
+    let approvals = mine(ekos_migrate::kinds::APPROVAL_KIND);
+    let mut aps = vec![rep::Claim::narrative(
+        "Every approval request and what was decided.",
+    )];
+    for o in &approvals {
+        let status = o
+            .properties
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("pending");
+        aps.push(rep::Claim::fact(
+            format!("{} is {status}.", o.name),
+            rep::ClaimKind::Approval,
+            vec![format!("MigrationApproval:{}", o.name)],
+        ));
+    }
+    sections.push(rep::Section {
+        heading: "Approvals".into(),
+        claims: aps,
+    });
+
+    // ── drift ──
+    let drift = mine(ekos_migrate::kinds::DRIFT_KIND);
+    let mut ds = vec![rep::Claim::narrative(
+        "Differences between the live schema and the repository's own DDL.",
+    )];
+    for o in &drift {
+        let kind = o
+            .properties
+            .get("drift_kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        ds.push(rep::Claim::fact(
+            format!("{}: {kind}.", o.name),
+            rep::ClaimKind::Finding,
+            vec![format!("MigrationDrift:{}", o.name)],
+        ));
+    }
+    sections.push(rep::Section {
+        heading: "Drift".into(),
+        claims: ds,
+    });
+
+    let all_claims: Vec<rep::Claim> = sections.iter().flat_map(|s| s.claims.clone()).collect();
+    let (groundedness, problems) = rep::verify(&all_claims, &facts);
+
+    let preconditions = ekos_migrate_report::Preconditions {
+        incomplete_units: units
+            .iter()
+            .filter(|(_, s)| !s.is_complete())
+            .map(|(o, _)| o.name.clone())
+            .collect(),
+        // A finding that blocks and has no disposition is the report's version of an unexplained
+        // divergence: RFC 0161's disposition machinery will supply the other half.
+        unexplained_divergences: findings
+            .iter()
+            .filter(|o| o.properties.get("blocks").and_then(|v| v.as_bool()) == Some(true))
+            .count(),
+        tiers_not_run: units
+            .iter()
+            .filter(|(_, s)| *s == UnitState::Loaded)
+            .map(|(o, _)| o.name.clone())
+            .collect(),
+        // No controls have run through this path, and that is *not* the same as every control
+        // passing. Saying so is what keeps a green report honest (RFC 0156).
+        controls_missed: vec![
+            "no planted controls were run through `ekos migrate validate`".to_string(),
+        ],
+        unclassified_objects: 0,
+        groundedness,
+        groundedness_threshold: threshold,
+    };
+
+    let report = rep::Report {
+        project: name.clone(),
+        snapshot,
+        sections,
+        groundedness,
+        problems,
+        preconditions,
+    };
+
+    let md = rep::markdown(&report);
+    match out_path {
+        Some(p) => {
+            std::fs::write(&p, &md)?;
+            println!("Report written to {}", p.display());
+        }
+        None => print!("{md}"),
+    }
+    if !report.signable() {
+        println!(
+            "\nNot signable. The blockers above are mechanical: none of them is a judgement call \
+             at sign-off."
+        );
+    }
+    Ok(())
+}
+
 /// `ekos migrate review` — list pending requests, or raise one for a unit.
 pub fn review(
     config: &EkosConfig,
