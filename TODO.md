@@ -6109,9 +6109,18 @@ Determinism verified by compiling four times and diffing.
 
 ## Migrate Phase 6 — Full logic coverage (RFC 0163, 0164) — **required, not optional**
 
-- [ ] PL/pgSQL parser → `ProcedureIr` (dollar-quoting lexer, recursive descent, local recovery)
-- [ ] Fidelity labels computed from the IR; nothing labelled `Statements` that contains a gap
+**RFC 0163 landed 2026-09-26 (devlog_220).** `ekos-plpgsql`: dollar-quoting lexer, recursive-descent
+parser, procedural IR, fidelity computed from the IR. 43 tests; **5/5 real routines read back from
+PostgreSQL recover completely**, with a ratcheted floor.
+
+- [x] PL/pgSQL parser → `ProcedureIr` (dollar-quoting lexer, recursive descent, local recovery)
+- [x] Fidelity labels computed from the IR; nothing labelled `Statements` that contains a gap
+- [x] Cursors, exception handlers, every loop form, dynamic `EXECUTE` as a reported boundary
+- [ ] Wire the parser into a `PlPgSqlAnalyzerPass` in `recovery`, emitting `Custom("Procedure")` /
+      `Custom("ProcedureStatement")` objects with REGISTRY rows
 - [ ] Trigger recovery and structural classification; never auto-translated
+- [ ] Lower `ProcStmt::Sql` into the dataflow `TransformGraph` (the RFC drew this seam inside the
+      parser; it sits one step later — see the crate docs)
 - [ ] Deterministic lowering with round-trip checking; CH incremental-MV semantics trap handled
 - [ ] Anti-invention check — meaningful only now that a real node set exists
 - [ ] Fidelity gate: `Partial` objects are ineligible for reconstruction

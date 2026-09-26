@@ -1307,6 +1307,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plpgsql"
+version = "1.0.3"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ekos-plugin-clickhouse"
 version = "1.0.3"
 dependencies = [
