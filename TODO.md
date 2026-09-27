@@ -3928,7 +3928,10 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [x] `commit.rs`'s own new Ollama provider selection fixed to use `from_env_with_model`
     (`config.llm.model` was being silently ignored, always falling back to the hard-coded
     `llama3.1:8b` default).
-  - [ ] **Not fixed, flagged only** — `docs.rs::select_llm_provider_for_prose` and
+  - [x] **Fixed 2026-09-27** (the model half had already been fixed; the provider half had not —
+    both copies never routed `provider = "openai"`, building an `AnthropicProvider` from the
+    OpenAI-compatible key). Both now call `recover::build_llm_provider_strict`. Original note:
+    `docs.rs::select_llm_provider_for_prose` and
     `marketing.rs`'s equivalent have the exact same `from_env` (not `from_env_with_model`) bug;
     `recover.rs` already has the correct fix. `--prose` and `ekos marketing publish` against a
     configured non-default Ollama model silently use the wrong model today. Out of RFC 0088's own
@@ -5357,13 +5360,13 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] Devlogs that discuss eval scenarios by name (e.g. devlog_170 / adv-001) are now findable per section and pull adversarial answers off a refusal — exclude or tag eval-meta docs.
   - [ ] Doc → file-path links (`` `transform_ir.rs` ``) — needs a post-`commit` step, `File` objects aren't in the semantic graph.
   - [ ] Recall@10 fell 64.7% → 55.9% while answers improved — look at ranking whole Documents vs their Sections.
-  - [ ] `web/ui/coverage/` (lcov HTML/JS) is ingested — add to `[observe] ignore-patterns` (2,519 junk `JsSymbol`s).
+  - [x] `web/ui/coverage/` (lcov HTML/JS) is ingested — `coverage` added to this repo's `[observe] ignore-patterns` 2026-09-27 (takes effect on the next rebuild).
   - [ ] `arch-001`-style evidence (crate-dependency facts with no evidence ids) can never be cited — give those claims a source.
 - [x] **RFC 0145 — OpenAI-compatible `base-url` + explicit Ollama `context-window` (devlog_185).** `[llm] model` now
   respected by the OpenAI provider; cache namespace keeps truncated Ollama answers from replaying; cached answers
   truncated below a raised `max_tokens` regenerate.
   - [ ] Re-measure local Ollama at `context-window = 8192` vs 4096 on a host with free RAM (killed 3× here).
-  - [ ] `ekos doctor`'s key check still defaults to `ANTHROPIC_API_KEY` for `provider = "openai"` (devlog_180's bug, other call site).
+  - [x] `ekos doctor`'s key check still defaults to `ANTHROPIC_API_KEY` for `provider = "openai"` (devlog_180's bug, other call site). Fixed 2026-09-27: uses `recover::default_key_env`.
 - [x] **REASON planner routing + entity resolution (devlog_186, 2026-09-15).** Structural cues must open the question;
   `::` paths are mentions; generic nouns / question verbs never resolve; path-family + last-segment matching; fuzzy
   match length guard; fact-attribute route gated; Lookup adds a small Search. Same Zen model: **79 → 87/101**,
@@ -6081,9 +6084,8 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       cannot read either, so codecs are emitted as comments and a partitioned design refuses to
       emit. Neither weakens the control, and both cost a real feature until the parser catches up.
 - [ ] Resume a load from recorded chunk facts; `ctid`-range chunking for tables with no key
-- [ ] Statement classifier generalizing `validate_select_only` into `StatementClass`
-- [ ] Artifact hash pinning: executed hash must equal approved hash, no override
-- [ ] Chunked, resumable, throttled engine-native load; dry-run gate
+- [ ] Throttle the chunked load (rows/s or a replica-lag back-off) — chunking and the dry-run gate
+      shipped in devlog_217; nothing paces the chunks yet
 
 ## Migrate Phase 5 — Risk, approval, report (RFC 0161, 0162)
 
@@ -6099,13 +6101,11 @@ Determinism verified by compiling four times and diffing.
 - [ ] `ekos migrate signoff` — the R4 approval over a passing report (needs the preconditions to be
       satisfiable end to end first)
 - [ ] HTML and PDF renderers; clickable citations in the console
-
-- [ ] Computed risk: statement class × environment × lossiness × blast radius × affected rows
-- [ ] Evidence snapshots: an approval whose evidence changed is dead, not re-validated
-- [ ] Two distinct approvers for R4; typed confirmation
-- [ ] `migrate.policy.toml`, its content hash recorded on every approval
-- [ ] Report compiled from ledger queries; citation verification; groundedness gate
-- [ ] Five mechanical sign-off preconditions, each independently enforced
+- [x] Computed risk: statement class × environment × lossiness × blast radius × affected rows
+      (devlog_218, `migrate-approval/src/risk.rs`)
+- [x] Evidence snapshots: an approval whose evidence changed is dead, not re-validated (devlog_218)
+- [x] Two distinct approvers for R4; typed confirmation (`request.rs`, devlog_218)
+- [x] `migrate.policy.toml`, its content hash recorded on every approval (`policy.rs`, devlog_218)
 
 ## Migrate Phase 6 — Full logic coverage (RFC 0163, 0164) — **required, not optional**
 

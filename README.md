@@ -1110,29 +1110,65 @@ ekos replay scenario.yaml               # read back every recorded round, read-o
 ekos replay scenario.yaml --round 2     # narrow to one round
 ```
 
-### EKOS Migrate (foundation only, opt-in)
+### EKOS Migrate (PostgreSQL → ClickHouse, opt-in)
 
 Evidence-backed migration of a PostgreSQL database to an analytical target — a migration *proof*
 system rather than a SQL converter. Every scope decision, finding, mapping, validation result and
-human approval is a ledger fact with provenance, and the report cites those facts or does not ship.
-It covers the whole PostgreSQL surface, views, triggers and PL/pgSQL included: every source object
-is recovered, classified and dispositioned, never silently dropped or approximated
+human approval is a ledger fact with provenance, and the report cites those facts or does not ship
 (`ekos/docs/rfcs/0154`-`0167`).
 
-**Shipped today is the foundation only** — the project model, migration units and the append-only
-state machine. Nothing yet connects to a real database.
+**Shipped:** a real table was migrated PostgreSQL → ClickHouse and validated at V1/V2/V3, with a
+planted one-row change caught by V3. **Not yet:** logic (views, functions, triggers — the PL/pgSQL
+parser exists, RFC 0163, but nothing consumes it yet), V0/V4-V5 validation, `signoff`, a second
+target, CDC and cutover.
 
 ```bash
 ekos migrate init --name ledgersmb \
-  --source postgres://pg-prod/ledgersmb \
-  --target clickhouse://ch-dev/ledgersmb \
+  --source postgres://pg/ledgersmb \
+  --target clickhouse://ch/ledgersmb \
   --source-secret-env PG_PASSWORD      # the variable's NAME; the value is never stored
+ekos migrate discover                   # live catalog → one unit per table + live-vs-repo drift
+ekos migrate profile --tier p1          # p0 catalog only | p1 bounded sample | p2 exact, budgeted
+ekos migrate assess                     # DQ + target-compatibility rules, affected rows measured
+ekos migrate map --emit out.sql         # type map with lossiness, CH design, DDL with its reasoning
+ekos migrate review --unit public.orders --env staging   # raise an approval request
+ekos migrate approve <REQUEST> --as alice --show-evidence # human-only; no MCP equivalent exists
+ekos migrate load --unit public.orders --dry-run         # gate + print every statement
+ekos migrate load --unit public.orders                   # create, then copy chunk by chunk
+ekos migrate validate --unit public.orders --tier v3     # V1 counts, V2 aggregates, V3 row hashes
+ekos migrate report --out report.md     # compiled from ledger facts, every claim cited
 ekos migrate status                     # units by state, and what is blocking
 ```
 
-A connection string carrying a password is refused rather than parsed and stripped — a password
-that reached argv has already leaked into shell history. Needs `[migrate] enabled = true` in
-`ekos.toml`; a PostgreSQL and a ClickHouse sandbox are in `docker-compose.migrate.yml`.
+What each stage guarantees:
+
+- **Credentials never reach the ledger.** A DSN names an alias, `[migrate.connections.<alias>]`
+  resolves it to host/port/user, and `secret-env` names the password variable. A connection string
+  carrying a password is refused rather than parsed and stripped — it has already leaked into shell
+  history. Row values never reach the ledger either: profiles hold statistics, and a column
+  classified as PII gets no bounds and no top-k at any tier.
+- **Sessions are read-only against the source** (`default_transaction_read_only`, statement/lock
+  timeouts, low `work_mem`, a replica-lag guard that refuses a run above the configured threshold).
+- **Assessment measures, it does not guess.** Each finding carries the SQL that measured it.
+  Undeclared foreign keys are inferred from real joins in the compiled code *and* in
+  `pg_stat_statements`, then checked by inclusion before anything is claimed.
+- **Every executed statement is parsed and classified** (never string-matched). An unparseable,
+  unknown or credential-carrying statement is refused. Outside the sandbox, a statement runs only if
+  an approval matches its artifact id, content hash and environment — there is no override.
+- **Approval risk is computed** from statement class × environment × lossiness × blast radius (how
+  many compiled objects depend on the table) × affected rows. An approval is pinned to an evidence
+  snapshot, so it dies if the evidence changes after it was given. Self-approval is refused, and R4
+  needs two distinct approvers plus a typed confirmation. Thresholds live in `migrate.policy.toml`,
+  and its hash is recorded on every approval.
+- **Validation compares engines through one canonical serialization** (RFC 0155), cross-checked by
+  PostgreSQL, ClickHouse and Rust. A tier passes only with zero blocking divergences *and* every
+  planted control fired, so a check that never ran cannot report green.
+- **The report is compiled, not generated.** Every factual sentence carries fact ids that are
+  resolved and structurally checked. Prose containing a number is refused. The same snapshot
+  recompiles byte-identically.
+
+Needs `[migrate] enabled = true` in `ekos.toml`. A PostgreSQL and a ClickHouse sandbox are in
+`docker-compose.migrate.yml`; the live suites run with `EKOS_MIGRATE_LIVE=1`.
 
 A scenario's `world: { sources: [reports/report_01.md] }` ingests real documents (PDF/DOCX/text/
 Markdown/HTML/email) into its starting world; an agent's `knowledge:`/`relationships:` can

@@ -80,6 +80,13 @@ ignore-patterns = [
     ".pytest_cache",
     ".ruff_cache",
     ".mypy_cache",
+    # Found 2026-09-15 (TODO.md, RFC 0144/0145 follow-ups): `web/ui/coverage/` is the console's
+    # git-ignored lcov HTML/JS report, and it compiled to 2,519 junk `JsSymbol`s. Patterns match a
+    # bare directory name, not a path, so this is the generic `coverage` name the note above avoids
+    # adding — safe *in this workspace only*: on 2026-09-27 the only other `coverage` directory in
+    # the tree was `web/api/.venv/.../site-packages/coverage`, already pruned by `.venv`, and git
+    # tracks nothing under any `coverage/`. This is this repo's `ekos.toml`, not a default.
+    "coverage",
 ]
 
 [llm]

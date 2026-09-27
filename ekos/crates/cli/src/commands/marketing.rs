@@ -11,7 +11,7 @@ use ekos_marketing::{
     Importance, NoopPublisher, PostedStore, Publisher, TwitterPublisher, generate_tweet,
     importance::classify,
 };
-use ekos_recovery::{AnthropicProvider, CachedLlmProvider, LlmProvider, OllamaProvider};
+use ekos_recovery::LlmProvider;
 
 pub async fn publish(
     config: &EkosConfig,
@@ -125,39 +125,19 @@ pub async fn publish(
     Ok(())
 }
 
-/// Selects an LLM provider the same way `ekos recover` does (RFC 0021's `[llm] provider =
-/// "ollama"` routing, else Anthropic), but — unlike `recover`, which has a legitimate
+/// Selects an LLM provider the same way `ekos recover` does (`build_llm_provider_strict`: every
+/// `[llm] provider`, not a private copy of the routing), but — unlike `recover`, which has a legitimate
 /// "structural analysis only" degraded mode to fall back to — errors out clearly when no
 /// provider is usable instead of silently falling back to a mock. There is no valid degraded
 /// mode for drafting a tweet: a mock response would just surface later as a confusing
 /// "missing field `tweet`" JSON error instead of a clear "no API key" one.
 fn select_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Result<Arc<dyn LlmProvider>> {
-    let cache_dir = artifact_dir
-        .parent()
-        .unwrap_or(artifact_dir)
-        .join("llm-cache");
-    std::fs::create_dir_all(&cache_dir).ok();
-
-    if config.llm.provider.as_deref() == Some("ollama") {
-        return Ok(Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
-                .with_context_window(config.llm.context_window),
-            cache_dir,
-        )));
-    }
-
-    let key_env = config
-        .llm
-        .api_key_env
-        .as_deref()
-        .unwrap_or("ANTHROPIC_API_KEY");
-    let provider = AnthropicProvider::from_env_var(key_env).map_err(|_| {
+    super::recover::build_llm_provider_strict(config, artifact_dir).map_err(|err| {
         anyhow!(
-            "{key_env} not set and no [llm] provider = \"ollama\" configured in ekos.toml — \
+            "{err} and no [llm] provider = \"ollama\" configured in ekos.toml — \
              an LLM is required to draft a tweet"
         )
-    })?;
-    Ok(Arc::new(CachedLlmProvider::new(provider, cache_dir)))
+    })
 }
 
 /// `DEVLOG` may be a path, a bare number ("28"), the literal "latest", or omitted (= latest).

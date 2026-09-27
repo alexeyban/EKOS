@@ -1193,7 +1193,7 @@ fn should_register_architecture_reasoning(config: &EkosConfig, crate_count: usiz
 /// `OPENAI_API_KEY` set, but no explicit `api-key-env` override, silently degraded to the stub
 /// `MockLlmProvider` — `OpenAiProvider::from_env_var("ANTHROPIC_API_KEY")` checked the wrong
 /// variable — and warned about the wrong key ever being missing.
-fn default_key_env(provider: Option<&str>) -> &'static str {
+pub(crate) fn default_key_env(provider: Option<&str>) -> &'static str {
     match provider {
         Some("openai") => "OPENAI_API_KEY",
         _ => "ANTHROPIC_API_KEY",
@@ -1226,6 +1226,30 @@ pub fn resolved_key_env(config: &EkosConfig) -> &str {
 /// selection logic as a library dependency rather than duplicating it — see
 /// `ekos/crates/demo-server`.
 pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
+    match build_llm_provider_strict(config, artifact_dir) {
+        Ok(provider) => provider,
+        Err(err) => {
+            tracing::warn!("{err} — using structural analysis only (LLM enrichment skipped)");
+            Arc::new(MockLlmProvider::new(
+                r#"{"entities":[],"relationships":[]}"#,
+            ))
+        }
+    }
+}
+
+/// The same provider selection as [`build_llm_provider`], without its mock fallback: a missing
+/// key is an error naming the variable [`resolved_key_env`] resolved.
+///
+/// For the opt-in paths that have no honest degraded mode — `docs generate --prose` and
+/// `ekos marketing publish`. Each of those used to carry its own copy of this selection, and both
+/// copies only knew `ollama` and Anthropic: with `[llm] provider = "openai"` they built an
+/// `AnthropicProvider` from the OpenAI-compatible key and failed on the first request. One
+/// selection, called from every site, is what keeps a new provider from reaching only some of
+/// them.
+pub fn build_llm_provider_strict(
+    config: &EkosConfig,
+    artifact_dir: &Path,
+) -> Result<Arc<dyn LlmProvider>> {
     let cache_dir = artifact_dir
         .parent()
         .unwrap_or(artifact_dir)
@@ -1234,50 +1258,30 @@ pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn L
 
     if config.llm.provider.as_deref() == Some("ollama") {
         tracing::info!("using local Ollama provider with disk cache");
-        return Arc::new(CachedLlmProvider::new(
+        return Ok(Arc::new(CachedLlmProvider::new(
             OllamaProvider::from_env_with_model(config.llm.model.as_deref())
                 .with_context_window(config.llm.context_window),
             cache_dir,
-        ));
+        )));
     }
 
     let key_env = resolved_key_env(config);
+    let not_set = |_| anyhow::anyhow!("{key_env} not set");
 
     if config.llm.provider.as_deref() == Some("openai") {
-        return match OpenAiProvider::from_config(
+        let provider = OpenAiProvider::from_config(
             key_env,
             config.llm.model.as_deref(),
             config.llm.base_url.as_deref(),
-        ) {
-            Ok(provider) => {
-                tracing::info!("using OpenAI provider with disk cache");
-                Arc::new(CachedLlmProvider::new(provider, cache_dir))
-            }
-            Err(_) => {
-                tracing::warn!(
-                    "{key_env} not set — using structural analysis only (LLM enrichment skipped)"
-                );
-                Arc::new(MockLlmProvider::new(
-                    r#"{"entities":[],"relationships":[]}"#,
-                ))
-            }
-        };
+        )
+        .map_err(not_set)?;
+        tracing::info!("using OpenAI provider with disk cache");
+        return Ok(Arc::new(CachedLlmProvider::new(provider, cache_dir)));
     }
 
-    match AnthropicProvider::from_env_var(key_env) {
-        Ok(provider) => {
-            tracing::info!("using Anthropic provider with disk cache");
-            Arc::new(CachedLlmProvider::new(provider, cache_dir))
-        }
-        Err(_) => {
-            tracing::warn!(
-                "{key_env} not set — using structural analysis only (LLM enrichment skipped)"
-            );
-            Arc::new(MockLlmProvider::new(
-                r#"{"entities":[],"relationships":[]}"#,
-            ))
-        }
-    }
+    let provider = AnthropicProvider::from_env_var(key_env).map_err(not_set)?;
+    tracing::info!("using Anthropic provider with disk cache");
+    Ok(Arc::new(CachedLlmProvider::new(provider, cache_dir)))
 }
 
 #[cfg(test)]
@@ -1475,6 +1479,31 @@ mod tests {
         // Without ANTHROPIC_API_KEY set in the test environment this lands
         // on the mock; either way it must not be the Ollama default model.
         assert_ne!(provider.model_name(), "llama3.1:8b");
+    }
+
+    /// `docs generate --prose` and `marketing publish` used to carry private copies of provider
+    /// selection that only knew `ollama` and Anthropic, so an `openai` workspace built an
+    /// `AnthropicProvider` from the wrong key. The strict builder is now their only path; it must
+    /// route `openai` to its own key and fail naming it, never fall back to a mock.
+    #[test]
+    fn strict_builder_routes_openai_and_errors_instead_of_mocking() {
+        let dir = tempdir().unwrap();
+        let var = "EKOS_TEST_STRICT_BUILDER_KEY_THAT_IS_NEVER_SET";
+        for provider in ["openai", "anthropic"] {
+            let config = EkosConfig {
+                llm: LlmConfig {
+                    provider: Some(provider.to_string()),
+                    api_key_env: Some(var.to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let err = match build_llm_provider_strict(&config, dir.path()) {
+                Ok(p) => panic!("{provider}: expected an error, got {}", p.model_name()),
+                Err(err) => err.to_string(),
+            };
+            assert!(err.contains(var), "{provider}: {err}");
+        }
     }
 
     /// Real bug, found live 2026-09-14 while adding RFC 0138 Phase 4's hard-fail-on-mock check:

@@ -361,36 +361,12 @@ fn select_llm_provider_for_prose(
     config: &EkosConfig,
     artifact_dir: &Path,
 ) -> Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
-    use ekos_recovery::{AnthropicProvider, CachedLlmProvider, OllamaProvider};
-
-    let cache_dir = artifact_dir
-        .parent()
-        .unwrap_or(artifact_dir)
-        .join("llm-cache");
-    std::fs::create_dir_all(&cache_dir).ok();
-
-    if config.llm.provider.as_deref() == Some("ollama") {
-        return Ok(std::sync::Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
-                .with_context_window(config.llm.context_window),
-            cache_dir,
-        )));
-    }
-
-    let key_env = config
-        .llm
-        .api_key_env
-        .as_deref()
-        .unwrap_or("ANTHROPIC_API_KEY");
-    let provider = AnthropicProvider::from_env_var(key_env).map_err(|_| {
+    super::recover::build_llm_provider_strict(config, artifact_dir).map_err(|err| {
         anyhow::anyhow!(
-            "{key_env} not set and no [llm] provider = \"ollama\" configured in ekos.toml — \
+            "{err} and no [llm] provider = \"ollama\" configured in ekos.toml — \
              an LLM is required for --prose"
         )
-    })?;
-    Ok(std::sync::Arc::new(CachedLlmProvider::new(
-        provider, cache_dir,
-    )))
+    })
 }
 
 fn render_er_diagram_page(

@@ -72,7 +72,10 @@ fn llm_provider_check(
         );
     }
 
-    let key_var = api_key_env.unwrap_or("ANTHROPIC_API_KEY");
+    // Same per-provider default `build_llm_provider` checks. This literal was `ANTHROPIC_API_KEY`
+    // for every provider, so `provider = "openai"` with a real `OPENAI_API_KEY` reported a
+    // missing Anthropic key (devlog_180's bug, found again at this call site).
+    let key_var = api_key_env.unwrap_or(super::recover::default_key_env(Some(provider)));
     if key_is_set(key_var) {
         Check::ok("LLM provider", format!("{provider} (key: ${key_var} ✓)"))
     } else {
@@ -337,6 +340,17 @@ mod tests {
     fn anthropic_passes_when_its_key_env_var_is_set() {
         let check = llm_provider_check(Some("anthropic"), None, |_| true);
         assert!(check.ok);
+    }
+
+    #[test]
+    fn openai_checks_its_own_default_key_not_anthropics() {
+        let check = llm_provider_check(Some("openai"), None, |var| var == "OPENAI_API_KEY");
+        assert!(check.ok, "{}", check.detail);
+        assert!(check.detail.contains("OPENAI_API_KEY"), "{}", check.detail);
+
+        let check = llm_provider_check(Some("openai"), None, |_| false);
+        assert!(!check.ok);
+        assert!(!check.detail.contains("ANTHROPIC"), "{}", check.detail);
     }
 
     #[test]
