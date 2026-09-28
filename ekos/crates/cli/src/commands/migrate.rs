@@ -1237,10 +1237,19 @@ fn blast_radius(store: &dyn ekos_ledger::KnowledgeStore, unit: &str) -> usize {
     let Ok(objects) = store.all_objects() else {
         return 0;
     };
-    let Some(target) = objects.iter().find(|o| {
-        matches!(o.kind, ekos_kir::ObjectKind::Table)
-            && o.name.to_ascii_lowercase().ends_with(&bare)
-    }) else {
+    // The table itself, by exact name (bare or schema-qualified), never by suffix. `ends_with`
+    // matched `person_to_entity` for `public.entity`, and `all_objects()` has no stable order, so
+    // `review` and `load` could compute different blast radii for one unit — R1 in one, R3 in the
+    // other (LedgerSMB demo, 2026-09-28). Several same-named tables pick the lowest id: stable.
+    let Some(target) = objects
+        .iter()
+        .filter(|o| {
+            let name = o.name.to_ascii_lowercase();
+            matches!(o.kind, ekos_kir::ObjectKind::Table)
+                && (name == bare || name.rsplit('.').next() == Some(bare.as_str()))
+        })
+        .min_by_key(|o| o.id.to_string())
+    else {
         // No compiled Table object means no impact graph to consult — which reads as zero, and the
         // assessment's own "not measured" language is what keeps that honest.
         return 0;
@@ -1255,6 +1264,14 @@ fn blast_radius(store: &dyn ekos_ledger::KnowledgeStore, unit: &str) -> usize {
                 .len()
         })
         .unwrap_or(0)
+}
+
+/// Whether an approval granted at class `granted` covers an action needing class `needed`.
+fn approval_covers(
+    granted: ekos_migrate_approval::RiskClass,
+    needed: ekos_migrate_approval::RiskClass,
+) -> bool {
+    granted >= needed
 }
 
 /// Approval requests recorded for this project.
@@ -1641,7 +1658,13 @@ pub fn load(
         let approval = if risk.class.is_automatic() {
             None
         } else {
-            match approvals.iter().find(|r| r.authorizes(&a.id, &a.hash)) {
+            // The approval must also cover the class computed *now*. Matching artifacts alone let a
+            // request approved at R1 with zero approvers satisfy a load this code classed R3
+            // (LedgerSMB demo, 2026-09-28): the class is part of what was approved.
+            match approvals
+                .iter()
+                .find(|r| r.authorizes(&a.id, &a.hash) && approval_covers(r.risk.class, risk.class))
+            {
                 Some(req) => Some(ch::Approval {
                     artifact_id: a.id.clone(),
                     artifact_hash: a.hash.clone(),
@@ -2619,6 +2642,52 @@ mod tests {
         );
         // No scale anywhere: skipped, not hashed at 0 (which hid every cent).
         assert_eq!(column_rule_for("numeric", "String"), None);
+    }
+
+    #[test]
+    fn a_lower_class_approval_does_not_cover_a_higher_class_load() {
+        use ekos_migrate_approval::RiskClass as R;
+        assert!(approval_covers(R::R3, R::R3));
+        assert!(approval_covers(R::R4, R::R3));
+        assert!(
+            !approval_covers(R::R1, R::R3),
+            "an R1 approval must not open an R3 gate"
+        );
+    }
+
+    /// `entity` must be `entity`, not whichever `…entity` table the store lists first.
+    #[test]
+    fn blast_radius_counts_the_table_itself_not_a_suffix_match() {
+        use ekos_kir::{KirObject, KirRelationship, ObjectKind, RelationshipKind};
+        let dir = tempfile::tempdir().unwrap();
+        let store = ekos_ledger::FactLedger::open(dir.path()).unwrap();
+        // Decoys that the old suffix match would take: inserted first, and with ids that sort before
+        // the real table's, so the old code picks one whether the store lists by insertion or by id.
+        let mut entity = KirObject::new("entity", ObjectKind::Table);
+        entity.id = ekos_kir::KirId(uuid::Uuid::from_u128(u128::MAX));
+        for i in 0..5u128 {
+            let mut decoy = KirObject::new(format!("decoy{i}_entity"), ObjectKind::Table);
+            decoy.id = ekos_kir::KirId(uuid::Uuid::from_u128(i + 1));
+            store.append_object(&decoy).unwrap();
+        }
+        let other = KirObject::new("person_to_entity", ObjectKind::Table);
+        store.append_object(&other).unwrap();
+        store.append_object(&entity).unwrap();
+        for i in 0..3 {
+            let dep = KirObject::new(format!("dep_{i}"), ObjectKind::Table);
+            store.append_object(&dep).unwrap();
+            store
+                .append_relationship(&KirRelationship::new(
+                    RelationshipKind::ForeignKey,
+                    dep.id,
+                    entity.id,
+                ))
+                .unwrap();
+        }
+        for _ in 0..5 {
+            assert_eq!(blast_radius(&store, "public.entity"), 3);
+        }
+        assert_eq!(blast_radius(&store, "public.person_to_entity"), 0);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# Devlog 226 — EKOS Migrate on a real ERP: 14 defects the fixtures never reached
+# Devlog 226 — EKOS Migrate on a real ERP: 16 defects the fixtures never reached
 
 **Date:** 2026-09-28
 **PRs:** none — committed to main, local gates green, `[skip ci]`
@@ -12,7 +12,7 @@ The LedgerSMB analytics demo (`../ledgersmb-analytics-demo`) ran EKOS Migrate (R
 end to end against a real ERP schema: 168 tables, 503 functions, 175 applied schema changes, and 18
 months of synthetic but LedgerSMB-posted data (41,248 journal lines).
 
-It broke in 14 places. Every one is fixed here, each with a regression test that fails without its
+It broke in 16 places (14 in the first pass, #15–16 found while writing the demo's report). Every one is fixed here, each with a regression test that fails without its
 fix; the ones that could hide wrong data were also mutation-checked. The worst two were a
 **self-approval bypass** in the human-only approval layer, and a **validator that could not see
 cents** on unconstrained `numeric` money columns. That second one is the exact false green RFC 0155
@@ -40,6 +40,8 @@ End state: 30 of 30 migrated tables pass V1/V2/V3, and a planted one-cent change
 | 12 | validator V2 | Empty table: CH min/max/sum return defaults, PG returns NULL | `aggregate_functions_null_for_empty = 1` |
 | 13 | validator reader | Raw TSV prints SQL NULL as `\N`, the same bytes as the canonical NULL sentinel | `format_tsv_null_representation=` on reads |
 | 14 | `migrate validate` | Printed "Validation failed" and **exited 0** | Non-zero exit on any failed tier |
+| 15 | **risk gate** | `blast_radius` picked the first table whose name *ends with* the unit (`person_to_entity` for `entity`), in unstable order — `review` computed R1 and `load` R3 for the same unit | Exact name match, stable choice |
+| 16 | **risk gate** | `load` accepted any approval whose artifacts matched, regardless of the class it was granted at — an R1, zero-approver approval opened an R3 gate | The approval's class must be ≥ the class computed at load |
 
 ---
 
