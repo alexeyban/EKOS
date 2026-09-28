@@ -44,8 +44,12 @@ use crate::segment::{Batch, SegmentError};
 /// Entries per zstd block inside a run file.
 const BLOCK_ENTRIES: usize = 512;
 const RUN_MAGIC: u32 = 0x454B_4953; // "EKIS" — format v2: explicit prefix-delta keys, slim projections
-/// Run blocks are written once at seal/merge time — spend effort there.
-const RUN_ZSTD_LEVEL: i32 = 19;
+/// Run-block compression. Was 19 on the reasoning that runs are "written once — spend effort
+/// there", but a merge rewrites every run inline in whichever `commit` crosses `MERGE_RUNS_AT`.
+/// Measured on EKOS's own 8 EAVT runs (RFC 0168, 2026-09-28): level 19 → 150 s / 36 MB,
+/// level 9 → 4.5 s / 37 MB, level 3 → 1.4 s / 38 MB, point reads unchanged. Level 9 buys a 33×
+/// faster write for 3% more disk.
+const RUN_ZSTD_LEVEL: i32 = 9;
 
 /// The three covering sort orders (RFC 0016 §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -246,6 +250,88 @@ struct RunDirectory {
     order: SortOrder,
     entry_count: u64,
     blocks: Vec<BlockMeta>,
+    /// RFC 0168: the entities this (EAVT) run holds, so an entity scan skips a run that cannot
+    /// match without reading a block. `None` for runs written before RFC 0168 and for the other
+    /// orders — such a run is always probed, exactly as before. Older binaries ignore the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    entity_filter: Option<EntityFilter>,
+}
+
+// ── RFC 0168: per-run entity filter ─────────────────────────────────────────
+
+/// Bits per distinct entity. At `FILTER_PROBES` = 7 this is ~1% false positives; a false positive
+/// only costs the block read every probe paid before this filter existed.
+const FILTER_BITS_PER_ENTITY: usize = 10;
+const FILTER_PROBES: u64 = 7;
+
+/// A Bloom filter over entity ids, in-tree and deterministic (RFC 0168 open question 1): the same
+/// entities always produce the same bits, so a rewritten run is byte-identical.
+///
+/// Entity ids are UUIDs — v4 random or v5 name-hashed — so their bytes are already close to
+/// uniform. They are still passed through a SplitMix64 finalizer, because a UUID's version and
+/// variant nibbles are fixed and would otherwise bias two of the probe positions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct EntityFilter {
+    /// Hex of the little-endian bit words: compact in the zstd'd JSON directory, no new codec.
+    bits: String,
+    #[serde(skip)]
+    words: Vec<u64>,
+}
+
+fn mix64(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+impl EntityFilter {
+    fn build<'a>(entities: impl Iterator<Item = &'a Uuid>, distinct_hint: usize) -> Self {
+        let bits = (distinct_hint.max(1) * FILTER_BITS_PER_ENTITY).max(64);
+        let mut words = vec![0u64; bits.div_ceil(64)];
+        for e in entities {
+            for bit in Self::probes(e, words.len() as u64 * 64) {
+                words[(bit / 64) as usize] |= 1 << (bit % 64);
+            }
+        }
+        let mut bytes = Vec::with_capacity(words.len() * 8);
+        for w in &words {
+            bytes.extend_from_slice(&w.to_le_bytes());
+        }
+        Self {
+            bits: hex::encode(bytes),
+            words,
+        }
+    }
+
+    /// Kirsch–Mitzenmacher double hashing: probe `i` is `h1 + i·h2`.
+    fn probes(entity: &Uuid, nbits: u64) -> impl Iterator<Item = u64> {
+        let b = entity.as_bytes();
+        let h1 = mix64(u64::from_le_bytes(b[0..8].try_into().expect("8 bytes")));
+        let h2 = mix64(u64::from_le_bytes(b[8..16].try_into().expect("8 bytes"))) | 1;
+        (0..FILTER_PROBES).map(move |i| h1.wrapping_add(i.wrapping_mul(h2)) % nbits)
+    }
+
+    /// Rebuild `words` after deserialization. A malformed field disables filtering for the run
+    /// (always probe) rather than failing the open: the filter is an optimization, never truth.
+    fn hydrate(mut self) -> Option<Self> {
+        let bytes = hex::decode(&self.bits).ok()?;
+        if bytes.is_empty() || bytes.len() % 8 != 0 {
+            return None;
+        }
+        self.words = bytes
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| u64::from_le_bytes(*c))
+            .collect();
+        Some(self)
+    }
+
+    fn may_contain(&self, entity: &Uuid) -> bool {
+        let nbits = self.words.len() as u64 * 64;
+        Self::probes(entity, nbits)
+            .all(|bit| self.words[(bit / 64) as usize] & (1 << (bit % 64)) != 0)
+    }
 }
 
 /// Whether a sort order stores values in run bodies. Only EAVT is covering —
@@ -292,6 +378,17 @@ pub fn write_run(
 }
 
 fn write_run_raw(path: &Path, order: SortOrder, raws: &[RawRecord]) -> Result<(), SegmentError> {
+    write_run_raw_with(path, order, raws, true)
+}
+
+/// `with_filter: false` writes a run exactly as a pre-RFC 0168 binary did — tests use it to prove
+/// mixed old/new run sets still scan correctly.
+fn write_run_raw_with(
+    path: &Path,
+    order: SortOrder,
+    raws: &[RawRecord],
+    with_filter: bool,
+) -> Result<(), SegmentError> {
     let mut file = File::create(path)?;
     let mut blocks = Vec::new();
     let mut offset = 0u64;
@@ -308,10 +405,18 @@ fn write_run_raw(path: &Path, order: SortOrder, raws: &[RawRecord]) -> Result<()
         offset += body.len() as u64;
     }
 
+    // EAVT keys sort by entity first, so distinct entities are the runs of equal ids.
+    let entity_filter =
+        (with_filter && matches!(order, SortOrder::Eavt) && !raws.is_empty()).then(|| {
+            let mut distinct: Vec<&Uuid> = raws.iter().map(|(_, e)| &e.entity).collect();
+            distinct.dedup();
+            EntityFilter::build(distinct.iter().copied(), distinct.len())
+        });
     let dir = RunDirectory {
         order,
         entry_count: raws.len() as u64,
         blocks,
+        entity_filter,
     };
     let dir_json = serde_json::to_vec(&dir)?;
     let dir_body = zstd::encode_all(&dir_json[..], ekos_common::compress::ZSTD_LEVEL)?;
@@ -362,7 +467,24 @@ fn encode_block(order: SortOrder, chunk: &[RawRecord]) -> Result<Vec<u8>, Segmen
     Ok(out)
 }
 
-fn decode_block(order: SortOrder, bytes: &[u8]) -> Result<Vec<RawRecord>, SegmentError> {
+/// What [`decode_block_where`] does with one record, decided from its key alone.
+enum Keep {
+    Yes,
+    No,
+    /// Keys are sorted: nothing after this one can match either.
+    Stop,
+}
+
+/// Decode a block, materializing only the records `keep` accepts.
+///
+/// RFC 0168: a point scan used to parse the JSON value of all 512 records in a block to return a
+/// handful. Every key must still be rebuilt, because each one is delta-encoded against the last,
+/// but a skipped record's value bytes are stepped over, never parsed.
+fn decode_block_where(
+    order: SortOrder,
+    bytes: &[u8],
+    keep: impl Fn(&[u8]) -> Keep,
+) -> Result<Vec<RawRecord>, SegmentError> {
     fn corrupt(m: &str) -> SegmentError {
         SegmentError::Corrupt(format!("run block: {m}"))
     }
@@ -374,17 +496,35 @@ fn decode_block(order: SortOrder, bytes: &[u8]) -> Result<Vec<RawRecord>, Segmen
         Ok(s)
     };
     let count = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
-    let mut out = Vec::with_capacity(count.min(1 << 20));
-    let mut prev: Vec<u8> = Vec::new();
+    let mut out = Vec::new();
+    let mut key: Vec<u8> = Vec::new();
     for _ in 0..count {
         let shared = u16::from_le_bytes(take(2)?.try_into().unwrap()) as usize;
         let suffix_len = u16::from_le_bytes(take(2)?.try_into().unwrap()) as usize;
-        if shared > prev.len() {
+        if shared > key.len() {
             return Err(corrupt("bad shared prefix"));
         }
-        let mut key = prev[..shared].to_vec();
+        key.truncate(shared);
         key.extend_from_slice(take(suffix_len)?);
-        prev = key.clone();
+
+        let wanted = match keep(&key) {
+            Keep::Stop => break,
+            Keep::Yes => true,
+            Keep::No => false,
+        };
+        if !wanted {
+            // Step over the fixed-width fields, the optional pos and the value.
+            take(16 + 4)?;
+            if take(1)?[0] != 0 {
+                take(4)?;
+            }
+            take(8 + 1)?;
+            if stores_values(order) {
+                let vlen = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+                take(vlen)?;
+            }
+            continue;
+        }
 
         let entity = Uuid::from_slice(take(16)?).map_err(|_| corrupt("bad uuid"))?;
         let attr = AttrId(u32::from_le_bytes(take(4)?.try_into().unwrap()));
@@ -405,7 +545,7 @@ fn decode_block(order: SortOrder, bytes: &[u8]) -> Result<Vec<RawRecord>, Segmen
             FactValue::Null
         };
         out.push((
-            key,
+            key.clone(),
             IndexEntry {
                 entity,
                 attr,
@@ -423,6 +563,9 @@ fn decode_block(order: SortOrder, bytes: &[u8]) -> Result<Vec<RawRecord>, Segmen
 pub struct IndexRun {
     path: PathBuf,
     dir: RunDirectory,
+    /// Blocks read so far — lets a test prove the filter *skips* reads, not just that results match.
+    #[cfg(test)]
+    blocks_read: std::sync::atomic::AtomicUsize,
 }
 
 impl IndexRun {
@@ -452,10 +595,13 @@ impl IndexRun {
         file.seek(SeekFrom::Start(dir_offset))?;
         file.read_exact(&mut body)?;
         let dir_json = zstd::decode_all(&body[..])?;
-        let dir: RunDirectory = serde_json::from_slice(&dir_json)?;
+        let mut dir: RunDirectory = serde_json::from_slice(&dir_json)?;
+        dir.entity_filter = dir.entity_filter.take().and_then(EntityFilter::hydrate);
         Ok(Self {
             path: path.to_path_buf(),
             dir,
+            #[cfg(test)]
+            blocks_read: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -468,12 +614,23 @@ impl IndexRun {
     }
 
     fn read_block_raw(&self, meta: &BlockMeta) -> Result<Vec<RawRecord>, SegmentError> {
+        self.read_block_where(meta, |_| Keep::Yes)
+    }
+
+    fn read_block_where(
+        &self,
+        meta: &BlockMeta,
+        keep: impl Fn(&[u8]) -> Keep,
+    ) -> Result<Vec<RawRecord>, SegmentError> {
+        #[cfg(test)]
+        self.blocks_read
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut file = File::open(&self.path)?;
         let mut body = vec![0u8; meta.len as usize];
         file.seek(SeekFrom::Start(meta.offset))?;
         file.read_exact(&mut body)?;
         let bytes = zstd::decode_all(&body[..])?;
-        decode_block(self.dir.order, &bytes)
+        decode_block_where(self.dir.order, &bytes, keep)
     }
 
     /// All entries whose (stored) key starts with `prefix`, in key order.
@@ -481,14 +638,28 @@ impl IndexRun {
     /// read. Slim orders hydrate with `FactValue::Null` (see
     /// [`stores_values`]).
     fn scan(&self, prefix: &[u8]) -> Result<Vec<IndexEntry>, SegmentError> {
+        // RFC 0168: an EAVT prefix starts with the entity. If the run's filter rules the entity
+        // out, no block can match — skip the read. Every run used to pay one block decode here
+        // (ids are random, so some block always straddles the id).
+        if let (SortOrder::Eavt, Some(filter), Some(entity)) = (
+            self.dir.order,
+            &self.dir.entity_filter,
+            prefix.get(..16).and_then(|b| Uuid::from_slice(b).ok()),
+        ) && !filter.may_contain(&entity)
+        {
+            return Ok(Vec::new());
+        }
         // Hex encoding is order-preserving, so string comparison over the
         // directory's hex keys equals byte-key comparison.
         let hex_prefix = hex::encode(prefix);
         let mut out = Vec::new();
-        for meta in &self.dir.blocks {
-            if meta.last_key.as_str() < hex_prefix.as_str() {
-                continue; // block ends before the prefix range
-            }
+        // Blocks are in key order: jump to the first that does not end before the prefix
+        // (RFC 0168 §4) instead of walking the directory from the start.
+        let first = self
+            .dir
+            .blocks
+            .partition_point(|meta| meta.last_key.as_str() < hex_prefix.as_str());
+        for meta in &self.dir.blocks[first..] {
             // Any key > prefix that doesn't start with it is ≥ the prefix's
             // successor — this block (and all later ones) starts past the range.
             if meta.first_key.as_str() > hex_prefix.as_str()
@@ -496,11 +667,20 @@ impl IndexRun {
             {
                 break;
             }
-            for (key, entry) in self.read_block_raw(meta)? {
-                if in_prefix(&key, prefix) {
-                    out.push(entry);
+            let keep = |key: &[u8]| {
+                if in_prefix(key, prefix) {
+                    Keep::Yes
+                } else if key > prefix {
+                    Keep::Stop // sorted: past the prefix range for good
+                } else {
+                    Keep::No
                 }
-            }
+            };
+            out.extend(
+                self.read_block_where(meta, keep)?
+                    .into_iter()
+                    .map(|(_, e)| e),
+            );
         }
         Ok(out)
     }
@@ -661,6 +841,175 @@ mod tests {
             store.append(facts, i as i64).unwrap();
         }
         (store, reg, ids)
+    }
+
+    // ── RFC 0168: entity filter ─────────────────────────────────────────────
+
+    /// `n` entities × 3 attributes, as EAVT entries.
+    fn synthetic(seed: u128, n: u128) -> (Vec<Uuid>, Vec<IndexEntry>) {
+        let ids: Vec<Uuid> = (0..n)
+            .map(|i| {
+                Uuid::from_u128(mix64((seed * 1_000_003 + i) as u64) as u128 * 0x9E37_79B9 + i)
+            })
+            .collect();
+        let entries = ids
+            .iter()
+            .flat_map(|id| {
+                (0..3u32).map(move |a| IndexEntry {
+                    entity: *id,
+                    attr: AttrId(a),
+                    pos: None,
+                    tx: TxId(1),
+                    op: FactOp::Assert,
+                    value: FactValue::String(format!("{id}-{a}")),
+                })
+            })
+            .collect();
+        (ids, entries)
+    }
+
+    fn run_from(path: &Path, entries: Vec<IndexEntry>, with_filter: bool) -> IndexRun {
+        let mut raws: Vec<RawRecord> = entries
+            .into_iter()
+            .filter_map(|e| project(SortOrder::Eavt, e))
+            .collect();
+        raws.sort_by(|a, b| a.0.cmp(&b.0));
+        write_run_raw_with(path, SortOrder::Eavt, &raws, with_filter).unwrap();
+        IndexRun::open(path).unwrap()
+    }
+
+    fn entity_prefix(id: &Uuid) -> Vec<u8> {
+        ScanPrefix::Entity {
+            entity: *id,
+            attr: None,
+        }
+        .bytes()
+    }
+
+    #[test]
+    fn filter_has_no_false_negatives_and_a_low_false_positive_rate() {
+        let (present, _) = synthetic(1, 20_000);
+        let (absent, _) = synthetic(2, 20_000);
+        let f = EntityFilter::build(present.iter(), present.len());
+        assert!(
+            present.iter().all(|id| f.may_contain(id)),
+            "a false negative loses data"
+        );
+        let fp = absent.iter().filter(|id| f.may_contain(id)).count();
+        assert!(fp < 400, "{fp} of 20000 absent ids passed (>2%)");
+    }
+
+    #[test]
+    fn filter_round_trips_through_the_run_directory_deterministically() {
+        let dir = tempdir().unwrap();
+        let (ids, entries) = synthetic(3, 1_000);
+        let a = run_from(&dir.path().join("a.run"), entries.clone(), true);
+        let b = run_from(&dir.path().join("b.run"), entries, true);
+        let fa = a
+            .dir
+            .entity_filter
+            .as_ref()
+            .expect("EAVT run carries a filter");
+        assert_eq!(
+            fa.bits,
+            b.dir.entity_filter.as_ref().unwrap().bits,
+            "same input, same bits"
+        );
+        assert!(
+            ids.iter().all(|id| fa.may_contain(id)),
+            "hydrated filter matches"
+        );
+    }
+
+    /// Filtered and unfiltered runs return identical results, for present and absent entities,
+    /// and the filtered set reads far fewer blocks.
+    #[test]
+    fn filtered_scans_equal_unfiltered_and_skip_block_reads() {
+        let dir = tempdir().unwrap();
+        let mut filtered = Vec::new();
+        let mut plain = Vec::new();
+        let mut all_ids = Vec::new();
+        for r in 0..8u128 {
+            let (ids, entries) = synthetic(10 + r, 400);
+            all_ids.extend(ids);
+            filtered.push(run_from(
+                &dir.path().join(format!("f{r}.run")),
+                entries.clone(),
+                true,
+            ));
+            plain.push(run_from(
+                &dir.path().join(format!("p{r}.run")),
+                entries,
+                false,
+            ));
+        }
+        let (absent, _) = synthetic(99, 200);
+        let scan = |runs: &[IndexRun], id: &Uuid| -> Vec<IndexEntry> {
+            runs.iter()
+                .flat_map(|r| r.scan(&entity_prefix(id)).unwrap())
+                .collect()
+        };
+        for id in all_ids.iter().chain(absent.iter()) {
+            assert_eq!(scan(&filtered, id), scan(&plain, id), "{id}");
+        }
+        let reads = |runs: &[IndexRun]| -> usize {
+            runs.iter()
+                .map(|r| r.blocks_read.load(std::sync::atomic::Ordering::SeqCst))
+                .sum()
+        };
+        let (f, p) = (reads(&filtered), reads(&plain));
+        assert!(f * 4 < p, "filtered read {f} blocks, unfiltered {p}");
+    }
+
+    /// Pre-RFC runs (no filter) and new runs mixed in one index set still scan correctly.
+    #[test]
+    fn a_mix_of_pre_rfc_and_filtered_runs_scans_correctly() {
+        let dir = tempdir().unwrap();
+        let (old_ids, old_entries) = synthetic(20, 300);
+        let (new_ids, new_entries) = synthetic(21, 300);
+        let old = run_from(&dir.path().join("old.run"), old_entries, false);
+        let new = run_from(&dir.path().join("new.run"), new_entries, true);
+        assert!(old.dir.entity_filter.is_none() && new.dir.entity_filter.is_some());
+        for id in old_ids.iter().chain(new_ids.iter()) {
+            let hits: usize = [&old, &new]
+                .iter()
+                .map(|r| r.scan(&entity_prefix(id)).unwrap().len())
+                .sum();
+            assert_eq!(hits, 3, "{id}");
+        }
+    }
+
+    /// The test of the test: a filter missing one entity must make the equivalence check fail.
+    #[test]
+    fn a_planted_false_negative_is_caught_by_the_equivalence_check() {
+        let dir = tempdir().unwrap();
+        let (ids, entries) = synthetic(30, 500);
+        let plain = run_from(&dir.path().join("p.run"), entries.clone(), false);
+        let mut broken = run_from(&dir.path().join("b.run"), entries, true);
+        // Plant against the first id the broken filter really excludes — skipping any that
+        // collide into a false positive, so the test can never pass without testing anything.
+        let victim = ids
+            .iter()
+            .copied()
+            .find(|v| {
+                let others: Vec<Uuid> = ids.iter().copied().filter(|id| id != v).collect();
+                !EntityFilter::build(others.iter(), others.len()).may_contain(v)
+            })
+            .expect("some id is not a false positive");
+        let others: Vec<Uuid> = ids.iter().copied().filter(|id| *id != victim).collect();
+        broken.dir.entity_filter = Some(EntityFilter::build(others.iter(), others.len()));
+        let lost = broken.scan(&entity_prefix(&victim)).unwrap();
+        let truth = plain.scan(&entity_prefix(&victim)).unwrap();
+        assert_ne!(lost, truth, "equivalence must detect the missing entity");
+    }
+
+    #[test]
+    fn a_malformed_filter_disables_filtering_instead_of_failing() {
+        let bad = EntityFilter {
+            bits: "zz".into(),
+            words: vec![],
+        };
+        assert!(bad.hydrate().is_none());
     }
 
     #[test]

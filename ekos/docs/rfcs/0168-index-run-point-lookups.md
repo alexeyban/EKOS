@@ -1,6 +1,6 @@
 # RFC 0168 — Fact-index point lookups: skip runs that cannot match, and stop decoding what is thrown away
 
-**Status:** Draft
+**Status:** Accepted (2026-09-28, maintainer) — in-tree filter (open question 1 resolved)
 **Date:** 2026-09-28
 **Related:** RFC 0016 (fact-segment engine, §4 index runs), RFC 0080 (storage plan), RFC 0106
 (checkpoints), devlog_222 (the MCP traversal bound this makes less necessary)
@@ -118,3 +118,33 @@ policy. With (1) in place, run count stops mattering for reads, so merges can ha
    serializable, so it is the leaning.
 2. Should `ekos ledger repair` offer an explicit "rewrite runs with filters" so an existing large
    ledger benefits immediately rather than at its next merge?
+
+---
+
+## Implementation (2026-09-28, devlog_224)
+
+Shipped: §1 (entity filter), §4 (binary-searched directory), §5 (merge cost), plus one item the
+draft missed. §2 (mmap) and §3 (block cache) are **deferred**: the gate below was met without them.
+
+**The missed item: lazy block decode.** A point scan parsed the JSON value of all 512 records in
+every probed block to return a handful. `decode_block_where` now rebuilds every key (they are
+delta-encoded, so it must) but parses values only for records inside the prefix, and stops once
+keys pass it. This needs no format change, so it speeds up *existing* ledgers immediately.
+
+**§5 was the compression level, not the merge algorithm.** Rewriting EKOS's 8 EAVT runs *without*
+merging still took 150 s at zstd 19. Level 9: 4.5 s, +3% size, reads unchanged. Now 9.
+
+| Measurement | Before | After |
+|---|---|---|
+| Real ledger, 8 EAVT runs, per entity — existing unfiltered runs | 1.43 ms | 0.50 ms |
+| Same, runs rewritten with filters | — | **0.171 ms** (faster than the 0.19 ms fully merged index) |
+| Bench `index_eavt_entity_scan` (1 run) | 137 µs | 40 µs |
+| Bench `index_eavt_entity_scan_8_runs` | 1,083 µs | 41 µs — **1.01×** the merged scan (gate: ≤1.5×) |
+| Bench `index_avet_ref_lookup` | 81 µs | 43 µs |
+| Rewrite 8 runs (zstd 19 → 9) | 150 s | 4.5 s |
+| Filter overhead | — | +1 MB on 35 MB of EAVT runs |
+| MCP `ekos_neighborhood` depth 2, release, EKOS's ledger (no filters yet) | 3.56 s | 1.45 s |
+
+**Filter adoption:** a run gets its filter when it is next written (a seal's flush, or a merge),
+so an existing ledger adopts filters over its normal lifecycle. Open question 2 (an explicit
+`ekos ledger repair` rewrite) stays open; lazy decode already covers existing runs.

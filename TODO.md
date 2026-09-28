@@ -6162,7 +6162,11 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [x] Console: the published placeholder `session_secret` let anyone forge a write-role session
       cookie in every auth mode — replaced by a random per-process secret; default-read-token warning
 - [x] Compose ports bound to `127.0.0.1` (console and Migrate sandboxes)
-- [ ] **Slow point reads → RFC 0168 (Draft, awaiting acceptance).** Profiled (devlog_223): the
+- [x] **Slow point reads → RFC 0168 — accepted and implemented 2026-09-28 (devlog_224).** 8-run
+      entity scan 1,083 µs → 41 µs (bench); real ledger 1.43 → 0.171 ms filtered / 0.50 ms on
+      existing unfiltered runs; run writes zstd 19 → 9 (150 s → 4.5 s). Remaining, optional:
+      mmap'd blocks (§2), a decoded-block cache (§3), and an explicit `ledger repair` step that
+      rewrites old runs with filters (open question 2). Original note: Profiled (devlog_223): the
       cost is *not* reconstruction but the EAVT scan, ~0.19 ms **per index run**, paid for every
       run even when the entity is not in it (8 runs → 1.5 ms per lookup release; merged to 1 run
       → 0.19 ms). Fix: per-run entity Bloom filter + mmap'd blocks + block cache + binary-searched
