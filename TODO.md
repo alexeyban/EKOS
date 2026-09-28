@@ -6162,15 +6162,19 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [x] Console: the published placeholder `session_secret` let anyone forge a write-role session
       cookie in every auth mode — replaced by a random per-process secret; default-read-token warning
 - [x] Compose ports bound to `127.0.0.1` (console and Migrate sandboxes)
-- [ ] **`relationships_for` costs ~15-20 ms per edge in a debug build** (it reconstructs every
-      candidate relationship from facts). This, not the depth, is why a hub neighborhood is slow:
-      depth 3 was 28 s release / 184 s debug for 14 MB. The MCP budget contains it, but every
-      graph read pays it. Profile and index before raising any bound.
-- [ ] `cargo audit` (or `cargo deny`) as a CI job *and* a local gate — `[skip ci]` commits bypass CI,
-      which is how a known advisory sat unnoticed
+- [ ] **Slow point reads → RFC 0168 (Draft, awaiting acceptance).** Profiled (devlog_223): the
+      cost is *not* reconstruction but the EAVT scan, ~0.19 ms **per index run**, paid for every
+      run even when the entity is not in it (8 runs → 1.5 ms per lookup release; merged to 1 run
+      → 0.19 ms). Fix: per-run entity Bloom filter + mmap'd blocks + block cache + binary-searched
+      directory. Also found: `merge_runs(Eavt)` 8→1 took **151 s**, paid inline by a `commit`.
+- [x] `cargo audit` as a CI job *and* a local gate — `.github/workflows/audit.yml` (push, PR and a
+      weekly schedule) runs `scripts/audit.sh`: RustSec over all three workspaces plus a
+      `cargo metadata --locked` stale-lockfile check. Negative-tested against the pre-devlog_222
+      lockfiles (caught the advisory in two workspaces and the stale one). `ci.yml` itself is left
+      untouched, per the maintainer's standing instruction.
 - [ ] 12 unmaintained-crate warnings (`instant`, `paste`, `unic-*`, `ttf-parser`); replace over time
 - [ ] MCP tools still ignore unknown argument names (`max_depth` for `max_hops` runs the default)
-- [ ] Separate workspaces' lockfiles drift while CI is skipped — `benchmark/` still listed the local
+- [x] Separate workspaces' lockfiles drift while CI is skipped (now caught by `scripts/audit.sh`) — `benchmark/` still listed the local
       crates at 0.1.0 and `tests/integration/` predated the Migrate crates (refreshed here)
 - [ ] `missing_docs` enabled in no crate; the largest files (`docs-gen/src/lib.rs` 6k lines,
       `commands/mcp.rs` 4.9k, `fact_ledger.rs` 3.4k) are due for splitting

@@ -1,0 +1,45 @@
+name: Audit
+
+# RustSec advisories over every Cargo workspace, plus lockfile freshness (`scripts/audit.sh`).
+#
+# Separate from ci.yml because advisories are published against code that has not changed: the
+# weekly schedule is what catches a new CVE in a dependency nobody touched. RUSTSEC-2026-0285
+# (rustls) sat in the tree unnoticed until a manual audit found it (devlog_222).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache cargo-audit
+        id: cache-audit
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-audit-0.22.2
+
+      # Installed from crates.io at a pinned version with its own lockfile, rather than through a
+      # third-party action: the same trust boundary as every other crate this repo builds.
+      - name: Install cargo-audit
+        if: steps.cache-audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: Audit every workspace
+        run: scripts/audit.sh
