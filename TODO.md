@@ -6177,7 +6177,9 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       lockfiles (caught the advisory in two workspaces and the stale one). `ci.yml` itself is left
       untouched, per the maintainer's standing instruction.
 - [ ] 12 unmaintained-crate warnings (`instant`, `paste`, `unic-*`, `ttf-parser`); replace over time
-- [ ] MCP tools still ignore unknown argument names (`max_depth` for `max_hops` runs the default)
+- [x] MCP tools still ignore unknown argument names (`max_depth` for `max_hops` runs the default) —
+      refused against each tool's own schema since devlog_225, with a source-scan guard that every
+      key a handler reads is declared; console impact `max_hops` aligned to the tool's cap of 20
 - [x] Separate workspaces' lockfiles drift while CI is skipped (now caught by `scripts/audit.sh`) — `benchmark/` still listed the local
       crates at 0.1.0 and `tests/integration/` predated the Migrate crates (refreshed here)
 - [ ] `missing_docs` enabled in no crate; the largest files (`docs-gen/src/lib.rs` 6k lines,

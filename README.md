@@ -1029,7 +1029,9 @@ connections at once; the first line is read under that cap before any token is c
 that panics is answered with `-32603` and the server keeps serving, where before a panic killed a
 stdio server and permanently wedged `--http`'s single worker. `--http` queues at most 64 waiting
 requests and answers `503` with `Retry-After` past that. Traversal bounds (`depth`, `max_hops`,
-`max_objects`) are refused with the limit named when out of range, never silently clamped. Token-less
+`max_objects`) are refused with the limit named when out of range, never silently clamped. An
+argument name a tool does not declare (e.g. `max_depth` for `ekos_impact`, whose parameter is
+`max_hops`) is refused with the accepted names listed, instead of being ignored. Token-less
 `--tcp` or `--http` on a non-loopback address logs a warning.
 
 #### HTTP transport — for clients that only take a URL (RFC 0143)

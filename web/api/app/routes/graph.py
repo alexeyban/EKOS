@@ -92,7 +92,9 @@ async def impact(
     object_id: str,
     mcp: EkosMcpClient = Depends(mcp_for_workspace),
     direction: str = Query("dependents", pattern="^(dependents|dependencies)$"),
-    max_hops: int = Query(5, ge=1, le=50),
+    # 20 = `ekos_impact`'s own bound (mcp.rs IMPACT_MAX_HOPS, devlog_222): refuse here with a
+    # 422 rather than forward a value the tool will reject.
+    max_hops: int = Query(5, ge=1, le=20),
     kind: list[str] = Query(default=[]),
 ) -> Any:
     """`ekos_impact` (RFC 0136 §3) — a hop-depth node list (`hops: [{hop, id, name, kind, via}]`),

@@ -1369,6 +1369,8 @@ fn call_tool(
     cache: &mut StoreCache,
     ext: &Extensions,
 ) -> Result<Value> {
+    check_argument_names(config, ext, name, args)?;
+
     // The write-capable tools bypass the read-only cache entirely — a real
     // write needs a real writable store, and `StoreCache` deliberately
     // never holds one open (see its doc comment). Opening fresh here, then
@@ -2323,6 +2325,60 @@ fn required_id(args: &Value) -> Result<KirId> {
     KirId::from_str(raw).map_err(|_| anyhow::anyhow!("invalid object id: {raw}"))
 }
 
+/// Refuse argument names the tool's own `inputSchema` does not declare, and non-object arguments.
+///
+/// Found by the devlog_222 audit: `ekos_impact` given `max_depth` (its parameter is `max_hops`)
+/// silently ran at the default depth, and the agent reasoned over an answer it believed matched
+/// its request. A misspelt or invented name is now an error listing the accepted ones.
+///
+/// Checked against each tool's own schema, extensions included. Safe because every built-in
+/// handler reads only keys its schema declares; `every_argument_a_handler_reads_is_declared`
+/// keeps that true. A schema with no `properties` is not checked, since there is nothing to check
+/// against.
+fn check_argument_names(
+    config: &EkosConfig,
+    ext: &Extensions,
+    name: &str,
+    args: &Value,
+) -> Result<()> {
+    let map = match args {
+        Value::Null => return Ok(()),
+        Value::Object(map) => map,
+        other => anyhow::bail!("`arguments` must be an object, got {other}"),
+    };
+    let tools = tool_definitions(config, ext);
+    let Some(props) = tools
+        .iter()
+        .find(|t| t["name"] == name)
+        .and_then(|t| t["inputSchema"]["properties"].as_object())
+    else {
+        return Ok(()); // unknown tool (reported by dispatch) or a schema without properties
+    };
+    let unknown: Vec<&str> = map
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !props.contains_key(*k))
+        .collect();
+    if !unknown.is_empty() {
+        let mut accepted: Vec<&str> = props.keys().map(String::as_str).collect();
+        accepted.sort_unstable();
+        anyhow::bail!(
+            "unknown argument(s) {} for {name}; accepted: {}",
+            unknown
+                .iter()
+                .map(|k| format!("`{k}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if accepted.is_empty() {
+                "none".to_string()
+            } else {
+                accepted.join(", ")
+            }
+        );
+    }
+    Ok(())
+}
+
 /// An optional integer argument, `default` when absent, an error when present but not an integer
 /// in `min..=max`.
 ///
@@ -2878,6 +2934,138 @@ mod tests {
             json!({ "id": id, "depth": 3 }),
         );
         assert_eq!(ok["result"]["isError"], false, "the cap itself is allowed");
+    }
+
+    /// `max_depth` is not an `ekos_impact` argument (`max_hops` is): refused, never silently
+    /// ignored, and the error lists what is accepted.
+    #[test]
+    fn unknown_argument_names_are_refused_with_the_accepted_list() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let (orders_id, _) = seeded_ledger(&config, tmp.path());
+
+        let resp = call(
+            &config,
+            tmp.path(),
+            "ekos_impact",
+            json!({ "id": orders_id.to_string(), "max_depth": 3 }),
+        );
+        assert_eq!(resp["result"]["isError"], true);
+        let text = tool_text(&resp);
+        assert!(text.contains("`max_depth`"), "{text}");
+        assert!(
+            text.contains("accepted: direction, id, kinds, max_hops"),
+            "{text}"
+        );
+
+        let resp = call(&config, tmp.path(), "ekos_search", json!("notanobject"));
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(
+            tool_text(&resp).contains("must be an object"),
+            "{}",
+            tool_text(&resp)
+        );
+
+        let ok = call(
+            &config,
+            tmp.path(),
+            "ekos_impact",
+            json!({ "id": orders_id.to_string(), "max_hops": 3 }),
+        );
+        assert_eq!(ok["result"]["isError"], false, "declared names still work");
+    }
+
+    /// The strict name check is only safe while every key a handler reads is declared in its own
+    /// tool's schema, or it would reject a call that works today. Source-scanned, the same shape
+    /// as the RFC 0151 read-path guard: a new `args.get("x")` without a schema entry fails here.
+    #[test]
+    fn every_argument_a_handler_reads_is_declared() {
+        // Every gated tool switched on, so every schema is listed.
+        let mut config = EkosConfig::default();
+        config.session_memory.enabled = true;
+        config.clickhouse.enable_mcp_query = true;
+        let tools = tool_definitions(&config, &Extensions::none());
+        let declared = |tool: &str| -> Vec<String> {
+            tools
+                .iter()
+                .find(|t| t["name"] == tool)
+                .unwrap_or_else(|| panic!("{tool} is not in tools/list"))["inputSchema"]
+                ["properties"]
+                .as_object()
+                .map(|m| m.keys().cloned().collect())
+                .unwrap_or_default()
+        };
+        let reads = |code: &str| -> Vec<String> {
+            let mut keys = Vec::new();
+            for pat in [
+                "args.get(\"",
+                "args\n                .get(\"",
+                "required_str(args, \"",
+                "bounded_arg(args, \"",
+            ] {
+                for (at, _) in code.match_indices(pat) {
+                    let rest = &code[at + pat.len()..];
+                    keys.push(rest[..rest.find('"').unwrap()].to_string());
+                }
+            }
+            if code.contains("required_id(args)") {
+                keys.push("id".into());
+            }
+            keys
+        };
+
+        let src = include_str!("mcp.rs");
+        let src = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
+        let body = &src[src.find("fn call_tool(").unwrap()..];
+        let body = &body[..body[10..].find("\nfn ").unwrap() + 10];
+
+        let mut arms = 0;
+        let mut undeclared = Vec::new();
+        let mut pieces = body.split("\n        \"ekos_");
+        pieces.next();
+        for piece in pieces {
+            let Some((tool, code)) = piece.split_once("\" =>") else {
+                continue;
+            };
+            let tool = format!("ekos_{tool}");
+            arms += 1;
+            let ok = declared(&tool);
+            undeclared.extend(
+                reads(code)
+                    .into_iter()
+                    .filter(|k| !ok.contains(k))
+                    .map(|k| format!("{tool}.{k}")),
+            );
+        }
+        assert!(
+            arms >= 18,
+            "the arm scan stopped matching ({arms} arms) — fix the scan"
+        );
+
+        for (func, tools) in [
+            ("fn identity_review(", vec!["ekos_identity_review"]),
+            ("fn architecture_review(", vec!["ekos_architecture_review"]),
+            ("fn session_note(", vec!["ekos_session_note"]),
+            (
+                "fn session_read(",
+                vec!["ekos_session_recall", "ekos_session_brief"],
+            ),
+        ] {
+            let code = &src[src.find(func).unwrap()..];
+            let code = &code[..code[10..].find("\nfn ").unwrap() + 10];
+            let ok: Vec<String> = tools.iter().flat_map(|t| declared(t)).collect();
+            undeclared.extend(
+                reads(code)
+                    .into_iter()
+                    .filter(|k| !ok.contains(k))
+                    .map(|k| format!("{func}.{k}")),
+            );
+        }
+        assert!(
+            undeclared.is_empty(),
+            "handlers read argument(s) their schema does not declare: {undeclared:?} — add them \
+             to the tool's inputSchema, or the strict name check will reject them"
+        );
     }
 
     /// Hitting `max_objects` says so in the response.

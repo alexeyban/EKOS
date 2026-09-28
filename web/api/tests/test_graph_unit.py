@@ -115,6 +115,19 @@ def test_neighborhood_rejects_depth_above_three(rec: tuple[TestClient, Recording
     assert r.status_code == 422
 
 
+def test_impact_rejects_max_hops_above_the_tools_own_bound(
+    rec: tuple[TestClient, RecordingMcp],
+) -> None:
+    """`ekos_impact` refuses max_hops > 20 (devlog_222); the route must not accept 21-50 and
+    forward a call the tool will reject."""
+    client, recorder = rec
+    r = client.get("/api/workspaces/any/impact/abc?max_hops=21", headers=AUTH)
+    assert r.status_code == 422
+    assert not recorder.calls
+    ok = client.get("/api/workspaces/any/impact/abc?max_hops=20", headers=AUTH)
+    assert ok.status_code == 200, ok.text
+
+
 def test_impact_forwards_direction_max_hops_and_kinds(
     rec: tuple[TestClient, RecordingMcp],
 ) -> None:
