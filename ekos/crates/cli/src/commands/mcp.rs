@@ -272,6 +272,89 @@ fn authorize_initialize(line: &str, expected: &str) -> bool {
     ct_eq(token.as_bytes(), expected.as_bytes())
 }
 
+/// Longest JSON-RPC line any transport accepts. A real MCP message is a few KB; axum's own body
+/// limit for `--http` is 2 MB. Without a bound, `BufRead::lines` buffers a newline-free stream
+/// until memory runs out — and on `--tcp` that read happens *before* the token is checked.
+const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Read one `\n`-terminated line of at most `MAX_LINE_BYTES`. `Ok(None)` at end of stream; an
+/// `InvalidData` error for an over-long line, which ends the connection.
+fn read_bounded_line(reader: &mut impl BufRead) -> std::io::Result<Option<String>> {
+    let mut buf = Vec::new();
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            return if buf.is_empty() {
+                Ok(None)
+            } else {
+                String::from_utf8(buf)
+                    .map(Some)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            };
+        }
+        let (take, done) = match chunk.iter().position(|&b| b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (chunk.len(), false),
+        };
+        if buf.len() + take > MAX_LINE_BYTES + 1 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("message longer than {MAX_LINE_BYTES} bytes"),
+            ));
+        }
+        buf.extend_from_slice(&chunk[..take]);
+        reader.consume(take);
+        if done {
+            buf.pop(); // '\n'
+            if buf.last() == Some(&b'\r') {
+                buf.pop();
+            }
+            return String::from_utf8(buf)
+                .map(Some)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+        }
+    }
+}
+
+/// [`handle_message_with`], with a panic contained to the one request that caused it.
+///
+/// Every transport serves many requests from one long-lived thread, and `--http` serves every
+/// client from a single worker. An uncaught panic there killed the worker while the process kept
+/// its port open: every later request got `500 mcp worker unavailable` from a server that looked
+/// healthy. The cache is dropped on a panic because a panic mid-read can leave a poisoned lock
+/// inside the store it holds; the next request reopens it.
+pub fn handle_message_isolated(
+    config: &EkosConfig,
+    workspace: &Path,
+    line: &str,
+    cache: &mut StoreCache,
+    ext: &Extensions,
+) -> Option<String> {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        handle_message_with(config, workspace, line, cache, ext)
+    }));
+    match outcome {
+        Ok(response) => response,
+        Err(panic) => {
+            let what = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "non-string panic payload".into());
+            tracing::error!(%what, "mcp: request panicked; the server recovered");
+            *cache = StoreCache::new();
+            let msg: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+            // A notification has no id and is never answered, panic or not.
+            let id = msg.get("id").cloned()?;
+            Some(error_response(
+                id,
+                -32603,
+                "internal error: this request panicked; the server recovered and is still serving",
+            ))
+        }
+    }
+}
+
 /// The shared dispatch loop (RFC 0115): reads one JSON-RPC message per line from `reader`, writes
 /// zero-or-one response lines to `writer`. Identical for stdio and TCP — the protocol has no idea
 /// which transport it's running over, or whether `cache` is this call's only user (stdio) or one
@@ -281,20 +364,17 @@ fn serve_messages(
     workspace: &Path,
     cache: &mut StoreCache,
     ext: &Extensions,
-    reader: impl BufRead,
+    mut reader: impl BufRead,
     mut writer: impl Write,
     require_token: Option<&str>,
 ) -> Result<()> {
-    let mut lines = reader.lines();
-
     if let Some(expected) = require_token {
         // RFC 0128 §1.2: the first line on an authenticated connection must be an `initialize`
         // request carrying a matching `params._meta.token`. Anything else gets one JSON-RPC error
         // line and the connection closes — no tool is ever reachable unauthenticated.
         let first = loop {
-            match lines.next() {
+            match read_bounded_line(&mut reader)? {
                 Some(line) => {
-                    let line = line?;
                     if line.trim().is_empty() {
                         continue;
                     }
@@ -320,12 +400,11 @@ fn serve_messages(
         writer.flush()?;
     }
 
-    for line in lines {
-        let line = line?;
+    while let Some(line) = read_bounded_line(&mut reader)? {
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handle_message_with(config, workspace, &line, cache, ext) {
+        if let Some(response) = handle_message_isolated(config, workspace, &line, cache, ext) {
             writeln!(writer, "{response}")?;
             writer.flush()?;
         }
@@ -350,6 +429,30 @@ fn serve_messages(
 /// (RFC 0115 — bind `127.0.0.1` or a trusted network only). With a `token`, every connection's
 /// first line must be an `initialize` request carrying a matching `params._meta.token` or it is
 /// closed with a `-32001` error before any tool is reachable.
+/// Concurrent `--tcp` connections. Each one is an OS thread with its own store handle, and before
+/// this there was no limit: any peer that could reach the port — token or not, since the token is
+/// only read from the first line — could open threads until the process failed.
+const MAX_TCP_CONNECTIONS: usize = 64;
+
+/// Releases a connection slot when the connection's thread ends, however it ends.
+struct ConnectionSlot(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Claim a slot, or `None` when `max` are already held.
+fn claim_slot(live: &Arc<std::sync::atomic::AtomicUsize>, max: usize) -> Option<ConnectionSlot> {
+    use std::sync::atomic::Ordering;
+    live.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+        (n < max).then_some(n + 1)
+    })
+    .ok()
+    .map(|_| ConnectionSlot(Arc::clone(live)))
+}
+
 fn serve_tcp(
     config: &EkosConfig,
     workspace: &Path,
@@ -362,9 +465,15 @@ fn serve_tcp(
     let bound = listener.local_addr()?;
     let auth_note = if token.is_some() {
         "bearer-token auth required (RFC 0128)"
+    } else if bound.ip().is_loopback() {
+        "unauthenticated — loopback only"
     } else {
-        "unauthenticated — trusted network/localhost only"
+        "UNAUTHENTICATED on a non-loopback address — set --token-file / EKOS_MCP_TOKEN or bind 127.0.0.1"
     };
+    if token.is_none() && !bound.ip().is_loopback() {
+        tracing::warn!(%bound, "MCP TCP server: {auth_note}");
+    }
+    let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     tracing::info!(%bound, "MCP TCP server listening — RFC 0115, {auth_note}");
     eprintln!("ekos mcp serve: listening on {bound} (TCP, {auth_note})");
 
@@ -377,11 +486,25 @@ fn serve_tcp(
             }
         };
         let peer = stream.peer_addr().ok();
+        let Some(slot) = claim_slot(&live, MAX_TCP_CONNECTIONS) else {
+            tracing::warn!(
+                ?peer,
+                "mcp tcp: connection limit ({MAX_TCP_CONNECTIONS}) reached"
+            );
+            let mut stream = stream;
+            let _ = writeln!(
+                stream,
+                "{}",
+                error_response(Value::Null, -32000, "server busy: too many connections")
+            );
+            continue;
+        };
         let config = config.clone();
         let workspace = workspace.to_path_buf();
         let token = token.clone();
         let ext = ext.clone();
         std::thread::spawn(move || {
+            let _slot = slot;
             let reader = match stream.try_clone() {
                 Ok(s) => std::io::BufReader::new(s),
                 Err(e) => {
@@ -408,6 +531,11 @@ fn serve_tcp(
 
 // ── RFC 0143: MCP over Streamable HTTP ────────────────────────────────────────────────────────
 
+/// Requests that may wait for the single `--http` worker. Past this, a request is refused with
+/// `503` and `Retry-After` rather than queued: the queue used to be unbounded, so a burst behind
+/// one slow call grew memory without limit while every waiting client timed out anyway.
+const HTTP_QUEUE_DEPTH: usize = 64;
+
 /// One unit of work for the MCP worker thread: a raw JSON-RPC line in, zero-or-one response line
 /// back over the `oneshot`.
 type McpJob = (String, tokio::sync::oneshot::Sender<Option<String>>);
@@ -418,8 +546,8 @@ type McpJob = (String, tokio::sync::oneshot::Sender<Option<String>>);
 struct HttpState {
     /// Forwards each request line to the single worker thread that owns the (non-`Send`)
     /// `StoreCache`. `tokio::sync::mpsc` specifically because axum state must be `Send + Sync` and
-    /// `std::sync::mpsc::Sender` is `!Sync`.
-    jobs: tokio::sync::mpsc::UnboundedSender<McpJob>,
+    /// `std::sync::mpsc::Sender` is `!Sync`. Bounded: see [`HTTP_QUEUE_DEPTH`].
+    jobs: tokio::sync::mpsc::Sender<McpJob>,
     /// `Some` → every request must carry `Authorization: Bearer <token>` (RFC 0128, extended to
     /// HTTP). `None` → unauthenticated, same as a token-less `--tcp`.
     token: Option<Arc<str>>,
@@ -497,7 +625,7 @@ fn build_http_router(
     allow_origins: Vec<String>,
     ext: &Extensions,
 ) -> Router {
-    let (jobs, mut rx) = tokio::sync::mpsc::unbounded_channel::<McpJob>();
+    let (jobs, mut rx) = tokio::sync::mpsc::channel::<McpJob>(HTTP_QUEUE_DEPTH);
     {
         let config = config.clone();
         let workspace = workspace.to_path_buf();
@@ -505,7 +633,8 @@ fn build_http_router(
         std::thread::spawn(move || {
             let mut cache = StoreCache::new();
             while let Some((line, reply)) = rx.blocking_recv() {
-                let response = handle_message_with(&config, &workspace, &line, &mut cache, &ext);
+                let response =
+                    handle_message_isolated(&config, &workspace, &line, &mut cache, &ext);
                 let _ = reply.send(response);
             }
         });
@@ -585,8 +714,20 @@ async fn http_post(State(st): State<HttpState>, headers: HeaderMap, body: String
     let mut responses: Vec<String> = Vec::new();
     for msg in &messages {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        if st.jobs.send((msg.to_string(), tx)).is_err() {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "mcp worker unavailable").into_response();
+        match st.jobs.try_send((msg.to_string(), tx)) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    [(header::RETRY_AFTER, "1")],
+                    "mcp worker busy — retry",
+                )
+                    .into_response();
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, "mcp worker unavailable")
+                    .into_response();
+            }
         }
         match rx.await {
             Ok(Some(line)) => responses.push(line),
@@ -883,12 +1024,13 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_neighborhood",
-            "description": "BFS graph traversal from an object: everything connected within `depth` hops, as objects + relationships.",
+            "description": "BFS graph traversal from an object: everything connected within `depth` hops, as objects + relationships. Stops at `max_objects` and sets `truncated: true` when it does — a truncated graph is partial, not complete.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "Object id (UUID) from ekos_search or ekos_ekl" },
-                    "depth": { "type": "integer", "description": "Hops to traverse (default 1)" }
+                    "depth": { "type": "integer", "minimum": 0, "maximum": 3, "description": "Hops to traverse (default 1, at most 3)" },
+                    "max_objects": { "type": "integer", "minimum": 1, "maximum": 5000, "description": "Stop collecting after this many objects (default 500, at most 5000)" }
                 },
                 "required": ["id"]
             }
@@ -934,7 +1076,7 @@ fn base_tool_definitions() -> Vec<Value> {
                     "id": { "type": "string", "description": "Object id (UUID) from ekos_search or ekos_ekl" },
                     "direction": { "type": "string", "description": "\"dependents\" (default; what depends on this) or \"dependencies\" (what this depends on)" },
                     "kinds": { "type": "array", "items": { "type": "string" }, "description": "Relationship kind names to follow, e.g. [\"ForeignKey\", \"DependsOn\"] (default: all kinds)" },
-                    "max_hops": { "type": "integer", "description": "Hop bound (default 5)" }
+                    "max_hops": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Hop bound (default 5, at most 20)" }
                 },
                 "required": ["id"]
             }
@@ -984,7 +1126,7 @@ fn base_tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "Transformation IR object id (a TransformNode, typically a Sink), from ekos_search or ekos_ekl" },
-                    "max_hops": { "type": "integer", "description": "Hop bound walking upstream (default 50)" }
+                    "max_hops": { "type": "integer", "minimum": 1, "maximum": 200, "description": "Hop bound walking upstream (default 50, at most 200)" }
                 },
                 "required": ["id"]
             }
@@ -997,7 +1139,7 @@ fn base_tool_definitions() -> Vec<Value> {
                 "properties": {
                     "old_id": { "type": "string", "description": "Transformation IR object id of the original pipeline's end node" },
                     "new_id": { "type": "string", "description": "Transformation IR object id of the new pipeline's end node" },
-                    "max_hops": { "type": "integer", "description": "Hop bound walking upstream on each side (default 50)" }
+                    "max_hops": { "type": "integer", "minimum": 1, "maximum": 200, "description": "Hop bound walking upstream on each side (default 50, at most 200)" }
                 },
                 "required": ["old_id", "new_id"]
             }
@@ -1347,9 +1489,21 @@ fn call_tool(
         }
         "ekos_neighborhood" => {
             let id = required_id(args)?;
-            let depth = args.get("depth").and_then(Value::as_u64).unwrap_or(1) as u32;
-            let graph = runtime.load_neighborhood(&id, depth)?;
-            Ok(serde_json::to_value(&graph)?)
+            let depth = bounded_arg(args, "depth", 1, 0, NEIGHBORHOOD_MAX_DEPTH)? as u32;
+            let max_objects = bounded_arg(
+                args,
+                "max_objects",
+                NEIGHBORHOOD_DEFAULT_OBJECTS,
+                1,
+                NEIGHBORHOOD_MAX_OBJECTS,
+            )? as usize;
+            let (graph, truncated) = runtime.load_neighborhood_bounded(&id, depth, max_objects)?;
+            let mut out = serde_json::to_value(&graph)?;
+            if let Value::Object(map) = &mut out {
+                map.insert("truncated".into(), json!(truncated));
+                map.insert("max_objects".into(), json!(max_objects));
+            }
+            Ok(out)
         }
         "ekos_audit" => {
             let id = required_id(args)?;
@@ -1434,7 +1588,7 @@ fn call_tool(
                         .collect()
                 })
                 .unwrap_or_default();
-            let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(5) as u32;
+            let max_hops = bounded_arg(args, "max_hops", 5, 1, IMPACT_MAX_HOPS)? as u32;
 
             let hops = runtime.trace_impact(&id, direction, &kinds, max_hops)?;
             let by_hop: Vec<Value> = hops
@@ -1639,7 +1793,7 @@ fn call_tool(
         }
         "ekos_transformation_explain" => {
             let id = required_id(args)?;
-            let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(50) as u32;
+            let max_hops = bounded_arg(args, "max_hops", 50, 1, TRANSFORMATION_MAX_HOPS)? as u32;
             let chain = transformation_chain(&runtime, &id, max_hops)?;
 
             let steps: Vec<Value> = chain
@@ -1658,7 +1812,7 @@ fn call_tool(
                 .map_err(|_| anyhow::anyhow!("invalid `old_id`"))?;
             let new_id = KirId::from_str(required_str(args, "new_id")?)
                 .map_err(|_| anyhow::anyhow!("invalid `new_id`"))?;
-            let max_hops = args.get("max_hops").and_then(Value::as_u64).unwrap_or(50) as u32;
+            let max_hops = bounded_arg(args, "max_hops", 50, 1, TRANSFORMATION_MAX_HOPS)? as u32;
 
             let old_chain = transformation_chain(&runtime, &old_id, max_hops)?;
             let new_chain = transformation_chain(&runtime, &new_id, max_hops)?;
@@ -2169,6 +2323,36 @@ fn required_id(args: &Value) -> Result<KirId> {
     KirId::from_str(raw).map_err(|_| anyhow::anyhow!("invalid object id: {raw}"))
 }
 
+/// An optional integer argument, `default` when absent, an error when present but not an integer
+/// in `min..=max`.
+///
+/// Refused rather than clamped: an agent that asked for depth 10 and silently got 3 reasons from a
+/// graph it believes is complete. And never `as u32` on the raw `u64` — that wrapped, so
+/// `4294967296` hops ran as 0.
+fn bounded_arg(args: &Value, key: &str, default: u64, min: u64, max: u64) -> Result<u64> {
+    let Some(raw) = args.get(key) else {
+        return Ok(default);
+    };
+    let n = raw
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("`{key}` must be a non-negative integer, got {raw}"))?;
+    if !(min..=max).contains(&n) {
+        anyhow::bail!("`{key}` is {n}; it must be between {min} and {max}");
+    }
+    Ok(n)
+}
+
+/// `ekos_neighborhood` bounds. Measured on EKOS's own ledger around one hub object, release build
+/// (2026-09-28): depth 2 → 3.6 s, depth 3 → 28 s and 14 MB. Over `--http` a single worker thread
+/// serves every client, so one unbounded call stalled all of them.
+const NEIGHBORHOOD_MAX_DEPTH: u64 = 3;
+const NEIGHBORHOOD_DEFAULT_OBJECTS: u64 = 500;
+const NEIGHBORHOOD_MAX_OBJECTS: u64 = 5_000;
+/// `ekos_impact`'s hop bound. Its default is 5; 20 is well past any real dependency chain.
+const IMPACT_MAX_HOPS: u64 = 20;
+/// Transformation chains are walked upstream one node per hop; the default was already 50.
+const TRANSFORMATION_MAX_HOPS: u64 = 200;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2629,6 +2813,120 @@ mod tests {
         assert_eq!(body["count"], 1);
         assert_eq!(body["hops"][0]["id"], items_id.to_string());
         assert_eq!(body["hops"][0]["hop"], 1);
+    }
+
+    // ── Traversal bounds (devlog_222) ──────────────────────────────────────
+
+    fn tool_text(resp: &Value) -> &str {
+        resp["result"]["content"][0]["text"].as_str().unwrap()
+    }
+
+    /// Out-of-range and wrong-typed bounds are refused with the limit named, never clamped or
+    /// wrapped. `4294967296` is the value `as u32` used to turn into 0.
+    #[test]
+    fn traversal_bounds_are_refused_not_clamped_or_wrapped() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let (orders_id, _) = seeded_ledger(&config, tmp.path());
+        let id = orders_id.to_string();
+
+        for (tool, args, needle) in [
+            (
+                "ekos_neighborhood",
+                json!({ "id": id, "depth": 4 }),
+                "between 0 and 3",
+            ),
+            (
+                "ekos_neighborhood",
+                json!({ "id": id, "depth": -1 }),
+                "non-negative integer",
+            ),
+            (
+                "ekos_neighborhood",
+                json!({ "id": id, "depth": "2" }),
+                "non-negative integer",
+            ),
+            (
+                "ekos_neighborhood",
+                json!({ "id": id, "max_objects": 0 }),
+                "between 1 and 5000",
+            ),
+            (
+                "ekos_impact",
+                json!({ "id": id, "max_hops": 4_294_967_296_u64 }),
+                "between 1 and 20",
+            ),
+            (
+                "ekos_transformation_explain",
+                json!({ "id": id, "max_hops": 201 }),
+                "between 1 and 200",
+            ),
+        ] {
+            let resp = call(&config, tmp.path(), tool, args.clone());
+            assert_eq!(resp["result"]["isError"], true, "{tool} {args}");
+            assert!(
+                tool_text(&resp).contains(needle),
+                "{tool} {args}: {}",
+                tool_text(&resp)
+            );
+        }
+
+        let ok = call(
+            &config,
+            tmp.path(),
+            "ekos_neighborhood",
+            json!({ "id": id, "depth": 3 }),
+        );
+        assert_eq!(ok["result"]["isError"], false, "the cap itself is allowed");
+    }
+
+    /// Hitting `max_objects` says so in the response.
+    #[test]
+    fn neighborhood_reports_truncation() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let (orders_id, _) = seeded_ledger(&config, tmp.path());
+        let id = orders_id.to_string();
+
+        let body = |args: Value| -> Value {
+            let resp = call(&config, tmp.path(), "ekos_neighborhood", args);
+            assert_eq!(resp["result"]["isError"], false);
+            serde_json::from_str(tool_text(&resp)).unwrap()
+        };
+        let full = body(json!({ "id": id }));
+        assert_eq!(full["truncated"], false);
+        assert_eq!(full["objects"].as_array().unwrap().len(), 2);
+
+        let cut = body(json!({ "id": id, "max_objects": 1 }));
+        assert_eq!(cut["truncated"], true);
+        assert_eq!(cut["objects"].as_array().unwrap().len(), 1);
+        assert!(cut["relationships"].as_array().unwrap().is_empty());
+    }
+
+    /// The advertised schema limits are the enforced ones.
+    #[test]
+    fn schema_maximums_match_enforced_bounds() {
+        let tools = tool_definitions(&EkosConfig::default(), &Extensions::default());
+        let max = |tool: &str, arg: &str| {
+            tools.iter().find(|t| t["name"] == tool).unwrap()["inputSchema"]["properties"][arg]
+                ["maximum"]
+                .as_u64()
+                .unwrap()
+        };
+        assert_eq!(max("ekos_neighborhood", "depth"), NEIGHBORHOOD_MAX_DEPTH);
+        assert_eq!(
+            max("ekos_neighborhood", "max_objects"),
+            NEIGHBORHOOD_MAX_OBJECTS
+        );
+        assert_eq!(max("ekos_impact", "max_hops"), IMPACT_MAX_HOPS);
+        assert_eq!(
+            max("ekos_transformation_explain", "max_hops"),
+            TRANSFORMATION_MAX_HOPS
+        );
+        assert_eq!(
+            max("ekos_transformation_diff", "max_hops"),
+            TRANSFORMATION_MAX_HOPS
+        );
     }
 
     // ── RFC 0124: ekos_query / ekos_retrieve / ekos_search limit ──────────
@@ -4039,6 +4337,209 @@ mod tests {
         let body: Value = res.json().await.unwrap();
         assert_eq!(body["result"]["protocolVersion"], "2025-06-18");
         assert_eq!(body["result"]["serverInfo"]["name"], "ekos");
+    }
+
+    // ── Panic isolation, bounded queue, bounded reads, connection cap (devlog_222) ─────────────
+
+    /// An extension whose `boom` tool panics and whose `slow` tool blocks until released — real
+    /// dispatch paths, no test-only hook in production code.
+    struct Faulty(Arc<std::sync::Barrier>);
+
+    #[async_trait::async_trait(?Send)]
+    impl crate::extension::EkosExtension for Faulty {
+        fn name(&self) -> &'static str {
+            "faulty"
+        }
+        fn mcp_tools(&self, _config: &EkosConfig) -> Vec<Value> {
+            vec![
+                json!({ "name": "boom", "inputSchema": { "type": "object" } }),
+                json!({ "name": "slow", "inputSchema": { "type": "object" } }),
+            ]
+        }
+        fn call_mcp_tool(
+            &self,
+            name: &str,
+            _args: &Value,
+            _ledger: &dyn KnowledgeStore,
+        ) -> Option<anyhow::Result<Value>> {
+            match name {
+                "boom" => panic!("injected panic"),
+                "slow" => {
+                    self.0.wait();
+                    Some(Ok(json!("done")))
+                }
+                _ => None,
+            }
+        }
+    }
+
+    fn faulty_ext(barrier: Arc<std::sync::Barrier>) -> Extensions {
+        Extensions::new(vec![Arc::new(Faulty(barrier))])
+    }
+
+    /// A panicking request becomes a `-32603` error for that request only; the loop keeps serving.
+    /// Before, a stdio server died outright on a panic.
+    #[test]
+    fn a_panicking_request_is_answered_and_the_loop_keeps_serving() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let (orders_id, _) = seeded_ledger(&config, tmp.path());
+        let ext = faulty_ext(Arc::new(std::sync::Barrier::new(1)));
+
+        let input = [
+            req(1, "tools/call", json!({ "name": "boom", "arguments": {} })),
+            req(
+                2,
+                "tools/call",
+                json!({ "name": "ekos_state", "arguments": { "id": orders_id.to_string() } }),
+            ),
+        ]
+        .join("\n");
+        let mut out = Vec::new();
+        serve_messages(
+            &config,
+            tmp.path(),
+            &mut StoreCache::new(),
+            &ext,
+            std::io::Cursor::new(input),
+            &mut out,
+            None,
+        )
+        .unwrap();
+        let lines: Vec<Value> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["id"], 1);
+        assert_eq!(lines[0]["error"]["code"], -32603);
+        assert_eq!(lines[1]["id"], 2);
+        assert_eq!(lines[1]["result"]["isError"], false, "{}", lines[1]);
+    }
+
+    fn http_router(tmp: &Path, ext: &Extensions) -> Router {
+        build_http_router(&EkosConfig::default(), tmp, None, vec![], ext)
+    }
+
+    async fn serve_router(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/mcp")
+    }
+
+    /// The `--http` worker survives a panic: the next request is served, not `500 mcp worker
+    /// unavailable` forever.
+    #[tokio::test]
+    async fn http_worker_survives_a_panicking_request() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        seeded_ledger(&config, tmp.path());
+        let ext = faulty_ext(Arc::new(std::sync::Barrier::new(1)));
+        let url = serve_router(http_router(tmp.path(), &ext)).await;
+        let client = reqwest::Client::new();
+
+        let boom: Value = client
+            .post(url.as_str())
+            .json(&json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                           "params": { "name": "boom", "arguments": {} } }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(boom["error"]["code"], -32603);
+
+        let res = client
+            .post(url.as_str())
+            .json(&init_msg())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "the worker must still be alive");
+    }
+
+    /// Past `HTTP_QUEUE_DEPTH` waiting requests, the next is refused with 503 + `Retry-After`
+    /// instead of queued without bound.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn http_queue_is_bounded() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        seeded_ledger(&config, tmp.path());
+        // The worker blocks inside `slow` until the test releases it.
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let ext = faulty_ext(barrier.clone());
+        let url = serve_router(http_router(tmp.path(), &ext)).await;
+        let client = reqwest::Client::new();
+        let slow = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": { "name": "slow", "arguments": {} } });
+
+        // One request occupies the worker, then fill the queue behind it.
+        let mut pending = Vec::new();
+        for _ in 0..=HTTP_QUEUE_DEPTH {
+            let c = client.clone();
+            let u = url.clone();
+            let body = slow.clone();
+            pending.push(tokio::spawn(async move {
+                c.post(u.as_str()).json(&body).send().await
+            }));
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let refused = client.post(url.as_str()).json(&slow).send().await.unwrap();
+        assert_eq!(refused.status(), 503);
+        assert_eq!(refused.headers()["retry-after"], "1");
+
+        // Release every blocked `slow` call so the test ends cleanly.
+        let releaser = std::thread::spawn(move || {
+            for _ in 0..=HTTP_QUEUE_DEPTH {
+                barrier.wait();
+            }
+        });
+        for p in pending {
+            assert_eq!(p.await.unwrap().unwrap().status(), 200);
+        }
+        releaser.join().unwrap();
+    }
+
+    #[test]
+    fn bounded_line_reader_splits_lines_and_refuses_an_over_long_one() {
+        let mut r = std::io::Cursor::new("a\r\n¿é\n\nlast".as_bytes().to_vec());
+        assert_eq!(read_bounded_line(&mut r).unwrap().as_deref(), Some("a"));
+        assert_eq!(read_bounded_line(&mut r).unwrap().as_deref(), Some("¿é"));
+        assert_eq!(read_bounded_line(&mut r).unwrap().as_deref(), Some(""));
+        assert_eq!(read_bounded_line(&mut r).unwrap().as_deref(), Some("last"));
+        assert_eq!(read_bounded_line(&mut r).unwrap(), None);
+
+        // No newline at all, just more bytes than the limit: refused, not buffered forever.
+        let big = vec![b'x'; MAX_LINE_BYTES + 2];
+        let err = read_bounded_line(&mut std::io::BufReader::new(&big[..])).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+        // Exactly at the limit, newline-terminated: accepted.
+        let mut at = vec![b'x'; MAX_LINE_BYTES];
+        at.push(b'\n');
+        let line = read_bounded_line(&mut std::io::BufReader::new(&at[..])).unwrap();
+        assert_eq!(line.map(|l| l.len()), Some(MAX_LINE_BYTES));
+    }
+
+    #[test]
+    fn connection_slots_cap_and_release() {
+        let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let a = claim_slot(&live, 2).unwrap();
+        let _b = claim_slot(&live, 2).unwrap();
+        assert!(
+            claim_slot(&live, 2).is_none(),
+            "third connection over a cap of 2"
+        );
+        drop(a);
+        assert!(
+            claim_slot(&live, 2).is_some(),
+            "a closed connection frees its slot"
+        );
     }
 
     /// Extract the `data:` payload of each SSE `event: message` frame from a response body.

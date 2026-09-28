@@ -922,7 +922,8 @@ server over stdio (RFC 0013), a raw TCP socket (`--tcp`, RFC 0115), or Streamabl
 `ekos_retrieve` (compiled fact + graph answers and the inspectable query plan / evidence set, no
 LLM — RFC 0124), `ekos_ekl` (EKL supports point-in-time `AS OF <timestamp>` queries,
 `COUNT`/`GROUP BY` aggregation — RFC 0096, and `SEMANTIC 'text'` retrieval candidate sets — RFC
-0124), `ekos_neighborhood`,
+0124), `ekos_neighborhood` (`depth` 0-3, stops at `max_objects` — default 500, at most
+5,000 — and says so with `truncated: true`),
 `ekos_state`, `ekos_dependents` (single-hop impact analysis), `ekos_impact` (directed,
 kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_graph_export` (the whole compiled
 graph as nodes + edges in one call — filtered, optionally collapsed to super-nodes, truncation
@@ -1022,6 +1023,14 @@ plus the two write-capable tools, to anyone who can reach it. Two safe ways to d
 
 Both `EKOS_WORKSPACE`/`EKOS_CONFIG` env vars and `--config` still apply the same way they do for
 stdio mode; `--tcp` only changes how clients connect, not which workspace is served.
+
+**Limits, on every transport.** A message line is capped at 4 MB, and `--tcp` serves at most 64
+connections at once; the first line is read under that cap before any token is checked. A request
+that panics is answered with `-32603` and the server keeps serving, where before a panic killed a
+stdio server and permanently wedged `--http`'s single worker. `--http` queues at most 64 waiting
+requests and answers `503` with `Retry-After` past that. Traversal bounds (`depth`, `max_hops`,
+`max_objects`) are refused with the limit named when out of range, never silently clamped. Token-less
+`--tcp` or `--http` on a non-loopback address logs a warning.
 
 #### HTTP transport — for clients that only take a URL (RFC 0143)
 
@@ -1404,7 +1413,11 @@ uv --directory web/api run uvicorn --factory app.main:create_app --port 8000 &
 cd web/ui && npm install && npm run dev        # http://localhost:5173 — sign in with a token
 ```
 
-`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173). A hardening pass
+`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173), published on
+`127.0.0.1` only. Settings live in `web/api/.env`. With no `EKOS_CONSOLE_SESSION_SECRET` set, the
+API generates a random secret per process (sessions do not survive a restart) rather than signing
+cookies with a string anyone can read in this repository. It also logs a warning while the read
+token is still the default `dev-console-token`. A hardening pass
 (Phase 7 — performance, theming, packaging) is still to come, authored just-in-time.
 
 ### Fact-segment engine (RFC 0016) — the default for new workspaces

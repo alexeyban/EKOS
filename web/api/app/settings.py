@@ -9,9 +9,18 @@ working.
 from __future__ import annotations
 
 import json
+import logging
+import secrets
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger("ekos.console")
+
+# Placeholders that ship in this public repository. Anything signed with one of these is forgeable
+# by anyone who has read the source.
+_PLACEHOLDER_SESSION_SECRETS = frozenset({"", "dev-session-secret-change-me"})
+DEFAULT_CONSOLE_TOKEN = "dev-console-token"
 
 
 class WorkspaceSeed(BaseModel):
@@ -40,10 +49,13 @@ class Settings(BaseSettings):
     oidc_role_claim: str = "groups"
     oidc_write_values: str = ""  # comma-separated; empty => every authenticated user is read-only
     post_login_redirect: str = "/"
+    # Signs the session cookie, which is trusted in *every* auth mode. Left at the placeholder, a
+    # random per-process secret replaces it (see `_no_published_session_secret`): sessions then do
+    # not survive a restart, and a cookie signed with the published string never validates.
     session_secret: str = "dev-session-secret-change-me"
 
     # Token-mode credentials. `console_token` → read; `console_write_token` → read + write.
-    console_token: str = "dev-console-token"
+    console_token: str = DEFAULT_CONSOLE_TOKEN
     console_write_token: str = ""  # unset => write is never granted in token mode
 
     @property
@@ -84,6 +96,25 @@ class Settings(BaseSettings):
 
     # Origin the Vite dev server runs on, allowed through CORS.
     dev_origin: str = "http://localhost:5173"
+
+    @model_validator(mode="after")
+    def _no_published_session_secret(self) -> Settings:
+        """Found 2026-09-28: with no `EKOS_CONSOLE_SESSION_SECRET` set, anyone could sign
+        `{"user": {"role": "write"}}` with the repo's placeholder and hold write access — including
+        in token mode with no write token configured, because the session is checked first."""
+        if self.session_secret in _PLACEHOLDER_SESSION_SECRETS:
+            log.warning(
+                "EKOS_CONSOLE_SESSION_SECRET is unset or the published placeholder; using a random "
+                "per-process secret. Sessions will not survive a restart — set it to keep them."
+            )
+            self.session_secret = secrets.token_urlsafe(32)
+        if not self.oidc_enabled and self.console_token == DEFAULT_CONSOLE_TOKEN:
+            log.warning(
+                "EKOS_CONSOLE_CONSOLE_TOKEN is the published default %r: anyone who can reach this "
+                "console can read every workspace. Set it in api/.env for anything but local use.",
+                DEFAULT_CONSOLE_TOKEN,
+            )
+        return self
 
     def workspace_seeds(self) -> list[WorkspaceSeed]:
         raw = json.loads(self.workspaces_json or "[]")

@@ -6148,3 +6148,31 @@ PostgreSQL recover completely**, with a ratcheted floor.
 - [ ] Eight subagents with allowlists (ergonomics, explicitly not the security boundary)
 - [ ] Eval scenarios in `ekos eval`: grounding, gap honesty, escalation, **containment**
 - [ ] Headless end-to-end demo: Pagila → ClickHouse, real approvals, recorded transcripts
+
+## Reliability / security audit (2026-09-27/28, devlog_221-222)
+
+A whole-repo check for reliability, security and maintainability: `cargo audit`, a secret scan of
+the git history, a hostile-input run against the real MCP server, and timing on EKOS's own ledger.
+
+- [x] rustls 0.23.41 → 0.23.45 (RUSTSEC-2026-0285) in `ekos/` and `tests/integration/`
+- [x] MCP traversal bounds: `depth` 0-3, `max_hops` ≤20 / ≤200, `max_objects` budget with a
+      `truncated` flag; out-of-range refused with the limit named, never clamped or wrapped
+- [x] Panic isolation on every MCP transport; bounded `--http` queue (503 + `Retry-After`)
+- [x] 4 MB line cap (before auth on `--tcp`), 64-connection cap, non-loopback token-less warning
+- [x] Console: the published placeholder `session_secret` let anyone forge a write-role session
+      cookie in every auth mode — replaced by a random per-process secret; default-read-token warning
+- [x] Compose ports bound to `127.0.0.1` (console and Migrate sandboxes)
+- [ ] **`relationships_for` costs ~15-20 ms per edge in a debug build** (it reconstructs every
+      candidate relationship from facts). This, not the depth, is why a hub neighborhood is slow:
+      depth 3 was 28 s release / 184 s debug for 14 MB. The MCP budget contains it, but every
+      graph read pays it. Profile and index before raising any bound.
+- [ ] `cargo audit` (or `cargo deny`) as a CI job *and* a local gate — `[skip ci]` commits bypass CI,
+      which is how a known advisory sat unnoticed
+- [ ] 12 unmaintained-crate warnings (`instant`, `paste`, `unic-*`, `ttf-parser`); replace over time
+- [ ] MCP tools still ignore unknown argument names (`max_depth` for `max_hops` runs the default)
+- [ ] Separate workspaces' lockfiles drift while CI is skipped — `benchmark/` still listed the local
+      crates at 0.1.0 and `tests/integration/` predated the Migrate crates (refreshed here)
+- [ ] `missing_docs` enabled in no crate; the largest files (`docs-gen/src/lib.rs` 6k lines,
+      `commands/mcp.rs` 4.9k, `fact_ledger.rs` 3.4k) are due for splitting
+- [ ] Set `EKOS_CONSOLE_WORKSPACES_ROOT` in any shared console deployment (unset = any path with
+      `ekos.toml` is registrable by a write-role user)

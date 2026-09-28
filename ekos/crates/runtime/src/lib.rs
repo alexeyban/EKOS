@@ -126,21 +126,43 @@ impl<'a> Runtime<'a> {
     /// - depth=1 → root + direct neighbours + connecting rels
     /// - depth=N → N hops outward
     pub fn load_neighborhood(&self, id: &KirId, depth: u32) -> Result<KirGraph, RuntimeError> {
+        Ok(self.load_neighborhood_bounded(id, depth, usize::MAX)?.0)
+    }
+
+    /// [`Self::load_neighborhood`] that stops collecting once the graph holds `max_objects`
+    /// objects, and says so: the returned `bool` is `true` when the walk stopped early.
+    ///
+    /// For callers that serve an unknown client (`ekos mcp serve`). Around one hub object on EKOS's
+    /// own ledger, depth 3 was 14 MB and 28 s in a release build, and a single-worker transport
+    /// serves nobody else meanwhile. A truncated graph must never read as a complete one, so the
+    /// flag is part of the return value rather than a log line.
+    pub fn load_neighborhood_bounded(
+        &self,
+        id: &KirId,
+        depth: u32,
+        max_objects: usize,
+    ) -> Result<(KirGraph, bool), RuntimeError> {
         let mut graph = KirGraph::new();
+        let mut truncated = false;
         let mut visited: HashSet<KirId> = HashSet::new();
+        // A set, not `graph.relationships.iter().any(..)`: that linear scan ran once per edge, so
+        // the walk was quadratic in the edges it collected. Same output, same order. It was *not*
+        // the dominant cost measured on EKOS's own ledger (2026-09-28) — that is the per-edge
+        // `relationships_for` reconstruction — so the MCP tool also bounds `depth`.
+        let mut seen_rels: HashSet<KirId> = HashSet::new();
         let mut queue: VecDeque<(KirId, u32)> = VecDeque::new();
 
         let root = match self.ledger.get_object(id)? {
             Some(obj) if !Self::is_session_kind(&obj.kind) => obj,
             // Unknown, or session memory (RFC 0151) — never a graph root here.
-            _ => return Ok(graph),
+            _ => return Ok((graph, false)),
         };
 
         visited.insert(root.id);
         queue.push_back((root.id, 0));
         graph.add_object(root);
 
-        while let Some((current_id, current_depth)) = queue.pop_front() {
+        'walk: while let Some((current_id, current_depth)) = queue.pop_front() {
             if current_depth >= depth {
                 continue;
             }
@@ -163,11 +185,15 @@ impl<'a> Runtime<'a> {
                 };
 
                 // Avoid duplicate relationships.
-                if !graph.relationships.iter().any(|r| r.id == rel.id) {
+                if seen_rels.insert(rel.id) {
                     graph.add_relationship(rel);
                 }
 
                 if !visited.contains(&neighbour_id) {
+                    if graph.objects.len() >= max_objects {
+                        truncated = true;
+                        break 'walk;
+                    }
                     visited.insert(neighbour_id);
                     if let Some(neighbour) = self.ledger.get_object(&neighbour_id)? {
                         if Self::is_session_kind(&neighbour.kind) {
@@ -180,7 +206,16 @@ impl<'a> Runtime<'a> {
             }
         }
 
-        Ok(graph)
+        if truncated {
+            // An edge recorded just before the stop may point at an object that was never
+            // collected. Drop it rather than hand back a dangling endpoint.
+            let kept: HashSet<KirId> = graph.objects.iter().map(|o| o.id).collect();
+            graph
+                .relationships
+                .retain(|r| kept.contains(&r.from) && kept.contains(&r.to));
+        }
+
+        Ok((graph, truncated))
     }
 
     /// Directed, relationship-kind-filtered impact trace (RFC 0018).
@@ -978,6 +1013,56 @@ mod tests {
         assert_eq!(g.relationships.len(), 2);
     }
 
+    /// A hub with five spokes: a budget of 3 objects stops the walk, reports it, and leaves no edge
+    /// pointing at an object that was never collected.
+    #[test]
+    fn bounded_neighborhood_truncates_reports_it_and_keeps_no_dangling_edge() {
+        let (ledger, _dir) = temp_ledger();
+        let hub = obj("hub");
+        ledger.append_object(&hub).unwrap();
+        for i in 0..5 {
+            let spoke = obj(&format!("spoke{i}"));
+            ledger.append_object(&spoke).unwrap();
+            ledger.append_relationship(&fk(hub.id, spoke.id)).unwrap();
+        }
+
+        let rt = Runtime::new(&ledger);
+        let (g, truncated) = rt.load_neighborhood_bounded(&hub.id, 1, 3).unwrap();
+        assert!(truncated);
+        assert_eq!(g.objects.len(), 3);
+        let kept: HashSet<KirId> = g.objects.iter().map(|o| o.id).collect();
+        assert!(
+            g.relationships
+                .iter()
+                .all(|r| kept.contains(&r.from) && kept.contains(&r.to)),
+            "a truncated graph must not reference objects it does not contain"
+        );
+        assert_eq!(g.relationships.len(), 2);
+    }
+
+    /// A budget the graph never reaches changes nothing: same objects, same edges, not truncated.
+    #[test]
+    fn bounded_neighborhood_under_budget_equals_unbounded() {
+        let (ledger, _dir) = temp_ledger();
+        let a = obj("a");
+        let b = obj("b");
+        let c = obj("c");
+        ledger.append_object(&a).unwrap();
+        ledger.append_object(&b).unwrap();
+        ledger.append_object(&c).unwrap();
+        ledger.append_relationship(&fk(a.id, b.id)).unwrap();
+        ledger.append_relationship(&fk(b.id, c.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let full = rt.load_neighborhood(&a.id, 2).unwrap();
+        let (bounded, truncated) = rt.load_neighborhood_bounded(&a.id, 2, 100).unwrap();
+        assert!(!truncated);
+        let ids = |g: &KirGraph| g.objects.iter().map(|o| o.id).collect::<Vec<_>>();
+        let rels = |g: &KirGraph| g.relationships.iter().map(|r| r.id).collect::<Vec<_>>();
+        assert_eq!(ids(&full), ids(&bounded));
+        assert_eq!(rels(&full), rels(&bounded));
+    }
+
     #[test]
     fn load_neighborhood_handles_cycles() {
         let (ledger, _dir) = temp_ledger();
@@ -1613,6 +1698,25 @@ mod session_isolation_tests {
                 .all(|o| !Runtime::is_session_kind(&o.kind)),
             "neighbourhood leaked session memory"
         );
+        // The bounded walk (what `ekos_neighborhood` calls) — including when the budget cuts it
+        // short, the path with its own edge-pruning code.
+        for budget in [1, 2, usize::MAX] {
+            let (hood, _) = rt.load_neighborhood_bounded(&f.orders, 3, budget).unwrap();
+            assert!(
+                hood.objects
+                    .iter()
+                    .all(|o| !Runtime::is_session_kind(&o.kind)),
+                "bounded neighbourhood (budget {budget}) leaked session memory"
+            );
+        }
+        assert!(
+            rt.load_neighborhood_bounded(&f.claim, 3, 10)
+                .unwrap()
+                .0
+                .objects
+                .is_empty(),
+            "session memory is not a valid bounded-graph root"
+        );
         let dependents = rt.dependents(&f.orders, 3).unwrap();
         assert_eq!(
             dependents.len(),
@@ -1715,6 +1819,7 @@ mod session_isolation_tests {
             // filtered in this module's tests above
             "load_object",
             "load_neighborhood",
+            "load_neighborhood_bounded",
             "trace_impact",
             "reconstruct_state",
             "reconstruct_state_at",

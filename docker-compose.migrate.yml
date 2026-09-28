@@ -40,7 +40,7 @@ services:
       - -c
       - track_activity_query_size=4096
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - migrate-pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -62,8 +62,8 @@ services:
         soft: 262144
         hard: 262144
     ports:
-      - "58123:8123"   # HTTP — the interface `ekos-plugin-clickhouse` already speaks
-      - "59000:9000"   # native
+      - "127.0.0.1:58123:8123"   # HTTP — the interface `ekos-plugin-clickhouse` already speaks
+      - "127.0.0.1:59000:9000"   # native
     volumes:
       - migrate-ch-data:/var/lib/clickhouse
       # RFC 0160: the source credential lives in server config, never in a generated statement.

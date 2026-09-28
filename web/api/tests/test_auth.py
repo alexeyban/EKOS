@@ -79,3 +79,35 @@ def test_oidc_role_mapping() -> None:
     assert role_for_claims({"groups": ["ekos-write"]}, "groups", {"ekos-write"}) == "write"
     assert role_for_claims({"groups": ["other"]}, "groups", {"ekos-write"}) == "read"
     assert role_for_claims({"roles": "admin"}, "roles", {"admin"}) == "write"  # scalar claim
+
+
+def _forged_session_cookie(secret: str, role: str) -> str:
+    """A session cookie signed the way Starlette's `SessionMiddleware` signs one."""
+    import base64
+    import json
+
+    import itsdangerous
+
+    payload = base64.b64encode(json.dumps({"user": {"subject": "attacker", "role": role}}).encode())
+    return itsdangerous.TimestampSigner(secret).sign(payload).decode()
+
+
+def test_the_published_default_session_secret_cannot_forge_a_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, reset_settings: None
+) -> None:
+    """The session secret's default was a literal in this public repo, and the session cookie is
+    trusted in every auth mode — so with no secret configured, anyone could sign
+    `{"role": "write"}` and hold write access, even with no write token set. The default must not
+    be usable as a key."""
+    from app.settings import Settings
+
+    published_default = Settings.model_fields["session_secret"].default
+    monkeypatch.chdir(tmp_path)  # no stray .env
+    monkeypatch.delenv("EKOS_CONSOLE_SESSION_SECRET", raising=False)
+    monkeypatch.delenv("EKOS_CONSOLE_CONSOLE_WRITE_TOKEN", raising=False)
+    monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_DB", str(tmp_path / "c.db"))
+    monkeypatch.setenv("EKOS_BIN", "/bin/true")
+    for secret in {published_default, "dev-session-secret-change-me"}:
+        with TestClient(create_app()) as c:
+            c.cookies.set("session", _forged_session_cookie(secret, "write"))
+            assert c.get("/api/auth/me").status_code == 401, secret

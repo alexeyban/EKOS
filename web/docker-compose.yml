@@ -44,7 +44,7 @@ services:
   api:
     build: ./api
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - path: ./api/.env
         required: false
@@ -66,7 +66,7 @@ services:
     working_dir: /ui
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     environment:
       VITE_API_TARGET: http://api:8000
     volumes:
