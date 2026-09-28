@@ -310,6 +310,50 @@ pub fn distinct_count(n_distinct: Option<f64>, row_count: i64) -> Option<f64> {
     }
 }
 
+/// Seed for every P1 sample. A fixed seed makes `TABLESAMPLE` draw the same pages for as long as the
+/// table's pages are unchanged, so profiling twice gives the same answer.
+///
+/// Without it the draw was random, and so was everything derived from it. RFC 0159's DDL is derived
+/// from the P1 profile, and RFC 0161 pins an approval to the DDL's hash, so on a small table (where
+/// a 10% page sample is empty about half the time) `review` and `load` generated different DDL and
+/// an approved load was refused as "no matching approval" (LedgerSMB demo, `public.parts`,
+/// 2026-09-28).
+const SAMPLE_SEED: u32 = 20_160;
+
+/// Tables at or below this many pages are read whole rather than sampled: sampling one of a few pages
+/// saves nothing and turns "every value" into "possibly no values at all".
+const FULL_READ_MAX_PAGES: i64 = 128;
+
+/// The `TABLESAMPLE` clause for one P1 read: deterministic, and 100% for a small table.
+fn sample_clause(percent: f64) -> String {
+    format!("TABLESAMPLE SYSTEM ({percent}) REPEATABLE ({SAMPLE_SEED})")
+}
+
+/// The sample percentage to use for `qualified`: the caller's, or 100 when the table is small.
+fn effective_percent(
+    src: &dyn CatalogSource,
+    qualified: &str,
+    percent: f64,
+) -> Result<f64, PgError> {
+    let (schema, table) = split_qualified(qualified)?;
+    let rows = src.rows(&format!(
+        "SELECT relpages FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = {} AND c.relname = {}",
+        q(schema),
+        q(table),
+    ))?;
+    let pages: i64 = rows
+        .first()
+        .and_then(|r| r.first())
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(i64::MAX);
+    Ok(if pages <= FULL_READ_MAX_PAGES {
+        100.0
+    } else {
+        percent
+    })
+}
+
 /// P1 — a bounded sample.
 ///
 /// `TABLESAMPLE SYSTEM` reads whole pages, which is cheap and biased; for profiling shape rather
@@ -327,8 +371,9 @@ fn sample_text(
 ) -> Result<Vec<String>, PgError> {
     let (schema, table) = split_qualified(qualified)?;
     let rows = src.rows(&format!(
-        "SELECT {col}::text FROM {sch}.{tbl} TABLESAMPLE SYSTEM ({percent}) \
+        "SELECT {col}::text FROM {sch}.{tbl} {sample} \
          WHERE {col} IS NOT NULL LIMIT {limit}",
+        sample = sample_clause(percent),
         col = ident(column),
         sch = ident(schema),
         tbl = ident(table),
@@ -346,6 +391,7 @@ pub fn profile_columns_p1(
     limit: u32,
 ) -> Result<Vec<ColumnProfile>, PgError> {
     let (schema, table) = split_qualified(qualified)?;
+    let percent = effective_percent(src, qualified, percent)?;
     let mut out = Vec::new();
     for mut c in p0 {
         let column = c
@@ -381,7 +427,8 @@ pub fn profile_columns_p1(
                 "SELECT count(*), \
                         max(length(replace(trim(leading '-' from {col}::text), '.', ''))), \
                         max(scale({col})) \
-                 FROM {sch}.{tbl} TABLESAMPLE SYSTEM ({percent}) WHERE {col} IS NOT NULL",
+                 FROM {sch}.{tbl} {sample} WHERE {col} IS NOT NULL",
+                sample = sample_clause(percent),
                 col = ident(&column),
                 sch = ident(schema),
                 tbl = ident(table),
@@ -401,7 +448,8 @@ pub fn profile_columns_p1(
             let rows = src.rows(&format!(
                 "SELECT count(*) FILTER (WHERE prev IS NOT NULL AND v < prev) \
                  FROM (SELECT {col} AS v, lag({col}) OVER (ORDER BY ctid) AS prev \
-                       FROM {sch}.{tbl} TABLESAMPLE SYSTEM ({percent})) t",
+                       FROM {sch}.{tbl} {sample}) t",
+                sample = sample_clause(percent),
                 col = ident(&column),
                 sch = ident(schema),
                 tbl = ident(table),
@@ -642,6 +690,46 @@ mod tests {
             parse_bounds("{\"2026-01-01\",\"2026-06-01\"}"),
             vec!["2026-01-01", "2026-06-01"]
         );
+    }
+
+    /// Answers only the `relpages` query, and records every SQL it is asked.
+    struct Pages(i64, std::cell::RefCell<Vec<String>>);
+
+    impl crate::catalog::CatalogSource for Pages {
+        fn rows(&self, sql: &str) -> Result<Vec<Vec<String>>, PgError> {
+            self.1.borrow_mut().push(sql.to_string());
+            Ok(vec![vec![self.0.to_string()]])
+        }
+    }
+
+    #[test]
+    fn a_small_table_is_read_whole_and_a_large_one_is_sampled() {
+        let small = Pages(3, Default::default());
+        assert_eq!(
+            effective_percent(&small, "public.parts", 10.0).unwrap(),
+            100.0
+        );
+        assert!(small.1.borrow()[0].contains("relname = 'parts'"));
+        let large = Pages(FULL_READ_MAX_PAGES + 1, Default::default());
+        assert_eq!(
+            effective_percent(&large, "public.acc_trans", 10.0).unwrap(),
+            10.0
+        );
+    }
+
+    /// Profiling twice must give the same answer, or the DDL derived from it — and the approval
+    /// pinned to that DDL's hash — cannot be reproduced.
+    #[test]
+    fn every_sample_is_seeded() {
+        let c = sample_clause(10.0);
+        assert_eq!(
+            c,
+            format!("TABLESAMPLE SYSTEM (10) REPEATABLE ({SAMPLE_SEED})")
+        );
+        let src = include_str!("profile.rs");
+        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let raw = body.matches("TABLESAMPLE SYSTEM (").count();
+        assert_eq!(raw, 1, "every TABLESAMPLE goes through sample_clause()");
     }
 
     #[test]

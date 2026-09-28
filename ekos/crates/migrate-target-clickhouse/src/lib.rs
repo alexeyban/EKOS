@@ -27,6 +27,7 @@ pub use design::{
     design,
 };
 pub use execute::{
-    Approval, Artifact, Chunk, Environment, ExecuteError, authorize, chunk_insert, plan_chunks,
+    Approval, Artifact, Chunk, Environment, ExecuteError, authorize, chunk_insert,
+    is_range_chunkable, plan_chunks, whole_table_insert,
 };
 pub use typemap::{ColumnEvidence, Lossiness, Mapping, map_column};

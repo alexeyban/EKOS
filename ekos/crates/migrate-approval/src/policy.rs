@@ -85,6 +85,21 @@ pub fn load(path: &std::path::Path) -> Result<LoadedPolicy, PolicyError> {
 mod tests {
     use super::*;
 
+    /// The rest of the file is kebab-case, so the thresholds table must accept kebab-case too.
+    #[test]
+    fn thresholds_accept_kebab_and_snake_case() {
+        for toml_text in [
+            "[thresholds]\nblast-radius = 3\naffected-rows = 7\n",
+            "[thresholds]\nblast_radius = 3\naffected_rows = 7\n",
+        ] {
+            let p: Policy = toml::from_str(toml_text).unwrap();
+            assert_eq!(
+                (p.thresholds.blast_radius, p.thresholds.affected_rows),
+                (3, 7)
+            );
+        }
+    }
+
     #[test]
     fn a_missing_file_yields_defaults_and_says_so() {
         let p = load(std::path::Path::new("/nonexistent/migrate.policy.toml")).unwrap();

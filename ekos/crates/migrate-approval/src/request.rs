@@ -246,13 +246,31 @@ impl ApprovalRequest {
     }
 }
 
-/// The identity inside a labelled actor: `human:alex` and `cli:alex` are both `alex`.
+/// The channel prefixes EKOS itself writes onto an actor label: `cli:` (a request raised from the
+/// CLI), `human:` (added by `lifecycle::approve` to every approver), `agent:`, `console:`.
+const CHANNEL_SCHEMES: [&str; 4] = ["human", "cli", "agent", "console"];
+
+/// The identity inside a labelled actor: `human:alex`, `cli:alex` and `human:cli:alex` are all
+/// `alex`.
 ///
 /// Comparing labels instead of identities is how a self-approval check becomes decoration — the
 /// same person raising from the CLI and approving from the console produces two different strings
 /// for one human.
+///
+/// **Every leading channel scheme is stripped, not just one.** `lifecycle::approve` prefixes
+/// `human:` to whatever `--as` says, so `--as cli:legion` was recorded as `human:cli:legion`,
+/// stripped once to `cli:legion`, and compared unequal to the requester `cli:legion` → `legion`: the
+/// requester approved their own R3 request. Found in the LedgerSMB demo (2026-09-28). Only EKOS's
+/// own channel schemes are stripped, so an OIDC subject's own colons (`https://idp/x:y`) survive.
 pub fn identity_of(label: &str) -> &str {
-    label.split_once(':').map_or(label, |(_, rest)| rest)
+    let mut rest = label;
+    while let Some((scheme, tail)) = rest.split_once(':') {
+        if !CHANNEL_SCHEMES.contains(&scheme) {
+            break;
+        }
+        rest = tail;
+    }
+    rest
 }
 
 fn status_label(s: &RequestStatus) -> &'static str {
@@ -421,6 +439,9 @@ mod tests {
             ("human:alex", "cli:alex"),
             ("agent:alex", "human:alex"),
             ("alex", "human:alex"),
+            // `--as cli:alex` is recorded as `human:cli:alex` — the label that got through.
+            ("cli:alex", "human:cli:alex"),
+            ("cli:alex", "human:console:alex"),
         ] {
             let mut r = request(("dml_insert", "staging"), None);
             r.requester = requester.into();
@@ -455,12 +476,14 @@ mod tests {
     }
 
     #[test]
-    fn identity_strips_exactly_one_scheme() {
+    fn identity_strips_every_channel_scheme_and_nothing_else() {
         assert_eq!(identity_of("human:alex"), "alex");
         assert_eq!(identity_of("cli:alex"), "alex");
+        assert_eq!(identity_of("human:cli:alex"), "alex");
         assert_eq!(identity_of("alex"), "alex");
-        // An OIDC subject can contain colons; only the leading scheme is stripped.
+        // An OIDC subject can contain colons; only EKOS's own channel schemes are stripped.
         assert_eq!(identity_of("human:https://idp/x:y"), "https://idp/x:y");
+        assert_eq!(identity_of("mailto:a@b"), "mailto:a@b");
     }
 
     #[test]

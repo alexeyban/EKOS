@@ -221,9 +221,64 @@ pub fn chunk_insert(
     )
 }
 
+/// Key types [`plan_chunks`] can split into integer ranges. A `text`, `uuid` or `numeric` key cannot
+/// be chunked this way: ranging over `min(accno)..max(accno)` as integers is either a type error
+/// (found on LedgerSMB's `account`, keyed by text) or, worse, a silent mis-chunking.
+pub fn is_range_chunkable(pg_type: &str) -> bool {
+    matches!(
+        pg_type,
+        "smallint" | "integer" | "bigint" | "int2" | "int4" | "int8"
+    )
+}
+
+/// The single statement that copies a whole table, for a table with no integer key to range over.
+///
+/// Correct — every row, once — but neither bounded nor resumable: it is one statement however
+/// large the table is. RFC 0160's `ctid`-range chunking is the bounded answer and is not
+/// implemented yet, so the plan says which of the two it chose.
+pub fn whole_table_insert(
+    target_database: &str,
+    target_table: &str,
+    source_schema: &str,
+    source_table: &str,
+    named_collection: &str,
+) -> String {
+    let ident = |s: &str| format!("`{}`", s.replace('`', "\\`"));
+    let lit = |s: &str| format!("'{}'", s.replace('\'', "\\'"));
+    format!(
+        "INSERT INTO {db}.{tbl} SELECT * FROM postgresql({nc}, schema = {schema}, table = {table})",
+        db = ident(target_database),
+        tbl = ident(target_table),
+        nc = named_collection,
+        schema = lit(source_schema),
+        table = lit(source_table),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_integer_keys_are_range_chunked() {
+        for t in ["integer", "bigint", "smallint", "int4"] {
+            assert!(is_range_chunkable(t), "{t}");
+        }
+        for t in ["text", "character varying", "uuid", "numeric", "date"] {
+            assert!(!is_range_chunkable(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn whole_table_insert_has_no_key_predicate_and_no_credential() {
+        let sql = whole_table_insert("lsmb_raw", "account", "public", "account", "lsmb_source");
+        assert_eq!(
+            sql,
+            "INSERT INTO `lsmb_raw`.`account` SELECT * FROM postgresql(lsmb_source, \
+             schema = 'public', table = 'account')"
+        );
+        assert!(!sql.contains("WHERE"));
+    }
 
     fn artifact() -> Artifact {
         Artifact::new("ART.1", "INSERT INTO db.t SELECT 1")

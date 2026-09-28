@@ -120,10 +120,24 @@ fn nullable(
             ),
         ),
         _ => (
-            format!("Nullable({target})"),
+            nullable_of(target),
             Lossiness::Exact,
             "source column is nullable".into(),
         ),
+    }
+}
+
+/// `Nullable(T)`, nested the way ClickHouse accepts it: `LowCardinality` must be the **outer**
+/// wrapper. `Nullable(LowCardinality(String))` is rejected at `CREATE TABLE` ("Nested type
+/// LowCardinality(String) cannot be inside Nullable type") — found loading LedgerSMB's
+/// `acc_trans.source`, a nullable low-distinct text column; no fixture had had one.
+fn nullable_of(target: &str) -> String {
+    match target
+        .strip_prefix("LowCardinality(")
+        .and_then(|t| t.strip_suffix(')'))
+    {
+        Some(inner) => format!("LowCardinality(Nullable({inner}))"),
+        None => format!("Nullable({target})"),
     }
 }
 
@@ -434,6 +448,20 @@ mod tests {
             map_column("c", "text", true, &has_nulls).target_type,
             "Nullable(String)"
         );
+    }
+
+    #[test]
+    fn a_nullable_low_cardinality_column_nests_the_way_clickhouse_accepts() {
+        let low = ColumnEvidence {
+            distinct: Some(12.0),
+            null_fraction: Some(0.4),
+            ..ev()
+        };
+        assert_eq!(
+            map_column("memo", "text", true, &low).target_type,
+            "LowCardinality(Nullable(String))"
+        );
+        assert_eq!(nullable_of("Int32"), "Nullable(Int32)");
     }
 
     #[test]

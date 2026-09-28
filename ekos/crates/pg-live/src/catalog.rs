@@ -270,13 +270,8 @@ pub fn introspect(
          WHERE {} ORDER BY n.nspname, c.relname, con.conname",
         schema_filter("n.nspname", schemas)
     ))? {
-        let kind = match row[3].as_str() {
-            "p" => ObjectKind::PrimaryKey,
-            "f" => ObjectKind::ForeignKey,
-            "u" => ObjectKind::UniqueConstraint,
-            "c" => ObjectKind::CheckConstraint,
-            "x" => ObjectKind::ExclusionConstraint,
-            other => return Err(PgError::UnknownConstraintType(other.to_string())),
+        let Some(kind) = constraint_kind(&row[3])? else {
+            continue;
         };
         objects.push(CatalogObject {
             kind,
@@ -425,6 +420,26 @@ pub fn introspect(
 /// The enumeration above could be wrong in a way that is invisible — a `JOIN` that drops rows, a
 /// filter that is subtly too narrow — and a smaller catalog silently shrinks RFC 0158's denominator.
 /// So the counts come from a *different* query shape than the one that built the list.
+/// The catalog kind of a `pg_constraint.contype`, or `None` for one recorded elsewhere.
+///
+/// `t` is a constraint trigger (`CREATE CONSTRAINT TRIGGER`). PostgreSQL lists it in `pg_constraint`
+/// *and* in `pg_trigger` with `tgisinternal = false`, so the trigger pass above already records it;
+/// taking it here as well would count it twice. Found on a real schema (LedgerSMB's
+/// `account_link.prohibit_multiple_summary_account_links`), where `discover` failed outright with
+/// `unknown pg_constraint.contype "t"`. Any other unknown type still fails loudly rather than being
+/// dropped: a constraint kind nobody has classified is exactly what a migration must not lose.
+fn constraint_kind(contype: &str) -> Result<Option<ObjectKind>, PgError> {
+    Ok(Some(match contype {
+        "p" => ObjectKind::PrimaryKey,
+        "f" => ObjectKind::ForeignKey,
+        "u" => ObjectKind::UniqueConstraint,
+        "c" => ObjectKind::CheckConstraint,
+        "x" => ObjectKind::ExclusionConstraint,
+        "t" => return Ok(None),
+        other => return Err(PgError::UnknownConstraintType(other.to_string())),
+    }))
+}
+
 pub fn reconcile(
     src: &dyn CatalogSource,
     snapshot: &CatalogSnapshot,
@@ -470,6 +485,24 @@ pub fn reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constraint_triggers_are_left_to_the_trigger_pass_and_unknown_types_still_fail() {
+        assert_eq!(constraint_kind("f").unwrap(), Some(ObjectKind::ForeignKey));
+        assert_eq!(
+            constraint_kind("x").unwrap(),
+            Some(ObjectKind::ExclusionConstraint)
+        );
+        assert_eq!(
+            constraint_kind("t").unwrap(),
+            None,
+            "recorded once, as a Trigger"
+        );
+        assert!(matches!(
+            constraint_kind("n"),
+            Err(PgError::UnknownConstraintType(t)) if t == "n"
+        ));
+    }
 
     #[test]
     fn the_default_schema_filter_excludes_system_schemas() {

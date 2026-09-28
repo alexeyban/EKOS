@@ -1150,7 +1150,7 @@ fn evidence_for(
 ) -> Result<Vec<ekos_migrate_approval::EvidenceRef>> {
     Ok(current_hashes(store, project)?
         .into_iter()
-        .filter(|(id, _)| id.contains(unit))
+        .filter(|(key, _)| evidence_key_is_for(key, unit))
         .map(
             |(fact_id, content_hash)| ekos_migrate_approval::EvidenceRef {
                 fact_id,
@@ -1158,6 +1158,19 @@ fn evidence_for(
             },
         )
         .collect())
+}
+
+/// Whether an evidence key (`Kind:schema.table[.column][#rule]`) belongs to `unit`
+/// (`schema.table`): the table itself or one of its columns — never a table that merely *starts*
+/// with the same letters. A substring match put `public.entity_employee`, `public.entity_note` and
+/// `public.entity_to_location` into the evidence of a request for `public.entity`.
+fn evidence_key_is_for(key: &str, unit: &str) -> bool {
+    let name = key.split_once(':').map_or(key, |(_, n)| n);
+    let name = name.split_once('#').map_or(name, |(n, _)| n);
+    name == unit
+        || name
+            .strip_prefix(unit)
+            .is_some_and(|rest| rest.starts_with('.'))
 }
 
 /// Every migration fact's current content hash, keyed by name.
@@ -1192,8 +1205,21 @@ fn current_hashes(
         let sorted: std::collections::BTreeMap<&String, &serde_json::Value> =
             o.properties.iter().collect();
         let body = serde_json::to_string(&sorted).unwrap_or_default();
+        // Several findings share one name — two rules on the same column (a sentinel-date rule and
+        // a before-1900 rule both fire on every date column) — so the rule is part of the key. Keyed
+        // by name alone, the two collided and whichever `all_objects()` returned last won: a request
+        // raised and approved back to back was declared dead with "evidence has changed" on every
+        // table with a date column (LedgerSMB demo, 2026-09-28).
+        let rule = o
+            .properties
+            .get("rule_id")
+            .and_then(|v| v.as_str())
+            .filter(|_| kind == ekos_migrate::kinds::FINDING_KIND);
         out.insert(
-            format!("{kind}:{}", o.name),
+            match rule {
+                Some(rule) => format!("{kind}:{}#{rule}", o.name),
+                None => format!("{kind}:{}", o.name),
+            },
             ekos_common::ContentHash::of_str(&body).as_str().to_string(),
         );
     }
@@ -1280,8 +1306,12 @@ impl ChClient {
     }
 
     fn run(&self, sql: &str) -> Result<String> {
+        self.run_at(&self.url, sql)
+    }
+
+    fn run_at(&self, url: &str, sql: &str) -> Result<String> {
         let out = std::process::Command::new("curl")
-            .args(["-s", "--fail-with-body", &self.url, "--data-binary", sql])
+            .args(["-s", "--fail-with-body", url, "--data-binary", sql])
             .output()?;
         let body = String::from_utf8_lossy(&out.stdout).to_string();
         if !out.status.success() {
@@ -1303,8 +1333,14 @@ impl ekos_migrate_validate::EngineReader for ChClient {
     fn query(&self, sql: &str) -> Result<Vec<Vec<String>>, ekos_migrate_validate::ReadError> {
         // TabSeparatedRaw, because the default format escapes backslashes on output and the
         // canonical form is full of them (devlog_207).
+        // SQL NULL as an empty cell — how the PostgreSQL reader's simple protocol renders it. Raw TSV
+        // otherwise prints NULL as `\N`, the same bytes as the canonical NULL *sentinel string*, so
+        // an empty table's NULL aggregates read as '\N' here and '' there and every empty table
+        // failed V2 (LedgerSMB demo, `public.warehouse`). A URL setting, because V2's query already
+        // carries its own SETTINGS clause.
+        let url = format!("{}&format_tsv_null_representation=", self.url);
         let body = self
-            .run(&format!("{sql} FORMAT TabSeparatedRaw"))
+            .run_at(&url, &format!("{sql} FORMAT TabSeparatedRaw"))
             .map_err(|e| ekos_migrate_validate::ReadError::Query {
                 engine: "clickhouse".into(),
                 message: e.to_string(),
@@ -1338,6 +1374,19 @@ pub fn validate(
     let bare = unit.rsplit('.').next().unwrap_or(&unit).to_string();
 
     let target = ChClient::from_alias(config, &target_ref.alias)?;
+    // The types actually deployed — what the canonical form must render against. Re-mapping the
+    // column here with no evidence gives a *default* type, not the one `load` created.
+    let deployed: std::collections::HashMap<String, String> = target
+        .run(&format!(
+            "SELECT name, type FROM system.columns WHERE database = '{}' AND table = '{}' \
+             FORMAT TSV",
+            target_db.replace('\'', "\\'"),
+            bare.replace('\'', "\\'")
+        ))?
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .map(|(n, t)| (n.to_string(), t.to_string()))
+        .collect();
 
     // The plan needs the same column list on both sides, rendered per dialect. It is built from the
     // mapping so the two sides agree on order — RFC 0155 joins columns in the *approved target*
@@ -1365,7 +1414,11 @@ pub fn validate(
                 nullability.get(column).copied().unwrap_or(true),
                 &ch::ColumnEvidence::default(),
             );
-            let Some(rule) = column_rule_for(&c.data_type, &mapping.target_type) else {
+            let target_type = deployed
+                .get(column)
+                .cloned()
+                .unwrap_or_else(|| mapping.target_type.clone());
+            let Some(rule) = column_rule_for(&c.data_type, &target_type) else {
                 // A column whose canonical form has no rule is skipped and named, never silently
                 // folded into the hash on one side only.
                 println!("  skipping {column}: no canonical rule for {}", c.data_type);
@@ -1429,15 +1482,49 @@ pub fn validate(
         }
     } else {
         println!("\nValidation failed. Bisect the failed buckets with RFC 0156's V4 path.");
+        // A failed tier is a failed command. This returned Ok(()) — exit 0 — so a pipeline that
+        // gated on `ekos migrate validate` passed a migration its own output called failed
+        // (LedgerSMB demo, 2026-09-28).
+        anyhow::bail!("validation of {unit} failed at tier {tier}");
     }
     let _ = plan;
     Ok(())
 }
 
-/// Which RFC 0155 canonical rule applies to a source type.
+/// The scale of a ClickHouse decimal type, through `Nullable(…)` / `LowCardinality(…)`:
+/// `Decimal(18, 2)` → 2, `Decimal128(22)` → 22, anything else → `None`.
+fn decimal_scale_of(ch_type: &str) -> Option<u32> {
+    let mut t = ch_type.trim();
+    for wrapper in ["Nullable(", "LowCardinality("] {
+        if let Some(inner) = t.strip_prefix(wrapper).and_then(|x| x.strip_suffix(')')) {
+            t = inner.trim();
+        }
+    }
+    if let Some(args) = t.strip_prefix("Decimal(").and_then(|x| x.strip_suffix(')')) {
+        return args
+            .split_once(',')
+            .and_then(|(_, s)| s.trim().parse().ok());
+    }
+    for bits in ["Decimal32(", "Decimal64(", "Decimal128(", "Decimal256("] {
+        if let Some(s) = t.strip_prefix(bits).and_then(|x| x.strip_suffix(')')) {
+            return s.trim().parse().ok();
+        }
+    }
+    None
+}
+
+/// Which RFC 0155 canonical rule applies to a source type, given the type actually deployed.
+///
+/// **An unconstrained `numeric` used to be hashed at scale 0.** PostgreSQL's `to_char` then rounds
+/// (604.74 → "605") while ClickHouse truncates (→ "604"), so the tiers failed at random on
+/// fractions ≥ .5 — and, far worse, a difference in the cents was invisible to V1–V3 on every money
+/// column of a schema like LedgerSMB's, where amounts are unconstrained `numeric`. The scale now
+/// comes from the source declaration, else from the deployed target type (chosen from the measured
+/// profile, so it renders every value exactly), and a column with neither is **skipped and named**
+/// rather than hashed at a scale that hides the data.
 fn column_rule_for(
     source_type: &str,
-    _target_type: &str,
+    target_type: &str,
 ) -> Option<ekos_migrate_validate::ColumnRule> {
     use ekos_migrate_validate::ColumnRule as R;
     let base = source_type
@@ -1451,11 +1538,10 @@ fn column_rule_for(
         "text" | "character varying" => R::Text,
         "character" => R::Char,
         "numeric" | "decimal" => {
-            let scale = source_type
+            let declared = source_type
                 .split_once(',')
-                .and_then(|(_, s)| s.trim_end_matches(')').trim().parse().ok())
-                .unwrap_or(0);
-            R::Decimal(scale)
+                .and_then(|(_, s)| s.trim_end_matches(')').trim().parse().ok());
+            R::Decimal(declared.or_else(|| decimal_scale_of(target_type))?)
         }
         "timestamp with time zone" => R::TimestampUtc,
         "timestamp without time zone" => R::TimestampNaive,
@@ -1643,24 +1729,45 @@ fn plan_artifacts(
 
     let ddl = generate_ddl_for(config, src, unit, target_db, run_id)?;
     let pk = primary_key_columns(src, unit)?;
-    let key = pk.first().cloned().ok_or_else(|| {
-        anyhow::anyhow!(
-            "{unit} has no primary key, so the load cannot be chunked by key range. RFC 0160's \
-             ctid fallback is not implemented yet."
-        )
-    })?;
     let (schema, table) = unit.split_once('.').unwrap_or(("public", unit));
+    let bare = unit.rsplit('.').next().unwrap_or(unit);
+    let mut out = vec![ch::Artifact::new(format!("{unit}:ddl"), ddl)];
+
+    // Integer-keyed tables load in bounded key ranges. A table keyed by text/uuid, or with no key
+    // at all, loads in one whole-table statement: correct, but not bounded or resumable (RFC 0160's
+    // ctid chunking is the bounded answer, not built yet). Found on LedgerSMB, whose `account` is
+    // keyed by text: ranging over it as integers failed with "COALESCE types text and integer".
+    let key = match pk.first() {
+        Some(k) if ch::is_range_chunkable(&column_type(src, schema, table, k)?) => k.clone(),
+        _ => {
+            out.push(ch::Artifact::new(
+                format!("{unit}:chunk:0"),
+                ch::whole_table_insert(
+                    target_db,
+                    bare,
+                    schema,
+                    table,
+                    &config.migrate.source_named_collection,
+                ),
+            ));
+            return Ok(out);
+        }
+    };
     let rows = src.raw_query(&format!(
         "SELECT COALESCE(min(\"{k}\"), 0), COALESCE(max(\"{k}\"), -1) FROM \"{s}\".\"{t}\"",
         k = key.replace('"', "\"\""),
         s = schema.replace('"', "\"\""),
         t = table.replace('"', "\"\"")
     ))?;
-    let lo: i64 = rows[0][0].trim().parse().unwrap_or(0);
-    let hi: i64 = rows[0][1].trim().parse().unwrap_or(-1);
+    // An unparseable bound is an error, never a silent 0: a wrong range loads the wrong rows.
+    let bound = |v: &str| -> Result<i64> {
+        v.trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("{unit}: key bound {v:?} is not an integer"))
+    };
+    let lo = bound(&rows[0][0])?;
+    let hi = bound(&rows[0][1])?;
 
-    let bare = unit.rsplit('.').next().unwrap_or(unit);
-    let mut out = vec![ch::Artifact::new(format!("{unit}:ddl"), ddl)];
     for c in ch::plan_chunks(lo, hi, config.migrate.chunk_rows) {
         out.push(ch::Artifact::new(
             format!("{unit}:chunk:{}", c.index),
@@ -2408,6 +2515,21 @@ fn report_completeness(
     }
 }
 
+/// The PostgreSQL type of one column, as `information_schema` spells it (`integer`, `text`, …).
+fn column_type(src: &PgSource, schema: &str, table: &str, column: &str) -> Result<String> {
+    let q = |v: &str| v.replace('\'', "''");
+    let rows = src.raw_query(&format!(
+        "SELECT data_type FROM information_schema.columns \
+         WHERE table_schema = '{}' AND table_name = '{}' AND column_name = '{}'",
+        q(schema),
+        q(table),
+        q(column)
+    ))?;
+    rows.first()
+        .map(|r| r[0].trim().to_string())
+        .ok_or_else(|| anyhow::anyhow!("{schema}.{table}.{column}: column not found"))
+}
+
 /// Constraints that are declared and were never validated. Their existence is not a guarantee.
 fn unvalidated_constraints(src: &PgSource, table: &str) -> Result<Vec<String>> {
     let (schema, name) = table.split_once('.').unwrap_or(("public", table));
@@ -2445,6 +2567,78 @@ fn whoami() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two rules on one column are two facts with one name. Both must be in the snapshot, and the
+    /// hashes must not depend on read order — otherwise raise-then-approve reports "changed".
+    #[test]
+    fn two_findings_on_one_column_are_both_evidence_and_hash_stably() {
+        use ekos_migrate::profile_facts::{FindingFact, write_findings};
+        let dir = tempfile::tempdir().unwrap();
+        let store = ekos_ledger::FactLedger::open(dir.path()).unwrap();
+        let finding = |rule: &str| FindingFact {
+            rule_id: rule.into(),
+            family: "dq".into(),
+            severity: "warn".into(),
+            target: None,
+            lossiness: None,
+            object: "public.t.d".into(),
+            message: format!("{rule} fired"),
+            affected_rows: Some(0),
+            evidence_sql: None,
+            blocks: false,
+        };
+        let (a, b) = (
+            finding("DQ.COMPLETE.002"),
+            finding("COMPAT.CH.DATE_BEFORE_1900"),
+        );
+        write_findings(&store, "p", &[a, b], "run").unwrap();
+
+        let first = current_hashes(&store, "p").unwrap();
+        let keys: Vec<&String> = first.keys().collect();
+        assert_eq!(keys.len(), 2, "{keys:?}");
+        for _ in 0..5 {
+            assert_eq!(current_hashes(&store, "p").unwrap(), first);
+        }
+    }
+
+    #[test]
+    fn unconstrained_numeric_is_hashed_at_the_deployed_scale_never_zero() {
+        use ekos_migrate_validate::ColumnRule as R;
+        assert_eq!(decimal_scale_of("Decimal(18, 2)"), Some(2));
+        assert_eq!(decimal_scale_of("Nullable(Decimal(38, 22))"), Some(22));
+        assert_eq!(decimal_scale_of("Decimal128(22)"), Some(22));
+        assert_eq!(decimal_scale_of("String"), None);
+
+        assert_eq!(
+            column_rule_for("numeric", "Decimal(18, 2)"),
+            Some(R::Decimal(2))
+        );
+        assert_eq!(
+            column_rule_for("numeric(12,4)", "Decimal(18, 2)"),
+            Some(R::Decimal(4))
+        );
+        // No scale anywhere: skipped, not hashed at 0 (which hid every cent).
+        assert_eq!(column_rule_for("numeric", "String"), None);
+    }
+
+    #[test]
+    fn evidence_keys_match_the_unit_exactly_not_by_prefix() {
+        let unit = "public.entity";
+        for yes in [
+            "MigrationTableProfile:public.entity",
+            "MigrationColumnProfile:public.entity.created",
+            "MigrationFinding:public.entity.created#DQ.COMPLETE.002",
+        ] {
+            assert!(evidence_key_is_for(yes, unit), "{yes}");
+        }
+        for no in [
+            "MigrationFinding:public.entity_employee.enddate#DQ.COMPLETE.002",
+            "MigrationColumnProfile:public.entity_note.created",
+            "MigrationTableProfile:public.entity_to_location",
+        ] {
+            assert!(!evidence_key_is_for(no, unit), "{no}");
+        }
+    }
 
     fn enabled() -> EkosConfig {
         let mut c = EkosConfig::default();

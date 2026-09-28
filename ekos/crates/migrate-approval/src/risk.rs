@@ -92,7 +92,13 @@ pub struct ActionFacts {
 /// right one for a 900-table warehouse, and a constant in code is a constant somebody has to patch.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Thresholds {
+    // `migrate.policy.toml` is kebab-case everywhere else (`scan-budget-rows`), so a policy writing
+    // `[thresholds] blast-radius = …` failed to parse with "missing field `blast_radius`" (found
+    // in the LedgerSMB demo). Both spellings are accepted; the serialized form is unchanged,
+    // because thresholds may already sit in recorded approval facts.
+    #[serde(alias = "blast-radius")]
     pub blast_radius: usize,
+    #[serde(alias = "affected-rows")]
     pub affected_rows: i64,
 }
 

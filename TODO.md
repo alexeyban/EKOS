@@ -6186,3 +6186,25 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       `commands/mcp.rs` 4.9k, `fact_ledger.rs` 3.4k) are due for splitting
 - [ ] Set `EKOS_CONSOLE_WORKSPACES_ROOT` in any shared console deployment (unset = any path with
       `ekos.toml` is registrable by a write-role user)
+
+## LedgerSMB demo findings (2026-09-28, devlog_226) — found, not yet fixed
+
+14 defects were fixed in devlog_226. These were found in the same run and are still open:
+
+- [ ] `resolve` stops on cross-language homonyms (Table `gl` vs PerlPackage `LedgerSMB::GL`, JS vs
+      Perl `initialize` — 15 on LedgerSMB). Needs an RFC 0093-style narrowing; `--force` is the
+      workaround and merges nothing.
+- [ ] Compile `sql/changes/` `ALTER`s on top of the base DDL (RFC 0146 follow-up). EKOS's repository
+      view of LedgerSMB is the pre-upgrade schema: 316 drift findings, e.g. `acc_trans.amount` vs
+      `amount_bc`.
+- [ ] `DQ.UNIQ.001` fires BLOCK on foreign-key columns (`acc_trans.trans_id`, `chart_id`, …) — skip
+      columns covered by a declared or inferred FK.
+- [ ] Join-harvest alias resolution attributes columns to the wrong table
+      (`country.country_id → entity.id`); measurement prevents a false claim, but the candidates are
+      noise.
+- [ ] Transform dispositions: a BLOCK like `COMPAT.CH.INFINITE_TIMESTAMP` (`tax.validto`) has no
+      place to record "map infinity → NULL", and `load` is `SELECT *`. RFC 0161 follow-up.
+- [ ] Canonical rule for `jsonb` (skipped from V3 today, named in the output).
+- [ ] P1 profile could be read from the recorded profile facts instead of re-sampled inside
+      `review`/`load` — determinism by construction rather than by seed.
+- [ ] CLI `--as` is an unauthenticated claim; document that four-eyes needs the console's OIDC path.

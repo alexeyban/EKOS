@@ -1,28 +1,28 @@
 Text
-  coalesce(replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f'), '\N')
+  (case when "txt" is null then '\N' else replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f') end)
 Char
-  coalesce(replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f'), '\N')
+  (case when "ch" is null then '\N' else replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f') end)
 Bool
-  coalesce((case when "flag" then 't' else 'f' end), '\N')
+  (case when "flag" is null then '\N' else (case when "flag" then 't' else 'f' end) end)
 Int
-  coalesce("n"::text, '\N')
+  (case when "n" is null then '\N' else "n"::text end)
 Decimal(2)
-  coalesce(trim(to_char("amt", 'FM9999999999999999999990.00')), '\N')
+  (case when "amt" is null then '\N' else trim(to_char("amt", 'FM9999999999999999999990.00')) end)
 TimestampUtc
-  coalesce(to_char("ts" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US'), '\N')
+  (case when "ts" is null then '\N' else to_char("ts" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') end)
 TimestampNaive
-  coalesce(to_char("ts_naive", 'YYYY-MM-DD"T"HH24:MI:SS.US'), '\N')
+  (case when "ts_naive" is null then '\N' else to_char("ts_naive", 'YYYY-MM-DD"T"HH24:MI:SS.US') end)
 Date
-  coalesce(to_char("d", 'YYYY-MM-DD'), '\N')
+  (case when "d" is null then '\N' else to_char("d", 'YYYY-MM-DD') end)
 Time
-  coalesce(to_char("t", 'HH24:MI:SS.US'), '\N')
+  (case when "t" is null then '\N' else to_char("t", 'HH24:MI:SS.US') end)
 Uuid
-  coalesce(lower("u"::text), '\N')
+  (case when "u" is null then '\N' else lower("u"::text) end)
 Bytes
-  coalesce(encode("b", 'hex'), '\N')
+  (case when "b" is null then '\N' else encode("b", 'hex') end)
 Inet
-  coalesce(replace(replace("ip"::text, '\', '\\'), chr(31), '\x1f'), '\N')
+  (case when "ip" is null then '\N' else replace(replace("ip"::text, '\', '\\'), chr(31), '\x1f') end)
 ROW_HASH
-  md5(coalesce(replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f'), '\N') || chr(31) || coalesce(replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f'), '\N'))
+  md5((case when "txt" is null then '\N' else replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f') end) || chr(31) || (case when "ch" is null then '\N' else replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f') end))
 BUCKET_QUERY
-  SELECT (('x' || substr(md5(coalesce("id"::text, '\N')), 1, 15))::bit(60))::bigint % 4096 AS bucket, count(*) AS row_count, sum(((('x' || substr(md5(coalesce(replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f'), '\N') || chr(31) || coalesce(replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f'), '\N')), 1, 15))::bit(60))::bigint)::numeric) AS hash_sum FROM s.orders GROUP BY bucket ORDER BY bucket
+  SELECT (('x' || substr(md5((case when "id" is null then '\N' else "id"::text end)), 1, 15))::bit(60))::bigint % 4096 AS bucket, count(*) AS row_count, sum(((('x' || substr(md5((case when "txt" is null then '\N' else replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f') end) || chr(31) || (case when "ch" is null then '\N' else replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f') end)), 1, 15))::bit(60))::bigint)::numeric) AS hash_sum FROM s.orders GROUP BY bucket ORDER BY bucket

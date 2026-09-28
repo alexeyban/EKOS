@@ -82,6 +82,29 @@ mod tests {
         }
     }
 
+    /// The exact CLI path that approved its own R3 request in the LedgerSMB demo: raised as
+    /// `cli:legion`, approved with `--as cli:legion`, which `approve` labels `human:cli:legion`.
+    #[test]
+    fn a_requester_cannot_self_approve_by_typing_their_own_label() {
+        let mut r = pending();
+        r.requester = "cli:legion".into();
+        let err = approve(
+            &mut r,
+            Actor::Human,
+            &["cli:legion".into()],
+            "s",
+            None,
+            &|_| Some("h1".into()),
+            "t0",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, crate::request::RequestError::SelfApproval { .. }),
+            "{err:?}"
+        );
+        assert!(matches!(r.status, RequestStatus::Pending), "still pending");
+    }
+
     #[test]
     fn an_approval_is_labelled_as_human() {
         let mut r = pending();

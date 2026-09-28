@@ -133,10 +133,15 @@ pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
         (Dialect::Postgres, ColumnRule::Bytes) => format!("encode({c}, 'hex')"),
         (Dialect::ClickHouse, ColumnRule::Bytes) => format!("lower(hex({c}))"),
     };
-    // NULL is applied last, over the rendered value, so no rule has to handle it itself.
+    // NULL is decided on the **column**, not on the rendered value, and the same way on both
+    // sides. `coalesce(body, …)` on PostgreSQL only fired when the *rendering* was NULL — and the
+    // boolean rule renders NULL as 'f' (`CASE WHEN NULL … ELSE 'f'`), so a NULL boolean hashed as
+    // false on PostgreSQL and as the NULL sentinel on ClickHouse. Found as a V2/V3 failure on
+    // LedgerSMB's all-NULL `ar.force_closed`; the same asymmetry meant a load that turned NULLs into
+    // false would have hashed equal on the PostgreSQL side of a PG→PG check.
     let null = null_literal(d);
     match d {
-        Dialect::Postgres => format!("coalesce({body}, {null})"),
+        Dialect::Postgres => format!("(case when {c} is null then {null} else {body} end)"),
         Dialect::ClickHouse => format!("if(isNull({c}), {null}, {body})"),
     }
 }
@@ -287,16 +292,54 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
         ));
         parts.push(format!("min({e}) AS min_{i}"));
         parts.push(format!("max({e}) AS max_{i}"));
-        parts.push(format!("sum(length({e})) AS len_{i}"));
+        // Bytes on both sides: the canonical form is compared as bytes, and PostgreSQL's
+        // `length()` counts *characters* while ClickHouse's counts *bytes* — so every column
+        // holding one non-ASCII character diverged at V2 (LedgerSMB demo: "Raw Materials — Steel").
+        let len = match d {
+            Dialect::Postgres => format!("octet_length({e})"),
+            Dialect::ClickHouse => format!("length({e})"),
+        };
+        parts.push(format!("sum({len}) AS len_{i}"));
     }
     // ClickHouse has no `case when` shorthand difference here, but `sum(case when …)` is valid in
     // both, so one form serves both dialects and there is one less place to diverge.
-    format!("SELECT {} FROM {table}", parts.join(", "))
+    match d {
+        Dialect::Postgres => format!("SELECT {} FROM {table}", parts.join(", ")),
+        // Over an empty table PostgreSQL's min/max/sum are NULL and ClickHouse's are type defaults
+        // ('' / 0), so every empty table failed V2 on nulls, min and max. This setting makes
+        // ClickHouse answer NULL, as PostgreSQL does.
+        Dialect::ClickHouse => format!(
+            "SELECT {} FROM {table} SETTINGS aggregate_functions_null_for_empty = 1",
+            parts.join(", ")
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A NULL boolean must render as the NULL sentinel on **both** engines. PostgreSQL used to
+    /// coalesce the *rendered* value, and the boolean rule renders NULL as 'f'.
+    #[test]
+    fn v2_measures_bytes_and_treats_an_empty_table_the_same_on_both_engines() {
+        let pg = aggregate_query(Dialect::Postgres, "t", &["x".into()]);
+        let ch = aggregate_query(Dialect::ClickHouse, "t", &["x".into()]);
+        assert!(pg.contains("sum(octet_length(x))"), "{pg}");
+        assert!(ch.contains("sum(length(x))"), "{ch}");
+        assert!(
+            ch.ends_with("SETTINGS aggregate_functions_null_for_empty = 1"),
+            "{ch}"
+        );
+    }
+
+    #[test]
+    fn null_is_decided_on_the_column_on_both_engines() {
+        let pg = canon_expr(Dialect::Postgres, "b", ColumnRule::Bool);
+        let ch = canon_expr(Dialect::ClickHouse, "b", ColumnRule::Bool);
+        assert!(pg.starts_with("(case when \"b\" is null then"), "{pg}");
+        assert!(ch.starts_with("if(isNull(\"b\")"), "{ch}");
+    }
 
     #[test]
     fn bisect_filters_in_where_not_having() {
