@@ -537,7 +537,7 @@ pub fn detect_workspace(cwd: &Path, config: &EkosConfig) -> Result<Detection> {
             // configured workspace does not re-walk what that config exists to skip.
             !ignore.contains(name.as_str())
         })
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
     {
         if !entry.file_type().is_file() {
             continue;
@@ -561,7 +561,7 @@ pub fn detect_workspace(cwd: &Path, config: &EkosConfig) -> Result<Detection> {
             WalkDir::new(root)
                 .follow_links(false)
                 .into_iter()
-                .filter_map(|e| e.ok())
+                .filter_map(std::result::Result::ok)
                 .filter(|e| e.file_type().is_file())
                 .take(CONTAMINANT_COUNT_CAP)
                 .filter_map(|e| {
@@ -827,7 +827,7 @@ mod tests {
     use super::*;
 
     fn listing(paths: &[&str]) -> Vec<String> {
-        paths.iter().map(|s| s.to_string()).collect()
+        paths.iter().map(std::string::ToString::to_string).collect()
     }
 
     /// Every variant, positive **and** negative.

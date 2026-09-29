@@ -14,8 +14,11 @@ from ..auth import check_role, require_role
 from ..deps import require_workspace
 from ..scheduler import ConsoleScheduler, ScheduleError, build_trigger
 from ..settings import get_settings
+from ._responses import CONFLICT, NOT_FOUND, UNPROCESSABLE
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
+
+NO_SUCH_SCHEDULE = "no such schedule"
 
 
 class ScheduleIn(BaseModel):
@@ -81,7 +84,12 @@ async def list_schedules(workspace: str | None = Query(None)) -> list[dict]:
     return [_dump(s) for s in models.list_schedules(workspace)]
 
 
-@router.post("", status_code=201, dependencies=[Depends(require_role("write"))])
+@router.post(
+    "",
+    status_code=201,
+    dependencies=[Depends(require_role("write"))],
+    responses={404: NOT_FOUND, 422: UNPROCESSABLE},
+)
 async def create_schedule(body: ScheduleIn, request: Request) -> dict:
     require_workspace(body.workspace_id)  # 404 if unknown
     _validate(body.command, body.params, body.trigger_kind, body.trigger_expr)
@@ -103,11 +111,15 @@ async def create_schedule(body: ScheduleIn, request: Request) -> dict:
     return _dump(row)
 
 
-@router.patch("/{schedule_id}", dependencies=[Depends(require_role("write"))])
+@router.patch(
+    "/{schedule_id}",
+    dependencies=[Depends(require_role("write"))],
+    responses={404: NOT_FOUND, 422: UNPROCESSABLE},
+)
 async def patch_schedule(schedule_id: str, body: SchedulePatch, request: Request) -> dict:
     current = models.get_schedule(schedule_id)
     if current is None:
-        raise HTTPException(status_code=404, detail="no such schedule")
+        raise HTTPException(status_code=404, detail=NO_SUCH_SCHEDULE)
     fields = body.model_dump(exclude_none=True)
     if "notify_url" in fields and not fields["notify_url"].startswith(("http://", "https://")):
         raise HTTPException(status_code=422, detail="notify_url must be an http(s) URL")
@@ -119,17 +131,26 @@ async def patch_schedule(schedule_id: str, body: SchedulePatch, request: Request
     return _dump(row)
 
 
-@router.delete("/{schedule_id}", status_code=204, dependencies=[Depends(require_role("write"))])
+@router.delete(
+    "/{schedule_id}",
+    status_code=204,
+    dependencies=[Depends(require_role("write"))],
+    responses={404: NOT_FOUND},
+)
 async def delete_schedule(schedule_id: str, request: Request) -> None:
     if not models.delete_schedule(schedule_id):
-        raise HTTPException(status_code=404, detail="no such schedule")
+        raise HTTPException(status_code=404, detail=NO_SUCH_SCHEDULE)
     _sched(request).remove(schedule_id)
 
 
-@router.post("/{schedule_id}/run-now", dependencies=[Depends(require_role("write"))])
+@router.post(
+    "/{schedule_id}/run-now",
+    dependencies=[Depends(require_role("write"))],
+    responses={404: NOT_FOUND, 409: CONFLICT},
+)
 async def run_now(schedule_id: str, request: Request) -> dict:
     if models.get_schedule(schedule_id) is None:
-        raise HTTPException(status_code=404, detail="no such schedule")
+        raise HTTPException(status_code=404, detail=NO_SUCH_SCHEDULE)
     run_id = await _sched(request).fire(schedule_id)
     if run_id is None:
         raise HTTPException(status_code=409, detail="could not fire (workspace gone or queue full)")

@@ -89,7 +89,7 @@ impl ParquetExportReader {
             return Ok(None);
         }
         let mut dirs: Vec<PathBuf> = std::fs::read_dir(export_root)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .map(|e| e.path())
             .filter(|p| {
                 p.is_dir()
@@ -190,7 +190,7 @@ fn get_string(
 ) -> Result<String, CryptoReaderError> {
     use parquet::record::RowAccessor;
     row.get_string(idx)
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .map_err(|_| CryptoReaderError::UnexpectedType {
             file: path.display().to_string(),
             column,

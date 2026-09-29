@@ -311,7 +311,7 @@ pub(crate) fn try_consume_resource(
         .properties
         .get("resources")
         .and_then(|r| r.get(key))
-        .and_then(|v| v.as_f64())
+        .and_then(serde_json::Value::as_f64)
     else {
         return Ok(ConsumeResult::NoSuchResource);
     };
@@ -512,7 +512,7 @@ fn bump_trust(
     let current = rel
         .properties
         .get("value")
-        .and_then(|v| v.as_f64())
+        .and_then(serde_json::Value::as_f64)
         .unwrap_or(0.0);
     rel.properties.insert(
         "value".to_string(),

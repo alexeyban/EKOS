@@ -177,7 +177,7 @@ fn store_fingerprint(root: &Path) -> Option<SystemTime> {
     }
     walkdir::WalkDir::new(root)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_type().is_file())
         .filter_map(|e| e.metadata().ok()?.modified().ok())
         .max()
@@ -338,7 +338,7 @@ pub fn handle_message_isolated(
         Err(panic) => {
             let what = panic
                 .downcast_ref::<&str>()
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .or_else(|| panic.downcast_ref::<String>().cloned())
                 .unwrap_or_else(|| "non-string panic payload".into());
             tracing::error!(%what, "mcp: request panicked; the server recovered");
@@ -2191,18 +2191,18 @@ fn node_summary(obj: &ekos_kir::KirObject, node_type: &str) -> String {
             prop("join_kind"),
             obj.properties
                 .get("keys")
-                .map(|v| v.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default()
         ),
         "Aggregate" => format!(
             "groups by {}, aggregates {}",
             obj.properties
                 .get("group_by")
-                .map(|v| v.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default(),
             obj.properties
                 .get("aggs")
-                .map(|v| v.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default()
         ),
         "Unmapped" => format!(
@@ -2234,11 +2234,11 @@ fn node_comparable(obj: &ekos_kir::KirObject, node_type: &str) -> String {
             "{}|{}",
             obj.properties
                 .get("group_by")
-                .map(|v| v.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default(),
             obj.properties
                 .get("aggs")
-                .map(|v| v.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_default()
         ),
         _ => String::new(),

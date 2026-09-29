@@ -788,7 +788,11 @@ pub fn report(
         "Data-quality and target-compatibility findings, with the rows each affects, where that was measured.",
     )];
     for o in &findings {
-        let rows = match o.properties.get("affected_rows").and_then(|v| v.as_i64()) {
+        let rows = match o
+            .properties
+            .get("affected_rows")
+            .and_then(serde_json::Value::as_i64)
+        {
             Some(n) => format!("{n} row(s) affected"),
             // "Not measured" and "zero" are different answers, and the report must not collapse
             // them — that is the same mistake as an empty sample reading as a measurement of zero.
@@ -867,7 +871,12 @@ pub fn report(
         // divergence: RFC 0161's disposition machinery will supply the other half.
         unexplained_divergences: findings
             .iter()
-            .filter(|o| o.properties.get("blocks").and_then(|v| v.as_bool()) == Some(true))
+            .filter(|o| {
+                o.properties
+                    .get("blocks")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+            })
             .count(),
         tiers_not_run: units
             .iter()
@@ -2236,7 +2245,9 @@ fn assess_inferred_keys(
         let verdict = result
             .as_ref()
             .map(ekos_migrate_dq::InclusionResult::verdict);
-        let rate = result.as_ref().and_then(|r| r.inclusion_rate());
+        let rate = result
+            .as_ref()
+            .and_then(ekos_migrate_dq::InclusionResult::inclusion_rate);
         let detail = match (&verdict, rate) {
             (Some(v), Some(r)) => format!("{} ({:.2}% of values match)", v.as_str(), r * 100.0),
             (Some(v), None) => v.as_str().to_string(),

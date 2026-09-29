@@ -22,13 +22,17 @@ set -eu
 REPO="alexeyban/EKOS"
 INSTALL_DIR="${EKOS_INSTALL_DIR:-$HOME/.local/bin}"
 
+# POSIX sh has no `local`, so each function names its arguments with a function-prefixed
+# variable instead of reading "$1"/"$2" throughout.
 die() {
-    printf 'ekos install: %s\n' "$1" >&2
+    die_msg="$1"
+    printf 'ekos install: %s\n' "$die_msg" >&2
     exit 1
 }
 
 need() {
-    command -v "$1" >/dev/null 2>&1 || die "this installer needs '$1' on PATH"
+    need_cmd="$1"
+    command -v "$need_cmd" >/dev/null 2>&1 || die "this installer needs '$need_cmd' on PATH"
 }
 
 need uname
@@ -36,11 +40,11 @@ need mkdir
 need tar
 
 if command -v curl >/dev/null 2>&1; then
-    fetch() { curl -fsSL "$1" -o "$2"; }
-    fetch_stdout() { curl -fsSL "$1"; }
+    fetch() { fetch_url="$1"; fetch_dest="$2"; curl -fsSL "$fetch_url" -o "$fetch_dest"; }
+    fetch_stdout() { fetch_url="$1"; curl -fsSL "$fetch_url"; }
 elif command -v wget >/dev/null 2>&1; then
-    fetch() { wget -qO "$2" "$1"; }
-    fetch_stdout() { wget -qO- "$1"; }
+    fetch() { fetch_url="$1"; fetch_dest="$2"; wget -qO "$fetch_dest" "$fetch_url"; }
+    fetch_stdout() { fetch_url="$1"; wget -qO- "$fetch_url"; }
 else
     die "this installer needs curl or wget on PATH"
 fi

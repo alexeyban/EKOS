@@ -169,7 +169,7 @@ pub fn build_object_page_model(
         .properties
         .get("description")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
     // RFC 0089: same promote-out-of-the-generic-table treatment `description` gets, for the same
     // reason — shown structured (in `## Definition`'s own "Defined in" line) rather than as a raw
     // JSON blob in the generic properties table.
@@ -185,17 +185,17 @@ pub fn build_object_page_model(
         .properties
         .get("ai_overview")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
     let ai_usage = object
         .properties
         .get("ai_usage")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
     let ai_comment_check = object
         .properties
         .get("ai_comment_check")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
     let mut properties: Vec<(String, String)> = object
         .properties
         .iter()
@@ -1817,7 +1817,7 @@ fn render_rollup_container_fallback(
         let member_count = rollup
             .properties
             .get("member_count")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         let label = match page_names.get(&rollup.id) {
             Some(f) => format!("[{}]({f})", rollup.name),
@@ -1869,7 +1869,7 @@ fn render_component_view(
         let member_count = rollup
             .properties
             .get("member_count")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
         let rollup_label = match page_names.get(&rollup.id) {
             Some(f) => format!("[{} member file(s)]({f})", member_count),
@@ -2247,7 +2247,7 @@ pub fn render_readme(objects: &[KirObject]) -> RenderedPage {
             let count_of = |o: &KirObject| {
                 o.properties
                     .get("commit_count")
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0)
             };
             count_of(b)
@@ -2255,7 +2255,11 @@ pub fn render_readme(objects: &[KirObject]) -> RenderedPage {
                 .then_with(|| a.name.cmp(&b.name))
         });
         for c in &contributors {
-            match c.properties.get("commit_count").and_then(|v| v.as_i64()) {
+            match c
+                .properties
+                .get("commit_count")
+                .and_then(serde_json::Value::as_i64)
+            {
                 Some(n) => out.push_str(&format!("- {} ({n} commits)\n", c.name)),
                 None => out.push_str(&format!("- {}\n", c.name)),
             }
@@ -2538,7 +2542,7 @@ pub fn render_architecture(
             let member_count = rollup
                 .properties
                 .get("member_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             let link = page_names.get(&rollup.id);
             let label = match link {
@@ -3435,7 +3439,7 @@ pub fn render_dependency_risk_report(
         let dev = rel
             .properties
             .get("dev_dependency")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         npm_rows.push((
             declared_in.to_string(),
@@ -3586,7 +3590,7 @@ pub fn render_onboarding_guide(objects: &[KirObject]) -> RenderedPage {
         let count_of = |o: &&KirObject| {
             o.properties
                 .get("member_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0)
         };
         count_of(b).cmp(&count_of(a))
@@ -3596,7 +3600,7 @@ pub fn render_onboarding_guide(objects: &[KirObject]) -> RenderedPage {
             let count = top
                 .properties
                 .get("member_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             out.push_str(&format!(
                 "The largest compiled subsystem is **{}** ({count} member file(s)) — a \

@@ -197,7 +197,9 @@ pub fn profile_columns_p0(
         // Classification runs on the *name* here; P1 adds the value-pattern signal. A column named
         // `email` suppresses its bounds before anything has looked at the data.
         let pii = pii::classify_name(name);
-        let suppress = pii.as_ref().is_some_and(|c| c.suppresses_values());
+        let suppress = pii
+            .as_ref()
+            .is_some_and(super::pii::Classification::suppresses_values);
 
         // `histogram_bounds` are real values from the table. Orderable non-text types are the ones
         // RFC 0158's range rules need; text bounds are withheld because a min or max is a value.
@@ -409,7 +411,10 @@ pub fn profile_columns_p1(
                 c.pii = Some(found);
             }
         }
-        c.values_suppressed = c.pii.as_ref().is_some_and(|p| p.suppresses_values());
+        c.values_suppressed = c
+            .pii
+            .as_ref()
+            .is_some_and(super::pii::Classification::suppresses_values);
         if c.values_suppressed {
             // A P0 bound may have been recorded before the pattern signal existed. Withdraw it.
             c.min = None;

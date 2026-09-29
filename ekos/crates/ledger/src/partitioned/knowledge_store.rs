@@ -3,7 +3,10 @@
 //! `PartitionError` maps to `LedgerError` via `From`: a wrapped `Ledger` error is unwrapped;
 //! anything else becomes `Corrupt`.
 
-use super::*;
+use super::{
+    DateTime, KirEvent, KirEvidence, KirId, KirObject, KirRelationship, KnowledgeStore, LedgerDiff,
+    LedgerError, PartitionError, PartitionedLedger, Path, Utc,
+};
 
 impl From<PartitionError> for LedgerError {
     fn from(e: PartitionError) -> Self {

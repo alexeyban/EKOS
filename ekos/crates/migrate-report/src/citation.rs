@@ -184,7 +184,7 @@ pub fn verify(claims: &[Claim], facts: &FactKinds) -> (Groundedness, Vec<Citatio
                             .kind
                             .supported_by()
                             .iter()
-                            .map(|s| s.to_string())
+                            .map(std::string::ToString::to_string)
                             .collect(),
                     });
                 }

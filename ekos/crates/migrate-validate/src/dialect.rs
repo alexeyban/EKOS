@@ -152,13 +152,17 @@ pub fn row_hash_expr(d: Dialect, column_exprs: &[String]) -> String {
         Dialect::Postgres => format!("chr({})", UNIT_SEPARATOR as u32),
         Dialect::ClickHouse => "char(31)".to_string(),
     };
-    let joined = column_exprs.join(&format!(" || {sep} || "));
+    hash_hex_expr(d, &column_exprs.join(&format!(" || {sep} || ")))
+}
+
+/// SHA-256 of a text expression, as lowercase hex — the engine-side twin of [`crate::row_hash`].
+///
+/// PostgreSQL's `sha256` takes `bytea`, so the text is encoded as UTF-8 first; ClickHouse hashes a
+/// `String`'s bytes directly, which are already UTF-8. Both then hash the same bytes.
+pub fn hash_hex_expr(d: Dialect, text_expr: &str) -> String {
     match d {
-        Dialect::Postgres => format!("md5({joined})"),
-        Dialect::ClickHouse => format!(
-            "lower(hex(MD5({})))",
-            column_exprs.join(&format!(" || {sep} || "))
-        ),
+        Dialect::Postgres => format!("encode(sha256(convert_to({text_expr}, 'UTF8')), 'hex')"),
+        Dialect::ClickHouse => format!("lower(hex(SHA256({text_expr})))"),
     }
 }
 
@@ -197,10 +201,7 @@ pub fn bucket_checksum_query(
     buckets: u32,
 ) -> String {
     let row = row_hash_expr(d, column_exprs);
-    let pk_hash = match d {
-        Dialect::Postgres => format!("md5({pk_expr})"),
-        Dialect::ClickHouse => format!("lower(hex(MD5({pk_expr})))"),
-    };
+    let pk_hash = hash_hex_expr(d, pk_expr);
     let bucket = format!("{} % {buckets}", prefix60_expr(d, &pk_hash));
     let sum = match d {
         Dialect::Postgres => format!("sum(({})::numeric)", prefix60_expr(d, &row)),
@@ -214,10 +215,7 @@ pub fn bucket_checksum_query(
 
 /// The bucket expression on its own, so bisect can both group by it and filter on it.
 pub fn bucket_expr(d: Dialect, pk_expr: &str, buckets: u32) -> String {
-    let pk_hash = match d {
-        Dialect::Postgres => format!("md5({pk_expr})"),
-        Dialect::ClickHouse => format!("lower(hex(MD5({pk_expr})))"),
-    };
+    let pk_hash = hash_hex_expr(d, pk_expr);
     format!("{} % {buckets}", prefix60_expr(d, &pk_hash))
 }
 

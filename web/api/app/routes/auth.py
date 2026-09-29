@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ..auth import Principal, oauth, resolve_principal, role_for_claims
 from ..settings import Settings, get_settings
+from ._responses import BAD_REQUEST, UNAUTHORIZED
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -19,7 +20,7 @@ class TokenLogin(BaseModel):
     token: str
 
 
-@router.get("/me")
+@router.get("/me", responses={401: UNAUTHORIZED})
 async def me(
     request: Request,
     authorization: str = Header(default=""),
@@ -38,7 +39,7 @@ async def logout(request: Request) -> dict:
     return {"ok": True}
 
 
-@router.post("/token-login")
+@router.post("/token-login", responses={400: BAD_REQUEST, 401: UNAUTHORIZED})
 async def token_login(
     body: TokenLogin,
     request: Request,
@@ -59,14 +60,14 @@ async def token_login(
     return {"role": role}
 
 
-@router.get("/login")
+@router.get("/login", responses={400: BAD_REQUEST})
 async def login(request: Request, settings: Settings = Depends(get_settings)):
     if not settings.oidc_enabled:
         raise HTTPException(status_code=400, detail="OIDC is not configured")
     return await oauth(settings).oidc.authorize_redirect(request, settings.oidc_redirect_uri)
 
 
-@router.get("/callback")
+@router.get("/callback", responses={400: BAD_REQUEST})
 async def callback(request: Request, settings: Settings = Depends(get_settings)):
     if not settings.oidc_enabled:
         raise HTTPException(status_code=400, detail="OIDC is not configured")

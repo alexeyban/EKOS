@@ -76,7 +76,7 @@ impl Default for WorkspaceConfig {
 fn default_ignore_patterns() -> Vec<String> {
     [".ekos", ".git", "target", "node_modules"]
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect()
 }
 
@@ -451,7 +451,7 @@ fn default_github() -> String {
 fn default_hashtags() -> Vec<String> {
     ["Rust", "AI", "MCP"]
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect()
 }
 

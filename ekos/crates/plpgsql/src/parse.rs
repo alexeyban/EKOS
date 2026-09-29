@@ -10,7 +10,9 @@
 //! where one unparseable construct costs the whole routine and leaves partial, duplicate `Unmapped`
 //! fragments behind.
 
-use crate::ir::*;
+use crate::ir::{
+    CursorOp, ExceptionHandler, LoopKind, ProcSignature, ProcStmt, ProcedureIr, Span, VarDecl,
+};
 
 /// Where a body sits inside its original source, so spans point at the file rather than at the
 /// extracted fragment.

@@ -268,8 +268,16 @@ fn transcript_of(run: &ScenarioRun, attribution: Attribution) -> Transcript {
     Transcript {
         answer: run.answer.clone(),
         evidence_text: run.evidence_text.clone(),
-        evidence_refs: run.evidence_refs.iter().map(|id| id.to_string()).collect(),
-        retrieved_ids: run.retrieved_ids.iter().map(|id| id.to_string()).collect(),
+        evidence_refs: run
+            .evidence_refs
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
+        retrieved_ids: run
+            .retrieved_ids
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
         planned_query_type: run.planned_query_type.clone(),
         diagnostics: run.diagnostics.clone(),
         attribution: Some(attribution),

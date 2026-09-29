@@ -13,8 +13,10 @@
 
       postgresql(ekos_migrate_source, table = 'orders', schema = 'public')
 
-  This file is the sandbox's version. A real deployment configures the same collection with its own
-  credentials and never checks them in.
+  This file is the sandbox's version. Even here the password is not in the file: `from_env` makes
+  ClickHouse read it from the server's environment at startup (docker-compose.migrate.yml sets
+  EKOS_MIGRATE_SOURCE_PASSWORD, defaulting to the local-only sandbox password). A real deployment
+  configures the same collection the same way, from its own secret store.
 -->
 <clickhouse>
     <named_collections>
@@ -23,7 +25,7 @@
             <port>5432</port>
             <database>ekos_migrate_fixtures</database>
             <user>ekos</user>
-            <password>ekos-local-only</password>
+            <password from_env="EKOS_MIGRATE_SOURCE_PASSWORD"/>
         </ekos_migrate_source>
     </named_collections>
 </clickhouse>

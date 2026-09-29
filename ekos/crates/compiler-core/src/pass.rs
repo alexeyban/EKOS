@@ -317,7 +317,11 @@ impl PassManager {
         }
 
         if done != self.passes.len() {
-            let placed: HashSet<&str> = levels.iter().flatten().map(|s| s.as_str()).collect();
+            let placed: HashSet<&str> = levels
+                .iter()
+                .flatten()
+                .map(std::string::String::as_str)
+                .collect();
             let cycle_node = self
                 .passes
                 .iter()

@@ -57,7 +57,8 @@ class ConsoleScheduler:
             if row.enabled:
                 self._register(row)
 
-    async def aclose(self) -> None:
+    # Async on purpose: the app's shutdown hook awaits every service's `aclose`.
+    async def aclose(self) -> None:  # NOSONAR(python:S7503)
         self._sched.shutdown(wait=False)
 
     # ── registration ─────────────────────────────────────────────────────────

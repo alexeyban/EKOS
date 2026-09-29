@@ -1093,7 +1093,7 @@ pub fn collect_artifact_ids_for_connector(
         }
     }
     let mut ids: Vec<ArtifactId> = by_target.into_values().map(|(id, _)| id).collect();
-    ids.sort_by_key(|id| id.to_string());
+    ids.sort_by_key(std::string::ToString::to_string);
     ids
 }
 

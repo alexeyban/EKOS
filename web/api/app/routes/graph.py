@@ -11,6 +11,7 @@ from ..deps import mcp_for_workspace
 from ..layout import compute_layout
 from ..mcp_client import EkosMcpClient, McpToolError
 from ..schemas import GraphOut, LayoutIn, LayoutOut
+from ._responses import NOT_FOUND
 
 router = APIRouter(
     prefix="/workspaces", tags=["graph"], dependencies=[Depends(require_role("read"))]
@@ -49,7 +50,7 @@ async def graph_export(
     return GraphOut.model_validate(await mcp.call_tool("ekos_graph_export", args))
 
 
-@router.get("/{workspace_id}/objects/{object_id}")
+@router.get("/{workspace_id}/objects/{object_id}", responses={404: NOT_FOUND})
 async def object_state(
     object_id: str,
     mcp: EkosMcpClient = Depends(mcp_for_workspace),
@@ -87,7 +88,7 @@ async def neighborhood(
     return await mcp.call_tool("ekos_neighborhood", {"id": object_id, "depth": depth})
 
 
-@router.get("/{workspace_id}/impact/{object_id}")
+@router.get("/{workspace_id}/impact/{object_id}", responses={404: NOT_FOUND})
 async def impact(
     object_id: str,
     mcp: EkosMcpClient = Depends(mcp_for_workspace),

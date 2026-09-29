@@ -87,7 +87,7 @@ function RegisterForm() {
   const add = useMutation({
     mutationFn: () => apiPost("/workspaces", { id, name, path }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["workspaces"] });
+      void qc.invalidateQueries({ queryKey: ["workspaces"] });
       setId("");
       setName("");
       setPath("");

@@ -18,7 +18,7 @@ pub fn column_names(obj: &KirObject) -> Option<HashSet<String>> {
         .filter_map(|c| {
             c.as_str()
                 .or_else(|| c.get("name").and_then(|n| n.as_str()))
-                .map(|s| s.to_lowercase())
+                .map(str::to_lowercase)
         })
         .collect();
     if names.is_empty() { None } else { Some(names) }

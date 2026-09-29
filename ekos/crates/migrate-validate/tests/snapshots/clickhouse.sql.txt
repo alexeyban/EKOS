@@ -23,6 +23,6 @@ Bytes
 Inet
   if(isNull("ip"), '\\N', replaceAll(replaceAll(toString("ip"), '\\', '\\\\'), char(31), '\\x1f'))
 ROW_HASH
-  lower(hex(MD5(if(isNull("txt"), '\\N', replaceAll(replaceAll(toString("txt"), '\\', '\\\\'), char(31), '\\x1f')) || char(31) || if(isNull("ch"), '\\N', replaceAll(replaceAll(toString("ch"), '\\', '\\\\'), char(31), '\\x1f')))))
+  lower(hex(SHA256(if(isNull("txt"), '\\N', replaceAll(replaceAll(toString("txt"), '\\', '\\\\'), char(31), '\\x1f')) || char(31) || if(isNull("ch"), '\\N', replaceAll(replaceAll(toString("ch"), '\\', '\\\\'), char(31), '\\x1f')))))
 BUCKET_QUERY
-  SELECT reinterpretAsUInt64(reverse(unhex(concat('0', substring(lower(hex(MD5(if(isNull("id"), '\\N', toString("id"))))), 1, 15))))) % 4096 AS bucket, count(*) AS row_count, sum(toDecimal128(reinterpretAsUInt64(reverse(unhex(concat('0', substring(lower(hex(MD5(if(isNull("txt"), '\\N', replaceAll(replaceAll(toString("txt"), '\\', '\\\\'), char(31), '\\x1f')) || char(31) || if(isNull("ch"), '\\N', replaceAll(replaceAll(toString("ch"), '\\', '\\\\'), char(31), '\\x1f'))))), 1, 15))))), 0)) AS hash_sum FROM s.orders GROUP BY bucket ORDER BY bucket
+  SELECT reinterpretAsUInt64(reverse(unhex(concat('0', substring(lower(hex(SHA256(if(isNull("id"), '\\N', toString("id"))))), 1, 15))))) % 4096 AS bucket, count(*) AS row_count, sum(toDecimal128(reinterpretAsUInt64(reverse(unhex(concat('0', substring(lower(hex(SHA256(if(isNull("txt"), '\\N', replaceAll(replaceAll(toString("txt"), '\\', '\\\\'), char(31), '\\x1f')) || char(31) || if(isNull("ch"), '\\N', replaceAll(replaceAll(toString("ch"), '\\', '\\\\'), char(31), '\\x1f'))))), 1, 15))))), 0)) AS hash_sum FROM s.orders GROUP BY bucket ORDER BY bucket

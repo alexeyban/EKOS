@@ -12,6 +12,7 @@ from ..deps import get_supervisor
 from ..schemas import ServerStatus, WorkspaceCreate, WorkspaceOut
 from ..settings import Settings, get_settings
 from ..supervisor import McpSupervisor
+from ._responses import BAD_REQUEST, CONFLICT, NOT_FOUND
 
 router = APIRouter(
     prefix="/workspaces", tags=["workspaces"], dependencies=[Depends(require_role("read"))]
@@ -36,6 +37,7 @@ async def list_workspaces(
     response_model=WorkspaceOut,
     status_code=201,
     dependencies=[Depends(require_role("write"))],
+    responses={400: BAD_REQUEST, 409: CONFLICT},
 )
 async def register_workspace(
     body: WorkspaceCreate,
@@ -66,7 +68,12 @@ async def register_workspace(
     return _out(ws, supervisor)
 
 
-@router.delete("/{workspace_id}", status_code=204, dependencies=[Depends(require_role("write"))])
+@router.delete(
+    "/{workspace_id}",
+    status_code=204,
+    dependencies=[Depends(require_role("write"))],
+    responses={404: NOT_FOUND},
+)
 async def deregister_workspace(
     workspace_id: str,
     supervisor: McpSupervisor = Depends(get_supervisor),

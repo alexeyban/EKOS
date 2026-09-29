@@ -120,7 +120,8 @@ def require_role(minimum: Role):
     """Dependency factory. `require_role("read")` accepts read or write; `require_role("write")`
     needs write."""
 
-    async def dependency(
+    # Async on purpose: runs on the event loop instead of a thread-pool hop per request.
+    async def dependency(  # NOSONAR(python:S7503)
         request: Request,
         authorization: str = Header(default=""),
         settings: Settings = Depends(get_settings),

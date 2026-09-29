@@ -373,7 +373,7 @@ impl Inbox {
     /// Session ids that have an inbox file, sorted.
     pub fn sessions(&self) -> Result<Vec<String>, InboxError> {
         let mut ids: Vec<String> = fs::read_dir(&self.dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().into_owned();
                 name.strip_suffix(".jsonl").map(str::to_string)

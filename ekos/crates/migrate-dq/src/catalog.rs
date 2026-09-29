@@ -5,7 +5,7 @@
 //! database and buries the three that actually overflow. "Seventeen rows in one table exceed
 //! precision 38, here is the query" turns a blocking unknown into a five-minute decision.
 
-use crate::model::*;
+use crate::model::{ColumnContext, Family, Lossiness, Rule, Severity, TableContext, Target};
 
 fn ident(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))

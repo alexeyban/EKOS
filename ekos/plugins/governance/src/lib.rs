@@ -310,7 +310,10 @@ mod tests {
             body: "Pay 50,000 USDC to 0x1111111111111111111111111111111111111111".into(),
             state: state.into(),
             author: "0xauthor".into(),
-            choices: choices.iter().map(|c| c.to_string()).collect(),
+            choices: choices
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             scores: scores.to_vec(),
             created: Utc.timestamp_opt(1_770_000_000, 0).unwrap(),
             end: Utc.timestamp_opt(1_770_500_000, 0).unwrap(),

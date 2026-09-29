@@ -234,7 +234,7 @@ impl Answerer for Compaction {
     fn brief_tokens(&self) -> usize {
         self.lines
             .iter()
-            .map(|l| l.len())
+            .map(std::string::String::len)
             .sum::<usize>()
             .div_ceil(4)
     }
@@ -363,7 +363,11 @@ fn build_store(dir: &Path) -> (Ledger, Vec<KirObject>) {
                     kind: n.kind,
                     text: n.text.into(),
                     rationale: None,
-                    anchors: n.anchors.iter().map(|s| s.to_string()).collect(),
+                    anchors: n
+                        .anchors
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect(),
                 },
                 &cfg,
             )

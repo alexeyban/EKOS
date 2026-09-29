@@ -1,4 +1,4 @@
-# EKOS development image (TODO.md Phase 0) — a consistent build environment for a machine with
+# EKOS development image (roadmap Phase 0) — a consistent build environment for a machine with
 # no local Rust installation, matching the exact toolchain CI actually verifies against
 # (.github/workflows/ci.yml: rustfmt + clippy components, cargo build/test/clippy/fmt --check).
 #
@@ -14,9 +14,8 @@ FROM rust:1.93-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN rustup component add rustfmt clippy
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup component add rustfmt clippy
 
 WORKDIR /workspace
 

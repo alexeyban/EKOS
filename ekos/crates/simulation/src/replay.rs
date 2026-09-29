@@ -66,7 +66,7 @@ impl<'a> Replay<'a> {
         let mut rounds: Vec<u32> = self
             .all_logged_events()?
             .iter()
-            .filter_map(|e| e.payload.get("round").and_then(|v| v.as_u64()))
+            .filter_map(|e| e.payload.get("round").and_then(serde_json::Value::as_u64))
             .map(|n| n as u32)
             .collect();
         rounds.sort_unstable();
@@ -79,7 +79,9 @@ impl<'a> Replay<'a> {
         let events: Vec<KirEvent> = self
             .all_logged_events()?
             .into_iter()
-            .filter(|e| e.payload.get("round").and_then(|v| v.as_u64()) == Some(u64::from(round)))
+            .filter(|e| {
+                e.payload.get("round").and_then(serde_json::Value::as_u64) == Some(u64::from(round))
+            })
             .collect();
         if events.is_empty() {
             return Err(ReplayError::UnknownRound(round));

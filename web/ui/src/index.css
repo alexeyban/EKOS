@@ -383,7 +383,7 @@ pre.log {
   font-size: 0.78rem;
   line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .param {
   margin: 0.35rem 0;

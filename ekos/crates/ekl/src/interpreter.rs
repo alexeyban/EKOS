@@ -38,11 +38,11 @@ pub fn default_returns(entity: &Entity) -> Vec<String> {
     match entity {
         Entity::Object => ["id", "name", "kind"]
             .iter()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect(),
         Entity::Relationship => ["id", "kind", "from", "to"]
             .iter()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect(),
     }
 }

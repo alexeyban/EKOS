@@ -654,7 +654,7 @@ pub(crate) fn extract_search_terms(question: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     question
         .split(|c: char| !c.is_alphanumeric())
-        .map(|w| w.to_lowercase())
+        .map(str::to_lowercase)
         .filter(|w| w.len() >= 2 && !QUESTION_STOPWORDS.contains(&w.as_str()))
         .filter(|w| seen.insert(w.clone()))
         .collect()

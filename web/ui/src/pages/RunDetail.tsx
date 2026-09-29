@@ -45,7 +45,7 @@ export function RunDetail() {
     es.addEventListener("end", () => {
       setLive(false);
       es.close();
-      qc.invalidateQueries({ queryKey: ["run", runId] });
+      void qc.invalidateQueries({ queryKey: ["run", runId] });
     });
     es.onerror = () => {
       setLive(false);

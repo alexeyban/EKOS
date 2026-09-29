@@ -88,21 +88,30 @@ pub fn run(
         let result = sim.run_round(round)?;
         println!("\nRound {round}:");
         for (agent_id, decision) in &result.decisions {
-            let agent_name = names_by_id.get(agent_id).map(|s| s.as_str()).unwrap_or("?");
+            let agent_name = names_by_id
+                .get(agent_id)
+                .map(std::string::String::as_str)
+                .unwrap_or("?");
             let target = decision
                 .action
                 .target
                 .and_then(|t| names_by_id.get(&t))
-                .map(|s| s.as_str())
+                .map(std::string::String::as_str)
                 .unwrap_or("-");
             println!("  {agent_name} -> {:?}({target})", decision.action.kind);
         }
         for (agent_id, err) in &result.validation_failures {
-            let agent_name = names_by_id.get(agent_id).map(|s| s.as_str()).unwrap_or("?");
+            let agent_name = names_by_id
+                .get(agent_id)
+                .map(std::string::String::as_str)
+                .unwrap_or("?");
             println!("  [validation failed] {agent_name}: {err}");
         }
         for (agent_id, err) in &result.conflict_failures {
-            let agent_name = names_by_id.get(agent_id).map(|s| s.as_str()).unwrap_or("?");
+            let agent_name = names_by_id
+                .get(agent_id)
+                .map(std::string::String::as_str)
+                .unwrap_or("?");
             println!("  [conflict] {agent_name}: {err}");
         }
     }

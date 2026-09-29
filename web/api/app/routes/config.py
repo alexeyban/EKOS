@@ -20,6 +20,7 @@ from .. import _afile, config_io, models, readproc
 from ..auth import require_role
 from ..deps import require_workspace
 from ..settings import Settings, get_settings
+from ._responses import BAD_GATEWAY, UNPROCESSABLE
 
 router = APIRouter(
     prefix="/workspaces", tags=["config"], dependencies=[Depends(require_role("read"))]
@@ -82,7 +83,7 @@ async def _validate_text(settings: Settings, ws_path: str, raw: str) -> dict[str
         await _afile.unlink(Path(tmp))
 
 
-@router.get("/{workspace_id}/config", response_model=ConfigOut)
+@router.get("/{workspace_id}/config", response_model=ConfigOut, responses={502: BAD_GATEWAY})
 async def get_config(ws: models.Workspace = Depends(require_workspace)) -> ConfigOut:
     try:
         raw, observe = await asyncio.to_thread(config_io.read_config, ws.path)
@@ -94,7 +95,7 @@ async def get_config(ws: models.Workspace = Depends(require_workspace)) -> Confi
     )
 
 
-@router.post("/{workspace_id}/config/validate")
+@router.post("/{workspace_id}/config/validate", responses={502: BAD_GATEWAY})
 async def validate_config(
     body: RawIn,
     ws: models.Workspace = Depends(require_workspace),
@@ -115,7 +116,7 @@ async def validate_config(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post("/{workspace_id}/config/preview-scan")
+@router.post("/{workspace_id}/config/preview-scan", responses={502: BAD_GATEWAY})
 async def preview_scan(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -132,6 +133,7 @@ async def preview_scan(
     "/{workspace_id}/config",
     response_model=WriteOut,
     dependencies=[Depends(require_role("write"))],
+    responses={422: UNPROCESSABLE, 502: BAD_GATEWAY},
 )
 async def put_config(
     body: RawIn,

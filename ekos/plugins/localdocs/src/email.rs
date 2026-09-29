@@ -72,7 +72,10 @@ fn header_block(message: &Message<'_>) -> String {
     push("To", render_address(message.to()));
     push(
         "Date",
-        message.date().map(|d| d.to_string()).unwrap_or_default(),
+        message
+            .date()
+            .map(std::string::ToString::to_string)
+            .unwrap_or_default(),
     );
     out
 }

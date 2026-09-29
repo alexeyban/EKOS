@@ -330,7 +330,7 @@ fn concentration_risks(graph: &KirGraph) -> Vec<(KirObject, KirRelationship)> {
 
     let mut risks: Vec<(KirObject, KirRelationship)> = Vec::new();
     let mut target_ids: Vec<&KirId> = dependents_by_target.keys().collect();
-    target_ids.sort_by_key(|id| id.to_string());
+    target_ids.sort_by_key(std::string::ToString::to_string);
     for target_id in target_ids {
         let rels = &dependents_by_target[target_id];
         if rels.len() < MIN_DEPENDENTS_FOR_CONCENTRATION_RISK {
@@ -566,7 +566,7 @@ fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -
     }
 
     let mut result: Vec<ArtifactId> = newest.into_values().map(|(id, _)| id).collect();
-    result.sort_by_key(|id| id.to_string());
+    result.sort_by_key(std::string::ToString::to_string);
     result
 }
 
@@ -1307,9 +1307,9 @@ mod tests {
 
         let all_ids = store.list().unwrap();
         let mut deduped = dedup_knowledge_artifact_ids(&store, &all_ids);
-        deduped.sort_by_key(|id| id.to_string());
+        deduped.sort_by_key(std::string::ToString::to_string);
         let mut expected = vec![ka_a, ka_b];
-        expected.sort_by_key(|id| id.to_string());
+        expected.sort_by_key(std::string::ToString::to_string);
 
         assert_eq!(
             deduped, expected,

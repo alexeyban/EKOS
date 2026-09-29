@@ -239,13 +239,13 @@ pub fn extract_mentions(text: &str) -> Vec<String> {
                 .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_alphanumeric() || c == '_'));
         let is_camel = {
             let mut chars = t.chars();
-            let first_upper = chars.next().is_some_and(|c| c.is_uppercase());
+            let first_upper = chars.next().is_some_and(char::is_uppercase);
             // A lowercase letter is required too: an acronym ("AI", "MCP", "SQL") is not an
             // identifier, and "AI" once resolved exactly (conf 1.0) to a minified JS symbol `aI`.
             first_upper
-                && t.chars().skip(1).any(|c| c.is_uppercase())
-                && t.chars().any(|c| c.is_lowercase())
-                && t.chars().all(|c| c.is_alphanumeric())
+                && t.chars().skip(1).any(char::is_uppercase)
+                && t.chars().any(char::is_lowercase)
+                && t.chars().all(char::is_alphanumeric)
         };
         let is_ident = (t.contains('_') || t.contains('-'))
             && t.chars()

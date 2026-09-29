@@ -187,7 +187,10 @@ mod tests {
             kind,
             text: format!("note {id}"),
             rationale: Some("because".into()),
-            anchors: anchors.iter().map(|s| s.to_string()).collect(),
+            anchors: anchors
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             capture: "explicit".into(),
             quote: None,
         }

@@ -177,7 +177,11 @@ fn view_of(
         recorded_at: claim.created_at.to_rfc3339(),
         anchors,
         verdict,
-        evidence: claim.evidence.iter().map(|e| e.to_string()).collect(),
+        evidence: claim
+            .evidence
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
         source_purged,
     })
 }

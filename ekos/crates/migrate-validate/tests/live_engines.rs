@@ -134,7 +134,7 @@ fn clickhouse_reproduces_every_canonical_form() {
     assert_eq!(checked, 29, "the clickhouse live-case count changed");
 }
 
-/// The row hash itself, end to end: both engines must produce the same `md5` of the same joined
+/// The row hash itself, end to end: both engines must produce the same SHA-256 of the same joined
 /// canonical row as the Rust implementation.
 #[test]
 fn both_engines_reproduce_the_row_hash() {
@@ -202,13 +202,16 @@ fn both_engines_reproduce_the_hash_prefix() {
     let want = ekos_migrate_validate::prefix60(&ekos_migrate_validate::row_hash("abc")).to_string();
     let pg_got = pg(&format!(
         "SELECT {}",
-        ekos_migrate_validate::dialect::prefix60_expr(Dialect::Postgres, "md5('abc')")
+        ekos_migrate_validate::dialect::prefix60_expr(
+            Dialect::Postgres,
+            &ekos_migrate_validate::dialect::hash_hex_expr(Dialect::Postgres, "'abc'")
+        )
     ));
     let ch_got = ch(&format!(
         "SELECT {}",
         ekos_migrate_validate::dialect::prefix60_expr(
             Dialect::ClickHouse,
-            "lower(hex(MD5('abc')))"
+            &ekos_migrate_validate::dialect::hash_hex_expr(Dialect::ClickHouse, "'abc'")
         )
     ));
     assert_eq!(pg_got, want);
@@ -248,4 +251,27 @@ fn every_fixture_is_either_live_or_explained() {
             "'{name}' is listed as unmapped but is now exercised on both engines"
         );
     }
+}
+
+/// Non-ASCII text: PostgreSQL's `sha256` hashes `bytea`, so the text is `convert_to(…, 'UTF8')`
+/// first, while ClickHouse hashes a `String`'s bytes as stored. Both must reach the same bytes —
+/// an encoding slip here would only show up on data with accents or emoji.
+#[test]
+fn both_engines_hash_non_ascii_text_identically() {
+    if !live() {
+        return;
+    }
+    use ekos_migrate_validate::dialect::hash_hex_expr;
+    let text = "Ünïcödé 🦀";
+    let want = ekos_migrate_validate::row_hash(text);
+    let pg_got = pg(&format!(
+        "SELECT {}",
+        hash_hex_expr(Dialect::Postgres, &format!("'{text}'"))
+    ));
+    let ch_got = ch(&format!(
+        "SELECT {}",
+        hash_hex_expr(Dialect::ClickHouse, &format!("'{text}'"))
+    ));
+    assert_eq!(pg_got, want, "postgres hashed different bytes");
+    assert_eq!(ch_got, want, "clickhouse hashed different bytes");
 }

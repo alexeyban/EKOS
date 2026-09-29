@@ -42,17 +42,19 @@ class Command:
                 if spec.required:
                     raise ValueError(f"missing required parameter {pname!r}")
                 continue
-            value = params[pname]
-            if spec.kind == "bool":
-                if value is True:
-                    argv.append(f"--{pname}")
-            elif spec.kind == "string":
-                if not isinstance(value, str) or "\x00" in value:
-                    raise ValueError(f"parameter {pname!r} must be a string")
-                argv += [f"--{pname}", value]
-            else:  # pragma: no cover - unreachable given the specs below
-                raise ValueError(f"unknown param kind {spec.kind!r}")
+            argv += _param_argv(pname, spec, params[pname])
         return argv
+
+
+def _param_argv(pname: str, spec: Param, value: object) -> list[str]:
+    """One present parameter as argv elements. `ValueError` on a value of the wrong kind."""
+    if spec.kind == "bool":
+        return [f"--{pname}"] if value is True else []
+    if spec.kind == "string":
+        if not isinstance(value, str) or "\x00" in value:
+            raise ValueError(f"parameter {pname!r} must be a string")
+        return [f"--{pname}", value]
+    raise ValueError(f"unknown param kind {spec.kind!r}")  # pragma: no cover - unreachable
 
 
 _PIPELINE_STAGES = ("build", "recover", "resolve", "compile", "commit")

@@ -23,6 +23,6 @@ Bytes
 Inet
   (case when "ip" is null then '\N' else replace(replace("ip"::text, '\', '\\'), chr(31), '\x1f') end)
 ROW_HASH
-  md5((case when "txt" is null then '\N' else replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f') end) || chr(31) || (case when "ch" is null then '\N' else replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f') end))
+  encode(sha256(convert_to((case when "txt" is null then '\N' else replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f') end) || chr(31) || (case when "ch" is null then '\N' else replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f') end), 'UTF8')), 'hex')
 BUCKET_QUERY
-  SELECT (('x' || substr(md5((case when "id" is null then '\N' else "id"::text end)), 1, 15))::bit(60))::bigint % 4096 AS bucket, count(*) AS row_count, sum(((('x' || substr(md5((case when "txt" is null then '\N' else replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f') end) || chr(31) || (case when "ch" is null then '\N' else replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f') end)), 1, 15))::bit(60))::bigint)::numeric) AS hash_sum FROM s.orders GROUP BY bucket ORDER BY bucket
+  SELECT (('x' || substr(encode(sha256(convert_to((case when "id" is null then '\N' else "id"::text end), 'UTF8')), 'hex'), 1, 15))::bit(60))::bigint % 4096 AS bucket, count(*) AS row_count, sum(((('x' || substr(encode(sha256(convert_to((case when "txt" is null then '\N' else replace(replace("txt"::text, '\', '\\'), chr(31), '\x1f') end) || chr(31) || (case when "ch" is null then '\N' else replace(replace("ch"::text, '\', '\\'), chr(31), '\x1f') end), 'UTF8')), 'hex'), 1, 15))::bit(60))::bigint)::numeric) AS hash_sum FROM s.orders GROUP BY bucket ORDER BY bucket

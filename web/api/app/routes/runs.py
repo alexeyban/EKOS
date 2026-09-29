@@ -12,8 +12,11 @@ from fastapi.responses import StreamingResponse
 from .. import models
 from ..auth import require_role
 from ..models import TERMINAL
+from ._responses import NOT_FOUND
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+
+NO_SUCH_RUN = "no such run"
 
 
 def _dump(run: models.Run, *, tail: int = 0) -> dict[str, Any]:
@@ -46,42 +49,48 @@ async def list_runs(
     return [_dump(r) for r in models.list_runs(workspace, status, limit)]
 
 
-@router.get("/{run_id}", dependencies=[Depends(require_role("read"))])
+@router.get("/{run_id}", dependencies=[Depends(require_role("read"))], responses={404: NOT_FOUND})
 async def get_run(run_id: str) -> dict:
     run = models.get_run(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="no such run")
+        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
     return _dump(run, tail=500)
 
 
-@router.post("/{run_id}/cancel", dependencies=[Depends(require_role("write"))])
+@router.post(
+    "/{run_id}/cancel", dependencies=[Depends(require_role("write"))], responses={404: NOT_FOUND}
+)
 async def cancel_run(run_id: str, request: Request) -> dict:
     run = models.get_run(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="no such run")
+        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
     ok = await request.app.state.runner.cancel(run_id)
     return {"cancelled": ok}
 
 
-@router.get("/{run_id}/logs", dependencies=[Depends(require_role("read"))])
+@router.get(
+    "/{run_id}/logs", dependencies=[Depends(require_role("read"))], responses={404: NOT_FOUND}
+)
 async def stream_logs(run_id: str) -> StreamingResponse:
     run = models.get_run(run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="no such run")
-    log_path = Path(run.log_path)
+        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
+    return StreamingResponse(
+        _log_events(run_id, Path(run.log_path)), media_type="text/event-stream"
+    )
 
-    async def events():
-        sent = 0
-        while True:
-            if log_path.is_file():
-                lines = log_path.read_text(errors="replace").splitlines()
-                for line in lines[sent:]:
-                    yield f"data: {line}\n\n"
-                sent = len(lines)
-            fresh = models.get_run(run_id)
-            if fresh is None or fresh.status in TERMINAL:
-                yield f"event: end\ndata: {fresh.status if fresh else 'gone'}\n\n"
-                return
-            await asyncio.sleep(0.25)
 
-    return StreamingResponse(events(), media_type="text/event-stream")
+async def _log_events(run_id: str, log_path: Path):
+    """Tail a run's log as SSE `data:` lines, then one `end` event once the run is terminal."""
+    sent = 0
+    while True:
+        if log_path.is_file():
+            lines = log_path.read_text(errors="replace").splitlines()
+            for line in lines[sent:]:
+                yield f"data: {line}\n\n"
+            sent = len(lines)
+        fresh = models.get_run(run_id)
+        if fresh is None or fresh.status in TERMINAL:
+            yield f"event: end\ndata: {fresh.status if fresh else 'gone'}\n\n"
+            return
+        await asyncio.sleep(0.25)

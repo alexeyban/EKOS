@@ -316,8 +316,12 @@ mod tests {
         // Stable, so the same key masks the same way across a run and a report.
         assert_eq!(m, mask_key("customer-4815162342"));
         assert_ne!(m, mask_key("customer-4815162343"));
-        // Short keys reveal nothing at all rather than most of themselves.
-        assert!(!mask_key("7").contains('7'));
+        // Short keys reveal nothing at all rather than most of themselves. The key must use
+        // non-hex characters: a digit key like "7" can appear by chance in the hash suffix
+        // (~40% of 8-hex-digit suffixes contain any given digit), which says nothing about masking.
+        let short = mask_key("zq");
+        assert!(!short.contains('z') && !short.contains('q'), "{short}");
+        assert!(short.starts_with("··#"), "{short}");
     }
 
     #[test]

@@ -1267,9 +1267,9 @@ name = "ekos-migrate-validate"
 version = "1.0.3"
 dependencies = [
  "chrono",
- "md-5 0.10.6",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
  "uuid",
 ]

@@ -72,7 +72,7 @@ impl SliceStore {
         let mut v: Vec<String> = fs::read_dir(self.session_dir(session_id))
             .into_iter()
             .flatten()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter_map(|e| {
                 e.file_name()
                     .to_string_lossy()
@@ -118,7 +118,9 @@ impl SliceStore {
 
     pub fn purge_session(&self, session_id: &str) -> usize {
         let dir = self.session_dir(session_id);
-        let n = fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0);
+        let n = fs::read_dir(&dir)
+            .map(std::iter::Iterator::count)
+            .unwrap_or(0);
         let _ = fs::remove_dir_all(&dir);
         n
     }

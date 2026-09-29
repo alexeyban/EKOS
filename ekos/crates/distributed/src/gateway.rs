@@ -391,7 +391,7 @@ impl DistributedLedger {
                 })
                 .await?;
             let bm25_elapsed_ms = bm25_start.elapsed().as_secs_f64() * 1000.0;
-            let bm25_candidates: usize = per_partition.iter().map(|hits| hits.len()).sum();
+            let bm25_candidates: usize = per_partition.iter().map(std::vec::Vec::len).sum();
             let union: Vec<ScoredCandidate> = per_partition
                 .iter()
                 .flatten()

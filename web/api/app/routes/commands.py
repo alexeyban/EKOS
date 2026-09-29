@@ -12,6 +12,7 @@ from ..auth import check_role, require_role
 from ..deps import require_workspace
 from ..runner import JobRunner, QueueFull
 from ..settings import get_settings
+from ._responses import NOT_FOUND, TOO_MANY, UNPROCESSABLE
 
 router = APIRouter(tags=["commands"])
 
@@ -25,7 +26,10 @@ def _runner(request: Request) -> JobRunner:
     return request.app.state.runner
 
 
-@router.post("/workspaces/{workspace_id}/commands/{name}")
+@router.post(
+    "/workspaces/{workspace_id}/commands/{name}",
+    responses={404: NOT_FOUND, 422: UNPROCESSABLE, 429: TOO_MANY},
+)
 async def run_command(
     name: str,
     request: Request,

@@ -25,6 +25,57 @@ const DEFAULT_OFF_RELS = ["CoupledWith", "FeedsInto"];
 const ALL_RELS = ["Calls", "Contains", "CoupledWith", "DependsOn", "References", "SameAs"];
 const OBJECT_BUDGET = 800;
 
+/** Query parameters for `/graph`: an object-level page when a kind is expanded, else the
+ * per-kind aggregate overview. */
+function graphParams(expanded: boolean, minDegree: number, excludedRels: Set<string>) {
+  const params = new URLSearchParams();
+  if (expanded) {
+    params.set("level", "object");
+    params.set("max_nodes", String(OBJECT_BUDGET));
+    params.set("min_degree", String(minDegree));
+  } else {
+    params.set("level", "aggregate");
+    params.set("group_by", "kind");
+  }
+  for (const r of excludedRels) params.append("exclude_rel_kind", r);
+  // Always fetch the union (latest) graph with first-seen stamps — the slider filters it
+  // client-side, so scrubbing never refetches (RFC 0134 §3.1/§3.3).
+  params.set("include_first_seen", "1");
+  return params;
+}
+
+/** The compact `/graph` wire format (index-coded kinds and endpoints) → canvas nodes and links. */
+function exportToGraph(g: GraphOut): { nodes: GNode[]; links: GLink[] } {
+  const isAgg = g.level === "aggregate";
+  const nodes: GNode[] = g.nodes.map((n) => ({
+    id: n.id,
+    label: n.n ?? n.id,
+    kind: g.kind_index[n.k ?? 0] ?? "?",
+    kindIdx: n.k ?? 0,
+    degree: n.d ?? 0,
+    count: n.count,
+    isAggregate: isAgg,
+    firstSeen: n.fs,
+  }));
+  const byIdx = g.nodes.map((n) => n.id);
+  const links: GLink[] = g.edges.map((e) => ({
+    source: byIdx[e.s],
+    target: byIdx[e.t],
+    relKind: g.rel_kind_index[e.k ?? 0] ?? "?",
+    weight: e.w ?? 1,
+    firstSeen: e.fs,
+  }));
+  return { nodes, links };
+}
+
+/** Pin nodes at server-computed positions; nodes without one stay client-simulated. */
+function pinPositions(nodes: GNode[], positions: Record<string, [number, number]>): GNode[] {
+  return nodes.map((n) => {
+    const p = positions[n.id];
+    return p ? { ...n, fx: p[0], fy: p[1] } : n;
+  });
+}
+
 export function Graph() {
   const { id = "" } = useParams();
   // RFC 0136 §7 (deep-linking) — `?as_of=&focus=` seed the initial view once on mount (a lazy
@@ -83,19 +134,7 @@ export function Graph() {
 
   const expanded = focusKind !== null;
 
-  const params = new URLSearchParams();
-  if (expanded) {
-    params.set("level", "object");
-    params.set("max_nodes", String(OBJECT_BUDGET));
-    params.set("min_degree", String(minDegree));
-  } else {
-    params.set("level", "aggregate");
-    params.set("group_by", "kind");
-  }
-  for (const r of excludedRels) params.append("exclude_rel_kind", r);
-  // Always fetch the union (latest) graph with first-seen stamps — the slider filters it
-  // client-side, so scrubbing never refetches (RFC 0134 §3.1/§3.3).
-  params.set("include_first_seen", "1");
+  const params = graphParams(expanded, minDegree, excludedRels);
 
   const graph = useQuery({
     queryKey: ["graph", id, params.toString()],
@@ -146,28 +185,7 @@ export function Graph() {
         ? neighborhoodToGraph(neighborhood.data)
         : { nodes: [] as GNode[], links: [] as GLink[] };
     }
-    const g = graph.data;
-    if (!g) return { nodes: [] as GNode[], links: [] as GLink[] };
-    const isAgg = g.level === "aggregate";
-    const nodes: GNode[] = g.nodes.map((n) => ({
-      id: n.id,
-      label: n.n ?? n.id,
-      kind: g.kind_index[n.k ?? 0] ?? "?",
-      kindIdx: n.k ?? 0,
-      degree: n.d ?? 0,
-      count: n.count,
-      isAggregate: isAgg,
-      firstSeen: n.fs,
-    }));
-    const byIdx = g.nodes.map((n) => n.id);
-    const links: GLink[] = g.edges.map((e) => ({
-      source: byIdx[e.s],
-      target: byIdx[e.t],
-      relKind: g.rel_kind_index[e.k ?? 0] ?? "?",
-      weight: e.w ?? 1,
-      firstSeen: e.fs,
-    }));
-    return { nodes, links };
+    return graph.data ? exportToGraph(graph.data) : { nodes: [] as GNode[], links: [] as GLink[] };
   }, [graph.data, isolate, neighborhood.data]);
 
   // RFC 0136 §4 — above the client-side simulation threshold, ask the console to precompute
@@ -194,14 +212,10 @@ export function Graph() {
   // simulating those nodes entirely, matching `react-force-graph`'s documented pre-positioned
   // behavior. Falls back to the plain `nodes` (client-simulated) below the threshold or before
   // the layout call resolves.
-  const positionedNodes = useMemo(() => {
-    if (!needsServerLayout || !layout.data) return nodes;
-    const positions = layout.data.positions;
-    return nodes.map((n) => {
-      const p = positions[n.id];
-      return p ? { ...n, fx: p[0], fy: p[1] } : n;
-    });
-  }, [nodes, needsServerLayout, layout.data]);
+  const positionedNodes = useMemo(
+    () => (needsServerLayout && layout.data ? pinPositions(nodes, layout.data.positions) : nodes),
+    [nodes, needsServerLayout, layout.data],
+  );
 
   // RFC 0136 §3 — id -> hop distance, or null when impact mode isn't active.
   const impactHops = impact && impactQuery.data ? impactHopMap(impactQuery.data) : null;
@@ -254,10 +268,15 @@ export function Graph() {
           <button
             className="pill"
             onClick={() => {
-              navigator.clipboard?.writeText(window.location.href).then(() => {
-                setLinkCopied(true);
-                window.setTimeout(() => setLinkCopied(false), 1500);
-              });
+              navigator.clipboard
+                ?.writeText(window.location.href)
+                .then(() => {
+                  setLinkCopied(true);
+                  window.setTimeout(() => setLinkCopied(false), 1500);
+                })
+                // Clipboard access can be denied (permissions, insecure context); the link is
+                // still in the address bar, so there is nothing to recover — just don't claim it.
+                .catch(() => setLinkCopied(false));
             }}
             title="copy a link to this exact view (time-travel position + selected object)"
           >

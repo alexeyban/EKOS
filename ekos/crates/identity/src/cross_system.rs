@@ -179,7 +179,7 @@ fn free_text_tokens(obj: &KirObject) -> Option<HashSet<String>> {
     };
     let tokens: HashSet<String> = text
         .split(|c: char| !c.is_alphanumeric())
-        .map(|w| w.to_lowercase())
+        .map(str::to_lowercase)
         .filter(|w| w.len() >= MIN_FREE_TEXT_TOKEN_LEN)
         .collect();
     if tokens.is_empty() {

@@ -63,7 +63,8 @@ class JobRunner:
 
     # ── submission ───────────────────────────────────────────────────────────
 
-    async def submit(
+    # Async on purpose: part of the awaited runner interface (callers `await` it).
+    async def submit(  # NOSONAR(python:S7503)
         self,
         workspace_id: str,
         ws_path: str,

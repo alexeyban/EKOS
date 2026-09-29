@@ -960,7 +960,7 @@ mod tests {
             formats,
             ["eml", "htm", "html", "md", "txt"]
                 .iter()
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect()
         );
     }

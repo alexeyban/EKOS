@@ -24,6 +24,7 @@ from ..schemas import (
     TimelineOut,
 )
 from ..settings import Settings, get_settings
+from ._responses import BAD_GATEWAY
 
 router = APIRouter(
     prefix="/workspaces", tags=["stats"], dependencies=[Depends(require_role("read"))]
@@ -34,7 +35,7 @@ def _bin(settings: Settings) -> str:
     return settings.ekos_bin
 
 
-@router.get("/{workspace_id}/stats", response_model=StatusOut)
+@router.get("/{workspace_id}/stats", response_model=StatusOut, responses={502: BAD_GATEWAY})
 async def stats(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -46,7 +47,7 @@ async def stats(
     return StatusOut.model_validate(payload)
 
 
-@router.get("/{workspace_id}/health", response_model=DoctorOut)
+@router.get("/{workspace_id}/health", response_model=DoctorOut, responses={502: BAD_GATEWAY})
 async def health(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -58,7 +59,9 @@ async def health(
     return DoctorOut.model_validate(payload)
 
 
-@router.get("/{workspace_id}/stats/timeline", response_model=TimelineOut)
+@router.get(
+    "/{workspace_id}/stats/timeline", response_model=TimelineOut, responses={502: BAD_GATEWAY}
+)
 async def timeline(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),

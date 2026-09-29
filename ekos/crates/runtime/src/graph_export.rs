@@ -313,15 +313,15 @@ pub fn export_graph(
         kinds: opts
             .kinds
             .as_ref()
-            .map(|ks| ks.iter().map(|k| k.to_string()).collect()),
+            .map(|ks| ks.iter().map(std::string::ToString::to_string).collect()),
         rel_kinds: opts
             .rel_kinds
             .as_ref()
-            .map(|ks| ks.iter().map(|k| k.to_string()).collect()),
+            .map(|ks| ks.iter().map(std::string::ToString::to_string).collect()),
         exclude_rel_kinds: opts
             .exclude_rel_kinds
             .iter()
-            .map(|k| k.to_string())
+            .map(std::string::ToString::to_string)
             .collect(),
         min_degree: opts.min_degree,
     };
@@ -562,7 +562,10 @@ fn build_aggregate_level(
                 GroupBy::Kind => kind_pos[label],
                 GroupBy::PathPrefix { .. } => 0,
             },
-            degree: neighbours.get(gid).map(|s| s.len()).unwrap_or(0),
+            degree: neighbours
+                .get(gid)
+                .map(std::collections::HashSet::len)
+                .unwrap_or(0),
             properties: BTreeMap::new(),
             count: Some(*count),
             first_seen: if opts.include_first_seen {

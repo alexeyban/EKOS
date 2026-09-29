@@ -221,7 +221,7 @@ fn load_provenance_from(
         .filter(|l| !l.trim().is_empty())
     {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
-            && let Some(tx) = v.get("tx").and_then(|t| t.as_u64())
+            && let Some(tx) = v.get("tx").and_then(serde_json::Value::as_u64)
             && let Some(ctx) = v
                 .get("ctx")
                 .and_then(|c| serde_json::from_value(c.clone()).ok())

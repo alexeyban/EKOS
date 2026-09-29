@@ -177,7 +177,7 @@ pub fn validate_action(
                     && matches!(&r.kind, RelationshipKind::Custom(k) if k == "Trusts")
             })
             .and_then(|r| r.properties.get("value"))
-            .and_then(|v| v.as_f64())
+            .and_then(serde_json::Value::as_f64)
             .unwrap_or(0.0);
         if trust_value <= 0.4 {
             return Err(ValidationError::PreconditionFailed {

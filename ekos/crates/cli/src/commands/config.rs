@@ -259,7 +259,10 @@ mod tests {
     fn observe(paths: &[&str], ignore: &[&str]) -> ObserveConfig {
         ObserveConfig {
             paths: paths.iter().map(PathBuf::from).collect(),
-            ignore_patterns: ignore.iter().map(|s| s.to_string()).collect(),
+            ignore_patterns: ignore
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
         }
     }
 

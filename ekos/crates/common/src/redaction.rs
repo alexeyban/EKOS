@@ -162,7 +162,7 @@ const BUILTIN_EXCLUDED_GLOBS: &[&str] = &[
 ];
 
 fn compiled_builtin_patterns() -> &'static [(&'static str, Regex, bool)] {
-    static COMPILED: OnceLock<Vec<(&'static str, Regex, bool)>> = OnceLock::new();
+    static COMPILED: OnceLock<Vec<(&str, Regex, bool)>> = OnceLock::new();
     COMPILED.get_or_init(|| {
         BUILTIN_SECRET_PATTERNS
             .iter()

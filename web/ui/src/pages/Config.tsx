@@ -37,8 +37,8 @@ export function Config() {
   const save = useMutation({
     mutationFn: () => apiPut<WriteResult>(`/workspaces/${id}/config`, { raw: text }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config", id] });
-      qc.invalidateQueries({ queryKey: ["ws", id] });
+      void qc.invalidateQueries({ queryKey: ["config", id] });
+      void qc.invalidateQueries({ queryKey: ["ws", id] });
     },
   });
 

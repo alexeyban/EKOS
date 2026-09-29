@@ -1,14 +1,15 @@
 //! RFC 0155 — the row hash, bucketing and the order-independent bucket checksum.
 
-use md5::{Digest, Md5};
+use sha2::{Digest, Sha256};
 
-/// `md5` of a row's canonical form, lowercase hex.
+/// SHA-256 of a row's canonical form, lowercase hex.
 ///
-/// Chosen for availability, not for strength: PostgreSQL, ClickHouse and Spark SQL all have it
-/// natively, and this is a comparison function, never a security primitive. Adversarial collision
-/// resistance is not a property it needs — do not "upgrade" it to SHA-256 and lose an engine.
+/// A comparison function, not a security primitive, but every engine in the matrix has SHA-256
+/// natively (PostgreSQL 11+ `sha256`, ClickHouse `SHA256`, Spark SQL `sha2(…, 256)`), so there is
+/// no portability reason to use a broken hash. RFC 0155 originally chose MD5; see its 2026-09-29
+/// amendment.
 pub fn row_hash(canonical: &str) -> String {
-    let mut h = Md5::new();
+    let mut h = Sha256::new();
     h.update(canonical.as_bytes());
     format!("{:x}", h.finalize())
 }
@@ -20,7 +21,7 @@ pub fn row_hash(canonical: &str) -> String {
 /// force engines into approximate or overflowing arithmetic, and an approximate checksum is a
 /// false green waiting to happen.
 pub fn prefix60(hex: &str) -> u64 {
-    u64::from_str_radix(&hex[..15], 16).expect("md5 hex is 32 hex chars")
+    u64::from_str_radix(&hex[..15], 16).expect("sha-256 hex is 64 hex chars")
 }
 
 /// Which bucket a row's primary key falls in.
@@ -70,20 +71,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn row_hash_matches_the_reference_md5() {
-        // The value every engine's own md5() must agree with. A committed literal, not a
+    fn row_hash_matches_the_reference_sha256() {
+        // The value every engine's own SHA-256 must agree with. A committed literal, not a
         // cross-check between two implementations that could both be wrong.
-        assert_eq!(row_hash(""), "d41d8cd98f00b204e9800998ecf8427e");
-        assert_eq!(row_hash("abc"), "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(
+            row_hash(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            row_hash("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
     fn prefix60_takes_the_first_fifteen_hex_digits() {
         assert_eq!(
-            prefix60("900150983cd24fb0d6963f7d28e17f72"),
-            0x900150983cd24fb
+            prefix60("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+            0xba7816bf8f01cfe
         );
-        assert!(prefix60("ffffffffffffffffffffffffffffffff") < (1u64 << 60));
+        assert!(prefix60(&"f".repeat(64)) < (1u64 << 60));
     }
 
     #[test]

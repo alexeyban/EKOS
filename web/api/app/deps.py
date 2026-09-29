@@ -23,7 +23,9 @@ def require_workspace(workspace_id: str) -> models.Workspace:
     return ws
 
 
-async def mcp_for_workspace(
+# Async on purpose: FastAPI runs an async dependency on the event loop, which owns the supervisor's
+# handle table; a sync one would read it from a thread-pool thread.
+async def mcp_for_workspace(  # NOSONAR(python:S7503)
     ws: models.Workspace = Depends(require_workspace),
     supervisor: McpSupervisor = Depends(get_supervisor),
 ) -> EkosMcpClient:

@@ -215,7 +215,7 @@ fn plan(suffix: &str) -> UnitPlan {
 fn names() -> Vec<String> {
     ["id", "name", "amount", "note", "tag_a", "tag_b"]
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect()
 }
 

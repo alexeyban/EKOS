@@ -144,7 +144,7 @@ function CreateForm({ workspaces }: { workspaces: Workspace[] }) {
         notify_url: url,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["schedules"] });
+      void qc.invalidateQueries({ queryKey: ["schedules"] });
       setCmd("");
       setUrl("");
       setParams({});

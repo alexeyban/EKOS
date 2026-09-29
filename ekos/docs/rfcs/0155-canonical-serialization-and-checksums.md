@@ -76,27 +76,26 @@ store that" assumption would eventually cost a false green.
 
 ```
 row_canonical = canon(c1) || US || canon(c2) || US || … || canon(cn)
-row_hash      = md5(row_canonical)          -- 128-bit, hex
+row_hash      = sha256(row_canonical)       -- 256-bit, hex (md5 until 2026-09-29, see Amendment)
 ```
 
 `US` is `U+001F` (ASCII unit separator), chosen because it cannot appear unescaped in any canonical
 form above. Column order is the **approved target column order** from `MigrationTargetDesign`, not
 the source catalog order, so a deliberate reordering does not read as a divergence.
 
-`md5` is chosen for availability: PostgreSQL, ClickHouse and Spark SQL all have it natively, and it
-is a comparison function here, not a security primitive. Adversarial collision resistance is not a
-property this needs; a note in the RFC says so explicitly so nobody "upgrades" it and loses an
-engine.
+The hash is SHA-256. It is a comparison function here, not a security primitive, but every engine
+in the matrix has it natively, so there is no portability cost to avoiding a broken hash. (This RFC
+originally chose `md5` for availability; see *Amendment 2026-09-29*.)
 
 ### Bucketing and the bucket checksum
 
 ```
-bucket        = md5_prefix_60(canon(pk)) % N          -- N from policy, default 4096
+bucket        = prefix_60(sha256(canon(pk))) % N      -- N from policy, default 4096
 bucket_count  = count(*)
-bucket_sum    = sum( md5_prefix_60(row_hash) )        -- exact integer arithmetic
+bucket_sum    = sum( prefix_60(row_hash) )            -- exact integer arithmetic
 ```
 
-`md5_prefix_60` takes the first 15 hex characters (60 bits) of the hash as an integer. 60 bits fits
+`prefix_60` takes the first 15 hex characters (60 bits) of the hash as an integer. 60 bits fits
 in a signed 64-bit integer with room for summation, and every target engine can sum it exactly —
 which is the point. The pair `(count, sum)` is **order-independent**, so neither side needs to sort,
 and a same-count/same-sum pair is what lets bisect skip a bucket.
@@ -161,8 +160,8 @@ control that does not is a bug in this RFC, not in the validator.
 - **XOR of row hashes instead of a sum.** Order-independent and overflow-free, but a duplicated row
   cancels itself out, so exactly the duplicate-row defect that `ReplacingMergeTree` makes likely
   becomes invisible. The `(count, sum)` pair catches it.
-- **SHA-256 instead of MD5.** No benefit here (not a security boundary) and weaker portability
-  across the engine matrix. Revisit only if an engine drops `md5`.
+- **MD5 instead of SHA-256.** The original choice, for availability. Withdrawn 2026-09-29: the
+  portability premise was wrong (see *Amendment 2026-09-29*).
 - **Let each engine cast to text with its own default.** This is what naive comparisons do, and it
   is the source of every failure listed in *Motivation*.
 - **Include floats via rounding to N decimal places.** Rejected: rounding boundaries differ between
@@ -185,3 +184,35 @@ control that does not is a bug in this RFC, not in the validator.
 - [ ] Every serialization-layer planted control changes the bucket checksum.
 - [ ] Dialect expressions are generated from one table, not written per call site.
 - [ ] `cargo clippy --workspace -- -D warnings` and `cargo fmt --check` clean.
+
+## Amendment 2026-09-29 — SHA-256 replaces MD5
+
+The row hash and the bucket hash are now SHA-256 on every side:
+
+| Side | Expression |
+|---|---|
+| Rust | `sha2::Sha256`, lowercase hex |
+| PostgreSQL (11+) | `encode(sha256(convert_to(x, 'UTF8')), 'hex')` |
+| ClickHouse | `lower(hex(SHA256(x)))` |
+| Spark SQL (future Delta target) | `sha2(x, 256)` |
+
+**Why.** SonarCloud's security rating was D on a single MD5 finding (`rust:S4790`) in
+`migrate-validate/src/hash.rs`. The original rejection of SHA-256 rested on "weaker portability",
+and that turned out to be wrong: every engine above has SHA-256 natively. Suppressing the
+finding would have kept a broken hash in place for no benefit.
+
+**What did not change.** Canonical forms, the unit separator, `prefix_60` (still the first 15 hex
+characters), the `(count, sum)` bucket pair, and the endianness handling in `prefix60_expr`.
+Earlier validation runs compared both sides within one run, so no stored comparison mixes the two
+hashes.
+
+**Verified.** The golden table was regenerated from the implementation. With
+`EKOS_MIGRATE_LIVE=1`, both sandboxes (PostgreSQL 16, ClickHouse 24.8) reproduce the Rust row hash,
+the 60-bit prefix, and a new non-ASCII case (`Ünïcödé 🦀`). The non-ASCII case guards the
+`convert_to(…, 'UTF8')` step, which PostgreSQL needs because `sha256` takes `bytea`.
+
+**Found alongside.** The change exposed a flaky assertion in `bisect::mask_key`'s test
+(`!mask_key("7").contains('7')`). The masked form ends in 8 hex characters of the hash, and about
+40% of 8-hex-digit strings contain any given digit, so the test passed under MD5 by luck. It now
+uses a key made of non-hex characters.
+

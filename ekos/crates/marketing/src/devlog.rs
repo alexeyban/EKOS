@@ -136,7 +136,7 @@ pub fn number_from_filename(name: &str) -> Option<u32> {
 pub fn find_latest(dir: &Path) -> Option<PathBuf> {
     std::fs::read_dir(dir)
         .ok()?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter_map(|e| {
             let path = e.path();
             let name = path.file_name()?.to_str()?.to_string();

@@ -158,94 +158,6 @@ fn first_missing_key(catalog: &Catalog) -> Option<(String, String)> {
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ekos_demo_server::catalog::RepoEntry;
-
-    fn repo(slug: &str, workspace_dir: std::path::PathBuf) -> RepoEntry {
-        RepoEntry {
-            slug: slug.to_string(),
-            display_name: slug.to_string(),
-            tagline: String::new(),
-            workspace_dir,
-            html_dir: std::path::PathBuf::new(),
-            llm_provider: None,
-            llm_api_key_env: None,
-            ai_max_tokens: None,
-        }
-    }
-
-    /// RFC 0045 Testing: "server started with ANTHROPIC_API_KEY unset must
-    /// exit with a startup error, not serve requests" — the pure half of
-    /// that check, without actually exiting the test process. RFC 0046 adds
-    /// the OpenAI-provider case. Every case lives in one test function: even
-    /// mutating *different* env-var keys concurrently from separate `#[test]`
-    /// threads is a real race against the platform's environment table (the
-    /// reason `set_var`/`remove_var` are `unsafe` at all, not just same-key
-    /// collisions) — so every env-var-touching assertion in this file runs
-    /// sequentially, in this one function, on purpose.
-    #[test]
-    fn first_missing_key_reflects_whether_a_working_key_is_present() {
-        let dir = tempfile::tempdir().unwrap();
-        let catalog = Catalog {
-            repos: vec![repo("demo", dir.path().to_path_buf())],
-        };
-
-        // SAFETY (test-only): no other test in this crate reads or writes
-        // this env var, and every assertion below runs sequentially in one
-        // test, never concurrently with another test's env mutation.
-        unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
-        }
-        // No ekos.toml written — from_file_or_default falls back to
-        // defaults, which default to the Anthropic provider needing
-        // ANTHROPIC_API_KEY.
-        assert_eq!(
-            first_missing_key(&catalog),
-            Some(("demo".to_string(), "ANTHROPIC_API_KEY".to_string()))
-        );
-
-        unsafe {
-            std::env::set_var("ANTHROPIC_API_KEY", "test-key-value");
-        }
-        assert_eq!(first_missing_key(&catalog), None);
-
-        unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
-        }
-
-        // RFC 0046: the same check must follow the catalog's llm_provider
-        // override, not always assume Anthropic.
-        let openai_dir = tempfile::tempdir().unwrap();
-        let openai_repo = RepoEntry {
-            llm_provider: Some("openai".to_string()),
-            llm_api_key_env: Some("OPENAI_API_KEY".to_string()),
-            ..repo("demo-openai", openai_dir.path().to_path_buf())
-        };
-        let openai_catalog = Catalog {
-            repos: vec![openai_repo],
-        };
-
-        unsafe {
-            std::env::remove_var("OPENAI_API_KEY");
-        }
-        assert_eq!(
-            first_missing_key(&openai_catalog),
-            Some(("demo-openai".to_string(), "OPENAI_API_KEY".to_string()))
-        );
-
-        unsafe {
-            std::env::set_var("OPENAI_API_KEY", "test-key-value");
-        }
-        assert_eq!(first_missing_key(&openai_catalog), None);
-
-        unsafe {
-            std::env::remove_var("OPENAI_API_KEY");
-        }
-    }
-}
-
 async fn index(State(state): State<Arc<AppState>>) -> Html<String> {
     let mut cards = String::new();
     for repo in &state.catalog.repos {
@@ -360,4 +272,92 @@ async fn handle_ask(
 
 fn error_response(status: axum::http::StatusCode, message: &str) -> axum::response::Response {
     (status, axum::Json(serde_json::json!({ "error": message }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ekos_demo_server::catalog::RepoEntry;
+
+    fn repo(slug: &str, workspace_dir: std::path::PathBuf) -> RepoEntry {
+        RepoEntry {
+            slug: slug.to_string(),
+            display_name: slug.to_string(),
+            tagline: String::new(),
+            workspace_dir,
+            html_dir: std::path::PathBuf::new(),
+            llm_provider: None,
+            llm_api_key_env: None,
+            ai_max_tokens: None,
+        }
+    }
+
+    /// RFC 0045 Testing: "server started with ANTHROPIC_API_KEY unset must
+    /// exit with a startup error, not serve requests" — the pure half of
+    /// that check, without actually exiting the test process. RFC 0046 adds
+    /// the OpenAI-provider case. Every case lives in one test function: even
+    /// mutating *different* env-var keys concurrently from separate `#[test]`
+    /// threads is a real race against the platform's environment table (the
+    /// reason `set_var`/`remove_var` are `unsafe` at all, not just same-key
+    /// collisions) — so every env-var-touching assertion in this file runs
+    /// sequentially, in this one function, on purpose.
+    #[test]
+    fn first_missing_key_reflects_whether_a_working_key_is_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = Catalog {
+            repos: vec![repo("demo", dir.path().to_path_buf())],
+        };
+
+        // SAFETY (test-only): no other test in this crate reads or writes
+        // this env var, and every assertion below runs sequentially in one
+        // test, never concurrently with another test's env mutation.
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+        // No ekos.toml written — from_file_or_default falls back to
+        // defaults, which default to the Anthropic provider needing
+        // ANTHROPIC_API_KEY.
+        assert_eq!(
+            first_missing_key(&catalog),
+            Some(("demo".to_string(), "ANTHROPIC_API_KEY".to_string()))
+        );
+
+        unsafe {
+            std::env::set_var("ANTHROPIC_API_KEY", "test-key-value");
+        }
+        assert_eq!(first_missing_key(&catalog), None);
+
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+
+        // RFC 0046: the same check must follow the catalog's llm_provider
+        // override, not always assume Anthropic.
+        let openai_dir = tempfile::tempdir().unwrap();
+        let openai_repo = RepoEntry {
+            llm_provider: Some("openai".to_string()),
+            llm_api_key_env: Some("OPENAI_API_KEY".to_string()),
+            ..repo("demo-openai", openai_dir.path().to_path_buf())
+        };
+        let openai_catalog = Catalog {
+            repos: vec![openai_repo],
+        };
+
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+        assert_eq!(
+            first_missing_key(&openai_catalog),
+            Some(("demo-openai".to_string(), "OPENAI_API_KEY".to_string()))
+        );
+
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "test-key-value");
+        }
+        assert_eq!(first_missing_key(&openai_catalog), None);
+
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+        }
+    }
 }

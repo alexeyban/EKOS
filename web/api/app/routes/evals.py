@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from .. import models
 from ..auth import require_role
 from ..deps import require_workspace
+from ._responses import BAD_REQUEST, NOT_FOUND, SERVER_ERROR
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/evals", tags=["evals"])
 
@@ -88,7 +89,11 @@ async def list_reports(ws: models.Workspace = Depends(require_workspace)) -> lis
     return out
 
 
-@router.get("/reports/{filename}", dependencies=[Depends(require_role("read"))])
+@router.get(
+    "/reports/{filename}",
+    dependencies=[Depends(require_role("read"))],
+    responses={400: BAD_REQUEST, 404: NOT_FOUND, 500: SERVER_ERROR},
+)
 async def get_report(filename: str, ws: models.Workspace = Depends(require_workspace)) -> dict:
     """The full report — every headline metric plus the per-scenario breakdown — for one saved
     run, verbatim as `ekos eval run` wrote it."""

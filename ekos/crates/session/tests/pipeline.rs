@@ -48,7 +48,10 @@ fn note(kind: NoteKind, text: &str, anchors: &[&str]) -> NoteInput {
         kind,
         text: text.into(),
         rationale: Some("measured".into()),
-        anchors: anchors.iter().map(|s| s.to_string()).collect(),
+        anchors: anchors
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
     }
 }
 

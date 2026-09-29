@@ -1351,7 +1351,7 @@ pub fn migrate_to_v2(path: &Path) -> Result<MigrateReport, LedgerError> {
     } else {
         None
     };
-    let dict_bytes = dict_bytes_vec.as_ref().map(|d| d.len()).unwrap_or(0);
+    let dict_bytes = dict_bytes_vec.as_ref().map(std::vec::Vec::len).unwrap_or(0);
     drop(samples);
 
     let tmp = sibling_path(path, ".migrating");

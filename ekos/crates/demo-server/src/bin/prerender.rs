@@ -26,7 +26,10 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&dst)?;
 
     let mut rendered = 0usize;
-    for entry in WalkDir::new(&src).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(&src)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+    {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
             continue;

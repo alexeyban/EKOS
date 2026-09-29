@@ -72,7 +72,7 @@ pub trait TreasuryClient: Send + Sync {
 /// Insert the decimal point into a raw integer amount: `("1500000", 6)` → `"1.5"`. String math
 /// only — token amounts routinely exceed `f64`'s 2^53 exact-integer range.
 pub fn scale_decimal(raw: &str, decimals: u32) -> String {
-    let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits: String = raw.chars().filter(char::is_ascii_digit).collect();
     let digits = digits.trim_start_matches('0');
     if digits.is_empty() {
         return "0".into();

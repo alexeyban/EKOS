@@ -87,8 +87,8 @@ export function exportGltf(nodes: GNode[], links: GLink[]): void {
   buffer.set(new Uint8Array(linePositions.buffer), linePosOffset);
 
   const minMax = (arr: Float32Array, comps: number) => {
-    const min = Array(comps).fill(Infinity);
-    const max = Array(comps).fill(-Infinity);
+    const min = new Array<number>(comps).fill(Infinity);
+    const max = new Array<number>(comps).fill(-Infinity);
     for (let i = 0; i < arr.length; i += comps) {
       for (let c = 0; c < comps; c++) {
         min[c] = Math.min(min[c], arr[i + c]);
@@ -100,7 +100,7 @@ export function exportGltf(nodes: GNode[], links: GLink[]): void {
   const posMinMax = minMax(pointPositions, 3);
 
   let binary = "";
-  for (const byte of buffer) binary += String.fromCharCode(byte);
+  for (const byte of buffer) binary += String.fromCodePoint(byte);
   const base64 = btoa(binary);
 
   // glTF requires every mesh to have at least one primitive — when there are no edges to draw,
