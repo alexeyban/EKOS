@@ -32,6 +32,7 @@ pub mod package_json_analyzer;
 pub mod pentaho_analyzer;
 pub mod perl_analyzer;
 pub mod plpgsql_analyzer;
+pub mod plpgsql_footprint;
 pub mod python_analyzer;
 pub mod requirements_analyzer;
 pub mod rust_analyzer;

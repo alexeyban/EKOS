@@ -6122,8 +6122,10 @@ PostgreSQL recover completely**, with a ratcheted floor.
 - [x] Wire the parser into a `PlPgSqlAnalyzerPass` in `recovery`, emitting `Custom("Procedure")` /
       `Custom("ProcedureStatement")` objects with REGISTRY rows (devlog_229; LedgerSMB `sql/`: 556
       routines, 1556 statements, deterministic across re-commits)
-- [ ] Link routines to the tables/routines they touch (needs the lowering below + an RFC 0075-style
-      whole-graph name match)
+- [x] Link routines to the tables/routines they touch: per-statement SQL footprint from a real
+      `sqlparser` AST walk + `procedure_lineage` at `commit` (devlog_230; LedgerSMB: 1,852 edges,
+      99.6% of embedded SQL parses, idempotent across re-commits)
+- [ ] A `View` object kind — views are the largest class of unlinkable names (RFC 0075 has the same gap)
 - [ ] Downstream registries for the new kinds: docs-gen entity pages / API grouping,
       `llm_description`, `doc_links` (RFC 0147's list) — not CI-enforced
 - [ ] Trigger recovery and structural classification; never auto-translated

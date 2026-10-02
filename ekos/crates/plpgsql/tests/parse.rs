@@ -653,6 +653,108 @@ fn every_directly_executable_sql_command_is_recognised() {
     assert!(kinds(&ir).iter().all(|k| *k == "sql"), "{:?}", kinds(&ir));
 }
 
+/// `INSERT INTO t` names a table, not PL/pgSQL's `INTO variable`. In DML the binding `INTO` can
+/// only follow `RETURNING`. Treating the first `INTO` as the binding stored every plain insert as
+/// `INSERT SELECT …` with its table recorded as a variable — found when the footprint of
+/// `INSERT INTO journal_line … SELECT` came back without `journal_line`.
+#[test]
+fn dml_into_is_a_table_and_only_returning_into_binds() {
+    let sql_of = |body: &str| match &f(body).body[0] {
+        ProcStmt::Sql { sql, into, .. } => (sql.clone(), into.clone()),
+        other => panic!("{other:?}"),
+    };
+    let (sql, into) = sql_of("INSERT INTO journal_line (account_id) SELECT id FROM account;");
+    assert_eq!(
+        sql,
+        "INSERT INTO journal_line (account_id) SELECT id FROM account"
+    );
+    assert_eq!(into, None);
+
+    let (sql, into) = sql_of("INSERT INTO t VALUES (1) RETURNING id INTO new_id;");
+    assert_eq!(sql, "INSERT INTO t VALUES (1) RETURNING id");
+    assert_eq!(into, Some(vec!["new_id".to_string()]));
+
+    let (sql, into) = sql_of("UPDATE t SET a = 1 WHERE id = 2 RETURNING a, b INTO x, y;");
+    assert_eq!(sql, "UPDATE t SET a = 1 WHERE id = 2 RETURNING a, b");
+    assert_eq!(into, Some(vec!["x".to_string(), "y".to_string()]));
+
+    let (sql, into) = sql_of("WITH s AS (SELECT 1 AS v) INSERT INTO t SELECT v FROM s;");
+    assert_eq!(
+        sql,
+        "WITH s AS (SELECT 1 AS v) INSERT INTO t SELECT v FROM s"
+    );
+    assert_eq!(into, None);
+
+    // SELECT keeps the binding wherever it sits.
+    let (sql, into) = sql_of("SELECT a INTO STRICT x FROM t;");
+    assert_eq!(sql, "SELECT a FROM t");
+    assert_eq!(into, Some(vec!["x".to_string()]));
+}
+
+/// A loop's query keeps its own parentheses. Trimming `(`/`)` from both ends unconditionally
+/// stored `… = any(ids)` as `… = any(ids` — found when the stored text failed to parse as SQL.
+/// Only one pair that wraps the whole query is removed.
+#[test]
+fn a_loop_query_keeps_its_own_parentheses() {
+    let query_of = |body: &str| match &f(body).body[0] {
+        ProcStmt::Loop {
+            kind: LoopKind::ForQuery { sql, .. },
+            ..
+        } => sql.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        query_of("FOR r IN select * from oe WHERE id = any(ids) LOOP RETURN NEXT r; END LOOP;"),
+        "select * from oe WHERE id = any(ids)"
+    );
+    assert_eq!(
+        query_of("FOR r IN (SELECT a FROM t) LOOP RETURN NEXT r; END LOOP;"),
+        "SELECT a FROM t"
+    );
+    assert_eq!(
+        query_of("FOR r IN (SELECT 1) UNION (SELECT 2) LOOP RETURN NEXT r; END LOOP;"),
+        "(SELECT 1) UNION (SELECT 2)"
+    );
+}
+
+/// The old `SELECT INTO a, b expr, expr FROM …` form: the binding list ends at its last identifier,
+/// not at `FROM`, or the select list is swallowed as "targets".
+#[test]
+fn select_into_right_after_select_binds_only_the_identifier_list() {
+    match &f("SELECT INTO v_cost, v_qty SUM(i.sellprice * i.qty), SUM(i.qty) FROM invoice i;").body
+        [0]
+    {
+        ProcStmt::Sql { sql, into, .. } => {
+            assert_eq!(
+                into.as_deref(),
+                Some(&["v_cost".to_string(), "v_qty".to_string()][..])
+            );
+            assert_eq!(
+                sql,
+                "SELECT SUM(i.sellprice * i.qty), SUM(i.qty) FROM invoice i"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// `USING` on its own line is still `USING`; the arguments are not part of the dynamic expression.
+#[test]
+fn execute_using_is_found_whatever_whitespace_precedes_it() {
+    match &f("EXECUTE $sql$ SELECT * FROM t WHERE a = $1 $sql$\nINTO t_retval\nUSING in_a, in_b;")
+        .body[0]
+    {
+        ProcStmt::DynamicExecute {
+            expr, using, into, ..
+        } => {
+            assert_eq!(expr, "$sql$ SELECT * FROM t WHERE a = $1 $sql$");
+            assert_eq!(using, &vec!["in_a".to_string(), "in_b".to_string()]);
+            assert_eq!(into.as_deref(), Some(&["t_retval".to_string()][..]));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
 /// `ELSEIF` is PL/pgSQL's documented alternative spelling of `ELSIF`.
 #[test]
 fn elseif_is_an_elsif() {

@@ -378,12 +378,21 @@ deterministic, in-process PL/pgSQL parser (no database, no LLM) and writes:
 
 ```bash
 ekos recover   # … PL/pgSQL routines: 556 (254 plpgsql: 251 complete, 3 partial), 1556 statements
+ekos commit    # … Procedure links: 1852 new (409 reads, 308 writes, 989 depends-on, 146 calls …)
 ekos ekl "FIND Object WHERE kind = 'Procedure' AND name = 'payment_post'"
 ```
 
 On LedgerSMB every routine its `LOADORDER` installs recovers completely (212/212); the three
 `partial` routines above are in a module LedgerSMB itself does not load, and are invalid PL/pgSQL.
-Edges from a routine to the tables it reads and writes come with RFC 0164's lowering.
+
+Each statement's embedded SQL (and each condition, assignment and loop bound) is parsed as real
+PostgreSQL, so every `ProcedureStatement` and `Procedure` records the tables it **reads**, the tables
+it **writes** and the functions it **calls** — `LANGUAGE sql` routines included. `ekos commit` then
+links them across the whole workspace: `ReadsFrom`/`WritesTo` per statement, `DependsOn` from the
+routine to each table (with `access: read | write | read_write`), and `Calls` between routines — so
+"what breaks if I change `acc_trans`" now names the 50 LedgerSMB routines that touch it. A name links
+only when it names exactly one object; an overloaded or redefined routine, a view (EKOS has no view
+object yet), a temp table or a system catalog links nothing rather than something guessed.
 
 ### dbt metadata extraction (RFC 0117)
 

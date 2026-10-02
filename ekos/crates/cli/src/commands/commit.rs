@@ -4,7 +4,9 @@ use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirGraph, KirObject, KirRelationship, SourceLocation};
 use ekos_ledger::KnowledgeStore;
-use ekos_semantic::{CkModel, CkmRelationship, EvidenceRecord, data_lineage, rollup};
+use ekos_semantic::{
+    CkModel, CkmRelationship, EvidenceRecord, data_lineage, procedure_lineage, rollup,
+};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
@@ -134,6 +136,14 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     let step = phase_note("linking data lineage");
     let lineage_links_added = commit_data_lineage(&*ledger)?;
     step.done();
+
+    // RFC 0163: routines → the tables they read/write and the routines they call. Same reason to
+    // run here as RFC 0075's lineage: the names each `Procedure` recorded can only be resolved
+    // against every file's tables, which first coexist in this ledger read.
+    ledger.set_write_context(Some(write_ctx("commit:procedure-lineage")));
+    let step = phase_note("linking procedures");
+    let (procedure_links_added, procedure_link_stats) = commit_procedure_lineage(&*ledger)?;
+    step.done();
     ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
@@ -197,6 +207,16 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     }
     for line in &extension_lines {
         println!("  {line}");
+    }
+    if procedure_links_added > 0 || procedure_link_stats.ambiguous > 0 {
+        println!(
+            "  Procedure links:       {procedure_links_added} new ({} reads, {} writes, {} depends-on, {} calls resolved; {} ambiguous name(s) not linked)",
+            procedure_link_stats.reads_from,
+            procedure_link_stats.writes_to,
+            procedure_link_stats.depends_on,
+            procedure_link_stats.calls,
+            procedure_link_stats.ambiguous
+        );
     }
     if lineage_links_added > 0 {
         println!("  Data lineage links:    {lineage_links_added}");
@@ -276,6 +296,30 @@ fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
     }
 
     Ok(written)
+}
+
+/// RFC 0163: links recovered routines to the tables they read/write (`ReadsFrom`/`WritesTo` per
+/// statement, `DependsOn` per routine) and the routines they call (`Calls`), by unique name only.
+/// Deterministic ids make a re-run on unchanged input append nothing. Returns the number of
+/// relationships newly written and what the linker resolved.
+fn commit_procedure_lineage(
+    ledger: &dyn KnowledgeStore,
+) -> Result<(usize, procedure_lineage::ProcedureLinkStats)> {
+    let objects = ledger.all_objects()?;
+    let mut graph = KirGraph {
+        objects,
+        relationships: Vec::new(),
+        events: Vec::new(),
+        evidence: Vec::new(),
+    };
+    let stats = procedure_lineage::link_procedures(&mut graph);
+    let mut written = 0usize;
+    for rel in &graph.relationships {
+        if ledger.append_relationship(rel)? {
+            written += 1;
+        }
+    }
+    Ok((written, stats))
 }
 
 /// RFC 0109: a freshly-compiled role `Claim` never carries `review_status` — the reasoning pass

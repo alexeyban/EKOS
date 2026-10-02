@@ -190,7 +190,7 @@ glob = "0.3"
 regex = "1"
 
 # SQL parsing
-sqlparser = "0.53"
+sqlparser = { version = "0.53", features = ["visitor"] }
 
 # XML parsing (Pentaho .ktr/.kjb — RFC 0027 Phase 3)
 roxmltree = "0.20"

@@ -21,6 +21,7 @@
 //! links `TransformNode`s to tables; a per-file pass sees neither. The statement text needed for
 //! both is already on every `ProcedureStatement`.
 
+use crate::plpgsql_footprint::{Footprint, expression_footprint, statement_footprint};
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
@@ -303,24 +304,145 @@ fn emit_procedure(
     .with_property("span_end", json!(offset + text.len()));
     obj.id = proc_id;
     obj.evidence.push(evidence_id);
-    graph.add_object(obj);
 
-    if !is_plpgsql {
-        return;
+    // What the routine touches: the union of its statements' footprints and its declarations'
+    // defaults — or, for a `LANGUAGE sql` routine, its body parsed as the SQL it is.
+    let mut footprint = Footprint::default();
+    for d in &ir.declarations {
+        if let Some(default) = &d.default {
+            footprint.merge(expression_footprint(default));
+        }
     }
-    let mut emitter = StatementEmitter {
-        graph,
-        stats,
-        source_path,
-        sql,
-        key,
-        procedure: &ir.signature.name,
-        offset,
-        next_index: 0,
+    if is_plpgsql {
+        let mut emitter = StatementEmitter {
+            graph,
+            stats,
+            source_path,
+            sql,
+            key,
+            procedure: &ir.signature.name,
+            offset,
+            next_index: 0,
+            footprint: &mut footprint,
+        };
+        for (order, stmt) in ir.body.iter().enumerate() {
+            emitter.emit(stmt, proc_id, None, 0, order, "body");
+        }
+    } else if ir.signature.language == "sql"
+        && let Some(body) = sql_body(text)
+    {
+        footprint.merge(statement_footprint(&body));
+    }
+    set_footprint(&mut obj.properties, &footprint);
+    obj.properties
+        .insert("footprint_fragments".into(), json!(footprint.fragments));
+    graph.add_object(obj);
+}
+
+/// A `LANGUAGE sql` routine's body: the dollar- or single-quoted string after `AS`, unescaped.
+fn sql_body(text: &str) -> Option<String> {
+    use ekos_plpgsql::lex::{Tok, lex};
+    let toks = lex(text).ok()?;
+    toks.windows(2).find_map(|w| match (&w[0].tok, &w[1].tok) {
+        (Tok::Word(a), Tok::Dollar { body, .. } | Tok::Str(body))
+            if a.eq_ignore_ascii_case("AS") =>
+        {
+            Some(body.clone())
+        }
+        _ => None,
+    })
+}
+
+fn set_footprint(props: &mut std::collections::HashMap<String, Value>, fp: &Footprint) {
+    props.insert("reads".into(), json!(fp.reads));
+    props.insert("writes".into(), json!(fp.writes));
+    props.insert("calls".into(), json!(fp.calls));
+    props.insert("footprint".into(), json!(fp.status()));
+    if !fp.errors.is_empty() {
+        props.insert("footprint_errors".into(), json!(fp.errors));
+    }
+}
+
+/// The footprint of one statement's *own* SQL and expressions — not its children's, which are
+/// statements of their own.
+///
+/// Not attempted: `RAISE` arguments (`RAISE SQLSTATE '22012'`, `USING ERRCODE = …` are not SQL
+/// expressions) and `GET DIAGNOSTICS` (not SQL). A dynamic `EXECUTE` contributes the functions its
+/// string-building expression calls; its target is genuinely unknown and stays a boundary.
+fn statement_footprint_of(stmt: &ProcStmt) -> Footprint {
+    use ekos_plpgsql::LoopKind;
+    let mut fp = Footprint::default();
+    let not_dynamic = |q: &str| !q.trim_start().to_ascii_uppercase().starts_with("EXECUTE");
+    let expr = |fp: &mut Footprint, e: &str| {
+        if !e.trim().is_empty() {
+            fp.merge(expression_footprint(e));
+        }
     };
-    for (order, stmt) in ir.body.iter().enumerate() {
-        emitter.emit(stmt, proc_id, None, 0, order, "body");
+    match stmt {
+        ProcStmt::Sql { sql, .. } => {
+            let head = sql.split_whitespace().next().unwrap_or_default();
+            if !["GET", "NULL"].iter().any(|h| head.eq_ignore_ascii_case(h)) {
+                fp.merge(statement_footprint(sql));
+            }
+        }
+        ProcStmt::Perform { sql, .. } => fp.merge(statement_footprint(&format!("SELECT {sql}"))),
+        ProcStmt::Assign { expr: e, .. } => expr(&mut fp, e),
+        ProcStmt::If { branches, .. } => {
+            for (cond, _) in branches {
+                expr(&mut fp, cond);
+            }
+        }
+        ProcStmt::Case {
+            operand, branches, ..
+        } => {
+            if let Some(o) = operand {
+                expr(&mut fp, o);
+            }
+            for (label, _) in branches {
+                expr(&mut fp, label);
+            }
+        }
+        ProcStmt::Loop { kind, .. } => match kind {
+            LoopKind::While { condition } => expr(&mut fp, condition),
+            LoopKind::ForRange { from, to, .. } => {
+                expr(&mut fp, from);
+                expr(&mut fp, to);
+            }
+            LoopKind::ForQuery { sql, .. } if not_dynamic(sql) => {
+                fp.merge(statement_footprint(sql))
+            }
+            LoopKind::ForEach { array, .. } => expr(&mut fp, array),
+            _ => {}
+        },
+        ProcStmt::Exit { when: Some(w), .. } => expr(&mut fp, w),
+        ProcStmt::Return { value, query, .. } => {
+            if let Some(q) = query.as_deref().filter(|q| not_dynamic(q)) {
+                fp.merge(statement_footprint(q));
+            }
+            if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) {
+                expr(&mut fp, v);
+            }
+        }
+        ProcStmt::Cursor { query: Some(q), .. } if not_dynamic(q) => {
+            fp.merge(statement_footprint(q))
+        }
+        ProcStmt::DynamicExecute { expr: e, .. } => {
+            // The constructed text's target is unknown; only what builds it is real.
+            let mut built = expression_footprint(e);
+            built.reads.clear();
+            built.writes.clear();
+            fp.merge(built);
+        }
+        ProcStmt::Block { declarations, .. } => {
+            for d in declarations {
+                if let Some(default) = &d.default {
+                    expr(&mut fp, default);
+                }
+            }
+        }
+        _ => {}
     }
+    fp
 }
 
 struct StatementEmitter<'a> {
@@ -333,6 +455,8 @@ struct StatementEmitter<'a> {
     /// Where the routine starts in the file; statement spans are relative to the routine.
     offset: usize,
     next_index: usize,
+    /// The routine's footprint, accumulated statement by statement.
+    footprint: &'a mut Footprint,
 }
 
 impl StatementEmitter<'_> {
@@ -377,6 +501,9 @@ impl StatementEmitter<'_> {
         );
         obj.id = id;
         obj.properties = semantics(stmt);
+        let fp = statement_footprint_of(stmt);
+        set_footprint(&mut obj.properties, &fp);
+        self.footprint.merge(fp);
         for (k, v) in [
             ("procedure", json!(self.procedure)),
             ("index", json!(index)),
@@ -716,6 +843,72 @@ CREATE FUNCTION broken() RETURNS int AS $$ BEGIN ¿¿ nonsense; RETURN 1; END $$
             "mssql",
             "CREATE PROCEDURE p AS BEGIN SELECT 1 END"
         ));
+    }
+
+    /// Each statement records what its own SQL and expressions touch; the routine records the
+    /// union, and a `LANGUAGE sql` routine gets its body's footprint without statements.
+    #[test]
+    fn statements_and_routines_record_what_they_read_write_and_call() {
+        let sql = "CREATE FUNCTION post(in_id int) RETURNS int AS $$\n\
+DECLARE t_uid int := person__get_my_entity_id();\n\
+BEGIN\n\
+  IF EXISTS (SELECT 1 FROM account WHERE id = in_id) THEN\n\
+    INSERT INTO journal_line (account_id) SELECT id FROM account WHERE id = in_id;\n\
+  END IF;\n\
+  PERFORM setting_increment('glnumber');\n\
+  FOR r IN SELECT * FROM acc_trans WHERE trans_id = in_id LOOP\n\
+    UPDATE invoice SET allocated = 0 WHERE id = r.invoice_id;\n\
+  END LOOP;\n\
+  EXECUTE format('DELETE FROM %I', 'secret_target');\n\
+  GET DIAGNOSTICS n = ROW_COUNT;\n\
+  RETURN t_uid;\n\
+END $$ LANGUAGE plpgsql;\n\
+CREATE FUNCTION open_items(in_acc int) RETURNS SETOF open_item AS $$\n\
+  SELECT * FROM open_item WHERE account_id = in_acc;\n\
+  UPDATE account SET touched = true WHERE id = in_acc;\n\
+$$ LANGUAGE sql;";
+        let (g, _) = recover_routines("f.sql", sql);
+        let strs = |o: &KirObject, k: &str| -> Vec<String> {
+            prop(o, k)
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect()
+        };
+        let procs = of_kind(&g, "Procedure");
+        let post = procs.iter().find(|p| p.name == "post").unwrap();
+        assert_eq!(strs(post, "reads"), ["acc_trans", "account"]);
+        assert_eq!(strs(post, "writes"), ["invoice", "journal_line"]);
+        let calls = strs(post, "calls");
+        for c in ["person__get_my_entity_id", "setting_increment", "format"] {
+            assert!(calls.contains(&c.to_string()), "{calls:?}");
+        }
+        // The dynamic statement's constructed target is never claimed.
+        assert!(!strs(post, "writes").contains(&"secret_target".to_string()));
+        assert_eq!(
+            prop(post, "footprint"),
+            &json!("parsed"),
+            "{:?}",
+            post.properties
+        );
+
+        let stmt = |tag: &str| {
+            of_kind(&g, "ProcedureStatement")
+                .into_iter()
+                .find(|s| prop(s, "procedure") == "post" && prop(s, "stmt") == tag)
+                .unwrap()
+        };
+        // The IF reads what its condition reads; the INSERT inside it is its own statement.
+        assert_eq!(strs(stmt("if"), "reads"), ["account"]);
+        assert!(strs(stmt("if"), "writes").is_empty());
+        assert_eq!(strs(stmt("loop"), "reads"), ["acc_trans"]);
+        assert_eq!(prop(stmt("loop"), "footprint"), &json!("parsed"));
+
+        let items = procs.iter().find(|p| p.name == "open_items").unwrap();
+        assert_eq!(prop(items, "fidelity"), &json!("signature"));
+        assert_eq!(strs(items, "reads"), ["open_item"]);
+        assert_eq!(strs(items, "writes"), ["account"]);
     }
 
     #[tokio::test]

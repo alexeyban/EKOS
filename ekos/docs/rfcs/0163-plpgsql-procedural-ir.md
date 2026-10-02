@@ -293,3 +293,30 @@ Measured end to end on LedgerSMB `sql/` (259 files, mock LLM): 556 routines, 254
 complete, 3 partial — all in the unloaded `Business_Dates.sql`), 1556 statements; zero compile
 warnings from the new kinds; after a second full `recover`→`commit` on unchanged input every one of
 the 2,112 objects still has exactly one ledger version.
+
+## Amendment 2026-10-02 (c) — what routines touch, and the links
+
+*Where it runs* promised "`Calls` edges from procedure to the tables, functions and procedures it
+touches". Built as two stages (devlog_230):
+
+1. **Footprint, per file** (`recovery/src/plpgsql_footprint.rs`). Each statement's own SQL and
+   expressions are parsed with `sqlparser`'s PostgreSQL dialect and the AST walked with its
+   visitor: writes = `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`TRUNCATE` targets; reads = every other
+   relation minus the statement's CTE names; calls = every function, a table function
+   (`FROM setting_get(…)`) included as a call, not a table. Expressions are parsed as
+   `SELECT <expr>`, as PL/pgSQL evaluates them, so variables need no placeholder substitution —
+   the deviation from *Parsing*'s "typed placeholders", which proved unnecessary. A fragment that
+   does not parse is recorded with the parser's error (`footprint: unparsed`), never guessed at.
+   `LANGUAGE sql` routines get their body's footprint at routine level.
+2. **Linking, whole graph** (`semantic/src/procedure_lineage.rs`, run by `ekos commit`). Not
+   `Calls` to tables as first written — `Calls` is the routine call graph `callers` traverses, so:
+   `ReadsFrom`/`WritesTo` statement → table (the precise citation), `DependsOn` routine → table
+   (what `dependents`/`impact` traverse), `Calls` routine → routine. A name links only when it names
+   **exactly one** object (RFC 0060/0075's judgment); one edge per (kind, from, to).
+
+Parsing the IR's own text as SQL turned out to be the strongest check the parser has had: it found
+four more bugs that corrupted IR text under a `Statements` label (`INSERT INTO t` read as the
+binding `INTO`, loop queries losing a closing parenthesis, the old `SELECT INTO a, b expr` form,
+`EXECUTE … USING` on its own line). On LedgerSMB, 1137/1141 statements' SQL now parses — the four
+left are `sqlparser` 0.53 grammar gaps — and that number is a ratchet
+(`recovery/tests/plpgsql_ledgersmb.rs`).

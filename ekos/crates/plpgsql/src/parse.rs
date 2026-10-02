@@ -473,10 +473,11 @@ impl<'a> Parser<'a> {
 
     fn dynamic(&self, text: &str, span: Span) -> ProcStmt {
         let rest = after_kw(text, 7);
-        let (expr, using) = match rest.to_ascii_uppercase().find(" USING ") {
+        // A keyword search, not `" USING "`: the clause is often on its own line.
+        let (expr, using) = match find_kw(rest, "USING") {
             Some(at) => (
                 rest[..at].trim().to_string(),
-                rest[at + 7..]
+                rest[at + 5..]
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .collect(),
@@ -676,10 +677,7 @@ impl<'a> Parser<'a> {
                     // `FOR r IN SELECT …` iterates a query.
                     None => LoopKind::ForQuery {
                         var,
-                        sql: range
-                            .trim_matches(|c| c == '(' || c == ')')
-                            .trim()
-                            .to_string(),
+                        sql: unwrap_parens(range).to_string(),
                     },
                 }
             }
@@ -995,6 +993,38 @@ fn strip_end<'s>(text: &'s str, what: &str) -> Option<&'s str> {
     w.eq_ignore_ascii_case("END").then_some(before)
 }
 
+/// Remove one pair of parentheses only if it wraps the whole text: `(SELECT …)` → `SELECT …`, but
+/// `(SELECT 1) UNION (SELECT 2)` and `… any(ids)` are left alone. Trimming `(`/`)` from both ends
+/// unconditionally once stored `… = any(ids)` as `… = any(ids`.
+fn unwrap_parens(s: &str) -> &str {
+    let t = s.trim();
+    if !t.starts_with('(') || !t.ends_with(')') {
+        return t;
+    }
+    let b = t.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0usize;
+    while i < b.len() {
+        if let Some(next) = skip_quoted(t, i) {
+            i = next;
+            continue;
+        }
+        match b[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 && i + 1 < b.len() {
+                    // The opening paren closes before the end: it does not wrap the whole text.
+                    return t;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    t[1..t.len() - 1].trim()
+}
+
 /// `target := expr`, or `target = expr` — PL/pgSQL accepts both, and older code uses `=`.
 fn split_assign(text: &str) -> Option<(String, String)> {
     if let Some(at) = find_kw_op(text, ":=") {
@@ -1052,24 +1082,60 @@ fn split_label(text: &str) -> Option<(String, &str)> {
 }
 
 /// `SELECT a, b INTO x, y FROM t` → the query without `INTO`, plus the targets.
+///
+/// In DML the binding `INTO` can only follow `RETURNING`: `INSERT INTO t` names a table. Treating
+/// the first `INTO` as the binding stored every plain insert as `INSERT SELECT …`, its table and
+/// select list recorded as variables. The statement's main verb decides — for `WITH …` the first
+/// top-level verb after the CTEs, so `SELECT … FOR UPDATE` is not mistaken for DML.
 fn find_into(text: &str) -> Option<(String, Vec<String>, String)> {
-    let at = find_kw(text, "INTO")?;
-    let after = &text[at + 4..];
-    let after = after
-        .trim_start()
-        .strip_prefix("STRICT")
-        .unwrap_or(after.trim_start());
-    // The target list runs to the next clause keyword.
-    let end = ["FROM", "WHERE", "USING", "RETURNING"]
+    let verb = ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE"]
         .iter()
-        .filter_map(|k| find_kw(after, k))
+        .filter_map(|k| find_kw(text, k).map(|at| (at, *k)))
         .min()
-        .unwrap_or(after.len());
-    let targets: Vec<String> = after[..end]
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+        .map(|(_, k)| k);
+    let from = match verb {
+        Some("INSERT" | "UPDATE" | "DELETE" | "MERGE") => find_kw(text, "RETURNING")? + 9,
+        _ => 0,
+    };
+    let at = from + find_kw(&text[from..], "INTO")?;
+    let after = &text[at + 4..];
+    let after = after.trim_start();
+    let after = if starts_with_kw(after, "STRICT") {
+        after[6..].trim_start()
+    } else {
+        after
+    };
+    // The target list is identifiers separated by commas, and it ends after the last one — not at
+    // the next clause keyword. In the old `SELECT INTO a, b SUM(x), SUM(y) FROM …` form the select
+    // list follows the targets directly, and running to `FROM` swallowed it as "targets".
+    let b = after.as_bytes();
+    let is_target_byte = |c: u8| is_word_byte(c) || matches!(c, b'.' | b'"' | b'[' | b']');
+    let mut targets = Vec::new();
+    let mut i = 0usize;
+    let mut end = 0usize;
+    loop {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let start = i;
+        while i < b.len() && is_target_byte(b[i]) {
+            i += 1;
+        }
+        if i == start {
+            break;
+        }
+        targets.push(after[start..i].to_string());
+        end = i;
+        let mut j = i;
+        while j < b.len() && b[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j < b.len() && b[j] == b',' {
+            i = j + 1;
+        } else {
+            break;
+        }
+    }
     if targets.is_empty() {
         return None;
     }
