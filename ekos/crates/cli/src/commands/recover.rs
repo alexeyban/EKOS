@@ -13,9 +13,9 @@ use ekos_recovery::{
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
     GovernanceAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass,
     MockLlmProvider, OllamaProvider, OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass,
-    PentahoStats, PerlAnalyzerPass, PerlStats, PythonAnalyzerPass, PythonStats,
-    RequirementsAnalyzerPass, RustAnalyzerPass, RustStats, SqlAnalyzerPass,
-    SqlTransformAnalyzerPass, SqlTransformStats, TreasuryAnalyzerPass,
+    PentahoStats, PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats,
+    PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats,
+    SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, TreasuryAnalyzerPass,
     anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
     llm::LlmProvider, resolve_dialect_name,
 };
@@ -63,6 +63,7 @@ pub async fn run_with(
     let redaction_config = config.redaction_config();
     let mut sql_count = 0usize;
     let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
+    let mut plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>> = Vec::new();
 
     // ── SQL dialect resolution (RFC 0031) ─────────────────────────────────
     // Registry is compile-time (mirrors the Observer plugin pattern) — a new dialect means a
@@ -164,6 +165,15 @@ pub async fn run_with(
             );
             sql_transform_stats_handles.push(transform_pass.stats_handle());
             pass_manager.register(Box::new(transform_pass));
+
+            // ── PL/pgSQL procedural IR (RFC 0163) ─────────────────────────
+            // The redacted text as written, not the dialect-preprocessed one: statement spans and
+            // line numbers cite the file, and `preprocess` rewrites it.
+            if PlPgSqlAnalyzerPass::applies_to(dialect_name, &sql) {
+                let plpgsql_pass = PlPgSqlAnalyzerPass::new(&rel_str, sql.clone());
+                plpgsql_stats_handles.push(plpgsql_pass.stats_handle());
+                pass_manager.register(Box::new(plpgsql_pass));
+            }
 
             sql_count += 1;
         }
@@ -1003,6 +1013,36 @@ pub async fn run_with(
         println!(
             "  Transformation IR nodes (SQL): {nodes_total} total, {coverage:.0}% mapped (non-Unmapped)"
         );
+    }
+    if !plpgsql_stats_handles.is_empty() {
+        let mut total = PlPgSqlStats::default();
+        let mut unlexable = 0usize;
+        for handle in &plpgsql_stats_handles {
+            let s = handle.lock().unwrap();
+            total.routines += s.routines;
+            total.plpgsql += s.plpgsql;
+            total.complete += s.complete;
+            total.partial += s.partial;
+            total.statements += s.statements;
+            total.unrecovered += s.unrecovered;
+            unlexable += usize::from(s.lex_error.is_some());
+        }
+        if total.routines > 0 || unlexable > 0 {
+            println!(
+                "  PL/pgSQL routines: {} ({} plpgsql: {} complete, {} partial), {} statements, {} unrecovered{}",
+                total.routines,
+                total.plpgsql,
+                total.complete,
+                total.partial,
+                total.statements,
+                total.unrecovered,
+                if unlexable > 0 {
+                    format!(", {unlexable} file(s) did not lex")
+                } else {
+                    String::new()
+                }
+            );
+        }
     }
     println!("  Passes run: {}", report.passes_run());
     if report.passes_skipped() > 0 {

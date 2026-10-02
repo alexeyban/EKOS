@@ -110,6 +110,18 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(owning module id, qualified name) — RFC 0081",
     },
     CustomKind {
+        name: "Procedure",
+        structurally_keyed: true,
+        note: "(source path, routine name, argument list) — RFC 0163 plpgsql_analyzer; overloads \
+               share a name and are different routines",
+    },
+    CustomKind {
+        name: "ProcedureStatement",
+        structurally_keyed: true,
+        note: "(routine key, pre-order statement index) — RFC 0163 plpgsql_analyzer; names are \
+               `routine#N`, a shared prefix that would otherwise merge a routine's whole body",
+    },
+    CustomKind {
         name: "PerlPackage",
         structurally_keyed: true,
         note: "qualified package name — RFC 0147; LedgerSMB::* shares a prefix across ~700 files",

@@ -22,6 +22,8 @@
 pub mod ir;
 pub mod lex;
 pub mod parse;
+pub mod source;
 
 pub use ir::{CursorOp, Fidelity, LoopKind, ProcSignature, ProcStmt, ProcedureIr, Span, VarDecl};
 pub use parse::{Origin, parse_body, parse_function};
+pub use source::{RoutineSource, line_of, routines};

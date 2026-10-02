@@ -11,6 +11,7 @@ rust-version.workspace = true
 [dependencies]
 ekos-common.workspace = true
 ekos-kir.workspace = true
+ekos-plpgsql.workspace = true
 ekos-artifact.workspace = true
 ekos-compiler-core.workspace = true
 ekos-semantic.workspace = true

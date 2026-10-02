@@ -1718,6 +1718,7 @@ dependencies = [
  "ekos-compiler-core",
  "ekos-kir",
  "ekos-ledger",
+ "ekos-plpgsql",
  "ekos-plugin-sql-dialect-clickhouse",
  "ekos-plugin-sql-dialect-databricks",
  "ekos-plugin-sql-dialect-mssql",

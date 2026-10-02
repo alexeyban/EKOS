@@ -15,8 +15,7 @@
 //!
 //! Measured against LedgerSMB `544bcd947` (2026-09-13, `1.7.0-beta1-6323`).
 
-use ekos_plpgsql::lex::{Tok, lex};
-use ekos_plpgsql::{Fidelity, ProcStmt, ProcedureIr, parse_function};
+use ekos_plpgsql::{Fidelity, ProcStmt, ProcedureIr, parse_function, routines};
 use std::path::{Path, PathBuf};
 
 fn checkout() -> Option<PathBuf> {
@@ -37,35 +36,6 @@ fn loaded_modules(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Every `CREATE [OR REPLACE] FUNCTION|PROCEDURE` statement in a file, split at top-level
-/// semicolons by the crate's own lexer, so a semicolon inside a body never splits it.
-fn routines(src: &str) -> Vec<String> {
-    let toks = lex(src).expect("module lexes");
-    let mut out = Vec::new();
-    let mut start: Option<usize> = None;
-    for t in &toks {
-        let s = *start.get_or_insert(t.start);
-        if t.tok == Tok::Punct(';') {
-            start = None;
-            let text = &src[s..t.end];
-            let head: Vec<String> = text
-                .split_whitespace()
-                .take(4)
-                .map(str::to_ascii_uppercase)
-                .collect();
-            let head: Vec<&str> = head.iter().map(String::as_str).collect();
-            if matches!(
-                head.as_slice(),
-                ["CREATE", "FUNCTION" | "PROCEDURE", ..]
-                    | ["CREATE", "OR", "REPLACE", "FUNCTION" | "PROCEDURE"]
-            ) {
-                out.push(text.to_string());
-            }
-        }
-    }
-    out
-}
-
 struct Measured {
     plpgsql: usize,
     complete: Vec<String>,
@@ -82,7 +52,8 @@ fn measure(root: &Path) -> (Measured, Vec<(String, String, ProcedureIr)>) {
     for file in loaded_modules(root) {
         let src = std::fs::read_to_string(&file).expect("module readable");
         let module = file.file_name().unwrap().to_string_lossy().into_owned();
-        for def in routines(&src) {
+        for routine in routines(&src).expect("module lexes") {
+            let def = routine.text.to_string();
             let ir = parse_function(&def)
                 .unwrap_or_else(|e| panic!("{module}: a routine failed to lex: {e}"));
             if ir.signature.language != "plpgsql" {

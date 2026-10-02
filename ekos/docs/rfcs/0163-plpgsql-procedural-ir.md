@@ -229,7 +229,8 @@ already scans, so the CI check applies without extending it.
       Pagila not yet.
 - [x] One malformed statement costs exactly one `Unrecovered` node. (devlog_220)
 - [ ] Trigger classification covers every class plus the ambiguous case.
-- [ ] `Procedure` and `ProcedureStatement` have REGISTRY rows with `structurally_keyed: true`.
+- [x] `Procedure` and `ProcedureStatement` have REGISTRY rows with `structurally_keyed: true`.
+      (devlog_229 — and `PlPgSqlAnalyzerPass` runs in `ekos recover`)
 - [x] Output is byte-identical across runs — asserted on every LedgerSMB routine (devlog_228).
 
 ## Amendment 2026-10-02 — the corpus, measured from source
@@ -259,3 +260,36 @@ Two findings change how the rest of this RFC should be read:
 Also supported now: pre-8.0 single-quoted bodies (`AS ' … '`, spans mapped through the collapsed
 `''`), `ELSEIF`, `=` assignment, `E'…'` strings, labelled `END LOOP x`, and every SQL command
 PL/pgSQL executes directly (`CALL`, `NOTIFY`, `LOCK`, …).
+
+## Amendment 2026-10-02 (b) — the analyzer pass, as built
+
+`PlPgSqlAnalyzerPass` (`crates/recovery/src/plpgsql_analyzer.rs`, devlog_229) runs once per `.sql`
+file. Decisions *Where it runs* left open, and what was chosen:
+
+- **Which files.** Only files resolved to the `postgres` dialect or that name `plpgsql`. A T-SQL or
+  MySQL procedure has no `LANGUAGE` clause and would "parse" as a `Partial` PL/pgSQL routine whose
+  gaps are really a different language.
+- **Which text.** The redacted file as written, not the dialect-preprocessed text the other SQL
+  passes get: `preprocess` rewrites the file, and statement spans and line numbers must cite it.
+- **Every routine gets a `Procedure`**, in any language; only PL/pgSQL gets statements. A
+  `LANGUAGE sql` routine is `Signature`-fidelity, never an empty body.
+- **Statements at every depth**, numbered in pre-order, one `ProcedureStatement` each, with
+  `Contains` edges procedure → statement → nested statement. Each child records its **branch**
+  (`then:N`, `else`, `body`, `handler:N`) on both the object and the edge, so the stored tree keeps
+  the routine's control flow and not only its membership. A statement's properties are its own
+  serialized IR form minus spans and nested bodies, so a new `ProcStmt` variant needs no change here.
+- **Evidence.** A leaf cites its full source text (capped at 4 KiB, exact span always recorded); a
+  compound statement cites its first line only, since its body is cited statement by statement.
+- **Keys.** `Procedure` = (path, lower-cased name, argument list) — overloads are distinct routines.
+  `ProcedureStatement` = (routine key, pre-order index). A later `CREATE OR REPLACE` of the same
+  routine in the same file replaces the earlier one, as it does in the database.
+- **No `Calls` edges to tables or routines yet.** A per-file pass sees neither the embedded SQL's
+  lowered form nor other files' tables; both belong to RFC 0164's lowering plus a whole-graph,
+  unambiguous-name link in the style of RFC 0075. The statement text needed is on every object.
+- `catalog oid` keying for routines read live (RFC 0157) is not used: pg-live keeps routine bodies
+  in the Migrate catalog, not the ledger, so source files are the only consumer today.
+
+Measured end to end on LedgerSMB `sql/` (259 files, mock LLM): 556 routines, 254 PL/pgSQL (251
+complete, 3 partial — all in the unloaded `Business_Dates.sql`), 1556 statements; zero compile
+warnings from the new kinds; after a second full `recover`→`commit` on unchanged input every one of
+the 2,112 objects still has exactly one ledger version.

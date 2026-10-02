@@ -362,6 +362,29 @@ reading required. `Unmapped` is deliberate, not a gap swept under the rug: anyth
 parsed is still recorded as evidenced fact ("something is here, not yet understood"), never
 silently dropped.
 
+### PL/pgSQL stored procedures (RFC 0163)
+
+A stored procedure is also *imperative* — ordered statements, branches, loops, exception handlers —
+which a dataflow IR cannot hold without losing the order. For every `.sql` file resolved to the
+`postgres` dialect (or that names `plpgsql`), `ekos recover` parses each routine with a
+deterministic, in-process PL/pgSQL parser (no database, no LLM) and writes:
+
+- one `Procedure` object per routine — signature, language, and a **fidelity label computed from
+  the parse**: `statements` (every statement recovered), `partial` (with the exact counts and the
+  lines of what was missed), or `signature` (a `LANGUAGE sql`/`c` routine whose body is not parsed);
+- one `ProcedureStatement` per statement at every depth, whose evidence is its own source text and
+  line, linked by `Contains` edges that record which branch each child sits in (`then:0`, `else`,
+  `handler:1`, …).
+
+```bash
+ekos recover   # … PL/pgSQL routines: 556 (254 plpgsql: 251 complete, 3 partial), 1556 statements
+ekos ekl "FIND Object WHERE kind = 'Procedure' AND name = 'payment_post'"
+```
+
+On LedgerSMB every routine its `LOADORDER` installs recovers completely (212/212); the three
+`partial` routines above are in a module LedgerSMB itself does not load, and are invalid PL/pgSQL.
+Edges from a routine to the tables it reads and writes come with RFC 0164's lowering.
+
 ### dbt metadata extraction (RFC 0117)
 
 dbt can point at any warehouse, so `ekos recover` extracts real `Table` objects from a dbt
@@ -1129,9 +1152,9 @@ human approval is a ledger fact with provenance, and the report cites those fact
 (`ekos/docs/rfcs/0154`-`0167`).
 
 **Shipped:** a real table was migrated PostgreSQL → ClickHouse and validated at V1/V2/V3, with a
-planted one-row change caught by V3. **Not yet:** logic (views, functions, triggers — the PL/pgSQL
-parser exists, RFC 0163, but nothing consumes it yet), V0/V4-V5 validation, `signoff`, a second
-target, CDC and cutover.
+planted one-row change caught by V3. **Not yet:** logic migration (views, functions, triggers —
+PL/pgSQL routines are recovered into the ledger statement by statement, RFC 0163, but not yet lowered
+or translated, RFC 0164), V0/V4-V5 validation, `signoff`, a second target, CDC and cutover.
 
 ```bash
 ekos migrate init --name ledgersmb \
