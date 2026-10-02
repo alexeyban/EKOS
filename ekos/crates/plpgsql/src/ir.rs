@@ -180,6 +180,65 @@ impl ProcStmt {
         }
     }
 
+    /// Every span in this statement and everything nested inside it, handlers included.
+    pub(crate) fn spans_mut(&mut self, f: &mut dyn FnMut(&mut Span)) {
+        let each = |v: &mut Vec<ProcStmt>, f: &mut dyn FnMut(&mut Span)| {
+            for s in v {
+                s.spans_mut(f);
+            }
+        };
+        match self {
+            Self::If {
+                branches,
+                else_branch,
+                span,
+            }
+            | Self::Case {
+                branches,
+                else_branch,
+                span,
+                ..
+            } => {
+                f(span);
+                for (_, body) in branches {
+                    each(body, f);
+                }
+                if let Some(e) = else_branch {
+                    each(e, f);
+                }
+            }
+            Self::Loop { body, span, .. } => {
+                f(span);
+                each(body, f);
+            }
+            Self::Block {
+                declarations,
+                body,
+                exception,
+                span,
+            } => {
+                f(span);
+                for d in declarations {
+                    f(&mut d.span);
+                }
+                each(body, f);
+                for h in exception {
+                    f(&mut h.span);
+                    each(&mut h.body, f);
+                }
+            }
+            Self::Sql { span, .. }
+            | Self::Assign { span, .. }
+            | Self::Exit { span, .. }
+            | Self::Return { span, .. }
+            | Self::Raise { span, .. }
+            | Self::Perform { span, .. }
+            | Self::Cursor { span, .. }
+            | Self::DynamicExecute { span, .. }
+            | Self::Unrecovered { span, .. } => f(span),
+        }
+    }
+
     /// Walk this statement and everything nested inside it.
     pub fn walk(&self, f: &mut impl FnMut(&ProcStmt)) {
         f(self);

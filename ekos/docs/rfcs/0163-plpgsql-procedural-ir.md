@@ -221,11 +221,41 @@ already scans, so the CI check applies without extending it.
 
 ## Acceptance criteria
 
-- [ ] Every `ProcStmt` variant is produced from a fixture and asserted.
-- [ ] The fidelity invariant is enforced at construction, asserted by test.
+- [x] Every `ProcStmt` variant is produced from a fixture and asserted. (devlog_220)
+- [x] The fidelity invariant is enforced at construction, asserted by test. (devlog_220)
 - [ ] A floor for functions reaching `Statements` on LedgerSMB and Pagila is established and
-      enforced as a ratchet.
-- [ ] One malformed statement costs exactly one `Unrecovered` node.
+      enforced as a ratchet. **LedgerSMB done: 212/212** loaded routines, from source
+      (`tests/ledgersmb_corpus.rs`, devlog_228); live fixture schema 5/5 (`tests/corpus.rs`).
+      Pagila not yet.
+- [x] One malformed statement costs exactly one `Unrecovered` node. (devlog_220)
 - [ ] Trigger classification covers every class plus the ambiguous case.
 - [ ] `Procedure` and `ProcedureStatement` have REGISTRY rows with `structurally_keyed: true`.
-- [ ] Output is byte-identical across runs.
+- [x] Output is byte-identical across runs — asserted on every LedgerSMB routine (devlog_228).
+
+## Amendment 2026-10-02 — the corpus, measured from source
+
+The parser was first measured on five routines read back through `pg_get_functiondef`, which
+normalizes exactly the things hand-written source does not: `LANGUAGE` before `AS`, no comments
+inside clauses, dollar-quoted bodies. Run against the 212 PL/pgSQL routines LedgerSMB's `LOADORDER`
+installs, it fully recovered **44 of 57 it recognised — and failed to recognise 165 at all**. Nine
+bugs, all fixed with regression tests (devlog_228); the corpus now recovers 212/212 and is a
+ratchet.
+
+Two findings change how the rest of this RFC should be read:
+
+1. **A wrong `Statements` label is possible without any `Unrecovered` node.** `DROP TABLE IF
+   EXISTS` was counted as an `IF` opener, so every later statement — a `RETURN` included — was
+   swallowed into that statement's SQL text, and the routine was labelled complete. Fidelity is
+   computed from the IR, but the IR can be wrong in a way the label cannot see. The corpus test
+   therefore also asserts that every span covers exactly one statement; that check, not the label,
+   caught it. RFC 0164's lowering should treat an `Sql` text containing a top-level `;` as a parser
+   defect, never as one statement.
+2. **Spans are now computed, not searched for.** Every fragment the parser handles is a subslice of
+   one comment-masked body, and its span is its address within it. The earlier
+   `parent.find(fragment)` approach produced plausible offsets pointing at the wrong text for every
+   nested statement — the failure *Fidelity labels* warns about. Comments are blanked to spaces of
+   equal byte length before parsing, so spans index the original source exactly.
+
+Also supported now: pre-8.0 single-quoted bodies (`AS ' … '`, spans mapped through the collapsed
+`''`), `ELSEIF`, `=` assignment, `E'…'` strings, labelled `END LOOP x`, and every SQL command
+PL/pgSQL executes directly (`CALL`, `NOTIFY`, `LOCK`, …).

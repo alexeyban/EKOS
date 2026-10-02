@@ -435,6 +435,313 @@ fn a_non_plpgsql_routine_is_signature_only() {
     assert_eq!(ir.signature.language, "c");
 }
 
+/// An apostrophe in a comment is not the start of a string. Every keyword scan in the parser read
+/// `-- we don't want AP reversals` as an unterminated literal and swallowed the rest of the
+/// statement — the `LOOP` after it was never found (LedgerSMB `cogs__reverse_ar`).
+#[test]
+fn an_apostrophe_inside_a_comment_hides_nothing() {
+    let ir = f("FOR r IN SELECT * FROM invoice \
+                  -- exclude 'ap', because we don't want AP reversals\n \
+                  WHERE qty > 0 LOOP \
+                  PERFORM a(r); \
+                END LOOP; \
+                IF x THEN /* the line's account */ PERFORM b(); END IF;");
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+    assert_eq!(kinds(&ir), vec!["loop", "perform", "if", "perform"]);
+}
+
+/// A comment after the last statement of a scope is not a statement. It used to arrive as an empty
+/// fragment and be reported as "unrecognized statement starting with \"\"".
+#[test]
+fn a_trailing_comment_is_not_a_statement() {
+    let ir = f("BEGIN \
+                  DELETE FROM currency WHERE curr = 'X'; \
+                  RAISE SQLSTATE 'P0004'; -- cause rollback\n \
+                EXCEPTION WHEN foreign_key_violation THEN RETURN true; \
+                END;");
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+}
+
+/// Comments are blanked, not removed: every span still points at the original bytes, and covers
+/// the statement itself rather than the comment in front of it.
+#[test]
+fn spans_stay_exact_across_comments_with_multibyte_text() {
+    let src = "CREATE FUNCTION t() RETURNS int LANGUAGE plpgsql AS $$ BEGIN \
+               -- ¿qué? the caller's choice\n PERFORM alpha(); /* ü */ PERFORM beta(); END $$";
+    let ir = parse_function(src).unwrap();
+    let texts: Vec<&str> = ir
+        .body
+        .iter()
+        .map(|s| &src[s.span().start..s.span().end])
+        .collect();
+    assert_eq!(texts, vec!["PERFORM alpha()", "PERFORM beta()"]);
+}
+
+/// Every span, at every depth, covers exactly its own statement: it starts at the statement's first
+/// keyword and carries no surrounding whitespace. Checking only that a span "contains" a name let
+/// spans shifted by a few bytes pass for months, and a shifted span still points at plausible text.
+#[test]
+fn every_nested_span_starts_at_its_own_statement() {
+    let src = "CREATE FUNCTION t() RETURNS int LANGUAGE plpgsql AS $$\n\
+        DECLARE\n  n int := 0;\n  c CURSOR FOR SELECT 1;\n\
+        BEGIN\n\
+          IF a THEN\n    PERFORM x();\n  ELSIF b THEN\n    PERFORM x();\n  ELSE\n    PERFORM x();\n  END IF;\n\
+          CASE n WHEN 1 THEN\n    RAISE NOTICE 'one';\n  ELSE\n    RAISE NOTICE 'other';\n  END CASE;\n\
+          FOR r IN SELECT * FROM t LOOP\n    n := n + 1;\n    EXIT WHEN n > 3;\n  END LOOP;\n\
+          BEGIN\n    UPDATE t SET a = 1;\n  EXCEPTION\n    WHEN unique_violation THEN\n      RETURN 1;\n    \
+            WHEN others THEN\n      RETURN 2;\n  END;\n\
+          OPEN c;\n  EXECUTE 'SELECT 1';\n  RETURN n;\n\
+        END $$";
+    let ir = parse_function(src).unwrap();
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+
+    let mut checked = 0;
+    let mut check = |sp: Span, expect: &str| {
+        let text = &src[sp.start..sp.end];
+        assert_eq!(
+            text,
+            text.trim(),
+            "span has surrounding whitespace: {text:?}"
+        );
+        assert!(
+            text.to_ascii_uppercase().starts_with(expect),
+            "span {sp:?} should start with {expect}: {text:?}"
+        );
+        checked += 1;
+    };
+    for s in &ir.body {
+        s.walk(&mut |x| {
+            let expect = match x {
+                ProcStmt::Sql { sql, .. } => sql.split_whitespace().next().unwrap().to_string(),
+                ProcStmt::Assign { target, .. } => target.to_ascii_uppercase(),
+                ProcStmt::If { .. } => "IF".into(),
+                ProcStmt::Case { .. } => "CASE".into(),
+                ProcStmt::Loop { .. } => "FOR".into(),
+                ProcStmt::Exit { .. } => "EXIT".into(),
+                ProcStmt::Return { .. } => "RETURN".into(),
+                ProcStmt::Raise { .. } => "RAISE".into(),
+                ProcStmt::Block { .. } => "BEGIN".into(),
+                ProcStmt::Perform { .. } => "PERFORM".into(),
+                ProcStmt::Cursor { .. } => "OPEN".into(),
+                ProcStmt::DynamicExecute { .. } => "EXECUTE".into(),
+                ProcStmt::Unrecovered { .. } => unreachable!(),
+            };
+            check(x.span(), &expect.to_ascii_uppercase());
+        });
+    }
+    for d in &ir.declarations {
+        check(d.span, &d.name.to_ascii_uppercase());
+    }
+    // Handlers cite themselves, not the block around them.
+    let handlers: Vec<&ExceptionHandler> = ir
+        .body
+        .iter()
+        .filter_map(|s| match s {
+            ProcStmt::Block { exception, .. } => Some(exception),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(handlers.len(), 2);
+    for h in handlers {
+        check(h.span, "WHEN");
+    }
+    // 3 PERFORMs + IF, 2 RAISEs + CASE, LOOP + assign + EXIT, block + UPDATE + 2 RETURNs, OPEN,
+    // EXECUTE, RETURN (17); 2 declarations; 2 handlers.
+    assert_eq!(checked, 21);
+
+    // Identical statements in different branches get different spans.
+    match &ir.body[0] {
+        ProcStmt::If {
+            branches,
+            else_branch,
+            ..
+        } => {
+            let starts: Vec<usize> = branches
+                .iter()
+                .map(|(_, b)| b[0].span().start)
+                .chain(else_branch.iter().map(|b| b[0].span().start))
+                .collect();
+            assert!(starts[0] < starts[1] && starts[1] < starts[2], "{starts:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A `CASE` expression's `END` followed by the loop's own `LOOP` is not `END LOOP`. Matching any
+/// trailing keyword let the expression's `END` swallow the `LOOP` that opens the body, and the whole
+/// loop read as unterminated (LedgerSMB `reconciliation__pending_transactions`).
+#[test]
+fn a_case_expression_ending_just_before_loop_does_not_close_the_loop() {
+    let ir = f(
+        "FOR r IN SELECT a FROM t GROUP BY a, CASE WHEN b IS NULL THEN c ELSE NULL END \
+                LOOP PERFORM x(r); END LOOP; \
+                IF y THEN n := CASE WHEN z THEN 1 ELSE 2 END; ELSE n := 3; END IF;",
+    );
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+    assert_eq!(
+        kinds(&ir),
+        vec!["loop", "perform", "if", "assign", "assign"]
+    );
+    match &ir.body[1] {
+        ProcStmt::If {
+            branches,
+            else_branch,
+            ..
+        } => {
+            assert_eq!(branches.len(), 1);
+            assert_eq!(else_branch.as_ref().map(Vec::len), Some(1));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The pre-8.0 form: the body is an ordinary string literal with every quote doubled. PostgreSQL
+/// still accepts it, and LedgerSMB still loads two routines written that way. It used to be read
+/// as "no body" and labelled `Signature`.
+#[test]
+fn a_single_quoted_body_is_parsed_and_its_spans_cite_the_source() {
+    let src = "CREATE OR REPLACE FUNCTION trigger_parts_short() RETURNS TRIGGER\nAS\n'\n\
+               BEGIN\n  IF NEW.onhand >= NEW.rop THEN\n    RAISE NOTICE ''short; reorder'';\n  \
+               END IF;\n  RETURN NEW;\nEND;\n' LANGUAGE PLPGSQL;";
+    let ir = parse_function(src).unwrap();
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+    assert_eq!(kinds(&ir), vec!["if", "raise", "return"]);
+    let mut texts = Vec::new();
+    for s in &ir.body {
+        s.walk(&mut |x| texts.push(&src[x.span().start..x.span().end]));
+    }
+    // Spans index the source as written — doubled quotes included — not the unescaped body.
+    assert_eq!(texts[1], "RAISE NOTICE ''short; reorder''");
+    assert_eq!(texts[2], "RETURN NEW");
+    match &ir.body[0] {
+        ProcStmt::If { branches, .. } => match &branches[0].1[0] {
+            ProcStmt::Raise { message, .. } => assert_eq!(message, "'short; reorder'"),
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+}
+
+/// `DROP TABLE IF EXISTS` is DDL, not an `IF` statement. Counting it as an opener left the depth one
+/// too high, and every statement after it — `RETURN TRUE` included — was swallowed into the DROP's
+/// SQL text while the routine still read as fully recovered (LedgerSMB `lsmb__clear_role_backup`).
+#[test]
+fn ddl_if_exists_is_not_an_if_statement() {
+    let ir = f("DROP TABLE IF EXISTS a CASCADE; \
+                CREATE TABLE IF NOT EXISTS b (id int); \
+                ALTER TABLE b ADD COLUMN IF NOT EXISTS c int; \
+                IF EXISTS (SELECT 1 FROM b) THEN PERFORM x(); END IF; \
+                RETURN TRUE;");
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+    assert_eq!(
+        kinds(&ir),
+        vec!["sql", "sql", "sql", "if", "perform", "return"]
+    );
+}
+
+/// Every SQL command PL/pgSQL runs directly is an `Sql` statement, not a gap.
+#[test]
+fn every_directly_executable_sql_command_is_recognised() {
+    let ir = f(
+        "NOTIFY parts_short; LISTEN c; UNLISTEN c; LOCK TABLE t IN SHARE MODE; \
+                GRANT SELECT ON t TO r; REVOKE SELECT ON t FROM r; CALL p(1); \
+                ANALYZE t; COMMENT ON TABLE t IS 'x'; RESET ALL; DISCARD TEMP; \
+                VALUES (1); TABLE t; COPY t TO STDOUT; REINDEX TABLE t; CLUSTER t;",
+    );
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+    assert!(kinds(&ir).iter().all(|k| *k == "sql"), "{:?}", kinds(&ir));
+}
+
+/// `ELSEIF` is PL/pgSQL's documented alternative spelling of `ELSIF`.
+#[test]
+fn elseif_is_an_elsif() {
+    let ir = f("IF a THEN PERFORM x(); ELSEIF b THEN PERFORM y(); ELSE PERFORM z(); END IF;");
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+    match &ir.body[0] {
+        ProcStmt::If {
+            branches,
+            else_branch,
+            ..
+        } => {
+            assert_eq!(branches.len(), 2);
+            assert!(else_branch.is_some());
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// PL/pgSQL accepts `=` as well as `:=` for assignment, and older code uses it throughout.
+#[test]
+fn assignment_with_a_single_equals_is_an_assignment() {
+    let ir = f(
+        "t_id = currval('budget_info_id_seq'); NEW.workflow_user = CURRENT_USER; \
+                arr[1] = 0;",
+    );
+    assert_eq!(ir.fidelity(), Fidelity::Statements, "{:?}", ir.body);
+    let targets: Vec<&str> = ir
+        .body
+        .iter()
+        .filter_map(|s| match s {
+            ProcStmt::Assign { target, .. } => Some(target.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(targets, vec!["t_id", "NEW.workflow_user", "arr[1]"]);
+}
+
+/// Hand-written schemas put `LANGUAGE` after the body, terminated by the statement's `;` or quoted.
+/// Read as raw text, `plpgsql;` is not `plpgsql`, and the routine was labelled `Signature` without
+/// its body ever being parsed — 165 of LedgerSMB's routines.
+#[test]
+fn language_after_the_body_is_recognised_however_it_is_written() {
+    for tail in [
+        "LANGUAGE plpgsql;",
+        "LANGUAGE 'plpgsql';",
+        "language PLPGSQL",
+    ] {
+        let src = format!("CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END $$ {tail}");
+        let ir = parse_function(&src).unwrap();
+        assert_eq!(ir.signature.language, "plpgsql", "{tail}");
+        assert_eq!(ir.fidelity(), Fidelity::Statements, "{tail}");
+    }
+}
+
+/// The word `language` inside the body is not the routine's `LANGUAGE` clause.
+#[test]
+fn a_body_word_is_never_read_as_the_language_clause() {
+    let src = "CREATE FUNCTION f() RETURNS text AS $$ \
+               BEGIN RETURN (SELECT language FROM user_preference); END $$ LANGUAGE plpgsql";
+    let ir = parse_function(src).unwrap();
+    assert_eq!(ir.signature.language, "plpgsql");
+}
+
+/// Argument types carry their own parentheses, and return types are often more than one word.
+#[test]
+fn signatures_keep_nested_parentheses_and_multi_word_return_types() {
+    let ir = parse_function(
+        "CREATE OR REPLACE FUNCTION public.\"Pay\"(in_amount numeric(10,2), in_ids int[]) \
+         RETURNS SETOF payment_line STABLE LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;",
+    )
+    .unwrap();
+    assert_eq!(ir.signature.name, "public.Pay");
+    assert_eq!(
+        ir.signature.arguments,
+        vec!["in_amount numeric(10,2)", "in_ids int[]"]
+    );
+    assert_eq!(ir.signature.returns.as_deref(), Some("SETOF payment_line"));
+
+    let ir = parse_function(
+        "CREATE FUNCTION t(a int) RETURNS TABLE (id int, total numeric(12,2)) AS $$ \
+         BEGIN RETURN QUERY SELECT 1, 2; END $$ LANGUAGE plpgsql",
+    )
+    .unwrap();
+    assert_eq!(
+        ir.signature.returns.as_deref(),
+        Some("TABLE (id int, total numeric(12,2))")
+    );
+}
+
 /// Every `ProcStmt` variant has a fixture above. A variant nobody exercises is one nobody knows is
 /// broken, and the anti-invention check downstream is only as good as the node set.
 #[test]

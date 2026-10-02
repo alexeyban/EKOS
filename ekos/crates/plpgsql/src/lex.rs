@@ -136,26 +136,38 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
         // String literal. `''` is an escaped quote, not a terminator followed by an opener.
         if c == b'\'' {
             let start = i;
-            let mut value = String::new();
+            // Bytes, not `s[i] as char`: that reads each byte of a multibyte character as its own
+            // Latin-1 character, so `é` came out as `Ã©`. Only ASCII quotes are dropped, so the
+            // result is still valid UTF-8.
+            // `E'it\'s'`: in an escape string a backslash escapes the next byte, quotes included.
+            // The escape is kept as written; only the terminator matters here.
+            let escapes = matches!(out.last(), Some(Spanned { tok: Tok::Word(w), end, .. })
+                if *end == i && w.eq_ignore_ascii_case("E"));
+            let mut value = Vec::new();
             i += 1;
             loop {
                 if i >= s.len() {
                     return Err(LexError::UnterminatedString { at: start });
                 }
+                if escapes && s[i] == b'\\' && i + 1 < s.len() {
+                    value.extend_from_slice(&s[i..i + 2]);
+                    i += 2;
+                    continue;
+                }
                 if s[i] == b'\'' {
                     if i + 1 < s.len() && s[i + 1] == b'\'' {
-                        value.push('\'');
+                        value.push(b'\'');
                         i += 2;
                         continue;
                     }
                     i += 1;
                     break;
                 }
-                value.push(s[i] as char);
+                value.push(s[i]);
                 i += 1;
             }
             out.push(Spanned {
-                tok: Tok::Str(value),
+                tok: Tok::Str(String::from_utf8_lossy(&value).into_owned()),
                 start,
                 end: i,
             });
@@ -207,7 +219,7 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
         // Quoted identifier — kept as a word, with the quotes stripped.
         if c == b'"' {
             let start = i;
-            let mut value = String::new();
+            let mut value = Vec::new();
             i += 1;
             loop {
                 if i >= s.len() {
@@ -215,18 +227,18 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
                 }
                 if s[i] == b'"' {
                     if i + 1 < s.len() && s[i + 1] == b'"' {
-                        value.push('"');
+                        value.push(b'"');
                         i += 2;
                         continue;
                     }
                     i += 1;
                     break;
                 }
-                value.push(s[i] as char);
+                value.push(s[i]);
                 i += 1;
             }
             out.push(Spanned {
-                tok: Tok::Word(value),
+                tok: Tok::Word(String::from_utf8_lossy(&value).into_owned()),
                 start,
                 end: i,
             });
@@ -283,6 +295,95 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
     Ok(out)
 }
 
+/// Replace every comment with spaces of the same byte length, keeping newlines.
+///
+/// The parser's keyword scans are byte-level and know about quotes but not comments, so an
+/// apostrophe in `-- we don't want AP reversals` opened a string that swallowed the rest of the
+/// statement. Blanking comments once, here, fixes every scan at the same time. Lengths are preserved
+/// byte for byte — a multibyte character becomes one space per byte — so every span the parser
+/// computes still points at the original text.
+///
+/// A `--` or `/*` inside a string, a quoted identifier or a dollar quote is text, not a comment.
+pub fn mask_comments(src: &str) -> String {
+    let s = src.as_bytes();
+    let mut out = s.to_vec();
+    let blank = |out: &mut Vec<u8>, from: usize, to: usize| {
+        for b in &mut out[from..to] {
+            if *b != b'\n' {
+                *b = b' ';
+            }
+        }
+    };
+    let mut i = 0usize;
+    while i < s.len() {
+        let c = s[i];
+        if c == b'\'' || c == b'"' {
+            // `E'…'` strings treat a backslash as an escape; standard strings do not.
+            let escapes = c == b'\''
+                && i > 0
+                && matches!(s[i - 1], b'E' | b'e')
+                && (i < 2 || !(s[i - 2].is_ascii_alphanumeric() || s[i - 2] == b'_'));
+            i += 1;
+            while i < s.len() {
+                if escapes && s[i] == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if s[i] == c {
+                    if i + 1 < s.len() && s[i + 1] == c {
+                        i += 2;
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'$'
+            && let Some((tag, after)) = dollar_tag(s, i)
+        {
+            let close = format!("${tag}$");
+            match src[after..].find(&close) {
+                Some(rel) => i = after + rel + close.len(),
+                None => i = s.len(),
+            }
+            continue;
+        }
+        if c == b'-' && s.get(i + 1) == Some(&b'-') {
+            let start = i;
+            while i < s.len() && s[i] != b'\n' {
+                i += 1;
+            }
+            blank(&mut out, start, i);
+            continue;
+        }
+        if c == b'/' && s.get(i + 1) == Some(&b'*') {
+            let start = i;
+            let mut depth = 1;
+            i += 2;
+            while i < s.len() && depth > 0 {
+                if s[i] == b'/' && s.get(i + 1) == Some(&b'*') {
+                    depth += 1;
+                    i += 2;
+                } else if s[i] == b'*' && s.get(i + 1) == Some(&b'/') {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            blank(&mut out, start, i.min(s.len()));
+            continue;
+        }
+        i += 1;
+    }
+    // Only ASCII bytes were written, and only over whole comments, so this cannot fail; the lossy
+    // conversion is a guard, never a path.
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
 /// Extract the body of `CREATE FUNCTION … AS $tag$ … $tag$`.
 ///
 /// Returns the body and its byte span in `src`, so every statement the parser recovers can cite an
@@ -310,6 +411,41 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// A literal is UTF-8 text, not a byte per character: `s[i] as char` turned `é` into `Ã©`.
+    #[test]
+    fn string_literals_and_quoted_identifiers_keep_multibyte_text() {
+        let toks = lex("'café ¿sí?' \"Größe\"").unwrap();
+        assert_eq!(toks[0].tok, Tok::Str("café ¿sí?".into()));
+        assert_eq!(toks[1].tok, Tok::Word("Größe".into()));
+    }
+
+    /// In an `E'…'` string a backslash escapes the quote; in a standard string it does not.
+    #[test]
+    fn escape_strings_honour_backslash_quotes() {
+        let toks = lex(r"E'it\'s' x 'a\' y").unwrap();
+        assert_eq!(toks[1].tok, Tok::Str(r"it\'s".into()));
+        assert_eq!(toks[2].tok, Tok::Word("x".into()));
+        assert_eq!(toks[3].tok, Tok::Str(r"a\".into()));
+    }
+
+    #[test]
+    fn comments_are_blanked_to_the_same_length_and_text_is_not() {
+        let src =
+            "a -- don't\nb /* it's /* nested */ ¿ */ c '-- kept' $q$ -- kept $q$ E'\\' -- x' d";
+        let m = mask_comments(src);
+        assert_eq!(m.len(), src.len());
+        assert!(
+            !m.contains("don't") && !m.contains("nested") && !m.contains('¿'),
+            "{m}"
+        );
+        assert!(
+            m.contains("'-- kept'") && m.contains("$q$ -- kept $q$"),
+            "{m}"
+        );
+        assert!(m.contains("E'\\' -- x'") && m.ends_with(" d"), "{m}");
+        assert_eq!(m.matches('\n').count(), 1);
     }
 
     #[test]

@@ -22,23 +22,48 @@ pub struct Origin {
 }
 
 struct Parser<'a> {
+    /// The comment-masked body. **Every fragment the parser handles is a subslice of this**, so a
+    /// fragment's span is its address within it — computed, never searched for.
+    ///
+    /// Searching (`parent.find(fragment)`) was the old approach, and it was wrong in two ways at
+    /// once: the parent it searched was often a re-trimmed copy whose start was not the offset it
+    /// was paired with, and `find` returns the *first* match, so `IF a THEN x; ELSE x;` gave the
+    /// ELSE branch the THEN branch's span. Both produced plausible offsets pointing at the wrong
+    /// text — worse than an obviously broken span.
     src: &'a str,
-    /// Statement-sized slices with their spans, produced by [`split_statements`].
-    stmts: Vec<(String, Span)>,
-    pos: usize,
+    origin: Origin,
 }
 
 /// Split a body into statements at top-level semicolons.
 ///
 /// Semicolons inside strings, dollar quotes, comments and parentheses do not end a statement, and
 /// neither does the one closing a nested `END;` — nesting is tracked by keyword depth so a block's
-/// interior stays with it.
+/// interior stays with it. Each statement's span covers exactly its trimmed text.
 pub fn split_statements(body: &str, origin: Origin) -> Vec<(String, Span)> {
+    split_slices(body)
+        .into_iter()
+        .map(|s| {
+            let at = s.as_ptr() as usize - body.as_ptr() as usize;
+            (
+                s.to_string(),
+                Span {
+                    start: origin.offset + at,
+                    end: origin.offset + at + s.len(),
+                },
+            )
+        })
+        .collect()
+}
+
+/// [`split_statements`] as trimmed subslices of `body`.
+fn split_slices(body: &str) -> Vec<&str> {
     let b = body.as_bytes();
     let mut out = Vec::new();
     let mut start = 0usize;
     let mut i = 0usize;
     let mut depth = 0i32;
+    // The openers currently open, so an `END` knows what it closes (see [`end_tail_len`]).
+    let mut open: Vec<&'static str> = Vec::new();
     let mut parens = 0i32;
     // `DECLARE` is not a block opener, but its semicolons still belong to the block: they separate
     // declarations, not statements. So it suppresses splitting until the `BEGIN` that does open the
@@ -79,20 +104,8 @@ pub fn split_statements(body: &str, origin: Origin) -> Vec<(String, Span)> {
     while i < b.len() {
         let c = b[i];
         // Skip anything a semicolon can hide inside.
-        if c == b'\'' || c == b'"' {
-            let q = c;
-            i += 1;
-            while i < b.len() {
-                if b[i] == q {
-                    if i + 1 < b.len() && b[i + 1] == q {
-                        i += 2;
-                        continue;
-                    }
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
+        if let Some(next) = skip_quoted(body, i) {
+            i = next;
             continue;
         }
         if c == b'-' && i + 1 < b.len() && b[i + 1] == b'-' {
@@ -108,18 +121,6 @@ pub fn split_statements(body: &str, origin: Origin) -> Vec<(String, Span)> {
             }
             i = (i + 2).min(b.len());
             continue;
-        }
-        if c == b'$'
-            && let Some((tag, after)) = crate::lex::probe_dollar(body, i)
-        {
-            let close = format!("${tag}$");
-            match body[after..].find(&close) {
-                Some(rel) => {
-                    i = after + rel + close.len();
-                    continue;
-                }
-                None => break,
-            }
         }
         if c == b'(' {
             parens += 1;
@@ -137,7 +138,9 @@ pub fn split_statements(body: &str, origin: Origin) -> Vec<(String, Span)> {
             continue;
         }
 
-        if let Some((kw, n)) = keyword_at(i) {
+        if let Some((kw, n)) = keyword_at(i)
+            && (kw != "IF" || at_statement_start(b, i))
+        {
             if kw == "BEGIN" {
                 in_declare = false;
             }
@@ -149,41 +152,25 @@ pub fn split_statements(body: &str, origin: Origin) -> Vec<(String, Span)> {
                     // and then re-matching the `IF` on the next pass decrements and immediately
                     // increments, so the depth never returns to zero and the whole routine reads
                     // as one unterminated statement. The trailing keyword is consumed here.
-                    let after = i + n;
-                    let rest = &b[after..];
-                    let skip = rest.iter().take_while(|c| c.is_ascii_whitespace()).count();
-                    for tail in ["IF", "LOOP", "CASE"] {
-                        let m = tail.len();
-                        if after + skip + m <= b.len()
-                            && b[after + skip..after + skip + m]
-                                .eq_ignore_ascii_case(tail.as_bytes())
-                            && (after + skip + m == b.len() || !is_word_byte(b[after + skip + m]))
-                        {
-                            consumed = n + skip + m;
-                            break;
-                        }
-                    }
+                    consumed = n + end_tail_len(b, i + n, open.pop());
                 }
                 "ELSIF" | "ELSE" | "EXCEPTION" => {}
                 // `CASE` appears both as a statement and as an expression (`SELECT CASE WHEN …`);
                 // an expression `CASE` still has a matching `END`, so counting both keeps the
                 // depth balanced.
-                _ => depth += 1,
+                _ => {
+                    depth += 1;
+                    open.push(kw);
+                }
             }
             i += consumed;
             continue;
         }
 
         if c == b';' && depth <= 0 && parens <= 0 && !in_declare {
-            let text = slice(body, start, i).trim().to_string();
+            let text = slice(body, start, i).trim();
             if !text.is_empty() {
-                out.push((
-                    text,
-                    Span {
-                        start: origin.offset + start,
-                        end: origin.offset + i,
-                    },
-                ));
+                out.push(text);
             }
             start = i + 1;
         }
@@ -191,15 +178,78 @@ pub fn split_statements(body: &str, origin: Origin) -> Vec<(String, Span)> {
     }
     let tail = slice(body, start.min(body.len()), body.len()).trim();
     if !tail.is_empty() {
-        out.push((
-            tail.to_string(),
-            Span {
-                start: origin.offset + start,
-                end: origin.offset + body.len(),
-            },
-        ));
+        out.push(tail);
     }
     out
+}
+
+/// After an `END` ending at `after`, the length of a trailing `IF`/`LOOP`/`CASE` (with the
+/// whitespace before it) that belongs to the same closer, or 0.
+///
+/// `closing` is the opener this `END` closes. The tail belongs to the closer only when it names
+/// that construct: a `CASE` expression's `END` followed by a loop's opening `LOOP` is two keywords,
+/// not `END LOOP`. Matching any tail let the expression swallow the loop's opener and left the
+/// whole loop unterminated. With no opener on record (an unbalanced fragment), any tail counts, as
+/// it always did.
+fn end_tail_len(b: &[u8], after: usize, closing: Option<&str>) -> usize {
+    let skip = b[after..]
+        .iter()
+        .take_while(|c| c.is_ascii_whitespace())
+        .count();
+    for tail in ["IF", "LOOP", "CASE"] {
+        let m = tail.len();
+        let at = after + skip;
+        if closing.is_none_or(|c| c == tail)
+            && at + m <= b.len()
+            && b[at..at + m].eq_ignore_ascii_case(tail.as_bytes())
+            && (at + m == b.len() || !is_word_byte(b[at + m]))
+        {
+            return skip + m;
+        }
+    }
+    0
+}
+
+/// If a quoted construct starts at byte `i`, the offset just past it.
+///
+/// A keyword or semicolon inside a string, a quoted identifier or a dollar quote is text. `E'…'`
+/// strings treat a backslash as an escape, so `E'it\'s'` is one string, not an unterminated one.
+fn skip_quoted(s: &str, i: usize) -> Option<usize> {
+    let b = s.as_bytes();
+    match b[i] {
+        q @ (b'\'' | b'"') => {
+            let escapes = q == b'\''
+                && i > 0
+                && matches!(b[i - 1], b'E' | b'e')
+                && (i < 2 || !is_word_byte(b[i - 2]));
+            let mut j = i + 1;
+            while j < b.len() {
+                if escapes && b[j] == b'\\' {
+                    j += 2;
+                    continue;
+                }
+                if b[j] == q {
+                    if b.get(j + 1) == Some(&q) {
+                        j += 2;
+                        continue;
+                    }
+                    return Some(j + 1);
+                }
+                j += 1;
+            }
+            Some(b.len())
+        }
+        b'$' => {
+            let (tag, after) = crate::lex::probe_dollar(s, i)?;
+            let close = format!("${tag}$");
+            Some(
+                s[after..]
+                    .find(&close)
+                    .map_or(s.len(), |r| after + r + close.len()),
+            )
+        }
+        _ => None,
+    }
 }
 
 /// Slice by byte offsets, snapped outward to the nearest char boundaries.
@@ -223,38 +273,40 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Drop leading whitespace and comments, so classification sees the statement itself.
+/// Whether byte `i` begins a statement: it is the first thing in the text, or follows `;`, a
+/// `<<label>>`, or a keyword after which a statement list starts.
+///
+/// `IF` opens a block only here. `DROP TABLE IF EXISTS` and `ADD COLUMN IF NOT EXISTS` are DDL, and
+/// counting their `IF` as an opener left the depth one too high: every statement after it was
+/// swallowed into the DDL's SQL text, and the routine still read as fully recovered.
+fn at_statement_start(b: &[u8], i: usize) -> bool {
+    let mut j = i;
+    while j > 0 && b[j - 1].is_ascii_whitespace() {
+        j -= 1;
+    }
+    if j == 0 || matches!(b[j - 1], b';' | b'>') {
+        return true;
+    }
+    let end = j;
+    while j > 0 && is_word_byte(b[j - 1]) {
+        j -= 1;
+    }
+    let word = &b[j..end];
+    ["THEN", "ELSE", "LOOP", "BEGIN"]
+        .iter()
+        .any(|k| word.eq_ignore_ascii_case(k.as_bytes()))
+}
+
 /// The text after a leading keyword of `n` bytes. The keyword is ASCII by construction, so the
 /// offset is a boundary — but the *slice* has to come from the trimmed string, and doing it in one
-/// place is how the rest of this module stays free of index arithmetic.
+/// place is how the rest of this module stays free of index arithmetic. The result is a subslice
+/// of `text`, so its span is still computable.
 fn after_kw(text: &str, n: usize) -> &str {
     let t = text.trim_start();
     if t.len() <= n {
         return "";
     }
     t[n..].trim()
-}
-
-/// Drop leading whitespace and comments, so classification sees the statement itself.
-fn strip_leading_trivia(s: &str) -> String {
-    let mut rest = s.trim_start();
-    loop {
-        if let Some(r) = rest.strip_prefix("--") {
-            rest = match r.find('\n') {
-                Some(at) => r[at + 1..].trim_start(),
-                None => "",
-            };
-            continue;
-        }
-        if let Some(r) = rest.strip_prefix("/*") {
-            rest = match r.find("*/") {
-                Some(at) => r[at + 2..].trim_start(),
-                None => "",
-            };
-            continue;
-        }
-        return rest.to_string();
-    }
 }
 
 fn first_word(s: &str) -> String {
@@ -279,28 +331,40 @@ fn starts_with_kw(s: &str, kw: &str) -> bool {
 
 impl<'a> Parser<'a> {
     fn new(src: &'a str, origin: Origin) -> Self {
-        Self {
-            stmts: split_statements(src, origin),
-            src,
-            pos: 0,
+        Self { src, origin }
+    }
+
+    /// Where `frag` — a subslice of `self.src` — sits in the original source.
+    fn span_of(&self, frag: &str) -> Span {
+        let base = self.src.as_ptr() as usize;
+        let at = (frag.as_ptr() as usize)
+            .checked_sub(base)
+            .filter(|at| at + frag.len() <= self.src.len());
+        debug_assert!(
+            at.is_some(),
+            "fragment is not a slice of the body: {frag:?}"
+        );
+        let at = at.unwrap_or(0);
+        Span {
+            start: self.origin.offset + at,
+            end: self.origin.offset + at + frag.len(),
         }
     }
 
-    fn parse_all(&mut self) -> Vec<ProcStmt> {
-        let mut out = Vec::new();
-        while self.pos < self.stmts.len() {
-            let (text, span) = self.stmts[self.pos].clone();
-            self.pos += 1;
-            out.push(self.statement(&text, span));
-        }
-        out
+    fn parse_all(&self) -> Vec<ProcStmt> {
+        self.sub(self.src)
     }
 
-    fn statement(&mut self, text: &str, span: Span) -> ProcStmt {
-        // A comment sits *inside* the statement text the splitter produced, because a comment does
-        // not end a statement. Classifying without stripping it makes every commented statement
-        // unrecoverable — the first word is `--`.
-        let text = &strip_leading_trivia(text);
+    /// Parse an interior fragment — a subslice of the body — into statements.
+    fn sub(&self, text: &'a str) -> Vec<ProcStmt> {
+        split_slices(text)
+            .into_iter()
+            .map(|s| self.statement(s))
+            .collect()
+    }
+
+    fn statement(&self, text: &'a str) -> ProcStmt {
+        let span = self.span_of(text);
         let head = first_word(text);
         match head.as_str() {
             "RETURN" => self.ret(text, span),
@@ -321,10 +385,13 @@ impl<'a> Parser<'a> {
                 into: None,
                 span,
             },
+            // Every SQL command PL/pgSQL executes directly. `GET [CURRENT] DIAGNOSTICS` is a
+            // PL/pgSQL statement but reads like one, and is carried the same way.
             "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "WITH" | "MERGE" | "CREATE" | "DROP"
-            | "ALTER" | "TRUNCATE" | "REFRESH" | "COMMIT" | "ROLLBACK" | "SET" | "GET" => {
-                self.sql(text, span)
-            }
+            | "ALTER" | "TRUNCATE" | "REFRESH" | "COMMIT" | "ROLLBACK" | "SET" | "GET" | "CALL"
+            | "NOTIFY" | "LISTEN" | "UNLISTEN" | "LOCK" | "GRANT" | "REVOKE" | "ANALYZE"
+            | "COMMENT" | "RESET" | "DISCARD" | "VALUES" | "TABLE" | "COPY" | "REINDEX"
+            | "CLUSTER" | "SECURITY" | "IMPORT" => self.sql(text, span),
             _ => {
                 // An assignment is the only other shape: `target := expr`.
                 if let Some((lhs, rhs)) = split_assign(text) {
@@ -347,7 +414,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn sql(&mut self, text: &str, span: Span) -> ProcStmt {
+    fn sql(&self, text: &str, span: Span) -> ProcStmt {
         // `SELECT … INTO a, b` binds results to variables; the target list is part of the control
         // flow, not of the query, so it is lifted out here.
         let (sql, into) = match find_into(text) {
@@ -360,7 +427,7 @@ impl<'a> Parser<'a> {
         ProcStmt::Sql { sql, into, span }
     }
 
-    fn ret(&mut self, text: &str, span: Span) -> ProcStmt {
+    fn ret(&self, text: &str, span: Span) -> ProcStmt {
         let rest = after_kw(text, 6);
         if starts_with_kw(rest, "QUERY") {
             return ProcStmt::Return {
@@ -386,7 +453,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn raise(&mut self, text: &str, span: Span) -> ProcStmt {
+    fn raise(&self, text: &str, span: Span) -> ProcStmt {
         let rest = after_kw(text, 5);
         let level = first_word(rest);
         let known = ["DEBUG", "LOG", "INFO", "NOTICE", "WARNING", "EXCEPTION"];
@@ -404,7 +471,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn dynamic(&mut self, text: &str, span: Span) -> ProcStmt {
+    fn dynamic(&self, text: &str, span: Span) -> ProcStmt {
         let rest = after_kw(text, 7);
         let (expr, using) = match rest.to_ascii_uppercase().find(" USING ") {
             Some(at) => (
@@ -432,7 +499,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `OPEN c [FOR query]`, `FETCH [direction FROM] c INTO targets`, `MOVE …`, `CLOSE c`.
-    fn cursor(&mut self, text: &str, span: Span, head: &str) -> ProcStmt {
+    fn cursor(&self, text: &str, span: Span, head: &str) -> ProcStmt {
         let op = match head {
             "OPEN" => CursorOp::Open,
             "FETCH" => CursorOp::Fetch,
@@ -470,7 +537,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn exit(&mut self, text: &str, span: Span, is_continue: bool) -> ProcStmt {
+    fn exit(&self, text: &str, span: Span, is_continue: bool) -> ProcStmt {
         let kw = if is_continue { 8 } else { 4 };
         let rest = after_kw(text, kw);
         let (label, when) = match rest.to_ascii_uppercase().find("WHEN ") {
@@ -489,27 +556,27 @@ impl<'a> Parser<'a> {
     }
 
     /// `IF cond THEN … [ELSIF cond THEN …] [ELSE …] END IF`
-    fn if_stmt(&mut self, text: &str, span: Span) -> ProcStmt {
+    fn if_stmt(&self, text: &'a str, span: Span) -> ProcStmt {
         let Some(inner) = strip_end(text, "IF") else {
             return self.unrecovered(text, span, "IF without a matching END IF");
         };
         let mut branches = Vec::new();
         let mut else_branch = None;
-        let mut rest = inner.trim_start()[2..].trim().to_string();
+        let mut rest = after_kw(inner, 2);
 
         loop {
-            let Some(then_at) = find_kw(&rest, "THEN") else {
+            let Some(then_at) = find_kw_outer(rest, "THEN") else {
                 return self.unrecovered(text, span, "IF branch without THEN");
             };
             let cond = rest[..then_at].trim().to_string();
             let after = &rest[then_at + 4..];
+            // Block depth, not just parentheses: the `ELSE` of a nested `IF`, or of a `CASE`
+            // expression inside this branch, is not this statement's `ELSE`.
             let (body_text, tail) = split_at_kw(after, &["ELSIF", "ELSEIF", "ELSE"]);
-            let at = offset_of(&rest, &body_text, span.start);
-            branches.push((cond, self.sub_at(&body_text, at)));
+            branches.push((cond, self.sub(body_text)));
             match tail {
-                Some((kw, more)) if kw == "ELSE" => {
-                    let at = offset_of(&rest, &more, span.start);
-                    else_branch = Some(self.sub_at(&more, at));
+                Some(("ELSE", more)) => {
+                    else_branch = Some(self.sub(more));
                     break;
                 }
                 Some((_, more)) => rest = more,
@@ -524,32 +591,30 @@ impl<'a> Parser<'a> {
     }
 
     /// `CASE [operand] WHEN … THEN … [ELSE …] END CASE`
-    fn case_stmt(&mut self, text: &str, span: Span) -> ProcStmt {
+    fn case_stmt(&self, text: &'a str, span: Span) -> ProcStmt {
         let Some(inner) = strip_end(text, "CASE") else {
             return self.unrecovered(text, span, "CASE without a matching END CASE");
         };
-        let rest = inner.trim_start()[4..].trim();
-        let Some(first_when) = find_kw(rest, "WHEN") else {
+        let rest = after_kw(inner, 4);
+        let Some(first_when) = find_kw_outer(rest, "WHEN") else {
             return self.unrecovered(text, span, "CASE without WHEN");
         };
         let operand = (first_when > 0).then(|| rest[..first_when].trim().to_string());
         let mut branches = Vec::new();
         let mut else_branch = None;
-        let mut cursor = rest[first_when + 4..].to_string();
+        let mut cursor = &rest[first_when + 4..];
 
         loop {
-            let Some(then_at) = find_kw(&cursor, "THEN") else {
+            let Some(then_at) = find_kw_outer(cursor, "THEN") else {
                 return self.unrecovered(text, span, "CASE branch without THEN");
             };
             let label = cursor[..then_at].trim().to_string();
             let after = &cursor[then_at + 4..];
-            let (body_text, tail) = split_at_kw(after, &["WHEN", "ELSE"]);
-            let at = offset_of(&cursor, &body_text, span.start);
-            branches.push((label, self.sub_at(&body_text, at)));
+            let (body_text, tail) = split_at_statement_kw(after, &["WHEN", "ELSE"]);
+            branches.push((label, self.sub(body_text)));
             match tail {
-                Some((kw, more)) if kw == "ELSE" => {
-                    let at = offset_of(&cursor, &more, span.start);
-                    else_branch = Some(self.sub_at(&more, at));
+                Some(("ELSE", more)) => {
+                    else_branch = Some(self.sub(more));
                     break;
                 }
                 Some((_, more)) => cursor = more,
@@ -564,16 +629,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn loop_stmt(&mut self, text: &str, span: Span, label: Option<String>) -> ProcStmt {
+    fn loop_stmt(&self, text: &'a str, span: Span, label: Option<String>) -> ProcStmt {
         let Some(inner) = strip_end(text, "LOOP") else {
             return self.unrecovered(text, span, "LOOP without a matching END LOOP");
         };
-        let head = first_word(&inner);
-        let Some(loop_at) = find_kw(&inner, "LOOP") else {
+        let head = first_word(inner);
+        let Some(loop_at) = find_kw(inner, "LOOP") else {
             return self.unrecovered(text, span, "LOOP body not found");
         };
         let header = inner[..loop_at].trim();
-        let body = inner[loop_at + 4..].to_string();
+        let body = &inner[loop_at + 4..];
 
         let kind = match head.as_str() {
             "LOOP" => LoopKind::Plain,
@@ -601,7 +666,7 @@ impl<'a> Parser<'a> {
                 let range = h[in_at + 2..].trim();
                 let reverse = starts_with_kw(range, "REVERSE");
                 let range = if reverse { range[7..].trim() } else { range };
-                match range.find("..") {
+                match find_kw_op(range, "..") {
                     Some(at) => LoopKind::ForRange {
                         var,
                         from: range[..at].trim().to_string(),
@@ -623,71 +688,127 @@ impl<'a> Parser<'a> {
 
         ProcStmt::Loop {
             kind,
-            body: {
-                let at = offset_of(&inner, &body, span.start);
-                self.sub_at(&body, at)
-            },
+            body: self.sub(body),
             label,
             span,
         }
     }
 
     /// `[DECLARE …] BEGIN … [EXCEPTION WHEN … THEN …] END`
-    fn block(&mut self, text: &str, span: Span) -> ProcStmt {
+    fn block(&self, text: &'a str, span: Span) -> ProcStmt {
         let Some(inner) = strip_end(text, "") else {
             return self.unrecovered(text, span, "block without a matching END");
         };
-        let (decl_text, after_decl) = if starts_with_kw(&inner, "DECLARE") {
-            let rest = inner.trim_start()[7..].to_string();
-            match find_kw_outer(&rest, "BEGIN") {
-                Some(at) => (
-                    slice(&rest, 0, at).to_string(),
-                    slice(&rest, at + 5, rest.len()).to_string(),
-                ),
+        let (decl_text, after_decl) = if starts_with_kw(inner, "DECLARE") {
+            let rest = after_kw(inner, 7);
+            match find_kw_outer(rest, "BEGIN") {
+                Some(at) => (&rest[..at], &rest[at + 5..]),
                 None => return self.unrecovered(text, span, "DECLARE without BEGIN"),
             }
         } else {
-            match find_kw_outer(&inner, "BEGIN") {
-                Some(at) => (
-                    String::new(),
-                    slice(&inner, at + 5, inner.len()).to_string(),
-                ),
+            match find_kw_outer(inner, "BEGIN") {
+                Some(at) => (&inner[..0], &inner[at + 5..]),
                 None => return self.unrecovered(text, span, "block without BEGIN"),
             }
         };
 
         // `find_kw_outer`, not `find_kw`: an inner block's EXCEPTION belongs to the inner block.
-        let (body_text, exception_text) = match find_kw_outer(&after_decl, "EXCEPTION") {
-            Some(at) => (
-                slice(&after_decl, 0, at).to_string(),
-                Some(slice(&after_decl, at + 9, after_decl.len()).to_string()),
-            ),
+        let (body_text, exception_text) = match find_kw_outer(after_decl, "EXCEPTION") {
+            Some(at) => (&after_decl[..at], Some(&after_decl[at + 9..])),
             None => (after_decl, None),
         };
 
         ProcStmt::Block {
-            declarations: parse_declarations(&decl_text, span),
-            body: {
-                let at = offset_of(&inner, &body_text, span.start);
-                self.sub_at(&body_text, at)
-            },
-            exception: exception_text
-                .map(|e| parse_handlers(&e, span, self.src))
-                .unwrap_or_default(),
+            declarations: self.declarations(decl_text),
+            body: self.sub(body_text),
+            exception: exception_text.map(|e| self.handlers(e)).unwrap_or_default(),
             span,
         }
     }
 
-    /// Parse an interior fragment.
-    ///
-    /// `offset` is where the fragment begins **in the original source**, not where its parent
-    /// begins. Passing the parent's start shifts every nested span by however far into the parent
-    /// the fragment sits — which still looks like a plausible offset, so the spans point at real
-    /// text that is simply the wrong text. That is worse than an obviously broken span.
-    fn sub_at(&mut self, text: &str, offset: usize) -> Vec<ProcStmt> {
-        let mut p = Parser::new(self.src, Origin { offset });
-        p.stmts = split_statements(text, Origin { offset });
-        p.parse_all()
+    /// `WHEN cond [OR cond …] THEN …`, repeated. Each handler's span covers its own `WHEN … ;`
+    /// text, not the block around it.
+    fn handlers(&self, text: &'a str) -> Vec<ExceptionHandler> {
+        let mut out = Vec::new();
+        let Some(first) = find_kw_outer(text, "WHEN") else {
+            return out;
+        };
+        let mut cursor = &text[first..];
+        loop {
+            let after = &cursor[4..];
+            let Some(then_at) = find_kw_outer(after, "THEN") else {
+                break;
+            };
+            // `WHEN unique_violation OR SQLSTATE '23503' THEN`
+            let mut conditions = Vec::new();
+            let mut current: Vec<&str> = Vec::new();
+            for w in after[..then_at].split_whitespace() {
+                if w.eq_ignore_ascii_case("OR") {
+                    conditions.push(current.join(" ").to_ascii_lowercase());
+                    current.clear();
+                } else {
+                    current.push(w);
+                }
+            }
+            conditions.push(current.join(" ").to_ascii_lowercase());
+            conditions.retain(|c| !c.is_empty());
+
+            let body_and_rest = &after[then_at + 4..];
+            let (body, tail) = split_at_statement_kw(body_and_rest, &["WHEN"]);
+            let end = (body.as_ptr() as usize - cursor.as_ptr() as usize) + body.trim_end().len();
+            out.push(ExceptionHandler {
+                conditions,
+                body: self.sub(body),
+                span: self.span_of(cursor[..end].trim_end()),
+            });
+            match tail {
+                // `more` starts just after the next `WHEN`; step back onto it.
+                Some((_, more)) => {
+                    let at = more.as_ptr() as usize - cursor.as_ptr() as usize - 4;
+                    cursor = &cursor[at..];
+                }
+                None => break,
+            }
+        }
+        out
+    }
+
+    fn declarations(&self, text: &'a str) -> Vec<VarDecl> {
+        split_slices(text)
+            .into_iter()
+            .filter_map(|d| {
+                let mut parts = d.split_whitespace();
+                let name = parts.next()?.to_string();
+                let rest: Vec<&str> = parts.collect();
+                if rest.is_empty() {
+                    return None;
+                }
+                let constant = rest[0].eq_ignore_ascii_case("CONSTANT");
+                let rest = if constant { &rest[1..] } else { &rest[..] };
+                let joined = rest.join(" ");
+                // `c CURSOR FOR SELECT …` declares a cursor, not a typed variable. The "type" is
+                // the cursor's query, which is what a consumer needs.
+                let (data_type, default) =
+                    match joined.find(":=").or_else(|| find_kw(&joined, "DEFAULT")) {
+                        Some(at) => {
+                            let val = joined[at..]
+                                .trim_start_matches(":=")
+                                .trim_start_matches("DEFAULT")
+                                .trim()
+                                .to_string();
+                            (joined[..at].trim().to_string(), Some(val))
+                        }
+                        None => (joined.trim().to_string(), None),
+                    };
+                Some(VarDecl {
+                    name,
+                    data_type,
+                    default,
+                    constant,
+                    span: self.span_of(d),
+                })
+            })
+            .collect()
     }
 
     fn unrecovered(&self, text: &str, span: Span, reason: &str) -> ProcStmt {
@@ -697,91 +818,6 @@ impl<'a> Parser<'a> {
             span,
         }
     }
-}
-
-/// Where `fragment` sits in the original source, given that `parent` starts at `parent_at`.
-///
-/// The fragment is a slice of the parent by construction, so this is a search for a known
-/// substring; falling back to the parent's own offset keeps a span plausible rather than absent
-/// when a caller passes something reconstructed.
-fn offset_of(parent: &str, fragment: &str, parent_at: usize) -> usize {
-    parent
-        .find(fragment)
-        .map(|rel| parent_at + rel)
-        .unwrap_or(parent_at)
-}
-
-fn parse_handlers(text: &str, span: Span, src: &str) -> Vec<ExceptionHandler> {
-    let mut out = Vec::new();
-    let mut cursor = text.to_string();
-    while let Some(when_at) = find_kw(&cursor, "WHEN") {
-        let after = &cursor[when_at + 4..];
-        let Some(then_at) = find_kw(after, "THEN") else {
-            break;
-        };
-        let conditions: Vec<String> = slice(after, 0, then_at)
-            .split('|')
-            .map(|s| {
-                s.trim()
-                    .trim_start_matches("OR")
-                    .trim()
-                    .to_ascii_lowercase()
-            })
-            .filter(|s| !s.is_empty())
-            .collect();
-        let body_and_rest = &after[then_at + 4..];
-        let (body_text, tail) = split_at_kw(body_and_rest, &["WHEN"]);
-        let mut p = Parser::new(src, Origin { offset: span.start });
-        p.stmts = split_statements(&body_text, Origin { offset: span.start });
-        out.push(ExceptionHandler {
-            conditions,
-            body: p.parse_all(),
-            span,
-        });
-        match tail {
-            Some((_, more)) => cursor = format!("WHEN {more}"),
-            None => break,
-        }
-    }
-    out
-}
-
-fn parse_declarations(text: &str, span: Span) -> Vec<VarDecl> {
-    split_statements(text, Origin { offset: span.start })
-        .into_iter()
-        .filter_map(|(d, s)| {
-            let mut parts = d.split_whitespace();
-            let name = parts.next()?.to_string();
-            let rest: Vec<&str> = parts.collect();
-            if rest.is_empty() {
-                return None;
-            }
-            let constant = rest[0].eq_ignore_ascii_case("CONSTANT");
-            let rest = if constant { &rest[1..] } else { &rest[..] };
-            let joined = rest.join(" ");
-            // `c CURSOR FOR SELECT …` declares a cursor, not a typed variable. The "type" is the
-            // cursor's query, which is what a consumer needs.
-            let (data_type, default) =
-                match joined.find(":=").or_else(|| find_kw(&joined, "DEFAULT")) {
-                    Some(at) => {
-                        let val = joined[at..]
-                            .trim_start_matches(":=")
-                            .trim_start_matches("DEFAULT")
-                            .trim()
-                            .to_string();
-                        (joined[..at].trim().to_string(), Some(val))
-                    }
-                    None => (joined.trim().to_string(), None),
-                };
-            Some(VarDecl {
-                name,
-                data_type,
-                default,
-                constant,
-                span: s,
-            })
-        })
-        .collect()
 }
 
 /// Find a keyword at **block** depth zero: not inside a nested `BEGIN … END`, `IF … END IF`,
@@ -796,21 +832,12 @@ fn find_kw_outer(s: &str, kw: &str) -> Option<usize> {
     let b = s.as_bytes();
     let mut i = 0usize;
     let mut depth = 0i32;
+    let mut open: Vec<&'static str> = Vec::new();
     let mut parens = 0i32;
     while i < b.len() {
         let c = b[i];
-        if c == b'\'' {
-            i += 1;
-            while i < b.len() && b[i] != b'\'' {
-                i += 1;
-            }
-            i += 1;
-            continue;
-        }
-        if c == b'-' && i + 1 < b.len() && b[i + 1] == b'-' {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
-            }
+        if let Some(next) = skip_quoted(s, i) {
+            i = next;
             continue;
         }
         if c == b'(' {
@@ -842,8 +869,10 @@ fn find_kw_outer(s: &str, kw: &str) -> Option<usize> {
                 if i + n <= b.len()
                     && b[i..i + n].eq_ignore_ascii_case(opener.as_bytes())
                     && ends(b, i, n)
+                    && (opener != "IF" || at_statement_start(b, i))
                 {
                     depth += 1;
+                    open.push(opener);
                     matched = n;
                     break;
                 }
@@ -854,23 +883,8 @@ fn find_kw_outer(s: &str, kw: &str) -> Option<usize> {
                 && ends(b, i, 3)
             {
                 depth -= 1;
-                matched = 3;
                 // Same rule as the splitter: `END IF` is one closer.
-                let after = i + 3;
-                let skip = b[after..]
-                    .iter()
-                    .take_while(|c| c.is_ascii_whitespace())
-                    .count();
-                for tail in ["IF", "LOOP", "CASE"] {
-                    let m = tail.len();
-                    if after + skip + m <= b.len()
-                        && b[after + skip..after + skip + m].eq_ignore_ascii_case(tail.as_bytes())
-                        && (after + skip + m == b.len() || !is_word_byte(b[after + skip + m]))
-                    {
-                        matched = 3 + skip + m;
-                        break;
-                    }
-                }
+                matched = 3 + end_tail_len(b, i + 3, open.pop());
             }
             if matched > 0 {
                 i += matched;
@@ -889,12 +903,8 @@ fn find_kw(s: &str, kw: &str) -> Option<usize> {
     let mut parens = 0i32;
     while i < b.len() {
         let c = b[i];
-        if c == b'\'' {
-            i += 1;
-            while i < b.len() && b[i] != b'\'' {
-                i += 1;
-            }
-            i += 1;
+        if let Some(next) = skip_quoted(s, i) {
+            i = next;
             continue;
         }
         if c == b'(' {
@@ -915,68 +925,118 @@ fn find_kw(s: &str, kw: &str) -> Option<usize> {
     None
 }
 
-/// Split at the first of `keywords` found at depth zero.
-fn split_at_kw(s: &str, keywords: &[&str]) -> (String, Option<(String, String)>) {
-    let mut best: Option<(usize, &str)> = None;
+/// Split at the first of `keywords` found at **block** depth zero, returning subslices: the text
+/// before it, and the keyword with the text after it.
+fn split_at_kw<'s>(
+    s: &'s str,
+    keywords: &[&'static str],
+) -> (&'s str, Option<(&'static str, &'s str)>) {
+    let mut best: Option<(usize, &'static str)> = None;
     for kw in keywords {
-        if let Some(at) = find_kw(s, kw)
+        if let Some(at) = find_kw_outer(s, kw)
             && best.is_none_or(|(b, _)| at < b)
         {
             best = Some((at, kw));
         }
     }
     match best {
-        Some((at, kw)) => (
-            slice(s, 0, at).to_string(),
-            Some((
-                kw.to_ascii_uppercase(),
-                slice(s, at + kw.len(), s.len()).to_string(),
-            )),
-        ),
-        None => (s.to_string(), None),
+        Some((at, kw)) => (&s[..at], Some((kw, &s[at + kw.len()..]))),
+        None => (s, None),
     }
 }
 
-/// Strip a trailing `END [what]`, returning the interior.
-fn strip_end(text: &str, what: &str) -> Option<String> {
-    let t = text.trim_end().trim_end_matches(';').trim_end();
-    let upper = t.to_ascii_uppercase();
-    let suffix = if what.is_empty() {
-        "END".to_string()
-    } else {
-        format!("END {what}")
+/// [`split_at_kw`] for keywords that only count at the **start of a statement**: a `CASE` branch's
+/// `WHEN` or a handler's `WHEN`, but not the one in `EXIT WHEN done;` inside the branch body.
+fn split_at_statement_kw<'s>(
+    s: &'s str,
+    keywords: &[&'static str],
+) -> (&'s str, Option<(&'static str, &'s str)>) {
+    let mut from = 0;
+    loop {
+        let (_, found) = split_at_kw(&s[from..], keywords);
+        let Some((kw, more)) = found else {
+            return (s, None);
+        };
+        let at = more.as_ptr() as usize - s.as_ptr() as usize - kw.len();
+        let before = s[..at].trim_end();
+        if before.is_empty() || before.ends_with(';') {
+            return (&s[..at], Some((kw, more)));
+        }
+        from = at + kw.len();
+    }
+}
+
+/// Strip a trailing `END [what] [label]`, returning the interior as a subslice of `text`.
+fn strip_end<'s>(text: &'s str, what: &str) -> Option<&'s str> {
+    fn last_word(t: &str) -> (&str, &str) {
+        let at = t.rfind(char::is_whitespace).map_or(0, |a| a + 1);
+        (t[..at].trim_end(), &t[at..])
+    }
+    let is_label = |w: &str| {
+        !w.is_empty()
+            && w.bytes().all(is_word_byte)
+            && !w.eq_ignore_ascii_case("END")
+            && !w.eq_ignore_ascii_case(what)
     };
-    if upper.ends_with(&suffix) {
-        Some(t[..t.len() - suffix.len()].to_string())
-    } else if upper.ends_with("END") {
-        Some(t[..t.len() - 3].to_string())
-    } else {
-        None
+    let t = text.trim_end().trim_end_matches(';').trim_end();
+    let (mut before, mut w) = last_word(t);
+    // `END LOOP outer;` and `END outer;` close a labelled loop or block.
+    if is_label(w) {
+        let (b, w2) = last_word(before);
+        if w2.eq_ignore_ascii_case("END") || (!what.is_empty() && w2.eq_ignore_ascii_case(what)) {
+            (before, w) = (b, w2);
+        }
     }
+    if !what.is_empty() && w.eq_ignore_ascii_case(what) {
+        let (b, w2) = last_word(before);
+        return w2.eq_ignore_ascii_case("END").then_some(b);
+    }
+    // A bare `END` is accepted for any construct, as it always was.
+    w.eq_ignore_ascii_case("END").then_some(before)
 }
 
+/// `target := expr`, or `target = expr` — PL/pgSQL accepts both, and older code uses `=`.
 fn split_assign(text: &str) -> Option<(String, String)> {
-    let at = find_kw_op(text, ":=")?;
+    if let Some(at) = find_kw_op(text, ":=") {
+        let lhs = text[..at].trim();
+        if lhs.is_empty() || lhs.contains(char::is_whitespace) {
+            return None;
+        }
+        return Some((lhs.to_string(), text[at + 2..].trim().to_string()));
+    }
+    // `=` is also comparison, so the target must be exactly a variable reference — a name, a dotted
+    // field, an array subscript — and the statement must not have matched any keyword already.
+    let at = find_kw_op(text, "=")?;
     let lhs = text[..at].trim();
-    if lhs.is_empty() || lhs.contains(char::is_whitespace) {
+    let b = text.as_bytes();
+    let is_target = !lhs.is_empty()
+        && lhs.as_bytes()[0].is_ascii_alphabetic() | (lhs.as_bytes()[0] == b'_')
+        && lhs
+            .bytes()
+            .all(|c| is_word_byte(c) || matches!(c, b'.' | b'[' | b']' | b'"'));
+    let comparison =
+        at > 0 && matches!(b[at - 1], b'<' | b'>' | b'!' | b':') || b.get(at + 1) == Some(&b'=');
+    if !is_target || comparison {
         return None;
     }
-    Some((lhs.to_string(), text[at + 2..].trim().to_string()))
+    Some((lhs.to_string(), text[at + 1..].trim().to_string()))
 }
 
 fn find_kw_op(s: &str, op: &str) -> Option<usize> {
     let b = s.as_bytes();
     let mut i = 0;
+    let mut parens = 0i32;
     while i < b.len() {
-        if b[i] == b'\'' {
-            i += 1;
-            while i < b.len() && b[i] != b'\'' {
-                i += 1;
-            }
-            i += 1;
+        if let Some(next) = skip_quoted(s, i) {
+            i = next;
             continue;
         }
-        if b[i..].starts_with(op.as_bytes()) {
+        match b[i] {
+            b'(' => parens += 1,
+            b')' => parens -= 1,
+            _ => {}
+        }
+        if parens == 0 && b[i..].starts_with(op.as_bytes()) {
             return Some(i);
         }
         i += 1;
@@ -1021,22 +1081,46 @@ fn find_into(text: &str) -> Option<(String, Vec<String>, String)> {
 }
 
 /// Parse a function body into statements.
+///
+/// Comments are blanked first (see [`crate::lex::mask_comments`]), so no statement text carries
+/// one and no keyword scan can be misled by one. Spans still index the original `body`.
 pub fn parse_body(body: &str, origin: Origin) -> Vec<ProcStmt> {
-    Parser::new(body, origin).parse_all()
+    let masked = crate::lex::mask_comments(body);
+    Parser::new(&masked, origin).parse_all()
 }
 
 /// Parse a whole `CREATE FUNCTION … AS $$ … $$` into a [`ProcedureIr`].
 pub fn parse_function(src: &str) -> Result<ProcedureIr, crate::lex::LexError> {
-    let signature = parse_signature(src);
+    let toks = crate::lex::lex(src)?;
+    let signature = parse_signature(src, &toks);
     // A routine in a language this crate does not parse gets its signature and an honest label,
     // never an empty body that would read as "nothing in it".
     if !signature.language.eq_ignore_ascii_case("plpgsql") {
         return Ok(ProcedureIr::signature_only(signature));
     }
-    let Some((body, start, _end)) = crate::lex::function_body(src)? else {
-        return Ok(ProcedureIr::signature_only(signature));
+    let stmts = match quoted_body(src, &toks) {
+        Some((body, collapsed, start)) => {
+            // Parsed unescaped, then every span mapped back onto the source as written: a
+            // statement after N doubled quotes sits N bytes further on in the file.
+            let mut stmts = parse_body(&body, Origin { offset: 0 });
+            let map = |v: usize| start + v + collapsed.partition_point(|&p| p < v);
+            for s in &mut stmts {
+                s.spans_mut(&mut |sp| {
+                    *sp = Span {
+                        start: map(sp.start),
+                        end: map(sp.end),
+                    }
+                });
+            }
+            stmts
+        }
+        None => {
+            let Some((body, start, _end)) = crate::lex::function_body(src)? else {
+                return Ok(ProcedureIr::signature_only(signature));
+            };
+            parse_body(&body, Origin { offset: start })
+        }
     };
-    let stmts = parse_body(&body, Origin { offset: start });
     // A body is one `BEGIN … END` block; lift its declarations so callers see them directly.
     if let [
         ProcStmt::Block {
@@ -1058,48 +1142,179 @@ pub fn parse_function(src: &str) -> Result<ProcedureIr, crate::lex::LexError> {
     Ok(ProcedureIr::new(signature, Vec::new(), stmts))
 }
 
-fn parse_signature(src: &str) -> ProcSignature {
-    let upper = src.to_ascii_uppercase();
-    let name = upper
-        .find("FUNCTION")
-        .or_else(|| upper.find("PROCEDURE"))
-        .map(|at| {
-            let after = &src[at..];
-            let after = after.split_whitespace().nth(1).unwrap_or_default();
-            after.split('(').next().unwrap_or_default().to_string()
-        })
-        .unwrap_or_default();
-    let arguments = src
-        .find('(')
-        .and_then(|a| src[a..].find(')').map(|b| &src[a + 1..a + b]))
-        .map(|s| {
-            s.split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    let returns = find_kw(src, "RETURNS").map(|at| {
-        src[at + 7..]
-            .split_whitespace()
-            .next()
-            .unwrap_or_default()
-            .to_string()
-    });
-    let language = find_kw(src, "LANGUAGE")
-        .map(|at| {
-            src[at + 8..]
-                .split_whitespace()
-                .next()
-                .unwrap_or_default()
-                .to_ascii_lowercase()
-        })
-        .unwrap_or_else(|| "plpgsql".into());
+/// A body written the pre-8.0 way, `AS ' … '` with every quote inside doubled. PostgreSQL still
+/// accepts it and real schemas still carry it; reading it as "no body" labelled such a routine
+/// `Signature`, which is honest but wrong.
+///
+/// Returns the unescaped body, the body offsets at which a doubled quote collapsed to one, and the
+/// source offset where the body starts — enough to map any span in the body back to the source.
+fn quoted_body(src: &str, toks: &[crate::lex::Spanned]) -> Option<(String, Vec<usize>, usize)> {
+    use crate::lex::Tok;
+    let at = toks.windows(2).position(|w| {
+        matches!(&w[0].tok, Tok::Word(a) if a.eq_ignore_ascii_case("AS"))
+            && matches!(w[1].tok, Tok::Str(_) | Tok::Dollar { .. })
+    })?;
+    let t = &toks[at + 1];
+    if !matches!(t.tok, Tok::Str(_)) {
+        return None;
+    }
+    // A `C` routine's `AS 'module', 'symbol'` never gets here: only plpgsql bodies are parsed.
+    let raw = &src.as_bytes()[t.start + 1..t.end - 1];
+    let mut body = Vec::with_capacity(raw.len());
+    let mut collapsed = Vec::new();
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'\'' && raw.get(i + 1) == Some(&b'\'') {
+            collapsed.push(body.len());
+            body.push(b'\'');
+            i += 2;
+        } else {
+            body.push(raw[i]);
+            i += 1;
+        }
+    }
+    Some((
+        String::from_utf8_lossy(&body).into_owned(),
+        collapsed,
+        t.start + 1,
+    ))
+}
+
+/// Words that end a `RETURNS` type: the routine attributes that may follow it, in any order.
+const ROUTINE_ATTRIBUTES: &[&str] = &[
+    "LANGUAGE",
+    "AS",
+    "IMMUTABLE",
+    "STABLE",
+    "VOLATILE",
+    "STRICT",
+    "CALLED",
+    "SECURITY",
+    "EXTERNAL",
+    "PARALLEL",
+    "LEAKPROOF",
+    "NOT",
+    "COST",
+    "ROWS",
+    "SUPPORT",
+    "SET",
+    "WINDOW",
+    "TRANSFORM",
+    "BEGIN",
+    "RETURN",
+];
+
+/// Read the routine header from tokens rather than raw text.
+///
+/// The body is a single `Dollar` token, so nothing inside it can be mistaken for a clause — a
+/// column called `language` in the body was once read as the routine's language. Hand-written
+/// schemas also put `LANGUAGE plpgsql;` *after* the body, quoted or not, which a text scan read as
+/// the language `plpgsql;`.
+fn parse_signature(src: &str, toks: &[crate::lex::Spanned]) -> ProcSignature {
+    use crate::lex::Tok;
+    let is_word = |t: &Tok, w: &str| matches!(t, Tok::Word(x) if x.eq_ignore_ascii_case(w));
+
+    let mut name = String::new();
+    let mut arguments = Vec::new();
+    let mut i = toks
+        .iter()
+        .position(|t| is_word(&t.tok, "FUNCTION") || is_word(&t.tok, "PROCEDURE"))
+        .map_or(toks.len(), |k| k + 1);
+
+    // `schema.name`, either part possibly quoted.
+    while let Some(t) = toks.get(i) {
+        match &t.tok {
+            Tok::Word(w) => name.push_str(w),
+            Tok::Punct('.') => name.push('.'),
+            _ => break,
+        }
+        i += 1;
+    }
+
+    // Arguments: split on top-level commas, so `numeric(10,2)` stays one argument.
+    if matches!(toks.get(i).map(|t| &t.tok), Some(Tok::Punct('('))) {
+        let mut depth = 0i32;
+        let mut seg = toks[i].end;
+        for t in &toks[i..] {
+            match t.tok {
+                Tok::Punct('(') => depth += 1,
+                Tok::Punct(')') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        arguments.push(src[seg..t.start].trim().to_string());
+                        i += 1;
+                        break;
+                    }
+                }
+                Tok::Punct(',') if depth == 1 => {
+                    arguments.push(src[seg..t.start].trim().to_string());
+                    seg = t.end;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        arguments.retain(|a| !a.is_empty());
+    }
+
+    // The clauses after the argument list, at parenthesis depth zero.
+    let mut returns = None;
+    let mut language = None;
+    let mut depth = 0i32;
+    let mut k = i;
+    while k < toks.len() {
+        let t = &toks[k].tok;
+        match t {
+            Tok::Punct('(') => depth += 1,
+            Tok::Punct(')') => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && returns.is_none() && is_word(t, "RETURNS") {
+            // `RETURNS NULL ON NULL INPUT` is a strictness clause, not a type.
+            let null_clause = toks.get(k + 1).is_some_and(|n| is_word(&n.tok, "NULL"))
+                && toks.get(k + 2).is_some_and(|n| is_word(&n.tok, "ON"));
+            if !null_clause {
+                let from = k + 1;
+                let mut d = 0i32;
+                let mut end = from;
+                while let Some(n) = toks.get(end) {
+                    match &n.tok {
+                        Tok::Punct('(') => d += 1,
+                        Tok::Punct(')') => d -= 1,
+                        Tok::Punct(';') | Tok::Dollar { .. } | Tok::Str(_) if d == 0 => break,
+                        Tok::Word(w)
+                            if d == 0
+                                && end > from
+                                && ROUTINE_ATTRIBUTES.iter().any(|a| w.eq_ignore_ascii_case(a)) =>
+                        {
+                            break;
+                        }
+                        _ => {}
+                    }
+                    end += 1;
+                }
+                if end > from {
+                    let text = &src[toks[from].start..toks[end - 1].end];
+                    returns = Some(text.split_whitespace().collect::<Vec<_>>().join(" "));
+                }
+                k = end;
+                continue;
+            }
+        }
+        if depth == 0
+            && language.is_none()
+            && is_word(t, "LANGUAGE")
+            && let Some(Tok::Word(l) | Tok::Str(l)) = toks.get(k + 1).map(|n| &n.tok)
+        {
+            language = Some(l.to_ascii_lowercase());
+        }
+        k += 1;
+    }
+
     ProcSignature {
         name,
         arguments,
         returns,
-        language,
+        language: language.unwrap_or_else(|| "plpgsql".into()),
     }
 }

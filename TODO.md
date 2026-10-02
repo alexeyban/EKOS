@@ -6116,6 +6116,9 @@ PostgreSQL recover completely**, with a ratcheted floor.
 - [x] PL/pgSQL parser → `ProcedureIr` (dollar-quoting lexer, recursive descent, local recovery)
 - [x] Fidelity labels computed from the IR; nothing labelled `Statements` that contains a gap
 - [x] Cursors, exception handlers, every loop form, dynamic `EXECUTE` as a reported boundary
+- [x] LedgerSMB corpus from source, as a ratchet: **212/212** loaded routines reach `Statements`
+      (was 44/57 recognised, 165 never parsed); spans exact + deterministic on all (devlog_228)
+- [ ] Pagila corpus floor (RFC 0163's fast corpus)
 - [ ] Wire the parser into a `PlPgSqlAnalyzerPass` in `recovery`, emitting `Custom("Procedure")` /
       `Custom("ProcedureStatement")` objects with REGISTRY rows
 - [ ] Trigger recovery and structural classification; never auto-translated
