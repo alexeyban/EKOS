@@ -1,6 +1,6 @@
 # RFC 0169 — Views as first-class ledger objects
 
-**Status:** Accepted (2026-10-03)
+**Status:** Accepted and implemented (2026-10-03, devlog_231–232)
 **Date:** 2026-10-03
 **Supersedes:** none
 **Related:** RFC 0027 (Transformation IR — a view's *logic*), RFC 0075 (data lineage), RFC 0163

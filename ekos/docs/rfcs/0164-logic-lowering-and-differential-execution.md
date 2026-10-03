@@ -1,6 +1,7 @@
 # RFC 0164 — Logic lowering, constrained reconstruction and differential execution
 
-**Status:** Draft
+**Status:** Draft — not started. Its RFC 0163 prerequisites are met as of 2026-10-03 (a real node
+set with spans, computed fidelity, routine/table links, trigger classes — devlog_233)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0163 (the procedural IR this consumes — a hard prerequisite), RFC 0154 (coverage

@@ -1199,9 +1199,11 @@ human approval is a ledger fact with provenance, and the report cites those fact
 (`ekos/docs/rfcs/0154`-`0167`).
 
 **Shipped:** a real table was migrated PostgreSQL → ClickHouse and validated at V1/V2/V3, with a
-planted one-row change caught by V3. **Not yet:** logic migration (views, functions, triggers —
-PL/pgSQL routines are recovered into the ledger statement by statement, RFC 0163, but not yet lowered
-or translated, RFC 0164), V0/V4-V5 validation, `signoff`, a second target, CDC and cutover.
+planted one-row change caught by V3. The source side of logic migration is recovered: PL/pgSQL
+routines statement by statement, views, and triggers classified by what they do, all linked to the
+tables they touch (RFC 0163, 0169). **Not yet:** translating that logic to the target (RFC 0164:
+lowering, constrained reconstruction, V5 differential execution), V0/V4 validation, `signoff`, a
+second target, CDC and cutover.
 
 ```bash
 ekos migrate init --name ledgersmb \

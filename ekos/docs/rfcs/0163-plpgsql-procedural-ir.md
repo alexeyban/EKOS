@@ -1,6 +1,7 @@
 # RFC 0163 — PL/pgSQL → a procedural IR, deterministically
 
-**Status:** Draft
+**Status:** Accepted — implemented 2026-09-26 … 2026-10-03 (devlog_220, 228–233), except the
+Pagila corpus floor; the *Open questions* below are still open
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (the coverage requirement this RFC exists to satisfy), RFC 0027 (Transformation

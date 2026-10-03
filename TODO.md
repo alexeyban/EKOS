@@ -6107,36 +6107,78 @@ Determinism verified by compiling four times and diffing.
 - [x] Two distinct approvers for R4; typed confirmation (`request.rs`, devlog_218)
 - [x] `migrate.policy.toml`, its content hash recorded on every approval (`policy.rs`, devlog_218)
 
-## Migrate Phase 6 — Full logic coverage (RFC 0163, 0164) — **required, not optional**
+## Migrate Phase 6 — Full logic coverage (RFC 0163, 0169, 0164) — **required, not optional**
 
-**RFC 0163 landed 2026-09-26 (devlog_220).** `ekos-plpgsql`: dollar-quoting lexer, recursive-descent
-parser, procedural IR, fidelity computed from the IR. 43 tests; **5/5 real routines read back from
-PostgreSQL recover completely**, with a ratcheted floor.
+**Status 2026-10-03:** the *source* side is done — PL/pgSQL routines, views and triggers are
+recovered, linked and documented (RFC 0163 + RFC 0169, devlog_220 and devlog_228–233). The *target*
+side (RFC 0164: lowering, reconstruction, V5) has not started. All of it is on local `main`
+(5b17947 … 0a5393e), **not pushed**.
 
+### RFC 0163 — PL/pgSQL → procedural IR · **done except the Pagila floor**
+
+Done:
 - [x] PL/pgSQL parser → `ProcedureIr` (dollar-quoting lexer, recursive descent, local recovery)
+      (devlog_220)
 - [x] Fidelity labels computed from the IR; nothing labelled `Statements` that contains a gap
 - [x] Cursors, exception handlers, every loop form, dynamic `EXECUTE` as a reported boundary
-- [x] LedgerSMB corpus from source, as a ratchet: **212/212** loaded routines reach `Statements`
-      (was 44/57 recognised, 165 never parsed); spans exact + deterministic on all (devlog_228)
-- [ ] Pagila corpus floor (RFC 0163's fast corpus)
-- [x] Wire the parser into a `PlPgSqlAnalyzerPass` in `recovery`, emitting `Custom("Procedure")` /
-      `Custom("ProcedureStatement")` objects with REGISTRY rows (devlog_229; LedgerSMB `sql/`: 556
-      routines, 1556 statements, deterministic across re-commits)
-- [x] Link routines to the tables/routines they touch: per-statement SQL footprint from a real
-      `sqlparser` AST walk + `procedure_lineage` at `commit` (devlog_230; LedgerSMB: 1,852 edges,
-      99.6% of embedded SQL parses, idempotent across re-commits)
-- [x] A `View` object kind (RFC 0169, devlog_231): 17 LedgerSMB views, 24 view references now link
-- [x] Downstream registries for `View` (docs-gen Data Stores / entity pages, `llm_description`) (devlog_232)
-- [x] Downstream registries for the new kinds: docs-gen entity pages / API grouping,
-      `llm_description`, `doc_links` (RFC 0147's list) — not CI-enforced (devlog_232)
-- [x] Trigger recovery and structural classification; never auto-translated (devlog_233; LedgerSMB
-      42 triggers: 15 Validation, 15 DerivedColumn, 4 Cascade, 7 Mixed, 1 Unknown, all with reasons)
-- [ ] Lower `ProcStmt::Sql` into the dataflow `TransformGraph` (the RFC drew this seam inside the
-      parser; it sits one step later — see the crate docs)
+- [x] LedgerSMB corpus from source as a ratchet: **212/212** installed routines reach `Statements`
+      (was 44/57 recognised, 165 never parsed); spans exact, parsing deterministic (devlog_228)
+- [x] `PlPgSqlAnalyzerPass` → `Procedure` / `ProcedureStatement` objects with REGISTRY rows
+      (devlog_229; LedgerSMB `sql/`: 556 routines, 1,556 statements)
+- [x] What each statement/routine reads, writes, calls — a real `sqlparser` AST walk; **1137/1141**
+      LedgerSMB statements' SQL parses, as a ratchet (devlog_230)
+- [x] Routine → table (`DependsOn`, `ReadsFrom`/`WritesTo` per statement) and routine → routine
+      (`Calls`) links, unique names only, idempotent (devlog_230; LedgerSMB 1,931 edges)
+- [x] Downstream: docs-gen pages, API.md, doc coverage, `doc_links`, `llm_description`;
+      `COMMENT ON FUNCTION` as evidence-backed `description` (330/330 attach) (devlog_232)
+- [x] Triggers: recovered, linked, classified structurally — never auto-translated (devlog_233;
+      LedgerSMB 42: 15 Validation, 15 DerivedColumn, 4 Cascade, 7 Mixed, 1 Unknown, all with reasons)
+
+Not done:
+- [ ] Pagila corpus floor (RFC 0163's fast corpus) — the only open acceptance criterion
+- [ ] RFC 0163 open questions, all unanswered: `%TYPE`/`%ROWTYPE` resolution; PL/Perl/PL/Python
+      bodies (today `Signature` only); a dedicated `ekos_procedure_explain` MCP tool (today agents
+      read routines through `ekos_search`/`ekos_ekl`/`ekos_neighborhood` only)
+- [ ] `COMMENT ON TRIGGER` is not captured as a trigger description
+- [ ] 4 LedgerSMB statements stay `unparsed` on sqlparser 0.53 grammar gaps — `ON CONFLICT
+      (expression)`, a data-modifying CTE (`WITH … AS (DELETE …)`), `INSERT … OVERRIDING SYSTEM VALUE`
+- [ ] Calls into recovered routines are not inlined, so a trigger calling a helper is `Mixed` by
+      design; inlining (or callee effect summaries) would sharpen 3 of the 7 LedgerSMB `Mixed`
+
+### RFC 0169 — Views as ledger objects · **done**
+
+- [x] `View` objects for every `CREATE [MATERIALIZED] VIEW` in a `.sql` file; parsed one definition at
+      a time, never dropped; link targets and sources for both linkers (devlog_231; LedgerSMB 17
+      views, 24 previously unresolvable references now link)
+- [x] Pages, Data Stores listing, `COMMENT ON VIEW` descriptions, `llm_description` (devlog_232)
+- [x] Identity: `{View, Procedure, Trigger}` same-name groups narrowed (separate SQL namespaces)
+- [ ] Out of scope, stated in the RFC: views from live catalogs (RFC 0157 does not write to the
+      ledger), dbt models materialized as views, column-level lineage through a view
+
+### RFC 0164 — Lowering, reconstruction, V5 · **not started** (RFC still Draft)
+
+Prerequisites now in place: a real node set with spans (the anti-invention check is no longer
+vacuous), `eligible_for_reconstruction` computed on every `Procedure`, routine/table links, and
+trigger classes for the redesign proposals.
+
+- [ ] Lower `ProcStmt::Sql` into the dataflow `TransformGraph` — today only the *footprint*
+      (tables read/written, functions called) is extracted, not the dataflow graph
 - [ ] Deterministic lowering with round-trip checking; CH incremental-MV semantics trap handled
-- [ ] Anti-invention check — meaningful only now that a real node set exists
-- [ ] Fidelity gate: `Partial` objects are ineligible for reconstruction
+- [ ] Anti-invention check against the procedural IR's node set
+- [ ] Fidelity gate enforced in a reconstruction path (the label exists; nothing consumes it yet)
 - [ ] V5 differential execution on IR-derived fixtures; branch coverage reported with a ratchet
+- [ ] Trigger redesign proposals per class (`Mixed` / `Unknown` → human decision, no proposal)
+
+### Existing issues surfaced by this work — not fixed, not caused by it
+
+- [ ] A table defined in more than one file (schema + migration) shares one id (`table_kir_id` is
+      name-only): `SEM002 duplicate object id`, and the ledger flips between versions on every
+      commit (3 LedgerSMB tables)
+- [ ] Rollups re-write their `Contains` edges on every commit of unchanged input
+- [ ] EKL filters only on `kind`/`name`; `WHERE <property> = …` silently returns 0 rows, not an error
+- [ ] `*.sql@1`-style files (LedgerSMB alternate migrations) are not observed as SQL
+- [ ] `compile` prints one `SEM002` warning per `Contains` edge from a `File` (expected, resolved at
+      `commit`) — on LedgerSMB that is ~600 lines of noise for zero real problems
 
 ## Migrate Phase 7 — Second target (RFC 0165)
 
