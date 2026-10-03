@@ -26,7 +26,7 @@ use crate::sql_comments::{
     ObjectComment, ObjectCommentKind, extract_object_comments, match_object_comments,
 };
 use crate::sql_objects::{clip, file_kir_id};
-use crate::sql_predicates::predicates_json;
+use crate::sql_predicates::{condition_predicates, predicates_json};
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "plpgsql-analyzer/4";
+const LOGIC_VERSION: &str = "plpgsql-analyzer/5";
 
 /// The most source text one statement's evidence carries. A statement longer than this is rare;
 /// its exact byte span is always recorded, so the full text stays recoverable from the file.
@@ -568,7 +568,10 @@ fn business_predicates(
 ) -> Vec<crate::sql_predicates::PredicateSite> {
     sites
         .iter()
-        .filter(|s| !locals.contains(&s.column))
+        // `NEW.x`/`OLD.x` name the trigger row's column, whatever the routine's variables are called.
+        .filter(|s| {
+            s.relation.as_deref().is_some_and(|r| r.starts_with('$')) || !locals.contains(&s.column)
+        })
         .cloned()
         .collect()
 }
@@ -613,6 +616,7 @@ fn statement_footprint_of(stmt: &ProcStmt) -> Footprint {
         ProcStmt::If { branches, .. } => {
             for (cond, _) in branches {
                 expr(&mut fp, cond);
+                fp.predicates.extend(condition_predicates(cond));
             }
         }
         ProcStmt::Case {
@@ -626,7 +630,10 @@ fn statement_footprint_of(stmt: &ProcStmt) -> Footprint {
             }
         }
         ProcStmt::Loop { kind, .. } => match kind {
-            LoopKind::While { condition } => expr(&mut fp, condition),
+            LoopKind::While { condition } => {
+                expr(&mut fp, condition);
+                fp.predicates.extend(condition_predicates(condition));
+            }
             LoopKind::ForRange { from, to, .. } => {
                 expr(&mut fp, from);
                 expr(&mut fp, to);
@@ -637,7 +644,10 @@ fn statement_footprint_of(stmt: &ProcStmt) -> Footprint {
             LoopKind::ForEach { array, .. } => expr(&mut fp, array),
             _ => {}
         },
-        ProcStmt::Exit { when: Some(w), .. } => expr(&mut fp, w),
+        ProcStmt::Exit { when: Some(w), .. } => {
+            expr(&mut fp, w);
+            fp.predicates.extend(condition_predicates(w));
+        }
         ProcStmt::Return { value, query, .. } => {
             if let Some(q) = query.as_deref().filter(|q| not_dynamic(q)) {
                 fp.merge(statement_footprint(q));

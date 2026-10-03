@@ -121,6 +121,11 @@ impl CompilerPass for SqlTransformAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v2` = RFC 0170 Phase 3: a top-level `SELECT`'s graph carries its `predicates`.
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -143,6 +148,11 @@ impl CompilerPass for SqlTransformAnalyzerPass {
             ..Default::default()
         };
 
+        // RFC 0170 Phase 3: a standalone `SELECT` (an analyst query, a report) is a carrier of
+        // business predicates too. Views and routines are not: their own analyzers carry theirs,
+        // and counting them twice would inflate how widely a filter recurs.
+        let query_predicates = top_level_query_predicates(&self.sql, self.dialect.as_ref());
+
         for graph in &graphs {
             stats.statements_processed += 1;
             stats.nodes_total += graph.nodes.len();
@@ -151,7 +161,31 @@ impl CompilerPass for SqlTransformAnalyzerPass {
                 .iter()
                 .filter(|n| !matches!(n, TransformNode::Unmapped { .. }))
                 .count();
-            merge_graphs(&mut combined, lower_to_kir(graph));
+            let mut lowered = lower_to_kir(graph);
+            let index = graph
+                .origin
+                .source_path
+                .rsplit_once('#')
+                .and_then(|(_, i)| i.parse::<usize>().ok());
+            if let Some(sites) = index.and_then(|i| query_predicates.get(&i)) {
+                let carrier = lowered
+                    .objects
+                    .iter()
+                    .position(|o| {
+                        o.properties.get("node_type") == Some(&serde_json::json!("Filter"))
+                    })
+                    .or((!lowered.objects.is_empty()).then_some(0));
+                if let Some(c) = carrier {
+                    let o = &mut lowered.objects[c];
+                    o.properties.insert(
+                        "predicates".into(),
+                        crate::sql_predicates::predicates_json(sites, 1),
+                    );
+                    o.properties
+                        .insert("source_path".into(), serde_json::json!(self.source_path));
+                }
+            }
+            merge_graphs(&mut combined, lowered);
         }
 
         *self.stats.lock().unwrap() = stats.clone();
@@ -197,6 +231,28 @@ fn source_kind_for(dialect_name: &str) -> &'static str {
         "informix" => "sql-informix",
         _ => "sql-generic",
     }
+}
+
+/// RFC 0170 Phase 3: the predicates of every top-level `SELECT` in `sql`, by statement index
+/// (matching the `#index` suffix of each graph's origin). Lines are the file's, from the whole-file
+/// parse; a file that only parses statement by statement contributes nothing here.
+pub fn top_level_query_predicates(
+    sql: &str,
+    dialect: &dyn Dialect,
+) -> std::collections::BTreeMap<usize, Vec<crate::sql_predicates::PredicateSite>> {
+    let mut out = std::collections::BTreeMap::new();
+    let Ok(stmts) = Parser::parse_sql(dialect, sql) else {
+        return out;
+    };
+    for (i, stmt) in stmts.iter().enumerate() {
+        if matches!(stmt, Statement::Query(_)) {
+            let sites = crate::sql_predicates::statement_predicates(stmt);
+            if !sites.is_empty() {
+                out.insert(i, sites);
+            }
+        }
+    }
+    out
 }
 
 // ── Top-level statement dispatch ─────────────────────────────────────────────
@@ -763,6 +819,18 @@ fn append_fragment(
 
 #[cfg(test)]
 mod tests {
+    /// RFC 0170 Phase 3: standalone SELECTs carry predicates; views do not (theirs come from
+    /// `view_analyzer`), so nothing is counted twice.
+    #[test]
+    fn only_top_level_selects_carry_predicates() {
+        let sql = "CREATE VIEW v AS SELECT * FROM t WHERE t.a = 1;\n\
+SELECT * FROM orders o\nWHERE o.status IN (1, 3);\n";
+        let p = top_level_query_predicates(sql, &sqlparser::dialect::PostgreSqlDialect {});
+        assert_eq!(p.keys().copied().collect::<Vec<_>>(), vec![1]);
+        assert_eq!(p[&1][0].canonical(), "orders.status IN (1, 3)");
+        assert_eq!(p[&1][0].line, 3);
+    }
+
     use super::*;
     use sqlparser::dialect::GenericDialect;
 

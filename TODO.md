@@ -6299,12 +6299,15 @@ LinkML; generation stays in LinkML.
 - [ ] Re-baseline the starter gold set's `IS FALSE` vs `IS NOT TRUE` predicates — or better, replace
       it with an expert's set
 
-### Phase 3 — wider sources
-- [ ] Pentaho filters via the Transformation IR; dbt tests; Confluence glossary
-- [ ] Application constants (Perl in LedgerSMB, Python)
-- [ ] PL/pgSQL `IF` conditions on `NEW.col` (trigger table known at compile)
-- [ ] Constrained LLM definition text: every sentence cites evidence, uncited sentences dropped
-- [ ] Exact seed-row lines (today a multi-row `VALUES` cites its `INSERT` line)
+### Phase 3 — wider sources · **done (devlog_238)**
+- [x] Pentaho `FilterRows` conditions (structured XML) on the upstream table
+- [x] dbt tests: `not_null`/`unique`/`accepted_values`/`relationships`, column descriptions
+- [x] PL/pgSQL `IF`/`WHILE`/`EXIT WHEN` on `NEW.`/`OLD.` → the trigger's table
+- [x] Standalone analyst `SELECT`s as carriers (views/routines not double-counted)
+- [x] Constrained LLM definition text (opt-in): cite-or-drop, hedges dropped, code meanings as evidence
+- [x] Exact seed-row lines
+- [ ] Confluence glossary; application constants (Perl in LedgerSMB, Python); predicates in dbt
+      model SQL (needs Jinja handling)
 
 ### Phase 4 — round-trip and agents
 - [x] `ekos import linkml` (expert YAML edits → review decisions; matched by `ekos_id`, all or

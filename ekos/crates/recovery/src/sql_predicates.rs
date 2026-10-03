@@ -20,7 +20,7 @@ use sqlparser::ast::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
-pub use ekos_kir::predicates::{Clause, PredicateSite, canonical_text};
+pub use ekos_kir::predicates::{Clause, NEW_ROW, OLD_ROW, PredicateSite, canonical_text};
 
 /// Every predicate in a parsed statement (nested queries included).
 pub fn statement_predicates(stmt: &Statement) -> Vec<PredicateSite> {
@@ -59,6 +59,35 @@ pub fn predicates_json(sites: &[PredicateSite], base: u32) -> serde_json::Value 
         })
         .collect();
     serde_json::to_value(rebased).unwrap_or_default()
+}
+
+/// The predicates of a PL/pgSQL condition (`IF NEW.status = 3 THEN`): only `NEW.`/`OLD.`-qualified
+/// columns resolve — to [`NEW_ROW`]/[`OLD_ROW`] — because an unqualified name in a condition is far
+/// more often a variable than a column. Unparseable conditions yield nothing.
+pub fn condition_predicates(cond: &str) -> Vec<PredicateSite> {
+    use sqlparser::dialect::PostgreSqlDialect;
+    let Ok(stmts) = sqlparser::parser::Parser::parse_sql(
+        &PostgreSqlDialect {},
+        &format!("SELECT 1 WHERE {cond}"),
+    ) else {
+        return Vec::new();
+    };
+    let Some(Statement::Query(q)) = stmts.first() else {
+        return Vec::new();
+    };
+    let SetExpr::Select(sel) = &*q.body else {
+        return Vec::new();
+    };
+    let Some(expr) = &sel.selection else {
+        return Vec::new();
+    };
+    let mut scope = Scope::default();
+    scope.aliases.insert("new".into(), NEW_ROW.into());
+    scope.aliases.insert("old".into(), OLD_ROW.into());
+    let mut out = Vec::new();
+    conjuncts(expr, &scope, Clause::Condition, &mut out);
+    out.retain(|p| p.relation.is_some());
+    out
 }
 
 // ── Literals ────────────────────────────────────────────────────────────────────────────────
@@ -811,6 +840,25 @@ mod tests {
             c,
             vec!["t.a IS NOT TRUE", "t.b IS FALSE", "t.c IS NOT TRUE"]
         );
+    }
+
+    #[test]
+    fn conditions_resolve_new_and_old_only() {
+        let c: Vec<String> = condition_predicates(
+            "NEW.status = 3 AND OLD.approved IS NOT TRUE AND in_flag AND new.amount > 0",
+        )
+        .iter()
+        .map(PredicateSite::canonical)
+        .collect();
+        assert_eq!(
+            c,
+            vec![
+                "$new.status IN (3)",
+                "$old.approved IS NOT TRUE",
+                "$new.amount > 0"
+            ]
+        );
+        assert!(condition_predicates("not valid sql ((").is_empty());
     }
 
     #[test]

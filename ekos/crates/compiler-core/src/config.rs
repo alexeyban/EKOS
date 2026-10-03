@@ -228,6 +228,18 @@ pub struct SemanticsConfig {
     /// A column compared against more distinct literals than this is a lookup key, not a code.
     #[serde(default = "default_semantics_max_enum_values")]
     pub max_enum_values: usize,
+    /// Opt-in: one-or-two-sentence plain-language text for undocumented concepts, from the `[llm]`
+    /// provider. Every sentence must cite the concept's own evidence or it is dropped; the text
+    /// never changes a concept's status. A cloud provider makes this a metered call per concept.
+    #[serde(default)]
+    pub llm_definitions: bool,
+    /// The most concepts described per commit.
+    #[serde(default = "default_semantics_llm_max")]
+    pub llm_max_definitions: usize,
+}
+
+fn default_semantics_llm_max() -> usize {
+    50
 }
 
 fn default_semantics_min_sites() -> usize {
@@ -245,6 +257,8 @@ impl Default for SemanticsConfig {
             rationale: true,
             min_sites: default_semantics_min_sites(),
             max_enum_values: default_semantics_max_enum_values(),
+            llm_definitions: false,
+            llm_max_definitions: default_semantics_llm_max(),
         }
     }
 }

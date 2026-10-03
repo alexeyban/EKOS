@@ -20,7 +20,16 @@ pub enum Clause {
     Case,
     /// A `CHECK` constraint on a table.
     Check,
+    /// A PL/pgSQL control-flow condition (`IF`/`ELSIF`/`WHILE`/`EXIT WHEN`). Its `NEW.`/`OLD.`
+    /// columns carry the placeholder relations [`NEW_ROW`]/[`OLD_ROW`] until synthesis maps them to
+    /// the table of the trigger that runs the routine.
+    Condition,
 }
+
+/// Placeholder relation of `NEW.col` in a routine's condition (resolved via its trigger).
+pub const NEW_ROW: &str = "$new";
+/// Placeholder relation of `OLD.col`.
+pub const OLD_ROW: &str = "$old";
 
 /// One normalized column-vs-literal predicate, with where it was found.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

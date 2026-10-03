@@ -30,8 +30,9 @@ pub const REJECTED: &str = "rejected";
 pub const NEEDS_REVIEW: &str = "needs_review";
 
 /// Properties that belong to the review, not to what was recovered. Never part of a signature.
-pub const REVIEW_FIELDS: [&str; 9] = [
+pub const REVIEW_FIELDS: [&str; 10] = [
     "status",
+    "review_reason",
     "reviewed_by",
     "reviewed_at",
     "review_note",
@@ -325,10 +326,12 @@ mod tests {
             json!(CONFIRMED)
         );
 
-        // Once flagged, it stays flagged until a human looks again.
+        // Once flagged, it stays flagged until a human looks again — and an unchanged re-run
+        // reproduces the flagged version exactly (the reason included), so nothing is rewritten.
         let mut again = concept("parts.obsolete IS TRUE");
         carry_forward(&mut again, Some(&changed));
         assert_eq!(status(&again), NEEDS_REVIEW);
+        assert_eq!(again.properties, changed.properties);
         let re = apply_review(&again, &Decision::Confirm, "ann", "t2", None).unwrap();
         let mut after = concept("parts.obsolete IS TRUE");
         carry_forward(&mut after, Some(&re));

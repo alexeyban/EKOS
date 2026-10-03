@@ -28,6 +28,7 @@
 //! shape — a documented approximation, not a blocker, matching this RFC's explicit tolerance for
 //! "accept incomplete coverage" scoping (see RFC 0025's Informix precedent).
 
+use crate::sql_predicates::predicates_json;
 use async_trait::async_trait;
 use ekos_artifact::ArtifactId;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
@@ -37,7 +38,7 @@ use ekos_semantic::transform_ir::{
     AggExpr, JoinKind, NodeId, TransformGraph, TransformNode, TransformOrigin, lower_to_kir,
 };
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +98,12 @@ impl CompilerPass for PentahoAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v2` = RFC 0170 Phase 3: Filter nodes carry `predicates`. `cache_inputs` names only the
+    /// artifacts read, so without this a cached run would keep serving filters without them.
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
         ids.sort();
@@ -149,7 +156,20 @@ impl CompilerPass for PentahoAnalyzerPass {
                 .filter(|n| !matches!(n, TransformNode::Unmapped { .. }))
                 .count();
 
-            merge_graphs(&mut combined, lower_to_kir(&graph));
+            let mut lowered = lower_to_kir(&graph);
+            // RFC 0170 Phase 3: a FilterRows step's condition as normalized predicates, so the
+            // business rules in a Kettle job join the ones recovered from SQL.
+            if data.kettle_kind != "job" {
+                for (index, sites) in filter_predicates(&data.xml, &graph) {
+                    if let Some(o) = lowered.objects.get_mut(index) {
+                        o.properties
+                            .insert("predicates".into(), predicates_json(&sites, 1));
+                        o.properties
+                            .insert("source_path".into(), serde_json::json!(data.path));
+                    }
+                }
+            }
+            merge_graphs(&mut combined, lowered);
         }
 
         *self.stats.lock().unwrap() = stats;
@@ -175,6 +195,200 @@ impl CompilerPass for PentahoAnalyzerPass {
         );
         Ok(())
     }
+}
+
+// ── RFC 0170: FilterRows conditions as predicates ───────────────────────────
+
+/// Every `FilterRows` step's condition as normalized predicates, by graph node index. Read from the
+/// structured `<condition>` tree — field, function, typed value — never from the display text.
+/// A field resolves to the step's upstream `TableInput` table when there is exactly one; with
+/// several, the candidates go into `scope` for synthesis to settle by real columns.
+pub fn filter_predicates(
+    xml: &str,
+    graph: &TransformGraph,
+) -> BTreeMap<usize, Vec<crate::sql_predicates::PredicateSite>> {
+    let mut out = BTreeMap::new();
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return out;
+    };
+    let steps: Vec<roxmltree::Node> = doc
+        .root_element()
+        .children()
+        .filter(|n| n.has_tag_name("step"))
+        .collect();
+    for (index, step) in steps.iter().enumerate() {
+        if child_text(step, "type").as_deref() != Some("FilterRows") {
+            continue;
+        }
+        let Some(cond) = step
+            .children()
+            .find(|n| n.has_tag_name("compare"))
+            .and_then(|c| c.children().find(|n| n.has_tag_name("condition")))
+        else {
+            continue;
+        };
+        let sources = upstream_sources(graph, index);
+        let (relation, scope) = match sources.as_slice() {
+            [one] => (Some(one.clone()), Vec::new()),
+            many => (None, many.to_vec()),
+        };
+        let mut sites = Vec::new();
+        condition_sites(&doc, &cond, true, &relation, &scope, &mut sites);
+        if !sites.is_empty() {
+            out.insert(index, sites);
+        }
+    }
+    out
+}
+
+/// The `Source` tables upstream of node `index` (following hops backwards), lower-cased.
+fn upstream_sources(graph: &TransformGraph, index: usize) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut stack = vec![index as u32];
+    let mut out = std::collections::BTreeSet::new();
+    while let Some(n) = stack.pop() {
+        if !seen.insert(n) {
+            continue;
+        }
+        if let Some(TransformNode::Source { object_name, .. }) = graph.nodes.get(n as usize)
+            && !object_name.contains(char::is_whitespace)
+        {
+            out.insert(object_name.to_lowercase());
+        }
+        for (from, to) in &graph.edges {
+            if to.0 == n {
+                stack.push(from.0);
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// One `<condition>` (and its nested `<conditions>`) as predicate sites. `top` is whether it is
+/// still part of the top-level conjunction (only `AND`s and the first operand so far).
+fn condition_sites(
+    doc: &roxmltree::Document,
+    cond: &roxmltree::Node,
+    top: bool,
+    relation: &Option<String>,
+    scope: &[String],
+    out: &mut Vec<crate::sql_predicates::PredicateSite>,
+) {
+    use crate::sql_predicates::{Clause, PredicateSite};
+    let negated = child_text(cond, "negated").as_deref() == Some("Y");
+    if let Some(children) = cond.children().find(|n| n.has_tag_name("conditions")) {
+        let parts: Vec<roxmltree::Node> = children
+            .children()
+            .filter(|n| n.has_tag_name("condition"))
+            .collect();
+        // An OR anywhere in the group makes every part a branch, not a definition.
+        let all_and = parts.iter().skip(1).all(|p| {
+            matches!(
+                child_text(p, "operator")
+                    .as_deref()
+                    .map(str::to_ascii_uppercase)
+                    .as_deref(),
+                Some("AND") | Some("-") | None
+            )
+        });
+        for p in &parts {
+            condition_sites(doc, p, top && all_and && !negated, relation, scope, out);
+        }
+        return;
+    }
+    let Some(field) = child_text(cond, "leftvalue").filter(|f| !f.is_empty()) else {
+        return;
+    };
+    // A comparison against another field is plumbing, like column = column in SQL.
+    if child_text(cond, "rightvalue").is_some_and(|r| !r.is_empty()) {
+        return;
+    }
+    let function = child_text(cond, "function")
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let value = cond.children().find(|n| n.has_tag_name("value"));
+    let vtype = value
+        .and_then(|v| child_text(&v, "type"))
+        .unwrap_or_default();
+    let vtext = value
+        .and_then(|v| child_text(&v, "text"))
+        .unwrap_or_default();
+    let lit = |t: &str| -> String {
+        match vtype.as_str() {
+            "Integer" | "Number" | "BigNumber" => t.trim().to_string(),
+            "Boolean" => {
+                if matches!(t.trim(), "Y" | "true" | "1") {
+                    "true".into()
+                } else {
+                    "false".into()
+                }
+            }
+            _ => format!("'{}'", t.replace('\'', "''")),
+        }
+    };
+    let (op, values): (&str, Vec<String>) = match function.as_str() {
+        "=" => ("in", vec![lit(&vtext)]),
+        "<>" => ("not_in", vec![lit(&vtext)]),
+        "<" | "<=" | ">" | ">=" => (
+            match function.as_str() {
+                "<" => "<",
+                "<=" => "<=",
+                ">" => ">",
+                _ => ">=",
+            },
+            vec![lit(&vtext)],
+        ),
+        "IN LIST" => {
+            let mut v: Vec<String> = vtext
+                .split(';')
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .map(lit)
+                .collect();
+            v.sort();
+            v.dedup();
+            ("in", v)
+        }
+        "IS NULL" => ("is_null", vec![]),
+        "IS NOT NULL" => ("is_not_null", vec![]),
+        "LIKE" => ("like", vec![lit(&vtext)]),
+        "STARTS WITH" => ("like", vec![format!("'{}%'", vtext.replace('\'', "''"))]),
+        "ENDS WITH" => ("like", vec![format!("'%{}'", vtext.replace('\'', "''"))]),
+        "CONTAINS" => ("like", vec![format!("'%{}%'", vtext.replace('\'', "''"))]),
+        _ => return,
+    };
+    if values.iter().any(|v| v == "''") && op != "is_null" && op != "is_not_null" {
+        return;
+    }
+    let op = if negated {
+        match op {
+            "in" => "not_in",
+            "not_in" => "in",
+            "is_null" => "is_not_null",
+            "is_not_null" => "is_null",
+            "like" => "not_like",
+            "<" => ">=",
+            "<=" => ">",
+            ">" => "<=",
+            ">=" => "<",
+            other => other,
+        }
+    } else {
+        op
+    };
+    let line = doc.text_pos_at(cond.range().start).row as u64;
+    out.push(PredicateSite {
+        relation: relation.clone(),
+        scope: scope.to_vec(),
+        column: field.to_lowercase(),
+        op: op.into(),
+        values,
+        clause: Clause::Where,
+        top_level: top,
+        subquery: false,
+        label: None,
+        line,
+    });
 }
 
 // ── XML parsing ──────────────────────────────────────────────────────────────
@@ -694,6 +908,73 @@ FROM Sales.SalesPerson
             &graph.nodes[1],
             TransformNode::Filter { condition } if condition == "status = 'active'"
         ));
+    }
+
+    /// RFC 0170 Phase 3: a FilterRows condition becomes a normalized predicate on its upstream
+    /// table, with its XML line.
+    #[test]
+    fn filter_rows_conditions_become_predicates_on_the_upstream_table() {
+        let graph = sample_graph();
+        let preds = filter_predicates(KTR_ALL_MAPPED_TYPES, &graph);
+        let sites = &preds[&1];
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].canonical(), "dbo.cust_mstr.status IN ('active')");
+        assert!(sites[0].top_level);
+        assert!(sites[0].line > 0);
+    }
+
+    #[test]
+    fn nested_filter_conditions_keep_and_as_definition_and_or_as_branches() {
+        let xml = r#"<transformation>
+  <order><hop><from>R</from><to>F</to></hop></order>
+  <step><name>R</name><type>TableInput</type><sql>SELECT * FROM orders</sql></step>
+  <step><name>F</name><type>FilterRows</type><compare><condition>
+    <negated>N</negated>
+    <conditions>
+      <condition><negated>N</negated><leftvalue>status</leftvalue><function>IN LIST</function>
+        <value><type>Integer</type><text>3;1</text></value></condition>
+      <condition><negated>N</negated><operator>AND</operator><leftvalue>closed</leftvalue>
+        <function>IS NULL</function></condition>
+      <condition><negated>Y</negated><operator>AND</operator><leftvalue>kind</leftvalue>
+        <function>=</function><value><type>String</type><text>Q</text></value></condition>
+      <condition><negated>N</negated><operator>AND</operator><leftvalue>a</leftvalue>
+        <function>=</function><rightvalue>b</rightvalue></condition>
+    </conditions>
+  </condition></compare></step>
+</transformation>"#;
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let graph = parse_ktr(
+            &doc.root_element(),
+            xml,
+            TransformOrigin {
+                source_path: "f.ktr".into(),
+                source_kind: "pentaho-ktr".into(),
+                extracted_at: chrono::Utc::now(),
+            },
+        );
+        let c: Vec<(String, bool)> = filter_predicates(xml, &graph)[&1]
+            .iter()
+            .map(|s| (s.canonical(), s.top_level))
+            .collect();
+        assert_eq!(
+            c,
+            vec![
+                ("orders.status IN (1, 3)".into(), true),
+                ("orders.closed IS NULL".into(), true),
+                ("orders.kind NOT IN ('Q')".into(), true),
+            ]
+        );
+        let or = xml.replace(
+            "<operator>AND</operator><leftvalue>closed",
+            "<operator>OR</operator><leftvalue>closed",
+        );
+        let doc = roxmltree::Document::parse(&or).unwrap();
+        let graph = parse_ktr(&doc.root_element(), &or, graph.origin.clone());
+        assert!(
+            filter_predicates(&or, &graph)[&1]
+                .iter()
+                .all(|s| !s.top_level)
+        );
     }
 
     #[test]

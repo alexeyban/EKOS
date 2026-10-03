@@ -36,6 +36,7 @@ pub mod plpgsql_footprint;
 pub mod python_analyzer;
 pub mod requirements_analyzer;
 pub mod rust_analyzer;
+pub mod semantics_llm;
 mod source_evidence;
 pub mod sql_analyzer;
 pub mod sql_comments;

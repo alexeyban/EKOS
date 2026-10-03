@@ -32,6 +32,7 @@ const SHOWN = [
   "expert_description",
   "expert_label",
   "description",
+  "llm_definition",
   "origin",
   "sites",
   "usage_sites",

@@ -19,7 +19,7 @@
 //! `procedure_lineage`, because a predicate in one file names a table created in another.
 
 use crate::procedure_lineage::NameIndex;
-use ekos_kir::predicates::{Clause, PredicateSite, canonical_text};
+use ekos_kir::predicates::{Clause, NEW_ROW, OLD_ROW, PredicateSite, canonical_text};
 use ekos_kir::{
     KirEvidence, KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind,
     SourceLocation,
@@ -251,6 +251,15 @@ fn is_quantity_type(t: &str) -> bool {
     .any(|q| t.contains(q))
 }
 
+/// A table's recovered column entries, as stored (`columns` property).
+fn raw_columns(o: &KirObject) -> Vec<&Value> {
+    o.properties
+        .get("columns")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().collect())
+        .unwrap_or_default()
+}
+
 // ── Sites ───────────────────────────────────────────────────────────────────────────────────
 
 /// A predicate site resolved to a table, with where it was found.
@@ -295,10 +304,30 @@ fn collect_sites(
         let (id, _) = index.resolve(name).ok()?;
         by_id.get(&id.0).copied()
     };
+    // `NEW.`/`OLD.` in a routine's condition: the table of the trigger(s) running the routine,
+    // when they all fire on one table.
+    let mut trigger_tables: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for t in graph.objects.iter().filter(|o| is_custom(o, "Trigger")) {
+        let (Some(f), Some(table)) = (
+            t.properties.get("function").and_then(Value::as_str),
+            t.properties.get("table").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        trigger_tables
+            .entry(tail(f))
+            .or_default()
+            .insert(table.to_lowercase());
+    }
     let mut out = Vec::new();
     for o in &graph.objects {
         let carrier_is_view = is_custom(o, "View");
-        if !(carrier_is_view || is_custom(o, "ProcedureStatement") || is_custom(o, "Procedure")) {
+        // A Pentaho FilterRows step (RFC 0170 Phase 3) is a `TransformNode` with `predicates`.
+        if !(carrier_is_view
+            || is_custom(o, "ProcedureStatement")
+            || is_custom(o, "Procedure")
+            || is_custom(o, "TransformNode"))
+        {
             continue;
         }
         let Some(Value::Array(preds)) = o.properties.get("predicates") else {
@@ -310,6 +339,17 @@ fn collect_sites(
             };
             stats.sites += 1;
             let table = match &p.relation {
+                Some(r) if r == NEW_ROW || r == OLD_ROW => {
+                    let routine = o
+                        .properties
+                        .get("procedure")
+                        .and_then(Value::as_str)
+                        .unwrap_or(&o.name);
+                    match trigger_tables.get(&tail(routine)) {
+                        Some(ts) if ts.len() == 1 => resolve_table(ts.iter().next().unwrap()),
+                        _ => None,
+                    }
+                }
                 Some(r) => resolve_table(r),
                 None => {
                     // An unqualified column: the one in-scope table that declares it.
@@ -434,6 +474,31 @@ pub fn comment_legend(text: &str) -> BTreeMap<String, String> {
     }
     if out.len() < 2 {
         out.clear();
+        // "A asset, L liability, Q equity": every part a short upper-case code, a space, a word.
+        let parts: Vec<&str> = text
+            .trim()
+            .trim_end_matches('.')
+            .split([',', ';'])
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect();
+        let pairs: Vec<(String, String)> = parts
+            .iter()
+            .filter_map(|p| {
+                let (code, label) = p.split_once(char::is_whitespace)?;
+                let code_ok = !code.is_empty()
+                    && code.len() <= 4
+                    && code
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+                let label = label.trim();
+                let label_ok = label.len() <= 60 && label.chars().next()?.is_alphabetic();
+                (code_ok && label_ok).then(|| (code.to_string(), label.to_string()))
+            })
+            .collect();
+        if pairs.len() >= 2 && pairs.len() == parts.len() {
+            out.extend(pairs);
+        }
     }
     out
 }
@@ -598,7 +663,24 @@ pub fn synthesize(
             &b.p,
         ))
     });
-    let fks = foreign_keys(graph, &by_id);
+    let mut fks = foreign_keys(graph, &by_id);
+    // A dbt `relationships` test declares the same thing a foreign key does (RFC 0170 Phase 3).
+    for (ti, t) in tables.iter().enumerate() {
+        for c in raw_columns(t.obj) {
+            let (Some(col), Some(r)) = (c["name"].as_str(), c.get("references")) else {
+                continue;
+            };
+            let (Some(rt), Some(rc)) = (r["table"].as_str(), r["column"].as_str()) else {
+                continue;
+            };
+            if let Ok((id, _)) = index.resolve(rt)
+                && let Some(&lt) = by_id.get(&id.0)
+            {
+                fks.entry((ti, col.to_lowercase()))
+                    .or_insert((lt, rc.to_lowercase()));
+            }
+        }
+    }
 
     let mut b = Builder {
         out: SemanticsOutput::default(),
@@ -652,6 +734,21 @@ pub fn synthesize(
                         .extend(p.values.iter().filter(|v| v.as_str() != "null").cloned());
                 }
             }
+        }
+    }
+
+    // A dbt `accepted_values` test declares a domain the same way.
+    for (ti, t) in tables.iter().enumerate() {
+        for c in raw_columns(t.obj) {
+            let (Some(col), Some(Value::Array(vals))) =
+                (c["name"].as_str(), c.get("accepted_values"))
+            else {
+                continue;
+            };
+            check_domain
+                .entry((ti, col.to_lowercase()))
+                .or_default()
+                .extend(vals.iter().filter_map(|v| v.as_str().map(str::to_string)));
         }
     }
 
@@ -898,7 +995,12 @@ pub fn synthesize(
     }
 
     // ── BusinessConcept ─────────────────────────────────────────────────────────────────────
-    let filter_clause = |c: Clause| matches!(c, Clause::Where | Clause::Having | Clause::JoinOn);
+    let filter_clause = |c: Clause| {
+        matches!(
+            c,
+            Clause::Where | Clause::Having | Clause::JoinOn | Clause::Condition
+        )
+    };
     // definition text → (key, origin, sites, view object)
     struct Concept<'a> {
         origin: &'static str,
@@ -1156,6 +1258,104 @@ pub fn synthesize(
             b.relate(CONFLICTS_WITH, id, *cid);
         }
         stats.conflicts += 1;
+    }
+
+    // ── ConstraintCandidate per dbt test (RFC 0170 Phase 3) ────────────────────────────────
+    for t in &tables {
+        for c in raw_columns(t.obj) {
+            let Some(col) = c["name"].as_str().map(str::to_lowercase) else {
+                continue;
+            };
+            let tests: Vec<&str> = c["dbt_tests"]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            for test in tests {
+                let site = |op: &str, values: Vec<String>| {
+                    serde_json::to_value(PredicateSite {
+                        relation: Some(t.name()),
+                        scope: Vec::new(),
+                        column: col.clone(),
+                        op: op.into(),
+                        values,
+                        clause: Clause::Check,
+                        top_level: true,
+                        subquery: false,
+                        label: None,
+                        line: 0,
+                    })
+                    .unwrap_or_default()
+                };
+                let (constraint_type, expression, structured) = match test {
+                    "not_null" => (
+                        "not_null",
+                        format!("{col} IS NOT NULL"),
+                        vec![site("is_not_null", vec![])],
+                    ),
+                    "unique" => ("unique", format!("{col} is unique"), vec![]),
+                    "accepted_values" => {
+                        let vals: Vec<String> = c["accepted_values"]
+                            .as_array()
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|v| v.as_str().map(str::to_string))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        (
+                            "enum",
+                            canonical_text(&col, "in", &vals),
+                            vec![site("in", vals)],
+                        )
+                    }
+                    "relationships" => (
+                        "relationship",
+                        format!(
+                            "{col} references {}.{}",
+                            c["references"]["table"].as_str().unwrap_or("?"),
+                            c["references"]["column"].as_str().unwrap_or("?")
+                        ),
+                        vec![],
+                    ),
+                    _ => continue,
+                };
+                let key = format!("constraint-candidate:dbt:{}:{col}:{test}", t.obj.id);
+                let path = c["dbt_path"].as_str().unwrap_or_default().to_string();
+                let line = c["dbt_line"].as_u64().map(|l| l as u32);
+                let preds: Vec<String> = structured
+                    .iter()
+                    .filter_map(|v| serde_json::from_value::<PredicateSite>(v.clone()).ok())
+                    .map(|p| p.canonical())
+                    .collect();
+                let idx = b.object(
+                    &key,
+                    format!("{} dbt {test} ({col})", t.name()),
+                    CONSTRAINT,
+                    vec![
+                        ("table", json!(t.name())),
+                        ("constraint_name", json!(format!("dbt:{test}"))),
+                        ("expression", json!(expression)),
+                        ("constraint_type", json!(constraint_type)),
+                        ("source", json!("dbt_test")),
+                        ("columns", json!([col.clone()])),
+                        ("predicates", json!(preds)),
+                        ("structured", json!(structured)),
+                        ("confidence", json!(0.9)),
+                    ],
+                );
+                let ev = b.evidence(
+                    &key,
+                    0,
+                    &path,
+                    line,
+                    format!("dbt test `{test}` on {}.{col}", t.name()),
+                );
+                b.out.objects[idx].evidence.push(ev);
+                let id = b.out.objects[idx].id;
+                b.relate(DESCRIBES, id, t.obj.id);
+                stats.constraints += 1;
+            }
+        }
     }
 
     // ── ConstraintCandidate per CHECK ───────────────────────────────────────────────────────
@@ -1841,6 +2041,71 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_trigger_condition_on_new_resolves_to_the_trigger_table() {
+        let mut g = fixture();
+        let mut trig = KirObject::new("trg_ar", ObjectKind::Custom("Trigger".into()));
+        trig.properties
+            .insert("function".into(), json!("public.check_ar"));
+        trig.properties
+            .insert("table".into(), json!("entity_credit_account"));
+        g.add_object(trig);
+        for n in 1..=2 {
+            let mut c = carrier(
+                "ProcedureStatement",
+                &format!("check_ar#{n}"),
+                json!([site("$new", "entity_class", "in", &["2"], "condition", 5)]),
+            );
+            c.properties.insert("procedure".into(), json!("check_ar"));
+            g.add_object(c);
+        }
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        let e = of(&out, ENUM_MEANING)
+            .into_iter()
+            .find(|o| o.name == "entity_credit_account.entity_class = 2")
+            .unwrap();
+        // 2 WHERE/JOIN sites from the fixture + 2 trigger conditions.
+        assert_eq!(prop(e, "usage_sites"), &json!(4));
+    }
+
+    #[test]
+    fn dbt_tests_declare_domains_references_and_constraints() {
+        let mut g = fixture();
+        g.add_object(table(
+            "orders",
+            json!([
+                {"name": "status", "description": "1=open, 2=closed", "description_path": "m/schema.yml",
+                 "description_line": 7, "accepted_values": ["1", "2"], "dbt_tests": ["accepted_values", "not_null"],
+                 "not_null": true, "dbt_path": "m/schema.yml", "dbt_line": 7},
+                {"name": "kind_id", "references": {"table": "entity_class", "column": "id"},
+                 "dbt_tests": ["relationships"], "dbt_path": "m/schema.yml", "dbt_line": 12}
+            ]),
+            vec![],
+        ));
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        let label = |n: &str| {
+            of(&out, ENUM_MEANING)
+                .into_iter()
+                .find(|o| o.name == n)
+                .map(|o| prop(o, "label").clone())
+        };
+        assert_eq!(label("orders.status = 1"), Some(json!("open")));
+        assert_eq!(
+            label("orders.kind_id = 2"),
+            Some(json!("Customer")),
+            "relationships → seeded lookup"
+        );
+        let types: BTreeSet<String> = of(&out, CONSTRAINT)
+            .iter()
+            .filter(|c| prop(c, "source") == &json!("dbt_test"))
+            .map(|c| prop(c, "constraint_type").as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            types,
+            BTreeSet::from(["enum".into(), "not_null".into(), "relationship".into()])
+        );
+    }
+
     /// The stored kind must survive a serde round trip, or a ledger read loses every concept.
     #[test]
     fn every_kind_round_trips_through_serde() {
@@ -1912,6 +2177,22 @@ mod tests {
     #[test]
     fn a_legend_needs_two_pairs() {
         assert_eq!(comment_legend("Note: this is free text").len(), 0);
+        assert_eq!(
+            comment_legend("A asset, L liability, Q equity, I income, E expense."),
+            BTreeMap::from([
+                ("A".into(), "asset".into()),
+                ("E".into(), "expense".into()),
+                ("I".into(), "income".into()),
+                ("L".into(), "liability".into()),
+                ("Q".into(), "equity".into()),
+            ])
+        );
+        // Prose with a short capitalised word is not a legend.
+        assert_eq!(
+            comment_legend("The account number from the chart (e.g. 1200 Accounts).").len(),
+            0
+        );
+        assert_eq!(comment_legend("AR and AP, plus other ledgers").len(), 0);
         assert_eq!(
             comment_legend(" A=asset,L=liability,Q=Equity,I=Income,E=expense "),
             BTreeMap::from([

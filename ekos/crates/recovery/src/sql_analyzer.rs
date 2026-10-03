@@ -137,11 +137,11 @@ impl CompilerPass for SqlAnalyzerPass {
         &self.pass_id
     }
 
-    /// `v2` = RFC 0170: `Table` objects gained `check_constraints`, `seed_rows` and column
+    /// `v3` = RFC 0170 Phase 3: a seed row cites its own line. `v2` = RFC 0170: `Table` objects gained `check_constraints`, `seed_rows` and column
     /// `not_null`/`primary_key`/`unique`/`description_line`. `cache_inputs` hashes only the SQL, so
     /// without this a workspace recovered before 0170 keeps serving tables without them.
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -367,7 +367,7 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect)
 
     // RFC 0170: literal rows inserted into a table this file creates — a lookup table's seed
     // (`INSERT INTO entity_class (id, class) VALUES (1, 'Vendor')`) is where a code's meaning is.
-    let seeds = seed_rows(&stmts, &graph, source_path);
+    let seeds = seed_rows(&stmts, &graph, source_path, sql);
     for obj in &mut graph.objects {
         if let Some(rows) = seeds.get(&obj.name.to_lowercase()) {
             obj.properties
@@ -547,7 +547,9 @@ fn seed_rows(
     stmts: &[Statement],
     graph: &KirGraph,
     source_path: &str,
+    sql: &str,
 ) -> HashMap<String, Vec<serde_json::Value>> {
+    let sql_lines: Vec<&str> = sql.lines().collect();
     use sqlparser::ast::SetExpr;
     let declared: HashMap<String, Vec<String>> = graph
         .objects
@@ -591,6 +593,10 @@ fn seed_rows(
             .map(|i| i.span.start.line)
             .unwrap_or_default();
         let rows = out.entry(table).or_default();
+        // sqlparser 0.53 gives a literal no span, so each row's own line is found in the text: the
+        // first line at or after the previous row's that holds the row's first string literal
+        // (else its first literal). A row that cannot be found cites the `INSERT` line.
+        let mut cursor = line.max(1) as usize - 1;
         for row in &values.rows {
             if rows.len() >= MAX_SEED_ROWS {
                 break;
@@ -603,12 +609,31 @@ fn seed_rows(
             let Some(lits) = lits else {
                 continue;
             };
+            let needle = lits
+                .iter()
+                .find(|l| l.starts_with('\''))
+                .or(lits.first())
+                .cloned()
+                .unwrap_or_default();
+            let row_line = sql_lines
+                .iter()
+                .enumerate()
+                .skip(cursor)
+                .find(|(_, text)| !needle.is_empty() && text.contains(needle.as_str()))
+                .map(|(i, _)| i);
+            let row_line = match row_line {
+                Some(i) => {
+                    cursor = i;
+                    i as u64 + 1
+                }
+                None => line,
+            };
             let map: serde_json::Map<String, serde_json::Value> = cols
                 .iter()
                 .zip(lits)
                 .map(|(c, v)| (c.clone(), serde_json::Value::String(v)))
                 .collect();
-            rows.push(serde_json::json!({"path": source_path, "line": line, "values": map}));
+            rows.push(serde_json::json!({"path": source_path, "line": row_line, "values": map}));
         }
     }
     out.retain(|_, v| !v.is_empty());
@@ -867,6 +892,34 @@ fn apply_llm_enrichment(graph: &mut KirGraph, llm_text: &str) -> anyhow::Result<
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod seed_line_tests {
+    use super::*;
+    use sqlparser::dialect::PostgreSqlDialect;
+
+    /// RFC 0170: every seeded row cites its own line, so a code's meaning points at the row.
+    #[test]
+    fn each_seed_row_cites_its_own_line() {
+        let sql = "CREATE TABLE entity_class (id int primary key, class text);\n\
+INSERT INTO entity_class (id, class)\n\
+VALUES (1, 'Vendor'),\n\
+       (2, 'Customer'),\n\
+       (3, 'Employee');\n\
+INSERT INTO entity_class VALUES (4, 'Contact');\n";
+        let g = parse_ddl_structural(sql, "s.sql", &PostgreSqlDialect {});
+        let t = g.objects.iter().find(|o| o.name == "entity_class").unwrap();
+        let lines: Vec<u64> = t.properties["seed_rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["line"].as_u64().unwrap())
+            .collect();
+        assert_eq!(lines, vec![3, 4, 5, 6]);
+        let cols = &t.properties["columns"];
+        assert_eq!(cols[0]["primary_key"], serde_json::json!(true));
+    }
+}
 
 #[cfg(test)]
 mod tests {

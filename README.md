@@ -439,7 +439,9 @@ Business meaning that nobody wrote down survives as traces: `WHERE NOT p.obsolet
 'A=asset,L=liability,…'`, the commit that last changed the line. Recovery records every
 column-vs-literal predicate in views, routines and `CHECK` constraints — normalized, so
 `status IN (1,3)` and `status = 1 OR 3 = status` are one predicate — plus `CHECK` constraints,
-`NOT NULL`/key columns and lookup-table seed rows. With `[semantics] enabled = true`, `ekos commit`
+`NOT NULL`/key columns and lookup-table seed rows — plus PL/pgSQL `IF NEW.col …` conditions
+(resolved to the trigger's table), Pentaho `FilterRows` conditions, standalone analyst `SELECT`s,
+and dbt `schema.yml` (descriptions, `not_null`/`unique`/`accepted_values`/`relationships` tests). With `[semantics] enabled = true`, `ekos commit`
 synthesizes **hypotheses** from them, deterministically and without an LLM:
 
 | Kind | What |
@@ -448,6 +450,7 @@ synthesizes **hypotheses** from them, deterministically and without an LLM:
 | `EnumMeaning` | A coded value and its meaning, from a column comment legend, a lookup seed row via its foreign key, or a `CASE` label |
 | `ConstraintCandidate` | A `CHECK` constraint, typed `range`/`enum`/`pattern`/`not_null`/`other` |
 | `SemanticGap` | A coded value used in logic that no source explains; a concept nobody documented |
+| (opt-in) AI summary | `[semantics] llm-definitions = true`: ≤2 sentences per undocumented concept, every sentence citing the concept's evidence (or the known code meanings) — uncited or hedging sentences are dropped; a reading aid, never the definition |
 | `RationaleLink` | `git blame -w` on the evidence lines → the commit that last changed them |
 
 Every item starts as `status: hypothesis` with its evidence (`path:line`). Only a human promotes

@@ -31,10 +31,11 @@ fn manifest_path(config: &EkosConfig, cwd: &Path) -> PathBuf {
 }
 
 /// RFC 0170: synthesize and append business-semantics hypotheses. `None` when `[semantics]` is off.
-pub fn commit_step(
+pub async fn commit_step(
     config: &EkosConfig,
     cwd: &Path,
     ledger: &dyn KnowledgeStore,
+    yes: bool,
 ) -> Result<Option<(SemanticsStats, usize)>> {
     if !config.semantics.enabled {
         return Ok(None);
@@ -66,6 +67,11 @@ pub fn commit_step(
         .collect();
     for o in &mut out.objects {
         semantics_review::carry_forward(o, current.get(&o.id).copied());
+    }
+    // Opt-in, cited plain-language text for undocumented concepts (after carry-forward, so an
+    // expert's description already present wins and nothing is asked for it).
+    if config.semantics.llm_definitions {
+        describe_with_llm(config, cwd, &mut out, yes).await?;
     }
     // A reviewed item the sources no longer support is not silently dropped: it is flagged.
     let fresh: std::collections::HashSet<KirId> = out.objects.iter().map(|o| o.id).collect();
@@ -108,6 +114,118 @@ pub fn commit_step(
     )
     .with_context(|| format!("writing {}", path.display()))?;
     Ok(Some((out.stats, written)))
+}
+
+/// RFC 0170 Phase 3: `llm_definition` on undocumented concepts, cite-or-drop
+/// (`ekos_recovery::semantics_llm`). Asks before a metered provider runs, like `[llm-description]`.
+async fn describe_with_llm(
+    config: &EkosConfig,
+    cwd: &Path,
+    out: &mut business_semantics::SemanticsOutput,
+    yes: bool,
+) -> Result<()> {
+    let undocumented = out
+        .objects
+        .iter()
+        .filter(|o| kind_of(o) == Some(CONCEPT))
+        .filter(|o| s(o, "expert_description").is_empty() && s(o, "description").is_empty())
+        .count();
+    if undocumented == 0 {
+        return Ok(());
+    }
+    let n = undocumented.min(config.semantics.llm_max_definitions);
+    let local = config.llm.provider.as_deref() == Some("ollama");
+    if !local {
+        println!(
+            "[semantics] llm-definitions: up to {n} LLM call(s) to {} for concept text (cached answers are free).",
+            config.llm.provider.as_deref().unwrap_or("anthropic")
+        );
+        if !super::commit::confirm_description_spend(yes)? {
+            println!("  skipped.");
+            return Ok(());
+        }
+    }
+    let provider = super::commit::select_llm_provider_for_description(
+        config,
+        &config.ekos_dir(cwd).join("artifacts"),
+    )?;
+    let evidence: HashMap<KirId, ekos_kir::KirEvidence> =
+        out.evidence.iter().map(|e| (e.id, e.clone())).collect();
+    let mut concepts: Vec<KirObject> = Vec::new();
+    let mut slots = Vec::new();
+    for (i, o) in out.objects.iter().enumerate() {
+        if kind_of(o) == Some(CONCEPT) {
+            slots.push(i);
+            concepts.push(o.clone());
+        }
+    }
+    // What EKOS already knows the concept's codes mean is evidence too: the model must not have to
+    // guess that `category = 'Q'` is equity when a column comment says so.
+    let meanings: Vec<(String, String, String, ekos_kir::KirEvidence)> = out
+        .objects
+        .iter()
+        .filter(|o| kind_of(o) == Some(ENUM_MEANING))
+        .filter_map(|o| {
+            let label = match s(o, "expert_label") {
+                l if l.is_empty() => s(o, "label"),
+                l => l,
+            };
+            if label.is_empty() {
+                return None;
+            }
+            let (table, column, value) = (s(o, "table"), s(o, "column"), s(o, "value"));
+            let source = p(o, "meanings")
+                .as_array()
+                .and_then(|a| a.first())
+                .cloned()
+                .unwrap_or_default();
+            let ev = ekos_kir::KirEvidence::new(
+                ekos_kir::SourceLocation {
+                    path: source["path"].as_str().unwrap_or_default().to_string(),
+                    line: source["line"].as_u64().map(|l| l as u32),
+                    column: None,
+                },
+                format!(
+                    "{table}.{column} = {value} means \"{label}\" ({})",
+                    source["source"].as_str().unwrap_or("recovered")
+                ),
+            );
+            Some((table, column, value, ev))
+        })
+        .collect();
+    let stats = ekos_recovery::semantics_llm::describe_concepts(
+        provider.as_ref(),
+        &mut concepts,
+        |c| {
+            let mut evs: Vec<ekos_kir::KirEvidence> = c
+                .evidence
+                .iter()
+                .filter_map(|id| evidence.get(id).cloned())
+                .take(8)
+                .collect();
+            let def = s(c, "definition");
+            evs.extend(
+                meanings
+                    .iter()
+                    .filter(|(t, col, v, _)| {
+                        def.contains(&format!("{t}.{col} ")) && def.contains(v.as_str())
+                    })
+                    .map(|(_, _, _, e)| e.clone())
+                    .take(6),
+            );
+            evs
+        },
+        config.semantics.llm_max_definitions,
+    )
+    .await;
+    for (slot, c) in slots.into_iter().zip(concepts) {
+        out.objects[slot] = c;
+    }
+    println!(
+        "  concept text: {} described, {} uncited sentence(s) dropped, {} error(s)",
+        stats.described, stats.sentences_dropped, stats.errors
+    );
+    Ok(())
 }
 
 fn stats_json(s: &SemanticsStats) -> Value {
@@ -760,6 +878,7 @@ fn agent_view(ledger: &dyn KnowledgeStore, o: &KirObject) -> Value {
         ("value", &["value"]),
         ("meaning", &["expert_label", "label"]),
         ("expression", &["expression"]),
+        ("ai_summary", &["llm_definition"]),
         ("question", &["question"]),
         ("confidence", &["confidence"]),
         ("reviewed_by", &["reviewed_by"]),
@@ -1373,8 +1492,8 @@ mod tests {
 
     /// The commit step end to end over a real fact ledger: a review survives an unchanged re-run
     /// (which writes nothing), and a changed source flips it to `needs_review`.
-    #[test]
-    fn a_review_holds_until_the_evidence_changes() {
+    #[tokio::test]
+    async fn a_review_holds_until_the_evidence_changes() {
         let dir = tempfile::tempdir().unwrap();
         let mut config = EkosConfig::default();
         config.semantics.enabled = true;
@@ -1408,7 +1527,10 @@ mod tests {
         ledger.append_object(&carrier("a#1", "is_false")).unwrap();
         ledger.append_object(&carrier("b#1", "is_false")).unwrap();
 
-        let (_, first) = commit_step(&config, dir.path(), &ledger).unwrap().unwrap();
+        let (_, first) = commit_step(&config, dir.path(), &ledger, true)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(first > 0);
         let items: Vec<KirObject> = ledger
             .all_objects()
@@ -1422,7 +1544,10 @@ mod tests {
                 .unwrap();
         ledger.append_object(&reviewed).unwrap();
 
-        let (_, again) = commit_step(&config, dir.path(), &ledger).unwrap().unwrap();
+        let (_, again) = commit_step(&config, dir.path(), &ledger, true)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(again, 0, "an unchanged re-run writes nothing");
         assert_eq!(
             ledger.get_object(&reviewed.id).unwrap().unwrap().properties["status"],
@@ -1434,7 +1559,9 @@ mod tests {
             .append_object(&carrier("b#1", "is_not_true"))
             .unwrap();
         ledger.append_object(&carrier("c#1", "is_false")).unwrap();
-        commit_step(&config, dir.path(), &ledger).unwrap();
+        commit_step(&config, dir.path(), &ledger, true)
+            .await
+            .unwrap();
         let after = ledger.get_object(&reviewed.id).unwrap().unwrap();
         assert_eq!(after.properties["status"], json!("needs_review"));
         assert_eq!(
@@ -1445,8 +1572,8 @@ mod tests {
 
     /// RFC 0170 Phase 4: agents get status in words, confirmed first, and an explicit "nothing
     /// found" instead of an empty list to improvise from.
-    #[test]
-    fn agent_lookup_states_the_status_and_never_returns_rejected_by_default() {
+    #[tokio::test]
+    async fn agent_lookup_states_the_status_and_never_returns_rejected_by_default() {
         let dir = tempfile::tempdir().unwrap();
         let mut config = EkosConfig::default();
         config.semantics.enabled = true;
@@ -1482,7 +1609,9 @@ mod tests {
             );
             ledger.append_object(&o).unwrap();
         }
-        commit_step(&config, dir.path(), &ledger).unwrap();
+        commit_step(&config, dir.path(), &ledger, true)
+            .await
+            .unwrap();
         let items = items_in(&config, dir.path(), &ledger).unwrap();
         let find = |n: &str| items.iter().find(|o| o.name == n).unwrap().clone();
         let confirmed = semantics_review::apply_review(

@@ -151,7 +151,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     let semantics_stats = if config.semantics.enabled {
         ledger.set_write_context(Some(write_ctx("commit:semantics")));
         let step = phase_note("recovering business semantics");
-        let stats = crate::commands::semantics::commit_step(config, cwd, &*ledger)?;
+        let stats = crate::commands::semantics::commit_step(config, cwd, &*ledger, yes).await?;
         step.done();
         stats
     } else {

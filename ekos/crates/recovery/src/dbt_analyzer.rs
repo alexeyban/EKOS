@@ -127,10 +127,135 @@ struct YamlSourceTable {
     name: String,
     source_name: String,
     description: Option<String>,
+    columns: Vec<serde_json::Value>,
+}
+
+/// RFC 0170 Phase 3 — one documented column: its description, declared type and dbt tests
+/// (`tests:` or dbt ≥ 1.8's `data_tests:`) as the same column facts the SQL analyzer records
+/// (`not_null`, `unique`), plus `accepted_values` (a declared domain, as normalized literals) and
+/// `references` (a `relationships` test: the column's lookup table). `path`/`line` locate the
+/// column in its YAML file, for evidence.
+fn column_json(
+    c: &serde_yaml::Value,
+    path: &str,
+    text: &str,
+    owner: &str,
+) -> Option<serde_json::Value> {
+    let name = c.get("name").and_then(|n| n.as_str())?;
+    let mut col = serde_json::json!({ "name": name });
+    if let Some(d) = c.get("description").and_then(|d| d.as_str()) {
+        col["description"] = serde_json::json!(d);
+        col["description_path"] = serde_json::json!(path);
+    }
+    if let Some(t) = c.get("data_type").and_then(|d| d.as_str()) {
+        col["data_type"] = serde_json::json!(t);
+    }
+    // The first `- name: <col>` after the owner's own `name:` line.
+    let owner_at = text
+        .lines()
+        .position(|l| l.trim_start().trim_start_matches("- ").trim() == format!("name: {owner}"))
+        .unwrap_or(0);
+    if let Some(i) = text
+        .lines()
+        .enumerate()
+        .skip(owner_at)
+        .find(|(_, l)| l.trim_start().trim_start_matches("- ").trim() == format!("name: {name}"))
+        .map(|(i, _)| i)
+    {
+        col["description_line"] = serde_json::json!(i + 1);
+        col["dbt_line"] = serde_json::json!(i + 1);
+    }
+    col["dbt_path"] = serde_json::json!(path);
+    let tests = c
+        .get("data_tests")
+        .or_else(|| c.get("tests"))
+        .and_then(|t| t.as_sequence())
+        .cloned()
+        .unwrap_or_default();
+    let mut names = Vec::new();
+    for t in &tests {
+        match t {
+            serde_yaml::Value::String(s) if s == "not_null" => {
+                col["not_null"] = serde_json::json!(true);
+                names.push("not_null".to_string());
+            }
+            serde_yaml::Value::String(s) if s == "unique" => {
+                col["unique"] = serde_json::json!(true);
+                names.push("unique".to_string());
+            }
+            serde_yaml::Value::Mapping(m) => {
+                for (k, v) in m {
+                    let k = k.as_str().unwrap_or_default();
+                    // Arguments sit under `arguments:` in dbt ≥ 1.10, directly under the test before.
+                    let args = v.get("arguments").unwrap_or(v);
+                    match k {
+                        "not_null" | "unique" => {
+                            col[k] = serde_json::json!(true);
+                            names.push(k.to_string());
+                        }
+                        "accepted_values" => {
+                            let quote = args.get("quote").and_then(|q| q.as_bool()).unwrap_or(true);
+                            let mut vals: Vec<String> = args
+                                .get("values")
+                                .and_then(|v| v.as_sequence())
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|v| match v {
+                                    serde_yaml::Value::String(s) if quote => {
+                                        Some(format!("'{}'", s.replace('\'', "''")))
+                                    }
+                                    serde_yaml::Value::String(s) => Some(s.clone()),
+                                    serde_yaml::Value::Number(n) => Some(n.to_string()),
+                                    serde_yaml::Value::Bool(b) => Some(b.to_string()),
+                                    _ => None,
+                                })
+                                .collect();
+                            vals.sort();
+                            vals.dedup();
+                            if !vals.is_empty() {
+                                col["accepted_values"] = serde_json::json!(vals);
+                                names.push("accepted_values".to_string());
+                            }
+                        }
+                        "relationships" => {
+                            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or_default();
+                            let field = args
+                                .get("field")
+                                .and_then(|f| f.as_str())
+                                .unwrap_or_default();
+                            if let Some(table) = macro_target(to)
+                                && !field.is_empty()
+                            {
+                                col["references"] = serde_json::json!({"table": table, "column": field.to_lowercase()});
+                                names.push("relationships".to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if !names.is_empty() {
+        col["dbt_tests"] = serde_json::json!(names);
+    }
+    Some(col)
+}
+
+/// The table a `ref('x')` / `source('s', 'x')` names.
+fn macro_target(s: &str) -> Option<String> {
+    let inner = s.trim().strip_suffix(')')?;
+    let (_, args) = inner.split_once('(')?;
+    let last = args.split(',').next_back()?;
+    let name = last.trim().trim_matches(['\'', '"']);
+    (!name.is_empty()).then(|| name.to_lowercase())
 }
 
 fn parse_yaml_doc(
     doc: &serde_yaml::Value,
+    path: &str,
+    text: &str,
 ) -> (HashMap<String, YamlModelDoc>, Vec<YamlSourceTable>) {
     let mut models = HashMap::new();
     if let Some(seq) = doc.get("models").and_then(|v| v.as_sequence()) {
@@ -143,8 +268,7 @@ fn parse_yaml_doc(
                 .and_then(|v| v.as_sequence())
                 .map(|cols| {
                     cols.iter()
-                        .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
-                        .map(|n| serde_json::json!({ "name": n }))
+                        .filter_map(|c| column_json(c, path, text, name))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -179,10 +303,20 @@ fn parse_yaml_doc(
                     .get("description")
                     .and_then(|v| v.as_str())
                     .map(str::to_string);
+                let columns = table
+                    .get("columns")
+                    .and_then(|v| v.as_sequence())
+                    .map(|cols| {
+                        cols.iter()
+                            .filter_map(|c| column_json(c, path, text, name))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 sources.push(YamlSourceTable {
                     name: name.to_string(),
                     source_name: source_name.to_string(),
                     description,
+                    columns,
                 });
             }
         }
@@ -228,6 +362,11 @@ impl CompilerPass for DbtAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v2` = RFC 0170 Phase 3: documented columns carry description, type and dbt tests.
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
@@ -256,7 +395,7 @@ impl CompilerPass for DbtAnalyzerPass {
                     continue;
                 }
             };
-            let (docs, sources) = parse_yaml_doc(&doc);
+            let (docs, sources) = parse_yaml_doc(&doc, rel_path, content);
             for (name, doc) in docs {
                 model_docs.insert(name, doc);
             }
@@ -328,6 +467,9 @@ impl CompilerPass for DbtAnalyzerPass {
             obj.id = id;
             if let Some(desc) = &source.description {
                 obj = obj.with_property("description", serde_json::json!(desc));
+            }
+            if !source.columns.is_empty() {
+                obj = obj.with_property("columns", serde_json::json!(source.columns));
             }
             graph.add_object(obj);
         }
@@ -460,6 +602,31 @@ again AS (
 )
 SELECT * FROM customer
 "#;
+
+    /// RFC 0170 Phase 3: dbt tests are column facts — a declared domain, keys, references.
+    #[test]
+    fn dbt_column_tests_become_column_facts() {
+        let text = "models:\n  - name: orders\n    columns:\n      - name: id\n        tests: [unique, not_null]\n      - name: status\n        description: \"1=open, 2=closed\"\n        data_tests:\n          - accepted_values:\n              values: ['open', 'closed']\n      - name: customer_id\n        tests:\n          - relationships:\n              to: ref('customers')\n              field: id\n      - name: kind\n        tests:\n          - accepted_values:\n              arguments:\n                values: [1, 3]\n                quote: false\n";
+        let doc: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
+        let (models, _) = parse_yaml_doc(&doc, "models/schema.yml", text);
+        let cols = &models["orders"].columns;
+        assert_eq!(cols[0]["unique"], serde_json::json!(true));
+        assert_eq!(cols[0]["not_null"], serde_json::json!(true));
+        assert_eq!(
+            cols[1]["accepted_values"],
+            serde_json::json!(["'closed'", "'open'"])
+        );
+        assert_eq!(cols[1]["description_line"], serde_json::json!(6));
+        assert_eq!(
+            cols[2]["references"],
+            serde_json::json!({"table": "customers", "column": "id"})
+        );
+        assert_eq!(cols[3]["accepted_values"], serde_json::json!(["1", "3"]));
+        assert_eq!(
+            macro_target("source('raw', 'Payments')"),
+            Some("payments".into())
+        );
+    }
 
     #[tokio::test]
     async fn model_without_any_yaml_doc_still_becomes_a_table() {

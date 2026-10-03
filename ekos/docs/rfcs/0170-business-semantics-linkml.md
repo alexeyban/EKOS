@@ -1,6 +1,6 @@
 # RFC 0170 — Business semantics from technical traces, exported as LinkML
 
-**Status:** Accepted — Phase 1 (devlog_234) and Phase 2 (devlog_235) implemented; Phase 4's `ekos import linkml` and the console review UI implemented (devlog_236), 2026-10-03; Phase 3 and Phase 4's MCP tools/ontology suggestions proposed
+**Status:** Accepted — Phases 1–3 implemented (devlog_234, 235, 238); Phase 4 implemented except ontology mapping suggestions (devlog_236, 237); 2026-10-03
 **Date:** 2026-10-03
 **Related:** RFC 0135 (provenance + determinism — this RFC's Phase 0), RFC 0146 Phase 2 (`COMMENT ON`
 descriptions), RFC 0163 (PL/pgSQL IR, `plpgsql_footprint`), RFC 0169 (views), RFC 0029/0063
@@ -257,11 +257,29 @@ The console gained **bulk review** (`ekos semantics confirm|reject` take many ta
 and checked first, written all or nothing; `POST …/semantics/review-bulk`) and a **side-by-side
 diff** of the edited YAML against the current export (Myers' line diff, context-collapsed).
 
-## Phases 3–4 (proposed, not implemented here)
+## Phase 3 — wider sources (implemented, devlog_238)
 
-- **Phase 3 — wider sources.** Pentaho filters via the Transformation IR, dbt tests, Confluence
-  glossary, application constants (Perl), constrained LLM definition text where every sentence must
-  cite evidence and uncited sentences are dropped.
+| Source | What it adds | Where |
+|---|---|---|
+| PL/pgSQL conditions | `IF`/`ELSIF`/`WHILE`/`EXIT WHEN` predicates on `NEW.`/`OLD.` (clause `condition`, placeholder relations `$new`/`$old`), resolved at synthesis to the table of the trigger(s) running the routine when they all fire on one table; unqualified names in a condition are variables and are ignored | `sql_predicates::condition_predicates`, `plpgsql_analyzer`, `business_semantics::collect_sites` |
+| Pentaho `FilterRows` | Predicates read from the structured `<condition>` tree (field, function, typed value; nested `AND` stays top-level, `OR` makes branches; `IN LIST`, `STARTS WITH`… normalized; field-vs-field skipped), on the step's upstream `TableInput` table, with the XML line | `pentaho_analyzer::filter_predicates` |
+| Standalone `SELECT`s | Analyst/report queries carry predicates on their Transformation-IR `Filter` node. Views and routines do not (their own analyzers already carry them — no double counting) | `sql_transform_analyzer::top_level_query_predicates` |
+| dbt `schema.yml` | Column descriptions (→ legends), `not_null`/`unique` (→ column facts, row keys), `accepted_values` (→ a declared domain), `relationships` (→ a foreign key into lookup meanings); each test becomes a `ConstraintCandidate` with `source: dbt_test`. `tests:` and `data_tests:`, arguments inline or under `arguments:` | `dbt_analyzer::column_json` |
+| Seed rows | Each `VALUES` row cites its own line, found in the text (sqlparser 0.53 gives literals no span) | `sql_analyzer::seed_rows` |
+| Legends | Also `A asset, L liability, Q equity` — only when every part is a short upper-case code and a word | `business_semantics::comment_legend` |
+| LLM text (opt-in) | `[semantics] llm-definitions = true`: ≤2 sentences per undocumented concept from the `[llm]` provider. The model sees only the concept's evidence plus the known meanings of its codes, numbered; a sentence citing nothing valid, or hedging ("likely", "probably", …), is dropped. Stored as `llm_definition` + per-sentence `llm_citations` — never the definition, never status/confidence/signature; exported as `ekos_ai_summary`. A cloud provider asks before spending (like `[llm-description]`); a cached provider re-asks nothing | `recovery::semantics_llm`, `semantics::describe_with_llm` |
+
+Measured: LedgerSMB 522 → 534 predicate sites (373 resolved), 40 concepts, re-commit writes 0. The
+analytics demo's dbt project (no SQL bodies EKOS parses): 91 dbt constraint candidates, 27 coded
+values in 7 columns with all five `account_category` codes explained by the dbt description. LLM
+text with local `llama3` on 8 LedgerSMB concepts: 8 described; the first version called `Q`
+accounts "likely Quality accounts", which is why code meanings became evidence and hedged sentences
+are dropped — the second run says "equity accounts".
+
+## Phases 4 remainder (proposed)
+
+- **Phase 3 — not covered.** Confluence glossaries and application constants (Perl/Python) are not
+  read; neither are predicates inside dbt model SQL (Jinja is not parsed).
 - **Phase 4 — remainder.** Optional ontology mapping suggestions (hypotheses only).
 
 ## Results — LedgerSMB, Phase 1 (2026-10-03)
