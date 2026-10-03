@@ -6262,3 +6262,45 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [ ] P1 profile could be read from the recorded profile facts instead of re-sampled inside
       `review`/`load` — determinism by construction rather than by seed.
 - [ ] CLI `--as` is an unauthenticated claim; document that four-eyes needs the console's OIDC path.
+
+## Business semantics → LinkML (RFC 0170) — experimental, opt-in `[semantics]`
+
+Source plan: "EKOS × LinkML: Recovering the Semantic Layer from Technical Traces". EKOS feeds
+LinkML; generation stays in LinkML.
+
+### Phase 0 — prerequisites · **done (RFC 0135 Parts B/C)**
+- [x] Provenance per object (`source_artifact_ids`, `ekos ledger audit`) and deterministic ids
+
+### Phase 1 — MVP on LedgerSMB · **done (devlog_234)**
+- [x] Predicate extractor (`recovery/src/sql_predicates.rs`): column-vs-literal predicates in
+      WHERE/HAVING/JOIN ON/CASE/CHECK, normalized (`IN`/`OR`/flipped/`NOT`), alias-resolved, lines;
+      routine parameters/variables filtered
+- [x] Enum usage + meaning sources: column-comment legends, lookup seed rows via FK (and a lookup
+      table's own key), CASE labels; CHECK `IN` domains
+- [x] Constraint extractor: CHECK (column + table level), NOT NULL / PK / UNIQUE on columns
+- [x] Concept synthesis (`semantic/src/business_semantics.rs`): view-defined + recurring filters,
+      key columns excluded, names from code labels where known
+- [x] Gap report (`ekos semantics gaps`), rationale linker (`git blame -w`, behind a trait)
+- [x] `ekos semantics list|show|gaps|eval`, `ekos export linkml` (validates: 0 `linkml-lint` errors)
+- [x] First eval run on a *starter* gold set (concept recall 0.73, label accuracy 0.95)
+- [ ] **Expert-written gold set** (20–30 accounting concepts, written before looking at output) and
+      published numbers, misses included — the starter set is not one
+
+### Phase 2 — review loop
+- [ ] `ekos semantics confirm|reject|edit` — human-only, never reachable from MCP (source-scan test)
+- [ ] Status lifecycle; `needs_review` when an evidence fact changes (today: items whose traces
+      vanished simply drop out of `.ekos/semantics/current.json`)
+- [ ] `ConceptConflict` (same name / same target, incompatible predicates)
+- [ ] Console review cards (RFC 0127)
+
+### Phase 3 — wider sources
+- [ ] Pentaho filters via the Transformation IR; dbt tests; Confluence glossary
+- [ ] Application constants (Perl in LedgerSMB, Python)
+- [ ] PL/pgSQL `IF` conditions on `NEW.col` (trigger table known at compile)
+- [ ] Constrained LLM definition text: every sentence cites evidence, uncited sentences dropped
+- [ ] Exact seed-row lines (today a multi-row `VALUES` cites its `INSERT` line)
+
+### Phase 4 — round-trip and agents
+- [ ] `ekos import linkml` (expert YAML edits → review decisions)
+- [ ] MCP `semantics_lookup` / `semantics_gaps`, status on every answer
+- [ ] Ontology mapping suggestions (hypotheses only)

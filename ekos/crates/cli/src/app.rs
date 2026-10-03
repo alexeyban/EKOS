@@ -149,6 +149,16 @@ enum Commands {
         #[arg(long)]
         to: DateTime<Utc>,
     },
+    /// Business-semantics hypotheses recovered from code traces (RFC 0170)
+    Semantics {
+        #[command(subcommand)]
+        subcommand: SemanticsCommands,
+    },
+    /// Export compiled knowledge to other formats (RFC 0170: LinkML)
+    Export {
+        #[command(subcommand)]
+        subcommand: ExportCommands,
+    },
     /// Cross-system identity resolution subcommands (RFC 0029)
     Identity {
         #[command(subcommand)]
@@ -804,6 +814,55 @@ enum ClickHouseCommands {
 }
 
 #[derive(Subcommand)]
+enum SemanticsCommands {
+    /// List the current concepts, enum meanings, constraints, gaps and rationale links — every one
+    /// a hypothesis recovered from code traces, never a confirmed definition
+    List {
+        /// Only one kind: concept, enum, constraint, gap or rationale
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One item with its evidence (path:line) and links
+    Show {
+        /// The item's name or id
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The gap report: coded values no source explains, concepts nobody documented
+    Gaps {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Score the recovered semantics against an expert-written gold set (YAML)
+    Eval {
+        /// The gold-set file
+        #[arg(long)]
+        gold: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExportCommands {
+    /// A draft LinkML schema of the business-semantics items (RFC 0170). Hypotheses are left out
+    /// unless asked for: the default is `--status confirmed`
+    Linkml {
+        #[arg(long, value_enum, default_value = "confirmed")]
+        status: crate::commands::export::StatusFilter,
+        /// Write here instead of stdout
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Schema name (default: the workspace directory's name)
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum IdentityCommands {
     /// Scan the ledger for candidate cross-system matches (e.g. Informix
     /// `cust_mstr` vs. Postgres `customers`); written as unconfirmed until
@@ -1037,6 +1096,27 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             crate::commands::recover::run_with(&config, &cwd, parallel, &extensions).await
         }
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
+        Commands::Semantics { subcommand } => match subcommand {
+            SemanticsCommands::List { kind, json } => {
+                crate::commands::semantics::list(&config, &cwd, kind.as_deref(), json)
+            }
+            SemanticsCommands::Show { target, json } => {
+                crate::commands::semantics::show(&config, &cwd, &target, json)
+            }
+            SemanticsCommands::Gaps { json } => {
+                crate::commands::semantics::gaps(&config, &cwd, json)
+            }
+            SemanticsCommands::Eval { gold, json } => {
+                crate::commands::semantics::eval(&config, &cwd, &gold, json)
+            }
+        },
+        Commands::Export { subcommand } => match subcommand {
+            ExportCommands::Linkml { status, out, name } => crate::commands::export::linkml(
+                &config,
+                &cwd,
+                &crate::commands::export::LinkmlOptions { status, out, name },
+            ),
+        },
         Commands::Identity { subcommand } => match subcommand {
             IdentityCommands::Scan => crate::commands::identity::scan(&config, &cwd),
         },

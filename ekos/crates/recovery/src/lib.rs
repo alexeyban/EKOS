@@ -41,6 +41,7 @@ pub mod sql_analyzer;
 pub mod sql_comments;
 pub mod sql_dialect_registry;
 pub mod sql_objects;
+pub mod sql_predicates;
 pub mod sql_transform_analyzer;
 mod statement_repair;
 pub mod treasury_analyzer;

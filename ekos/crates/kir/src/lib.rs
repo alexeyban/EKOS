@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 pub mod custom_kinds;
+pub mod predicates;
 
 /// Unique identifier for any KIR node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

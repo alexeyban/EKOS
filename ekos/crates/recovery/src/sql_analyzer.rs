@@ -349,8 +349,22 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect)
             let mut obj = KirObject::new(&table_name, ObjectKind::Table).with_evidence(ev_id);
             obj.id = table_kir_id(&table_name);
             obj.properties.insert("columns".into(), columns_json(ct));
+            let checks = check_constraints_json(ct, &table_name, source_path);
+            if checks.as_array().is_some_and(|a| !a.is_empty()) {
+                obj.properties.insert("check_constraints".into(), checks);
+            }
             let obj_id = graph.add_object(obj);
             table_ids.insert(table_name.to_lowercase(), obj_id);
+        }
+    }
+
+    // RFC 0170: literal rows inserted into a table this file creates — a lookup table's seed
+    // (`INSERT INTO entity_class (id, class) VALUES (1, 'Vendor')`) is where a code's meaning is.
+    let seeds = seed_rows(&stmts, &graph, source_path);
+    for obj in &mut graph.objects {
+        if let Some(rows) = seeds.get(&obj.name.to_lowercase()) {
+            obj.properties
+                .insert("seed_rows".into(), serde_json::Value::Array(rows.clone()));
         }
     }
 
@@ -459,17 +473,175 @@ fn col_names(cols: &[sqlparser::ast::Ident]) -> String {
 }
 
 fn columns_json(ct: &sqlparser::ast::CreateTable) -> serde_json::Value {
+    use sqlparser::ast::ColumnOption;
+    // RFC 0170: the column constraints the schema states — candidate `required`/`identifier`
+    // facts for a LinkML export. Table-level `PRIMARY KEY (a)`/`UNIQUE (a)` on a single column
+    // count for that column; a composite key says nothing about any one column alone.
+    let mut table_pk: Vec<String> = Vec::new();
+    let mut table_unique: Vec<String> = Vec::new();
+    for c in &ct.constraints {
+        match c {
+            TableConstraint::PrimaryKey { columns, .. } if columns.len() == 1 => {
+                table_pk.push(columns[0].value.to_lowercase())
+            }
+            TableConstraint::Unique { columns, .. } if columns.len() == 1 => {
+                table_unique.push(columns[0].value.to_lowercase())
+            }
+            _ => {}
+        }
+    }
     let cols: Vec<serde_json::Value> = ct
         .columns
         .iter()
         .map(|c| {
-            serde_json::json!({
+            let lower = c.name.value.to_lowercase();
+            let mut not_null = false;
+            let mut primary_key = table_pk.contains(&lower);
+            let mut unique = table_unique.contains(&lower);
+            for o in &c.options {
+                match &o.option {
+                    ColumnOption::NotNull => not_null = true,
+                    ColumnOption::Unique { is_primary, .. } => {
+                        if *is_primary {
+                            primary_key = true;
+                        } else {
+                            unique = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let mut col = serde_json::json!({
                 "name": c.name.value,
                 "data_type": c.data_type.to_string(),
-            })
+            });
+            for (k, v) in [
+                ("not_null", not_null || primary_key),
+                ("primary_key", primary_key),
+                ("unique", unique),
+            ] {
+                if v {
+                    col[k] = serde_json::Value::Bool(true);
+                }
+            }
+            col
         })
         .collect();
     serde_json::Value::Array(cols)
+}
+
+/// The most seed rows kept per table: reference data, not a data dump.
+const MAX_SEED_ROWS: usize = 200;
+
+/// RFC 0170: `INSERT … VALUES` rows of literals into tables `graph` already holds, per lower-cased
+/// table name, each `{"path", "line", "values": {column: literal}}`. Columns come from the `INSERT`'s own
+/// list, else the table's declared order. A row with any non-literal value is skipped whole.
+fn seed_rows(
+    stmts: &[Statement],
+    graph: &KirGraph,
+    source_path: &str,
+) -> HashMap<String, Vec<serde_json::Value>> {
+    use sqlparser::ast::SetExpr;
+    let declared: HashMap<String, Vec<String>> = graph
+        .objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Table)
+        .map(|o| {
+            let cols = o
+                .properties
+                .get("columns")
+                .and_then(|c| c.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|c| c["name"].as_str().map(str::to_lowercase))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (o.name.to_lowercase(), cols)
+        })
+        .collect();
+    let mut out: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
+    for stmt in stmts {
+        let Statement::Insert(ins) = stmt else {
+            continue;
+        };
+        let table = ins.table_name.to_string().to_lowercase();
+        let Some(table_cols) = declared.get(&table) else {
+            continue;
+        };
+        let Some(SetExpr::Values(values)) = ins.source.as_ref().map(|q| &*q.body) else {
+            continue;
+        };
+        let cols: Vec<String> = if ins.columns.is_empty() {
+            table_cols.clone()
+        } else {
+            ins.columns.iter().map(|c| c.value.to_lowercase()).collect()
+        };
+        let line = ins
+            .table_name
+            .0
+            .last()
+            .map(|i| i.span.start.line)
+            .unwrap_or_default();
+        let rows = out.entry(table).or_default();
+        for row in &values.rows {
+            if rows.len() >= MAX_SEED_ROWS {
+                break;
+            }
+            if row.len() > cols.len() {
+                continue;
+            }
+            let lits: Option<Vec<String>> =
+                row.iter().map(crate::sql_predicates::literal).collect();
+            let Some(lits) = lits else {
+                continue;
+            };
+            let map: serde_json::Map<String, serde_json::Value> = cols
+                .iter()
+                .zip(lits)
+                .map(|(c, v)| (c.clone(), serde_json::Value::String(v)))
+                .collect();
+            rows.push(serde_json::json!({"path": source_path, "line": line, "values": map}));
+        }
+    }
+    out.retain(|_, v| !v.is_empty());
+    out
+}
+
+/// RFC 0170: every `CHECK` on a table — column-level or table-level — as the constraint text and
+/// its normalized predicates, columns resolved to the table. Lines are those of the parsed text.
+fn check_constraints_json(
+    ct: &sqlparser::ast::CreateTable,
+    table: &str,
+    source_path: &str,
+) -> serde_json::Value {
+    use sqlparser::ast::ColumnOption;
+    let table = table.to_lowercase();
+    let mut out = Vec::new();
+    let mut push = |name: Option<&sqlparser::ast::Ident>, expr: &sqlparser::ast::Expr| {
+        let sites = crate::sql_predicates::check_predicates(&table, expr);
+        let line = sites.iter().map(|s| s.line).filter(|l| *l > 0).min();
+        out.push(serde_json::json!({
+            "name": name.map(|n| n.value.clone()),
+            "path": source_path,
+            "expression": expr.to_string(),
+            "line": line,
+            "predicates": crate::sql_predicates::predicates_json(&sites, 1),
+        }));
+    };
+    for c in &ct.columns {
+        for o in &c.options {
+            if let ColumnOption::Check(expr) = &o.option {
+                push(o.name.as_ref(), expr);
+            }
+        }
+    }
+    for c in &ct.constraints {
+        if let TableConstraint::Check { name, expr } = c {
+            push(name.as_ref(), expr);
+        }
+    }
+    serde_json::Value::Array(out)
 }
 
 // ── Author-written description application (RFC 0146 Phase 2) ────────────────
@@ -537,7 +709,7 @@ fn apply_sql_comments(
                 applied += 1;
             }
             CommentTarget::Column { column, .. } => {
-                if apply_column_comment(obj, column, &comment.text) {
+                if apply_column_comment(obj, column, &comment.text, source_path, comment.line) {
                     obj.evidence.push(ev_id);
                     applied += 1;
                 }
@@ -551,7 +723,13 @@ fn apply_sql_comments(
 /// Writes `text` onto the matching entry of a `Table` object's `columns` property array, which is
 /// where `columns_json` records each column's name and data type. Returns whether a column
 /// matched — a comment on a column the DDL does not declare is dropped rather than inventing one.
-fn apply_column_comment(obj: &mut KirObject, column: &str, text: &str) -> bool {
+fn apply_column_comment(
+    obj: &mut KirObject,
+    column: &str,
+    text: &str,
+    path: &str,
+    line: u32,
+) -> bool {
     let Some(serde_json::Value::Array(columns)) = obj.properties.get_mut("columns") else {
         return false;
     };
@@ -565,6 +743,9 @@ fn apply_column_comment(obj: &mut KirObject, column: &str, text: &str) -> bool {
                 "description".into(),
                 serde_json::Value::String(text.to_string()),
             );
+            // RFC 0170: where the comment is, so a code meaning read from it cites its line.
+            map.insert("description_path".into(), serde_json::json!(path));
+            map.insert("description_line".into(), serde_json::json!(line));
             return true;
         }
     }

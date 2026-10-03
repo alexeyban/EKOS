@@ -17,6 +17,7 @@
 use crate::plpgsql_footprint::{Footprint, query_footprint};
 use crate::sql_comments::{ObjectCommentKind, extract_object_comments, match_object_comments};
 use crate::sql_objects::{clip, file_kir_id};
+use crate::sql_predicates::predicates_json;
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
@@ -34,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "view-analyzer/2";
+const LOGIC_VERSION: &str = "view-analyzer/3";
 
 /// The most source text a view's evidence carries; the exact span is always recorded.
 const MAX_FRAGMENT: usize = 4096;
@@ -358,6 +359,11 @@ pub fn recover_views_in(
         if !fp.errors.is_empty() {
             obj.properties
                 .insert("footprint_errors".into(), json!(fp.errors));
+        }
+        // RFC 0170: the business-meaning traces in the view's query.
+        if !fp.predicates.is_empty() {
+            obj.properties
+                .insert("predicates".into(), predicates_json(&fp.predicates, line));
         }
         obj.properties.insert(
             "source_span".into(),

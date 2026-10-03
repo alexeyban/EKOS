@@ -134,6 +134,26 @@ pub const REGISTRY: &[CustomKind] = &[
                unique per table, so one name on two tables is two triggers",
     },
     CustomKind {
+        name: "EnumMeaning",
+        structurally_keyed: true,
+        note: "(table id, column, value) — RFC 0170; every value of a column shares its name prefix",
+    },
+    CustomKind {
+        name: "ConstraintCandidate",
+        structurally_keyed: true,
+        note: "(table id, CHECK index, expression) — RFC 0170",
+    },
+    CustomKind {
+        name: "SemanticGap",
+        structurally_keyed: true,
+        note: "(subject, value | concept) — RFC 0170 gap report; one per open question",
+    },
+    CustomKind {
+        name: "RationaleLink",
+        structurally_keyed: true,
+        note: "(owner item, commit sha) — RFC 0170 git-blame rationale; one commit explains many items",
+    },
+    CustomKind {
         name: "PerlPackage",
         structurally_keyed: true,
         note: "qualified package name — RFC 0147; LedgerSMB::* shares a prefix across ~700 files",

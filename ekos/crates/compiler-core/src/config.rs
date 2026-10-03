@@ -40,6 +40,8 @@ pub struct EkosConfig {
     pub session_memory: SessionMemoryConfig,
     #[serde(default)]
     pub migrate: MigrateConfig,
+    #[serde(default)]
+    pub semantics: SemanticsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +208,45 @@ pub struct SessionMemoryConfig {
     /// metered call — leave off unless that is intended.
     #[serde(default)]
     pub extraction: bool,
+}
+
+/// RFC 0170 — `[semantics]`: business-semantics hypotheses (`BusinessConcept`, `EnumMeaning`,
+/// `ConstraintCandidate`, `SemanticGap`, `RationaleLink`) synthesized at `ekos commit` from the
+/// predicates, constraints, lookup seeds and comments recovery recorded. Off by default — an
+/// experiment until its evaluation numbers exist. Deterministic, no LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SemanticsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// `git blame` each concept's and gap's evidence lines when the workspace is a git repository.
+    #[serde(default = "default_true")]
+    pub rationale: bool,
+    /// Distinct statements/views a filter must recur in to become a concept.
+    #[serde(default = "default_semantics_min_sites")]
+    pub min_sites: usize,
+    /// A column compared against more distinct literals than this is a lookup key, not a code.
+    #[serde(default = "default_semantics_max_enum_values")]
+    pub max_enum_values: usize,
+}
+
+fn default_semantics_min_sites() -> usize {
+    2
+}
+
+fn default_semantics_max_enum_values() -> usize {
+    12
+}
+
+impl Default for SemanticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            rationale: true,
+            min_sites: default_semantics_min_sites(),
+            max_enum_values: default_semantics_max_enum_values(),
+        }
+    }
 }
 
 /// RFC 0154 — `[migrate]`. Off by default; `ekos migrate` refuses to do anything until
@@ -728,6 +769,7 @@ impl Default for EkosConfig {
             retrieval: RetrievalConfig::default(),
             session_memory: SessionMemoryConfig::default(),
             migrate: MigrateConfig::default(),
+            semantics: SemanticsConfig::default(),
         }
     }
 }

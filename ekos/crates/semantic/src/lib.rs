@@ -4,6 +4,7 @@
 //! of the compiler pipeline. Downstream consumers (Ledger, Runtime, AI) always
 //! read from the CKM, never from raw KIR.
 
+pub mod business_semantics;
 pub mod data_lineage;
 pub mod doc_links;
 pub mod procedure_lineage;

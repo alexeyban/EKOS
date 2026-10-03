@@ -26,6 +26,7 @@ use crate::sql_comments::{
     ObjectComment, ObjectCommentKind, extract_object_comments, match_object_comments,
 };
 use crate::sql_objects::{clip, file_kir_id};
+use crate::sql_predicates::predicates_json;
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
@@ -34,12 +35,12 @@ use ekos_kir::{
 };
 use ekos_plpgsql::{Fidelity, ProcStmt, ProcedureIr, Span, line_of, parse_function, routines};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "plpgsql-analyzer/2";
+const LOGIC_VERSION: &str = "plpgsql-analyzer/3";
 
 /// The most source text one statement's evidence carries. A statement longer than this is rare;
 /// its exact byte span is always recorded, so the full text stays recoverable from the file.
@@ -396,6 +397,7 @@ fn emit_procedure(
 
     // What the routine touches: the union of its statements' footprints and its declarations'
     // defaults — or, for a `LANGUAGE sql` routine, its body parsed as the SQL it is.
+    let locals = routine_locals(ir);
     let mut footprint = Footprint::default();
     for d in &ir.declarations {
         if let Some(default) = &d.default {
@@ -413,6 +415,7 @@ fn emit_procedure(
             offset,
             next_index: 0,
             footprint: &mut footprint,
+            locals: &locals,
         };
         for (order, stmt) in ir.body.iter().enumerate() {
             emitter.emit(stmt, proc_id, None, 0, order, "body");
@@ -420,7 +423,17 @@ fn emit_procedure(
     } else if ir.signature.language == "sql"
         && let Some(body) = sql_body(text)
     {
-        footprint.merge(statement_footprint(&body));
+        let fp = statement_footprint(&body);
+        // RFC 0170: a `LANGUAGE sql` routine has no statements, so it carries its own predicates.
+        let predicates = business_predicates(&fp.predicates, &locals);
+        if !predicates.is_empty() {
+            let base = text
+                .find(body.as_str())
+                .map_or(line, |at| line_of(sql, offset + at));
+            obj.properties
+                .insert("predicates".into(), predicates_json(&predicates, base));
+        }
+        footprint.merge(fp);
     }
     set_footprint(&mut obj.properties, &footprint);
     obj.properties
@@ -465,7 +478,7 @@ fn emit_procedure(
 /// trigger classification reads. Read from the IR, never from names.
 struct TriggerFacts {
     /// `NEW` columns set, by assignment or by `… INTO new.col`.
-    assigns_new: std::collections::BTreeSet<String>,
+    assigns_new: BTreeSet<String>,
     /// `RAISE EXCEPTION`s, a bare re-raising `RAISE` included.
     raises_exception: usize,
     /// Whether it ever returns `NULL` — in a `BEFORE` row trigger, that silently drops the row.
@@ -519,6 +532,45 @@ fn sql_body(text: &str) -> Option<String> {
         }
         _ => None,
     })
+}
+
+/// A routine's parameter and declared-variable names, lower-cased. Inside its SQL they parse as
+/// column references (`status = in_status`, `in_from IS NULL`), but they are the routine's own
+/// inputs, not business rules about a table.
+fn routine_locals(ir: &ProcedureIr) -> BTreeSet<String> {
+    let mut names: BTreeSet<String> = ir
+        .declarations
+        .iter()
+        .map(|d| d.name.to_ascii_lowercase())
+        .collect();
+    for arg in &ir.signature.arguments {
+        let words: Vec<&str> = arg
+            .split_whitespace()
+            .skip_while(|w| {
+                matches!(
+                    w.to_ascii_uppercase().as_str(),
+                    "IN" | "OUT" | "INOUT" | "VARIADIC"
+                )
+            })
+            .collect();
+        // `name type` names a parameter; a lone `type` does not.
+        if words.len() >= 2 {
+            names.insert(words[0].trim_matches('"').to_ascii_lowercase());
+        }
+    }
+    names
+}
+
+/// RFC 0170: the predicates that test a real column — not a parameter or variable of the routine.
+fn business_predicates(
+    sites: &[crate::sql_predicates::PredicateSite],
+    locals: &BTreeSet<String>,
+) -> Vec<crate::sql_predicates::PredicateSite> {
+    sites
+        .iter()
+        .filter(|s| !locals.contains(&s.column))
+        .cloned()
+        .collect()
 }
 
 fn set_footprint(props: &mut std::collections::HashMap<String, Value>, fp: &Footprint) {
@@ -628,6 +680,8 @@ struct StatementEmitter<'a> {
     next_index: usize,
     /// The routine's footprint, accumulated statement by statement.
     footprint: &'a mut Footprint,
+    /// The routine's parameter and variable names (RFC 0170: not columns).
+    locals: &'a BTreeSet<String>,
 }
 
 impl StatementEmitter<'_> {
@@ -674,6 +728,12 @@ impl StatementEmitter<'_> {
         obj.properties = semantics(stmt);
         let fp = statement_footprint_of(stmt);
         set_footprint(&mut obj.properties, &fp);
+        // RFC 0170: the statement's predicates. Its embedded SQL starts on the statement's line.
+        let predicates = business_predicates(&fp.predicates, self.locals);
+        if !predicates.is_empty() {
+            obj.properties
+                .insert("predicates".into(), predicates_json(&predicates, line));
+        }
         self.footprint.merge(fp);
         for (k, v) in [
             ("procedure", json!(self.procedure)),

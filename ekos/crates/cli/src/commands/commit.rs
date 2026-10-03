@@ -144,6 +144,19 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     let step = phase_note("linking procedures");
     let (procedure_links_added, procedure_link_stats) = commit_procedure_lineage(&*ledger)?;
     step.done();
+
+    // RFC 0170: business-semantics hypotheses — after procedure lineage, for the same reason: a
+    // predicate in one file names a table created in another, and a lookup table's seed rows meet
+    // the column referencing them only in this whole-ledger read. Opt-in (`[semantics]`).
+    let semantics_stats = if config.semantics.enabled {
+        ledger.set_write_context(Some(write_ctx("commit:semantics")));
+        let step = phase_note("recovering business semantics");
+        let stats = crate::commands::semantics::commit_step(config, cwd, &*ledger)?;
+        step.done();
+        stats
+    } else {
+        None
+    };
     ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
@@ -220,6 +233,12 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     }
     if lineage_links_added > 0 {
         println!("  Data lineage links:    {lineage_links_added}");
+    }
+    if let Some((stats, written)) = &semantics_stats {
+        println!(
+            "  Business semantics:    {}",
+            crate::commands::semantics::summary_line(stats, *written)
+        );
     }
     if let Some(stats) = &embed_stats {
         println!(

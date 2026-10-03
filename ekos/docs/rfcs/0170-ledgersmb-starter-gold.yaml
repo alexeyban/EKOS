@@ -1,0 +1,83 @@
+# RFC 0170 — STARTER gold set for LedgerSMB (`ekos semantics eval --gold <this file>`).
+#
+# NOT EXPERT-AUTHORED, and NOT written blind. The plan requires the gold set to be written by an
+# accounting domain expert *before* anyone looks at EKOS's output; this file was written by the
+# implementing session after the first run, from general double-entry accounting knowledge and
+# LedgerSMB's own schema, to exercise the format and give first numbers. It deliberately includes
+# concepts a predicate-only extractor cannot recover (overdue, unpaid, on hold), so the misses are
+# visible. Replace it with an expert's set before publishing any number as a quality claim.
+#
+# Predicates use EKOS's canonical form: `table.column IN (v, …)`, `IS TRUE|FALSE|NULL|NOT NULL`,
+# `>`/`<`/`>=`/`<=` literal; `a AND b` for a conjunction. Case and spacing do not matter.
+
+concepts:
+  - name: Approved transaction
+    predicate: transactions.approved IS TRUE
+  - name: Unapproved (draft) transaction
+    predicate: transactions.approved IS FALSE
+  - name: Approved ledger line
+    predicate: acc_trans.approved IS TRUE
+  - name: Uncleared (unreconciled) ledger line
+    predicate: acc_trans.cleared IS FALSE
+  - name: Active (non-obsolete) part
+    predicate: parts.obsolete IS FALSE
+  - name: Inventory part (goods)
+    predicate: parts.inventory_accno_id IS NOT NULL
+  - name: Service part (no inventory account)
+    predicate: parts.inventory_accno_id IS NULL
+  - name: Assembly
+    predicate: parts.assembly IS TRUE
+  - name: Active account
+    predicate: account.obsolete IS FALSE
+  - name: Contra account
+    predicate: account.contra IS TRUE
+  - name: Customer account
+    predicate: entity_credit_account.entity_class IN (2)
+  - name: Vendor account
+    predicate: entity_credit_account.entity_class IN (1)
+  - name: Open order
+    predicate: oe.closed IS FALSE
+  - name: Sales or purchase order (not a quotation)
+    predicate: oe.oe_class_id IN (1, 2)
+  - name: Income-statement account
+    predicate: account.category IN ('E', 'I')
+  - name: Unapproved reconciliation report
+    predicate: cr_report.approved IS FALSE
+  - name: Year-end not reversed
+    predicate: yearend.reversed IS FALSE
+  - name: Unapproved budget
+    predicate: budget_info.approved_by IS NULL
+  # Expected misses: these are defined by comparisons between columns or against the current date,
+  # which leave no column-vs-literal trace.
+  - name: Overdue receivable
+    predicate: ar.duedate < current_date AND ar.amount_bc > ar.paid
+  - name: Unpaid invoice
+    predicate: ar.amount_bc > ar.paid
+  - name: Invoice on hold
+    predicate: eca_invoice.on_hold IS TRUE
+  - name: Reversed transaction
+    predicate: transactions.reversed_by IS NOT NULL
+
+enums:
+  - table: account
+    column: category
+    values: {"A": Asset, "L": Liability, "Q": Equity, "I": Income, "E": Expense}
+  - table: entity_credit_account
+    column: entity_class
+    values: {"1": Vendor, "2": Customer, "3": Employee}
+  - table: oe
+    column: oe_class_id
+    values: {"1": Sales order, "2": Purchase order, "3": Quotation, "4": Request for quotation}
+  - table: file_base
+    column: file_class
+    values: {"1": Transaction, "2": Order, "3": Part}
+  - table: asset_report
+    column: report_class
+    values: {"1": Depreciation, "2": Disposal, "3": Import, "4": Partial disposal}
+  - table: voucher
+    column: batch_class
+    values: {"1": AP, "2": AR, "3": Payment}
+
+known_unknowns:
+  # The employee role values are only ever compared in code; nothing in the schema enumerates them.
+  - {table: entity_employee, column: role, value: "'manager'"}

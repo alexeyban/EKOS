@@ -16,6 +16,7 @@
 //!
 //! A statement that does not parse is reported as such with the parser's error, never guessed at.
 
+use crate::sql_predicates::{PredicateSite, query_predicates, statement_predicates};
 use sqlparser::ast::{
     Expr, FromTable, ObjectName, Query, Statement, TableFactor, TableWithJoins, Visit, Visitor,
 };
@@ -40,6 +41,8 @@ pub struct Footprint {
     pub errors: Vec<String>,
     /// Fragments attempted.
     pub fragments: usize,
+    /// RFC 0170: every column-vs-literal predicate, lines relative to the fragment it came from.
+    pub predicates: Vec<PredicateSite>,
 }
 
 impl Footprint {
@@ -62,6 +65,7 @@ impl Footprint {
         self.calls.extend(other.calls);
         self.errors.extend(other.errors);
         self.fragments += other.fragments;
+        self.predicates.extend(other.predicates);
     }
 }
 
@@ -81,6 +85,7 @@ pub fn statement_footprint_in(dialect: &dyn Dialect, sql: &str) -> Footprint {
             let mut v = Collector::default();
             let _ = stmts.visit(&mut v);
             v.finish(&mut fp);
+            fp.predicates = stmts.iter().flat_map(statement_predicates).collect();
         }
         Err(e) => fp.errors.push(e.to_string()),
     }
@@ -97,6 +102,7 @@ pub fn query_footprint(query: &Query) -> Footprint {
     let mut v = Collector::default();
     let _ = query.visit(&mut v);
     v.finish(&mut fp);
+    fp.predicates = query_predicates(query);
     fp
 }
 

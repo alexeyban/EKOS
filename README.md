@@ -432,6 +432,43 @@ ekos recover   # … Views: 17 (17 parsed, 0 unparsed — still recorded)
 ekos ekl "FIND Object WHERE kind = 'View'"
 ```
 
+### Business semantics → LinkML (RFC 0170, experimental, opt-in)
+
+Business meaning that nobody wrote down survives as traces: `WHERE NOT p.obsolete`,
+`entity_class = 2`, the lookup row `(2, 'Customer')`, `COMMENT ON COLUMN account.category IS
+'A=asset,L=liability,…'`, the commit that last changed the line. Recovery records every
+column-vs-literal predicate in views, routines and `CHECK` constraints — normalized, so
+`status IN (1,3)` and `status = 1 OR 3 = status` are one predicate — plus `CHECK` constraints,
+`NOT NULL`/key columns and lookup-table seed rows. With `[semantics] enabled = true`, `ekos commit`
+synthesizes **hypotheses** from them, deterministically and without an LLM:
+
+| Kind | What |
+|---|---|
+| `BusinessConcept` | A filter that defines a view, or recurs in ≥ `min-sites` routines/views (`PartsNotObsolete`, `EntityCreditAccountCustomer`) |
+| `EnumMeaning` | A coded value and its meaning, from a column comment legend, a lookup seed row via its foreign key, or a `CASE` label |
+| `ConstraintCandidate` | A `CHECK` constraint, typed `range`/`enum`/`pattern`/`not_null`/`other` |
+| `SemanticGap` | A coded value used in logic that no source explains; a concept nobody documented |
+| `RationaleLink` | `git blame -w` on the evidence lines → the commit that last changed them |
+
+Every item is `status: hypothesis` with its evidence (`path:line`). Nothing is confirmed by EKOS:
+review is RFC 0170 Phase 2. The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
+generates everything else (JSON Schema, Pydantic, RDF/OWL/SHACL):
+
+```bash
+ekos semantics list [--kind concept|enum|constraint|gap|rationale]
+ekos semantics show PartsNotObsolete        # definition, evidence lines, links, commits
+ekos semantics gaps                         # the questions only a human can answer
+ekos export linkml --status hypothesis --out model.yaml   # default --status confirmed exports nothing yet
+ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
+```
+
+On LedgerSMB (SQL + git, no LLM): 39 concepts, 209 coded values in 56 columns (173 with a meaning),
+60 constraints, 8 gaps, 97 rationale links. The LinkML file passes `linkml-lint` with 0 errors and
+`gen-json-schema`/`gen-pydantic` run cleanly. Against a *starter* gold set (not expert-written —
+see `ekos/docs/rfcs/0170-ledgersmb-starter-gold.yaml`): concept recall 0.73, enum label accuracy
+0.95, evidence validity 1.0. Meaning defined only by comparisons between columns or against the
+current date (overdue, unpaid) leaves no literal trace and is not recovered: no trace, no recovery.
+
 ### dbt metadata extraction (RFC 0117)
 
 dbt can point at any warehouse, so `ekos recover` extracts real `Table` objects from a dbt
