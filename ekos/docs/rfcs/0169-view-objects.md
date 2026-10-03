@@ -141,3 +141,14 @@ Adding `View` objects surfaced the first identity conflict involving them: Ledge
 separate namespaces, so `identity` gained `is_expected_view_routine_pair`, narrowing — never widening
 — the conflict detector for exactly `{View, Procedure}`. `View` beside `Table` still conflicts
 (shared relation namespace), and `Table` beside `Procedure` is not excluded until observed.
+
+## Downstream integration (2026-10-03, devlog_232)
+
+`Procedure` and `View` now reach every downstream consumer RFC 0147 lists: curated docs-gen entity
+pages (`View`s also in Data Stores, `Procedure`s in API.md under their `File`), documentation
+coverage, `doc_links` (a backticked routine/view name in a doc links to it) and `llm_description`
+(symbol scope). Each object hangs off its `File` (`Contains`) and carries `source_span`, without
+which `llm_description` would skip it silently — a test builds them through the real analyzers and
+asserts they are described. `COMMENT ON FUNCTION|PROCEDURE|[MATERIALIZED] VIEW` in the same file
+becomes the object's evidence-backed `description` (LedgerSMB: all 330 function comments and every
+view comment on an observed file attach), matched by name and then arity, never guessed.

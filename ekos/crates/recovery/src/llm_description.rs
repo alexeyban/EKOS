@@ -74,6 +74,10 @@ const SYMBOL_KINDS: &[&str] = &[
     "JsSymbol",
     "PerlSymbol",
     "BinaryMethod",
+    // RFC 0163 / 0169: both carry `source_span` and hang off their `File` (`Contains`), which is
+    // what symbol descriptions read source by — without both they would be skipped silently.
+    "Procedure",
+    "View",
 ];
 
 /// RFC 0088's `[llm-description] scope` — how far this run goes. `Modules` is the config default
@@ -1299,6 +1303,81 @@ mod tests {
             sent[0].contains("Repo.get(User, id)"),
             "the real sliced source text must have reached the prompt: {}",
             sent[0]
+        );
+    }
+
+    /// RFC 0163 / 0169: routines and views straight out of their analyzers — no hand-set
+    /// properties — are described from their real source. Listing a kind in `SYMBOL_KINDS` is not
+    /// enough: without `source_span` and a `Contains` edge from the `File`, every one of them would
+    /// be skipped without a word.
+    #[tokio::test]
+    async fn sql_routines_and_views_from_their_analyzers_are_described_from_real_source() {
+        let workspace = tempdir().unwrap();
+        let sql = "CREATE FUNCTION pay(in_id int) RETURNS int AS $$\nBEGIN\n  UPDATE ap SET paid = true WHERE id = in_id;\n  RETURN 1;\nEND $$ LANGUAGE plpgsql;\n\
+COMMENT ON FUNCTION pay(int) IS 'Marks an AP item paid.';\n\
+CREATE VIEW open_ap AS SELECT * FROM ap WHERE NOT paid;\n";
+        std::fs::create_dir_all(workspace.path().join("sql")).unwrap();
+        std::fs::write(workspace.path().join("sql/pay.sql"), sql).unwrap();
+
+        let mut graph = KirGraph::new();
+        let mut file = KirObject::new("sql/pay.sql", ObjectKind::File);
+        file.id = KirId(uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            b"sql/pay.sql",
+        ));
+        graph.add_object(file);
+        let (routines, _) =
+            crate::plpgsql_analyzer::recover_routines_in("sql/pay.sql", sql, Some("sql/pay.sql"));
+        let (views, _) = crate::view_analyzer::recover_views_in(
+            "sql/pay.sql",
+            sql,
+            &sqlparser::dialect::PostgreSqlDialect {},
+            Some("sql/pay.sql"),
+        );
+        for g in [routines, views] {
+            graph.objects.extend(g.objects.into_iter().filter(
+                |o| !matches!(&o.kind, ObjectKind::Custom(k) if k == "ProcedureStatement"),
+            ));
+            graph.relationships.extend(
+                g.relationships.into_iter().filter(|r| {
+                    r.kind == RelationshipKind::Contains && r.from == graph.objects[0].id
+                }),
+            );
+        }
+        let (store, _dir) = temp_store();
+        seed(&store, graph);
+
+        let llm = RecordingLlmProvider::new(
+            r#"{"overview": "Grounded.", "usage": null, "comment_check": null}"#,
+        );
+        let stats = describe_objects(
+            &store,
+            &llm,
+            DescriptionScope::Symbols,
+            workspace.path(),
+            &RedactionConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stats.symbols_described, 2, "the routine and the view");
+        let sent = llm.requests.lock().unwrap();
+        let routine = sent
+            .iter()
+            .find(|r| r.contains("UPDATE ap SET paid"))
+            .expect("routine source");
+        assert!(
+            routine.contains("Marks an AP item paid."),
+            "the author's comment is passed on: {routine}"
+        );
+        assert!(
+            routine.contains("sql/pay.sql"),
+            "owned by its file: {routine}"
+        );
+        assert!(
+            sent.iter()
+                .any(|r| r.contains("SELECT * FROM ap WHERE NOT paid")),
+            "view source"
         );
     }
 

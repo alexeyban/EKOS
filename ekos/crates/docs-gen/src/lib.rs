@@ -693,6 +693,9 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     | "BinaryMethod"
                     | "Technology"
                     | "Rollup"
+                    // RFC 0163 / 0169: SQL routines and views, one page each.
+                    | "Procedure"
+                    | "View"
             )
         }
         ObjectKind::Pipeline => true,
@@ -2307,11 +2310,19 @@ fn components_cross_reference(kind: &str) -> Option<&'static str> {
 fn render_data_architecture(objects: &[KirObject], relationships: &[KirRelationship]) -> String {
     let mut out = String::new();
 
+    let is_custom = |o: &KirObject, k: &str| matches!(&o.kind, ObjectKind::Custom(c) if c == k);
+    // RFC 0169: a view is a data store too — listed with the tables, marked as a view.
     let mut stores: Vec<&KirObject> = objects
         .iter()
-        .filter(|o| matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset))
+        .filter(|o| {
+            matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset) || is_custom(o, "View")
+        })
         .collect();
     stores.sort_by(|a, b| a.name.cmp(&b.name));
+    // Who is on the other end of an edge decides what it counts as: a routine statement's
+    // `ReadsFrom`/`WritesTo` (RFC 0163) is not a transformation — it is counted under "used by".
+    let kind_of: HashMap<KirId, &ObjectKind> = objects.iter().map(|o| (o.id, &o.kind)).collect();
+    let from_is = |r: &KirRelationship, k: &str| matches!(kind_of.get(&r.from), Some(ObjectKind::Custom(c)) if c == k);
 
     out.push_str("### Data Stores\n\n");
     if stores.is_empty() {
@@ -2332,15 +2343,39 @@ fn render_data_architecture(objects: &[KirObject], relationships: &[KirRelations
                 .count();
             let reads = relationships
                 .iter()
-                .filter(|r| is_reads_from(&r.kind) && r.to == store.id)
+                .filter(|r| {
+                    is_reads_from(&r.kind) && r.to == store.id && !from_is(r, "ProcedureStatement")
+                })
                 .count();
             let writes = relationships
                 .iter()
-                .filter(|r| is_writes_to(&r.kind) && r.to == store.id)
+                .filter(|r| {
+                    is_writes_to(&r.kind) && r.to == store.id && !from_is(r, "ProcedureStatement")
+                })
                 .count();
+            // RFC 0163/0169: routines and views that depend on this store, counted once each.
+            let users: HashSet<KirId> = relationships
+                .iter()
+                .filter(|r| {
+                    r.kind == RelationshipKind::DependsOn
+                        && r.to == store.id
+                        && (from_is(r, "Procedure") || from_is(r, "View"))
+                })
+                .map(|r| r.from)
+                .collect();
+            let used_by = if users.is_empty() {
+                String::new()
+            } else {
+                format!(", used by {} routine(s)/view(s)", users.len())
+            };
+            let marker = if is_custom(store, "View") {
+                " (view)"
+            } else {
+                ""
+            };
             out.push_str(&format!(
-                "- **{}** — {fk_count} real foreign-key edge(s), read by {reads} \
-                 transformation(s), written by {writes} transformation(s)\n",
+                "- **{}**{marker} — {fk_count} real foreign-key edge(s), read by {reads} \
+                 transformation(s), written by {writes} transformation(s){used_by}\n",
                 store.name
             ));
             // RFC 0091: real column names, compiled by either raw SQL DDL parsing
@@ -2355,6 +2390,10 @@ fn render_data_architecture(objects: &[KirObject], relationships: &[KirRelations
                 let names: Vec<String> = columns
                     .iter()
                     .map(|c| {
+                        // A view's declared columns are bare names (RFC 0169).
+                        if let Some(bare) = c.as_str() {
+                            return bare.to_string();
+                        }
                         let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                         match c.get("data_type").and_then(|v| v.as_str()) {
                             Some(dt) => format!("{name} ({dt})"),
@@ -2972,6 +3011,8 @@ fn is_symbol_kind(kind: &ObjectKind) -> bool {
                 || s == "JsSymbol"
                 || s == "PerlSymbol"
                 || s == "BinaryMethod"
+                // RFC 0163: a SQL routine is a callable symbol, grouped under its `File`.
+                || s == "Procedure"
     )
 }
 
@@ -3387,6 +3428,9 @@ const DOC_BEARING_CUSTOM_KINDS: &[&str] = &[
     "PerlPackage",
     "BinaryMethod",
     "BinaryType",
+    // RFC 0163 / 0169: `description` from `COMMENT ON FUNCTION|PROCEDURE|VIEW`.
+    "Procedure",
+    "View",
 ];
 
 /// Render `DependencyRiskReport.md`: real declared versions (`Crate.version`, and npm
@@ -4665,6 +4709,52 @@ mod tests {
         assert!(section.contains("2 compiled data store(s)"));
         assert!(section.contains("**customers** — 1 real foreign-key edge(s)"));
         assert!(section.contains("**orders** — 1 real foreign-key edge(s)"));
+    }
+
+    /// RFC 0163/0169: views are data stores too, marked as views; transformations and routines
+    /// are counted separately, so a routine statement's `ReadsFrom` is never reported as a
+    /// "transformation"; a view's name-only `columns` render as names.
+    #[test]
+    fn data_architecture_lists_views_and_counts_routines_apart_from_transformations() {
+        let acc = KirObject::new("acc_trans", ObjectKind::Table);
+        let view = KirObject::new("account_heading_tree", ObjectKind::Custom("View".into()))
+            .with_property("columns", serde_json::json!(["id", "path"]));
+        let node = KirObject::new("etl.sql:0", ObjectKind::Custom("TransformNode".into()));
+        let stmt = KirObject::new("post#0", ObjectKind::Custom("ProcedureStatement".into()));
+        let routine = KirObject::new("post", ObjectKind::Custom("Procedure".into()));
+        let rels = vec![
+            KirRelationship::new(
+                RelationshipKind::Custom("ReadsFrom".into()),
+                node.id,
+                acc.id,
+            ),
+            KirRelationship::new(
+                RelationshipKind::Custom("ReadsFrom".into()),
+                stmt.id,
+                acc.id,
+            ),
+            KirRelationship::new(RelationshipKind::DependsOn, routine.id, acc.id),
+            KirRelationship::new(RelationshipKind::DependsOn, view.id, acc.id),
+            KirRelationship::new(RelationshipKind::DependsOn, routine.id, view.id),
+        ];
+        let section = render_data_architecture(&[acc, view, node, stmt, routine], &rels);
+        assert!(section.contains("2 compiled data store(s)"), "{section}");
+        assert!(
+            section.contains(
+                "**acc_trans** — 0 real foreign-key edge(s), read by 1 transformation(s), \
+                 written by 0 transformation(s), used by 2 routine(s)/view(s)"
+            ),
+            "{section}"
+        );
+        assert!(
+            section.contains("**account_heading_tree** (view)"),
+            "{section}"
+        );
+        assert!(
+            section.contains("used by 1 routine(s)/view(s)"),
+            "{section}"
+        );
+        assert!(section.contains("Columns: id, path"), "{section}");
     }
 
     #[test]

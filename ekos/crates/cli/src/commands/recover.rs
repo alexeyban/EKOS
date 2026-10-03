@@ -170,6 +170,18 @@ pub async fn run_with(
             // ── PL/pgSQL procedural IR (RFC 0163) ─────────────────────────
             // The redacted text as written, not the dialect-preprocessed one: statement spans and
             // line numbers cite the file, and `preprocess` rewrites it.
+            // The owning `File` object's id key — base-relative and project-qualified, exactly as
+            // `build.rs` keys `File` objects (RFC 0079; stripping only `cwd` here is the mistake
+            // `ekos_common::project`'s docs record twice).
+            let file_key = ekos_common::project::project_qualify(
+                &path
+                    .strip_prefix(base)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                Some(&ekos_common::project::project_key_for_base(base, cwd)),
+            );
+
             // ── Views (RFC 0169) ──────────────────────────────────────────
             // Same file-as-written text, the file's resolved dialect, one view at a time.
             if ViewAnalyzerPass::applies_to(&sql) {
@@ -178,13 +190,15 @@ pub async fn run_with(
                     sql.clone(),
                     dialect_name,
                     dialect_parser.sqlparser_dialect(),
-                );
+                )
+                .with_file(file_key.clone());
                 view_stats_handles.push(view_pass.stats_handle());
                 pass_manager.register(Box::new(view_pass));
             }
 
             if PlPgSqlAnalyzerPass::applies_to(dialect_name, &sql) {
-                let plpgsql_pass = PlPgSqlAnalyzerPass::new(&rel_str, sql.clone());
+                let plpgsql_pass =
+                    PlPgSqlAnalyzerPass::new(&rel_str, sql.clone()).with_file(file_key.clone());
                 plpgsql_stats_handles.push(plpgsql_pass.stats_handle());
                 pass_manager.register(Box::new(plpgsql_pass));
             }

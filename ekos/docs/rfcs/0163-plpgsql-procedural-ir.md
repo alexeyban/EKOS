@@ -320,3 +320,14 @@ binding `INTO`, loop queries losing a closing parenthesis, the old `SELECT INTO 
 `EXECUTE … USING` on its own line). On LedgerSMB, 1137/1141 statements' SQL now parses — the four
 left are `sqlparser` 0.53 grammar gaps — and that number is a ratchet
 (`recovery/tests/plpgsql_ledgersmb.rs`).
+
+## Downstream integration (2026-10-03, devlog_232)
+
+`Procedure` and `View` now reach every downstream consumer RFC 0147 lists: curated docs-gen entity
+pages (`View`s also in Data Stores, `Procedure`s in API.md under their `File`), documentation
+coverage, `doc_links` (a backticked routine/view name in a doc links to it) and `llm_description`
+(symbol scope). Each object hangs off its `File` (`Contains`) and carries `source_span`, without
+which `llm_description` would skip it silently — a test builds them through the real analyzers and
+asserts they are described. `COMMENT ON FUNCTION|PROCEDURE|[MATERIALIZED] VIEW` in the same file
+becomes the object's evidence-backed `description` (LedgerSMB: all 330 function comments and every
+view comment on an observed file attach), matched by name and then arity, never guessed.

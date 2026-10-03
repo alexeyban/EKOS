@@ -404,6 +404,12 @@ Views are linked like routines: a view `DependsOn` the tables and views its quer
 transformations that read a view link to it, and impact analysis on a table now reaches the views
 built on it.
 
+Routines and views are documented like code: `docs generate --layout curated` writes a page for
+each (the author's `COMMENT ON FUNCTION|VIEW` text as its description, its lines, what it reads,
+writes and calls, and who uses it), lists views among the Data Stores with the routines that use
+them, and lists routines in API.md under their file. `[llm-description]` describes them from their
+real source like any other symbol, and a backticked routine or view name in a doc links to it.
+
 ```bash
 ekos recover   # … Views: 17 (17 parsed, 0 unparsed — still recorded)
 ekos ekl "FIND Object WHERE kind = 'View'"

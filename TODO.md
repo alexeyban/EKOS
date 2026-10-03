@@ -6126,9 +6126,9 @@ PostgreSQL recover completely**, with a ratcheted floor.
       `sqlparser` AST walk + `procedure_lineage` at `commit` (devlog_230; LedgerSMB: 1,852 edges,
       99.6% of embedded SQL parses, idempotent across re-commits)
 - [x] A `View` object kind (RFC 0169, devlog_231): 17 LedgerSMB views, 24 view references now link
-- [ ] Downstream registries for `View` (docs-gen Data Stores / entity pages, `llm_description`)
-- [ ] Downstream registries for the new kinds: docs-gen entity pages / API grouping,
-      `llm_description`, `doc_links` (RFC 0147's list) — not CI-enforced
+- [x] Downstream registries for `View` (docs-gen Data Stores / entity pages, `llm_description`) (devlog_232)
+- [x] Downstream registries for the new kinds: docs-gen entity pages / API grouping,
+      `llm_description`, `doc_links` (RFC 0147's list) — not CI-enforced (devlog_232)
 - [ ] Trigger recovery and structural classification; never auto-translated
 - [ ] Lower `ProcStmt::Sql` into the dataflow `TransformGraph` (the RFC drew this seam inside the
       parser; it sits one step later — see the crate docs)

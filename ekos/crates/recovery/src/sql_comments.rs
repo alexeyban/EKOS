@@ -218,6 +218,190 @@ fn read_quoted_literal(chars: &[char], from: usize) -> Option<String> {
     }
 }
 
+/// What kind of non-table object a `COMMENT ON` documents (RFC 0163 routines, RFC 0169 views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectCommentKind {
+    Function,
+    Procedure,
+    View,
+}
+
+/// One `COMMENT ON FUNCTION|PROCEDURE|[MATERIALIZED] VIEW` statement.
+///
+/// Kept apart from [`SqlComment`] on purpose: `sql_analyzer` matches every `SqlComment` against
+/// `Table` names, and a `COMMENT ON VIEW v` must never land on a table that happens to be called
+/// `v`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectComment {
+    pub kind: ObjectCommentKind,
+    /// The name as written, quotes stripped, schema qualification kept.
+    pub name: String,
+    /// For a routine, its argument list as written (`["int", "text"]`), so an overloaded name can
+    /// be matched by arity. `None` for a view, or a routine commented without a list.
+    pub args: Option<Vec<String>>,
+    pub text: String,
+    /// 1-indexed line of the `COMMENT` keyword.
+    pub line: u32,
+}
+
+/// Every `COMMENT ON FUNCTION|PROCEDURE|[MATERIALIZED] VIEW … IS <literal>` in the **raw** `sql`.
+/// `IS NULL` (which removes a comment) and empty comments are skipped, as for tables.
+pub fn extract_object_comments(sql: &str) -> Vec<ObjectComment> {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut line_starts = vec![0usize];
+    for (i, c) in chars.iter().enumerate() {
+        if *c == '\n' {
+            line_starts.push(i + 1);
+        }
+    }
+    let line_of = |pos: usize| -> u32 {
+        match line_starts.binary_search(&pos) {
+            Ok(i) => (i + 1) as u32,
+            Err(i) => i as u32,
+        }
+    };
+    let mut out = Vec::new();
+    for (start, end) in statement_spans(&chars) {
+        let head = skip_trivia(&chars, start);
+        if head >= end || !is_word_at(&chars, head, "COMMENT", false) {
+            continue;
+        }
+        if let Some(c) = parse_object_comment(&chars, head, end, line_of(head)) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn parse_object_comment(
+    chars: &[char],
+    head: usize,
+    end: usize,
+    line: u32,
+) -> Option<ObjectComment> {
+    let mut i = skip_trivia(chars, head + "COMMENT".len());
+    if !is_word_at(chars, i, "ON", false) {
+        return None;
+    }
+    i = skip_trivia(chars, i + 2);
+    let kind = if is_word_at(chars, i, "FUNCTION", false) {
+        i += "FUNCTION".len();
+        ObjectCommentKind::Function
+    } else if is_word_at(chars, i, "PROCEDURE", false) {
+        i += "PROCEDURE".len();
+        ObjectCommentKind::Procedure
+    } else if is_word_at(chars, i, "VIEW", false) {
+        i += "VIEW".len();
+        ObjectCommentKind::View
+    } else if is_word_at(chars, i, "MATERIALIZED", false) {
+        i = skip_trivia(chars, i + "MATERIALIZED".len());
+        if !is_word_at(chars, i, "VIEW", false) {
+            return None;
+        }
+        i += "VIEW".len();
+        ObjectCommentKind::View
+    } else {
+        return None;
+    };
+    i = skip_trivia(chars, i);
+    let (name, next) = read_qualified_name(chars, i, end)?;
+    i = skip_trivia(chars, next);
+
+    // A routine's argument list, `(int, text)`, split at top-level commas.
+    let mut args = None;
+    if chars.get(i) == Some(&'(') && kind != ObjectCommentKind::View {
+        let mut depth = 0i32;
+        let mut current = String::new();
+        let mut list = Vec::new();
+        let mut j = i;
+        while j < end {
+            let c = chars[j];
+            match c {
+                '(' => {
+                    depth += 1;
+                    if depth > 1 {
+                        current.push(c);
+                    }
+                }
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    current.push(c);
+                }
+                ',' if depth == 1 => list.push(std::mem::take(&mut current)),
+                _ => current.push(c),
+            }
+            j += 1;
+        }
+        if depth != 0 {
+            return None;
+        }
+        list.push(current);
+        let list: Vec<String> = list
+            .into_iter()
+            .map(|a| a.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|a| !a.is_empty())
+            .collect();
+        args = Some(list);
+        i = skip_trivia(chars, j + 1);
+    }
+
+    if !is_word_at(chars, i, "IS", false) {
+        return None;
+    }
+    i = skip_trivia(chars, i + 2);
+    if is_word_at(chars, i, "NULL", false) {
+        return None;
+    }
+    let text = read_quoted_literal(chars, i)?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(ObjectComment {
+        kind,
+        name,
+        args,
+        text: text.trim().to_string(),
+        line,
+    })
+}
+
+/// Which of `candidates` — `(name, argument count)` of the routines or views one file defines —
+/// each comment of `kinds` documents. Returns, per candidate index, the comment that applies.
+///
+/// Matching is by unqualified, lower-cased name within the file. When several candidates share
+/// the name (overloads), the comment's own argument list narrows them by arity; a comment still
+/// matching more than one candidate is left unattached rather than guessed. A later comment on
+/// the same object replaces an earlier one, as it does in the database.
+pub fn match_object_comments<'c>(
+    comments: &'c [ObjectComment],
+    kinds: &[ObjectCommentKind],
+    candidates: &[(String, usize)],
+) -> std::collections::BTreeMap<usize, &'c ObjectComment> {
+    let tail = |n: &str| n.rsplit('.').next().unwrap_or(n).to_lowercase();
+    let mut out = std::collections::BTreeMap::new();
+    for c in comments.iter().filter(|c| kinds.contains(&c.kind)) {
+        let name = tail(&c.name);
+        let mut hits: Vec<usize> = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, (n, _))| tail(n) == name)
+            .map(|(i, _)| i)
+            .collect();
+        if hits.len() > 1
+            && let Some(args) = &c.args
+        {
+            hits.retain(|&i| candidates[i].1 == args.len());
+        }
+        if let [only] = hits.as_slice() {
+            out.insert(*only, c);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,5 +530,65 @@ COMMENT ON TABLE a IS $$ Hardwired classifications. $$;";
     #[test]
     fn a_file_with_no_comments_yields_nothing() {
         assert!(extract_sql_comments("CREATE TABLE a (id INT); SELECT 1;").is_empty());
+    }
+
+    #[test]
+    fn routine_and_view_comments_are_extracted_separately() {
+        let sql = "\
+COMMENT ON FUNCTION menu_generate() IS $$ returns the tree $$;
+COMMENT ON FUNCTION payment_post(int, numeric(10,2)[], text) IS 'posts a payment';
+COMMENT ON PROCEDURE p IS 'no list';
+COMMENT ON VIEW account_heading_tree IS $$ the heading tree $$;
+COMMENT ON MATERIALIZED VIEW public.mv IS 'materialized';
+COMMENT ON FUNCTION gone() IS NULL;
+COMMENT ON INDEX i IS 'an index';
+COMMENT ON TABLE t IS 'a table';";
+        let got = extract_object_comments(sql);
+        assert_eq!(got.len(), 5, "{got:?}");
+        assert_eq!(got[0].kind, ObjectCommentKind::Function);
+        assert_eq!(got[0].args, Some(vec![]));
+        assert_eq!(got[0].text, "returns the tree");
+        assert_eq!(got[1].name, "payment_post");
+        assert_eq!(
+            got[1].args,
+            Some(vec!["int".into(), "numeric(10,2)[]".into(), "text".into()])
+        );
+        assert_eq!(got[1].line, 2);
+        assert_eq!(got[2].args, None);
+        assert_eq!(got[3].kind, ObjectCommentKind::View);
+        assert_eq!(got[4].name, "public.mv");
+        // The table extractor is unchanged: it still sees only the table comment.
+        assert_eq!(extract_sql_comments(sql).len(), 1);
+    }
+
+    #[test]
+    fn object_comments_match_by_name_then_arity_and_never_guess() {
+        let sql = "\
+COMMENT ON FUNCTION f(int) IS 'one arg';
+COMMENT ON FUNCTION f(int, text) IS 'two args';
+COMMENT ON FUNCTION g IS 'overloaded, no list';
+COMMENT ON FUNCTION public.h() IS 'first';
+COMMENT ON FUNCTION h() IS 'second wins';
+COMMENT ON VIEW f IS 'a view, not the function';";
+        let comments = extract_object_comments(sql);
+        let routines = vec![
+            ("f".to_string(), 1),
+            ("f".to_string(), 2),
+            ("g".to_string(), 0),
+            ("g".to_string(), 1),
+            ("h".to_string(), 0),
+        ];
+        let kinds = [ObjectCommentKind::Function, ObjectCommentKind::Procedure];
+        let m = match_object_comments(&comments, &kinds, &routines);
+        assert_eq!(m[&0].text, "one arg");
+        assert_eq!(m[&1].text, "two args");
+        assert!(
+            !m.contains_key(&2) && !m.contains_key(&3),
+            "ambiguous g is not guessed"
+        );
+        assert_eq!(m[&4].text, "second wins");
+        let views =
+            match_object_comments(&comments, &[ObjectCommentKind::View], &[("f".into(), 0)]);
+        assert_eq!(views[&0].text, "a view, not the function");
     }
 }

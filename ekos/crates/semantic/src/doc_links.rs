@@ -37,6 +37,9 @@ const CODE_KINDS: &[&str] = &[
     "BinaryType",
     "BinaryMethod",
     "Crate",
+    // RFC 0163 / 0169: a backticked routine or view name in a doc links to it.
+    "Procedure",
+    "View",
 ];
 
 /// Derive RFC→RFC and doc→code `References` edges for every `Section` in `graph`.

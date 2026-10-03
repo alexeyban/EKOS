@@ -15,9 +15,13 @@
 //! later definition in the same file replaces the earlier one (`CREATE OR REPLACE`).
 
 use crate::plpgsql_footprint::{Footprint, query_footprint};
+use crate::sql_comments::{ObjectCommentKind, extract_object_comments, match_object_comments};
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
-use ekos_kir::{KirEvidence, KirGraph, KirId, KirObject, ObjectKind, SourceLocation};
+use ekos_kir::{
+    KirEvidence, KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind,
+    SourceLocation,
+};
 use ekos_plpgsql::lex::{Tok, lex};
 use ekos_plpgsql::{head_words, line_of, statements};
 use serde_json::json;
@@ -29,7 +33,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "view-analyzer/1";
+const LOGIC_VERSION: &str = "view-analyzer/2";
 
 /// The most source text a view's evidence carries; the exact span is always recorded.
 const MAX_FRAGMENT: usize = 4096;
@@ -53,6 +57,8 @@ pub struct ViewAnalyzerPass {
     sql: String,
     dialect_name: String,
     dialect: Box<dyn Dialect + Send + Sync>,
+    /// The owning `File` object's id key, as for routines (`PlPgSqlAnalyzerPass::with_file`).
+    file_key: Option<String>,
     stats: Arc<Mutex<ViewStats>>,
 }
 
@@ -70,8 +76,15 @@ impl ViewAnalyzerPass {
             source_path,
             dialect_name: dialect_name.into(),
             dialect,
+            file_key: None,
             stats: Arc::new(Mutex::new(ViewStats::default())),
         }
+    }
+
+    /// Attach every view to its `File` object (`Contains`), whose id is the v5 UUID of `file_key`.
+    pub fn with_file(mut self, file_key: impl Into<String>) -> Self {
+        self.file_key = Some(file_key.into());
+        self
     }
 
     /// Handle onto this pass's counters, readable after the `PassManager` has taken the pass.
@@ -97,12 +110,18 @@ impl CompilerPass for ViewAnalyzerPass {
         hasher.update(LOGIC_VERSION.as_bytes());
         hasher.update(self.source_path.as_bytes());
         hasher.update(self.dialect_name.as_bytes());
+        hasher.update(self.file_key.as_deref().unwrap_or_default().as_bytes());
         hasher.update(self.sql.as_bytes());
         vec![hex::encode(hasher.finalize())]
     }
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
-        let (graph, stats) = recover_views(&self.source_path, &self.sql, self.dialect.as_ref());
+        let (graph, stats) = recover_views_in(
+            &self.source_path,
+            &self.sql,
+            self.dialect.as_ref(),
+            self.file_key.as_deref(),
+        );
         *self.stats.lock().unwrap() = stats.clone();
         if let Some(e) = &stats.lex_error {
             tracing::warn!(pass = %self.pass_id, "view-analyzer: file does not lex: {e}");
@@ -187,6 +206,16 @@ struct Definition<'a> {
 
 /// Recover every view defined in one SQL file. Pure: same input, same graph, ids included.
 pub fn recover_views(source_path: &str, sql: &str, dialect: &dyn Dialect) -> (KirGraph, ViewStats) {
+    recover_views_in(source_path, sql, dialect, None)
+}
+
+/// [`recover_views`], with each view attached to the `File` whose id key is `file_key`.
+pub fn recover_views_in(
+    source_path: &str,
+    sql: &str,
+    dialect: &dyn Dialect,
+    file_key: Option<&str>,
+) -> (KirGraph, ViewStats) {
     let mut stats = ViewStats::default();
     let mut graph = KirGraph::new();
     let found = match statements(sql) {
@@ -245,7 +274,14 @@ pub fn recover_views(source_path: &str, sql: &str, dialect: &dyn Dialect) -> (Ki
     let mut ordered: Vec<(String, Definition)> = by_key.into_iter().collect();
     ordered.sort_by_key(|(_, d)| d.position);
 
-    for (key, def) in &ordered {
+    // `COMMENT ON [MATERIALIZED] VIEW` in the same file: the author's own description.
+    let comments = extract_object_comments(sql);
+    let candidates: Vec<(String, usize)> =
+        ordered.iter().map(|(_, d)| (d.name.clone(), 0)).collect();
+    let docs = match_object_comments(&comments, &[ObjectCommentKind::View], &candidates);
+    let file_id = file_key.map(|k| KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, k.as_bytes())));
+
+    for (index, (key, def)) in ordered.iter().enumerate() {
         let line = line_of(sql, def.offset);
         let mut evidence = KirEvidence::new(
             SourceLocation {
@@ -322,7 +358,38 @@ pub fn recover_views(source_path: &str, sql: &str, dialect: &dyn Dialect) -> (Ki
             obj.properties
                 .insert("footprint_errors".into(), json!(fp.errors));
         }
+        obj.properties.insert(
+            "source_span".into(),
+            json!({"start_line": line, "end_line": line_of(sql, def.offset + def.text.len())}),
+        );
         obj.evidence.push(evidence_id);
+        if let Some(c) = docs.get(&index) {
+            let mut ev = KirEvidence::new(
+                SourceLocation {
+                    path: source_path.to_string(),
+                    line: Some(c.line),
+                    column: None,
+                },
+                clip(
+                    &format!("COMMENT ON VIEW {} IS {}", c.name, c.text),
+                    MAX_FRAGMENT,
+                ),
+            );
+            ev.id = KirId(Uuid::new_v5(
+                &Uuid::NAMESPACE_URL,
+                format!("view-comment:{key}").as_bytes(),
+            ));
+            obj.evidence.push(graph.add_evidence(ev));
+            obj.properties.insert("description".into(), json!(c.text));
+        }
+        if let Some(file_id) = file_id {
+            graph.add_relationship(KirRelationship::deterministic(
+                RelationshipKind::Contains,
+                file_id,
+                obj.id,
+                "",
+            ));
+        }
         graph.add_object(obj);
     }
     (graph, stats)
@@ -435,6 +502,25 @@ create temporary view weird as select * from t where a ~~~ b @@@ ((;\n";
         let (again, _) = recover_views("f.sql", sql, &PostgreSqlDialect {});
         assert_eq!(views(&g)[0].id, views(&again)[0].id);
         assert_eq!(g.evidence[0].id, again.evidence[0].id);
+    }
+
+    #[test]
+    fn a_view_belongs_to_its_file_and_carries_its_documented_description() {
+        let sql = "CREATE VIEW v AS\n  SELECT 1 FROM t;\nCOMMENT ON VIEW v IS 'the v view';";
+        let (g, _) = recover_views_in("db/v.sql", sql, &PostgreSqlDialect {}, Some("db/v.sql"));
+        let v = views(&g)[0];
+        let file_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, b"db/v.sql"));
+        assert!(
+            g.relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Contains && r.from == file_id && r.to == v.id)
+        );
+        assert_eq!(
+            prop(v, "source_span"),
+            &json!({"start_line": 1, "end_line": 2})
+        );
+        assert_eq!(prop(v, "description"), &json!("the v view"));
+        assert_eq!(v.evidence.len(), 2);
     }
 
     #[test]

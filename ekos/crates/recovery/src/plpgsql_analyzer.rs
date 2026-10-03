@@ -22,6 +22,9 @@
 //! both is already on every `ProcedureStatement`.
 
 use crate::plpgsql_footprint::{Footprint, expression_footprint, statement_footprint};
+use crate::sql_comments::{
+    ObjectComment, ObjectCommentKind, extract_object_comments, match_object_comments,
+};
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
@@ -35,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "plpgsql-analyzer/1";
+const LOGIC_VERSION: &str = "plpgsql-analyzer/2";
 
 /// The most source text one statement's evidence carries. A statement longer than this is rare;
 /// its exact byte span is always recorded, so the full text stays recoverable from the file.
@@ -66,6 +69,9 @@ pub struct PlPgSqlAnalyzerPass {
     pass_id: String,
     source_path: String,
     sql: String,
+    /// The owning `File` object's id key (project-qualified, observe-path-relative — RFC 0079),
+    /// so each routine hangs off its file with a `Contains` edge.
+    file_key: Option<String>,
     stats: Arc<Mutex<PlPgSqlStats>>,
 }
 
@@ -76,8 +82,16 @@ impl PlPgSqlAnalyzerPass {
             pass_id: format!("plpgsql-analyzer:{source_path}"),
             sql: sql.into(),
             source_path,
+            file_key: None,
             stats: Arc::new(Mutex::new(PlPgSqlStats::default())),
         }
+    }
+
+    /// Attach every routine to its `File` object (`Contains`), whose id is the v5 UUID of
+    /// `file_key` — the same scheme `build` and every language analyzer use.
+    pub fn with_file(mut self, file_key: impl Into<String>) -> Self {
+        self.file_key = Some(file_key.into());
+        self
     }
 
     /// Handle onto this pass's counters, readable after the `PassManager` has taken the pass.
@@ -107,12 +121,14 @@ impl CompilerPass for PlPgSqlAnalyzerPass {
         let mut hasher = Sha256::new();
         hasher.update(LOGIC_VERSION.as_bytes());
         hasher.update(self.source_path.as_bytes());
+        hasher.update(self.file_key.as_deref().unwrap_or_default().as_bytes());
         hasher.update(self.sql.as_bytes());
         vec![hex::encode(hasher.finalize())]
     }
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
-        let (graph, stats) = recover_routines(&self.source_path, &self.sql);
+        let (graph, stats) =
+            recover_routines_in(&self.source_path, &self.sql, self.file_key.as_deref());
         *self.stats.lock().unwrap() = stats.clone();
 
         if let Some(e) = &stats.lex_error {
@@ -159,6 +175,15 @@ fn procedure_key(source_path: &str, ir: &ProcedureIr) -> String {
 
 /// Recover every routine in one SQL file into KIR. Pure: same input, same graph (ids included).
 pub fn recover_routines(source_path: &str, sql: &str) -> (KirGraph, PlPgSqlStats) {
+    recover_routines_in(source_path, sql, None)
+}
+
+/// [`recover_routines`], with each routine attached to the `File` whose id key is `file_key`.
+pub fn recover_routines_in(
+    source_path: &str,
+    sql: &str,
+    file_key: Option<&str>,
+) -> (KirGraph, PlPgSqlStats) {
     let mut stats = PlPgSqlStats::default();
     let mut graph = KirGraph::new();
 
@@ -195,8 +220,31 @@ pub fn recover_routines(source_path: &str, sql: &str) -> (KirGraph, PlPgSqlStats
     let mut ordered: Vec<(String, Parsed)> = by_key.into_iter().collect();
     ordered.sort_by_key(|(_, p)| p.position);
 
-    for (key, parsed) in &ordered {
-        emit_procedure(&mut graph, &mut stats, source_path, sql, key, parsed);
+    // `COMMENT ON FUNCTION|PROCEDURE` in the same file: the author's own description.
+    let comments = extract_object_comments(sql);
+    let candidates: Vec<(String, usize)> = ordered
+        .iter()
+        .map(|(_, p)| (p.ir.signature.name.clone(), p.ir.signature.arguments.len()))
+        .collect();
+    let docs = match_object_comments(
+        &comments,
+        &[ObjectCommentKind::Function, ObjectCommentKind::Procedure],
+        &candidates,
+    );
+    let file = FileCtx {
+        source_path,
+        sql,
+        file_id: file_key.map(|k| KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, k.as_bytes()))),
+    };
+    for (i, (key, parsed)) in ordered.iter().enumerate() {
+        emit_procedure(
+            &mut graph,
+            &mut stats,
+            &file,
+            key,
+            parsed,
+            docs.get(&i).copied(),
+        );
     }
     (graph, stats)
 }
@@ -210,14 +258,23 @@ struct Parsed<'a> {
     text: &'a str,
 }
 
+/// The file a routine is recovered from.
+struct FileCtx<'a> {
+    source_path: &'a str,
+    sql: &'a str,
+    /// The owning `File` object, when the caller knows its key.
+    file_id: Option<KirId>,
+}
+
 fn emit_procedure(
     graph: &mut KirGraph,
     stats: &mut PlPgSqlStats,
-    source_path: &str,
-    sql: &str,
+    file: &FileCtx,
     key: &str,
     parsed: &Parsed,
+    doc: Option<&ObjectComment>,
 ) {
+    let (source_path, sql) = (file.source_path, file.sql);
     let Parsed {
         ir, offset, text, ..
     } = parsed;
@@ -301,9 +358,40 @@ fn emit_procedure(
     .with_property("source_path", json!(source_path))
     .with_property("line", json!(line))
     .with_property("span_start", json!(offset))
-    .with_property("span_end", json!(offset + text.len()));
+    .with_property("span_end", json!(offset + text.len()))
+    // RFC 0088's symbol convention, so `llm_description` can read the routine's source.
+    .with_property(
+        "source_span",
+        json!({"start_line": line, "end_line": line_of(sql, offset + text.len())}),
+    );
     obj.id = proc_id;
     obj.evidence.push(evidence_id);
+
+    if let Some(c) = doc {
+        // The author's description outranks anything generated (RFC 0146 Phase 2).
+        let mut ev = KirEvidence::new(
+            SourceLocation {
+                path: source_path.to_string(),
+                line: Some(c.line),
+                column: None,
+            },
+            clip(
+                &format!("COMMENT ON FUNCTION {} IS {}", c.name, c.text),
+                MAX_FRAGMENT,
+            ),
+        );
+        ev.id = kir_id(&format!("plpgsql:procedure-comment:{key}"));
+        obj.evidence.push(graph.add_evidence(ev));
+        obj.properties.insert("description".into(), json!(c.text));
+    }
+    if let Some(file_id) = file.file_id {
+        graph.add_relationship(KirRelationship::deterministic(
+            RelationshipKind::Contains,
+            file_id,
+            proc_id,
+            "",
+        ));
+    }
 
     // What the routine touches: the union of its statements' footprints and its declarations'
     // defaults — or, for a `LANGUAGE sql` routine, its body parsed as the SQL it is.
@@ -909,6 +997,54 @@ $$ LANGUAGE sql;";
         assert_eq!(prop(items, "fidelity"), &json!("signature"));
         assert_eq!(strs(items, "reads"), ["open_item"]);
         assert_eq!(strs(items, "writes"), ["account"]);
+    }
+
+    /// A routine hangs off its `File`, carries the line span `llm_description` reads source by,
+    /// and takes the author's `COMMENT ON FUNCTION` as its description, cited at the comment.
+    #[test]
+    fn a_routine_belongs_to_its_file_and_carries_its_documented_description() {
+        let sql = "CREATE FUNCTION pay(in_id int) RETURNS int AS $$\nBEGIN\n  RETURN 1;\nEND $$ LANGUAGE plpgsql;\n\
+                   COMMENT ON FUNCTION pay(int) IS $$ Posts a payment. $$;\n\
+                   CREATE FUNCTION quiet() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql;";
+        let (g, _) = recover_routines_in(
+            "sql/modules/Payment.sql",
+            sql,
+            Some("sql/modules/Payment.sql"),
+        );
+        let file_id = KirId(Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            b"sql/modules/Payment.sql",
+        ));
+        let procs = of_kind(&g, "Procedure");
+        for p in &procs {
+            assert!(
+                g.relationships
+                    .iter()
+                    .any(|r| r.kind == RelationshipKind::Contains
+                        && r.from == file_id
+                        && r.to == p.id),
+                "{} has no Contains edge from its File",
+                p.name
+            );
+        }
+        let pay = procs.iter().find(|p| p.name == "pay").unwrap();
+        assert_eq!(
+            prop(pay, "source_span"),
+            &json!({"start_line": 1, "end_line": 4})
+        );
+        assert_eq!(prop(pay, "description"), &json!("Posts a payment."));
+        let cited = g
+            .evidence
+            .iter()
+            .find(|e| pay.evidence.contains(&e.id) && e.fragment.starts_with("COMMENT ON"))
+            .expect("the description cites its comment");
+        assert_eq!(cited.location.line, Some(5));
+        let quiet = procs.iter().find(|p| p.name == "quiet").unwrap();
+        assert_eq!(
+            prop(quiet, "description"),
+            &Value::Null,
+            "no comment, no description"
+        );
     }
 
     #[tokio::test]
