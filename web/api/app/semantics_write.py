@@ -115,6 +115,33 @@ def review_argv(
     return argv
 
 
+_MAX_BULK = 500
+
+
+def bulk_argv(
+    action: Literal["confirm", "reject"], item_ids: list[str], reviewer: str, *, note: str | None
+) -> list[str]:
+    """One CLI call deciding many items alike — the CLI applies them all or none."""
+    if action not in ("confirm", "reject"):
+        raise ReviewError("bulk review is confirm or reject; edits are one at a time")
+    if not item_ids:
+        raise ReviewError("no items selected")
+    if len(item_ids) > _MAX_BULK:
+        raise ReviewError(f"at most {_MAX_BULK} items at once")
+    if len(set(item_ids)) != len(item_ids):
+        raise ReviewError("an item is selected twice")
+    bad = [i for i in item_ids if not _UUID.match(i)]
+    if bad:
+        raise ReviewError(f"item ids must be UUIDs: {bad[:3]}")
+    note = _clean("note", note)
+    if action == "reject" and not note:
+        raise ReviewError("a rejection needs a note")
+    argv = ["semantics", action, *item_ids, f"--as={reviewer}"]
+    if note:
+        argv.append(f"--note={note}")
+    return argv
+
+
 async def _run(ekos_bin: str, workspace_path: str, argv: list[str]) -> tuple[int, str, str]:
     root = Path(workspace_path).resolve()
     if not root.is_dir():

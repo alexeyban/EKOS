@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_236.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_237.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -157,7 +157,7 @@ JSON-RPC 2.0 (also `--tcp <addr>` for multiple clients on one server, RFC 0115).
 RFC 0018), `ekos_diff`, `ekos_status`, `ekos_transformation_explain`/`ekos_transformation_diff`
 (Transformation IR, RFC 0028), `ekos_architecture_evaluate`/`ekos_architecture_drift`/`ekos_architecture_diff`
 (RFC 0065/0107-0109), the gated `ekos_clickhouse_query` (live NL-to-SQL, off by default, RFC 0056),
-the opt-in `ekos_session_note`/`ekos_session_recall`/`ekos_session_brief` (RFC 0151, `[session-memory]`; the note tool writes only the inbox file, never the ledger), and the two write-capable review tools `ekos_identity_review` (confirm/reject a candidate identity
+the opt-in `ekos_session_note`/`ekos_session_recall`/`ekos_session_brief` (RFC 0151, `[session-memory]`; the note tool writes only the inbox file, never the ledger), the opt-in read-only `ekos_semantics_lookup`/`ekos_semantics_gaps` (RFC 0170, `[semantics]`; every result carries its review status in words — there is no MCP tool that confirms a definition), and the two write-capable review tools `ekos_identity_review` (confirm/reject a candidate identity
 match — cross-system, RFC 0029, or same-source fuzzy, RFC 0063; the tool doesn't distinguish
 origin, only `Custom("SameAs")` kind) and `ekos_architecture_review` (confirm/reject an
 LLM-classified crate role, RFC 0109). Every other tool is read-only, going through `Runtime`

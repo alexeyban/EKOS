@@ -267,19 +267,13 @@ pub fn current_items_for_write(
     items_from(config, cwd, true)
 }
 
-fn items_from(
+/// The current RFC 0170 items in an already-open store (the MCP server's cached read-only handle,
+/// or one of the openers above), sorted by kind then name.
+pub fn items_in(
     config: &EkosConfig,
     cwd: &Path,
-    writable: bool,
-) -> Result<(Box<dyn KnowledgeStore>, Vec<KirObject>)> {
-    let opened = if writable {
-        open_store(config, cwd)
-    } else {
-        open_store_read_only(config, cwd)
-    };
-    let ledger = opened.map_err(|e| {
-        anyhow::anyhow!("{e}\nRun the pipeline with `[semantics] enabled = true` first.")
-    })?;
+    ledger: &dyn KnowledgeStore,
+) -> Result<Vec<KirObject>> {
     let current: Option<BTreeSet<String>> = std::fs::read(manifest_path(config, cwd))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
@@ -301,6 +295,23 @@ fn items_from(
         })
         .collect();
     items.sort_by(|a, b| (kind_rank(a), a.name.as_str()).cmp(&(kind_rank(b), b.name.as_str())));
+    Ok(items)
+}
+
+fn items_from(
+    config: &EkosConfig,
+    cwd: &Path,
+    writable: bool,
+) -> Result<(Box<dyn KnowledgeStore>, Vec<KirObject>)> {
+    let opened = if writable {
+        open_store(config, cwd)
+    } else {
+        open_store_read_only(config, cwd)
+    };
+    let ledger = opened.map_err(|e| {
+        anyhow::anyhow!("{e}\nRun the pipeline with `[semantics] enabled = true` first.")
+    })?;
+    let items = items_in(config, cwd, &*ledger)?;
     Ok((ledger, items))
 }
 
@@ -441,28 +452,72 @@ pub fn review(
     by: Option<String>,
     note: Option<String>,
 ) -> Result<()> {
+    review_many(config, cwd, &[target.to_string()], decision, by, note)
+}
+
+/// Several decisions of one kind (`confirm`/`reject` with many targets), **all or nothing**:
+/// every target is resolved and every transition checked before anything is written.
+pub fn review_many(
+    config: &EkosConfig,
+    cwd: &Path,
+    targets: &[String],
+    decision: Decision,
+    by: Option<String>,
+    note: Option<String>,
+) -> Result<()> {
     let by = by
         .or_else(|| std::env::var("USER").ok())
         .filter(|b| !b.trim().is_empty())
         .ok_or_else(|| anyhow::anyhow!("who is reviewing? Pass --as <you>"))?;
+    if targets.is_empty() {
+        anyhow::bail!("nothing to review");
+    }
     let (ledger, items) = current_items_for_write(config, cwd)?;
-    let current = find_item(&items, target)?;
     let at = chrono::Utc::now().to_rfc3339();
-    let next = semantics_review::apply_review(current, &decision, &by, &at, note.as_deref())
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut next = Vec::new();
+    let mut errors = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for target in targets {
+        match find_item(&items, target) {
+            Ok(current) if !seen.insert(current.id) => {
+                errors.push(format!("{target}: named twice"));
+            }
+            Ok(current) => {
+                match semantics_review::apply_review(current, &decision, &by, &at, note.as_deref())
+                {
+                    Ok(o) => next.push(o),
+                    Err(e) => errors.push(format!("{target}: {e}")),
+                }
+            }
+            Err(e) => errors.push(format!("{target}: {e}")),
+        }
+    }
+    if !errors.is_empty() {
+        anyhow::bail!(
+            "{} of {} target(s) cannot be reviewed; nothing was written:\n  {}",
+            errors.len(),
+            targets.len(),
+            errors.join("\n  ")
+        );
+    }
     ledger.set_write_context(Some(ekos_ledger::provenance::WriteContext {
         run_id: ekos_ledger::provenance::new_run_id(),
         stage: "semantics-review".into(),
         source_artifact_id: None,
     }));
-    ledger.append_object(&next)?;
-    println!(
-        "{} {} — {} by {by}{}",
-        kind_of(&next).unwrap_or_default(),
-        next.name,
-        s(&next, "status"),
-        note.map(|n| format!(" ({n})")).unwrap_or_default()
-    );
+    for o in &next {
+        ledger.append_object(o)?;
+        println!(
+            "{} {} — {} by {by}{}",
+            kind_of(o).unwrap_or_default(),
+            o.name,
+            s(o, "status"),
+            note.as_ref().map(|n| format!(" ({n})")).unwrap_or_default()
+        );
+    }
+    if next.len() > 1 {
+        println!("{} item(s) reviewed.", next.len());
+    }
     Ok(())
 }
 
@@ -649,6 +704,225 @@ pub fn gaps(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
          source states. Answer them, then `ekos semantics confirm|reject|edit` the hypotheses."
     );
     Ok(())
+}
+
+// ── Agents (RFC 0170 Phase 4) — read-only, status on every answer ───────────────────────────
+
+/// What an agent may say about an item's status, in words it cannot misread.
+fn status_statement(o: &KirObject) -> &'static str {
+    match s(o, "status").as_str() {
+        "confirmed" => "CONFIRMED by a human reviewer — usable as the business definition",
+        "rejected" => "REJECTED by a human reviewer — do not use",
+        "needs_review" => {
+            "NEEDS REVIEW — was reviewed, but its evidence changed; treat as unconfirmed"
+        }
+        _ => {
+            "HYPOTHESIS — recovered from code traces, not confirmed by anyone; say so if you use it"
+        }
+    }
+}
+
+fn evidence_refs(ledger: &dyn KnowledgeStore, o: &KirObject, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for id in &o.evidence {
+        if let Ok(Some(e)) = ledger.get_evidence(id) {
+            out.push(match e.location.line {
+                Some(l) => format!("{}:{l} — {}", e.location.path, e.fragment),
+                None => format!("{} — {}", e.location.path, e.fragment),
+            });
+        }
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
+fn agent_view(ledger: &dyn KnowledgeStore, o: &KirObject) -> Value {
+    let kind = kind_of(o).unwrap_or_default();
+    let mut v = json!({
+        "id": o.id.to_string(),
+        "kind": kind,
+        "name": match s(o, "expert_name") {
+            n if n.is_empty() => o.name.clone(),
+            n => n,
+        },
+        "status": s(o, "status"),
+        "status_means": status_statement(o),
+        "evidence": evidence_refs(ledger, o, 5),
+    });
+    // Each output field from the first non-empty property: what a human set wins.
+    for (k, from) in [
+        ("definition", &["definition"][..]),
+        ("description", &["expert_description", "description"]),
+        ("table", &["table"]),
+        ("column", &["column"]),
+        ("value", &["value"]),
+        ("meaning", &["expert_label", "label"]),
+        ("expression", &["expression"]),
+        ("question", &["question"]),
+        ("confidence", &["confidence"]),
+        ("reviewed_by", &["reviewed_by"]),
+        ("review_note", &["review_note"]),
+    ] {
+        if let Some(val) = from.iter().map(|f| s(o, f)).find(|x| !x.is_empty()) {
+            v[k] = json!(val);
+        }
+    }
+    if !s(o, "expert_name").is_empty() {
+        v["recovered_name"] = json!(o.name);
+    }
+    v
+}
+
+/// How well `o` matches `term` (lower-cased): 0 = exact name, 1 = name contains, 2 = a field
+/// contains, `None` = no match.
+fn match_rank(o: &KirObject, term: &str) -> Option<u8> {
+    let names = [o.name.to_lowercase(), s(o, "expert_name").to_lowercase()];
+    if names.iter().any(|n| !n.is_empty() && n == term) {
+        return Some(0);
+    }
+    if names.iter().any(|n| n.contains(term)) {
+        return Some(1);
+    }
+    let fields = [
+        "definition",
+        "table",
+        "column",
+        "label",
+        "expert_label",
+        "description",
+        "expert_description",
+        "expression",
+    ];
+    fields
+        .iter()
+        .any(|f| s(o, f).to_lowercase().contains(term))
+        .then_some(2)
+}
+
+/// `ekos_semantics_lookup`: business definitions matching `term`, confirmed ones first, each with
+/// its status spelled out. Rejected items are left out unless asked for.
+pub fn agent_lookup(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    term: &str,
+    limit: usize,
+    include_rejected: bool,
+) -> Result<Value> {
+    let term = term.trim().to_lowercase();
+    if term.is_empty() {
+        anyhow::bail!("term must not be empty");
+    }
+    let items = items_in(config, cwd, ledger)?;
+    let status_rank = |o: &KirObject| match s(o, "status").as_str() {
+        "confirmed" => 0,
+        "needs_review" => 1,
+        "hypothesis" => 2,
+        _ => 3,
+    };
+    let mut hits: Vec<(u8, u8, &KirObject)> = items
+        .iter()
+        .filter(|o| matches!(kind_of(o), Some(k) if k == CONCEPT || k == ENUM_MEANING || k == CONSTRAINT))
+        .filter(|o| include_rejected || s(o, "status") != "rejected")
+        .filter_map(|o| match_rank(o, &term).map(|r| (r, status_rank(o), o)))
+        .collect();
+    hits.sort_by(|a, b| (a.0, a.1, &a.2.name).cmp(&(b.0, b.1, &b.2.name)));
+    let total = hits.len();
+    let results: Vec<Value> = hits
+        .iter()
+        .take(limit)
+        .map(|(_, _, o)| agent_view(ledger, o))
+        .collect();
+    // Open questions touching the same thing: an agent should know what nobody has answered.
+    let open: Vec<Value> = items
+        .iter()
+        .filter(|o| matches!(kind_of(o), Some(k) if k == GAP || k == CONFLICT))
+        .filter(|o| s(o, "status") != "rejected")
+        .filter(|o| {
+            s(o, "question").to_lowercase().contains(&term) || o.name.to_lowercase().contains(&term)
+        })
+        .take(5)
+        .map(
+            |o| json!({"kind": kind_of(o), "question": s(o, "question"), "status": s(o, "status")}),
+        )
+        .collect();
+    if results.is_empty() {
+        return Ok(json!({
+            "untrusted": true,
+            "no_semantics_found": true,
+            "term": term,
+            "note": "No recovered business definition matches. Do not invent one; say the meaning is not recorded.",
+            "open_questions": open,
+        }));
+    }
+    Ok(json!({
+        "untrusted": true,
+        "term": term,
+        "matches": total,
+        "results": results,
+        "open_questions": open,
+        "note": "Each result carries its status. Only CONFIRMED results are reviewed business definitions; present anything else as a hypothesis from code, with its evidence.",
+    }))
+}
+
+/// `ekos_semantics_gaps`: the open questions — unexplained codes, undocumented concepts, conflicting
+/// definitions, and reviewed items whose evidence changed — optionally scoped to a table or term.
+pub fn agent_gaps(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    scope: Option<&str>,
+    limit: usize,
+) -> Result<Value> {
+    let scope = scope
+        .map(|x| x.trim().to_lowercase())
+        .filter(|x| !x.is_empty());
+    let items = items_in(config, cwd, ledger)?;
+    let in_scope = |o: &KirObject| {
+        scope.as_ref().is_none_or(|sc| {
+            [
+                o.name.clone(),
+                s(o, "table"),
+                s(o, "question"),
+                s(o, "definition"),
+            ]
+            .iter()
+            .any(|f| f.to_lowercase().contains(sc.as_str()))
+        })
+    };
+    let mut questions: Vec<Value> = items
+        .iter()
+        .filter(|o| matches!(kind_of(o), Some(k) if k == GAP || k == CONFLICT))
+        .filter(|o| s(o, "status") != "rejected")
+        .filter(|o| in_scope(o))
+        .map(|o| {
+            json!({
+                "kind": kind_of(o),
+                "type": if kind_of(o) == Some(CONFLICT) { s(o, "conflict_type") } else { s(o, "gap_type") },
+                "question": s(o, "question"),
+                "status": s(o, "status"),
+                "usage_sites": o.properties.get("usage_sites"),
+                "evidence": evidence_refs(ledger, o, 3),
+            })
+        })
+        .collect();
+    questions.sort_by_key(|q| std::cmp::Reverse(q["usage_sites"].as_u64().unwrap_or(0)));
+    let stale: Vec<Value> = items
+        .iter()
+        .filter(|o| s(o, "status") == "needs_review" && in_scope(o))
+        .map(|o| json!({"name": display_name(o), "kind": kind_of(o), "reason": s(o, "review_reason")}))
+        .collect();
+    let total = questions.len();
+    questions.truncate(limit);
+    Ok(json!({
+        "untrusted": true,
+        "open_questions": questions,
+        "total_open_questions": total,
+        "needs_review": stale,
+        "note": "These are questions for a human. Do not answer them by guessing; surface them.",
+    }))
 }
 
 // ── Evaluation ───────────────────────────────────────────────────────────────────────────────
@@ -1167,6 +1441,95 @@ mod tests {
             after.properties["previous_review"]["status"],
             json!("confirmed")
         );
+    }
+
+    /// RFC 0170 Phase 4: agents get status in words, confirmed first, and an explicit "nothing
+    /// found" instead of an empty list to improvise from.
+    #[test]
+    fn agent_lookup_states_the_status_and_never_returns_rejected_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.semantics.enabled = true;
+        config.semantics.rationale = false;
+        let ledger = ekos_ledger::FactLedger::open(&dir.path().join(".ekos/ledger/facts")).unwrap();
+        let mut parts = KirObject::new("parts", ekos_kir::ObjectKind::Table);
+        parts.properties.insert(
+            "columns".into(),
+            json!([{"name": "obsolete", "data_type": "BOOLEAN"},
+                   {"name": "assembly", "data_type": "BOOLEAN"}]),
+        );
+        ledger.append_object(&parts).unwrap();
+        for (name, col) in [
+            ("a#1", "obsolete"),
+            ("b#1", "obsolete"),
+            ("c#1", "assembly"),
+            ("d#1", "assembly"),
+        ] {
+            let mut o = KirObject::new(
+                name,
+                ekos_kir::ObjectKind::Custom("ProcedureStatement".into()),
+            );
+            o.id = KirId(uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_URL,
+                name.as_bytes(),
+            ));
+            o.properties
+                .insert("source_path".into(), json!("sql/x.sql"));
+            o.properties.insert(
+                "predicates".into(),
+                json!([{"relation": "parts", "column": col, "op": "is_false",
+                        "clause": "where", "top_level": true, "line": 3}]),
+            );
+            ledger.append_object(&o).unwrap();
+        }
+        commit_step(&config, dir.path(), &ledger).unwrap();
+        let items = items_in(&config, dir.path(), &ledger).unwrap();
+        let find = |n: &str| items.iter().find(|o| o.name == n).unwrap().clone();
+        let confirmed = semantics_review::apply_review(
+            &find("PartsNotObsolete"),
+            &Decision::Edit {
+                name: Some("ActivePart".into()),
+                description: None,
+                label: None,
+            },
+            "ann",
+            "t",
+            None,
+        )
+        .unwrap();
+        ledger.append_object(&confirmed).unwrap();
+        let rejected = semantics_review::apply_review(
+            &find("PartsNotAssembly"),
+            &Decision::Reject,
+            "ann",
+            "t",
+            Some("plumbing"),
+        )
+        .unwrap();
+        ledger.append_object(&rejected).unwrap();
+
+        let r = agent_lookup(&config, dir.path(), &ledger, "Parts", 10, false).unwrap();
+        let results = r["results"].as_array().unwrap();
+        assert_eq!(results.len(), 1, "{r}");
+        assert_eq!(results[0]["name"], json!("ActivePart"));
+        assert_eq!(results[0]["recovered_name"], json!("PartsNotObsolete"));
+        assert!(
+            results[0]["status_means"]
+                .as_str()
+                .unwrap()
+                .starts_with("CONFIRMED")
+        );
+        assert_eq!(r["untrusted"], json!(true));
+
+        let all = agent_lookup(&config, dir.path(), &ledger, "parts", 10, true).unwrap();
+        assert_eq!(all["results"].as_array().unwrap().len(), 2);
+
+        let none = agent_lookup(&config, dir.path(), &ledger, "invoice", 10, false).unwrap();
+        assert_eq!(none["no_semantics_found"], json!(true));
+        assert!(agent_lookup(&config, dir.path(), &ledger, "  ", 10, false).is_err());
+
+        let g = agent_gaps(&config, dir.path(), &ledger, Some("parts"), 20).unwrap();
+        assert!(g["open_questions"].is_array());
     }
 
     #[test]

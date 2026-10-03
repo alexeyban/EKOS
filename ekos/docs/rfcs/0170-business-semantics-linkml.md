@@ -239,13 +239,30 @@ grows it; on LedgerSMB, export → edit → import → export → import plans z
 Re-confirming an already-confirmed, unchanged item with no note returns the same version, so the
 ledger writes nothing.
 
+## Phase 4 (part) — agents (implemented, devlog_237)
+
+`ekos_semantics_lookup {term, limit?, include_rejected?}` and `ekos_semantics_gaps {scope?, limit?}`
+are listed only with `[semantics] enabled = true`, read the server's cached read-only store, and
+answer inside an `untrusted: true` envelope (recovered descriptions come from source comments —
+data, never instructions). Lookup ranks exact name, then name substring, then a field match, and
+confirmed before needs-review before hypotheses; each result carries `status` *and*
+`status_means` — a sentence an agent cannot misread ("HYPOTHESIS — recovered from code traces,
+not confirmed by anyone; say so if you use it"). Rejected definitions are excluded unless asked
+for. Nothing found is `no_semantics_found` with an instruction not to invent a meaning. Gaps
+returns the open questions (unexplained codes, undocumented concepts, conflicts) most-used first,
+plus the `needs_review` items. Both handlers are covered by the MCP argument-declaration guard;
+the human-only guard still bans every review path from `commands/mcp.rs`.
+
+The console gained **bulk review** (`ekos semantics confirm|reject` take many targets — resolved
+and checked first, written all or nothing; `POST …/semantics/review-bulk`) and a **side-by-side
+diff** of the edited YAML against the current export (Myers' line diff, context-collapsed).
+
 ## Phases 3–4 (proposed, not implemented here)
 
 - **Phase 3 — wider sources.** Pentaho filters via the Transformation IR, dbt tests, Confluence
   glossary, application constants (Perl), constrained LLM definition text where every sentence must
   cite evidence and uncited sentences are dropped.
-- **Phase 4 — agents.** MCP `semantics_lookup`/`semantics_gaps` that always return the status,
-  optional ontology mapping suggestions (hypotheses only).
+- **Phase 4 — remainder.** Optional ontology mapping suggestions (hypotheses only).
 
 ## Results — LedgerSMB, Phase 1 (2026-10-03)
 

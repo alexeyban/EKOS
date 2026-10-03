@@ -834,8 +834,9 @@ enum SemanticsCommands {
     },
     /// Confirm a hypothesis as a correct business definition (human-only; never via MCP)
     Confirm {
-        /// The item's name or id
-        target: String,
+        /// The items' names or ids — several are confirmed together, all or nothing
+        #[arg(required = true)]
+        targets: Vec<String>,
         /// Who is confirming (default: $USER)
         #[arg(long = "as")]
         by: Option<String>,
@@ -844,7 +845,9 @@ enum SemanticsCommands {
     },
     /// Reject a hypothesis (a reason is required)
     Reject {
-        target: String,
+        /// The items' names or ids — several are rejected together (one note), all or nothing
+        #[arg(required = true)]
+        targets: Vec<String>,
         #[arg(long = "as")]
         by: Option<String>,
         #[arg(long)]
@@ -1166,22 +1169,26 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 status.as_deref(),
                 json,
             ),
-            SemanticsCommands::Confirm { target, by, note } => crate::commands::semantics::review(
-                &config,
-                &cwd,
-                &target,
-                ekos_semantic::semantics_review::Decision::Confirm,
-                by,
-                note,
-            ),
-            SemanticsCommands::Reject { target, by, note } => crate::commands::semantics::review(
-                &config,
-                &cwd,
-                &target,
-                ekos_semantic::semantics_review::Decision::Reject,
-                by,
-                note,
-            ),
+            SemanticsCommands::Confirm { targets, by, note } => {
+                crate::commands::semantics::review_many(
+                    &config,
+                    &cwd,
+                    &targets,
+                    ekos_semantic::semantics_review::Decision::Confirm,
+                    by,
+                    note,
+                )
+            }
+            SemanticsCommands::Reject { targets, by, note } => {
+                crate::commands::semantics::review_many(
+                    &config,
+                    &cwd,
+                    &targets,
+                    ekos_semantic::semantics_review::Decision::Reject,
+                    by,
+                    note,
+                )
+            }
             SemanticsCommands::Edit {
                 target,
                 name,

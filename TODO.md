@@ -6294,8 +6294,8 @@ LinkML; generation stays in LinkML.
 - [x] Review-based eval metrics: definition precision, gap usefulness
 - [x] Console review UI (RFC 0127 web console, devlog_236): review queue, gaps & conflicts,
       LinkML viewer + YAML editor
-- [ ] Console: reviewing many items at once (bulk confirm), and a diff view between the edited
-      YAML and the current export
+- [x] Console: bulk confirm/reject (all or nothing) and a side-by-side diff of the edited YAML
+      against the current export — devlog_237
 - [ ] Re-baseline the starter gold set's `IS FALSE` vs `IS NOT TRUE` predicates — or better, replace
       it with an expert's set
 
@@ -6309,5 +6309,5 @@ LinkML; generation stays in LinkML.
 ### Phase 4 — round-trip and agents
 - [x] `ekos import linkml` (expert YAML edits → review decisions; matched by `ekos_id`, all or
       nothing, `--dry-run`) — devlog_236
-- [ ] MCP `semantics_lookup` / `semantics_gaps`, status on every answer
+- [x] MCP `ekos_semantics_lookup` / `ekos_semantics_gaps`, status on every answer — devlog_237
 - [ ] Ontology mapping suggestions (hypotheses only)

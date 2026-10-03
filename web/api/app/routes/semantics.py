@@ -180,6 +180,37 @@ async def review(
     return {"ok": True, "reviewer": who, "message": message}
 
 
+class BulkIn(BaseModel):
+    action: Literal["confirm", "reject"]
+    ids: list[str] = Field(min_length=1, max_length=500)
+    note: str | None = Field(default=None, max_length=2000)
+    reviewer: str | None = Field(default=None, max_length=80)
+
+
+@router.post(
+    "/review-bulk",
+    responses={400: BAD_REQUEST, 409: CONFLICT, 502: BAD_GATEWAY},
+)
+async def review_bulk(
+    body: BulkIn,
+    ws: models.Workspace = Depends(require_workspace),
+    settings: Settings = Depends(get_settings),
+    principal: Principal = Depends(_WRITER),
+) -> dict:
+    """Confirm or reject many items in one decision — all or nothing, one reviewer, one note."""
+    who = _reviewer(principal, settings, body.reviewer)
+    try:
+        argv = semantics_write.bulk_argv(body.action, body.ids, who, note=body.note)
+        message = await semantics_write.review(settings.ekos_bin, ws.path, argv)
+    except semantics_write.ReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except semantics_write.LedgerBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except semantics_write.CliFailed as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "reviewer": who, "count": len(body.ids), "message": message}
+
+
 class ImportIn(BaseModel):
     yaml: str
     reviewer: str | None = Field(default=None, max_length=80)

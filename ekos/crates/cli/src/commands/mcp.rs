@@ -907,10 +907,47 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     if config.session_memory.enabled {
         tools.extend(session_tool_definitions());
     }
+    if config.semantics.enabled {
+        tools.extend(semantics_tool_definitions());
+    }
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
     tools
+}
+
+/// RFC 0170 Phase 4 — business-semantics lookups for agents, listed only with
+/// `[semantics] enabled = true`. Read-only, and every answer carries the item's status in words:
+/// a hypothesis recovered from code is never handed over as a fact. There is deliberately no MCP
+/// tool that confirms, rejects or edits one — that is `ekos semantics confirm|reject|edit` /
+/// `ekos import linkml`, human-only (a source-scan test in `semantics.rs` enforces it).
+fn semantics_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "ekos_semantics_lookup",
+            "description": "Look up what a business term, table, column or code MEANS (e.g. 'active customer', 'oe_class_id', 'approved'), from definitions EKOS recovered from SQL filters, lookup tables, CHECK constraints and column comments. Every result states its status: only CONFIRMED results were reviewed by a human; HYPOTHESIS results are inferred from code and must be presented as such, with their evidence. Returns `no_semantics_found` when nothing matches — then say the meaning is not recorded rather than guessing. Also returns open questions about the term.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "term": { "type": "string", "description": "A business term, table, column, code or concept name" },
+                    "limit": { "type": "integer", "description": "Max results (default 10, max 50)" },
+                    "include_rejected": { "type": "boolean", "description": "Also return definitions a human rejected (default false)" }
+                },
+                "required": ["term"]
+            }
+        }),
+        json!({
+            "name": "ekos_semantics_gaps",
+            "description": "The open questions about business meaning: coded values used in logic that no source explains, concepts nobody documented, conflicting definitions, and reviewed definitions whose evidence changed. Optionally scoped to a table or term. Use it to tell a user what is NOT known instead of guessing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scope": { "type": "string", "description": "A table, term or concept name to narrow to" },
+                    "limit": { "type": "integer", "description": "Max questions (default 20, max 100)" }
+                }
+            }
+        }),
+    ]
 }
 
 /// RFC 0151 — the three agent-facing session-memory tools, listed only with
@@ -1394,6 +1431,14 @@ fn call_tool(
         }
         let ledger = cache.get(config, workspace)?;
         return session_read(config, workspace, ledger, name, args);
+    }
+
+    if matches!(name, "ekos_semantics_lookup" | "ekos_semantics_gaps") {
+        if !config.semantics.enabled {
+            anyhow::bail!("business semantics are disabled — set [semantics] enabled = true");
+        }
+        let ledger = cache.get(config, workspace)?;
+        return semantics_read(config, workspace, ledger, name, args);
     }
 
     let ledger = cache.get(config, workspace)?;
@@ -1973,6 +2018,42 @@ fn session_note(config: &EkosConfig, workspace: &Path, args: &Value) -> Result<V
         "accepted": accepted,
         "redactions_applied": redactions_applied,
     }))
+}
+
+/// RFC 0170 Phase 4 — the read-only business-semantics tools.
+fn semantics_read(
+    config: &EkosConfig,
+    workspace: &Path,
+    ledger: &dyn KnowledgeStore,
+    name: &str,
+    args: &Value,
+) -> Result<Value> {
+    if name == "ekos_semantics_lookup" {
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 50) as usize;
+        let include_rejected = args
+            .get("include_rejected")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        return super::semantics::agent_lookup(
+            config,
+            workspace,
+            ledger,
+            required_str(args, "term")?,
+            limit,
+            include_rejected,
+        );
+    }
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(20)
+        .clamp(1, 100) as usize;
+    let scope = args.get("scope").and_then(Value::as_str);
+    super::semantics::agent_gaps(config, workspace, ledger, scope, limit)
 }
 
 /// `ekos_session_recall` / `ekos_session_brief` (RFC 0151) — read-only over the ledger.
@@ -2983,6 +3064,7 @@ mod tests {
         // Every gated tool switched on, so every schema is listed.
         let mut config = EkosConfig::default();
         config.session_memory.enabled = true;
+        config.semantics.enabled = true;
         config.clickhouse.enable_mcp_query = true;
         let tools = tool_definitions(&config, &Extensions::none());
         let declared = |tool: &str| -> Vec<String> {
@@ -3049,6 +3131,10 @@ mod tests {
             (
                 "fn session_read(",
                 vec!["ekos_session_recall", "ekos_session_brief"],
+            ),
+            (
+                "fn semantics_read(",
+                vec!["ekos_semantics_lookup", "ekos_semantics_gaps"],
             ),
         ] {
             let code = &src[src.find(func).unwrap()..];

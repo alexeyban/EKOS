@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from app.auth import Principal
 from app.main import create_app
 from app.readproc import ReadProcError, _check_allowed
-from app.semantics_write import ReviewError, review_argv, reviewer_for
+from app.semantics_write import ReviewError, bulk_argv, review_argv, reviewer_for
 
 R = {"Authorization": "Bearer r"}
 W = {"Authorization": "Bearer w"}
@@ -214,3 +214,35 @@ def test_a_client_side_route_reloads_into_the_app(tmp_path: Path) -> None:
     for missing in ("assets/missing.js", "api/nope"):
         with pytest.raises(StarletteHTTPException):
             asyncio.run(files.get_response(missing, scope))
+
+
+ID2 = "5d04c82a-bbf0-5307-a0c3-f27beda79347"
+
+
+def test_bulk_argv_is_one_all_or_nothing_cli_call() -> None:
+    assert bulk_argv("confirm", [ID, ID2], "ann", note=None) == [
+        "semantics",
+        "confirm",
+        ID,
+        ID2,
+        "--as=ann",
+    ]
+    for bad in (
+        lambda: bulk_argv("confirm", [], "ann", note=None),
+        lambda: bulk_argv("confirm", [ID, ID], "ann", note=None),
+        lambda: bulk_argv("confirm", [ID, "--all"], "ann", note=None),
+        lambda: bulk_argv("reject", [ID], "ann", note=" "),
+    ):
+        with pytest.raises(ReviewError):
+            bad()
+
+
+def test_bulk_review_route(setup) -> None:
+    c, log = setup
+    url = "/api/workspaces/w/semantics/review-bulk"
+    body = {"action": "confirm", "ids": [ID, ID2], "reviewer": "Ann"}
+    assert c.post(url, headers=R, json=body).status_code == 403
+    r = c.post(url, headers=W, json=body)
+    assert r.status_code == 200 and r.json()["count"] == 2, r.text
+    assert _calls(log)[-1] == ["semantics", "confirm", ID, ID2, "--as=token:Ann"]
+    assert c.post(url, headers=W, json={**body, "action": "edit"}).status_code == 422

@@ -137,6 +137,37 @@ describe("Semantics review", () => {
   });
 });
 
+describe("bulk review", () => {
+  it("confirms every selected item in one all-or-nothing call", async () => {
+    const two = [concept(), concept({ definition: "parts.assembly IS TRUE" }, "5d04c82a-bbf0-5307-a0c3-f27beda79347")];
+    two[1].name = "PartsAssembly";
+    vi.spyOn(client, "api").mockResolvedValue(two);
+    const post = vi.spyOn(client, "apiPost").mockResolvedValue({ count: 2, reviewer: "token:Ann" });
+    renderAt("/w/ws1/semantics", writer);
+    fireEvent.click(await screen.findByLabelText(/select all 2 shown/));
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Confirm 2" });
+    expect(confirm).toBeDisabled(); // token mode: who?
+    fireEvent.change(screen.getByLabelText("bulk reviewer"), { target: { value: "Ann" } });
+    expect(screen.getByRole("button", { name: "Reject 2" })).toBeDisabled(); // no note
+    fireEvent.click(confirm);
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const [url, body] = post.mock.calls[0] as [string, { ids: string[] }];
+    expect(url).toBe("/workspaces/ws1/semantics/review-bulk");
+    expect(body).toMatchObject({ action: "confirm", note: null, reviewer: "Ann" });
+    expect([...body.ids].sort()).toEqual([ID, "5d04c82a-bbf0-5307-a0c3-f27beda79347"].sort());
+    expect(await screen.findByText("2 item(s) confirmed — recorded as token:Ann.")).toBeInTheDocument();
+    expect(screen.queryByText("2 selected")).not.toBeInTheDocument();
+  });
+
+  it("offers no selection to a reader", async () => {
+    vi.spyOn(client, "api").mockResolvedValue([concept()]);
+    renderAt("/w/ws1/semantics", reader);
+    await screen.findByText("PartsNotObsolete");
+    expect(screen.queryByLabelText(/select all/)).not.toBeInTheDocument();
+  });
+});
+
 describe("LinkML editor", () => {
   it("validates edits into decisions before it can apply them", async () => {
     vi.spyOn(client, "api").mockResolvedValue({ empty: false, yaml: "name: t\n" });
@@ -167,5 +198,17 @@ describe("LinkML editor", () => {
       yaml: "name: t\n",
     });
     await waitFor(() => expect(screen.getByRole("button", { name: /^Apply/ })).toBeEnabled());
+  });
+
+  it("shows edits side by side against the current export", async () => {
+    vi.spyOn(client, "api").mockResolvedValue({ empty: false, yaml: "name: t\nclasses:\n  A: {}\n" });
+    renderAt("/w/ws1/semantics?view=linkml", { mode: "oidc", email: "ann@x.io", role: "write" });
+    fireEvent.click(await screen.findByRole("button", { name: "YAML editor" }));
+    const ta = await screen.findByDisplayValue(/name: t/);
+    fireEvent.change(ta, { target: { value: "name: t\nclasses:\n  B: {}\n" } });
+    fireEvent.click(screen.getByRole("button", { name: /Diff vs current export/ }));
+    expect(await screen.findByText("1 changed block(s). Left: current export · right: your edits.")).toBeInTheDocument();
+    expect(screen.getByText("A: {}")).toHaveClass("lm-old");
+    expect(screen.getByText("B: {}")).toHaveClass("lm-new");
   });
 });

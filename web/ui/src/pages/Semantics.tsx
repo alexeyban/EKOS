@@ -4,10 +4,10 @@
 // viewer/editor. Every decision goes through the console API to the human-only CLI commands; the
 // MCP surface can never promote a hypothesis.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useOutletContext, useParams, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, apiPost } from "../api/client";
 import type { ReviewStatus, SemanticsItem, SemanticsKind } from "../api/types";
 import type { Me } from "../WorkspaceShell";
 import { Linkml } from "./Linkml";
@@ -15,8 +15,11 @@ import { SemanticsItemPanel } from "./SemanticsItemPanel";
 import {
   KIND_FILTER,
   KIND_LABEL,
+  REVIEWABLE,
   displayName,
+  loadReviewer,
   reviewOrder,
+  saveReviewer,
   status,
   statusChip,
   summary,
@@ -73,7 +76,10 @@ function Review({ me }: { me: Me }) {
   const [statusFilter, setStatus] = useState("");
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkDone, setBulkDone] = useState("");
   const items = useItems(id, kind, statusFilter);
+  const canWrite = me.role === "write";
 
   const needle = text.trim().toLowerCase();
   const shown = reviewOrder(items.data ?? []).filter(
@@ -82,6 +88,15 @@ function Review({ me }: { me: Me }) {
       displayName(i).toLowerCase().includes(needle) ||
       summary(i).toLowerCase().includes(needle),
   );
+  const pickable = shown.filter((i) => REVIEWABLE.includes(i.kind));
+  const allPicked = pickable.length > 0 && pickable.every((i) => picked.has(i.id));
+  const toggle = (itemId: string) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(itemId)) n.delete(itemId);
+      else n.add(itemId);
+      return n;
+    });
   const counts = (items.data ?? []).reduce<Record<string, number>>((m, i) => {
     m[status(i)] = (m[status(i)] ?? 0) + 1;
     return m;
@@ -128,6 +143,30 @@ function Review({ me }: { me: Me }) {
             </span>
           ))}
         </p>
+        {canWrite && pickable.length > 0 && (
+          <label className="sem-pickall">
+            <input
+              type="checkbox"
+              checked={allPicked}
+              onChange={() =>
+                setPicked(allPicked ? new Set() : new Set(pickable.map((i) => i.id)))
+              }
+            />
+            select all {pickable.length} shown
+          </label>
+        )}
+        {canWrite && picked.size > 0 && (
+          <BulkBar
+            workspace={id}
+            me={me}
+            ids={[...picked]}
+            onDone={(message) => {
+              setPicked(new Set());
+              setBulkDone(message);
+            }}
+          />
+        )}
+        {bulkDone && picked.size === 0 && <p className="ok-line">{bulkDone}</p>}
         {items.isLoading && <p className="muted">loading…</p>}
         {items.isError && <p className="err">{String(items.error)}</p>}
         {items.data?.length === 0 && (
@@ -144,6 +183,15 @@ function Review({ me }: { me: Me }) {
               onClick={() => setSelected(i.id)}
             >
               <div className="sem-item-head">
+                {canWrite && REVIEWABLE.includes(i.kind) && (
+                  <input
+                    type="checkbox"
+                    aria-label={`select ${displayName(i)}`}
+                    checked={picked.has(i.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => toggle(i.id)}
+                  />
+                )}
                 <span className="chip">{KIND_LABEL[i.kind]}</span>
                 <strong>{displayName(i)}</strong>
                 <span className={statusChip(status(i))}>{status(i).replace("_", " ")}</span>
@@ -227,6 +275,81 @@ function Gaps({ me }: { me: Me }) {
           onClose={() => setSelected(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** Confirm or reject every selected item in one decision — the CLI applies all or none. */
+function BulkBar({
+  workspace,
+  me,
+  ids,
+  onDone,
+}: {
+  workspace: string;
+  me: Me;
+  ids: string[];
+  /** Called after a decision (with what happened) or on clear (with ""). The bar unmounts when the
+   * selection empties, so the parent shows the message. */
+  onDone: (message: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [note, setNote] = useState("");
+  const [reviewer, setReviewer] = useState(loadReviewer());
+  const decide = useMutation({
+    mutationFn: (action: "confirm" | "reject") =>
+      apiPost<{ count: number; reviewer: string }>(
+        `/workspaces/${workspace}/semantics/review-bulk`,
+        { action, ids, note: note || null, reviewer: me.mode === "token" ? reviewer : null },
+      ),
+    onSuccess: (r, action) => {
+      if (me.mode === "token") saveReviewer(reviewer);
+      setNote("");
+      onDone(`${r.count} item(s) ${action}ed — recorded as ${r.reviewer}.`);
+      void qc.invalidateQueries({ queryKey: ["semantics"] });
+      void qc.invalidateQueries({ queryKey: ["semantics-gaps"] });
+      void qc.invalidateQueries({ queryKey: ["semantics-item"] });
+      void qc.invalidateQueries({ queryKey: ["linkml"] });
+    },
+  });
+  const needsName = me.mode === "token" && !reviewer.trim();
+  return (
+    <div className="sem-bulk" role="region" aria-label="bulk review">
+      <strong>{ids.length} selected</strong>
+      {me.mode === "token" && (
+        <input
+          aria-label="bulk reviewer"
+          placeholder="reviewer name"
+          value={reviewer}
+          onChange={(e) => setReviewer(e.target.value)}
+        />
+      )}
+      <input
+        aria-label="bulk note"
+        placeholder="note (required to reject)"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <div className="btnrow">
+        <button
+          className="save"
+          disabled={decide.isPending || needsName}
+          onClick={() => decide.mutate("confirm")}
+        >
+          Confirm {ids.length}
+        </button>
+        <button
+          className="danger-btn"
+          disabled={decide.isPending || needsName || !note.trim()}
+          onClick={() => decide.mutate("reject")}
+        >
+          Reject {ids.length}
+        </button>
+        <button className="linkish" onClick={() => onDone("")}>
+          clear
+        </button>
+      </div>
+      {decide.isError && <p className="err">{String(decide.error)}</p>}
     </div>
   );
 }

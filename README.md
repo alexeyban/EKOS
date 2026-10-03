@@ -455,8 +455,15 @@ one — `ekos semantics confirm|reject|edit` is CLI-only and no MCP tool can rea
 while what the item asserts and its evidence are unchanged (line moves don't count); otherwise the
 item becomes `needs_review`, and a confirmed item whose traces disappear is flagged, not dropped.
 Same-column threshold disagreements (`> 90` here, `> 60` there) become `ConceptConflict`s.
-The web console's **Semantics** tab is the review UI: a queue with evidence, and a LinkML viewer
-and YAML editor whose edits round-trip through `ekos import linkml` (see *Web console* below). The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
+The web console's **Semantics** tab is the review UI: a queue with evidence and bulk
+confirm/reject, and a LinkML viewer and YAML editor (with a side-by-side diff against the current
+export) whose edits round-trip through `ekos import linkml` (see *Web console* below).
+
+Agents read them over MCP — `ekos_semantics_lookup` (what a term, table, column or code means)
+and `ekos_semantics_gaps` (what is not known), listed when `[semantics]` is on. Every result
+states its status in words ("CONFIRMED by a human reviewer…", "HYPOTHESIS — … say so if you use
+it"); rejected definitions are left out; an empty lookup says `no_semantics_found` so an agent
+does not improvise. No MCP tool can confirm anything. The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
 generates everything else (JSON Schema, Pydantic, RDF/OWL/SHACL):
 
 ```bash
@@ -470,6 +477,7 @@ ekos export linkml --out model.yaml          # confirmed only; --status hypothes
 ekos import linkml model.yaml --dry-run      # an expert's YAML edits → the review decisions they mean
 ekos import linkml model.yaml --as ann       # …recorded, all or nothing (renames, descriptions,
                                              # code labels, ekos_status: confirmed|rejected)
+ekos semantics confirm PartsAssembly PartsNotObsolete --as ann   # many at once, all or nothing
 ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
 ```
 
@@ -1529,12 +1537,14 @@ a Vite + React app (`web/ui/`).
   they export. *Review* — a queue (needs-review first, then hypotheses by confidence) filterable by
   kind/status/text; each item opens with its definition, evidence lines (`path:line` + fragment),
   links and rationale commits, and **Confirm / Reject (note required) / Edit** (name and
-  description, or a code's label). *Gaps & conflicts* — the open questions, conflicting
+  description, or a code's label); tick several (or "select all shown") to confirm or reject
+  them in one all-or-nothing decision. *Gaps & conflicts* — the open questions, conflicting
   definitions and the `needs_review` queue. *LinkML schema* — a **viewer** (concepts, enums and
   tables as a tree; attributes, constraints, permissible values with status chips; "review" on
   any recovered element) and a **YAML editor**: *Validate* is a dry-run `ekos import linkml`
-  showing the decisions the edits stand for, *Apply* records them all-or-nothing; plus download
-  and load-from-file. Decisions need the write role and run the human-only CLI (never MCP),
+  showing the decisions the edits stand for, *Apply* records them all-or-nothing; *Diff vs
+  current export* shows the edits side by side (changed blocks with context); plus download and
+  load-from-file. Decisions need the write role and run the human-only CLI (never MCP),
   attributed to the OIDC user — or, in token mode, to a typed name recorded as `token:<name>`.
 
 ```bash

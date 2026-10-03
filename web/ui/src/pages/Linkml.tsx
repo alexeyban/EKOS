@@ -19,6 +19,7 @@ import type {
   LinkmlYaml,
 } from "../api/types";
 import type { Me } from "../WorkspaceShell";
+import { sideBySide } from "./line-diff";
 import { SemanticsItemPanel } from "./SemanticsItemPanel";
 import { annotation, loadReviewer, saveReviewer, statusChip } from "./semantics-shared";
 
@@ -416,6 +417,12 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [dirty, setDirty] = useState(true);
   const [reviewer, setReviewer] = useState(loadReviewer());
+  const [pane, setPane] = useState<"edit" | "diff">("edit");
+  const baseline = src.data?.yaml ?? "";
+  const diff = useMemo(
+    () => (pane === "diff" ? sideBySide(baseline, text) : null),
+    [pane, baseline, text],
+  );
 
   useEffect(() => {
     if (src.data) {
@@ -489,7 +496,23 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
       </p>
       {src.isError && <p className="err">{String(src.error)}</p>}
       {src.data?.empty && <p className="muted">{src.data.reason}</p>}
+      <div className="sem-filters">
+        <button
+          className={pane === "edit" ? "pill active" : "pill"}
+          onClick={() => setPane("edit")}
+        >
+          Edit
+        </button>
+        <button
+          className={pane === "diff" ? "pill active" : "pill"}
+          onClick={() => setPane("diff")}
+        >
+          Diff vs current export{text !== baseline ? " •" : ""}
+        </button>
+      </div>
+      {pane === "diff" && diff && <YamlDiff rows={diff.rows} changes={diff.changes} />}
       <textarea
+        hidden={pane !== "edit"}
         className="toml lm-yaml"
         spellCheck={false}
         value={text}
@@ -603,5 +626,37 @@ function PlanView({ plan }: { plan: ImportPlan }) {
         </table>
       )}
     </div>
+  );
+}
+
+/** Side by side: the current export on the left, the edited text on the right. */
+function YamlDiff({ rows, changes }: { rows: ReturnType<typeof sideBySide>["rows"]; changes: number }) {
+  if (changes === 0) return <p className="muted">No edits: the text matches the current export.</p>;
+  return (
+    <>
+      <p className="muted">
+        {changes} changed block(s). Left: current export · right: your edits.
+      </p>
+      <div className="lm-diff" role="table" aria-label="diff vs current export">
+        {rows.map((r, i) =>
+          r.kind === "gap" ? (
+            <div key={i} className="lm-diff-gap" role="row">
+              ⋯ {r.hidden} unchanged line(s)
+            </div>
+          ) : (
+            <div key={i} className={`lm-diff-row ${r.kind}`} role="row">
+              <span className={r.left && r.kind !== "same" ? "lm-ln lm-old-mark" : "lm-ln"}>
+                {r.left?.n ?? ""}
+              </span>
+              <code className={r.left && r.kind !== "same" ? "lm-old" : ""}>{r.left?.text ?? ""}</code>
+              <span className={r.right && r.kind !== "same" ? "lm-ln lm-new-mark" : "lm-ln"}>
+                {r.right?.n ?? ""}
+              </span>
+              <code className={r.right && r.kind !== "same" ? "lm-new" : ""}>{r.right?.text ?? ""}</code>
+            </div>
+          ),
+        )}
+      </div>
+    </>
   );
 }
