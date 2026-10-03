@@ -344,10 +344,10 @@ fn atom(e: &Expr, scope: &Scope, clause: Clause) -> Option<PredicateSite> {
         Expr::IsNull(x) => Some(site(scope.resolve(x)?, "is_null", vec![], clause)),
         Expr::IsNotNull(x) => Some(site(scope.resolve(x)?, "is_not_null", vec![], clause)),
         Expr::IsTrue(x) => Some(site(scope.resolve(x)?, "is_true", vec![], clause)),
-        Expr::IsFalse(x) | Expr::IsNotTrue(x) => {
-            Some(site(scope.resolve(x)?, "is_false", vec![], clause))
-        }
-        Expr::IsNotFalse(x) => Some(site(scope.resolve(x)?, "is_true", vec![], clause)),
+        Expr::IsFalse(x) => Some(site(scope.resolve(x)?, "is_false", vec![], clause)),
+        // Not `is_false`/`is_true`: `NULL IS NOT TRUE` holds, `NULL IS FALSE` does not.
+        Expr::IsNotTrue(x) => Some(site(scope.resolve(x)?, "is_not_true", vec![], clause)),
+        Expr::IsNotFalse(x) => Some(site(scope.resolve(x)?, "is_not_false", vec![], clause)),
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             expr,
@@ -362,8 +362,10 @@ fn atom(e: &Expr, scope: &Scope, clause: Clause) -> Option<PredicateSite> {
                 "not_in" => "in",
                 "is_null" => "is_not_null",
                 "is_not_null" => "is_null",
-                "is_true" => "is_false",
-                "is_false" => "is_true",
+                "is_true" => "is_not_true",
+                "is_false" => "is_not_false",
+                "is_not_true" => "is_true",
+                "is_not_false" => "is_false",
                 "like" => "not_like",
                 "not_like" => "like",
                 "between" => "not_between",
@@ -798,6 +800,17 @@ mod tests {
             vec!["account.amount >= 0", "account.kind IN ('A', 'L', 'Q')"]
         );
         assert!(p.iter().all(|s| s.clause == Clause::Check));
+    }
+
+    /// Three-valued logic: `IS NOT TRUE` admits NULL, `IS FALSE` does not.
+    #[test]
+    fn is_not_true_is_not_is_false() {
+        let c =
+            canon("SELECT * FROM t WHERE t.a IS NOT TRUE AND t.b IS FALSE AND NOT (t.c IS TRUE)");
+        assert_eq!(
+            c,
+            vec!["t.a IS NOT TRUE", "t.b IS FALSE", "t.c IS NOT TRUE"]
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # RFC 0170 — Business semantics from technical traces, exported as LinkML
 
-**Status:** Accepted — Phase 1 (MVP) implemented (2026-10-03, devlog_234); Phases 2–4 proposed
+**Status:** Accepted — Phase 1 (MVP) implemented (devlog_234); Phase 2 review loop implemented except console cards (devlog_235), 2026-10-03; Phases 3–4 proposed
 **Date:** 2026-10-03
 **Related:** RFC 0135 (provenance + determinism — this RFC's Phase 0), RFC 0146 Phase 2 (`COMMENT ON`
 descriptions), RFC 0163 (PL/pgSQL IR, `plpgsql_footprint`), RFC 0169 (views), RFC 0029/0063
@@ -171,12 +171,56 @@ lists known unknowns. The gold set must be written by a domain expert **before**
 output; the repository ships the format and a small starter set derived from LedgerSMB's own
 documentation, clearly marked as not expert-authored.
 
-## Phases 2–4 (proposed, not implemented here)
+## Phase 2 — review loop (implemented, devlog_235)
 
-- **Phase 2 — review loop.** `ekos semantics confirm|reject|edit` (human-only, like
-  `migrate-approval`; never reachable from MCP), status lifecycle, `needs_review` when any evidence
-  fact's content changes (RFC 0109's preserve-if-unchanged pattern), `ConceptConflict` (same name or
-  same target with incompatible predicates), console review cards (RFC 0127).
+**Lifecycle.** `hypothesis → confirmed | rejected`; `confirmed`/`rejected → needs_review` when what
+the item asserts or its evidence changes; a reviewed item whose traces vanish gets a stale
+`needs_review` version (never silently dropped). Rejected items whose traces vanish are left alone.
+
+**Signature.** Every item carries `signature` = hash of its kind, its *core* fields (concept:
+definition + table; enum: value, label, meanings' label/source/path; constraint: expression; gap:
+type + subject; conflict: definitions) and the set of its evidence `(path, fragment)` pairs.
+**Line numbers are excluded**, so an edit above a predicate does not reopen every review. A review
+records `reviewed_signature`; at `commit`, `carry_forward` keeps the decision only while the fresh
+signature equals it — confirmations never carry over a changed assertion (the identity-review
+principle). The old decision is kept in `previous_review`, and expert edits survive.
+
+**Human-only.** `ekos semantics confirm|reject|edit <name-or-id> [--as who] [--note …]` (reject
+requires a note; `edit` takes `--name`, `--description`, `--label` for a coded value and confirms
+with corrections). The pure transition is `ekos_semantic::semantics_review::apply_review`; the CLI is
+its only caller, and a source-scanning test fails the build if `commands/mcp.rs` ever names it.
+Writes go through the ledger with stage `semantics-review`, so `ekos ledger audit` shows who decided.
+
+**`ConceptConflict`** (deliberately narrow): *threshold* — one column, the same comparison direction,
+different literals (the plan's "90 days vs 60 days"); *name* — one name for different definitions.
+Differing `IN` sets on one column are **not** flagged: on LedgerSMB they are different concepts
+(`category IN ('A','E')` vs `IN ('E','I')`), not disagreements. LedgerSMB has 0 conflicts.
+
+**Read side.** `list --status`, gaps report shows open conflicts and the `needs_review` queue with
+the reason; rejected gaps/conflicts drop out of it. Export uses `expert_name`/`expert_description`/
+`expert_label`, annotates `ekos_reviewed_by`/`ekos_review_note`/`ekos_conflict`; the default
+`--status confirmed` now yields a real schema once anything is confirmed. `eval` adds the plan's
+review-based metrics: *definition precision* (reviewed concepts accepted without edits) and *gap
+usefulness* (reviewed gaps confirmed as real unknowns).
+
+**Not done:** console review cards (RFC 0127) — the CLI is the only review surface.
+
+### What Phase 2's real run changed
+
+- **Site order came from the ledger's unordered iteration.** Items with more than 12 sites cite the
+  first 12, so their evidence subset — and signature — changed every commit, rewriting the busiest
+  concepts each run. Sites are now sorted; a test feeds the graph reversed and requires identical
+  output.
+- **`IS NOT TRUE` had been normalized to `IS FALSE`.** Wrong under three-valued logic (`NULL IS NOT
+  TRUE` holds). Found because an edit from `IS FALSE` to `IS NOT TRUE` did not reopen a confirmed
+  concept. LedgerSMB uses `IS NOT TRUE` widely: it now yields its own NULL-tolerant concepts
+  (`CrReportNotApprovedOrUnset`, …) and the starter-set recall drops 0.73 → 0.68, because the
+  starter set (written against the buggy output) says `IS FALSE` where the code says `IS NOT TRUE`.
+- **`SqlAnalyzerPass` had no logic version.** Its cache key hashes only the SQL, so a workspace
+  recovered before 0170 would have kept tables without seeds or constraints. Now `v2`.
+
+## Phases 3–4 (proposed, not implemented here)
+
 - **Phase 3 — wider sources.** Pentaho filters via the Transformation IR, dbt tests, Confluence
   glossary, application constants (Perl), constrained LLM definition text where every sentence must
   cite evidence and uncited sentences are dropped.

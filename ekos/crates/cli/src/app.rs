@@ -818,11 +818,47 @@ enum SemanticsCommands {
     /// List the current concepts, enum meanings, constraints, gaps and rationale links — every one
     /// a hypothesis recovered from code traces, never a confirmed definition
     List {
-        /// Only one kind: concept, enum, constraint, gap or rationale
+        /// Only one kind: concept, enum, constraint, gap, conflict or rationale
         #[arg(long)]
         kind: Option<String>,
+        /// Only one status: hypothesis, confirmed, rejected or needs_review
+        #[arg(long)]
+        status: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// Confirm a hypothesis as a correct business definition (human-only; never via MCP)
+    Confirm {
+        /// The item's name or id
+        target: String,
+        /// Who is confirming (default: $USER)
+        #[arg(long = "as")]
+        by: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Reject a hypothesis (a reason is required)
+    Reject {
+        target: String,
+        #[arg(long = "as")]
+        by: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Confirm with corrections: a better name, a description, or a code's label
+    Edit {
+        target: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        /// For a coded value (EnumMeaning)
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long = "as")]
+        by: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
     },
     /// One item with its evidence (path:line) and links
     Show {
@@ -1097,9 +1133,48 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         }
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
         Commands::Semantics { subcommand } => match subcommand {
-            SemanticsCommands::List { kind, json } => {
-                crate::commands::semantics::list(&config, &cwd, kind.as_deref(), json)
-            }
+            SemanticsCommands::List { kind, status, json } => crate::commands::semantics::list(
+                &config,
+                &cwd,
+                kind.as_deref(),
+                status.as_deref(),
+                json,
+            ),
+            SemanticsCommands::Confirm { target, by, note } => crate::commands::semantics::review(
+                &config,
+                &cwd,
+                &target,
+                ekos_semantic::semantics_review::Decision::Confirm,
+                by,
+                note,
+            ),
+            SemanticsCommands::Reject { target, by, note } => crate::commands::semantics::review(
+                &config,
+                &cwd,
+                &target,
+                ekos_semantic::semantics_review::Decision::Reject,
+                by,
+                note,
+            ),
+            SemanticsCommands::Edit {
+                target,
+                name,
+                description,
+                label,
+                by,
+                note,
+            } => crate::commands::semantics::review(
+                &config,
+                &cwd,
+                &target,
+                ekos_semantic::semantics_review::Decision::Edit {
+                    name,
+                    description,
+                    label,
+                },
+                by,
+                note,
+            ),
             SemanticsCommands::Show { target, json } => {
                 crate::commands::semantics::show(&config, &cwd, &target, json)
             }

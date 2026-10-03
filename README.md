@@ -450,22 +450,28 @@ synthesizes **hypotheses** from them, deterministically and without an LLM:
 | `SemanticGap` | A coded value used in logic that no source explains; a concept nobody documented |
 | `RationaleLink` | `git blame -w` on the evidence lines → the commit that last changed them |
 
-Every item is `status: hypothesis` with its evidence (`path:line`). Nothing is confirmed by EKOS:
-review is RFC 0170 Phase 2. The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
+Every item starts as `status: hypothesis` with its evidence (`path:line`). Only a human promotes
+one — `ekos semantics confirm|reject|edit` is CLI-only and no MCP tool can reach it. A review holds
+while what the item asserts and its evidence are unchanged (line moves don't count); otherwise the
+item becomes `needs_review`, and a confirmed item whose traces disappear is flagged, not dropped.
+Same-column threshold disagreements (`> 90` here, `> 60` there) become `ConceptConflict`s. The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
 generates everything else (JSON Schema, Pydantic, RDF/OWL/SHACL):
 
 ```bash
 ekos semantics list [--kind concept|enum|constraint|gap|rationale]
 ekos semantics show PartsNotObsolete        # definition, evidence lines, links, commits
-ekos semantics gaps                         # the questions only a human can answer
-ekos export linkml --status hypothesis --out model.yaml   # default --status confirmed exports nothing yet
+ekos semantics gaps                         # open questions, conflicts, and the needs_review queue
+ekos semantics confirm TransactionsNotApproved --note "drafts"     # human-only (--as, default $USER)
+ekos semantics edit PartsWithInventoryAccnoId --name "Inventory part" --description "…"
+ekos semantics reject UserPreferenceWithoutUserId --note "anti-join plumbing"
+ekos export linkml --out model.yaml          # confirmed only; --status hypothesis|all for the draft
 ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
 ```
 
-On LedgerSMB (SQL + git, no LLM): 39 concepts, 209 coded values in 56 columns (173 with a meaning),
-60 constraints, 8 gaps, 97 rationale links. The LinkML file passes `linkml-lint` with 0 errors and
+On LedgerSMB (SQL + git, no LLM): 40 concepts, 209 coded values in 56 columns (173 with a meaning),
+60 constraints, 8 gaps, 0 conflicts, 97 rationale links; an unchanged re-commit writes nothing. The LinkML file passes `linkml-lint` with 0 errors and
 `gen-json-schema`/`gen-pydantic` run cleanly. Against a *starter* gold set (not expert-written —
-see `ekos/docs/rfcs/0170-ledgersmb-starter-gold.yaml`): concept recall 0.73, enum label accuracy
+see `ekos/docs/rfcs/0170-ledgersmb-starter-gold.yaml`): concept recall 0.68, enum label accuracy
 0.95, evidence validity 1.0. Meaning defined only by comparisons between columns or against the
 current date (overdue, unpaid) leaves no literal trace and is not recovered: no trace, no recovery.
 

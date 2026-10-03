@@ -6286,12 +6286,15 @@ LinkML; generation stays in LinkML.
 - [ ] **Expert-written gold set** (20–30 accounting concepts, written before looking at output) and
       published numbers, misses included — the starter set is not one
 
-### Phase 2 — review loop
-- [ ] `ekos semantics confirm|reject|edit` — human-only, never reachable from MCP (source-scan test)
-- [ ] Status lifecycle; `needs_review` when an evidence fact changes (today: items whose traces
-      vanished simply drop out of `.ekos/semantics/current.json`)
-- [ ] `ConceptConflict` (same name / same target, incompatible predicates)
+### Phase 2 — review loop · **done except console cards (devlog_235)**
+- [x] `ekos semantics confirm|reject|edit` — human-only, never reachable from MCP (source-scan test)
+- [x] Status lifecycle: signature over assertion + evidence (lines excluded); `needs_review` on
+      change; reviewed items whose traces vanish flagged stale, not dropped
+- [x] `ConceptConflict` — threshold (same column/direction, different literal) and name collisions
+- [x] Review-based eval metrics: definition precision, gap usefulness
 - [ ] Console review cards (RFC 0127)
+- [ ] Re-baseline the starter gold set's `IS FALSE` vs `IS NOT TRUE` predicates — or better, replace
+      it with an expert's set
 
 ### Phase 3 — wider sources
 - [ ] Pentaho filters via the Transformation IR; dbt tests; Confluence glossary

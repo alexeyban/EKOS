@@ -20,7 +20,7 @@ use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirObject, ObjectKind, RelationshipKind};
 use ekos_ledger::KnowledgeStore;
 use ekos_semantic::business_semantics::{
-    CONCEPT, CONSTRAINT, ENUM_MEANING, EXPLAINED_BY, GAP, RATIONALE, camel, kind_name,
+    CONCEPT, CONFLICT, CONSTRAINT, ENUM_MEANING, EXPLAINED_BY, GAP, RATIONALE, camel, kind_name,
 };
 use serde_json::Value as Json;
 use serde_yaml::{Mapping, Value};
@@ -61,6 +61,14 @@ fn text(o: &KirObject, k: &str) -> String {
         Json::String(s) => s.clone(),
         Json::Null => String::new(),
         v => v.to_string(),
+    }
+}
+
+/// A string property as a YAML value, or nothing when absent.
+fn opt(o: &KirObject, k: &str) -> Value {
+    match text(o, k) {
+        t if t.is_empty() => Value::Null,
+        t => Value::String(t),
     }
 }
 
@@ -255,7 +263,25 @@ pub fn build_schema(
     // Gaps per subject: `table.column = value` for values, concept name for concepts.
     let mut value_gaps: BTreeMap<(String, String, String), String> = BTreeMap::new();
     let mut concept_gaps: BTreeMap<String, String> = BTreeMap::new();
-    for g in items.iter().filter(|o| kind(o) == GAP) {
+    // Open disagreements between concepts, per concept name.
+    let mut conflicts: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for c in items
+        .iter()
+        .filter(|o| kind(o) == CONFLICT && text(o, "status") != "rejected")
+    {
+        for name in prop(c, "concepts").as_array().into_iter().flatten() {
+            if let Some(n) = name.as_str() {
+                conflicts
+                    .entry(n.to_string())
+                    .or_default()
+                    .push(text(c, "question"));
+            }
+        }
+    }
+    for g in items
+        .iter()
+        .filter(|o| kind(o) == GAP && text(o, "status") != "rejected")
+    {
         match text(g, "gap_type").as_str() {
             "unexplained_value" => {
                 value_gaps.insert(
@@ -501,7 +527,16 @@ pub fn build_schema(
         let Some(parent) = table_class.get(&subject) else {
             continue;
         };
-        let class = unique(o.name.clone(), &mut used, "Concept");
+        let expert = text(o, "expert_name");
+        let class = unique(
+            if expert.is_empty() {
+                o.name.clone()
+            } else {
+                camel(&expert)
+            },
+            &mut used,
+            "Concept",
+        );
         let refs = evidence_refs(ledger, o, 6);
         let mut commits: Vec<String> = Vec::new();
         for r in ledger.relationships_for(&o.id)? {
@@ -519,7 +554,11 @@ pub fn build_schema(
             }
         }
         commits.sort();
-        let author = o.properties.get("description").and_then(Json::as_str);
+        let author = o
+            .properties
+            .get("expert_description")
+            .or_else(|| o.properties.get("description"))
+            .and_then(Json::as_str);
         let description = format!(
             "{}Rows of `{subject}` where {}.",
             author
@@ -531,7 +570,13 @@ pub fn build_schema(
             "EKOS {} recovered from {} site(s); name {}.",
             text(o, "status"),
             text(o, "sites"),
-            if text(o, "name_source") == "view" {
+            if !expert.is_empty() {
+                format!(
+                    "given by {} (recovered as `{}`)",
+                    text(o, "reviewed_by"),
+                    o.name
+                )
+            } else if text(o, "name_source") == "view" {
                 format!("taken from view `{}`", text(o, "view"))
             } else {
                 "derived from the predicate, not from any author".to_string()
@@ -539,6 +584,9 @@ pub fn build_schema(
         ))];
         if let Some(q) = concept_gaps.get(&o.name) {
             comments.push(s(format!("GAP: {q}")));
+        }
+        for q in conflicts.get(&o.name).into_iter().flatten() {
+            comments.push(s(format!("CONFLICT: {q}")));
         }
         classes.insert(
             s(class),
@@ -589,7 +637,10 @@ pub fn build_schema(
         });
         for v in sorted {
             let value = text(v, "value");
-            let label = text(v, "label");
+            let label = match text(v, "expert_label") {
+                e if e.is_empty() => text(v, "label"),
+                e => e,
+            };
             let sources: Vec<String> = prop(v, "meanings")
                 .as_array()
                 .map(|a| {
@@ -617,6 +668,7 @@ pub fn build_schema(
                         map(vec![
                             ("ekos_status", s(text(v, "status"))),
                             ("ekos_confidence", s(text(v, "confidence"))),
+                            ("ekos_reviewed_by", opt(v, "reviewed_by")),
                             (
                                 "ekos_source",
                                 if sources.is_empty() {

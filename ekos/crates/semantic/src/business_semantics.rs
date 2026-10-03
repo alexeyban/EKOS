@@ -33,15 +33,18 @@ pub const ENUM_MEANING: &str = "EnumMeaning";
 pub const CONSTRAINT: &str = "ConstraintCandidate";
 pub const GAP: &str = "SemanticGap";
 pub const RATIONALE: &str = "RationaleLink";
+/// RFC 0170 Phase 2: two concepts that disagree about the same thing.
+pub const CONFLICT: &str = "ConceptConflict";
 
 /// Every kind this module writes.
-pub const KINDS: [&str; 5] = [CONCEPT, ENUM_MEANING, CONSTRAINT, GAP, RATIONALE];
+pub const KINDS: [&str; 6] = [CONCEPT, ENUM_MEANING, CONSTRAINT, GAP, CONFLICT, RATIONALE];
 
 /// Relationship kinds: item → the table/view it describes; concept → where it was seen;
 /// concept/gap → the commit that explains it.
 pub const DESCRIBES: &str = "Describes";
 pub const EVIDENCED_BY: &str = "EvidencedBy";
 pub const EXPLAINED_BY: &str = "ExplainedBy";
+pub const CONFLICTS_WITH: &str = "ConflictsWith";
 
 /// The status every synthesized item starts with.
 pub const HYPOTHESIS: &str = "hypothesis";
@@ -101,6 +104,7 @@ pub struct SemanticsStats {
     pub key_like_columns: usize,
     pub constraints: usize,
     pub gaps: usize,
+    pub conflicts: usize,
     pub rationale_links: usize,
 }
 
@@ -453,6 +457,9 @@ fn seed_label(values: &serde_json::Map<String, Value>, key_col: &str) -> Option<
         .and_then(|(_, v)| v.as_str().map(unquote))
 }
 
+/// One concept in a potential conflict: (id, name, definition).
+type ConflictMember = (KirId, String, String);
+
 /// A coded value used in logic that no source explains.
 struct Unexplained<'a> {
     table: usize,
@@ -534,6 +541,8 @@ fn derived_name(
     let rest = match op {
         "is_true" => c,
         "is_false" => format!("Not{c}"),
+        "is_not_true" => format!("Not{c}OrUnset"),
+        "is_not_false" => format!("{c}OrUnset"),
         "is_null" => format!("Without{c}"),
         "is_not_null" => format!("With{c}"),
         "in" if values.iter().all(|v| labels.contains_key(v)) => vals(values),
@@ -576,7 +585,19 @@ pub fn synthesize(
         index.add(&t.obj.name, t.obj.id);
         by_id.insert(t.obj.id.0, i);
     }
-    let sites = collect_sites(graph, &tables, &index, &by_id, &mut stats);
+    let mut sites = collect_sites(graph, &tables, &index, &by_id, &mut stats);
+    // A ledger hands objects back in no particular order. Everything downstream — which sites an
+    // item cites when it has more than `MAX_EVIDENCE`, evidence ids by index, signatures — must not
+    // depend on it, or every commit rewrites the busiest items.
+    sites.sort_by(|a, b| {
+        (&a.path, a.p.line, &a.carrier_name, a.carrier.0, &a.p).cmp(&(
+            &b.path,
+            b.p.line,
+            &b.carrier_name,
+            b.carrier.0,
+            &b.p,
+        ))
+    });
     let fks = foreign_keys(graph, &by_id);
 
     let mut b = Builder {
@@ -1051,6 +1072,92 @@ pub fn synthesize(
         concept_ids.push((id, key, c.sites.clone()));
     }
 
+    // ── ConceptConflict ─────────────────────────────────────────────────────────────────────
+    // Two kinds, both narrow on purpose. `IN` sets on one column that merely differ are usually
+    // different concepts (asset vs income accounts), not a disagreement, so they are not flagged.
+    //  - threshold: one column, the same comparison direction, different literals — "overdue" as
+    //    `> 90` in one place and `> 60` in another;
+    //  - name: one name for different definitions.
+    let mut conflicts: BTreeMap<String, (&'static str, Vec<ConflictMember>)> = BTreeMap::new();
+    for (def, c) in &concepts {
+        let id = kid(&format!("business-concept:{def}"));
+        if c.atoms.len() == 1
+            && let Some(s0) = c.sites.first()
+            && s0.p.values.len() == 1
+        {
+            let dir = match s0.p.op.as_str() {
+                ">" | ">=" => Some("above"),
+                "<" | "<=" => Some("below"),
+                _ => None,
+            };
+            if let Some(dir) = dir {
+                conflicts
+                    .entry(format!(
+                        "threshold:{}.{}:{dir}",
+                        tables[s0.table].name(),
+                        s0.column
+                    ))
+                    .or_insert(("threshold", Vec::new()))
+                    .1
+                    .push((id, c.name.clone(), def.clone()));
+            }
+        }
+        conflicts
+            .entry(format!("name:{}", c.name))
+            .or_insert(("name", Vec::new()))
+            .1
+            .push((id, c.name.clone(), def.clone()));
+    }
+    for (key, (conflict_type, members)) in conflicts {
+        if members.len() < 2 {
+            continue;
+        }
+        let names: Vec<String> = members.iter().map(|m| m.1.clone()).collect();
+        let defs: Vec<String> = members.iter().map(|m| m.2.clone()).collect();
+        let question = match conflict_type {
+            "threshold" => format!(
+                "Which threshold is the business rule? The code uses {} — one meaning, or several?",
+                defs.join(" vs ")
+            ),
+            _ => format!(
+                "`{}` names {} different definitions: {}. Which is it?",
+                names[0],
+                defs.len(),
+                defs.join(" vs ")
+            ),
+        };
+        let okey = format!("concept-conflict:{key}");
+        let idx = b.object(
+            &okey,
+            format!("conflict: {}", defs.join(" vs ")),
+            CONFLICT,
+            vec![
+                ("conflict_type", json!(conflict_type)),
+                ("concepts", json!(names)),
+                ("definitions", json!(defs)),
+                ("question", json!(question)),
+                ("confidence", json!(0.5)),
+            ],
+        );
+        let id = b.out.objects[idx].id;
+        // Its evidence is its members': each concept's first cited site.
+        let evs: Vec<KirId> = members
+            .iter()
+            .filter_map(|(cid, _, _)| {
+                b.out
+                    .objects
+                    .iter()
+                    .find(|o| o.id == *cid)
+                    .and_then(|o| o.evidence.first().copied())
+            })
+            .collect();
+        b.out.objects[idx].evidence = evs;
+        for (cid, _, _) in &members {
+            b.relate(CONFLICTS_WITH, id, *cid);
+        }
+        stats.conflicts += 1;
+    }
+
     // ── ConstraintCandidate per CHECK ───────────────────────────────────────────────────────
     for t in &tables {
         let Some(Value::Array(checks)) = t.obj.properties.get("check_constraints") else {
@@ -1240,6 +1347,25 @@ pub fn synthesize(
         .iter()
         .filter(|o| kind_name(o) == Some(RATIONALE))
         .count();
+    // RFC 0170 Phase 2: what each item asserts and rests on, for the review lifecycle.
+    let ev_by_id: HashMap<Uuid, &KirEvidence> =
+        b.out.evidence.iter().map(|e| (e.id.0, e)).collect();
+    let sigs: Vec<String> = b
+        .out
+        .objects
+        .iter()
+        .map(|o| {
+            let evs: Vec<&KirEvidence> = o
+                .evidence
+                .iter()
+                .filter_map(|id| ev_by_id.get(&id.0).copied())
+                .collect();
+            crate::semantics_review::signature(o, &evs)
+        })
+        .collect();
+    for (o, sig) in b.out.objects.iter_mut().zip(sigs) {
+        o.properties.insert("signature".into(), json!(sig));
+    }
     b.out.stats = stats;
     b.out
 }
@@ -1676,6 +1802,45 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_same_column_with_different_thresholds_is_a_conflict_not_two_facts() {
+        let mut g = fixture();
+        g.objects.retain(|o| o.name != "parts");
+        g.add_object(table(
+            "parts",
+            json!([{"name": "obsolete", "data_type": "BOOLEAN"}, {"name": "age", "data_type": "INT"}]),
+            vec![],
+        ));
+        for (n, v) in [("a", "90"), ("b", "90"), ("c", "60"), ("d", "60")] {
+            g.add_object(carrier(
+                "ProcedureStatement",
+                &format!("{n}#1"),
+                json!([site("parts", "age", ">", &[v], "where", 1)]),
+            ));
+        }
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        let c = of(&out, CONFLICT);
+        assert_eq!(
+            c.len(),
+            1,
+            "{:?}",
+            c.iter().map(|x| &x.name).collect::<Vec<_>>()
+        );
+        assert_eq!(prop(c[0], "conflict_type"), &json!("threshold"));
+        assert_eq!(
+            out.relationships
+                .iter()
+                .filter(|r| r.kind == RelationshipKind::Custom(CONFLICTS_WITH.into()))
+                .count(),
+            2
+        );
+        assert!(
+            out.objects
+                .iter()
+                .all(|o| o.properties.contains_key("signature"))
+        );
+    }
+
     /// The stored kind must survive a serde round trip, or a ledger read loses every concept.
     #[test]
     fn every_kind_round_trips_through_serde() {
@@ -1690,6 +1855,43 @@ mod tests {
                 .iter()
                 .any(|o| o.kind == ObjectKind::BusinessConcept)
         );
+    }
+
+    /// A ledger returns objects in any order; the output must not change with it.
+    #[test]
+    fn synthesis_does_not_depend_on_object_order() {
+        let a = synthesize(&fixture(), &SemanticsConfig::default(), Some(&Fixed));
+        let mut g = fixture();
+        g.objects.reverse();
+        g.relationships.reverse();
+        let b = synthesize(&g, &SemanticsConfig::default(), Some(&Fixed));
+        let norm = |o: &SemanticsOutput| {
+            let mut v: Vec<_> = o
+                .objects
+                .iter()
+                .map(|x| {
+                    (
+                        x.id.0,
+                        x.evidence.clone(),
+                        serde_json::to_string(&x.properties.iter().collect::<BTreeMap<_, _>>())
+                            .unwrap(),
+                    )
+                })
+                .collect();
+            v.sort_by_key(|x| x.0);
+            v
+        };
+        assert_eq!(norm(&a), norm(&b));
+        let ev = |o: &SemanticsOutput| {
+            let mut v: Vec<_> = o
+                .evidence
+                .iter()
+                .map(|e| (e.id.0, e.fragment.clone()))
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(ev(&a), ev(&b));
     }
 
     #[test]

@@ -35,7 +35,7 @@ pub struct PredicateSite {
     /// The column, lower-cased.
     pub column: String,
     /// `in`, `not_in`, `<`, `<=`, `>`, `>=`, `between`, `not_between`, `is_null`, `is_not_null`,
-    /// `is_true`, `is_false`, `like`, `not_like`.
+    /// `is_true`, `is_false`, `is_not_true`, `is_not_false`, `like`, `not_like`.
     pub op: String,
     /// Normalized literals: numbers as written, strings single-quoted, `true`/`false`/`null`.
     /// Sorted and de-duplicated for `in`/`not_in`.
@@ -83,6 +83,8 @@ pub fn canonical_text(target: &str, op: &str, values: &[String]) -> String {
         "is_not_null" => format!("{target} IS NOT NULL"),
         "is_true" => format!("{target} IS TRUE"),
         "is_false" => format!("{target} IS FALSE"),
+        "is_not_true" => format!("{target} IS NOT TRUE"),
+        "is_not_false" => format!("{target} IS NOT FALSE"),
         "like" => format!("{target} LIKE {}", values.join(", ")),
         "not_like" => format!("{target} NOT LIKE {}", values.join(", ")),
         cmp => format!("{target} {cmp} {}", values.join(", ")),

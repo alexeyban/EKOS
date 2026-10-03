@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "view-analyzer/3";
+const LOGIC_VERSION: &str = "view-analyzer/4";
 
 /// The most source text a view's evidence carries; the exact span is always recorded.
 const MAX_FRAGMENT: usize = 4096;

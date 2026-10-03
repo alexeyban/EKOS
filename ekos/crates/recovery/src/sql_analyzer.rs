@@ -137,6 +137,13 @@ impl CompilerPass for SqlAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v2` = RFC 0170: `Table` objects gained `check_constraints`, `seed_rows` and column
+    /// `not_null`/`primary_key`/`unique`/`description_line`. `cache_inputs` hashes only the SQL, so
+    /// without this a workspace recovered before 0170 keeps serving tables without them.
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();

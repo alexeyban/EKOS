@@ -15,9 +15,10 @@ use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirGraph, KirId, KirObject};
 use ekos_ledger::KnowledgeStore;
 use ekos_semantic::business_semantics::{
-    self, BlameHit, CONCEPT, CONSTRAINT, ENUM_MEANING, GAP, KINDS, RATIONALE, RationaleSource,
-    SemanticsConfig, SemanticsStats,
+    self, BlameHit, CONCEPT, CONFLICT, CONSTRAINT, ENUM_MEANING, GAP, KINDS, RATIONALE,
+    RationaleSource, SemanticsConfig, SemanticsStats,
 };
+use ekos_semantic::semantics_review::{self, Decision};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -51,23 +52,48 @@ pub fn commit_step(
     let blame = (config.semantics.rationale)
         .then(|| GitBlame::new(cwd))
         .flatten();
-    let out = business_semantics::synthesize(
+    let mut out = business_semantics::synthesize(
         &graph,
         &cfg,
         blame.as_ref().map(|b| b as &dyn RationaleSource),
     );
+    // RFC 0170 Phase 2: a human decision holds while what it was about is unchanged.
+    let current: HashMap<KirId, &KirObject> = graph
+        .objects
+        .iter()
+        .filter(|o| kind_of(o).is_some())
+        .map(|o| (o.id, o))
+        .collect();
+    for o in &mut out.objects {
+        semantics_review::carry_forward(o, current.get(&o.id).copied());
+    }
+    // A reviewed item the sources no longer support is not silently dropped: it is flagged.
+    let fresh: std::collections::HashSet<KirId> = out.objects.iter().map(|o| o.id).collect();
+    let mut stale: Vec<KirObject> = current
+        .values()
+        .filter(|o| !fresh.contains(&o.id))
+        .filter(|o| semantics_review::is_reviewed(o) && s(o, "status") != "rejected")
+        .map(|o| semantics_review::stale_version(o).unwrap_or_else(|| (*o).clone()))
+        .collect();
+    stale.sort_by(|a, b| a.name.cmp(&b.name));
     for ev in &out.evidence {
         ledger.append_evidence(ev)?;
     }
     // New ledger versions written: 0 on a re-run over unchanged sources (deterministic ids).
     let mut written = 0usize;
-    for o in &out.objects {
-        written += usize::from(ledger.append_object(o)?);
+    for o in out.objects.iter().chain(&stale) {
+        let w = ledger.append_object(o)?;
+        written += usize::from(w);
     }
     for r in &out.relationships {
         written += usize::from(ledger.append_relationship(r)?);
     }
-    let ids: Vec<String> = out.objects.iter().map(|o| o.id.to_string()).collect();
+    let ids: Vec<String> = out
+        .objects
+        .iter()
+        .chain(&stale)
+        .map(|o| o.id.to_string())
+        .collect();
     let path = manifest_path(config, cwd);
     std::fs::create_dir_all(path.parent().unwrap())?;
     std::fs::write(
@@ -76,6 +102,7 @@ pub fn commit_step(
             "rfc": "0170",
             "stats": stats_json(&out.stats),
             "rationale": blame.is_some(),
+            "stale_reviewed": stale.len(),
             "ids": ids,
         }))?,
     )
@@ -89,6 +116,7 @@ fn stats_json(s: &SemanticsStats) -> Value {
         "concepts_from_views": s.concepts_from_views, "coded_columns": s.coded_columns,
         "enum_values": s.enum_values, "enum_values_explained": s.enum_values_explained,
         "key_like_columns": s.key_like_columns, "constraints": s.constraints, "gaps": s.gaps,
+        "conflicts": s.conflicts,
         "rationale_links": s.rationale_links,
     })
 }
@@ -96,13 +124,14 @@ fn stats_json(s: &SemanticsStats) -> Value {
 /// The one-line summary `ekos commit` prints.
 pub fn summary_line(s: &SemanticsStats, written: usize) -> String {
     format!(
-        "{} concept(s), {} coded value(s) in {} column(s) ({} explained), {} constraint(s), {} gap(s), {} rationale link(s) — all hypotheses ({} of {} predicate sites resolved; {written} new ledger entries)",
+        "{} concept(s), {} coded value(s) in {} column(s) ({} explained), {} constraint(s), {} gap(s), {} conflict(s), {} rationale link(s) — all hypotheses ({} of {} predicate sites resolved; {written} new ledger entries)",
         s.concepts,
         s.enum_values,
         s.coded_columns,
         s.enum_values_explained,
         s.constraints,
         s.gaps,
+        s.conflicts,
         s.rationale_links,
         s.sites_resolved,
         s.sites
@@ -265,9 +294,10 @@ fn kind_filter(kind: &str) -> Result<&'static str> {
         "enum" | "enums" | "enummeaning" => ENUM_MEANING,
         "constraint" | "constraints" | "constraintcandidate" => CONSTRAINT,
         "gap" | "gaps" | "semanticgap" => GAP,
+        "conflict" | "conflicts" | "conceptconflict" => CONFLICT,
         "rationale" | "rationalelink" => RATIONALE,
         other => anyhow::bail!(
-            "unknown kind `{other}` — expected concept, enum, constraint, gap or rationale"
+            "unknown kind `{other}` — expected concept, enum, constraint, gap, conflict or rationale"
         ),
     })
 }
@@ -285,20 +315,31 @@ fn s(o: &KirObject, k: &str) -> String {
 }
 
 /// One line describing an item.
+/// The name a human gave the item, else the recovered one (with the recovered one alongside).
+fn display_name(o: &KirObject) -> String {
+    match s(o, "expert_name") {
+        n if n.is_empty() => o.name.clone(),
+        n => format!("{n} (recovered as {})", o.name),
+    }
+}
+
 fn line_for(o: &KirObject) -> String {
     let status = s(o, "status");
     match kind_of(o).unwrap_or_default() {
         k if k == CONCEPT => format!(
             "[{status}] {}  — {}  ({} site(s), {}, confidence {})",
-            o.name,
+            display_name(o),
             s(o, "definition"),
             s(o, "sites"),
             s(o, "origin"),
             s(o, "confidence")
         ),
         k if k == ENUM_MEANING => {
-            let label = s(o, "label");
-            let label = if label.is_empty() { "?".into() } else { label };
+            let label = match (s(o, "expert_label"), s(o, "label")) {
+                (e, _) if !e.is_empty() => format!("{e} (expert)"),
+                (_, l) if !l.is_empty() => l,
+                _ => "?".into(),
+            };
             let sources: Vec<String> = p(o, "meanings")
                 .as_array()
                 .map(|a| {
@@ -322,6 +363,7 @@ fn line_for(o: &KirObject) -> String {
         }
         k if k == CONSTRAINT => format!("[{status}] {}  ({})", o.name, s(o, "constraint_type")),
         k if k == GAP => format!("[{}] {}", s(o, "gap_type"), s(o, "question")),
+        k if k == CONFLICT => format!("[{status}] {}", s(o, "question")),
         _ => format!(
             "[{status}] {}  ({}, {})",
             o.name,
@@ -331,56 +373,14 @@ fn line_for(o: &KirObject) -> String {
     }
 }
 
-/// `ekos semantics list`.
-pub fn list(config: &EkosConfig, cwd: &Path, kind: Option<&str>, json_out: bool) -> Result<()> {
-    let want = kind.map(kind_filter).transpose()?;
-    let (_, items) = current_items(config, cwd)?;
-    let items: Vec<&KirObject> = items
-        .iter()
-        .filter(|o| want.is_none_or(|w| kind_of(o) == Some(w)))
-        .collect();
-    if json_out {
-        let rows: Vec<Value> = items.iter().map(|o| item_json(o)).collect();
-        println!("{}", serde_json::to_string_pretty(&rows)?);
-        return Ok(());
-    }
-    if items.is_empty() {
-        println!(
-            "No business-semantics items. Set `[semantics] enabled = true` in ekos.toml and re-run \
-             `ekos commit` (RFC 0170)."
-        );
-        return Ok(());
-    }
-    let mut current = "";
-    for o in &items {
-        let k = kind_of(o).unwrap_or_default();
-        if k != current {
-            let n = items.iter().filter(|x| kind_of(x) == Some(k)).count();
-            println!("\n{k} ({n})");
-            current = k;
-        }
-        println!("  {}", line_for(o));
-    }
-    println!(
-        "\nEvery item is a hypothesis recovered from code traces — nothing here is confirmed."
-    );
-    Ok(())
-}
-
-fn item_json(o: &KirObject) -> Value {
-    let props: BTreeMap<&String, &Value> = o.properties.iter().collect();
-    json!({"id": o.id.to_string(), "kind": kind_of(o), "name": o.name, "properties": props})
-}
-
-/// `ekos semantics show <name-or-id>`.
-pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Result<()> {
-    let (ledger, items) = current_items(config, cwd)?;
+/// The one current item `target` names — by id, recovered name or expert name.
+fn find_item<'a>(items: &'a [KirObject], target: &str) -> Result<&'a KirObject> {
     let matches: Vec<&KirObject> = items
         .iter()
-        .filter(|o| o.id.to_string() == target || o.name == target)
+        .filter(|o| o.id.to_string() == target || o.name == target || s(o, "expert_name") == target)
         .collect();
-    let o = match matches.as_slice() {
-        [one] => *one,
+    match matches.as_slice() {
+        [one] => Ok(*one),
         [] => {
             let near: Vec<&str> = items
                 .iter()
@@ -405,7 +405,112 @@ pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Re
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-    };
+    }
+}
+
+/// `ekos semantics confirm|reject|edit` — RFC 0170 Phase 2. **Human-only:** the CLI is the only
+/// caller of `semantics_review::apply_review`; `commands/mcp.rs` must never reach it (a test below
+/// scans for it). Writes one new version of the item, attributed to `by`.
+pub fn review(
+    config: &EkosConfig,
+    cwd: &Path,
+    target: &str,
+    decision: Decision,
+    by: Option<String>,
+    note: Option<String>,
+) -> Result<()> {
+    let by = by
+        .or_else(|| std::env::var("USER").ok())
+        .filter(|b| !b.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("who is reviewing? Pass --as <you>"))?;
+    let (ledger, items) = current_items(config, cwd)?;
+    let current = find_item(&items, target)?;
+    let at = chrono::Utc::now().to_rfc3339();
+    let next = semantics_review::apply_review(current, &decision, &by, &at, note.as_deref())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    ledger.set_write_context(Some(ekos_ledger::provenance::WriteContext {
+        run_id: ekos_ledger::provenance::new_run_id(),
+        stage: "semantics-review".into(),
+        source_artifact_id: None,
+    }));
+    ledger.append_object(&next)?;
+    println!(
+        "{} {} — {} by {by}{}",
+        kind_of(&next).unwrap_or_default(),
+        next.name,
+        s(&next, "status"),
+        note.map(|n| format!(" ({n})")).unwrap_or_default()
+    );
+    Ok(())
+}
+
+/// `ekos semantics list`.
+pub fn list(
+    config: &EkosConfig,
+    cwd: &Path,
+    kind: Option<&str>,
+    status: Option<&str>,
+    json_out: bool,
+) -> Result<()> {
+    let want = kind.map(kind_filter).transpose()?;
+    if let Some(st) = status
+        && !["hypothesis", "confirmed", "rejected", "needs_review"].contains(&st)
+    {
+        anyhow::bail!("unknown status `{st}` — hypothesis, confirmed, rejected or needs_review");
+    }
+    let (_, items) = current_items(config, cwd)?;
+    let items: Vec<&KirObject> = items
+        .iter()
+        .filter(|o| want.is_none_or(|w| kind_of(o) == Some(w)))
+        .filter(|o| status.is_none_or(|st| s(o, "status") == st))
+        .collect();
+    if json_out {
+        let rows: Vec<Value> = items.iter().map(|o| item_json(o)).collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+    if items.is_empty() {
+        if kind.is_some() || status.is_some() {
+            println!("No business-semantics items match.");
+        } else {
+            println!(
+                "No business-semantics items. Set `[semantics] enabled = true` in ekos.toml and \
+                 re-run `ekos commit` (RFC 0170)."
+            );
+        }
+        return Ok(());
+    }
+    let mut current = "";
+    for o in &items {
+        let k = kind_of(o).unwrap_or_default();
+        if k != current {
+            let n = items.iter().filter(|x| kind_of(x) == Some(k)).count();
+            println!("\n{k} ({n})");
+            current = k;
+        }
+        println!("  {}", line_for(o));
+    }
+    let confirmed = items
+        .iter()
+        .filter(|o| s(o, "status") == "confirmed")
+        .count();
+    println!(
+        "\n{confirmed} of {} confirmed by a human; everything else is a hypothesis recovered from \
+         code traces, or waiting for review.",
+        items.len()
+    );
+    Ok(())
+}
+
+fn item_json(o: &KirObject) -> Value {
+    let props: BTreeMap<&String, &Value> = o.properties.iter().collect();
+    json!({"id": o.id.to_string(), "kind": kind_of(o), "name": o.name, "properties": props})
+}
+
+/// `ekos semantics show <name-or-id>`.
+pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Result<()> {
+    let (ledger, items) = current_items(config, cwd)?;
+    let o = find_item(&items, target)?;
     let evidence: Vec<Value> = o
         .evidence
         .iter()
@@ -468,15 +573,30 @@ pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Re
 /// `ekos semantics gaps` — the gap report: the questions only a human can answer.
 pub fn gaps(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
     let (_, items) = current_items(config, cwd)?;
-    let gaps: Vec<&KirObject> = items.iter().filter(|o| kind_of(o) == Some(GAP)).collect();
+    // A gap a human rejected ("not a real unknown") is closed.
+    let gaps: Vec<&KirObject> = items
+        .iter()
+        .filter(|o| matches!(kind_of(o), Some(k) if k == GAP || k == CONFLICT))
+        .filter(|o| s(o, "status") != "rejected")
+        .collect();
+    let waiting: Vec<&KirObject> = items
+        .iter()
+        .filter(|o| s(o, "status") == "needs_review")
+        .collect();
     if json_out {
-        let rows: Vec<Value> = gaps.iter().map(|o| item_json(o)).collect();
+        let rows: Vec<Value> = gaps.iter().chain(&waiting).map(|o| item_json(o)).collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
         return Ok(());
     }
     let mut by_type: BTreeMap<String, Vec<&KirObject>> = BTreeMap::new();
     for g in &gaps {
-        by_type.entry(s(g, "gap_type")).or_default().push(g);
+        let t = match kind_of(g) {
+            Some(k) if k == CONFLICT => {
+                format!("conflicting definitions ({})", s(g, "conflict_type"))
+            }
+            _ => s(g, "gap_type"),
+        };
+        by_type.entry(t).or_default().push(g);
     }
     println!("Semantic gap report — {} open question(s)", gaps.len());
     for (t, gs) in by_type {
@@ -493,9 +613,18 @@ pub fn gaps(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
             println!("  - {}", s(g, "question"));
         }
     }
+    if !waiting.is_empty() {
+        println!(
+            "\nneeds_review ({}) — reviewed once, but the evidence changed or vanished",
+            waiting.len()
+        );
+        for o in &waiting {
+            println!("  - {}: {}", display_name(o), s(o, "review_reason"));
+        }
+    }
     println!(
         "\nNo trace, no recovery: these are the places where the code depends on a meaning no \
-         source states. Answer them, then confirm the hypotheses (RFC 0170 Phase 2)."
+         source states. Answer them, then `ekos semantics confirm|reject|edit` the hypotheses."
     );
     Ok(())
 }
@@ -794,6 +923,23 @@ pub fn score(
     }
 
     let explained = enums.iter().filter(|e| !s(e, "label").is_empty()).count();
+
+    // RFC 0170 §5 metrics that need no gold set, only human reviews (Phase 2).
+    let reviewed = |kind: &str| -> (usize, usize, usize) {
+        let of_kind = items.iter().filter(|o| kind_of(o) == Some(kind));
+        let (mut ok, mut edited, mut rejected) = (0, 0, 0);
+        for o in of_kind {
+            match s(o, "status").as_str() {
+                "confirmed" if o.properties.keys().any(|k| k.starts_with("expert_")) => edited += 1,
+                "confirmed" => ok += 1,
+                "rejected" => rejected += 1,
+                _ => {}
+            }
+        }
+        (ok, edited, rejected)
+    };
+    let (c_ok, c_edit, c_rej) = reviewed(CONCEPT);
+    let (g_ok, g_edit, g_rej) = reviewed(GAP);
     json!({
         "gold": {"concepts": gold.concepts.len(), "enum_codes": gold_codes, "known_unknowns": gold.known_unknowns.len()},
         "recovered": {"concepts": concepts.len(), "enum_values": enums.len(), "gaps": gaps.len()},
@@ -810,6 +956,10 @@ pub fn score(
                 "detail": format!("{explained} of {} recovered coded values have at least one meaning", enums.len())},
             "gap_recall": {"value": ratio(gap_hits, gold.known_unknowns.len()),
                 "detail": format!("{gap_hits} of {} known unknowns reported as gaps", gold.known_unknowns.len())},
+            "definition_precision_reviewed": {"value": ratio(c_ok, c_ok + c_edit + c_rej),
+                "detail": format!("{c_ok} of {} reviewed concepts accepted without edits ({c_edit} edited, {c_rej} rejected)", c_ok + c_edit + c_rej)},
+            "gap_usefulness_reviewed": {"value": ratio(g_ok + g_edit, g_ok + g_edit + g_rej),
+                "detail": format!("{} of {} reviewed gaps confirmed as real unknowns", g_ok + g_edit, g_ok + g_edit + g_rej)},
             "evidence_validity": {"value": ratio(valid, refs),
                 "detail": format!("{valid} of {refs} cited lines exist and mention what they are cited for")},
         },
@@ -908,6 +1058,89 @@ mod tests {
         assert_eq!(r["metrics"]["enum_label_accuracy"]["value"], json!(0.5));
         assert_eq!(r["metrics"]["gap_recall"]["value"], json!(1.0));
         assert_eq!(r["misses"]["wrong_labels"].as_array().unwrap().len(), 1);
+    }
+
+    /// RFC 0170 Phase 2: promotion stays human-only.
+    #[test]
+    fn no_mcp_code_can_reach_the_review_lifecycle() {
+        let mcp = include_str!("mcp.rs");
+        assert!(
+            !mcp.contains("semantics_review"),
+            "semantics review must stay CLI-only"
+        );
+        assert!(!mcp.contains("semantics::review"));
+    }
+
+    /// The commit step end to end over a real fact ledger: a review survives an unchanged re-run
+    /// (which writes nothing), and a changed source flips it to `needs_review`.
+    #[test]
+    fn a_review_holds_until_the_evidence_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = EkosConfig::default();
+        config.semantics.enabled = true;
+        config.semantics.rationale = false;
+        let ledger = ekos_ledger::FactLedger::open(&dir.path().join(".ekos/ledger/facts")).unwrap();
+
+        let mut parts = KirObject::new("parts", ekos_kir::ObjectKind::Table);
+        parts.properties.insert(
+            "columns".into(),
+            json!([{"name": "obsolete", "data_type": "BOOLEAN"}]),
+        );
+        ledger.append_object(&parts).unwrap();
+        let carrier = |name: &str, op: &str| {
+            let mut o = KirObject::new(
+                name,
+                ekos_kir::ObjectKind::Custom("ProcedureStatement".into()),
+            );
+            o.id = KirId(uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_URL,
+                name.as_bytes(),
+            ));
+            o.properties
+                .insert("source_path".into(), json!("sql/x.sql"));
+            o.properties.insert(
+                "predicates".into(),
+                json!([{"relation": "parts", "column": "obsolete", "op": op,
+                        "clause": "where", "top_level": true, "line": 3}]),
+            );
+            o
+        };
+        ledger.append_object(&carrier("a#1", "is_false")).unwrap();
+        ledger.append_object(&carrier("b#1", "is_false")).unwrap();
+
+        let (_, first) = commit_step(&config, dir.path(), &ledger).unwrap().unwrap();
+        assert!(first > 0);
+        let items: Vec<KirObject> = ledger
+            .all_objects()
+            .unwrap()
+            .into_iter()
+            .filter(|o| kind_of(o) == Some(CONCEPT))
+            .collect();
+        assert_eq!(items.len(), 1);
+        let reviewed =
+            semantics_review::apply_review(&items[0], &Decision::Confirm, "ann", "t", None)
+                .unwrap();
+        ledger.append_object(&reviewed).unwrap();
+
+        let (_, again) = commit_step(&config, dir.path(), &ledger).unwrap().unwrap();
+        assert_eq!(again, 0, "an unchanged re-run writes nothing");
+        assert_eq!(
+            ledger.get_object(&reviewed.id).unwrap().unwrap().properties["status"],
+            json!("confirmed")
+        );
+
+        // One routine changes its filter: the concept rests on different evidence now.
+        ledger
+            .append_object(&carrier("b#1", "is_not_true"))
+            .unwrap();
+        ledger.append_object(&carrier("c#1", "is_false")).unwrap();
+        commit_step(&config, dir.path(), &ledger).unwrap();
+        let after = ledger.get_object(&reviewed.id).unwrap().unwrap();
+        assert_eq!(after.properties["status"], json!("needs_review"));
+        assert_eq!(
+            after.properties["previous_review"]["status"],
+            json!("confirmed")
+        );
     }
 
     #[test]

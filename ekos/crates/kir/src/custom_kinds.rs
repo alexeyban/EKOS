@@ -149,6 +149,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(subject, value | concept) — RFC 0170 gap report; one per open question",
     },
     CustomKind {
+        name: "ConceptConflict",
+        structurally_keyed: true,
+        note: "(conflict type, column or name) — RFC 0170 Phase 2; one per disagreement",
+    },
+    CustomKind {
         name: "RationaleLink",
         structurally_keyed: true,
         note: "(owner item, commit sha) — RFC 0170 git-blame rationale; one commit explains many items",

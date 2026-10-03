@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "plpgsql-analyzer/3";
+const LOGIC_VERSION: &str = "plpgsql-analyzer/4";
 
 /// The most source text one statement's evidence carries. A statement longer than this is rare;
 /// its exact byte span is always recorded, so the full text stays recoverable from the file.

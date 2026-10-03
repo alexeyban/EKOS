@@ -9,6 +9,7 @@ pub mod data_lineage;
 pub mod doc_links;
 pub mod procedure_lineage;
 pub mod rollup;
+pub mod semantics_review;
 pub mod transform_ir;
 pub mod triggers;
 
