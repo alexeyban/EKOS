@@ -358,6 +358,65 @@ fn is_expected_sql_namespace_group<'a>(group: impl Iterator<Item = &'a KirObject
     seen.len() >= 2
 }
 
+/// RFC 0147 amendment (b): a same-name group spread over **separate namespaces** — the database,
+/// and each programming language's code — is an expected co-existence, provided each namespace's
+/// share of the group is unremarkable on its own.
+///
+/// | Namespace | Kinds | Unremarkable alone when |
+/// |---|---|---|
+/// | database | `Table`, `View`, `Procedure`, `Trigger` | only tables, or only views/routines/triggers ([`is_expected_sql_namespace_group`]) |
+/// | Perl | `PerlPackage`, `PerlSymbol` | any mix ([`is_expected_perl_package_symbol_pair`]) |
+/// | JavaScript, Python, Rust, Elixir | `*Module`, `*Symbol` | one kind only |
+///
+/// Found live on LedgerSMB: with `lib/` observed beside `sql/`, **16 conflicts, every one Perl
+/// beside SQL** — subs wrapping the stored procedure they call (`asset__save`), subs and packages
+/// named after tables (`payment`, `workflow`); with `UI/` observed too, JavaScript beside Perl
+/// (`initialize`). `ekos resolve` refused to proceed and `--force` hides *every* conflict.
+///
+/// A name shared across namespaces is not evidence of one entity: a Perl sub and the stored
+/// procedure it calls are two things by construction. At least two namespaces must be present, a
+/// kind outside the table keeps the group a conflict, and so does anything a namespace would flag
+/// on its own (`Table` beside `View`, or a JS module beside a same-named JS symbol).
+fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
+    const LANGUAGES: &[(&str, &[&str])] = &[
+        ("perl", &["PerlPackage", "PerlSymbol"]),
+        ("js", &["JsModule", "JsSymbol"]),
+        ("python", &["PythonModule", "PythonSymbol"]),
+        ("rust", &["RustModule", "RustSymbol"]),
+        ("elixir", &["ElixirModule", "ElixirSymbol"]),
+    ];
+    const ROUTINES: &[&str] = &["View", "Procedure", "Trigger"];
+    // namespace → distinct kinds seen in it
+    let mut seen: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
+    for obj in group {
+        let (ns, kind) = match &obj.kind {
+            ObjectKind::Table => ("database", "Table".to_string()),
+            ObjectKind::Custom(k) if ROUTINES.contains(&k.as_str()) => ("database", k.clone()),
+            ObjectKind::Custom(k) => {
+                match LANGUAGES.iter().find(|(_, ks)| ks.contains(&k.as_str())) {
+                    Some((lang, _)) => (*lang, k.clone()),
+                    None => return false,
+                }
+            }
+            _ => return false,
+        };
+        let kinds = seen.entry(ns).or_default();
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    seen.len() >= 2
+        && seen.iter().all(|(ns, kinds)| match *ns {
+            "database" => {
+                let tables = kinds.iter().any(|k| k == "Table");
+                let routines = kinds.iter().any(|k| k != "Table");
+                tables != routines
+            }
+            "perl" => true,
+            _ => kinds.len() == 1,
+        })
+}
+
 impl IdentityResolver for DefaultResolver {
     fn resolve(&self, graph: &KirGraph) -> ResolutionResult {
         let objects = &graph.objects;
@@ -395,6 +454,7 @@ impl IdentityResolver for DefaultResolver {
                     || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
                     || is_expected_binary_declaration_group(indices.iter().map(|&i| &objects[i]))
                     || is_expected_sql_namespace_group(indices.iter().map(|&i| &objects[i]))
+                    || is_expected_cross_namespace_group(indices.iter().map(|&i| &objects[i]))
                 {
                     continue;
                 }
@@ -1216,6 +1276,86 @@ mod tests {
         assert_eq!(DefaultResolver::new().resolve(&g).conflicts.len(), 1);
     }
 
+    /// Regression for the 16 LedgerSMB conflicts once `lib/` was observed beside `sql/`: Perl subs
+    /// and packages named like the procedures, views and tables they use.
+    #[test]
+    fn perl_code_beside_same_named_database_objects_does_not_conflict() {
+        for group in [
+            vec![
+                ("asset__save", ObjectKind::Custom("PerlSymbol".to_string())),
+                ("asset__save", ObjectKind::Custom("Procedure".to_string())),
+            ],
+            vec![
+                ("payment", ObjectKind::Table),
+                ("payment", ObjectKind::Custom("PerlSymbol".to_string())),
+            ],
+            vec![
+                ("Template", ObjectKind::Custom("PerlPackage".to_string())),
+                ("template", ObjectKind::Custom("PerlSymbol".to_string())),
+                ("template", ObjectKind::Table),
+            ],
+            vec![
+                ("employee__search", ObjectKind::Custom("View".to_string())),
+                (
+                    "employee__search",
+                    ObjectKind::Custom("Procedure".to_string()),
+                ),
+                (
+                    "employee_search",
+                    ObjectKind::Custom("PerlSymbol".to_string()),
+                ),
+            ],
+        ] {
+            let g = make_graph(&group);
+            assert!(
+                DefaultResolver::new().resolve(&g).conflicts.is_empty(),
+                "{group:?}"
+            );
+        }
+    }
+
+    /// JavaScript beside Perl (LedgerSMB's `initialize` with `UI/` observed), and a third language.
+    #[test]
+    fn code_in_different_languages_sharing_a_name_does_not_conflict() {
+        let g = make_graph(&[
+            ("initialize", ObjectKind::Custom("JsSymbol".to_string())),
+            ("initialize", ObjectKind::Custom("PerlSymbol".to_string())),
+            ("initialize", ObjectKind::Custom("PythonSymbol".to_string())),
+        ]);
+        assert!(DefaultResolver::new().resolve(&g).conflicts.is_empty());
+        // A JS module beside a same-named JS symbol is a JS-side question, Perl or not.
+        let g = make_graph(&[
+            ("store", ObjectKind::Custom("JsModule".to_string())),
+            ("store", ObjectKind::Custom("JsSymbol".to_string())),
+            ("store", ObjectKind::Custom("PerlSymbol".to_string())),
+        ]);
+        assert_eq!(DefaultResolver::new().resolve(&g).conflicts.len(), 1);
+    }
+
+    /// The narrowing never hides what the database side would flag on its own, nor a third kind.
+    #[test]
+    fn perl_does_not_excuse_a_database_side_conflict_or_another_kind() {
+        for group in [
+            vec![
+                ("orders", ObjectKind::Table),
+                ("orders", ObjectKind::Custom("View".to_string())),
+                ("orders", ObjectKind::Custom("PerlSymbol".to_string())),
+            ],
+            vec![
+                ("orders", ObjectKind::Table),
+                ("orders", ObjectKind::Custom("PerlSymbol".to_string())),
+                ("orders", ObjectKind::Custom("Technology".to_string())),
+            ],
+        ] {
+            let g = make_graph(&group);
+            assert_eq!(
+                DefaultResolver::new().resolve(&g).conflicts.len(),
+                1,
+                "{group:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_third_kind_mixed_into_the_perl_group_still_conflicts() {
         // The exclusion is exactly `{PerlPackage, PerlSymbol}` — any other kind sharing the name
@@ -1223,7 +1363,7 @@ mod tests {
         let g = make_graph(&[
             ("Template", ObjectKind::Custom("PerlPackage".to_string())),
             ("template", ObjectKind::Custom("PerlSymbol".to_string())),
-            ("template", ObjectKind::Custom("PythonModule".to_string())),
+            ("template", ObjectKind::Custom("Technology".to_string())),
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.conflicts.len(), 1);
@@ -1296,9 +1436,11 @@ mod tests {
     fn two_perl_packages_sharing_a_name_are_not_silently_excluded() {
         // The exclusion requires *both* kinds to be present. A same-kind group never reaches it
         // (no kind mismatch), but pairing a PerlPackage with an unrelated kind must still fire.
+        // (A `Table` was the unrelated kind here until RFC 0147 amendment (b) made code beside a
+        // same-named database object expected; a declared `Technology` is still unrelated.)
         let g = make_graph(&[
             ("Template", ObjectKind::Custom("PerlPackage".to_string())),
-            ("template", ObjectKind::Table),
+            ("template", ObjectKind::Custom("Technology".to_string())),
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.conflicts.len(), 1);

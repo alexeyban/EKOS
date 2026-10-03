@@ -6245,9 +6245,9 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 
 14 defects were fixed in devlog_226. These were found in the same run and are still open:
 
-- [ ] `resolve` stops on cross-language homonyms (Table `gl` vs PerlPackage `LedgerSMB::GL`, JS vs
-      Perl `initialize` — 15 on LedgerSMB). Needs an RFC 0093-style narrowing; `--force` is the
-      workaround and merges nothing.
+- [x] `resolve` stops on cross-language homonyms (Table `gl` vs PerlPackage `LedgerSMB::GL`, JS vs
+      Perl `initialize` — 15 on LedgerSMB). Fixed by RFC 0147 amendment (b), cross-namespace
+      narrowing: LedgerSMB with `sql/` + `lib/` + `UI/` observed, 16 → 0 conflicts (devlog_241)
 - [ ] Compile `sql/changes/` `ALTER`s on top of the base DDL (RFC 0146 follow-up). EKOS's repository
       view of LedgerSMB is the pre-upgrade schema: 316 drift findings, e.g. `acc_trans.amount` vs
       `amount_bc`.

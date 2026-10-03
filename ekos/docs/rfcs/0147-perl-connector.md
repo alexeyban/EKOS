@@ -170,3 +170,26 @@ downstream hole, which is exactly the failure mode RFC 0135 Part D's CI guard wa
   `javascript_analyzer.rs`'s judgment that non-function top-level bindings are data-constant
   noise.
 - **Resolve `Foo::Bar->method()` into `Calls` edges.** Rejected — see §2 non-goals.
+
+
+## Amendment (b) — Perl code beside same-named database objects (2026-10-03, devlog_241)
+
+Observing LedgerSMB's `lib/` beside its `sql/` produced **16 identity conflicts, every one a Perl
+object beside a database object of the same name**: subs wrapping the stored procedure they call
+(`asset__save`, `batch__delete`, `employee__search` — LedgerSMB's convention), subs and packages
+named after tables (`payment`, `template`, `transactions`, `workflow`). `ekos resolve` refused to
+proceed, and `--force` hides every conflict, real or not.
+
+Application code and the database are separate namespaces, so a name shared across them is not
+evidence of one entity. `identity::is_expected_cross_namespace_group` treats a group as expected
+when it spans at least two namespaces — the database (`Table`, `View`, `Procedure`, `Trigger`) and
+each language's code (Perl, JavaScript, Python, Rust, Elixir module/symbol kinds) — and each
+namespace's share is unremarkable on its own: the database side only tables or only
+views/routines/triggers, the Perl side any mix of package and sub, any other language one kind
+only. So `Table` beside `View` still conflicts with or without code beside it, and any kind outside
+these namespaces keeps the group a conflict. JavaScript beside Perl (`initialize`, TODO.md's other
+LedgerSMB case) is covered by the same rule.
+
+This **reverses** one earlier decision: a `PerlPackage` beside a same-named `Table` used to
+conflict (test `two_perl_packages_sharing_a_name_are_not_silently_excluded`, now using a declared `Technology`
+as its unrelated kind). 
