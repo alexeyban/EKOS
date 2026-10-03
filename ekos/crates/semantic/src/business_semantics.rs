@@ -62,6 +62,8 @@ pub struct SemanticsConfig {
     /// A column compared against more distinct literals than this is a lookup key
     /// (`defaults.setting_key`), not a classification: no concepts, no enum.
     pub max_enum_values: usize,
+    /// RFC 0170 Phase 4: the user's vocabulary for mapping suggestions (empty: none made).
+    pub ontology: crate::ontology::Vocabulary,
 }
 
 impl Default for SemanticsConfig {
@@ -69,6 +71,7 @@ impl Default for SemanticsConfig {
         Self {
             min_sites: 2,
             max_enum_values: 12,
+            ontology: Default::default(),
         }
     }
 }
@@ -106,6 +109,7 @@ pub struct SemanticsStats {
     pub gaps: usize,
     pub conflicts: usize,
     pub rationale_links: usize,
+    pub mapping_suggestions: usize,
 }
 
 /// Everything synthesized, ready to append.
@@ -272,6 +276,8 @@ struct Site {
     carrier_name: String,
     carrier_is_view: bool,
     path: String,
+    /// The dbt var that produced this site's single value (`'1200'` ← `acc_ar`): a name hint.
+    var_label: Option<String>,
 }
 
 impl Site {
@@ -282,6 +288,12 @@ impl Site {
             &self.p.values,
         )
     }
+}
+
+fn is_dbt_model(o: &KirObject) -> bool {
+    o.kind == ObjectKind::Table
+        && o.properties.get("dbt_kind").and_then(Value::as_str) == Some("model")
+        && o.properties.contains_key("predicates")
 }
 
 fn carrier_path(o: &KirObject) -> String {
@@ -321,7 +333,8 @@ fn collect_sites(
     }
     let mut out = Vec::new();
     for o in &graph.objects {
-        let carrier_is_view = is_custom(o, "View");
+        // A dbt model is a view whose WHERE defines it (RFC 0170).
+        let carrier_is_view = is_custom(o, "View") || is_dbt_model(o);
         // A Pentaho FilterRows step (RFC 0170 Phase 3) is a `TransformNode` with `predicates`.
         if !(carrier_is_view
             || is_custom(o, "ProcedureStatement")
@@ -330,6 +343,10 @@ fn collect_sites(
         {
             continue;
         }
+        let var_values = o
+            .properties
+            .get("dbt_var_values")
+            .and_then(Value::as_object);
         let Some(Value::Array(preds)) = o.properties.get("predicates") else {
             continue;
         };
@@ -378,6 +395,10 @@ fn collect_sites(
                 carrier_name: o.name.clone(),
                 carrier_is_view,
                 path: carrier_path(o),
+                var_label: match (var_values, p.values.as_slice()) {
+                    (Some(m), [v]) => m.get(v).and_then(Value::as_str).map(str::to_string),
+                    _ => None,
+                },
                 p,
             });
         }
@@ -542,6 +563,201 @@ struct GapDraft<'a> {
     props: Vec<(&'static str, Value)>,
     subject: KirId,
     used: Vec<&'a Site>,
+}
+
+/// One glossary entry, from a `Section` or `Page` carrying `glossary`.
+struct GlossEntry {
+    term: String,
+    definition: String,
+    path: String,
+    line: u32,
+    owner: KirId,
+}
+
+fn glossary_entries(graph: &KirGraph) -> Vec<GlossEntry> {
+    let mut out = Vec::new();
+    for o in &graph.objects {
+        // Documents only. The items this module writes carry `glossary` too (what they matched),
+        // and reading those back would re-import every previous run's output.
+        if !(is_custom(o, "Section") || is_custom(o, "Page")) {
+            continue;
+        }
+        let Some(Value::Array(entries)) = o.properties.get("glossary") else {
+            continue;
+        };
+        let path = o
+            .properties
+            .get("source_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        for e in entries {
+            let (Some(term), Some(definition)) = (e["term"].as_str(), e["definition"].as_str())
+            else {
+                continue;
+            };
+            out.push(GlossEntry {
+                term: term.to_string(),
+                definition: definition.to_string(),
+                path: path.clone(),
+                line: e["line"].as_u64().unwrap_or(0) as u32,
+                owner: o.id,
+            });
+        }
+    }
+    // Ledger order is arbitrary; evidence numbering and match order must not be.
+    out.sort_by(|a, b| {
+        (&a.path, a.line, &a.term, &a.definition, a.owner.0).cmp(&(
+            &b.path,
+            b.line,
+            &b.term,
+            &b.definition,
+            b.owner.0,
+        ))
+    });
+    out.dedup_by(|a, b| a.path == b.path && a.line == b.line && a.term == b.term);
+    out
+}
+
+/// Words for matching names across spellings: `OpenOrders`, `open_orders`, "Open orders" all
+/// become `open order` (camel case and separators split, lower-cased, a plural `s` dropped).
+pub fn words_key(s: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut prev_lower = false;
+    for c in s.chars() {
+        if !c.is_alphanumeric() {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            prev_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && prev_lower && !cur.is_empty() {
+            words.push(std::mem::take(&mut cur));
+        }
+        prev_lower = c.is_lowercase() || c.is_ascii_digit();
+        cur.extend(c.to_lowercase());
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
+        .into_iter()
+        .map(|w| {
+            if w.len() > 3 && w.ends_with('s') && !w.ends_with("ss") {
+                w[..w.len() - 1].to_string()
+            } else {
+                w
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// One application constant: `EC_CUSTOMER => 2` in package `LedgerSMB::Magic`.
+#[derive(Debug, Clone)]
+struct Constant {
+    name: String,
+    suffix: String,
+    value: String,
+    path: String,
+    line: u32,
+    package: String,
+}
+
+/// Constants by prefix (`EC`), from every object carrying `constants` (Perl packages today).
+/// Groups of fewer than two constants carry no pattern and are left out.
+fn constant_groups(graph: &KirGraph) -> BTreeMap<String, Vec<Constant>> {
+    let mut groups: BTreeMap<String, Vec<Constant>> = BTreeMap::new();
+    for o in &graph.objects {
+        let Some(Value::Array(cs)) = o.properties.get("constants") else {
+            continue;
+        };
+        let path = o
+            .properties
+            .get("constants_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        for c in cs {
+            let (Some(name), Some(value)) = (c["name"].as_str(), c["value"].as_str()) else {
+                continue;
+            };
+            let Some((prefix, suffix)) = name.split_once('_') else {
+                continue;
+            };
+            groups
+                .entry(prefix.to_string())
+                .or_default()
+                .push(Constant {
+                    name: name.to_string(),
+                    suffix: suffix.to_lowercase(),
+                    value: value.to_string(),
+                    path: path.clone(),
+                    line: c["line"].as_u64().unwrap_or(0) as u32,
+                    package: o.name.clone(),
+                });
+        }
+    }
+    groups.retain(|_, g| {
+        let values: BTreeSet<&str> = g.iter().map(|c| c.value.as_str()).collect();
+        g.len() >= 2 && values.len() == g.len()
+    });
+    groups
+}
+
+fn norm(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
+/// The constant group naming `column`'s codes, and how it matched: `labels` (at least two of its
+/// names equal the codes' known labels, and none disagree) or `initials` (its prefix is the
+/// column's initials — `EC` for `entity_class` — and at least half its values are codes the column
+/// is known to take). Ambiguity (two groups) matches nothing.
+fn match_constant_group(
+    groups: &BTreeMap<String, Vec<Constant>>,
+    column: &str,
+    values: &BTreeSet<String>,
+    labels: &BTreeMap<String, String>,
+) -> Option<(String, &'static str)> {
+    let mut by_labels = Vec::new();
+    let mut by_initials = Vec::new();
+    let initials: String = column
+        .split('_')
+        .filter(|t| !t.is_empty() && *t != "id")
+        .filter_map(|t| t.chars().next())
+        .collect::<String>()
+        .to_uppercase();
+    for (prefix, g) in groups {
+        let mut agree = 0;
+        let mut disagree = 0;
+        for c in g {
+            if let Some(l) = labels.get(&c.value) {
+                if norm(l) == norm(&c.suffix) {
+                    agree += 1;
+                } else {
+                    disagree += 1;
+                }
+            }
+        }
+        if agree >= 2 && disagree == 0 {
+            by_labels.push(prefix.clone());
+            continue;
+        }
+        let overlap = g.iter().filter(|c| values.contains(&c.value)).count();
+        if *prefix == initials && initials.len() >= 2 && overlap * 2 >= g.len() && disagree == 0 {
+            by_initials.push(prefix.clone());
+        }
+    }
+    match (by_labels.as_slice(), by_initials.as_slice()) {
+        ([one], _) => Some((one.clone(), "labels")),
+        ([], [one]) => Some((one.clone(), "initials")),
+        _ => None,
+    }
 }
 
 /// A seeded key as a code: `'1'` seeded into an integer key is the code `1`.
@@ -771,6 +987,9 @@ pub fn synthesize(
     }
     columns.retain(|k| !key_like.contains(k));
 
+    // Application constants grouped by prefix: `BC_AP => 1, BC_AR => 2` is the group `BC`.
+    let groups = constant_groups(graph);
+
     // ── EnumMeaning per (table, column, value) ─────────────────────────────────────────────
     // Labels per (table, column), for naming concepts.
     let mut labels: BTreeMap<(usize, String), BTreeMap<String, String>> = BTreeMap::new();
@@ -864,6 +1083,63 @@ pub fn synthesize(
                     line: row.get("line").and_then(Value::as_u64).map(|l| l as u32),
                     detail: format!("{}: seeded row {}", t.name(), Value::Object(values.clone())),
                 });
+            }
+        }
+        // Application constants (`use constant EC_CUSTOMER => 2`): a group whose names agree with
+        // this column's seeded labels, or whose prefix is the column's initials and whose values
+        // overlap its codes, names those codes.
+        {
+            let mut known_values: BTreeSet<String> = meanings.keys().cloned().collect();
+            if let Some(m) = coded.get(&(*ti, col.clone())) {
+                known_values.extend(m.keys().cloned());
+            }
+            if let Some(d) = check_domain.get(&(*ti, col.clone())) {
+                known_values.extend(d.iter().cloned());
+            }
+            let labels_now: BTreeMap<String, String> = meanings
+                .iter()
+                .filter_map(|(v, ms)| ms.first().map(|m| (v.clone(), m.label.clone())))
+                .collect();
+            if let Some((prefix, how)) =
+                match_constant_group(&groups, col, &known_values, &labels_now)
+            {
+                for c in &groups[&prefix] {
+                    meanings.entry(c.value.clone()).or_default().push(Meaning {
+                        label: c.suffix.clone(),
+                        source: "app_constant",
+                        confidence: if how == "labels" { 0.6 } else { 0.4 },
+                        path: c.path.clone(),
+                        line: Some(c.line),
+                        detail: format!(
+                            "use constant {} => {} ({}; matched by {how})",
+                            c.name, c.value, c.package
+                        ),
+                    });
+                }
+            }
+        }
+        // dbt var names: `account_number = '{{ var("acc_ar") }}'` says '1200' is the AR account.
+        if let Some(vals) = coded.get(&(*ti, col.clone())) {
+            for (v, used) in vals {
+                let mut seen = BTreeSet::new();
+                for s in used {
+                    if let Some(var) = &s.var_label
+                        && seen.insert(var.clone())
+                    {
+                        meanings.entry(v.clone()).or_default().push(Meaning {
+                            label: var.clone(),
+                            source: "dbt_var",
+                            confidence: 0.4,
+                            path: s.path.clone(),
+                            line: site_line(s),
+                            detail: format!(
+                                "{} — the value of dbt var `{var}` ({})",
+                                s.canonical(&tables),
+                                s.carrier_name
+                            ),
+                        });
+                    }
+                }
             }
         }
         // CASE branch labels.
@@ -1016,7 +1292,7 @@ pub fn synthesize(
     let views: BTreeMap<Uuid, &KirObject> = graph
         .objects
         .iter()
-        .filter(|o| is_custom(o, "View"))
+        .filter(|o| is_custom(o, "View") || is_dbt_model(o))
         .map(|o| (o.id.0, o))
         .collect();
     let mut view_sites: BTreeMap<Uuid, Vec<&Site>> = BTreeMap::new();
@@ -1439,6 +1715,70 @@ pub fn synthesize(
         }
     }
 
+    // ── Glossary (RFC 0170 Phase 3) ─────────────────────────────────────────────────────────
+    // A glossary term attaches to a concept or a code label with exactly the same words; one that
+    // matches nothing recovered — no concept, code or table — is a reverse gap: written down, but
+    // no trace in code.
+    let glossary = glossary_entries(graph);
+    let table_words: BTreeSet<String> = tables.iter().map(|t| words_key(&t.name())).collect();
+    let mut glossed: BTreeSet<Uuid> = BTreeSet::new();
+    let mut unmatched: Vec<&GlossEntry> = Vec::new();
+    for (gi, g) in glossary.iter().enumerate() {
+        let key = words_key(&g.term);
+        if key.is_empty() {
+            continue;
+        }
+        let mut hit = table_words.contains(&key);
+        for idx in 0..b.out.objects.len() {
+            let o = &b.out.objects[idx];
+            let target = match kind_name(o) {
+                Some(k) if k == CONCEPT => words_key(&o.name),
+                Some(k) if k == ENUM_MEANING => o
+                    .properties
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .map(words_key)
+                    .unwrap_or_default(),
+                _ => continue,
+            };
+            if target != key {
+                continue;
+            }
+            hit = true;
+            let owner_key = format!("glossary:{}:{gi}", o.id);
+            let ev = b.evidence(
+                &owner_key,
+                0,
+                &g.path,
+                (g.line > 0).then_some(g.line),
+                format!("glossary: {} — {}", g.term, g.definition),
+            );
+            let o = &mut b.out.objects[idx];
+            o.evidence.push(ev);
+            let entry =
+                json!({"term": g.term, "definition": g.definition, "path": g.path, "line": g.line});
+            match o.properties.get_mut("glossary") {
+                Some(Value::Array(a)) => a.push(entry),
+                _ => {
+                    o.properties.insert("glossary".into(), json!([entry]));
+                }
+            }
+            if kind_name(o) == Some(CONCEPT)
+                && o.properties.get("description").is_none_or(Value::is_null)
+            {
+                o.properties
+                    .insert("description".into(), json!(g.definition));
+                o.properties
+                    .insert("description_source".into(), json!("glossary"));
+            }
+            glossed.insert(o.id.0);
+        }
+        if !hit {
+            unmatched.push(g);
+        }
+    }
+    undocumented.retain(|(id, ..)| !glossed.contains(&id.0));
+
     // ── Rationale (git blame) ───────────────────────────────────────────────────────────────
     let mut explained: BTreeSet<Uuid> = BTreeSet::new();
     for (id, key, ss) in &concept_ids {
@@ -1541,12 +1881,67 @@ pub fn synthesize(
         stats.gaps += 1;
     }
 
+    for g in unmatched {
+        let key = format!("semantic-gap:term:{}:{}", g.path, words_key(&g.term));
+        let idx = b.object(
+            &key,
+            format!("glossary term “{}”: no trace in code", g.term),
+            GAP,
+            vec![
+                ("gap_type", json!("unmapped_term")),
+                ("term", json!(g.term)),
+                ("definition", json!(g.definition)),
+                (
+                    "question",
+                    json!(format!(
+                        "The glossary defines “{}” ({}), but no recovered concept, code or table \
+                         matches it. Which code implements it — or is the definition only on paper?",
+                        g.term, g.definition
+                    )),
+                ),
+            ],
+        );
+        let ev = b.evidence(
+            &key,
+            0,
+            &g.path,
+            (g.line > 0).then_some(g.line),
+            format!("glossary: {} — {}", g.term, g.definition),
+        );
+        b.out.objects[idx].evidence.push(ev);
+        let (id, owner) = (b.out.objects[idx].id, g.owner);
+        b.relate(DESCRIBES, id, owner);
+        stats.gaps += 1;
+    }
+
     stats.rationale_links = b
         .out
         .objects
         .iter()
         .filter(|o| kind_name(o) == Some(RATIONALE))
         .count();
+    // RFC 0170 Phase 4: ontology mapping suggestions — a concept by its name, a code by its label.
+    if !cfg.ontology.terms.is_empty() {
+        for o in &mut b.out.objects {
+            let name = match kind_name(o) {
+                Some(k) if k == CONCEPT => o.name.clone(),
+                Some(k) if k == ENUM_MEANING => {
+                    match o.properties.get("label").and_then(Value::as_str) {
+                        Some(l) => l.to_string(),
+                        None => continue,
+                    }
+                }
+                _ => continue,
+            };
+            let suggestions = cfg.ontology.suggest(&name);
+            if !suggestions.is_empty() {
+                o.properties
+                    .insert("mapping_suggestions".into(), json!(suggestions));
+                stats.mapping_suggestions += suggestions.len();
+            }
+        }
+    }
+
     // RFC 0170 Phase 2: what each item asserts and rests on, for the review lifecycle.
     let ev_by_id: HashMap<Uuid, &KirEvidence> =
         b.out.evidence.iter().map(|e| (e.id.0, e)).collect();
@@ -2104,6 +2499,180 @@ mod tests {
             types,
             BTreeSet::from(["enum".into(), "not_null".into(), "relationship".into()])
         );
+    }
+
+    #[test]
+    fn a_dbt_model_defines_a_concept_and_its_vars_label_codes() {
+        let mut g = fixture();
+        g.add_object(table(
+            "accounts",
+            json!([{"name": "account_number", "data_type": "TEXT"}]),
+            vec![],
+        ));
+        let mut m = KirObject::new("mart_ar_aging", ObjectKind::Table);
+        m.id = kid("m:ar");
+        for (k, v) in [
+            ("dbt_kind", json!("model")),
+            ("source_path", json!("models/mart_ar_aging.sql")),
+            ("description", json!("Receivables by age bucket.")),
+            ("dbt_var_values", json!({"'1200'": "acc_ar"})),
+            (
+                "predicates",
+                json!([site(
+                    "accounts",
+                    "account_number",
+                    "in",
+                    &["'1200'"],
+                    "where",
+                    9
+                )]),
+            ),
+        ] {
+            m.properties.insert(k.into(), v);
+        }
+        g.add_object(m);
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        let c = of(&out, CONCEPT)
+            .into_iter()
+            .find(|c| c.name == "MartArAging")
+            .expect("the model's filter is a concept named after it");
+        assert_eq!(prop(c, "origin"), &json!("view"));
+        assert_eq!(prop(c, "description"), &json!("Receivables by age bucket."));
+        let e = of(&out, ENUM_MEANING)
+            .into_iter()
+            .find(|o| o.name == "accounts.account_number = '1200'")
+            .unwrap();
+        assert_eq!(prop(e, "label"), &json!("acc_ar"));
+    }
+
+    #[test]
+    fn application_constants_name_codes_by_label_agreement_or_initials() {
+        let mut g = fixture();
+        let mut magic =
+            KirObject::new("LedgerSMB::Magic", ObjectKind::Custom("PerlPackage".into()));
+        magic
+            .properties
+            .insert("constants_path".into(), json!("lib/LedgerSMB/Magic.pm"));
+        magic.properties.insert(
+            "constants".into(),
+            json!([
+                {"name": "EC_VENDOR", "value": "1", "line": 10},
+                {"name": "EC_CUSTOMER", "value": "2", "line": 11},
+                {"name": "EC_EMPLOYEE", "value": "3", "line": 12},
+                {"name": "XY_ONE", "value": "1", "line": 20},
+                {"name": "XY_TWO", "value": "2", "line": 21}
+            ]),
+        );
+        g.add_object(magic);
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        let e = of(&out, ENUM_MEANING)
+            .into_iter()
+            .find(|o| o.name == "entity_credit_account.entity_class = 2")
+            .unwrap();
+        let sources: Vec<&str> = prop(e, "meanings")
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["source"].as_str().unwrap())
+            .collect();
+        // Seeds say 1=Vendor, 2=Customer; EC_VENDOR/EC_CUSTOMER agree — the group matches by labels.
+        assert!(sources.contains(&"app_constant"), "{sources:?}");
+        assert!(sources.contains(&"lookup_seed"));
+        // XY_* agrees with nothing and is not the column's initials: no match anywhere.
+        assert!(of(&out, ENUM_MEANING).iter().all(|o| {
+            prop(o, "meanings")
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|m| m["label"] != json!("one"))
+        }));
+    }
+
+    #[test]
+    fn glossary_terms_document_matching_items_and_unmatched_terms_are_gaps() {
+        assert_eq!(words_key("OpenOrders"), "open order");
+        assert_eq!(words_key("open_orders"), "open order");
+        assert_eq!(words_key("Open orders"), "open order");
+        let mut g = fixture();
+        let mut sec = KirObject::new(
+            "docs/glossary.md § Terms",
+            ObjectKind::Custom("Section".into()),
+        );
+        sec.properties
+            .insert("source_path".into(), json!("docs/glossary.md"));
+        sec.properties.insert(
+            "glossary".into(),
+            json!([
+                {"term": "Active parts", "definition": "Parts we still sell.", "line": 4},
+                {"term": "Customer", "definition": "An entity that buys from us.", "line": 5},
+                {"term": "Dunning level", "definition": "How many reminders were sent.", "line": 6}
+            ]),
+        );
+        g.add_object(sec);
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        // The view concept "ActiveParts" already had its view comment; the term attaches anyway.
+        let c = of(&out, CONCEPT)
+            .into_iter()
+            .find(|c| c.name == "ActiveParts")
+            .unwrap();
+        assert_eq!(prop(c, "glossary")[0]["term"], json!("Active parts"));
+        // "Customer" is the label of entity_class = 2.
+        let e = of(&out, ENUM_MEANING)
+            .into_iter()
+            .find(|o| o.name == "entity_credit_account.entity_class = 2")
+            .unwrap();
+        assert_eq!(
+            prop(e, "glossary")[0]["definition"],
+            json!("An entity that buys from us.")
+        );
+        let gaps: Vec<String> = of(&out, GAP)
+            .iter()
+            .filter(|g| prop(g, "gap_type") == &json!("unmapped_term"))
+            .map(|g| prop(g, "term").as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(gaps, vec!["Dunning level"]);
+
+        // A second run over a ledger that now also holds the first run's items (which carry
+        // `glossary`) must produce exactly the same items — no re-import of our own output.
+        let mut again = g.clone();
+        again.objects.extend(out.objects.iter().cloned());
+        let out2 = synthesize(&again, &SemanticsConfig::default(), None);
+        let e2 = of(&out2, ENUM_MEANING)
+            .into_iter()
+            .find(|o| o.name == "entity_credit_account.entity_class = 2")
+            .unwrap();
+        assert_eq!(prop(e2, "glossary").as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn ontology_suggestions_come_only_from_the_users_vocabulary() {
+        let none = synthesize(&fixture(), &SemanticsConfig::default(), None);
+        assert!(
+            none.objects
+                .iter()
+                .all(|o| !o.properties.contains_key("mapping_suggestions"))
+        );
+        let cfg = SemanticsConfig {
+            ontology: crate::ontology::Vocabulary {
+                prefixes: Default::default(),
+                terms: vec![crate::ontology::OntologyTerm {
+                    id: "schema:Customer".into(),
+                    label: "Customer".into(),
+                    synonyms: vec![],
+                }],
+            },
+            ..Default::default()
+        };
+        let out = synthesize(&fixture(), &cfg, None);
+        let e = of(&out, ENUM_MEANING)
+            .into_iter()
+            .find(|o| o.name == "entity_credit_account.entity_class = 2")
+            .unwrap();
+        assert_eq!(
+            prop(e, "mapping_suggestions")[0]["id"],
+            json!("schema:Customer")
+        );
+        assert_eq!(out.stats.mapping_suggestions, 1);
     }
 
     /// The stored kind must survive a serde round trip, or a ledger read loses every concept.

@@ -6306,11 +6306,12 @@ LinkML; generation stays in LinkML.
 - [x] Standalone analyst `SELECT`s as carriers (views/routines not double-counted)
 - [x] Constrained LLM definition text (opt-in): cite-or-drop, hedges dropped, code meanings as evidence
 - [x] Exact seed-row lines
-- [ ] Confluence glossary; application constants (Perl in LedgerSMB, Python); predicates in dbt
-      model SQL (needs Jinja handling)
+- [x] Glossaries (local docs + Confluence), Perl application constants, dbt model SQL (Jinja) —
+      devlog_239
+- [ ] Python constants; embedded SQL in Perl strings; dbt predicates through CTE aliases
 
 ### Phase 4 — round-trip and agents
 - [x] `ekos import linkml` (expert YAML edits → review decisions; matched by `ekos_id`, all or
       nothing, `--dry-run`) — devlog_236
 - [x] MCP `ekos_semantics_lookup` / `ekos_semantics_gaps`, status on every answer — devlog_237
-- [ ] Ontology mapping suggestions (hypotheses only)
+- [x] Ontology mapping suggestions from a user vocabulary (annotations only) — devlog_239

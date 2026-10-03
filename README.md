@@ -441,7 +441,11 @@ column-vs-literal predicate in views, routines and `CHECK` constraints — norma
 `status IN (1,3)` and `status = 1 OR 3 = status` are one predicate — plus `CHECK` constraints,
 `NOT NULL`/key columns and lookup-table seed rows — plus PL/pgSQL `IF NEW.col …` conditions
 (resolved to the trigger's table), Pentaho `FilterRows` conditions, standalone analyst `SELECT`s,
-and dbt `schema.yml` (descriptions, `not_null`/`unique`/`accepted_values`/`relationships` tests). With `[semantics] enabled = true`, `ekos commit`
+and dbt `schema.yml` (descriptions, `not_null`/`unique`/`accepted_values`/`relationships` tests)
+and model SQL (Jinja rendered: `ref`/`source`/`var`) — plus application constants (`use constant
+EC_CUSTOMER => 2`, matched to columns by label agreement) and marked glossaries (local docs,
+Confluence; unmatched terms become gaps). `[semantics] ontology = "<file>"` adds exact/close
+mapping suggestions from your own vocabulary, exported as annotations only. With `[semantics] enabled = true`, `ekos commit`
 synthesizes **hypotheses** from them, deterministically and without an LLM:
 
 | Kind | What |

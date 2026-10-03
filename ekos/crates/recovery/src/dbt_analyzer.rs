@@ -243,6 +243,166 @@ fn column_json(
     Some(col)
 }
 
+// ── RFC 0170: a model's own filters ─────────────────────────────────────────────────────────
+
+/// A dbt project's `vars:` from `dbt_project.yml`, as text (`acc_ar: "1200"` → `1200`).
+pub fn project_vars(dbt_project_yml: &str) -> std::collections::BTreeMap<String, String> {
+    let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(dbt_project_yml) else {
+        return Default::default();
+    };
+    doc.get("vars")
+        .and_then(|v| v.as_mapping())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| {
+                    let k = k.as_str()?.to_string();
+                    let v = match v {
+                        serde_yaml::Value::String(s) => s.clone(),
+                        serde_yaml::Value::Number(n) => n.to_string(),
+                        serde_yaml::Value::Bool(b) => b.to_string(),
+                        _ => return None,
+                    };
+                    Some((k, v))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Placeholder for a Jinja value nobody can know statically; any predicate comparing against it
+/// is dropped.
+const UNKNOWN: &str = "__dbt_unknown__";
+
+/// The SQL a dbt model compiles to, as far as can be known without running dbt: `ref('x')` → `x`,
+/// `source('s', 't')` → `t`, `var('n')` → its `dbt_project.yml` value (else its default, else
+/// unknown), `this` → the model; `{% … %}` and `{# … #}` blanked. Every replacement keeps the
+/// line breaks it covered, so lines still cite the model file. Also returns which literal each
+/// substituted var produced (`'1200'` → `acc_ar`): a var's name is a hint at a code's meaning.
+pub fn render_model_sql(
+    sql: &str,
+    model: &str,
+    vars: &std::collections::BTreeMap<String, String>,
+) -> (String, std::collections::BTreeMap<String, String>) {
+    let mut out = String::with_capacity(sql.len());
+    let mut used = std::collections::BTreeMap::new();
+    let mut rest = sql;
+    while let Some(start) = rest.find('{') {
+        let (open, close) = match rest[start..].get(..2) {
+            Some("{{") => ("{{", "}}"),
+            Some("{%") => ("{%", "%}"),
+            Some("{#") => ("{#", "#}"),
+            _ => {
+                out.push_str(&rest[..=start]);
+                rest = &rest[start + 1..];
+                continue;
+            }
+        };
+        out.push_str(&rest[..start]);
+        let body_start = start + open.len();
+        let Some(end) = rest[body_start..].find(close) else {
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let body = &rest[body_start..body_start + end];
+        // `{% if is_incremental() %} … {% endif %}` is a load-time guard, not a business rule:
+        // blank everything up to its `endif`.
+        if open == "{%"
+            && body
+                .trim()
+                .replace(' ', "")
+                .starts_with("ifis_incremental()")
+        {
+            let after = body_start + end + close.len();
+            if let Some(stop) = rest[after..].find("endif") {
+                let stop = after + stop;
+                let tail = rest[stop..]
+                    .find("%}")
+                    .map(|e| stop + e + 2)
+                    .unwrap_or(rest.len());
+                out.push_str(&"\n".repeat(rest[start..tail].matches('\n').count()));
+                rest = &rest[tail..];
+                continue;
+            }
+        }
+        let newlines = body.matches('\n').count();
+        let text = if open == "{{" {
+            render_expr(body.trim(), model, vars, &mut used)
+        } else {
+            String::new()
+        };
+        out.push_str(&text);
+        out.push_str(&"\n".repeat(newlines));
+        rest = &rest[body_start + end + close.len()..];
+    }
+    out.push_str(rest);
+    (out, used)
+}
+
+fn quoted_args(call: &str) -> Vec<String> {
+    let Some(inner) = call
+        .split_once('(')
+        .and_then(|(_, a)| a.rsplit_once(')'))
+        .map(|(a, _)| a)
+    else {
+        return Vec::new();
+    };
+    inner
+        .split(',')
+        .map(|a| a.trim().trim_matches(['\'', '"']).to_string())
+        .collect()
+}
+
+fn render_expr(
+    expr: &str,
+    model: &str,
+    vars: &std::collections::BTreeMap<String, String>,
+    used: &mut std::collections::BTreeMap<String, String>,
+) -> String {
+    let head = expr.split('(').next().unwrap_or_default().trim();
+    let args = quoted_args(expr);
+    match head {
+        "ref" => args.last().cloned().unwrap_or_else(|| UNKNOWN.into()),
+        "source" => args.get(1).cloned().unwrap_or_else(|| UNKNOWN.into()),
+        "var" => {
+            let Some(name) = args.first() else {
+                return UNKNOWN.into();
+            };
+            match vars.get(name).or(args.get(1)) {
+                Some(v) => {
+                    used.insert(format!("'{}'", v.replace('\'', "''")), name.clone());
+                    used.insert(v.clone(), name.clone());
+                    v.clone()
+                }
+                None => UNKNOWN.into(),
+            }
+        }
+        "this" => model.into(),
+        "config" => String::new(),
+        _ => UNKNOWN.into(),
+    }
+}
+
+/// The predicates of a model's rendered SQL, parsed with the first dialect that accepts it.
+pub fn model_predicates(rendered: &str) -> Vec<crate::sql_predicates::PredicateSite> {
+    use sqlparser::dialect::{ClickHouseDialect, Dialect, GenericDialect, PostgreSqlDialect};
+    let dialects: [&dyn Dialect; 3] = [
+        &PostgreSqlDialect {},
+        &ClickHouseDialect {},
+        &GenericDialect {},
+    ];
+    for d in dialects {
+        if let Ok(stmts) = sqlparser::parser::Parser::parse_sql(d, rendered) {
+            return stmts
+                .iter()
+                .flat_map(crate::sql_predicates::statement_predicates)
+                .filter(|p| !p.values.iter().any(|v| v.contains(UNKNOWN)))
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
 /// The table a `ref('x')` / `source('s', 'x')` names.
 fn macro_target(s: &str) -> Option<String> {
     let inner = s.trim().strip_suffix(')')?;
@@ -362,9 +522,10 @@ impl CompilerPass for DbtAnalyzerPass {
         &self.pass_id
     }
 
-    /// `v2` = RFC 0170 Phase 3: documented columns carry description, type and dbt tests.
+    /// `v3` = RFC 0170: a model carries its own filters (`predicates`). `v2` = documented columns
+    /// carry description, type and dbt tests.
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -404,6 +565,13 @@ impl CompilerPass for DbtAnalyzerPass {
             }
         }
 
+        let vars = self
+            .yml_files
+            .iter()
+            .find(|(p, _)| p.ends_with("dbt_project.yml"))
+            .map(|(_, c)| project_vars(c))
+            .unwrap_or_default();
+
         // ── Models: one `Table` per `.sql` file, regardless of YAML documentation. ──────────────
         let mut known: HashMap<String, KirId> = HashMap::new();
         for (rel_path, _content) in &self.sql_files {
@@ -433,6 +601,19 @@ impl CompilerPass for DbtAnalyzerPass {
 
             if let Some(materialized) = extract_materialized(content) {
                 obj = obj.with_property("materialized", serde_json::json!(materialized));
+            }
+            // RFC 0170: the model's own filters — a model is a view, and its WHERE defines it.
+            let (rendered, used_vars) = render_model_sql(content, &name, &vars);
+            let predicates = model_predicates(&rendered);
+            obj = obj.with_property("source_path", serde_json::json!(rel_path));
+            if !predicates.is_empty() {
+                obj = obj.with_property(
+                    "predicates",
+                    crate::sql_predicates::predicates_json(&predicates, 1),
+                );
+                if !used_vars.is_empty() {
+                    obj = obj.with_property("dbt_var_values", serde_json::json!(used_vars));
+                }
             }
             if let Some(doc) = model_docs.get(&name) {
                 if !doc.columns.is_empty() {
@@ -602,6 +783,31 @@ again AS (
 )
 SELECT * FROM customer
 "#;
+
+    #[test]
+    fn model_sql_renders_refs_sources_and_vars_keeping_lines() {
+        let vars = project_vars("vars:\n  acc_ar: \"1200\"\n  as_of: 2026-06-30\n");
+        let sql = "{{ config(materialized='view') }}\nselect o.id\nfrom {{ source('raw', 'oe') }} as o\n\
+join {{ ref('accounts') }} a on a.id = o.acc\n{% if is_incremental() %}\nand x = 1\n{% endif %}\n\
+where o.oe_class_id = 1 and a.account_number = '{{ var(\"acc_ar\") }}'\n  and o.d > '{{ var(\"nope\") }}'";
+        let (rendered, used) = render_model_sql(sql, "m", &vars);
+        assert_eq!(rendered.lines().count(), sql.lines().count());
+        assert!(rendered.contains("from oe as o"));
+        assert!(rendered.contains("join accounts a"));
+        assert_eq!(used.get("'1200'"), Some(&"acc_ar".to_string()));
+        let c: Vec<(String, u64)> = model_predicates(&rendered)
+            .iter()
+            .map(|p| (p.canonical(), p.line))
+            .collect();
+        assert_eq!(
+            c,
+            vec![
+                ("oe.oe_class_id IN (1)".to_string(), 8),
+                ("accounts.account_number IN ('1200')".to_string(), 8),
+            ],
+            "the unknown var's comparison is dropped"
+        );
+    }
 
     /// RFC 0170 Phase 3: dbt tests are column facts — a declared domain, keys, references.
     #[test]

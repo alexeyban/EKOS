@@ -20,6 +20,7 @@ pub mod elixir_analyzer;
 pub mod embed;
 pub mod git_analyzer;
 pub mod github_analyzer;
+pub mod glossary;
 pub mod governance_analyzer;
 pub mod javascript_analyzer;
 pub mod llm;

@@ -1,6 +1,6 @@
 # RFC 0170 — Business semantics from technical traces, exported as LinkML
 
-**Status:** Accepted — Phases 1–3 implemented (devlog_234, 235, 238); Phase 4 implemented except ontology mapping suggestions (devlog_236, 237); 2026-10-03
+**Status:** Accepted — Phases 1–4 implemented (devlog_234–239, 2026-10-03). Open: an expert-written gold set
 **Date:** 2026-10-03
 **Related:** RFC 0135 (provenance + determinism — this RFC's Phase 0), RFC 0146 Phase 2 (`COMMENT ON`
 descriptions), RFC 0163 (PL/pgSQL IR, `plpgsql_footprint`), RFC 0169 (views), RFC 0029/0063
@@ -276,11 +276,35 @@ text with local `llama3` on 8 LedgerSMB concepts: 8 described; the first version
 accounts "likely Quality accounts", which is why code meanings became evidence and hedged sentences
 are dropped — the second run says "equity accounts".
 
-## Phases 4 remainder (proposed)
+## Remaining sources and ontology suggestions (implemented, devlog_239)
 
-- **Phase 3 — not covered.** Confluence glossaries and application constants (Perl/Python) are not
-  read; neither are predicates inside dbt model SQL (Jinja is not parsed).
-- **Phase 4 — remainder.** Optional ontology mapping suggestions (hypotheses only).
+| Source | What it adds |
+|---|---|
+| dbt model SQL | Minimal Jinja rendering (`ref`/`source` → the table, `var` → its `dbt_project.yml` value or default, `this` → the model; `{% … %}`/`{# … #}` blanked, line breaks kept; `{% if is_incremental() %}` bodies dropped — load guards, not rules; anything else unknown, and any comparison against it dropped), parsed with the first of PostgreSQL/ClickHouse/generic that accepts it. A model with predicates is a **view-like carrier**: its top-level `WHERE` defines a concept named after the model, carrying the model's dbt description. A var's name labels the literal it produced (`'1200'` ← `acc_ar`, source `dbt_var`, 0.4) |
+| Application constants | `use constant NAME => literal` in Perl (single or block form; POD skipped), on the file's first package with lines. Grouped by prefix (`EC_*`); a group names a coded column's codes when ≥ 2 names agree with the codes' known labels and none disagree (`labels`, 0.6), else when the prefix is the column's initials (`EC` ↔ `entity_class`) and ≥ half its values are the column's codes (`initials`, 0.4); ambiguity matches nothing |
+| Glossaries | Local documents and Confluence pages marked as glossaries (name/heading with glossary/terms/definitions/dictionary/terminology). Formatted entries only — `**Term** — def`, `- Term: def`, two-column tables, HTML tables and `<dl>`. A term attaches to a concept (name) or a code (label) with exactly the same words (`words_key`: camel/snake split, lower case, plural `s` dropped); a concept gains it as its description; a term matching no concept, code or table is an `unmapped_term` gap — written down, no trace in code |
+| Ontology suggestions | `[semantics] ontology = "<file>"`: the user's vocabulary (`terms: [{id, label, synonyms}]`). A concept name, code label or table name with exactly a term's label's words → `exact` suggestion; a synonym's → `close`. Stored as `mapping_suggestions`, exported as `ekos_suggested_exact_mappings`/`ekos_suggested_close_mappings` annotations — never LinkML `exact_mappings`, because a suggestion is not a decision. EKOS ships no vocabulary (`0170-example-vocabulary.yaml` is a format example) |
+
+Measured on LedgerSMB with `lib/` observed: `Magic.pm`'s constants corroborate 130 coded values by
+label agreement and supply the only meaning for 6 — `file_class` 8 `email` and 9
+`reconciliation`, which the base schema's seed rows (1–7) predate; explained values 171 → 179;
+evidence validity 565/565. The analytics demo's dbt models yield 3 model-defined concepts
+(`MartApAging`: `ledger = 'AP'`, `StgLsmbSalesOrders`: `oe_class_id = 1`, …); 6 of 20 model sites
+resolve (the rest go through CTE aliases, honestly unresolved). A fixture glossary on LedgerSMB
+attached "Sales Order"/"Purchase Order"/"Customer" to their codes and reported "Dunning level" as
+`unmapped_term`.
+
+Found while testing: the glossary reader re-imported **its own previous output** — items carry a
+`glossary` property, and it read every object with one, so each commit multiplied the entries
+(`Customer` ×11). It now reads documents only, sorted and de-duplicated, and a test feeds a run's
+own output back in.
+
+## Not covered (stated limits)
+
+Predicates through dbt CTE aliases; Python constants; embedded SQL inside Perl strings (LedgerSMB
+binds `?` almost everywhere); free-prose definitions outside marked glossaries.
+
+
 
 ## Results — LedgerSMB, Phase 1 (2026-10-03)
 

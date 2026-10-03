@@ -344,7 +344,8 @@ pub fn linkml(config: &EkosConfig, cwd: &Path, opts: &ImportOptions) -> Result<(
                 .map(str::to_string)
                 .unwrap_or_else(|| super::export::default_schema_name(cwd));
             let (ledger, items) = current_items(config, cwd)?;
-            let baseline = build_schema(&*ledger, &items, status, &name)?
+            let vocab = super::semantics::load_vocabulary(config, cwd)?;
+            let baseline = build_schema(&*ledger, &items, status, &name, &vocab)?
                 .map(|v| serde_yaml::to_value(v).unwrap_or(Value::Null))
                 .unwrap_or(Value::Null);
             drop(ledger);

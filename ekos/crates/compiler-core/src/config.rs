@@ -236,6 +236,11 @@ pub struct SemanticsConfig {
     /// The most concepts described per commit.
     #[serde(default = "default_semantics_llm_max")]
     pub llm_max_definitions: usize,
+    /// A vocabulary file (YAML/JSON: `terms: [{id, label, synonyms}]`, optional `prefixes`) to
+    /// suggest ontology mappings from — exact word matches only, always hypotheses. Relative to
+    /// the workspace root. Unset: no suggestions.
+    #[serde(default)]
+    pub ontology: Option<PathBuf>,
 }
 
 fn default_semantics_llm_max() -> usize {
@@ -259,6 +264,7 @@ impl Default for SemanticsConfig {
             max_enum_values: default_semantics_max_enum_values(),
             llm_definitions: false,
             llm_max_definitions: default_semantics_llm_max(),
+            ontology: None,
         }
     }
 }

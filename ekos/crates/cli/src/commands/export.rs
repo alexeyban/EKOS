@@ -64,6 +64,43 @@ fn text(o: &KirObject, k: &str) -> String {
     }
 }
 
+/// `ekos_suggested_exact_mappings` / `ekos_suggested_close_mappings` from suggestions — never
+/// LinkML's own `exact_mappings`: a suggestion is not a decision.
+fn suggestion_annotations(suggestions: &[(String, String)]) -> Vec<(&'static str, Value)> {
+    let of = |t: &str| {
+        let ids: Vec<&str> = suggestions
+            .iter()
+            .filter(|(_, m)| m == t)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        if ids.is_empty() {
+            Value::Null
+        } else {
+            s(ids.join(" "))
+        }
+    };
+    vec![
+        ("ekos_suggested_exact_mappings", of("exact")),
+        ("ekos_suggested_close_mappings", of("close")),
+    ]
+}
+
+fn item_suggestions(o: &KirObject) -> Vec<(String, String)> {
+    prop(o, "mapping_suggestions")
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| {
+                    Some((
+                        x["id"].as_str()?.to_string(),
+                        x["match_type"].as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A string property as a YAML value, or nothing when absent.
 fn opt(o: &KirObject, k: &str) -> Value {
     match text(o, k) {
@@ -213,7 +250,8 @@ pub fn linkml(config: &EkosConfig, cwd: &Path, opts: &LinkmlOptions) -> Result<(
         .name
         .clone()
         .unwrap_or_else(|| default_schema_name(cwd));
-    let schema = build_schema(&*ledger, &items, opts.status, &name)?;
+    let vocab = super::semantics::load_vocabulary(config, cwd)?;
+    let schema = build_schema(&*ledger, &items, opts.status, &name, &vocab)?;
     let Some(schema) = schema else {
         let counts: BTreeMap<String, usize> = items.iter().fold(BTreeMap::new(), |mut m, o| {
             *m.entry(text(o, "status")).or_default() += 1;
@@ -262,6 +300,7 @@ pub fn build_schema(
     items: &[KirObject],
     status: StatusFilter,
     name: &str,
+    vocab: &ekos_semantic::ontology::Vocabulary,
 ) -> Result<Option<Value>> {
     let admitted: Vec<&KirObject> = items
         .iter()
@@ -523,13 +562,19 @@ pub fn build_schema(
                         Value::Mapping(slot_usage)
                     },
                 ),
-                (
-                    "annotations",
-                    map(vec![
+                ("annotations", {
+                    let sugg: Vec<(String, String)> = vocab
+                        .suggest(t)
+                        .into_iter()
+                        .map(|x| (x.id, x.match_type))
+                        .collect();
+                    let mut a = vec![
                         ("ekos_table", s(obj.name.clone())),
                         ("ekos_status", s("observed")),
-                    ]),
-                ),
+                    ];
+                    a.extend(suggestion_annotations(&sugg));
+                    map(a)
+                }),
             ]),
         );
     }
@@ -689,6 +734,14 @@ pub fn build_schema(
                             ("ekos_status", s(text(v, "status"))),
                             ("ekos_confidence", s(text(v, "confidence"))),
                             ("ekos_reviewed_by", opt(v, "reviewed_by")),
+                            (
+                                "ekos_suggested_exact_mappings",
+                                suggestion_annotations(&item_suggestions(v))[0].1.clone(),
+                            ),
+                            (
+                                "ekos_suggested_close_mappings",
+                                suggestion_annotations(&item_suggestions(v))[1].1.clone(),
+                            ),
                             (
                                 "ekos_source",
                                 if sources.is_empty() {

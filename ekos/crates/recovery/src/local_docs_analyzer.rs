@@ -191,6 +191,11 @@ impl CompilerPass for LocalDocAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v2` = RFC 0170: glossary sections/pages carry their entries (`glossary`).
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         let mut ids: Vec<String> = self
             .doc_artifact_ids
@@ -372,6 +377,25 @@ impl CompilerPass for LocalDocAnalyzerPass {
                     .insert("section_index".into(), serde_json::json!(section.index));
                 for (k, v) in &doc_attrs {
                     sec_obj.properties.insert((*k).into(), v.clone());
+                }
+                // RFC 0170: a glossary section's entries — meaning, written down.
+                {
+                    let mut names: Vec<&str> = vec![data.path.as_str()];
+                    names.extend(section.heading_path.iter().map(String::as_str));
+                    if crate::glossary::is_glossary(&names) {
+                        let entries = crate::glossary::parse_text(
+                            &section.text,
+                            section.line_start.unwrap_or(0),
+                        );
+                        if !entries.is_empty() {
+                            sec_obj
+                                .properties
+                                .insert("glossary".into(), serde_json::json!(entries));
+                            sec_obj
+                                .properties
+                                .insert("source_path".into(), serde_json::json!(data.path));
+                        }
+                    }
                 }
                 if let Some(heading) = &section.heading {
                     sec_obj

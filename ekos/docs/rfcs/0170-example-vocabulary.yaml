@@ -1,0 +1,35 @@
+# RFC 0170 Phase 4 — EXAMPLE ontology vocabulary for `[semantics] ontology = "<path>"`.
+#
+# An example of the format, not a recommended vocabulary: point `ontology` at your organisation's
+# own (or a curated slice of FIBO, schema.org, …). EKOS suggests a mapping only when a concept name,
+# a code's label or a table name has exactly the same words as a term's label (an `exact`
+# suggestion) or one of its synonyms (a `close` one), and exports suggestions as
+# `ekos_suggested_*_mappings` annotations — never as LinkML `exact_mappings` on its own.
+#
+# The terms below are schema.org types.
+prefixes:
+  schema: https://schema.org/
+
+terms:
+  - id: schema:Invoice
+    label: Invoice
+    synonyms: [bill]
+  - id: schema:Order
+    label: Order
+    synonyms: [sales order, purchase order]
+  - id: schema:Product
+    label: Product
+    synonyms: [part, good]
+  - id: schema:Organization
+    label: Organization
+    synonyms: [company]
+  - id: schema:Person
+    label: Person
+    synonyms: [employee, contact]
+  - id: schema:PostalAddress
+    label: Postal address
+    synonyms: [address, location]
+  - id: schema:BankAccount
+    label: Bank account
+  - id: schema:MonetaryAmount
+    label: Monetary amount

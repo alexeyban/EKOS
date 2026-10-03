@@ -50,7 +50,7 @@ fn core_fields(kind: &str) -> &'static [&'static str] {
         k if k == CONCEPT => &["definition", "table"],
         k if k == ENUM_MEANING => &["table", "column", "value", "label", "meanings"],
         k if k == CONSTRAINT => &["table", "expression"],
-        k if k == GAP => &["gap_type", "table", "column", "value", "concept"],
+        k if k == GAP => &["gap_type", "table", "column", "value", "concept", "term"],
         k if k == CONFLICT => &["conflict_type", "definitions"],
         k if k == RATIONALE => &["sha", "path"],
         _ => &[],

@@ -7,6 +7,7 @@
 pub mod business_semantics;
 pub mod data_lineage;
 pub mod doc_links;
+pub mod ontology;
 pub mod procedure_lineage;
 pub mod rollup;
 pub mod semantics_review;

@@ -49,6 +49,7 @@ pub async fn commit_step(
     let cfg = SemanticsConfig {
         min_sites: config.semantics.min_sites.max(1),
         max_enum_values: config.semantics.max_enum_values,
+        ontology: load_vocabulary(config, cwd)?,
     };
     let blame = (config.semantics.rationale)
         .then(|| GitBlame::new(cwd))
@@ -114,6 +115,21 @@ pub async fn commit_step(
     )
     .with_context(|| format!("writing {}", path.display()))?;
     Ok(Some((out.stats, written)))
+}
+
+/// RFC 0170 Phase 4: the user's ontology vocabulary (`[semantics] ontology`), or an empty one.
+pub fn load_vocabulary(
+    config: &EkosConfig,
+    cwd: &Path,
+) -> Result<ekos_semantic::ontology::Vocabulary> {
+    let Some(rel) = &config.semantics.ontology else {
+        return Ok(Default::default());
+    };
+    let path = cwd.join(rel);
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("[semantics] ontology: reading {}", path.display()))?;
+    serde_yaml::from_str(&text)
+        .with_context(|| format!("[semantics] ontology: parsing {}", path.display()))
 }
 
 /// RFC 0170 Phase 3: `llm_definition` on undocumented concepts, cite-or-drop
@@ -235,6 +251,7 @@ fn stats_json(s: &SemanticsStats) -> Value {
         "enum_values": s.enum_values, "enum_values_explained": s.enum_values_explained,
         "key_like_columns": s.key_like_columns, "constraints": s.constraints, "gaps": s.gaps,
         "conflicts": s.conflicts,
+        "mapping_suggestions": s.mapping_suggestions,
         "rationale_links": s.rationale_links,
     })
 }
@@ -242,7 +259,7 @@ fn stats_json(s: &SemanticsStats) -> Value {
 /// The one-line summary `ekos commit` prints.
 pub fn summary_line(s: &SemanticsStats, written: usize) -> String {
     format!(
-        "{} concept(s), {} coded value(s) in {} column(s) ({} explained), {} constraint(s), {} gap(s), {} conflict(s), {} rationale link(s) — all hypotheses ({} of {} predicate sites resolved; {written} new ledger entries)",
+        "{} concept(s), {} coded value(s) in {} column(s) ({} explained), {} constraint(s), {} gap(s), {} conflict(s), {} rationale link(s), {} mapping suggestion(s) — all hypotheses ({} of {} predicate sites resolved; {written} new ledger entries)",
         s.concepts,
         s.enum_values,
         s.coded_columns,
@@ -251,6 +268,7 @@ pub fn summary_line(s: &SemanticsStats, written: usize) -> String {
         s.gaps,
         s.conflicts,
         s.rationale_links,
+        s.mapping_suggestions,
         s.sites_resolved,
         s.sites
     )
@@ -1325,7 +1343,19 @@ pub fn score(
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(" ");
-            if needles.iter().any(|n| window.contains(n.as_str())) || needles.is_empty() {
+            // Alphanumerics only: `EC_HOT_LEAD` cites the label "hot lead".
+            let squash = |t: &str| {
+                t.chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+            };
+            let window_sq = squash(&window);
+            if needles.is_empty()
+                || needles.iter().any(|n| {
+                    window.contains(n.as_str())
+                        || (!squash(n).is_empty() && window_sq.contains(&squash(n)))
+                })
+            {
                 valid += 1;
             } else if invalid.len() < 25 {
                 invalid.push(format!(

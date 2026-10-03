@@ -108,8 +108,9 @@ impl CompilerPass for PerlAnalyzerPass {
 
     /// Bump on any change to this pass's output shape — see `rust_analyzer`'s `version` for why
     /// `cache_inputs` alone cannot catch a logic change, and what it cost when it didn't.
+    /// `v2` = RFC 0170: a package carries its `use constant` literals (`constants`).
     fn version(&self) -> &str {
-        "v1"
+        "v2"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -163,6 +164,10 @@ impl CompilerPass for PerlAnalyzerPass {
             stats.symbols_total += result.symbol_count;
 
             for mut obj in result.objects {
+                if obj.properties.contains_key("constants") {
+                    obj.properties
+                        .insert("constants_path".into(), serde_json::json!(data.path));
+                }
                 // RFC 0140 §1 — a symbol's span is useless without the file it belongs to.
                 crate::source_evidence::attach(&mut obj, &data.source, &data.path, &mut combined);
                 let is_package = matches!(&obj.kind, ObjectKind::Custom(k) if k == "PerlPackage");
@@ -568,6 +573,20 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
             );
         }
     }
+    // RFC 0170: `use constant NAME => literal` — named codes (`EC_CUSTOMER => 2`) are a trace of
+    // what a code means. Recorded on the file's first package, with their lines.
+    if let Some(idx) = first_package_obj {
+        let constants = perl_constants(source);
+        if !constants.is_empty() {
+            result.objects[idx].properties.insert(
+                "constants".into(),
+                serde_json::json!(constants
+                    .iter()
+                    .map(|(name, value, line)| serde_json::json!({"name": name, "value": value, "line": line}))
+                    .collect::<Vec<_>>()),
+            );
+        }
+    }
     // A file-level `=head1 DESCRIPTION`/`NAME` describes the module the file declares — Perl's
     // universal one-package-per-`.pm` convention. Applied to the *first* package only: a file
     // declaring several has no way to say which one the header meant.
@@ -578,6 +597,73 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
     }
 
     result
+}
+
+/// Every `use constant NAME => literal` — single-line, or inside a `use constant { … };` block —
+/// as `(name, normalized literal, 1-based line)`. Literals use the SQL normalization the predicate
+/// extractor uses (`2`, `'ap'`), so a constant and a compared code can be matched. Anything that
+/// is not a plain number or quoted string (an expression, a list) is skipped; POD is skipped.
+pub fn perl_constants(source: &str) -> Vec<(String, String, usize)> {
+    fn literal(v: &str) -> Option<String> {
+        let v = v.trim().trim_end_matches([';', ',']).trim();
+        if !v.is_empty()
+            && v.chars()
+                .enumerate()
+                .all(|(i, c)| c.is_ascii_digit() || (i == 0 && c == '-'))
+        {
+            return Some(v.to_string());
+        }
+        for q in ['\'', '"'] {
+            if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
+                let inner = &v[1..v.len() - 1];
+                if !inner.contains(q) {
+                    return Some(format!("'{}'", inner.replace('\'', "''")));
+                }
+            }
+        }
+        None
+    }
+    fn pair(text: &str) -> Option<(String, String)> {
+        let (name, value) = text.split_once("=>")?;
+        let name = name.trim();
+        (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            .then_some(())?;
+        Some((name.to_string(), literal(value)?))
+    }
+    let mut out = Vec::new();
+    let mut in_block = false;
+    let mut in_pod = false;
+    for (i, raw) in source.lines().enumerate() {
+        if in_pod {
+            in_pod = !raw.starts_with("=cut");
+            continue;
+        }
+        if is_pod_start(raw) {
+            in_pod = true;
+            continue;
+        }
+        let line = strip_comment(raw).trim();
+        if in_block {
+            if line.starts_with('}') {
+                in_block = false;
+            } else if let Some((n, v)) = pair(line) {
+                out.push((n, v, i + 1));
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("use constant") {
+            let rest = rest.trim();
+            if let Some(after) = rest.strip_prefix('{') {
+                if let Some((n, v)) = pair(after) {
+                    out.push((n, v, i + 1));
+                }
+                in_block = !after.contains('}');
+            } else if let Some((n, v)) = pair(rest) {
+                out.push((n, v, i + 1));
+            }
+        }
+    }
+    out
 }
 
 /// Track `{`/`}` nesting, consuming an armed `pending` block on the next opening brace and
@@ -805,6 +891,29 @@ fn extract_module_list(rest: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn use_constant_literals_are_recorded_with_lines() {
+        let src = "package LedgerSMB::Magic;\nuse constant BC_AP => 1;\nuse constant BC_AR => 2; # ar\n\
+use constant {\n    EC_VENDOR   => 1,\n    EC_CUSTOMER => '2',\n    LIST => (1, 2),\n};\n\
+use constant PI => 4 * atan2(1, 1);\n=pod\nuse constant FAKE => 9;\n=cut\n1;\n";
+        assert_eq!(
+            perl_constants(src),
+            vec![
+                ("BC_AP".to_string(), "1".to_string(), 2),
+                ("BC_AR".into(), "2".into(), 3),
+                ("EC_VENDOR".into(), "1".into(), 5),
+                ("EC_CUSTOMER".into(), "'2'".into(), 6),
+            ]
+        );
+        let r = parse(src);
+        let pkg = r
+            .objects
+            .iter()
+            .find(|o| o.name == "LedgerSMB::Magic")
+            .unwrap();
+        assert_eq!(pkg.properties["constants"].as_array().unwrap().len(), 4);
+    }
 
     fn parse(source: &str) -> PerlFileResult {
         let file_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, b"t.pm"));

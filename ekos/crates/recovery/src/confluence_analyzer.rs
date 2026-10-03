@@ -94,6 +94,11 @@ impl CompilerPass for ConfluenceAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v2` = RFC 0170: glossary sections/pages carry their entries (`glossary`).
+    fn version(&self) -> &str {
+        "v2"
+    }
+
     fn cache_inputs(&self) -> Vec<String> {
         let mut ids: Vec<String> = self
             .page_artifact_ids
@@ -156,6 +161,18 @@ impl CompilerPass for ConfluenceAnalyzerPass {
                 "excerpt".into(),
                 serde_json::json!(body_excerpt(&data.body)),
             );
+            // RFC 0170: a glossary page's entries.
+            if crate::glossary::is_glossary(&[data.title.as_str()]) {
+                let entries = crate::glossary::parse_html(&data.body);
+                if !entries.is_empty() {
+                    obj.properties
+                        .insert("glossary".into(), serde_json::json!(entries));
+                    obj.properties.insert(
+                        "source_path".into(),
+                        serde_json::json!(format!("confluence:{}:{}", data.space_key, data.id)),
+                    );
+                }
+            }
             graph.objects.push(obj);
         }
 
