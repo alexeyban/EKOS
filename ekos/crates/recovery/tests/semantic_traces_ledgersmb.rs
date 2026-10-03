@@ -129,3 +129,46 @@ fn ledgersmb_predicates() {
         "seeded lookup tables fell below the floor: {seeded}"
     );
 }
+
+/// RFC 0170: how much LedgerSMB's Perl contributes — SQL strings found, and literal predicates.
+#[test]
+fn ledgersmb_perl_sql_strings() {
+    let Some(root) = std::env::var_os("EKOS_LEDGERSMB_DIR").map(PathBuf::from) else {
+        eprintln!("skipped: set EKOS_LEDGERSMB_DIR to a LedgerSMB checkout");
+        return;
+    };
+    let mut strings = 0;
+    let mut sites = Vec::new();
+    let mut stack = vec![root.join("lib")];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "pm") {
+                let src = std::fs::read_to_string(&p).unwrap_or_default();
+                strings += ekos_recovery::perl_sql::sql_strings(&src).len();
+                for s in ekos_recovery::perl_sql::perl_sql_predicates(&src) {
+                    sites.push(format!(
+                        "{}:{} {}",
+                        p.strip_prefix(&root).unwrap().display(),
+                        s.line,
+                        s.canonical()
+                    ));
+                }
+            }
+        }
+    }
+    sites.sort();
+    eprintln!(
+        "SQL strings: {strings}, literal predicate sites: {}",
+        sites.len()
+    );
+    for s in &sites {
+        eprintln!("  {s}");
+    }
+    assert!(
+        strings >= 100,
+        "SQL strings fell below the floor: {strings}"
+    );
+}

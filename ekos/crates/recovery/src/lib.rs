@@ -32,6 +32,7 @@ pub mod openai;
 pub mod package_json_analyzer;
 pub mod pentaho_analyzer;
 pub mod perl_analyzer;
+pub mod perl_sql;
 pub mod plpgsql_analyzer;
 pub mod plpgsql_footprint;
 pub mod python_analyzer;

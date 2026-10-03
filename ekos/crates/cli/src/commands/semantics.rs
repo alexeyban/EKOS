@@ -1062,6 +1062,94 @@ pub fn agent_gaps(
     }))
 }
 
+// ── Gold-set template ───────────────────────────────────────────────────────────────────────
+
+/// The gold-set template's fixed part. A raw string on purpose: YAML indentation must survive,
+/// and a `\` line continuation in an ordinary literal would strip it.
+const GOLD_TEMPLATE_HEAD: &str = r#"# RFC 0170 gold set — to be written by a domain expert BEFORE looking at any EKOS output
+# (`ekos semantics list/gaps`, the console's Semantics tab, an exported LinkML schema). Answers
+# written after seeing EKOS's hypotheses measure agreement, not quality.
+#
+# Fill in what you know; leave out what you don't. 20–30 concepts is a good size.
+# Predicates use this form (case and spacing do not matter; `a AND b` for a conjunction):
+#   table.column IN (1, 3)      table.column IN ('A', 'L')     table.column NOT IN ('void')
+#   table.column IS TRUE|FALSE|NULL|NOT NULL|NOT TRUE           table.column > 0
+# Include rules you know exist even if they are not simple — those misses are worth measuring.
+
+meta:
+  author: ""                           # who wrote this
+  domain: ""                           # e.g. accounting
+  written_before_seeing_output: false  # set to true only if it is so
+
+# Business concepts the code should reveal.
+concepts: []
+#  - name: Open sales order
+#    predicate: oe.closed IS FALSE AND oe.oe_class_id IN (1)
+
+# Coded columns and what each code means.
+enums: []
+#  - table: oe
+#    column: oe_class_id
+#    values: {"1": Sales order, "2": Purchase order}
+
+# Values you know are used but whose meaning is NOT written down anywhere (to score the gap report).
+known_unknowns: []
+#  - {table: entity_employee, column: role, value: "'manager'"}
+
+# ── The workspace's structure, for reference (from the compiled schema; no EKOS hypotheses) ──
+"#;
+
+/// `ekos semantics gold-template`: a blank gold set for a domain expert to fill in **before**
+/// looking at any EKOS output. It shows the workspace's *structure* only — tables and their
+/// columns, from the compiled schema — and nothing EKOS hypothesised, so the answers are the
+/// expert's own.
+pub fn gold_template(
+    config: &EkosConfig,
+    cwd: &Path,
+    only: &[String],
+    out: Option<&Path>,
+) -> Result<()> {
+    let ledger = open_store_read_only(config, cwd)?;
+    let wanted: BTreeSet<String> = only.iter().map(|t| t.to_lowercase()).collect();
+    let mut tables: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for o in ledger.all_objects()? {
+        if o.kind != ekos_kir::ObjectKind::Table {
+            continue;
+        }
+        let name = o.name.rsplit('.').next().unwrap_or(&o.name).to_lowercase();
+        if !wanted.is_empty() && !wanted.contains(&name) {
+            continue;
+        }
+        let cols: Vec<String> = p(&o, "columns")
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|c| c["name"].as_str().map(str::to_lowercase))
+                    .collect()
+            })
+            .unwrap_or_default();
+        tables.entry(name).or_default().extend(cols);
+    }
+    let mut y = String::from(GOLD_TEMPLATE_HEAD);
+    for (t, cols) in &tables {
+        let mut cols = cols.clone();
+        cols.dedup();
+        y.push_str(&format!("# {t}: {}\n", cols.join(", ")));
+    }
+    match out {
+        Some(path) => {
+            std::fs::write(path, &y).with_context(|| format!("writing {}", path.display()))?;
+            println!(
+                "Wrote {} — {} table(s). Give it to the domain expert before they see any EKOS output.",
+                path.display(),
+                tables.len()
+            );
+        }
+        None => print!("{y}"),
+    }
+    Ok(())
+}
+
 // ── Evaluation ───────────────────────────────────────────────────────────────────────────────
 
 /// An expert-written gold set (RFC 0170 §5). Written **before** looking at EKOS's output.
@@ -1077,8 +1165,22 @@ pub fn agent_gaps(
 /// known_unknowns:           # values the expert agrees no source explains
 ///   - {table: acc_trans, column: status, value: "3"}
 /// ```
+/// Who wrote a gold set, and how. `eval` reports a result as an expert evaluation only when the
+/// author says it was written before seeing EKOS's output.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct GoldMeta {
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub written_before_seeing_output: bool,
+}
+
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct GoldSet {
+    #[serde(default)]
+    pub meta: GoldMeta,
     #[serde(default)]
     pub concepts: Vec<GoldConcept>,
     #[serde(default)]
@@ -1185,11 +1287,29 @@ pub fn eval(config: &EkosConfig, cwd: &Path, gold_path: &Path, json_out: bool) -
         },
         cwd,
     );
+    let caveat = (!gold.meta.written_before_seeing_output).then(|| {
+        "NOT an expert evaluation: this gold set does not say it was written before seeing EKOS's \
+         output (meta.written_before_seeing_output). Treat the numbers as a smoke test."
+            .to_string()
+    });
     if json_out {
+        let mut report = report;
+        report["meta"] = json!({
+            "author": gold.meta.author, "domain": gold.meta.domain,
+            "written_before_seeing_output": gold.meta.written_before_seeing_output,
+            "caveat": caveat,
+        });
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
     println!("RFC 0170 evaluation against {}", gold_path.display());
+    match (&caveat, &gold.meta.author) {
+        (Some(c), _) => println!("  ⚠ {c}"),
+        (None, Some(a)) => println!("  gold set by {a}, written before seeing EKOS's output"),
+        (None, None) => {
+            println!("  gold set written before seeing EKOS's output (author not named)")
+        }
+    }
     for (k, v) in report["metrics"].as_object().into_iter().flatten() {
         println!("  {k:28} {}", v["value"]);
         if let Some(d) = v["detail"].as_str() {
@@ -1689,6 +1809,35 @@ mod tests {
 
         let g = agent_gaps(&config, dir.path(), &ledger, Some("parts"), 20).unwrap();
         assert!(g["open_questions"].is_array());
+    }
+
+    /// The template's own body must parse as an (empty) gold set.
+    #[test]
+    fn the_gold_template_is_a_valid_empty_gold_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let ledger = ekos_ledger::FactLedger::open(&dir.path().join(".ekos/ledger/facts")).unwrap();
+        let mut t = KirObject::new("oe", ekos_kir::ObjectKind::Table);
+        t.properties.insert(
+            "columns".into(),
+            json!([{"name": "oe_class_id"}, {"name": "closed"}]),
+        );
+        ledger.append_object(&t).unwrap();
+        drop(ledger);
+        let out = dir.path().join("gold.yaml");
+        gold_template(&config, dir.path(), &[], Some(&out)).unwrap();
+        let text = std::fs::read_to_string(&out).unwrap();
+        assert!(text.contains("# oe: oe_class_id, closed"));
+        let g: GoldSet = serde_yaml::from_str(&text).unwrap();
+        assert!(g.concepts.is_empty() && !g.meta.written_before_seeing_output);
+        // Filling in the template in place must set the gold set's own fields.
+        let filled = text.replace("author: \"\"", "author: \"Ann\"").replace(
+            "written_before_seeing_output: false",
+            "written_before_seeing_output: true",
+        );
+        let g: GoldSet = serde_yaml::from_str(&filled).unwrap();
+        assert_eq!(g.meta.author.as_deref(), Some("Ann"));
+        assert!(g.meta.written_before_seeing_output);
     }
 
     #[test]

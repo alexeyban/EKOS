@@ -108,9 +108,10 @@ impl CompilerPass for PerlAnalyzerPass {
 
     /// Bump on any change to this pass's output shape — see `rust_analyzer`'s `version` for why
     /// `cache_inputs` alone cannot catch a logic change, and what it cost when it didn't.
-    /// `v2` = RFC 0170: a package carries its `use constant` literals (`constants`).
+    /// `v3` = RFC 0170: subs carry the literal predicates of their SQL strings (`predicates`;
+    /// includes `PREDICATES_VERSION`). `v2` = a package carries its `use constant` literals.
     fn version(&self) -> &str {
-        "v2"
+        "v3+predicates/2"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -164,6 +165,10 @@ impl CompilerPass for PerlAnalyzerPass {
             stats.symbols_total += result.symbol_count;
 
             for mut obj in result.objects {
+                if obj.properties.contains_key("predicates") {
+                    obj.properties
+                        .insert("source_path".into(), serde_json::json!(data.path));
+                }
                 if obj.properties.contains_key("constants") {
                     obj.properties
                         .insert("constants_path".into(), serde_json::json!(data.path));
@@ -573,6 +578,36 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
             );
         }
     }
+    // RFC 0170: SQL in string literals — each string's literal predicates on the innermost
+    // `sub` whose span holds it, else on the file's first package.
+    {
+        let sites = crate::perl_sql::perl_sql_predicates(source);
+        let mut by_owner: HashMap<usize, Vec<crate::sql_predicates::PredicateSite>> =
+            HashMap::new();
+        for site in sites {
+            let line = site.line as usize;
+            let owner = result
+                .objects
+                .iter()
+                .enumerate()
+                .filter_map(|(i, o)| {
+                    let (start, end) = *symbol_spans.get(&o.id)?;
+                    (start <= line && line <= end).then_some((end - start, i))
+                })
+                .min()
+                .map(|(_, i)| i)
+                .or(first_package_obj);
+            if let Some(i) = owner {
+                by_owner.entry(i).or_default().push(site);
+            }
+        }
+        for (i, sites) in by_owner {
+            result.objects[i].properties.insert(
+                "predicates".into(),
+                crate::sql_predicates::predicates_json(&sites, 1),
+            );
+        }
+    }
     // RFC 0170: `use constant NAME => literal` — named codes (`EC_CUSTOMER => 2`) are a trace of
     // what a code means. Recorded on the file's first package, with their lines.
     if let Some(idx) = first_package_obj {
@@ -891,6 +926,18 @@ fn extract_module_list(rest: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sub_carries_the_predicates_of_its_sql_strings() {
+        let src = "package LedgerSMB::Orders;\nsub open_orders {\n    my $sth = $dbh->prepare(q{\n        SELECT * FROM oe WHERE oe_class_id = 1 AND id = ?});\n}\nsub other { 1 }\n1;\n";
+        let r = parse(src);
+        let sub = r.objects.iter().find(|o| o.name == "open_orders").unwrap();
+        let p = &sub.properties["predicates"][0];
+        assert_eq!(p["relation"], serde_json::json!("oe"));
+        assert_eq!(p["line"], serde_json::json!(4));
+        let other = r.objects.iter().find(|o| o.name == "other").unwrap();
+        assert!(!other.properties.contains_key("predicates"));
+    }
 
     #[test]
     fn use_constant_literals_are_recorded_with_lines() {

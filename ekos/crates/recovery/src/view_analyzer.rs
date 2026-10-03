@@ -110,6 +110,7 @@ impl CompilerPass for ViewAnalyzerPass {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(LOGIC_VERSION.as_bytes());
+        hasher.update(crate::sql_predicates::PREDICATES_VERSION.as_bytes());
         hasher.update(self.source_path.as_bytes());
         hasher.update(self.dialect_name.as_bytes());
         hasher.update(self.file_key.as_deref().unwrap_or_default().as_bytes());

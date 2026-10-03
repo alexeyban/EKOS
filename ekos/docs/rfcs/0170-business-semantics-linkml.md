@@ -299,10 +299,26 @@ Found while testing: the glossary reader re-imported **its own previous output**
 (`Customer` ×11). It now reads documents only, sorted and de-duplicated, and a test feeds a run's
 own output back in.
 
-## Not covered (stated limits)
+## Closing the stated limits (implemented, devlog_240)
 
-Predicates through dbt CTE aliases; Python constants; embedded SQL inside Perl strings (LedgerSMB
-binds `?` almost everywhere); free-prose definitions outside marked glossaries.
+| Limit | Now |
+|---|---|
+| Filters through CTE / derived-table aliases | Every CTE and `FROM (subquery) x` gets a column map (output → base relation and column, chained through earlier CTEs); a site on one is restated on the base column, and a filter on a computed column keeps no relation. Applies everywhere predicates are read (views, routines, analyst queries, dbt) |
+| dbt filters on model columns | Each model records its `column_lineage`; synthesis chases a model column back across models to the source column (`mart_order_backlog`'s `not o.is_closed` → `stg_lsmb__sales_orders.is_closed` → `oe.closed`). dbt models document only some columns, so the declared-column check is skipped for them. Demo: 6 → **20 of 20** sites resolved, 3 → 6 concepts |
+| Python constants | Members of `Enum`/`IntEnum`/`StrEnum`/`Flag`/`IntFlag` classes, grouped by class; a class whose name has the column's words (`Status` ↔ `status`/`status_id`) matches by `name` (0.5), between label agreement (0.6) and initials (0.4). Module-level `UPPER_CASE` assignments are not read: in practice they are paths and settings, not codes |
+| SQL in Perl strings | `q{}`/`q\|\|`/`qq()` (brackets nest), quotes and heredocs; interpolated variables become the identifier `perl_var` (never a literal; `'$x'` inside SQL is dropped); predicates land on the innermost `sub`. LedgerSMB `lib/`: 303 SQL strings, 82 literal sites (41 in legacy `Upgrade_Tests.pm` against the SQL-Ledger schema), e.g. `oe.oe_class_id IN (1, 2) AND oe.quotation IS FALSE` |
+| Gold set | Not something EKOS can write. `ekos semantics gold-template` emits a blank gold file with the workspace's structure only (tables and columns, never a hypothesis) for an expert to fill in blind; a `meta` block records the author and `written_before_seeing_output`, and `eval` prints a caveat whenever that is not affirmed |
+
+`PREDICATES_VERSION` is now folded into every predicate-recording pass's cache key (a test fails
+when a literal pass version forgets it), so an extractor change can never be served from cache.
+
+LedgerSMB with all of this: 649 predicate sites (458 resolved, was 534/373), 47 concepts (was 40),
+re-commit 0.
+
+## Not covered
+
+Free-prose definitions outside marked glossaries; Python module constants; dynamic SQL assembled
+from fragments (unparseable as a whole, so nothing is claimed).
 
 
 

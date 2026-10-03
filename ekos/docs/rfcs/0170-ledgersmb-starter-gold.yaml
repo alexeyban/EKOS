@@ -10,6 +10,11 @@
 # Predicates use EKOS's canonical form: `table.column IN (v, …)`, `IS TRUE|FALSE|NULL|NOT NULL`,
 # `>`/`<`/`>=`/`<=` literal; `a AND b` for a conjunction. Case and spacing do not matter.
 
+meta:
+  author: RFC 0170 implementing session (not a domain expert)
+  domain: accounting
+  written_before_seeing_output: false
+
 concepts:
   - name: Approved transaction
     predicate: transactions.approved IS TRUE

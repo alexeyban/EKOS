@@ -20,6 +20,11 @@ use sqlparser::ast::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
+/// Bumped whenever this module's output changes for the same SQL. Every pass that records
+/// predicates folds it into its cache key, so an extractor change can never be served stale.
+/// `2` = RFC 0170: filters through CTEs and derived tables restated on base tables.
+pub const PREDICATES_VERSION: &str = "predicates/2";
+
 pub use ekos_kir::predicates::{Clause, NEW_ROW, OLD_ROW, PredicateSite, canonical_text};
 
 /// Every predicate in a parsed statement (nested queries included).
@@ -168,6 +173,13 @@ impl Scope {
             } => self.add(&object_name(n), alias.as_ref().map(|a| &a.name)),
             // A table function, a derived table or a join group names no base relation, but its
             // alias still shadows: a column qualified by it must not resolve elsewhere.
+            // A derived table (`FROM (SELECT …) x`): its columns are mapped back to their base
+            // relation through `Collector::derived`, under a marker no real table can be named.
+            TableFactor::Derived { alias: Some(a), .. } => {
+                let marker = derived_marker(&fold(&a.name));
+                self.aliases.insert(fold(&a.name), marker.clone());
+                self.relations.insert(marker);
+            }
             TableFactor::Table { alias, .. }
             | TableFactor::Derived { alias, .. }
             | TableFactor::Function { alias, .. }
@@ -533,8 +545,94 @@ fn case_sites(e: &Expr, scope: &Scope, out: &mut Vec<PredicateSite>) {
 
 // ── The walk ────────────────────────────────────────────────────────────────────────────────
 
+/// The relation name a derived table's alias stands for, unmistakable for a real table.
+fn derived_marker(alias: &str) -> String {
+    format!("\u{1}{alias}")
+}
+
+/// What a CTE's or derived table's output columns are, in terms of base relations: an output
+/// name → `(relation, column)` for a plain (possibly aliased) column reference, plus the one
+/// relation a `SELECT *` passes through. Computed columns are absent: a filter on one is about the
+/// computation, not a stored column.
+#[derive(Debug, Clone, Default)]
+struct ColMap {
+    cols: BTreeMap<String, (String, String)>,
+    star: Option<String>,
+}
+
+/// `(relation, column)` through any number of CTE/derived layers, or `None` when it ends in a
+/// computed column. A relation that is not mapped is a base relation and is returned as is.
+fn chase(
+    derived: &BTreeMap<String, ColMap>,
+    relation: &str,
+    column: &str,
+) -> Option<(String, String)> {
+    let (mut r, mut c) = (relation.to_string(), column.to_string());
+    for _ in 0..16 {
+        let Some(m) = derived.get(&r) else {
+            return Some((r, c));
+        };
+        match (m.cols.get(&c), &m.star) {
+            (Some((r2, c2)), _) => (r, c) = (r2.clone(), c2.clone()),
+            (None, Some(star)) => r = star.clone(),
+            (None, None) => return None,
+        }
+    }
+    None
+}
+
+/// The [`ColMap`] of a query whose body is one `SELECT`.
+fn projection_map(q: &Query, derived: &BTreeMap<String, ColMap>) -> Option<ColMap> {
+    use sqlparser::ast::SelectItem;
+    let SetExpr::Select(sel) = &*q.body else {
+        return None;
+    };
+    let mut scope = Scope::default();
+    scope.add_from(&sel.from);
+    let mut m = ColMap::default();
+    for item in &sel.projection {
+        let (expr, name) = match item {
+            SelectItem::UnnamedExpr(e) => (e, None),
+            SelectItem::ExprWithAlias { expr, alias } => (expr, Some(fold(alias))),
+            SelectItem::Wildcard(_) => {
+                let real: Vec<&String> = scope.relations.iter().filter(|r| !r.is_empty()).collect();
+                if real.len() == 1 && scope.relations.len() == 1 {
+                    m.star = Some(real[0].clone());
+                }
+                continue;
+            }
+            SelectItem::QualifiedWildcard(n, _) => {
+                if let Some(r) = scope.aliases.get(&object_name(n)).filter(|r| !r.is_empty()) {
+                    m.star.get_or_insert_with(|| r.clone());
+                }
+                continue;
+            }
+        };
+        if let Some(col) = scope.resolve(expr)
+            && let Some(rel) = col.relation
+            && let Some(base) = chase(derived, &rel, &col.column)
+        {
+            m.cols.insert(name.unwrap_or(col.column), base);
+        }
+    }
+    Some(m)
+}
+
+/// RFC 0170: a query's output columns in terms of base relations — `is_closed` ← `(oe, closed)` —
+/// through its CTEs and derived tables. Computed outputs are absent. For a dbt model this is its
+/// column lineage: a filter on a model column can be restated on the source column it carries.
+pub fn output_lineage(query: &Query) -> BTreeMap<String, (String, String)> {
+    let mut c = Collector::default();
+    c.learn_derived(query);
+    projection_map(query, &c.derived)
+        .map(|m| m.cols)
+        .unwrap_or_default()
+}
+
 #[derive(Default)]
 struct Collector {
+    /// CTE names and derived-table markers → their column maps.
+    derived: BTreeMap<String, ColMap>,
     scopes: Vec<Scope>,
     /// Queries (and `UPDATE`/`DELETE` statements) currently open: past the first, a filter is a
     /// subquery's.
@@ -550,8 +648,74 @@ impl Collector {
     /// Append `found`, marking each as a subquery's when this is not the outermost level.
     fn take(&mut self, found: Vec<PredicateSite>) {
         let subquery = self.depth > 0;
-        self.out
-            .extend(found.into_iter().map(|s| PredicateSite { subquery, ..s }));
+        let found: Vec<PredicateSite> = found
+            .into_iter()
+            .map(|s| self.through_derived(PredicateSite { subquery, ..s }))
+            .collect();
+        self.out.extend(found);
+    }
+
+    /// A site on a CTE or derived table, restated on the base relation its column comes from —
+    /// or left without a relation when the column is computed.
+    fn through_derived(&self, mut s: PredicateSite) -> PredicateSite {
+        if let Some(r) = s.relation.clone()
+            && self.derived.contains_key(&r)
+        {
+            match chase(&self.derived, &r, &s.column) {
+                Some((r2, c2)) => {
+                    s.relation = Some(r2);
+                    s.column = c2;
+                }
+                None => s.relation = None,
+            }
+        }
+        if !s.scope.is_empty() {
+            let col = s.column.clone();
+            s.scope = s
+                .scope
+                .iter()
+                .filter_map(|r| {
+                    if self.derived.contains_key(r) {
+                        chase(&self.derived, r, &col)
+                            .filter(|(_, c2)| *c2 == col)
+                            .map(|(r2, _)| r2)
+                    } else {
+                        Some(r.clone())
+                    }
+                })
+                .collect();
+        }
+        s
+    }
+
+    /// Record the column maps of a query's CTEs and of the derived tables in its `FROM`s.
+    fn learn_derived(&mut self, q: &Query) {
+        if let Some(with) = &q.with {
+            for cte in &with.cte_tables {
+                if let Some(m) = projection_map(&cte.query, &self.derived) {
+                    self.derived.insert(fold(&cte.alias.name), m);
+                }
+            }
+        }
+        let mut found = Vec::new();
+        selects(&q.body, &mut found);
+        for sel in found {
+            for t in &sel.from {
+                let factors =
+                    std::iter::once(&t.relation).chain(t.joins.iter().map(|j| &j.relation));
+                for f in factors {
+                    if let TableFactor::Derived {
+                        subquery,
+                        alias: Some(a),
+                        ..
+                    } = f
+                        && let Some(m) = projection_map(subquery, &self.derived)
+                    {
+                        self.derived.insert(derived_marker(&fold(&a.name)), m);
+                    }
+                }
+            }
+        }
     }
 
     fn select(&mut self, s: &Select, scope: &Scope) {
@@ -609,6 +773,7 @@ impl Visitor for Collector {
     type Break = ();
 
     fn pre_visit_query(&mut self, q: &Query) -> ControlFlow<()> {
+        self.learn_derived(q);
         let mut found = Vec::new();
         selects(&q.body, &mut found);
         let mut scope = Scope::default();
@@ -859,6 +1024,64 @@ mod tests {
             ]
         );
         assert!(condition_predicates("not valid sql ((").is_empty());
+    }
+
+    #[test]
+    fn filters_through_ctes_and_derived_tables_land_on_the_base_table() {
+        let c = canon(
+            "WITH orders AS (SELECT o.id, o.closed AS is_closed, o.oe_class_id AS class, \
+               o.amount * 2 AS doubled FROM oe o), \
+             open_orders AS (SELECT * FROM orders WHERE NOT is_closed) \
+             SELECT * FROM open_orders x JOIN (SELECT a.id, a.category AS cat FROM account a) acc \
+               ON acc.id = x.id \
+             WHERE x.class = 1 AND acc.cat IN ('A', 'L') AND x.doubled > 10",
+        );
+        assert_eq!(
+            c,
+            vec![
+                "oe.oe_class_id IN (1)",
+                "account.category IN ('A', 'L')",
+                "doubled > 10",
+                "oe.closed IS FALSE",
+            ],
+            "computed columns keep no relation; the CTE's own filter is on oe too"
+        );
+    }
+
+    /// Passes whose `version()` is a literal must spell the current predicates version, so bumping
+    /// one without the other fails here instead of serving stale caches.
+    #[test]
+    fn literal_pass_versions_track_the_predicates_version() {
+        for src in [
+            include_str!("sql_transform_analyzer.rs"),
+            include_str!("dbt_analyzer.rs"),
+            include_str!("perl_analyzer.rs"),
+        ] {
+            assert!(
+                src.contains(&format!("+{PREDICATES_VERSION}\"")),
+                "a pass version does not include {PREDICATES_VERSION}"
+            );
+        }
+    }
+
+    #[test]
+    fn output_lineage_follows_aliases_and_ctes() {
+        let stmts = Parser::parse_sql(
+            &PostgreSqlDialect {},
+            "WITH o AS (SELECT x.closed AS is_closed, x.id FROM oe x) \
+             SELECT o.is_closed AS done, o.id, o.id + 1 AS next FROM o",
+        )
+        .unwrap();
+        let Statement::Query(q) = &stmts[0] else {
+            panic!()
+        };
+        let l = output_lineage(q);
+        assert_eq!(
+            l.get("done"),
+            Some(&("oe".to_string(), "closed".to_string()))
+        );
+        assert_eq!(l.get("id"), Some(&("oe".to_string(), "id".to_string())));
+        assert!(!l.contains_key("next"));
     }
 
     #[test]

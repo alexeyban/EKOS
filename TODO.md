@@ -6284,7 +6284,8 @@ LinkML; generation stays in LinkML.
 - [x] `ekos semantics list|show|gaps|eval`, `ekos export linkml` (validates: 0 `linkml-lint` errors)
 - [x] First eval run on a *starter* gold set (concept recall 0.73, label accuracy 0.95)
 - [ ] **Expert-written gold set** (20–30 accounting concepts, written before looking at output) and
-      published numbers, misses included — the starter set is not one
+      published numbers, misses included — the starter set is not one. Tooling ready:
+      `ekos semantics gold-template` (structure only) + `meta.written_before_seeing_output`
 
 ### Phase 2 — review loop · **done (devlog_235, console devlog_236)**
 - [x] `ekos semantics confirm|reject|edit` — human-only, never reachable from MCP (source-scan test)
@@ -6308,7 +6309,8 @@ LinkML; generation stays in LinkML.
 - [x] Exact seed-row lines
 - [x] Glossaries (local docs + Confluence), Perl application constants, dbt model SQL (Jinja) —
       devlog_239
-- [ ] Python constants; embedded SQL in Perl strings; dbt predicates through CTE aliases
+- [x] Python `Enum` constants; SQL in Perl strings; filters through CTEs/derived tables and dbt
+      model column lineage (demo 6 → 20 of 20 sites) — devlog_240
 
 ### Phase 4 — round-trip and agents
 - [x] `ekos import linkml` (expert YAML edits → review decisions; matched by `ekos_id`, all or

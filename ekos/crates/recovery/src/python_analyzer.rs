@@ -97,8 +97,9 @@ impl CompilerPass for PythonAnalyzerPass {
     /// `v2` = RFC 0140 §1 (one `KirEvidence` per span-carrying symbol).
     /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
     /// `v4` = RFC 0141 §1 (`signature` on function symbols).
+    /// `v5` = RFC 0170 (`constants` on `Enum` class symbols).
     fn version(&self) -> &str {
-        "v4"
+        "v5"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -321,6 +322,52 @@ fn extends_kir_id(from: KirId, to: KirId) -> KirId {
         &Uuid::NAMESPACE_URL,
         format!("extends:{from}:{to}").as_bytes(),
     ))
+}
+
+/// RFC 0170: the literal members of a class deriving from an enum base (`Enum`, `IntEnum`,
+/// `StrEnum`, `Flag`, `IntFlag`, also as `enum.X`), as `(name, normalized literal, line)`. Values
+/// use the SQL literal normalization (`2`, `'ap'`) so they meet compared codes; `auto()` and other
+/// expressions are skipped.
+fn enum_members(c: &ast::StmtClassDef, source: &str) -> Vec<(String, String, u32)> {
+    let is_enum = c.bases.iter().any(|b| {
+        let name = match b {
+            ast::Expr::Name(n) => n.id.to_string(),
+            ast::Expr::Attribute(a) => a.attr.to_string(),
+            _ => return false,
+        };
+        matches!(
+            name.as_str(),
+            "Enum" | "IntEnum" | "StrEnum" | "Flag" | "IntFlag"
+        )
+    });
+    if !is_enum {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for stmt in &c.body {
+        let ast::Stmt::Assign(a) = stmt else { continue };
+        let [ast::Expr::Name(target)] = a.targets.as_slice() else {
+            continue;
+        };
+        let value = match &*a.value {
+            ast::Expr::Constant(k) => match &k.value {
+                ast::Constant::Int(i) => i.to_string(),
+                ast::Constant::Str(s) => format!("'{}'", s.replace('\'', "''")),
+                _ => continue,
+            },
+            ast::Expr::UnaryOp(u) if matches!(u.op, ast::UnaryOp::USub) => match &*u.operand {
+                ast::Expr::Constant(k) => match &k.value {
+                    ast::Constant::Int(i) => format!("-{i}"),
+                    _ => continue,
+                },
+                _ => continue,
+            },
+            _ => continue,
+        };
+        let line = line_number(source, usize::from(a.range().start()));
+        out.push((target.id.to_string(), value, line));
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -723,6 +770,29 @@ fn walk_top_level_statement(
                 Some(span),
                 None,
             );
+            // RFC 0170: an `Enum` class names its members' codes (`CUSTOMER = 2`).
+            let members = enum_members(c, source);
+            if !members.is_empty()
+                && let Some(sym) = result
+                    .objects
+                    .iter_mut()
+                    .rev()
+                    .find(|o| o.name == c.name.as_str())
+            {
+                sym.properties.insert(
+                    "constants".into(),
+                    serde_json::json!(
+                        members
+                            .iter()
+                            .map(|(n, v, l)| serde_json::json!({
+                                "name": n, "value": v, "line": l, "group": c.name.as_str(),
+                            }))
+                            .collect::<Vec<_>>()
+                    ),
+                );
+                sym.properties
+                    .insert("constants_path".into(), serde_json::json!(path));
+            }
             // RFC 0091: a real SQLAlchemy declarative model (`__tablename__` present) is *also*
             // compiled as a real `Table` object, alongside its existing `PythonSymbol` — the class
             // still gets its ordinary code-level representation unchanged.
@@ -1033,6 +1103,28 @@ fn calls_to_nodes(calls: &[RawCall], source: &str) -> Vec<TransformNode> {
 
 #[cfg(test)]
 mod tests {
+    /// RFC 0170: enum members are recorded as the class's constants.
+    #[test]
+    fn enum_members_become_constants() {
+        let src = "import enum\nfrom enum import IntEnum\n\nclass EntityClass(IntEnum):\n    VENDOR = 1\n    CUSTOMER = 2\n    OTHER = auto()\n\nclass Kind(enum.Enum):\n    AP = 'ap'\n\nclass Plain:\n    X = 1\n";
+        let r = parse_python_file("m.py", src, KirId::new()).unwrap();
+        let ec = r.objects.iter().find(|o| o.name == "EntityClass").unwrap();
+        assert_eq!(
+            ec.properties["constants"],
+            serde_json::json!([
+                {"name": "VENDOR", "value": "1", "line": 5, "group": "EntityClass"},
+                {"name": "CUSTOMER", "value": "2", "line": 6, "group": "EntityClass"}
+            ])
+        );
+        let kind = r.objects.iter().find(|o| o.name == "Kind").unwrap();
+        assert_eq!(
+            kind.properties["constants"][0]["value"],
+            serde_json::json!("'ap'")
+        );
+        let plain = r.objects.iter().find(|o| o.name == "Plain").unwrap();
+        assert!(!plain.properties.contains_key("constants"));
+    }
+
     use super::*;
 
     fn parse(source: &str) -> PythonFileResult {

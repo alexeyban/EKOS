@@ -339,7 +339,9 @@ fn collect_sites(
         if !(carrier_is_view
             || is_custom(o, "ProcedureStatement")
             || is_custom(o, "Procedure")
-            || is_custom(o, "TransformNode"))
+            || is_custom(o, "TransformNode")
+            || is_custom(o, "PerlSymbol")
+            || is_custom(o, "PerlPackage"))
         {
             continue;
         }
@@ -379,12 +381,41 @@ fn collect_sites(
                     (owners.len() == 1).then(|| *owners.iter().next().unwrap())
                 }
             };
-            let Some(table) = table else {
+            let Some(mut table) = table else {
                 continue;
             };
+            let mut p = p;
+            // A dbt model column that passes a source column through is restated on that column,
+            // across models (`stg_orders.is_closed` → `oe.closed`).
+            for _ in 0..8 {
+                let Some(Value::Object(lineage)) =
+                    tables[table].obj.properties.get("column_lineage")
+                else {
+                    break;
+                };
+                let Some((r, c)) = lineage.get(&p.column).and_then(|v| {
+                    Some((
+                        v.get(0)?.as_str()?.to_string(),
+                        v.get(1)?.as_str()?.to_string(),
+                    ))
+                }) else {
+                    break;
+                };
+                let Some(next) = resolve_table(&r) else {
+                    break;
+                };
+                table = next;
+                p.column = c.to_lowercase();
+                p.relation = Some(r);
+            }
             // A column the table does not declare is a computed alias or a typo; not a fact about
-            // the table. (A table recovered without columns cannot be checked, and is trusted.)
-            if !tables[table].columns.is_empty() && !tables[table].columns.contains_key(&p.column) {
+            // the table. (A table recovered without columns cannot be checked, and is trusted; a
+            // dbt model documents only some of its columns, so it is trusted too.)
+            let partial = tables[table].obj.properties.contains_key("dbt_kind");
+            if !partial
+                && !tables[table].columns.is_empty()
+                && !tables[table].columns.contains_key(&p.column)
+            {
                 continue;
             }
             stats.sites_resolved += 1;
@@ -684,20 +715,23 @@ fn constant_groups(graph: &KirGraph) -> BTreeMap<String, Vec<Constant>> {
             let (Some(name), Some(value)) = (c["name"].as_str(), c["value"].as_str()) else {
                 continue;
             };
-            let Some((prefix, suffix)) = name.split_once('_') else {
-                continue;
+            // An explicit group (a Python `Enum` class) names its members whole; a Perl constant
+            // groups by its prefix (`EC_CUSTOMER` → `EC` / `customer`).
+            let (prefix, suffix) = match c["group"].as_str() {
+                Some(g) => (g.to_string(), name.to_string()),
+                None => match name.split_once('_') {
+                    Some((p, s)) => (p.to_string(), s.to_string()),
+                    None => continue,
+                },
             };
-            groups
-                .entry(prefix.to_string())
-                .or_default()
-                .push(Constant {
-                    name: name.to_string(),
-                    suffix: suffix.to_lowercase(),
-                    value: value.to_string(),
-                    path: path.clone(),
-                    line: c["line"].as_u64().unwrap_or(0) as u32,
-                    package: o.name.clone(),
-                });
+            groups.entry(prefix).or_default().push(Constant {
+                name: name.to_string(),
+                suffix: suffix.to_lowercase(),
+                value: value.to_string(),
+                path: path.clone(),
+                line: c["line"].as_u64().unwrap_or(0) as u32,
+                package: o.name.clone(),
+            });
         }
     }
     groups.retain(|_, g| {
@@ -725,7 +759,9 @@ fn match_constant_group(
     labels: &BTreeMap<String, String>,
 ) -> Option<(String, &'static str)> {
     let mut by_labels = Vec::new();
+    let mut by_name = Vec::new();
     let mut by_initials = Vec::new();
+    let column_words = words_key(column);
     let initials: String = column
         .split('_')
         .filter(|t| !t.is_empty() && *t != "id")
@@ -749,13 +785,27 @@ fn match_constant_group(
             continue;
         }
         let overlap = g.iter().filter(|c| values.contains(&c.value)).count();
+        // `class Status(IntEnum)` for column `status` (or `status_id`).
+        let group_words = words_key(prefix);
+        if disagree == 0
+            && overlap * 2 >= g.len()
+            && (group_words == column_words || format!("{group_words} id") == column_words)
+        {
+            by_name.push(prefix.clone());
+            continue;
+        }
         if *prefix == initials && initials.len() >= 2 && overlap * 2 >= g.len() && disagree == 0 {
             by_initials.push(prefix.clone());
         }
     }
-    match (by_labels.as_slice(), by_initials.as_slice()) {
-        ([one], _) => Some((one.clone(), "labels")),
-        ([], [one]) => Some((one.clone(), "initials")),
+    match (
+        by_labels.as_slice(),
+        by_name.as_slice(),
+        by_initials.as_slice(),
+    ) {
+        ([one], _, _) => Some((one.clone(), "labels")),
+        ([], [one], _) => Some((one.clone(), "name")),
+        ([], [], [one]) => Some((one.clone(), "initials")),
         _ => None,
     }
 }
@@ -1107,7 +1157,11 @@ pub fn synthesize(
                     meanings.entry(c.value.clone()).or_default().push(Meaning {
                         label: c.suffix.clone(),
                         source: "app_constant",
-                        confidence: if how == "labels" { 0.6 } else { 0.4 },
+                        confidence: match how {
+                            "labels" => 0.6,
+                            "name" => 0.5,
+                            _ => 0.4,
+                        },
                         path: c.path.clone(),
                         line: Some(c.line),
                         detail: format!(
@@ -2673,6 +2727,79 @@ mod tests {
             json!("schema:Customer")
         );
         assert_eq!(out.stats.mapping_suggestions, 1);
+    }
+
+    #[test]
+    fn a_python_enum_named_like_the_column_names_its_codes() {
+        let mut g = fixture();
+        g.add_object(table(
+            "orders",
+            json!([{"name": "status_id", "data_type": "INT"}]),
+            vec![],
+        ));
+        g.add_object(carrier(
+            "ProcedureStatement",
+            "order_report#1",
+            json!([site("orders", "status_id", "in", &["1", "3"], "where", 4)]),
+        ));
+        let mut cls = KirObject::new("Status", ObjectKind::Custom("PythonSymbol".into()));
+        cls.properties
+            .insert("constants_path".into(), json!("app/models.py"));
+        cls.properties.insert(
+            "constants".into(),
+            json!([
+                {"name": "OPEN", "value": "1", "line": 7, "group": "Status"},
+                {"name": "SHIPPED", "value": "3", "line": 8, "group": "Status"}
+            ]),
+        );
+        g.add_object(cls);
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        let label = |n: &str| {
+            of(&out, ENUM_MEANING)
+                .into_iter()
+                .find(|o| o.name == n)
+                .map(|o| prop(o, "label").clone())
+        };
+        assert_eq!(label("orders.status_id = 3"), Some(json!("shipped")));
+    }
+
+    #[test]
+    fn a_filter_on_a_dbt_model_column_lands_on_the_source_column() {
+        let mut g = fixture();
+        let mut stg = KirObject::new("stg_orders", ObjectKind::Table);
+        stg.id = kid("t:stg");
+        stg.properties.insert("dbt_kind".into(), json!("model"));
+        stg.properties
+            .insert("columns".into(), json!([{"name": "order_id"}]));
+        stg.properties.insert(
+            "column_lineage".into(),
+            json!({"is_obsolete": ["parts", "obsolete"]}),
+        );
+        g.add_object(stg);
+        for n in ["mart_a", "mart_b"] {
+            g.add_object(carrier(
+                "ProcedureStatement",
+                &format!("{n}#1"),
+                json!([site(
+                    "stg_orders",
+                    "is_obsolete",
+                    "is_false",
+                    &[],
+                    "where",
+                    3
+                )]),
+            ));
+        }
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+        let c = of(&out, CONCEPT)
+            .into_iter()
+            .find(|c| c.name == "ActiveParts")
+            .unwrap();
+        assert_eq!(
+            prop(c, "sites"),
+            &json!(4),
+            "the view, the routine, and two marts via lineage"
+        );
     }
 
     /// The stored kind must survive a serde round trip, or a ledger read loses every concept.

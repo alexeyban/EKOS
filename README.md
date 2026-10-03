@@ -442,9 +442,11 @@ column-vs-literal predicate in views, routines and `CHECK` constraints — norma
 `NOT NULL`/key columns and lookup-table seed rows — plus PL/pgSQL `IF NEW.col …` conditions
 (resolved to the trigger's table), Pentaho `FilterRows` conditions, standalone analyst `SELECT`s,
 and dbt `schema.yml` (descriptions, `not_null`/`unique`/`accepted_values`/`relationships` tests)
-and model SQL (Jinja rendered: `ref`/`source`/`var`) — plus application constants (`use constant
-EC_CUSTOMER => 2`, matched to columns by label agreement) and marked glossaries (local docs,
-Confluence; unmatched terms become gaps). `[semantics] ontology = "<file>"` adds exact/close
+and model SQL (Jinja rendered: `ref`/`source`/`var`; model columns traced back to their source
+columns) — plus SQL in Perl strings, application constants (Perl `use constant EC_CUSTOMER => 2`,
+Python `Enum` classes; matched to columns by label agreement or name) and marked glossaries (local
+docs, Confluence; unmatched terms become gaps). Filters through CTEs and derived tables are
+restated on the base table. `[semantics] ontology = "<file>"` adds exact/close
 mapping suggestions from your own vocabulary, exported as annotations only. With `[semantics] enabled = true`, `ekos commit`
 synthesizes **hypotheses** from them, deterministically and without an LLM:
 
@@ -485,6 +487,7 @@ ekos import linkml model.yaml --dry-run      # an expert's YAML edits → the re
 ekos import linkml model.yaml --as ann       # …recorded, all or nothing (renames, descriptions,
                                              # code labels, ekos_status: confirmed|rejected)
 ekos semantics confirm PartsAssembly PartsNotObsolete --as ann   # many at once, all or nothing
+ekos semantics gold-template --out gold.yaml   # blank, structure-only: for an expert, before any output
 ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
 ```
 

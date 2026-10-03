@@ -880,6 +880,16 @@ enum SemanticsCommands {
         #[arg(long)]
         json: bool,
     },
+    /// A blank gold set for a domain expert — the workspace's tables and columns only, never EKOS's
+    /// hypotheses — to be filled in before anyone looks at EKOS's output
+    GoldTemplate {
+        /// Only these tables (default: all)
+        #[arg(long, value_delimiter = ',')]
+        tables: Vec<String>,
+        /// Write here instead of stdout
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
     /// Score the recovered semantics against an expert-written gold set (YAML)
     Eval {
         /// The gold-set file
@@ -1213,6 +1223,9 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             }
             SemanticsCommands::Gaps { json } => {
                 crate::commands::semantics::gaps(&config, &cwd, json)
+            }
+            SemanticsCommands::GoldTemplate { tables, out } => {
+                crate::commands::semantics::gold_template(&config, &cwd, &tables, out.as_deref())
             }
             SemanticsCommands::Eval { gold, json } => {
                 crate::commands::semantics::eval(&config, &cwd, &gold, json)

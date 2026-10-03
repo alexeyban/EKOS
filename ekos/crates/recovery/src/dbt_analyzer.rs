@@ -383,24 +383,38 @@ fn render_expr(
     }
 }
 
-/// The predicates of a model's rendered SQL, parsed with the first dialect that accepts it.
-pub fn model_predicates(rendered: &str) -> Vec<crate::sql_predicates::PredicateSite> {
+/// The rendered model, parsed with the first dialect that accepts it.
+fn parse_model(rendered: &str) -> Option<Vec<sqlparser::ast::Statement>> {
     use sqlparser::dialect::{ClickHouseDialect, Dialect, GenericDialect, PostgreSqlDialect};
     let dialects: [&dyn Dialect; 3] = [
         &PostgreSqlDialect {},
         &ClickHouseDialect {},
         &GenericDialect {},
     ];
-    for d in dialects {
-        if let Ok(stmts) = sqlparser::parser::Parser::parse_sql(d, rendered) {
-            return stmts
+    dialects
+        .into_iter()
+        .find_map(|d| sqlparser::parser::Parser::parse_sql(d, rendered).ok())
+}
+
+/// The predicates of a model's rendered SQL.
+pub fn model_predicates(rendered: &str) -> Vec<crate::sql_predicates::PredicateSite> {
+    parse_model(rendered)
+        .map(|stmts| {
+            stmts
                 .iter()
                 .flat_map(crate::sql_predicates::statement_predicates)
                 .filter(|p| !p.values.iter().any(|v| v.contains(UNKNOWN)))
-                .collect();
-        }
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A model's column lineage — each output column that passes a source column through.
+pub fn model_lineage(rendered: &str) -> std::collections::BTreeMap<String, (String, String)> {
+    match parse_model(rendered).as_deref() {
+        Some([sqlparser::ast::Statement::Query(q)]) => crate::sql_predicates::output_lineage(q),
+        _ => Default::default(),
     }
-    Vec::new()
 }
 
 /// The table a `ref('x')` / `source('s', 'x')` names.
@@ -525,7 +539,8 @@ impl CompilerPass for DbtAnalyzerPass {
     /// `v3` = RFC 0170: a model carries its own filters (`predicates`). `v2` = documented columns
     /// carry description, type and dbt tests.
     fn version(&self) -> &str {
-        "v3"
+        // Includes `PREDICATES_VERSION`: a model carries `predicates`.
+        "v4+predicates/2"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -605,6 +620,18 @@ impl CompilerPass for DbtAnalyzerPass {
             // RFC 0170: the model's own filters — a model is a view, and its WHERE defines it.
             let (rendered, used_vars) = render_model_sql(content, &name, &vars);
             let predicates = model_predicates(&rendered);
+            let lineage = model_lineage(&rendered);
+            if !lineage.is_empty() {
+                obj = obj.with_property(
+                    "column_lineage",
+                    serde_json::json!(
+                        lineage
+                            .iter()
+                            .map(|(k, (r, c))| (k.clone(), serde_json::json!([r, c])))
+                            .collect::<serde_json::Map<_, _>>()
+                    ),
+                );
+            }
             obj = obj.with_property("source_path", serde_json::json!(rel_path));
             if !predicates.is_empty() {
                 obj = obj.with_property(
