@@ -1,6 +1,6 @@
 # RFC 0170 — Business semantics from technical traces, exported as LinkML
 
-**Status:** Accepted — Phase 1 (MVP) implemented (devlog_234); Phase 2 review loop implemented except console cards (devlog_235), 2026-10-03; Phases 3–4 proposed
+**Status:** Accepted — Phase 1 (devlog_234) and Phase 2 (devlog_235) implemented; Phase 4's `ekos import linkml` and the console review UI implemented (devlog_236), 2026-10-03; Phase 3 and Phase 4's MCP tools/ontology suggestions proposed
 **Date:** 2026-10-03
 **Related:** RFC 0135 (provenance + determinism — this RFC's Phase 0), RFC 0146 Phase 2 (`COMMENT ON`
 descriptions), RFC 0163 (PL/pgSQL IR, `plpgsql_footprint`), RFC 0169 (views), RFC 0029/0063
@@ -203,7 +203,10 @@ the reason; rejected gaps/conflicts drop out of it. Export uses `expert_name`/`e
 review-based metrics: *definition precision* (reviewed concepts accepted without edits) and *gap
 usefulness* (reviewed gaps confirmed as real unknowns).
 
-**Not done:** console review cards (RFC 0127) — the CLI is the only review surface.
+**Console (devlog_236).** The RFC 0127 web console's *Semantics* tab is the review UI: a queue
+with evidence and confirm/reject/edit, the gap report, and a LinkML viewer + YAML editor. It runs
+the same human-only CLI commands under the write role, recording the OIDC identity or, in token
+mode, a typed name as `token:<name>` — a shared token is not an identity and the ledger says so.
 
 ### What Phase 2's real run changed
 
@@ -219,14 +222,30 @@ usefulness* (reviewed gaps confirmed as real unknowns).
 - **`SqlAnalyzerPass` had no logic version.** Its cache key hashes only the SQL, so a workspace
   recovered before 0170 would have kept tables without seeds or constraints. Now `v2`.
 
+## Phase 4 (part) — LinkML round trip (implemented, devlog_236)
+
+`ekos export linkml` annotates every recovered element with `ekos_id` (and the schema with
+`ekos_export_status`); `--json` prints the schema as JSON. `ekos import linkml <file> [--dry-run]
+[--json] [--as]` rebuilds the export the file came from and diffs element by element, matched by
+`ekos_id`: a renamed concept class → `edit --name`; a changed concept `description` →
+`edit --description`; a changed permissible-value `description` → `edit --label`;
+`ekos_status: confirmed|rejected` (+ `ekos_review_note`) → `confirm`/`reject`. A renamed code, an
+unknown id or a rejection without a note is an error; new classes, deletions and other statuses
+are warnings and import nothing. Validation is all or nothing. Human-only: the source-scan test
+also bans `import::linkml` from `commands/mcp.rs`. An expert's description now *replaces* the
+generated one in the export (the predicate stays in `ekos_definition`), so a round trip never
+grows it; on LedgerSMB, export → edit → import → export → import plans zero decisions.
+
+Re-confirming an already-confirmed, unchanged item with no note returns the same version, so the
+ledger writes nothing.
+
 ## Phases 3–4 (proposed, not implemented here)
 
 - **Phase 3 — wider sources.** Pentaho filters via the Transformation IR, dbt tests, Confluence
   glossary, application constants (Perl), constrained LLM definition text where every sentence must
   cite evidence and uncited sentences are dropped.
-- **Phase 4 — round-trip and agents.** `ekos import linkml` (expert YAML edits → review decisions),
-  MCP `semantics_lookup`/`semantics_gaps` that always return the status, optional ontology mapping
-  suggestions (hypotheses only).
+- **Phase 4 — agents.** MCP `semantics_lookup`/`semantics_gaps` that always return the status,
+  optional ontology mapping suggestions (hypotheses only).
 
 ## Results — LedgerSMB, Phase 1 (2026-10-03)
 

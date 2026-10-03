@@ -60,6 +60,10 @@ const router = createBrowserRouter([
               import("./pages/EvalDetail").then((m) => ({ Component: m.EvalDetail })),
           },
           {
+            path: "semantics",
+            lazy: () => import("./pages/Semantics").then((m) => ({ Component: m.Semantics })),
+          },
+          {
             path: "config",
             lazy: () => import("./pages/Config").then((m) => ({ Component: m.Config })),
           },

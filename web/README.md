@@ -10,7 +10,10 @@ relationship filters, search-with-fly-to, an evidence-backed object panel, a tim
 neighbourhood isolation, impact-mode tracing, a server-side layout for large graphs, and PNG/glTF
 export; and an **Evals** tab browsing every saved RFC 0138 `ekos eval run` report (history table +
 per-scenario detail), with a new run triggerable from the existing **Run** tab like any other
-allowlisted command. See the root [`README.md`](../README.md)'s own "Web console" section for the
+allowlisted command. A **Semantics** tab (RFC 0170) reviews business-semantics hypotheses
+(confirm/reject/edit with evidence) and views/edits the exported LinkML schema, round-tripping
+YAML edits through `ekos import linkml`. Decisions are write-role, CLI-only (never MCP), and
+attributed to the signed-in user. See the root [`README.md`](../README.md)'s own "Web console" section for the
 full, versioned feature list per RFC; this file stays focused on running and developing the
 console itself.
 

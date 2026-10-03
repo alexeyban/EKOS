@@ -9,7 +9,7 @@
 //!
 //! Read commands never write. Nothing here confirms anything: every item is a hypothesis.
 
-use super::store::open_store;
+use super::store::{open_store, open_store_read_only};
 use anyhow::{Context, Result};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirGraph, KirId, KirObject};
@@ -250,12 +250,34 @@ fn kind_of(o: &KirObject) -> Option<&'static str> {
 }
 
 /// The RFC 0170 items the latest synthesis run derived — every one ever written when no manifest
-/// exists yet (a ledger committed before the manifest, or by another tool).
+/// exists yet (a ledger committed before the manifest, or by another tool). Opened read-only, so
+/// it runs beside a serving `ekos mcp serve` or the web console; see [`current_items_for_write`].
 pub fn current_items(
     config: &EkosConfig,
     cwd: &Path,
 ) -> Result<(Box<dyn KnowledgeStore>, Vec<KirObject>)> {
-    let ledger = open_store(config, cwd).map_err(|e| {
+    items_from(config, cwd, false)
+}
+
+/// [`current_items`] on a writable store, for a review that appends a decision.
+pub fn current_items_for_write(
+    config: &EkosConfig,
+    cwd: &Path,
+) -> Result<(Box<dyn KnowledgeStore>, Vec<KirObject>)> {
+    items_from(config, cwd, true)
+}
+
+fn items_from(
+    config: &EkosConfig,
+    cwd: &Path,
+    writable: bool,
+) -> Result<(Box<dyn KnowledgeStore>, Vec<KirObject>)> {
+    let opened = if writable {
+        open_store(config, cwd)
+    } else {
+        open_store_read_only(config, cwd)
+    };
+    let ledger = opened.map_err(|e| {
         anyhow::anyhow!("{e}\nRun the pipeline with `[semantics] enabled = true` first.")
     })?;
     let current: Option<BTreeSet<String>> = std::fs::read(manifest_path(config, cwd))
@@ -423,7 +445,7 @@ pub fn review(
         .or_else(|| std::env::var("USER").ok())
         .filter(|b| !b.trim().is_empty())
         .ok_or_else(|| anyhow::anyhow!("who is reviewing? Pass --as <you>"))?;
-    let (ledger, items) = current_items(config, cwd)?;
+    let (ledger, items) = current_items_for_write(config, cwd)?;
     let current = find_item(&items, target)?;
     let at = chrono::Utc::now().to_rfc3339();
     let next = semantics_review::apply_review(current, &decision, &by, &at, note.as_deref())
@@ -1069,6 +1091,10 @@ mod tests {
             "semantics review must stay CLI-only"
         );
         assert!(!mcp.contains("semantics::review"));
+        assert!(
+            !mcp.contains("import::linkml"),
+            "LinkML import records human decisions"
+        );
     }
 
     /// The commit step end to end over a real fact ledger: a review survives an unchanged re-run

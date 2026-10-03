@@ -159,6 +159,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ExportCommands,
     },
+    /// Import an expert's edits back as review decisions (RFC 0170: LinkML round trip)
+    Import {
+        #[command(subcommand)]
+        subcommand: ImportCommands,
+    },
     /// Cross-system identity resolution subcommands (RFC 0029)
     Identity {
         #[command(subcommand)]
@@ -895,6 +900,27 @@ enum ExportCommands {
         /// Schema name (default: the workspace directory's name)
         #[arg(long)]
         name: Option<String>,
+        /// Print the schema as JSON instead of YAML
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImportCommands {
+    /// Turn edits to an exported LinkML schema into review decisions — renames, descriptions,
+    /// labels, `ekos_status: confirmed|rejected`. Human-only; all or nothing
+    Linkml {
+        /// The edited schema (from `ekos export linkml`)
+        file: std::path::PathBuf,
+        /// Show the decisions without writing them
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+        /// Who is reviewing (default: $USER)
+        #[arg(long = "as")]
+        by: Option<String>,
     },
 }
 
@@ -1186,10 +1212,37 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             }
         },
         Commands::Export { subcommand } => match subcommand {
-            ExportCommands::Linkml { status, out, name } => crate::commands::export::linkml(
+            ExportCommands::Linkml {
+                status,
+                out,
+                name,
+                json,
+            } => crate::commands::export::linkml(
                 &config,
                 &cwd,
-                &crate::commands::export::LinkmlOptions { status, out, name },
+                &crate::commands::export::LinkmlOptions {
+                    status,
+                    out,
+                    name,
+                    json,
+                },
+            ),
+        },
+        Commands::Import { subcommand } => match subcommand {
+            ImportCommands::Linkml {
+                file,
+                dry_run,
+                json,
+                by,
+            } => crate::commands::import::linkml(
+                &config,
+                &cwd,
+                &crate::commands::import::ImportOptions {
+                    file: &file,
+                    dry_run,
+                    json,
+                    by,
+                },
             ),
         },
         Commands::Identity { subcommand } => match subcommand {

@@ -629,3 +629,255 @@ pre.frag {
   padding: 0.2rem 0;
   border-top: 1px solid var(--rule);
 }
+
+/* ── Business semantics review + LinkML viewer/editor (RFC 0170) ── */
+main:has(.sem-page) {
+  max-width: 1440px;
+}
+.pill.active {
+  border-color: var(--accent-a);
+  background: var(--accent-a);
+  color: #fff;
+}
+.btnrow button.danger-btn {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}
+.sem-views,
+.sem-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.sem-filters input {
+  flex: 1;
+  min-width: 10rem;
+}
+.sem-note {
+  margin-left: auto;
+}
+.sem-layout,
+.lm-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.sem-layout.with-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+}
+.lm-layout {
+  grid-template-columns: minmax(14rem, 0.8fr) minmax(0, 2fr);
+}
+.lm-layout.with-panel {
+  grid-template-columns: minmax(14rem, 0.7fr) minmax(0, 1.6fr) minmax(0, 1.3fr);
+}
+.sem-panel,
+.lm-detail,
+.lm-tree {
+  position: sticky;
+  top: 0.5rem;
+  max-height: calc(100vh - 1rem);
+  overflow: auto;
+}
+.sem-items {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+.sem-items li {
+  padding: 0.55rem 0.5rem;
+  border-top: 1px solid var(--rule);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.sem-items li:hover {
+  background: var(--ground);
+}
+.sem-items li.selected {
+  background: var(--ground);
+  box-shadow: inset 3px 0 0 var(--accent-a);
+}
+.sem-item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.sem-item-sum {
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+}
+.sem-group {
+  margin: 1rem 0 0.2rem;
+  font-size: 0.9rem;
+  text-transform: capitalize;
+}
+.sem-panel-head {
+  display: flex;
+  justify-content: flex-end;
+}
+.sem-title {
+  margin: 0.5rem 0 0.2rem;
+  overflow-wrap: anywhere;
+}
+.sem-summary {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.sem-props {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.2rem 0.8rem;
+  margin: 0.6rem 0;
+  font-size: 0.85rem;
+}
+.sem-props > div {
+  display: contents;
+}
+.sem-props dt {
+  color: var(--ink-soft);
+}
+.sem-props dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.sem-sub {
+  display: block;
+  margin: 0.9rem 0 0.3rem;
+}
+.sem-evidence {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.82rem;
+}
+.sem-evidence li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.3rem 0;
+  border-top: 1px solid var(--rule);
+  overflow-wrap: anywhere;
+}
+.sem-decide {
+  margin-top: 0.6rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--rule);
+}
+.sem-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.sem-field textarea {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--ground);
+  color: var(--ink);
+}
+.sem-raw {
+  font-size: 0.75rem;
+  overflow: auto;
+  max-height: 20rem;
+}
+.lm-bar {
+  margin-bottom: -0.25rem;
+}
+.lm-desc {
+  font-size: 0.8rem;
+}
+.lm-tree input {
+  width: 100%;
+}
+.lm-group ul {
+  list-style: none;
+  margin: 0.2rem 0 0.4rem;
+  padding: 0;
+}
+.lm-group-head {
+  display: block;
+  margin-top: 0.7rem;
+  text-decoration: none;
+  font-weight: 600;
+}
+.lm-node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--ink);
+  padding: 0.25rem 0.4rem;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.lm-node:hover,
+.lm-node.active {
+  background: var(--ground);
+}
+.lm-node.active {
+  box-shadow: inset 3px 0 0 var(--accent-a);
+}
+.lm-review {
+  margin-left: auto;
+  font-size: 0.82rem;
+}
+.lm-pre {
+  white-space: pre-wrap;
+}
+.lm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-top: 0.3rem;
+}
+.lm-table th,
+.lm-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.3rem 0.4rem;
+  border-top: 1px solid var(--rule);
+  overflow-wrap: anywhere;
+}
+.lm-table th {
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+textarea.lm-yaml {
+  min-height: 60vh;
+  tab-size: 2;
+}
+.lm-upload {
+  font-size: 0.85rem;
+  color: var(--accent-a);
+  cursor: pointer;
+}
+.lm-upload input {
+  display: none;
+}
+@media (max-width: 900px) {
+  .sem-layout.with-panel,
+  .lm-layout,
+  .lm-layout.with-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sem-panel,
+  .lm-detail,
+  .lm-tree {
+    position: static;
+    max-height: none;
+  }
+}

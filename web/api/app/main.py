@@ -12,16 +12,48 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import models
-from .routes import auth, commands, config, evals, graph, meta, runs, schedules, stats, workspaces
+from .routes import (
+    auth,
+    commands,
+    config,
+    evals,
+    graph,
+    meta,
+    runs,
+    schedules,
+    semantics,
+    stats,
+    workspaces,
+)
 from .runner import JobRunner
 from .scheduler import ConsoleScheduler
 from .settings import get_settings
 from .supervisor import McpSupervisor
 
 _UI_DIST = Path(__file__).resolve().parents[2] / "ui" / "dist"
+
+
+class _SpaFiles(StaticFiles):
+    """The built UI, with client-side routes falling back to `index.html`.
+
+    Plain `StaticFiles(html=True)` answers a reload of `/w/<id>/semantics` with 404: there is no
+    such file, the React router owns that path. An unknown non-API path gets the app instead; a
+    missing asset (anything with a file extension) and `/api/...` still 404.
+    """
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            last = path.rsplit("/", 1)[-1]
+            if exc.status_code != 404 or path.startswith("api") or "." in last:
+                raise
+            return await super().get_response("index.html", scope)
+
 
 log = logging.getLogger("ekos.console")
 
@@ -80,12 +112,24 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (meta, auth, commands, runs, schedules, workspaces, stats, config, graph, evals):
+    for r in (
+        meta,
+        auth,
+        commands,
+        runs,
+        schedules,
+        workspaces,
+        stats,
+        config,
+        graph,
+        evals,
+        semantics,
+    ):
         app.include_router(r.router, prefix="/api")
 
     # Serve the built UI when it exists (Compose / production); the Vite dev server handles it
     # otherwise.
     if _UI_DIST.is_dir():
-        app.mount("/", StaticFiles(directory=_UI_DIST, html=True), name="ui")
+        app.mount("/", _SpaFiles(directory=_UI_DIST, html=True), name="ui")
 
     return app

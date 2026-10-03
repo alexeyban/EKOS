@@ -454,7 +454,9 @@ Every item starts as `status: hypothesis` with its evidence (`path:line`). Only 
 one — `ekos semantics confirm|reject|edit` is CLI-only and no MCP tool can reach it. A review holds
 while what the item asserts and its evidence are unchanged (line moves don't count); otherwise the
 item becomes `needs_review`, and a confirmed item whose traces disappear is flagged, not dropped.
-Same-column threshold disagreements (`> 90` here, `> 60` there) become `ConceptConflict`s. The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
+Same-column threshold disagreements (`> 90` here, `> 60` there) become `ConceptConflict`s.
+The web console's **Semantics** tab is the review UI: a queue with evidence, and a LinkML viewer
+and YAML editor whose edits round-trip through `ekos import linkml` (see *Web console* below). The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
 generates everything else (JSON Schema, Pydantic, RDF/OWL/SHACL):
 
 ```bash
@@ -465,6 +467,9 @@ ekos semantics confirm TransactionsNotApproved --note "drafts"     # human-only 
 ekos semantics edit PartsWithInventoryAccnoId --name "Inventory part" --description "…"
 ekos semantics reject UserPreferenceWithoutUserId --note "anti-join plumbing"
 ekos export linkml --out model.yaml          # confirmed only; --status hypothesis|all for the draft
+ekos import linkml model.yaml --dry-run      # an expert's YAML edits → the review decisions they mean
+ekos import linkml model.yaml --as ann       # …recorded, all or nothing (renames, descriptions,
+                                             # code labels, ekos_status: confirmed|rejected)
 ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
 ```
 
@@ -1470,7 +1475,7 @@ export keeps the most-connected core and says so in a `truncated` block rather t
 returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
 `ekos_graph_export` MCP tool exposes the same function to agents.
 
-### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134/0136/0138)
+### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134/0136/0138/0170)
 
 `web/` is a browser surface over one or more compiled workspaces — a FastAPI app (`web/api/`) plus
 a Vite + React app (`web/ui/`).
@@ -1520,6 +1525,17 @@ a Vite + React app (`web/ui/`).
   the existing command runner (`eval-run` in the allowlist) rather than a bespoke UI — it shows up
   on the **Run** tab like any other command, with `dataset`/`agent`/`category`/`limit` params, and
   its progress streams through the same job log every other command already uses.
+- **Semantics** (RFC 0170): human review of business-semantics hypotheses and the LinkML schema
+  they export. *Review* — a queue (needs-review first, then hypotheses by confidence) filterable by
+  kind/status/text; each item opens with its definition, evidence lines (`path:line` + fragment),
+  links and rationale commits, and **Confirm / Reject (note required) / Edit** (name and
+  description, or a code's label). *Gaps & conflicts* — the open questions, conflicting
+  definitions and the `needs_review` queue. *LinkML schema* — a **viewer** (concepts, enums and
+  tables as a tree; attributes, constraints, permissible values with status chips; "review" on
+  any recovered element) and a **YAML editor**: *Validate* is a dry-run `ekos import linkml`
+  showing the decisions the edits stand for, *Apply* records them all-or-nothing; plus download
+  and load-from-file. Decisions need the write role and run the human-only CLI (never MCP),
+  attributed to the OIDC user — or, in token mode, to a typed name recorded as `token:<name>`.
 
 ```bash
 cd ekos && cargo build --release -p ekos && cd ..

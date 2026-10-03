@@ -187,3 +187,98 @@ export interface EvalReport {
   metrics: Omit<EvalReportSummary, "file">;
   scenarios: EvalScenarioReport[];
 }
+
+// ── RFC 0170 business semantics ─────────────────────────────────────────────────────────────
+
+export type SemanticsKind =
+  | "BusinessConcept"
+  | "EnumMeaning"
+  | "ConstraintCandidate"
+  | "SemanticGap"
+  | "ConceptConflict"
+  | "RationaleLink";
+
+export type ReviewStatus = "hypothesis" | "confirmed" | "rejected" | "needs_review";
+
+/** One item as `ekos semantics list --json` prints it. */
+export interface SemanticsItem {
+  id: string;
+  kind: SemanticsKind;
+  name: string;
+  properties: Record<string, unknown>;
+}
+
+/** `ekos semantics show --json`: the item plus its evidence and outgoing links. */
+export interface SemanticsDetail extends SemanticsItem {
+  evidence: { path: string; line: number | null; fragment: string }[];
+  links: { kind: string; to: string }[];
+}
+
+export interface LinkmlJson {
+  empty: boolean;
+  reason?: string;
+  schema?: LinkmlSchema;
+}
+
+export interface LinkmlYaml {
+  empty: boolean;
+  reason?: string;
+  yaml: string;
+}
+
+export type Annotations = Record<string, string | { value?: string } | null | undefined>;
+
+export interface LinkmlSlot {
+  range?: string;
+  required?: boolean;
+  identifier?: boolean;
+  description?: string;
+  minimum_value?: number;
+  maximum_value?: number;
+  pattern?: string;
+  annotations?: Annotations;
+}
+
+export interface LinkmlClass {
+  is_a?: string;
+  description?: string;
+  comments?: string[];
+  attributes?: Record<string, LinkmlSlot>;
+  slot_usage?: Record<string, LinkmlSlot>;
+  annotations?: Annotations;
+}
+
+export interface LinkmlPermissibleValue {
+  description?: string;
+  annotations?: Annotations;
+}
+
+export interface LinkmlEnum {
+  description?: string;
+  permissible_values?: Record<string, LinkmlPermissibleValue>;
+}
+
+export interface LinkmlSchema {
+  id: string;
+  name: string;
+  title?: string;
+  description?: string;
+  classes?: Record<string, LinkmlClass>;
+  enums?: Record<string, LinkmlEnum>;
+  annotations?: Annotations;
+}
+
+/** `ekos import linkml --json`. */
+export interface ImportPlan {
+  decisions: {
+    id: string;
+    kind: string;
+    path: string;
+    action: "confirm" | "reject" | "edit";
+    changes: Record<string, [string | null, string | null]>;
+    note: string | null;
+  }[];
+  warnings: string[];
+  errors: string[];
+  applied: number;
+}

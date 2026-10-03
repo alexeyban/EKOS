@@ -206,6 +206,15 @@ pub fn apply_review(
     if *decision == Decision::Reject && note.is_none_or(|n| n.trim().is_empty()) {
         return Err("say why: a rejection needs --note".into());
     }
+    // Confirming what is already confirmed, unchanged and without a new note, says nothing new:
+    // the same version comes back, so the ledger writes nothing.
+    if *decision == Decision::Confirm
+        && status(current) == CONFIRMED
+        && note.is_none_or(|n| n.trim().is_empty())
+        && current.properties.get("reviewed_signature") == current.properties.get("signature")
+    {
+        return Ok(current.clone());
+    }
     let mut o = current.clone();
     let (new_status, _) = match decision {
         Decision::Confirm => (CONFIRMED, ()),
@@ -341,6 +350,23 @@ mod tests {
         let rejected =
             apply_review(&before, &Decision::Reject, "ann", "t", Some("plumbing")).unwrap();
         assert!(stale_version(&rejected).is_none());
+    }
+
+    #[test]
+    fn reconfirming_an_unchanged_confirmation_is_a_no_op() {
+        let c = apply_review(
+            &concept("parts.obsolete IS FALSE"),
+            &Decision::Confirm,
+            "ann",
+            "t1",
+            None,
+        )
+        .unwrap();
+        let again = apply_review(&c, &Decision::Confirm, "bob", "t2", None).unwrap();
+        assert_eq!(again.properties, c.properties);
+        let noted =
+            apply_review(&c, &Decision::Confirm, "bob", "t2", Some("checked again")).unwrap();
+        assert_eq!(noted.properties["reviewed_by"], json!("bob"));
     }
 
     #[test]

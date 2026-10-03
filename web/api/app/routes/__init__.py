@@ -1,4 +1,4 @@
-from . import auth, commands, config, graph, meta, runs, schedules, stats, workspaces
+from . import auth, commands, config, graph, meta, runs, schedules, semantics, stats, workspaces
 
 __all__ = [
     "auth",
@@ -8,6 +8,7 @@ __all__ = [
     "meta",
     "runs",
     "schedules",
+    "semantics",
     "stats",
     "workspaces",
 ]

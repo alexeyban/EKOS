@@ -6286,13 +6286,16 @@ LinkML; generation stays in LinkML.
 - [ ] **Expert-written gold set** (20–30 accounting concepts, written before looking at output) and
       published numbers, misses included — the starter set is not one
 
-### Phase 2 — review loop · **done except console cards (devlog_235)**
+### Phase 2 — review loop · **done (devlog_235, console devlog_236)**
 - [x] `ekos semantics confirm|reject|edit` — human-only, never reachable from MCP (source-scan test)
 - [x] Status lifecycle: signature over assertion + evidence (lines excluded); `needs_review` on
       change; reviewed items whose traces vanish flagged stale, not dropped
 - [x] `ConceptConflict` — threshold (same column/direction, different literal) and name collisions
 - [x] Review-based eval metrics: definition precision, gap usefulness
-- [ ] Console review cards (RFC 0127)
+- [x] Console review UI (RFC 0127 web console, devlog_236): review queue, gaps & conflicts,
+      LinkML viewer + YAML editor
+- [ ] Console: reviewing many items at once (bulk confirm), and a diff view between the edited
+      YAML and the current export
 - [ ] Re-baseline the starter gold set's `IS FALSE` vs `IS NOT TRUE` predicates — or better, replace
       it with an expert's set
 
@@ -6304,6 +6307,7 @@ LinkML; generation stays in LinkML.
 - [ ] Exact seed-row lines (today a multi-row `VALUES` cites its `INSERT` line)
 
 ### Phase 4 — round-trip and agents
-- [ ] `ekos import linkml` (expert YAML edits → review decisions)
+- [x] `ekos import linkml` (expert YAML edits → review decisions; matched by `ekos_id`, all or
+      nothing, `--dry-run`) — devlog_236
 - [ ] MCP `semantics_lookup` / `semantics_gaps`, status on every answer
 - [ ] Ontology mapping suggestions (hypotheses only)
