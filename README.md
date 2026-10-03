@@ -491,8 +491,9 @@ ekos semantics gold-template --out gold.yaml   # blank, structure-only: for an e
 ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
 ```
 
-On LedgerSMB (SQL + git, no LLM): 40 concepts, 209 coded values in 56 columns (173 with a meaning),
-60 constraints, 8 gaps, 0 conflicts, 97 rationale links; an unchanged re-commit writes nothing. The LinkML file passes `linkml-lint` with 0 errors and
+On LedgerSMB (SQL + Perl + UI + git, no LLM): 649 predicate sites (about 455 resolved to a
+table column), about 46 concepts, 219 coded values (177 with a meaning), 0 identity conflicts in
+`resolve`; an unchanged re-commit writes nothing. The LinkML file passes `linkml-lint` with 0 errors and
 `gen-json-schema`/`gen-pydantic` run cleanly. Against a *starter* gold set (not expert-written —
 see `ekos/docs/rfcs/0170-ledgersmb-starter-gold.yaml`): concept recall 0.68, enum label accuracy
 0.95, evidence validity 1.0. Meaning defined only by comparisons between columns or against the
@@ -533,6 +534,12 @@ match is an exact normalized name; anything fuzzy goes through that same `unconf
 flow instead of an irreversible merge (RFC 0063) — no confidence threshold on the underlying
 scoring formula reliably separates real correct fuzzy merges from real incorrect ones, so an
 irreversible auto-merge isn't a safe default for that case.
+
+A same-name group spread over separate namespaces is not a conflict: a Perl package
+`LedgerSMB::GL` beside a table `gl`, or a JS and a Perl `initialize`. `resolve` accepts a group
+spanning the database (`Table`/`View`/`Procedure`/`Trigger`) and the code of Perl, JS, Python,
+Rust or Elixir when each namespace's share is unremarkable on its own; a `Table` beside a
+same-named `View` still conflicts (RFC 0147 amendment b — LedgerSMB 16 → 0 conflicts).
 
 ### Real schema and class structure from source (RFC 0091/0092)
 
@@ -1073,7 +1080,10 @@ explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
 `ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,
 documentation drift, and a real architecture-level diff between two points in time — technologies,
 crate role classifications, risks, open questions — distinct from `ekos_diff`'s raw entry report;
-RFC 0065/0068 §55/RFC 0107-0108), and `ekos_identity_review`/`ekos_architecture_review` (confirm or
+RFC 0065/0068 §55/RFC 0107-0108), `ekos_semantics_lookup`/`ekos_semantics_gaps` (RFC 0170 —
+the recovered business meaning of a table, column or code value with its review status and
+evidence, and the open semantic gaps; read-only — confirming or rejecting stays a human-only CLI /
+web console action), and `ekos_identity_review`/`ekos_architecture_review` (confirm or
 reject a cross-system identity match, or an LLM-classified crate role claim — RFC 0029/RFC 0109,
 the two write-capable tools; every other tool reads only the local ledger, except the opt-in
 `ekos_session_note`, RFC 0151 — it writes a redacted note to a local inbox file, never to the ledger). Long-lived server

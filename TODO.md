@@ -6312,7 +6312,7 @@ LinkML; generation stays in LinkML.
 - [x] Python `Enum` constants; SQL in Perl strings; filters through CTEs/derived tables and dbt
       model column lineage (demo 6 → 20 of 20 sites) — devlog_240
 
-### Phase 4 — round-trip and agents
+### Phase 4 — round-trip and agents · **done (devlog_236/237/239)**
 - [x] `ekos import linkml` (expert YAML edits → review decisions; matched by `ekos_id`, all or
       nothing, `--dry-run`) — devlog_236
 - [x] MCP `ekos_semantics_lookup` / `ekos_semantics_gaps`, status on every answer — devlog_237
