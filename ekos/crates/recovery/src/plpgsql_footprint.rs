@@ -19,7 +19,7 @@
 use sqlparser::ast::{
     Expr, FromTable, ObjectName, Query, Statement, TableFactor, TableWithJoins, Visit, Visitor,
 };
-use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::dialect::{Dialect, PostgreSqlDialect};
 use sqlparser::parser::Parser;
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
@@ -57,13 +57,18 @@ impl Footprint {
     }
 }
 
-/// The footprint of one complete SQL statement (`SELECT …`, `UPDATE …`, …).
+/// The footprint of one complete SQL statement (`SELECT …`, `UPDATE …`, …), in PostgreSQL.
 pub fn statement_footprint(sql: &str) -> Footprint {
+    statement_footprint_in(&PostgreSqlDialect {}, sql)
+}
+
+/// [`statement_footprint`] in any `sqlparser` dialect (RFC 0169: views in every SQL file).
+pub fn statement_footprint_in(dialect: &dyn Dialect, sql: &str) -> Footprint {
     let mut fp = Footprint {
         fragments: 1,
         ..Default::default()
     };
-    match Parser::parse_sql(&PostgreSqlDialect {}, sql) {
+    match Parser::parse_sql(dialect, sql) {
         Ok(stmts) => {
             let mut v = Collector::default();
             let _ = stmts.visit(&mut v);
@@ -71,6 +76,19 @@ pub fn statement_footprint(sql: &str) -> Footprint {
         }
         Err(e) => fp.errors.push(e.to_string()),
     }
+    fp
+}
+
+/// The footprint of an already-parsed query — a view's body, without the view's own name, which
+/// the visitor would otherwise report as a relation of the enclosing `CREATE VIEW`.
+pub fn query_footprint(query: &Query) -> Footprint {
+    let mut fp = Footprint {
+        fragments: 1,
+        ..Default::default()
+    };
+    let mut v = Collector::default();
+    let _ = query.visit(&mut v);
+    v.finish(&mut fp);
     fp
 }
 

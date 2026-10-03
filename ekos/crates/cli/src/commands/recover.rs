@@ -16,8 +16,8 @@ use ekos_recovery::{
     PentahoStats, PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats,
     PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats,
     SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, TreasuryAnalyzerPass,
-    anthropic::AnthropicProvider, build_dialect_registry, cache::CachedLlmProvider,
-    llm::LlmProvider, resolve_dialect_name,
+    ViewAnalyzerPass, ViewStats, anthropic::AnthropicProvider, build_dialect_registry,
+    cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -64,6 +64,7 @@ pub async fn run_with(
     let mut sql_count = 0usize;
     let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
     let mut plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>> = Vec::new();
+    let mut view_stats_handles: Vec<Arc<std::sync::Mutex<ViewStats>>> = Vec::new();
 
     // ── SQL dialect resolution (RFC 0031) ─────────────────────────────────
     // Registry is compile-time (mirrors the Observer plugin pattern) — a new dialect means a
@@ -169,6 +170,19 @@ pub async fn run_with(
             // ── PL/pgSQL procedural IR (RFC 0163) ─────────────────────────
             // The redacted text as written, not the dialect-preprocessed one: statement spans and
             // line numbers cite the file, and `preprocess` rewrites it.
+            // ── Views (RFC 0169) ──────────────────────────────────────────
+            // Same file-as-written text, the file's resolved dialect, one view at a time.
+            if ViewAnalyzerPass::applies_to(&sql) {
+                let view_pass = ViewAnalyzerPass::new(
+                    &rel_str,
+                    sql.clone(),
+                    dialect_name,
+                    dialect_parser.sqlparser_dialect(),
+                );
+                view_stats_handles.push(view_pass.stats_handle());
+                pass_manager.register(Box::new(view_pass));
+            }
+
             if PlPgSqlAnalyzerPass::applies_to(dialect_name, &sql) {
                 let plpgsql_pass = PlPgSqlAnalyzerPass::new(&rel_str, sql.clone());
                 plpgsql_stats_handles.push(plpgsql_pass.stats_handle());
@@ -1013,6 +1027,20 @@ pub async fn run_with(
         println!(
             "  Transformation IR nodes (SQL): {nodes_total} total, {coverage:.0}% mapped (non-Unmapped)"
         );
+    }
+    if !view_stats_handles.is_empty() {
+        let (mut views, mut parsed) = (0usize, 0usize);
+        for handle in &view_stats_handles {
+            let s = handle.lock().unwrap();
+            views += s.views;
+            parsed += s.parsed;
+        }
+        if views > 0 {
+            println!(
+                "  Views: {views} ({parsed} parsed, {} unparsed — still recorded)",
+                views - parsed
+            );
+        }
     }
     if !plpgsql_stats_handles.is_empty() {
         let mut total = PlPgSqlStats::default();

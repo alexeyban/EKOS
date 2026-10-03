@@ -323,6 +323,31 @@ fn is_expected_binary_declaration_group<'a>(group: impl Iterator<Item = &'a KirO
     seen.len() >= 2
 }
 
+/// RFC 0169: a same-name-different-kind group of **only** `Custom("View")` and
+/// `Custom("Procedure")`, both present, is expected — the narrowing
+/// [`is_expected_perl_package_symbol_pair`] applies to its own pair.
+///
+/// SQL keeps relations and routines in separate namespaces, so a view and a function may share a
+/// name, and real schemas do it on purpose: a function named after the view it queries. Found live
+/// on LedgerSMB (`employee_search`: one view, two routines), where it was the single conflict in the
+/// run and failed `ekos resolve` by default.
+///
+/// Deliberately narrow. `View` beside `Table` is **not** excluded: views and tables share the
+/// relation namespace and cannot both exist under one name in one schema, so that is worth a
+/// reviewer's eye. `Table` beside `Procedure` is the same namespace argument but has not been
+/// observed, and is not excluded until it is. Any third kind keeps the group a conflict.
+fn is_expected_view_routine_pair<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
+    let (mut saw_view, mut saw_routine) = (false, false);
+    for obj in group {
+        match &obj.kind {
+            ObjectKind::Custom(k) if k == "View" => saw_view = true,
+            ObjectKind::Custom(k) if k == "Procedure" => saw_routine = true,
+            _ => return false,
+        }
+    }
+    saw_view && saw_routine
+}
+
 impl IdentityResolver for DefaultResolver {
     fn resolve(&self, graph: &KirGraph) -> ResolutionResult {
         let objects = &graph.objects;
@@ -359,6 +384,7 @@ impl IdentityResolver for DefaultResolver {
                 if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i]))
                     || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
                     || is_expected_binary_declaration_group(indices.iter().map(|&i| &objects[i]))
+                    || is_expected_view_routine_pair(indices.iter().map(|&i| &objects[i]))
                 {
                     continue;
                 }
@@ -1112,6 +1138,44 @@ mod tests {
             "a Perl package and a same-named sub is expected, not a conflict — got: {:?}",
             result.conflicts
         );
+    }
+
+    /// RFC 0169, found live on LedgerSMB: the view `employee_search` and two functions named
+    /// `employee_search` (the routines that query it). SQL keeps relations and routines in separate
+    /// namespaces, so this is legal and common; before the narrowing it was the single conflict in
+    /// the run and failed `ekos resolve`.
+    #[test]
+    fn a_view_and_a_same_named_routine_do_not_conflict() {
+        let g = make_graph(&[
+            ("employee_search", ObjectKind::Custom("View".to_string())),
+            (
+                "employee_search",
+                ObjectKind::Custom("Procedure".to_string()),
+            ),
+            (
+                "employee_search",
+                ObjectKind::Custom("Procedure".to_string()),
+            ),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+    }
+
+    /// A view and a table share SQL's relation namespace — they cannot both exist under one name in
+    /// one schema — so that pair still surfaces, as does any third kind mixed in.
+    #[test]
+    fn a_view_beside_a_same_named_table_still_conflicts() {
+        let g = make_graph(&[
+            ("periods", ObjectKind::Custom("View".to_string())),
+            ("periods", ObjectKind::Table),
+        ]);
+        assert_eq!(DefaultResolver::new().resolve(&g).conflicts.len(), 1);
+        let g = make_graph(&[
+            ("periods", ObjectKind::Custom("View".to_string())),
+            ("periods", ObjectKind::Custom("Procedure".to_string())),
+            ("periods", ObjectKind::Table),
+        ]);
+        assert_eq!(DefaultResolver::new().resolve(&g).conflicts.len(), 1);
     }
 
     #[test]

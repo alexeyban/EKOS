@@ -43,7 +43,9 @@ fn reads_writes_kir_id(kind_label: &str, from: KirId, to: KirId) -> KirId {
 pub fn link_transform_nodes_to_tables(graph: &mut KirGraph) {
     let mut tables_by_name: HashMap<String, Vec<KirId>> = HashMap::new();
     for obj in &graph.objects {
-        if matches!(obj.kind, ObjectKind::Table | ObjectKind::Dataset) {
+        // RFC 0169: a `View` is a relation a transformation reads from or writes (its own `Sink`).
+        let is_view = matches!(&obj.kind, ObjectKind::Custom(k) if k == "View");
+        if matches!(obj.kind, ObjectKind::Table | ObjectKind::Dataset) || is_view {
             tables_by_name
                 .entry(obj.name.to_lowercase())
                 .or_default()
@@ -119,6 +121,29 @@ mod tests {
         assert_eq!(rel.from, source.id);
         assert_eq!(rel.to, table.id);
         assert_eq!(rel.evidence, source.evidence);
+    }
+
+    /// RFC 0169: a view is a link target too — the `Sink` of a `CREATE VIEW`'s own transformation
+    /// links to the `View` object it names.
+    #[test]
+    fn links_a_view_sink_to_the_view_object() {
+        let view = KirObject::new("account_heading_tree", ObjectKind::Custom("View".into()));
+        let sink = transform_node("schema.sql:2", "Sink", "account_heading_tree");
+        let mut graph = KirGraph {
+            objects: vec![view.clone(), sink.clone()],
+            relationships: Vec::new(),
+            events: Vec::new(),
+            evidence: Vec::new(),
+        };
+
+        link_transform_nodes_to_tables(&mut graph);
+
+        assert_eq!(graph.relationships.len(), 1);
+        assert_eq!(graph.relationships[0].to, view.id);
+        assert_eq!(
+            graph.relationships[0].kind,
+            RelationshipKind::Custom("WritesTo".to_string())
+        );
     }
 
     #[test]

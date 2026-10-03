@@ -391,8 +391,23 @@ it **writes** and the functions it **calls** — `LANGUAGE sql` routines include
 links them across the whole workspace: `ReadsFrom`/`WritesTo` per statement, `DependsOn` from the
 routine to each table (with `access: read | write | read_write`), and `Calls` between routines — so
 "what breaks if I change `acc_trans`" now names the 50 LedgerSMB routines that touch it. A name links
-only when it names exactly one object; an overloaded or redefined routine, a view (EKOS has no view
-object yet), a temp table or a system catalog links nothing rather than something guessed.
+only when it names exactly one object; an overloaded or redefined routine or view, a temp table or
+a system catalog links nothing rather than something guessed.
+
+### Views (RFC 0169)
+
+Every `CREATE [OR REPLACE] [MATERIALIZED] VIEW` in an observed `.sql` file is a `View` object — its
+declared columns, whether it is materialized, its exact source text and line, and what its query
+reads and calls, from a real parse. Each definition is parsed on its own, so a view using syntax the
+parser lacks is still recorded (`footprint: unparsed`, with the reason) and never takes its file down.
+Views are linked like routines: a view `DependsOn` the tables and views its query reads, routines and
+transformations that read a view link to it, and impact analysis on a table now reaches the views
+built on it.
+
+```bash
+ekos recover   # … Views: 17 (17 parsed, 0 unparsed — still recorded)
+ekos ekl "FIND Object WHERE kind = 'View'"
+```
 
 ### dbt metadata extraction (RFC 0117)
 

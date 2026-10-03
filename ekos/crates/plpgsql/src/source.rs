@@ -1,4 +1,5 @@
-//! RFC 0163 — finding routines in a SQL file.
+//! RFC 0163 — finding statements (and among them routines) in a SQL file. RFC 0169's view
+//! analyzer uses the same splitter.
 //!
 //! A schema file holds many statements; the routines among them are the ones this crate parses.
 //! Splitting happens on the crate's own lexer tokens, so a semicolon inside a body, a string or a
@@ -7,50 +8,68 @@
 
 use crate::lex::{LexError, Tok, lex};
 
-/// One `CREATE [OR REPLACE] FUNCTION|PROCEDURE` statement, as written in its file.
+/// One top-level statement, as written in its file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RoutineSource<'a> {
-    /// The statement text, from `CREATE` through its terminating `;` (or the end of the file).
+pub struct SqlStatement<'a> {
+    /// The statement text, from its first token through its terminating `;` (or the end of the
+    /// file).
     pub text: &'a str,
-    /// Byte offset of `text` in the file. A span `s` inside the routine sits at `offset + s.start`.
+    /// Byte offset of `text` in the file. A span `s` inside the statement sits at `offset + s.start`.
     pub offset: usize,
 }
 
-/// Every routine definition in `src`, in file order.
+/// A routine definition is a statement; the name says which kind the caller asked for.
+pub type RoutineSource<'a> = SqlStatement<'a>;
+
+/// Every top-level statement in `src`, in file order, split on lexer tokens.
 ///
 /// Fails only when the file does not lex at all — an unterminated string, dollar quote or block
 /// comment — because past that point no statement boundary can be trusted.
-pub fn routines(src: &str) -> Result<Vec<RoutineSource<'_>>, LexError> {
+pub fn statements(src: &str) -> Result<Vec<SqlStatement<'_>>, LexError> {
     let toks = lex(src)?;
     let mut out = Vec::new();
     let mut start: Option<usize> = None;
-    let mut push = |from: usize, to: usize| {
-        let text = &src[from..to];
-        let head: Vec<String> = text
-            .split_whitespace()
-            .take(4)
-            .map(str::to_ascii_uppercase)
-            .collect();
-        let head: Vec<&str> = head.iter().map(String::as_str).collect();
-        if matches!(
-            head.as_slice(),
-            ["CREATE", "FUNCTION" | "PROCEDURE", ..]
-                | ["CREATE", "OR", "REPLACE", "FUNCTION" | "PROCEDURE"]
-        ) {
-            out.push(RoutineSource { text, offset: from });
-        }
-    };
     for t in &toks {
         let s = *start.get_or_insert(t.start);
         if t.tok == Tok::Punct(';') {
             start = None;
-            push(s, t.end);
+            out.push(SqlStatement {
+                text: &src[s..t.end],
+                offset: s,
+            });
         }
     }
     if let (Some(s), Some(last)) = (start, toks.last()) {
-        push(s, last.end);
+        out.push(SqlStatement {
+            text: &src[s..last.end],
+            offset: s,
+        });
     }
     Ok(out)
+}
+
+/// The first `n` words of a statement, upper-cased — what a caller classifies it by.
+pub fn head_words(text: &str, n: usize) -> Vec<String> {
+    text.split_whitespace()
+        .take(n)
+        .map(str::to_ascii_uppercase)
+        .collect()
+}
+
+/// Every `CREATE [OR REPLACE] FUNCTION|PROCEDURE` statement in `src`, in file order.
+pub fn routines(src: &str) -> Result<Vec<RoutineSource<'_>>, LexError> {
+    Ok(statements(src)?
+        .into_iter()
+        .filter(|st| {
+            let head = head_words(st.text, 4);
+            let head: Vec<&str> = head.iter().map(String::as_str).collect();
+            matches!(
+                head.as_slice(),
+                ["CREATE", "FUNCTION" | "PROCEDURE", ..]
+                    | ["CREATE", "OR", "REPLACE", "FUNCTION" | "PROCEDURE"]
+            )
+        })
+        .collect())
 }
 
 /// 1-based line number of byte offset `at` in `src`.

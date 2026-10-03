@@ -122,6 +122,12 @@ pub const REGISTRY: &[CustomKind] = &[
                `routine#N`, a shared prefix that would otherwise merge a routine's whole body",
     },
     CustomKind {
+        name: "View",
+        structurally_keyed: true,
+        note: "(source path, view name) — RFC 0169 view_analyzer; a view redefined in another \
+               file is another definition, never merged by name",
+    },
+    CustomKind {
         name: "PerlPackage",
         structurally_keyed: true,
         note: "qualified package name — RFC 0147; LedgerSMB::* shares a prefix across ~700 files",

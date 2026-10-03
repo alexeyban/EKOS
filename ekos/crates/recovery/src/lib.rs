@@ -43,6 +43,7 @@ pub mod sql_dialect_registry;
 pub mod sql_transform_analyzer;
 mod statement_repair;
 pub mod treasury_analyzer;
+pub mod view_analyzer;
 
 pub use anthropic::AnthropicProvider;
 pub use architecture_diff::{ArchitectureDiff, RoleChange, diff_architecture};
@@ -97,6 +98,7 @@ pub use sql_transform_analyzer::{
     SqlTransformAnalyzerPass, SqlTransformStats, parse_sql_to_transform_graphs,
 };
 pub use treasury_analyzer::TreasuryAnalyzerPass;
+pub use view_analyzer::{ViewAnalyzerPass, ViewStats};
 
 #[cfg(test)]
 mod relationship_determinism_guard {

@@ -6125,7 +6125,8 @@ PostgreSQL recover completely**, with a ratcheted floor.
 - [x] Link routines to the tables/routines they touch: per-statement SQL footprint from a real
       `sqlparser` AST walk + `procedure_lineage` at `commit` (devlog_230; LedgerSMB: 1,852 edges,
       99.6% of embedded SQL parses, idempotent across re-commits)
-- [ ] A `View` object kind — views are the largest class of unlinkable names (RFC 0075 has the same gap)
+- [x] A `View` object kind (RFC 0169, devlog_231): 17 LedgerSMB views, 24 view references now link
+- [ ] Downstream registries for `View` (docs-gen Data Stores / entity pages, `llm_description`)
 - [ ] Downstream registries for the new kinds: docs-gen entity pages / API grouping,
       `llm_description`, `doc_links` (RFC 0147's list) — not CI-enforced
 - [ ] Trigger recovery and structural classification; never auto-translated

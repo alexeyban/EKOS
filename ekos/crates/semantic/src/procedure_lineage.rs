@@ -12,6 +12,9 @@
 //! | `DependsOn` | `Procedure` → `Table`/`Dataset` | what `ekos_dependents`/`ekos_impact` traverse, so "what breaks if I change this table" finds the routine |
 //! | `Calls` | `Procedure` → `Procedure` | the call graph `callers` traverses |
 //!
+//! RFC 0169: a `View` is both a target (routines and views read it) and a source (it `DependsOn`
+//! what its query reads and `Calls` the routines its query calls).
+//!
 //! **A name links only when it names exactly one object.** Two `customers` tables in two schemas,
 //! or one routine overloaded three ways, is not something a bare name can choose between, and a
 //! guessed edge is a fabricated fact (the RFC 0060/0075 judgment). An unqualified name may match a
@@ -121,7 +124,8 @@ pub fn link_procedures(graph: &mut KirGraph) -> ProcedureLinkStats {
     let mut tables = NameIndex::default();
     let mut routines = NameIndex::default();
     for o in &graph.objects {
-        if matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset) {
+        // RFC 0169: views are relations a routine reads, so they resolve alongside tables.
+        if matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset) || is_custom(o, "View") {
             tables.add(&o.name, o.id);
         } else if is_custom(o, "Procedure") {
             routines.add(&o.name, o.id);
@@ -154,7 +158,8 @@ pub fn link_procedures(graph: &mut KirGraph) -> ProcedureLinkStats {
                     }
                 }
             }
-        } else if is_custom(o, "Procedure") {
+        } else if is_custom(o, "Procedure") || is_custom(o, "View") {
+            // A view links from its own query's footprint exactly as a routine does — reads only.
             // read / write / read_write per table, and the strongest way any spelling matched it.
             let mut access: BTreeMap<Uuid, (bool, bool, &'static str)> = BTreeMap::new();
             for (key, write) in [("reads", false), ("writes", true)] {
@@ -346,6 +351,64 @@ mod tests {
         // And no id appears twice.
         let ids: std::collections::HashSet<_> = g.relationships.iter().map(|r| r.id.0).collect();
         assert_eq!(ids.len(), g.relationships.len());
+    }
+
+    /// RFC 0169: a view is a relation routines can read, and is linked to what its own query reads
+    /// and calls — so impact on a table reaches the views over it, and the routines over those.
+    #[test]
+    fn views_are_link_targets_and_link_to_their_own_dependencies() {
+        let mut g = KirGraph::new();
+        let view_kind = || ObjectKind::Custom("View".into());
+        let acc = obj(&mut g, "acc_trans", ObjectKind::Table, &[]);
+        let in_tree = obj(&mut g, "in_tree", proc_kind(), &[]);
+        let base = obj(
+            &mut g,
+            "account_heading_tree",
+            view_kind(),
+            &[("reads", &["acc_trans"]), ("calls", &["in_tree"])],
+        );
+        let over = obj(
+            &mut g,
+            "account_heading_descendant",
+            view_kind(),
+            &[("reads", &["account_heading_tree"])],
+        );
+        let routine = obj(
+            &mut g,
+            "report",
+            proc_kind(),
+            &[("reads", &["account_heading_descendant"])],
+        );
+        let stmt = obj(
+            &mut g,
+            "report#0",
+            stmt_kind(),
+            &[("reads", &["account_heading_descendant"])],
+        );
+        // Defined in two files: two views, one bare name — not linked.
+        obj(&mut g, "cash_impact", view_kind(), &[]);
+        obj(&mut g, "cash_impact", view_kind(), &[]);
+        let ambiguous_reader = obj(&mut g, "r2", proc_kind(), &[("reads", &["cash_impact"])]);
+
+        link_procedures(&mut g);
+        assert_eq!(edges(&g, base), {
+            let mut w = vec![
+                ("Calls".to_string(), in_tree),
+                ("DependsOn".to_string(), acc),
+            ];
+            w.sort_by_key(|(k, id)| (k.clone(), id.0));
+            w
+        });
+        assert_eq!(edges(&g, over), vec![("DependsOn".to_string(), base)]);
+        assert_eq!(edges(&g, routine), vec![("DependsOn".to_string(), over)]);
+        assert_eq!(edges(&g, stmt), vec![("ReadsFrom".to_string(), over)]);
+        assert!(edges(&g, ambiguous_reader).is_empty());
+        let dep = g
+            .relationships
+            .iter()
+            .find(|r| r.from == base && r.to == acc)
+            .unwrap();
+        assert_eq!(dep.properties["access"], json!("read"));
     }
 
     /// A name that matches two objects is not guessed at.
