@@ -30,6 +30,11 @@ use std::ops::ControlFlow;
 pub struct Footprint {
     pub reads: BTreeSet<String>,
     pub writes: BTreeSet<String>,
+    /// `writes`, split by operation — an audit trigger only inserts, a cascade updates or deletes.
+    /// `TRUNCATE` counts as a delete.
+    pub inserts: BTreeSet<String>,
+    pub updates: BTreeSet<String>,
+    pub deletes: BTreeSet<String>,
     pub calls: BTreeSet<String>,
     /// Parser errors, one per fragment that did not parse. Empty when everything parsed.
     pub errors: Vec<String>,
@@ -51,6 +56,9 @@ impl Footprint {
     pub fn merge(&mut self, other: Footprint) {
         self.reads.extend(other.reads);
         self.writes.extend(other.writes);
+        self.inserts.extend(other.inserts);
+        self.updates.extend(other.updates);
+        self.deletes.extend(other.deletes);
         self.calls.extend(other.calls);
         self.errors.extend(other.errors);
         self.fragments += other.fragments;
@@ -111,12 +119,20 @@ fn name(n: &ObjectName) -> String {
         .join(".")
 }
 
+#[derive(Clone, Copy)]
+enum Op {
+    Insert,
+    Update,
+    Delete,
+}
+
 #[derive(Default)]
 struct Collector {
     /// Every relation occurrence, in visiting order — a multiset, so a written table that is also
     /// read keeps its read.
     relations: Vec<String>,
-    writes: Vec<String>,
+    /// Write targets with their operation, in visiting order.
+    writes: Vec<(Op, String)>,
     calls: BTreeSet<String>,
     ctes: BTreeSet<String>,
     /// The next relation the visitor reports is a table function's name, already counted as a call.
@@ -125,12 +141,17 @@ struct Collector {
 
 impl Collector {
     fn finish(mut self, fp: &mut Footprint) {
-        for w in &self.writes {
+        for (op, w) in &self.writes {
             if let Some(at) = self.relations.iter().position(|r| r == w) {
                 self.relations.remove(at);
             }
+            match op {
+                Op::Insert => fp.inserts.insert(w.clone()),
+                Op::Update => fp.updates.insert(w.clone()),
+                Op::Delete => fp.deletes.insert(w.clone()),
+            };
+            fp.writes.insert(w.clone());
         }
-        fp.writes.extend(self.writes);
         fp.reads.extend(
             self.relations
                 .into_iter()
@@ -139,9 +160,9 @@ impl Collector {
         fp.calls.extend(self.calls);
     }
 
-    fn write_target(&mut self, t: &TableWithJoins) {
+    fn write_target(&mut self, op: Op, t: &TableWithJoins) {
         if let TableFactor::Table { name: n, .. } = &t.relation {
-            self.writes.push(name(n));
+            self.writes.push((op, name(n)));
         }
     }
 }
@@ -194,27 +215,28 @@ impl Visitor for Collector {
 
     fn pre_visit_statement(&mut self, s: &Statement) -> ControlFlow<()> {
         match s {
-            Statement::Insert(i) => self.writes.push(name(&i.table_name)),
-            Statement::Update { table, .. } => self.write_target(table),
+            Statement::Insert(i) => self.writes.push((Op::Insert, name(&i.table_name))),
+            Statement::Update { table, .. } => self.write_target(Op::Update, table),
             Statement::Delete(d) => {
                 if d.tables.is_empty() {
                     let (FromTable::WithFromKeyword(from) | FromTable::WithoutKeyword(from)) =
                         &d.from;
                     for t in from {
-                        self.write_target(t);
+                        self.write_target(Op::Delete, t);
                     }
                 } else {
-                    self.writes.extend(d.tables.iter().map(name));
+                    self.writes
+                        .extend(d.tables.iter().map(|t| (Op::Delete, name(t))));
                 }
             }
             Statement::Truncate { table_names, .. } => {
                 self.writes
-                    .extend(table_names.iter().map(|t| name(&t.name)));
+                    .extend(table_names.iter().map(|t| (Op::Delete, name(&t.name))));
             }
             Statement::Merge {
                 table: TableFactor::Table { name: n, .. },
                 ..
-            } => self.writes.push(name(n)),
+            } => self.writes.push((Op::Update, name(n))),
             _ => {}
         }
         ControlFlow::Continue(())
@@ -268,6 +290,26 @@ mod tests {
     }
 
     /// `INSERT INTO t SELECT … FROM t` writes `t` and reads it; neither occurrence hides the other.
+    /// RFC 0163 triggers: an audit trigger only inserts, a cascade updates or deletes — so writes
+    /// are kept per operation, not just as one set.
+    #[test]
+    fn writes_are_also_kept_per_operation() {
+        let fp = statement_footprint("INSERT INTO audit_log SELECT * FROM t");
+        assert_eq!(fp.inserts, set(&["audit_log"]));
+        assert!(fp.updates.is_empty() && fp.deletes.is_empty());
+        // (A `DELETE` inside a CTE is a sqlparser 0.53 grammar gap; `UPDATE` inside one parses.)
+        let fp = statement_footprint(
+            "WITH moved AS (UPDATE a SET x = 0 RETURNING id) INSERT INTO b SELECT id FROM moved",
+        );
+        assert_eq!(fp.updates, set(&["a"]));
+        assert_eq!(fp.inserts, set(&["b"]));
+        assert_eq!(fp.writes, set(&["a", "b"]));
+        let fp = statement_footprint("DELETE FROM a WHERE id = 1");
+        assert_eq!(fp.deletes, set(&["a"]));
+        let fp = statement_footprint("TRUNCATE t");
+        assert_eq!(fp.deletes, set(&["t"]));
+    }
+
     #[test]
     fn a_table_written_and_read_is_both() {
         let fp = statement_footprint("INSERT INTO t SELECT * FROM t WHERE x > 0");

@@ -16,6 +16,7 @@
 
 use crate::plpgsql_footprint::{Footprint, query_footprint};
 use crate::sql_comments::{ObjectCommentKind, extract_object_comments, match_object_comments};
+use crate::sql_objects::{clip, file_kir_id};
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
@@ -279,7 +280,7 @@ pub fn recover_views_in(
     let candidates: Vec<(String, usize)> =
         ordered.iter().map(|(_, d)| (d.name.clone(), 0)).collect();
     let docs = match_object_comments(&comments, &[ObjectCommentKind::View], &candidates);
-    let file_id = file_key.map(|k| KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, k.as_bytes())));
+    let file_id = file_key.map(file_kir_id);
 
     for (index, (key, def)) in ordered.iter().enumerate() {
         let line = line_of(sql, def.offset);
@@ -393,17 +394,6 @@ pub fn recover_views_in(
         graph.add_object(obj);
     }
     (graph, stats)
-}
-
-fn clip(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut at = max;
-    while !s.is_char_boundary(at) {
-        at -= 1;
-    }
-    format!("{} …", &s[..at])
 }
 
 #[cfg(test)]

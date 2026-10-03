@@ -324,7 +324,7 @@ fn is_expected_binary_declaration_group<'a>(group: impl Iterator<Item = &'a KirO
 }
 
 /// RFC 0169: a same-name-different-kind group of **only** `Custom("View")` and
-/// `Custom("Procedure")`, both present, is expected — the narrowing
+/// `Custom("Procedure")` (and, since RFC 0163's triggers, `Custom("Trigger")`) is expected — the narrowing
 /// [`is_expected_perl_package_symbol_pair`] applies to its own pair.
 ///
 /// SQL keeps relations and routines in separate namespaces, so a view and a function may share a
@@ -336,16 +336,26 @@ fn is_expected_binary_declaration_group<'a>(group: impl Iterator<Item = &'a KirO
 /// relation namespace and cannot both exist under one name in one schema, so that is worth a
 /// reviewer's eye. `Table` beside `Procedure` is the same namespace argument but has not been
 /// observed, and is not excluded until it is. Any third kind keeps the group a conflict.
-fn is_expected_view_routine_pair<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
-    let (mut saw_view, mut saw_routine) = (false, false);
+///
+/// Extended to `Trigger` (RFC 0163, found live on LedgerSMB: 6 conflicts, every one a trigger named
+/// after the function it executes — a near-universal convention). Trigger names live in a
+/// per-table namespace of their own. The group must still be drawn **only** from `View`,
+/// `Procedure` and `Trigger`, with at least two distinct kinds; any `Table` keeps it a conflict.
+fn is_expected_sql_namespace_group<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
+    const KINDS: &[&str] = &["View", "Procedure", "Trigger"];
+    let mut seen: Vec<&str> = Vec::new();
     for obj in group {
-        match &obj.kind {
-            ObjectKind::Custom(k) if k == "View" => saw_view = true,
-            ObjectKind::Custom(k) if k == "Procedure" => saw_routine = true,
-            _ => return false,
+        let ObjectKind::Custom(name) = &obj.kind else {
+            return false;
+        };
+        let Some(kind) = KINDS.iter().find(|k| *k == name) else {
+            return false;
+        };
+        if !seen.contains(kind) {
+            seen.push(kind);
         }
     }
-    saw_view && saw_routine
+    seen.len() >= 2
 }
 
 impl IdentityResolver for DefaultResolver {
@@ -384,7 +394,7 @@ impl IdentityResolver for DefaultResolver {
                 if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i]))
                     || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
                     || is_expected_binary_declaration_group(indices.iter().map(|&i| &objects[i]))
-                    || is_expected_view_routine_pair(indices.iter().map(|&i| &objects[i]))
+                    || is_expected_sql_namespace_group(indices.iter().map(|&i| &objects[i]))
                 {
                     continue;
                 }
@@ -1159,6 +1169,34 @@ mod tests {
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+    }
+
+    /// RFC 0163, found live on LedgerSMB (6 conflicts): a trigger named after the function it runs
+    /// — `trigger_workflow_user` executing `trigger_workflow_user()` — is a near-universal
+    /// PostgreSQL convention. Trigger names live in a per-table namespace of their own.
+    #[test]
+    fn a_trigger_named_after_its_function_does_not_conflict() {
+        let g = make_graph(&[
+            (
+                "trigger_workflow_user",
+                ObjectKind::Custom("Trigger".to_string()),
+            ),
+            (
+                "trigger_workflow_user",
+                ObjectKind::Custom("Procedure".to_string()),
+            ),
+            (
+                "trigger_workflow_user",
+                ObjectKind::Custom("Procedure".to_string()),
+            ),
+        ]);
+        assert!(DefaultResolver::new().resolve(&g).conflicts.is_empty());
+        // A trigger beside a same-named table is still a surprise worth a reviewer's eye.
+        let g = make_graph(&[
+            ("audit", ObjectKind::Custom("Trigger".to_string())),
+            ("audit", ObjectKind::Table),
+        ]);
+        assert_eq!(DefaultResolver::new().resolve(&g).conflicts.len(), 1);
     }
 
     /// A view and a table share SQL's relation namespace — they cannot both exist under one name in

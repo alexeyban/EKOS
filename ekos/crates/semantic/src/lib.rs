@@ -9,6 +9,7 @@ pub mod doc_links;
 pub mod procedure_lineage;
 pub mod rollup;
 pub mod transform_ir;
+pub mod triggers;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -718,6 +719,13 @@ impl CompilerPass for SemanticCompilerPass {
         for rel in links {
             resolved.add_relationship(rel);
         }
+
+        // ── Trigger links + structural classification (RFC 0163) ────────────────
+        // Same placement reasoning again: a trigger and its function usually live in different
+        // files, and only meet here. Running before the CKM is built means each `Trigger` carries
+        // its classification from its first ledger version.
+        let trigger_stats = triggers::link_and_classify_triggers(&mut resolved);
+        tracing::debug!(?trigger_stats, "triggers linked and classified");
 
         // ── Build CKM ────────────────────────────────────────────────────────
         let provenance: HashMap<KirId, Vec<String>> = provenance

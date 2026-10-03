@@ -394,6 +394,23 @@ routine to each table (with `access: read | write | read_write`), and `Calls` be
 only when it names exactly one object; an overloaded or redefined routine or view, a temp table or
 a system catalog links nothing rather than something guessed.
 
+### Triggers (RFC 0163)
+
+Every `CREATE [CONSTRAINT] TRIGGER` becomes a `Trigger` object — timing, events (with `UPDATE OF`
+columns), level, `WHEN` condition and function — linked to the table it fires on (`DependsOn`, so
+impact analysis on a table finds its triggers) and to its function. Each is **classified from what
+its function actually does**, read from the recovered IR, never from names: `Validation` (raises or
+drops the row), `DerivedColumn` (sets `NEW` columns), `Audit` (only inserts elsewhere), `Cascade`
+(updates/deletes elsewhere), `Mixed` (several of those, dynamic SQL, or calls whose effects are not
+inlined — a human decides) or `Unknown` (the function body is not recovered). Every class carries its
+reasons. A function redefined across migrations is classified per definition and only gets a class
+when they all agree; `RETURN NEW` placeholders are set aside, and the reasons say so. Triggers are
+never auto-translated.
+
+```bash
+ekos recover   # … Triggers: 42 (42 parsed, 0 read from tokens) — classified at compile
+```
+
 ### Views (RFC 0169)
 
 Every `CREATE [OR REPLACE] [MATERIALIZED] VIEW` in an observed `.sql` file is a `View` object — its

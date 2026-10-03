@@ -6129,7 +6129,8 @@ PostgreSQL recover completely**, with a ratcheted floor.
 - [x] Downstream registries for `View` (docs-gen Data Stores / entity pages, `llm_description`) (devlog_232)
 - [x] Downstream registries for the new kinds: docs-gen entity pages / API grouping,
       `llm_description`, `doc_links` (RFC 0147's list) — not CI-enforced (devlog_232)
-- [ ] Trigger recovery and structural classification; never auto-translated
+- [x] Trigger recovery and structural classification; never auto-translated (devlog_233; LedgerSMB
+      42 triggers: 15 Validation, 15 DerivedColumn, 4 Cascade, 7 Mixed, 1 Unknown, all with reasons)
 - [ ] Lower `ProcStmt::Sql` into the dataflow `TransformGraph` (the RFC drew this seam inside the
       parser; it sits one step later — see the crate docs)
 - [ ] Deterministic lowering with round-trip checking; CH incremental-MV semantics trap handled

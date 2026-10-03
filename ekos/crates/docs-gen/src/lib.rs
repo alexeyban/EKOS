@@ -696,6 +696,7 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     // RFC 0163 / 0169: SQL routines and views, one page each.
                     | "Procedure"
                     | "View"
+                    | "Trigger"
             )
         }
         ObjectKind::Pipeline => true,

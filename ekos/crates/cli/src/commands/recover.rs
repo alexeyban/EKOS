@@ -16,8 +16,8 @@ use ekos_recovery::{
     PentahoStats, PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats,
     PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats,
     SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, TreasuryAnalyzerPass,
-    ViewAnalyzerPass, ViewStats, anthropic::AnthropicProvider, build_dialect_registry,
-    cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
+    TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats, anthropic::AnthropicProvider,
+    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -65,6 +65,7 @@ pub async fn run_with(
     let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
     let mut plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>> = Vec::new();
     let mut view_stats_handles: Vec<Arc<std::sync::Mutex<ViewStats>>> = Vec::new();
+    let mut trigger_stats_handles: Vec<Arc<std::sync::Mutex<TriggerStats>>> = Vec::new();
 
     // ── SQL dialect resolution (RFC 0031) ─────────────────────────────────
     // Registry is compile-time (mirrors the Observer plugin pattern) — a new dialect means a
@@ -194,6 +195,19 @@ pub async fn run_with(
                 .with_file(file_key.clone());
                 view_stats_handles.push(view_pass.stats_handle());
                 pass_manager.register(Box::new(view_pass));
+            }
+
+            // ── Triggers (RFC 0163) — classified later, against their functions ──
+            if TriggerAnalyzerPass::applies_to(&sql) {
+                let trigger_pass = TriggerAnalyzerPass::new(
+                    &rel_str,
+                    sql.clone(),
+                    dialect_name,
+                    dialect_parser.sqlparser_dialect(),
+                )
+                .with_file(file_key.clone());
+                trigger_stats_handles.push(trigger_pass.stats_handle());
+                pass_manager.register(Box::new(trigger_pass));
             }
 
             if PlPgSqlAnalyzerPass::applies_to(dialect_name, &sql) {
@@ -1041,6 +1055,20 @@ pub async fn run_with(
         println!(
             "  Transformation IR nodes (SQL): {nodes_total} total, {coverage:.0}% mapped (non-Unmapped)"
         );
+    }
+    if !trigger_stats_handles.is_empty() {
+        let (mut triggers, mut parsed) = (0usize, 0usize);
+        for handle in &trigger_stats_handles {
+            let s = handle.lock().unwrap();
+            triggers += s.triggers;
+            parsed += s.parsed;
+        }
+        if triggers > 0 {
+            println!(
+                "  Triggers: {triggers} ({parsed} parsed, {} read from tokens) — classified at compile",
+                triggers - parsed
+            );
+        }
     }
     if !view_stats_handles.is_empty() {
         let (mut views, mut parsed) = (0usize, 0usize);

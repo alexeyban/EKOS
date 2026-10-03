@@ -128,6 +128,12 @@ pub const REGISTRY: &[CustomKind] = &[
                file is another definition, never merged by name",
     },
     CustomKind {
+        name: "Trigger",
+        structurally_keyed: true,
+        note: "(source path, table, trigger name) — RFC 0163 trigger_analyzer; trigger names are \
+               unique per table, so one name on two tables is two triggers",
+    },
+    CustomKind {
         name: "PerlPackage",
         structurally_keyed: true,
         note: "qualified package name — RFC 0147; LedgerSMB::* shares a prefix across ~700 files",

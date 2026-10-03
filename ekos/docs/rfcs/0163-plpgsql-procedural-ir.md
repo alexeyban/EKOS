@@ -228,7 +228,7 @@ already scans, so the CI check applies without extending it.
       (`tests/ledgersmb_corpus.rs`, devlog_228); live fixture schema 5/5 (`tests/corpus.rs`).
       Pagila not yet.
 - [x] One malformed statement costs exactly one `Unrecovered` node. (devlog_220)
-- [ ] Trigger classification covers every class plus the ambiguous case.
+- [x] Trigger classification covers every class plus the ambiguous case. (devlog_233)
 - [x] `Procedure` and `ProcedureStatement` have REGISTRY rows with `structurally_keyed: true`.
       (devlog_229 — and `PlPgSqlAnalyzerPass` runs in `ekos recover`)
 - [x] Output is byte-identical across runs — asserted on every LedgerSMB routine (devlog_228).
@@ -331,3 +331,38 @@ which `llm_description` would skip it silently — a test builds them through th
 asserts they are described. `COMMENT ON FUNCTION|PROCEDURE|[MATERIALIZED] VIEW` in the same file
 becomes the object's evidence-backed `description` (LedgerSMB: all 330 function comments and every
 view comment on an observed file attach), matched by name and then arity, never guessed.
+
+## Amendment 2026-10-03 (d) — triggers, as built
+
+`TriggerAnalyzerPass` (`recovery/src/trigger_analyzer.rs`) recovers every `CREATE [CONSTRAINT]
+TRIGGER` as a `Custom("Trigger")` keyed `(file, table, name)`: timing, events (with `UPDATE OF`
+columns), level, `WHEN` condition, function. `semantic::triggers` — run inside
+`SemanticCompilerPass` beside RFC 0094's risks — links it (`DependsOn` → its table, `role:
+fires_on`; `Calls` → its function when unique) and classifies it from the function's IR facts,
+which `PlPgSqlAnalyzerPass` now records on every `RETURNS trigger` routine (`assigns_new`,
+`raises_exception`, `returns_null`, `pass_through`, and `inserts`/`updates`/`deletes`).
+
+Decisions the section above left open:
+
+- **`Audit` is defined structurally**, not by "log-shaped" names: the function only *inserts* into
+  tables other than its own. Updates or deletes of other tables are `Cascade`.
+- **A sixth outcome, `Unknown`**, separate from `Mixed`: the function is not recovered, not
+  PL/pgSQL, or only partially recovered. "We cannot see the body" is a different finding from "the
+  body does several things".
+- **Calls into other recovered routines make a trigger `Mixed`** — their effects are not inlined,
+  so "only sets NEW columns" cannot be claimed while a callee might write anywhere. Built-ins name
+  no routine and do not count.
+- **A function defined in several files** (module + migrations — LedgerSMB redefines most trigger
+  functions) is classified **per definition**: if they all agree, the class holds whichever body
+  runs; if not, `Mixed`, naming each definition's class and file. No single `Calls` edge is
+  invented for an ambiguous function.
+- **Placeholders are set aside, and said so.** A definition whose body is empty or only `RETURN
+  NEW|OLD` carries no logic (LedgerSMB: "dummy; actual function defined in modules/triggers.sql").
+  When a real definition exists, placeholders do not outvote it; a *conditional* return is real
+  logic and is never a placeholder.
+- **Identity:** a trigger named after its function is near-universal; `{View, Procedure, Trigger}`
+  same-name groups are narrowed out of the conflict detector (separate SQL namespaces), any `Table`
+  in the group still conflicts.
+
+On LedgerSMB (42 triggers, 17 functions): 15 Validation, 15 DerivedColumn, 4 Cascade, 7 Mixed, 1
+Unknown (`tg_enforce_perms_eclass`, not in any observed file) — every one with its reasons.

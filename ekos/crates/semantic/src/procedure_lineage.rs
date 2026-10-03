@@ -46,14 +46,14 @@ impl ProcedureLinkStats {
 
 /// Names → object ids, exact (lower-cased full name) and by last dotted segment.
 #[derive(Default)]
-struct NameIndex {
+pub(crate) struct NameIndex {
     // Keyed by the inner `Uuid` (`KirId` is not `Ord`), so iteration — and edge order — is stable.
     exact: HashMap<String, BTreeSet<Uuid>>,
     tail: HashMap<String, BTreeSet<Uuid>>,
 }
 
 impl NameIndex {
-    fn add(&mut self, name: &str, id: KirId) {
+    pub(crate) fn add(&mut self, name: &str, id: KirId) {
         let n = name.to_lowercase();
         let tail = n.rsplit('.').next().unwrap_or(&n).to_string();
         self.exact.entry(n).or_default().insert(id.0);
@@ -62,7 +62,26 @@ impl NameIndex {
 
     /// The single object `name` refers to, and how it matched — or `Err(true)` when several
     /// objects match (ambiguous), `Err(false)` when none does.
-    fn resolve(&self, name: &str) -> Result<(KirId, &'static str), bool> {
+    /// Every object `name` could refer to — the exact matches, else the qualified↔unqualified
+    /// ones — in a stable order. For callers that can use *all* candidates honestly (trigger
+    /// classification checks whether every definition agrees), never to pick one.
+    pub(crate) fn candidates(&self, name: &str) -> Vec<KirId> {
+        let n = name.to_lowercase();
+        if let Some(ids) = self.exact.get(&n) {
+            return ids.iter().map(|u| KirId(*u)).collect();
+        }
+        let tail = n.rsplit('.').next().unwrap_or(&n);
+        let fallback = if n.contains('.') {
+            self.exact.get(tail)
+        } else {
+            self.tail.get(tail)
+        };
+        fallback
+            .map(|ids| ids.iter().map(|u| KirId(*u)).collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn resolve(&self, name: &str) -> Result<(KirId, &'static str), bool> {
         let n = name.to_lowercase();
         let unique = |s: Option<&BTreeSet<Uuid>>| match s {
             Some(ids) if ids.len() == 1 => Ok(KirId(*ids.iter().next().unwrap())),

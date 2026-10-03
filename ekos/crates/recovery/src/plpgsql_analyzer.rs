@@ -25,6 +25,7 @@ use crate::plpgsql_footprint::{Footprint, expression_footprint, statement_footpr
 use crate::sql_comments::{
     ObjectComment, ObjectCommentKind, extract_object_comments, match_object_comments,
 };
+use crate::sql_objects::{clip, file_kir_id};
 use async_trait::async_trait;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
@@ -234,7 +235,7 @@ pub fn recover_routines_in(
     let file = FileCtx {
         source_path,
         sql,
-        file_id: file_key.map(|k| KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, k.as_bytes()))),
+        file_id: file_key.map(file_kir_id),
     };
     for (i, (key, parsed)) in ordered.iter().enumerate() {
         emit_procedure(
@@ -424,7 +425,86 @@ fn emit_procedure(
     set_footprint(&mut obj.properties, &footprint);
     obj.properties
         .insert("footprint_fragments".into(), json!(footprint.fragments));
+    if is_plpgsql
+        && ir
+            .signature
+            .returns
+            .as_deref()
+            .is_some_and(|r| r.eq_ignore_ascii_case("trigger"))
+    {
+        let t = trigger_facts(ir);
+        obj.properties
+            .insert("assigns_new".into(), json!(t.assigns_new));
+        obj.properties
+            .insert("raises_exception".into(), json!(t.raises_exception));
+        obj.properties
+            .insert("returns_null".into(), json!(t.returns_null));
+        // A placeholder: the whole body is `RETURN NEW|OLD`. Schemas create a trigger against one
+        // and replace the function later (LedgerSMB: "dummy; actual function defined in …").
+        // An empty body counts too (LedgerSMB 1.10: `BEGIN END;`). A *conditional* return is
+        // not a placeholder: `RETURN NULL` in a BEFORE trigger drops rows, which is real logic.
+        let pass_through = ir.declarations.is_empty()
+            && match ir.body.as_slice() {
+                [] => true,
+                [
+                    ProcStmt::Return {
+                        value: Some(v),
+                        query: None,
+                        ..
+                    },
+                ] => v.trim().eq_ignore_ascii_case("new") || v.trim().eq_ignore_ascii_case("old"),
+                _ => false,
+            };
+        obj.properties
+            .insert("pass_through".into(), json!(pass_through));
+    }
     graph.add_object(obj);
+}
+
+/// What a trigger function does to the row and around it — the structural facts RFC 0163's
+/// trigger classification reads. Read from the IR, never from names.
+struct TriggerFacts {
+    /// `NEW` columns set, by assignment or by `… INTO new.col`.
+    assigns_new: std::collections::BTreeSet<String>,
+    /// `RAISE EXCEPTION`s, a bare re-raising `RAISE` included.
+    raises_exception: usize,
+    /// Whether it ever returns `NULL` — in a `BEFORE` row trigger, that silently drops the row.
+    returns_null: bool,
+}
+
+fn trigger_facts(ir: &ProcedureIr) -> TriggerFacts {
+    let mut t = TriggerFacts {
+        assigns_new: Default::default(),
+        raises_exception: 0,
+        returns_null: false,
+    };
+    let new_col = |target: &str, t: &mut TriggerFacts| {
+        let target = target.trim().to_ascii_lowercase();
+        if let Some(col) = target.strip_prefix("new.") {
+            t.assigns_new.insert(col.to_string());
+        }
+    };
+    for s in &ir.body {
+        s.walk(&mut |x| match x {
+            ProcStmt::Assign { target, .. } => new_col(target, &mut t),
+            ProcStmt::Sql {
+                into: Some(into), ..
+            }
+            | ProcStmt::Cursor {
+                into: Some(into), ..
+            } => {
+                for target in into {
+                    new_col(target, &mut t);
+                }
+            }
+            ProcStmt::Raise { level, .. } if level == "exception" => t.raises_exception += 1,
+            ProcStmt::Return { value: Some(v), .. } if v.trim().eq_ignore_ascii_case("null") => {
+                t.returns_null = true
+            }
+            _ => {}
+        });
+    }
+    t
 }
 
 /// A `LANGUAGE sql` routine's body: the dollar- or single-quoted string after `AS`, unescaped.
@@ -444,6 +524,9 @@ fn sql_body(text: &str) -> Option<String> {
 fn set_footprint(props: &mut std::collections::HashMap<String, Value>, fp: &Footprint) {
     props.insert("reads".into(), json!(fp.reads));
     props.insert("writes".into(), json!(fp.writes));
+    props.insert("inserts".into(), json!(fp.inserts));
+    props.insert("updates".into(), json!(fp.updates));
+    props.insert("deletes".into(), json!(fp.deletes));
     props.insert("calls".into(), json!(fp.calls));
     props.insert("footprint".into(), json!(fp.status()));
     if !fp.errors.is_empty() {
@@ -712,18 +795,6 @@ fn fragment_for(stmt: &ProcStmt, source: &str) -> String {
     } else {
         clip(source, MAX_FRAGMENT)
     }
-}
-
-/// At most `max` bytes, cut on a char boundary.
-fn clip(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut at = max;
-    while !s.is_char_boundary(at) {
-        at -= 1;
-    }
-    format!("{} …", &s[..at])
 }
 
 #[cfg(test)]
@@ -1045,6 +1116,62 @@ $$ LANGUAGE sql;";
             &Value::Null,
             "no comment, no description"
         );
+    }
+
+    /// RFC 0163 triggers: a trigger function records the structural facts its trigger is
+    /// classified by — which `NEW` columns it sets, whether it raises, whether it drops the row,
+    /// and what it writes, per operation.
+    #[test]
+    fn a_trigger_function_records_what_its_classification_needs() {
+        let sql = "CREATE FUNCTION trg() RETURNS trigger AS $$\nBEGIN\n\
+  IF new.amount < 0 THEN RAISE EXCEPTION 'negative'; END IF;\n\
+  IF new.skip THEN RETURN NULL; END IF;\n\
+  NEW.updated := now();\n\
+  INSERT INTO open_item (account_id) VALUES (new.chart_id) RETURNING id INTO new.open_item_id;\n\
+  INSERT INTO audit_log SELECT new.*;\n\
+  UPDATE balance SET total = total + new.amount;\n\
+  RETURN NEW;\nEND $$ LANGUAGE plpgsql;\n\
+CREATE FUNCTION plain() RETURNS int AS $$ BEGIN RETURN 1; END $$ LANGUAGE plpgsql;";
+        let (g, _) = recover_routines("t.sql", sql);
+        let procs = of_kind(&g, "Procedure");
+        let trg = procs.iter().find(|p| p.name == "trg").unwrap();
+        assert_eq!(
+            prop(trg, "assigns_new"),
+            &json!(["open_item_id", "updated"])
+        );
+        assert_eq!(prop(trg, "raises_exception"), &json!(1));
+        assert_eq!(prop(trg, "returns_null"), &json!(true));
+        assert_eq!(prop(trg, "inserts"), &json!(["audit_log", "open_item"]));
+        assert_eq!(prop(trg, "updates"), &json!(["balance"]));
+        assert_eq!(prop(trg, "deletes"), &json!([]));
+        assert_eq!(prop(trg, "pass_through"), &json!(false));
+        let (stub, _) = recover_routines(
+            "s.sql",
+            "CREATE FUNCTION s() RETURNS trigger AS $$ BEGIN -- dummy\n RETURN NEW; END $$ LANGUAGE plpgsql;",
+        );
+        assert_eq!(
+            prop(of_kind(&stub, "Procedure")[0], "pass_through"),
+            &json!(true)
+        );
+        let (empty, _) = recover_routines(
+            "s.sql",
+            "CREATE FUNCTION e() RETURNS trigger AS $$ BEGIN END; $$ LANGUAGE plpgsql;",
+        );
+        assert_eq!(
+            prop(of_kind(&empty, "Procedure")[0], "pass_through"),
+            &json!(true)
+        );
+        let (cond, _) = recover_routines(
+            "s.sql",
+            "CREATE FUNCTION c() RETURNS trigger AS $$ BEGIN IF tg_op = 'DELETE' THEN RETURN NULL; END IF; RETURN NEW; END $$ LANGUAGE plpgsql;",
+        );
+        assert_eq!(
+            prop(of_kind(&cond, "Procedure")[0], "pass_through"),
+            &json!(false)
+        );
+        // Only trigger functions carry the trigger facts.
+        let plain = procs.iter().find(|p| p.name == "plain").unwrap();
+        assert_eq!(prop(plain, "assigns_new"), &Value::Null);
     }
 
     #[tokio::test]
