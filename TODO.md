@@ -6248,7 +6248,9 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [x] `resolve` stops on cross-language homonyms (Table `gl` vs PerlPackage `LedgerSMB::GL`, JS vs
       Perl `initialize` — 15 on LedgerSMB). Fixed by RFC 0147 amendment (b), cross-namespace
       narrowing: LedgerSMB with `sql/` + `lib/` + `UI/` observed, 16 → 0 conflicts (devlog_241)
-- [ ] Compile `sql/changes/` `ALTER`s on top of the base DDL (RFC 0146 follow-up). EKOS's repository
+- [ ] Compile `sql/changes/` `ALTER`s on top of the base DDL (RFC 0146 follow-up). A table a
+      change file re-creates (`user_preference`, `sql/changes/1.9`) is today two same-id objects
+      in the CKM (`SEM002`), the later path winning — deterministic since devlog_242, not modelled. EKOS's repository
       view of LedgerSMB is the pre-upgrade schema: 316 drift findings, e.g. `acc_trans.amount` vs
       `amount_bc`.
 - [ ] `DQ.UNIQ.001` fires BLOCK on foreign-key columns (`acc_trans.trans_id`, `chart_id`, …) — skip
@@ -6317,3 +6319,8 @@ LinkML; generation stays in LinkML.
       nothing, `--dry-run`) — devlog_236
 - [x] MCP `ekos_semantics_lookup` / `ekos_semantics_gaps`, status on every answer — devlog_237
 - [x] Ontology mapping suggestions from a user vocabulary (annotations only) — devlog_239
+- [x] End-to-end demo: `demo/ledgersmb-linkml/run.sh` — LedgerSMB → review → LinkML, checked by
+      `linkml-lint`/`gen-*`/`linkml-validate` (devlog_242)
+- [x] Compile read knowledge artifacts in timestamp-hashed id order — a table defined in two files
+      kept the definition read last, so counts changed between runs (46/47 concepts on identical
+      input). Now source-path order (devlog_242)

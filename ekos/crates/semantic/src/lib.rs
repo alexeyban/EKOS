@@ -507,6 +507,14 @@ impl SemanticCompilerPass {
 /// multiple inputs (a handful of workspace-wide passes, e.g. `dependency_analyzer.rs` — not the
 /// measured dominant driver) fall back to `(pass_name, exact input_ids)`, which still collapses
 /// byte-identical reruns without attempting to model partial multi-input accumulation.
+///
+/// **Order.** The result is sorted by that same key — source target (or input ids), then pass
+/// name — never by artifact id. A `KnowledgeArtifact`'s id hashes its `created_at`, so an id order
+/// is a fresh shuffle on every `recover`, and the compile reads artifacts in this order: when two
+/// files define an object with the same id (LedgerSMB creates `user_preference` in
+/// `sql/Pg-database.sql` and again in `sql/changes/1.9/transpose_user_prefs.sql`), which
+/// definition the ledger keeps flipped between runs — and with it the table's columns, CHECKs and
+/// seed rows (RFC 0170 counted 46 or 47 concepts on identical input).
 fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -> Vec<ArtifactId> {
     #[derive(Hash, Eq, PartialEq)]
     enum Key {
@@ -570,9 +578,18 @@ fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -
         }
     }
 
-    let mut result: Vec<ArtifactId> = newest.into_values().map(|(id, _)| id).collect();
-    result.sort_by_key(std::string::ToString::to_string);
+    let mut result: Vec<(String, String, String)> = newest
+        .into_iter()
+        .map(|(key, (id, _))| match key {
+            Key::SingleTarget(pass, target) => (target, pass, id.to_string()),
+            Key::ExactInputs(pass, inputs) => (inputs.join(","), pass, id.to_string()),
+        })
+        .collect();
+    result.sort();
     result
+        .into_iter()
+        .map(|(_, _, id)| ArtifactId(id))
+        .collect()
 }
 
 #[async_trait]
@@ -1365,6 +1382,31 @@ mod tests {
             vec![new_ka],
             "byte-identical multi-input reruns must still collapse; got old={old_ka:?}"
         );
+    }
+
+    /// Two files, one analyzer: the artifacts come back in source order however their
+    /// timestamp-bearing ids happen to sort, so a same-id object defined in both files resolves
+    /// the same way on every run.
+    #[test]
+    fn dedup_orders_by_source_target_not_by_artifact_id() {
+        use ekos_artifact::FileSystemArtifactStore;
+
+        let base = Utc::now();
+        for shift in 0..8 {
+            let dir = TempDir::new().unwrap();
+            let store = FileSystemArtifactStore::new(dir.path());
+            let base_sql =
+                write_observation(&store, "sql/Pg-database.sql", "create table t (a int)");
+            let change =
+                write_observation(&store, "sql/changes/1.9/t.sql", "create table t (b int)");
+            // Different timestamps → different artifact ids → a different id order per round.
+            let t = base + chrono::Duration::seconds(shift);
+            let ka_base = write_knowledge(&store, "sql_analyzer", vec![base_sql], t, "t_base");
+            let ka_change = write_knowledge(&store, "sql_analyzer", vec![change], t, "t_change");
+
+            let deduped = dedup_knowledge_artifact_ids(&store, &store.list().unwrap());
+            assert_eq!(deduped, vec![ka_base, ka_change], "round {shift}");
+        }
     }
 
     #[tokio::test]

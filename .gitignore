@@ -39,3 +39,6 @@ __pycache__/
 .scannerwork/
 web/api/coverage.xml
 web/api/.coverage
+
+# RFC 0170 LedgerSMB → LinkML demo: clone, workspace, venv and outputs
+/demo/ledgersmb-linkml/work/

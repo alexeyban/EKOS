@@ -491,8 +491,11 @@ ekos semantics gold-template --out gold.yaml   # blank, structure-only: for an e
 ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
 ```
 
-On LedgerSMB (SQL + Perl + UI + git, no LLM): 649 predicate sites (about 455 resolved to a
-table column), about 46 concepts, 219 coded values (177 with a meaning), 0 identity conflicts in
+A runnable end-to-end example — clone LedgerSMB, compile, review, export, then lint, generate
+and validate with LinkML's own tools — is [`demo/ledgersmb-linkml/`](demo/ledgersmb-linkml/README.md).
+
+On LedgerSMB (SQL + Perl + UI + git, no LLM): 649 predicate sites (458 resolved to a
+table column), 47 concepts, 222 coded values (179 with a meaning), 0 identity conflicts in
 `resolve`; an unchanged re-commit writes nothing. The LinkML file passes `linkml-lint` with 0 errors and
 `gen-json-schema`/`gen-pydantic` run cleanly. Against a *starter* gold set (not expert-written —
 see `ekos/docs/rfcs/0170-ledgersmb-starter-gold.yaml`): concept recall 0.68, enum label accuracy

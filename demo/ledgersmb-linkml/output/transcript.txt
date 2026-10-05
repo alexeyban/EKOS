@@ -1,0 +1,158 @@
+
+== build ekos (release; the first build takes a while)
+
+== 1. LedgerSMB at 544bcd947ec10a5aa661e4b124ac814f89127457
+   544bcd947 2026-09-13 Merge pull request #9872 from ehuelsmann/fix/master/readonly-elements
+
+== 2. ekos build → recover → resolve → compile → commit
+   build   ok (27s)
+   recover ok (2s)
+   resolve ok (0s)
+   compile ok (1s)
+   commit  ok (461s)
+     recovering business semantics…
+     recovering business semantics — 30s
+     Business semantics:    47 concept(s), 222 coded value(s) in 61 column(s) (179 explained), 60 constraint(s), 15 gap(s), 0 conflict(s), 128 rationale link(s), 17 mapping suggestion(s) — all hypotheses (458 of 649 predicate sites resolved; 1133 new ledger entries)
+
+== 3. recovered hypotheses
+   concept     BusinessConcept (47)
+   enum        EnumMeaning (222)
+   constraint  ConstraintCandidate (60)
+   gap         SemanticGap (15)
+   conflict    No business-semantics items match.
+   rationale   RationaleLink (128)
+
+== 3a. one concept, with its evidence
+   EntityCreditAccountCustomer — BusinessConcept
+     id: 074fe04f-ed9b-548d-9201-6bc644be2ea6
+     carriers: 3
+     confidence: 0.45
+     definition: "entity_credit_account.entity_class IN (2)"
+     description: null
+     name_source: "derived"
+     origin: "recurring"
+     predicates: ["entity_credit_account.entity_class IN (2)"]
+     seen_in: ["eca__get_pricematrix","eca__get_pricematrix_by_pricegroup","eca__save_pricematrix#8"]
+     signature: "33ac02ad272cab672371f9d89ee648b74e95403aa041ea8dee4c482e527c95c1"
+     sites: 3
+     status: "hypothesis"
+     table: "entity_credit_account"
+     tables: ["entity_credit_account"]
+     view: null
+     evidence:
+       sql/modules/Company.sql:1297  entity_credit_account.entity_class IN (2) (eca__get_pricematrix_by_pricegroup, Where)
+       sql/modules/Company.sql:1310  entity_credit_account.entity_class IN (2) (eca__get_pricematrix, Where)
+       sql/modules/Company.sql:1397  entity_credit_account.entity_class IN (2) (eca__save_pricematrix#8, Where)
+     links:
+       EvidencedBy → eca__get_pricematrix_by_pricegroup (Procedure)
+       EvidencedBy → eca__get_pricematrix (Procedure)
+       EvidencedBy → eca__save_pricematrix#8 (ProcedureStatement)
+       ExplainedBy → e9d0fbd521 Company name can now be prepopulated on login screen (RationaleLink)
+       ExplainedBy → 439aaf1160 More customer/vendor pricematrix work, again not exposed to app, and not affecting previous functionality (RationaleLink)
+       Describes → entity_credit_account (Table)
+       ExplainedBy → 1b5baf71b0 Groundwork for fix on pricematrix issues (RationaleLink)
+
+== 3b. a coded value: where its meaning came from
+   [hypothesis] entity_credit_account.entity_class = 1  → Vendor  (4 usage site(s); from app_constant, lookup_seed)
+   [hypothesis] entity_credit_account.entity_class = 2  → Customer  (3 usage site(s); from app_constant, lookup_seed)
+   [hypothesis] entity_credit_account.entity_class = 3  → Employee  (0 usage site(s); from app_constant, lookup_seed)
+
+== 3c. what EKOS could not explain (first gaps)
+   Semantic gap report — 15 open question(s)
+   
+   unexplained_value (15)
+     - What does account_link.description = 'AP' mean? It is used in logic (2 site(s)) but no comment, lookup row or CASE label explains it. `account_link_description` seeds it, but with no label or description column.
+     - What does account_link.description = 'AR' mean? It is used in logic (2 site(s)) but no comment, lookup row or CASE label explains it. `account_link_description` seeds it, but with no label or description column.
+     - What does ap.language_code = '' mean? It is used in logic (2 site(s)) but no comment, lookup row or CASE label explains it.
+     - What does ar.language_code = '' mean? It is used in logic (2 site(s)) but no comment, lookup row or CASE label explains it.
+     - What does oe.language_code = '' mean? It is used in logic (2 site(s)) but no comment, lookup row or CASE label explains it.
+     - What does account_link.description = 'Asset_Dep' mean? It is used in logic (1 site(s)) but no comment, lookup row or CASE label explains it. `account_link_description` seeds it, but with no label or description column.
+     - What does account_link.description = 'Fixed_Asset' mean? It is used in logic (1 site(s)) but no comment, lookup row or CASE label explains it. `account_link_description` seeds it, but with no label or description column.
+     - What does account_link.description = 'IC_expense' mean? It is used in logic (1 site(s)) but no comment, lookup row or CASE label explains it. `account_link_description` seeds it, but with no label or description column.
+     - What does defaults.value = '1' mean? It is used in logic (1 site(s)) but no comment, lookup row or CASE label explains it.
+
+== 4. review on the CLI (as 'demo-reviewer')
+   EnumMeaning account.category = 'A' — confirmed by demo-reviewer (column comment, sql/Pg-database.sql)
+   EnumMeaning account.category = 'L' — confirmed by demo-reviewer (column comment)
+   EnumMeaning account.category = 'Q' — confirmed by demo-reviewer (column comment)
+   EnumMeaning account.category = 'I' — confirmed by demo-reviewer (column comment)
+   EnumMeaning account.category = 'E' — confirmed by demo-reviewer (column comment)
+   ConstraintCandidate account CHECK (category IN ('A', 'L', 'Q', 'I', 'E')) — confirmed by demo-reviewer (the declared domain)
+   EnumMeaning entity_credit_account.entity_class = 1 — confirmed by demo-reviewer (entity_class seed rows + LedgerSMB::Magic EC_* constants)
+   EnumMeaning entity_credit_account.entity_class = 2 — confirmed by demo-reviewer (entity_class seed rows + LedgerSMB::Magic EC_* constants)
+   EnumMeaning entity_credit_account.entity_class = 3 — confirmed by demo-reviewer (entity_class seed rows + LedgerSMB::Magic EC_* constants)
+   3 item(s) reviewed.
+   BusinessConcept EntityCreditAccountCustomer — confirmed by demo-reviewer (entity_class seed row)
+   BusinessConcept EntityCreditAccountVendor — confirmed by demo-reviewer (entity_class seed row)
+   EnumMeaning oe.oe_class_id = 1 — confirmed by demo-reviewer (oe_class seed rows)
+   EnumMeaning oe.oe_class_id = 2 — confirmed by demo-reviewer (oe_class seed rows)
+   EnumMeaning oe.oe_class_id = 3 — confirmed by demo-reviewer (oe_class seed rows)
+   EnumMeaning oe.oe_class_id = 4 — confirmed by demo-reviewer (oe_class seed rows)
+   4 item(s) reviewed.
+   BusinessConcept OeNotClosed — confirmed by demo-reviewer (oe.closed)
+   BusinessConcept PartsAssembly — confirmed by demo-reviewer (parts table comment)
+   BusinessConcept PartsWithInventoryAccnoId — confirmed by demo-reviewer (parts table comment)
+   BusinessConcept PartsNotObsolete — confirmed by demo-reviewer (parts.obsolete)
+   BusinessConcept TransactionsApproved — confirmed by demo-reviewer (28 report sites)
+   BusinessConcept AccountLinkDescriptionSummaryT — rejected by demo-reviewer (duplicate of AccountLinkDescriptionSummary ('t' = true))
+
+== 5. review in the YAML: edit the export, then ekos import linkml
+Wrote work/review.linkml.yaml — 120 class(es), 59 enum(s), status filter Hypothesis.
+   edited: YearendNotReversed → ActiveYearEnd, ekos_status: confirmed
+   edit     classes.ActiveYearEnd  name: YearendNotReversed → ActiveYearEnd; status: hypothesis → confirmed
+   1 decision(s) planned, 0 applied (dry run).
+   edit     classes.ActiveYearEnd  name: YearendNotReversed → ActiveYearEnd; status: hypothesis → confirmed
+   1 decision(s) planned, 1 applied.
+
+== after review
+   BusinessConcept (8)
+     [confirmed] CustomerAccount (recovered as EntityCreditAccountCustomer)  — entity_credit_account.entity_class IN (2)  (3 site(s), recurring, confidence 0.45)
+     [confirmed] VendorAccount (recovered as EntityCreditAccountVendor)  — entity_credit_account.entity_class IN (1)  (3 site(s), recurring, confidence 0.45)
+     [confirmed] OpenOrder (recovered as OeNotClosed)  — oe.closed IS FALSE  (2 site(s), recurring, confidence 0.4)
+     [confirmed] Assembly (recovered as PartsAssembly)  — parts.assembly IS TRUE  (2 site(s), recurring, confidence 0.4)
+     [confirmed] ActivePart (recovered as PartsNotObsolete)  — parts.obsolete IS FALSE  (4 site(s), recurring, confidence 0.5)
+     [confirmed] InventoryPart (recovered as PartsWithInventoryAccnoId)  — parts.inventory_accno_id IS NOT NULL  (9 site(s), recurring, confidence 0.6)
+     [confirmed] ApprovedTransaction (recovered as TransactionsApproved)  — transactions.approved IS TRUE  (28 site(s), recurring, confidence 0.6)
+     [confirmed] ActiveYearEnd (recovered as YearendNotReversed)  — yearend.reversed IS FALSE  (7 site(s), recurring, confidence 0.5)
+   EnumMeaning (12)
+     [confirmed] account.category = 'A'  → Asset (expert)  (14 usage site(s); from case_label, column_comment)
+     [confirmed] account.category = 'E'  → Expense (expert)  (17 usage site(s); from column_comment)
+     [confirmed] account.category = 'I'  → Income (expert)  (9 usage site(s); from column_comment)
+     [confirmed] account.category = 'L'  → Liability (expert)  (6 usage site(s); from case_label, column_comment)
+     [confirmed] account.category = 'Q'  → Equity (expert)  (5 usage site(s); from column_comment)
+     [confirmed] entity_credit_account.entity_class = 1  → Vendor  (4 usage site(s); from app_constant, lookup_seed)
+     [confirmed] entity_credit_account.entity_class = 2  → Customer  (3 usage site(s); from app_constant, lookup_seed)
+     [confirmed] entity_credit_account.entity_class = 3  → Employee  (0 usage site(s); from app_constant, lookup_seed)
+     [confirmed] oe.oe_class_id = 1  → Sales Order  (7 usage site(s); from app_constant, case_label, lookup_seed)
+     [confirmed] oe.oe_class_id = 2  → Purchase Order  (6 usage site(s); from app_constant, case_label, lookup_seed)
+     [confirmed] oe.oe_class_id = 3  → Quotation  (3 usage site(s); from app_constant, lookup_seed)
+     [confirmed] oe.oe_class_id = 4  → RFQ  (3 usage site(s); from app_constant, lookup_seed)
+   ConstraintCandidate (1)
+     [confirmed] account CHECK (category IN ('A', 'L', 'Q', 'I', 'E'))  (enum)
+   21 of 21 confirmed by a human; everything else is a hypothesis recovered from code traces, or waiting for review.
+
+== 6. ekos export linkml (confirmed only — the default)
+Wrote work/ledgersmb.linkml.yaml — 14 class(es), 3 enum(s), status filter Confirmed.
+Wrote work/ledgersmb.all.linkml.yaml — 127 class(es), 61 enum(s), status filter All.
+   work/ledgersmb.linkml.yaml: 730 lines
+   work/ledgersmb.all.linkml.yaml: 5882 lines (every element, with its status)
+
+== 6a. linkml-lint
+   errors: 0, warnings: 83 (recommended 71, standard_naming 12)
+
+== 6b. gen-json-schema, gen-pydantic
+   work/ledgersmb.schema.json (50432 bytes)
+   work/ledgersmb_models.py (1082 lines)
+
+== 6c. linkml-validate: records against the recovered schema
+   account-ok.yaml (category A): valid
+     No issues found
+   account-bad.yaml (category X): INVALID
+     [ERROR] [account-bad.yaml/0] 'X' is not one of ['A', 'E', 'I', 'L', 'Q'] in /category
+
+== done
+   Schema (confirmed):   work/ledgersmb.linkml.yaml
+   Schema (everything):  work/ledgersmb.all.linkml.yaml
+   JSON Schema:          work/ledgersmb.schema.json
+   Pydantic models:      work/ledgersmb_models.py
+   EKOS workspace:       work/LedgerSMB   (try: ekos/target/release/ekos semantics gaps --config work/LedgerSMB/ekos.toml)
