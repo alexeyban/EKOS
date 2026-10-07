@@ -15,7 +15,7 @@ Unlike traditional enterprise systems that manage data, documents or metadata in
 
 EKOS is a **compiler for enterprise knowledge**, not a database or document store. It observes an
 enterprise's existing systems — source code, Git history, SQL schemas, GitHub issues/PRs,
-Confluence, local PDF/DOCX documents, crypto/DeFi exports — without interpreting them, compiles
+Confluence, local PDF/DOCX documents — without interpreting them, compiles
 those observations through deterministic passes into a Canonical Knowledge Model, and stores the
 result in an append-only ledger where every conclusion carries the evidence it was derived from. AI
 agents (Claude Code among them) read that ledger through a read-only Model Context Protocol server
@@ -25,9 +25,6 @@ The project follows an RFC-first workflow (`docs/rfcs/`): every capability is de
 before it's implemented, and the `devlogs/devlog_*.md` files are the running record of
 what shipped, why, and what was learned building it. It is written in Rust (2024 edition) as a
 Cargo workspace, and is licensed under the [MIT License](LICENSE).
-
-EKOS also has a community token — utility designed to grow as a consequence of platform adoption,
-not a promise of price. See [Token & Community](#token--community) below.
 
 ## The Problem
 
@@ -122,7 +119,7 @@ recovery — `if`/loop/`switch`/`try` with the IL offset of every line, labelled
 reached — plus a per-method migration spec, a Python-rewrite parity check and sandboxed characterization tests that
 run the original and check the rewrite against what it did, RFC 0150; RFC 0148 — shipped
 as a separately licensed extension build, not part of this open-source repository, RFC 0149), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
-0056), crypto/DeFi export, plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
+0056), plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). SQL in the PostgreSQL, SQL Server (T-SQL), MySQL, Snowflake, Databricks and ClickHouse dialects is
 parsed from files (RFC 0031); live PostgreSQL / SQL Server database connectors and a Jira connector remain planned.
@@ -520,16 +517,7 @@ The same real-world entity observed under different names across systems (Inform
 Postgres `customers`, Databricks `gold.dim_customer`) can be linked too: `ekos identity scan`
 scores candidate cross-system matches (column overlap, naming-pattern similarity, type
 compatibility) and writes them as `unconfirmed` relationships — never a silent auto-merge — for
-review via the `ekos_identity_review` MCP tool. **DAO treasury compliance (RFC 0032).** "Was this payment approved by governance?" is the same shape of
-problem: two independently observed records with no link between them, where a wrong auto-decision is
-worse than none. `EKOS_TREASURY_ADDRESS` + `EKOS_TREASURY_CHAIN_ID` observe a treasury's outgoing
-transfers through an Etherscan-family explorer (each sub-transfer of a Safe multi-send is its own
-payment); `EKOS_SNAPSHOT_SPACE` observes a Snapshot space's proposals and their outcomes.
-`ekos treasury scan` scores payment↔proposal candidates on recipient, amount, text reference and timing
-and writes each as an `unconfirmed` `AuthorizedBy` relationship with its evidence — a payment made
-*before* its approval is flagged and heavily penalised, a rejected proposal is never offered — then
-lists the payments with no candidate. Review with `ekos_identity_review`. **Status:** verified against
-mock clients and a full-pipeline fixture; the real explorer and Snapshot clients have not been run live.
+review via the `ekos_identity_review` MCP tool.
 
 Same-source duplicates (`ekos resolve`/`ekos
 compile`, e.g. two `Table` objects both literally named `customers`) auto-merge only when the
@@ -1700,17 +1688,14 @@ Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presen
 - [TSD System Documentation](https://alexeyban.github.io/EKOS/presentations/tsd-documentation.html) and [How TSD Works](https://alexeyban.github.io/EKOS/presentations/tsd-how-it-works.html) — a Windows CE barcode terminal and its desktop server documented from compiled .NET binaries alone (RFC 0148), every claim traced to a metadata token.
 - [Distributed Storage Under Fire](https://alexeyban.github.io/EKOS/presentations/distributed-storage-under-fire.html) — two end-to-end runs of the RFC 0111/0113 distributed engine and the eight defects they found.
 - [EKOS Web Console](https://alexeyban.github.io/EKOS/presentations/web-console.html) — the web console, RFC 0128–0133.
-- [Vision & Token Utility](https://alexeyban.github.io/EKOS/presentations/vision-and-token-utility.html) — why the EKOS token's relevance is designed to grow as a consequence of platform adoption, not a promise of price.
 
 See [alexeyban.github.io/EKOS/presentations.html](https://alexeyban.github.io/EKOS/presentations.html) for the full list.
 
-## Token & Community
+## Community
 
-EKOS has a community token whose utility is designed to grow as the platform is adopted — a
-consequence of usage, not a promise of price. Network, contract address, and full allocation are
-the canonical facts in [TOKENOMICS.md](TOKENOMICS.md); the phased utility roadmap is in
-[VISION.md](VISION.md). Release announcements post to X: [@ekosproject](https://x.com/ekosproject)
-(via `ekos marketing publish`, RFC 0030).
+Questions and ideas: [GitHub Discussions](https://github.com/alexeyban/EKOS/discussions). Release
+announcements post to X: [@ekosproject](https://x.com/ekosproject) (via `ekos marketing publish`,
+RFC 0030). The project site is [ekos.dev](https://ekos.dev).
 
 ## Versioning Roadmap
 
@@ -1726,7 +1711,7 @@ the canonical facts in [TOKENOMICS.md](TOKENOMICS.md); the phased utility roadma
 | v1.0 | Enterprise Knowledge Compiler |
 
 The workspace is versioned `1.0.0`, released 2026-09-23 — the `v1.0` row above. What has actually
-shipped — RFCs up to 0153 and 201 devlogs so far — is tracked phase by phase in [TODO.md](TODO.md)
+shipped — RFCs up to 0170 and 242 devlogs so far — is tracked phase by phase in [TODO.md](TODO.md)
 and the devlogs, not by this table. See [CHANGELOG.md](CHANGELOG.md) for what 1.0.0 commits to.
 
 ## Team
