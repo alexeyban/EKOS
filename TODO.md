@@ -6047,7 +6047,7 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       explicit `JOIN … ON` and implicit `WHERE a.x = b.y`. Live-verified: a join existing only in the
       workload was found and measured, and a join present in both sources had its confidence raised
       from one place to two.
-- [ ] Doc-vs-data conflict findings (no `ConflictingEvidence` path exists today — new work)
+- [ ] Doc-vs-data conflict findings — the `ConflictingEvidence` shape exists now (RFC 0172, devlog_244); this is its Phase 3 in `migrate-dq`
 - [ ] Gate the completeness check on real dispositions rather than reporting it (needs RFC 0161)
 
 ## Migrate Phase 4 — Map, design, generate, execute (RFC 0159, 0160)
@@ -6264,6 +6264,20 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [ ] P1 profile could be read from the recorded profile facts instead of re-sampled inside
       `review`/`load` — determinism by construction rather than by seed.
 - [ ] CLI `--as` is an unauthenticated claim; document that four-eyes needs the console's OIDC path.
+
+## ConflictingEvidence (RFC 0172) — on by default `[conflicts]`
+
+- [x] Phase 1: `ConflictingEvidence` kind, `duplicate_definitions` + `merge_losses` in
+      `SemanticCompilerPass` (replaces the silent "later wins" and `SEM002` duplicate-id warnings),
+      `ekos conflicts list|show` (devlog_244)
+- [x] Phase 2: `label_mismatches` at commit, human-only `ekos conflicts resolve` with carry-forward,
+      MCP `ekos_conflicts` + `open_conflicts` on `ekos_state`, counts in `ekos status`
+- [x] LedgerSMB: 5 conflicts (1 duplicate definition, 4 labels; 2 labels are misreadings)
+- [ ] Phase 3: doc-vs-data findings in `migrate-dq` (RFC 0158 `DQ.CONSIST.DOC`) in the same shape
+- [ ] `disputed: true` on `ekos_query`/`ekos_retrieve` claims about a disputed attribute
+- [ ] Console conflicts view + RFC 0127 graph halo
+- [ ] The `case_label` source misreads a CASE that rewrites a code (`'A'`→`'L'`) as a label — fix
+      the extractor; the conflict detector currently catches it
 
 ## Source freshness (RFC 0171) — on by default `[freshness]`
 

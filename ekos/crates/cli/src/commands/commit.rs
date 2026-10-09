@@ -91,10 +91,16 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // Write canonical objects.
     let obj_total = model.objects.len();
     let obj_progress = ProgressLine::for_phase("writing objects");
+    // RFC 0172 — the conflicts this compile found, for `.ekos/conflicts/current.json`.
+    let mut compiled_conflicts: Vec<ekos_kir::KirId> = Vec::new();
     for ckm_obj in &model.objects {
         ledger.set_write_context(Some(per_source_ctx(&ckm_obj.source_artifact_ids)));
         let mut kir_obj = ckm_object_to_kir(ckm_obj);
         preserve_claim_review_status(&*ledger, &mut kir_obj)?;
+        if ekos_semantic::conflicts::is_conflict(&kir_obj) {
+            crate::commands::conflicts::carry_review(&*ledger, &mut kir_obj)?;
+            compiled_conflicts.push(kir_obj.id);
+        }
         if ledger.append_object(&kir_obj)? {
             objects_written += 1;
         } else {
@@ -159,6 +165,19 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
         let stats = crate::commands::semantics::commit_step(config, cwd, &*ledger, yes).await?;
         step.done();
         stats
+    } else {
+        None
+    };
+    // RFC 0172: label mismatches need the business-semantics items just written; the manifest of
+    // current conflicts needs both.
+    let conflict_stats = if config.conflicts.enabled {
+        ledger.set_write_context(Some(write_ctx("commit:conflicts")));
+        Some(crate::commands::conflicts::commit_step(
+            config,
+            cwd,
+            &*ledger,
+            &compiled_conflicts,
+        )?)
     } else {
         None
     };
@@ -244,6 +263,9 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
             "  Business semantics:    {}",
             crate::commands::semantics::summary_line(stats, *written)
         );
+    }
+    if let Some(stats) = conflict_stats.filter(|s| s.total() > 0) {
+        println!("  Conflicting evidence:  {}", stats.summary_line());
     }
     if let Some(stats) = &embed_stats {
         println!(

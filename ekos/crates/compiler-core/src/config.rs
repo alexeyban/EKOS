@@ -44,6 +44,8 @@ pub struct EkosConfig {
     pub semantics: SemanticsConfig,
     #[serde(default)]
     pub freshness: FreshnessConfig,
+    #[serde(default)]
+    pub conflicts: ConflictsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -295,6 +297,23 @@ impl Default for FreshnessConfig {
             enabled: true,
             ttl_seconds: default_freshness_ttl(),
         }
+    }
+}
+
+/// RFC 0172 — `[conflicts]`: when sources disagree about one fact (a table defined twice, a merge
+/// that would drop a column type, two labels for one code), keep both claims as a
+/// `ConflictingEvidence` item instead of silently keeping one. On by default; deterministic, no LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ConflictsConfig {
+    /// `false` restores the old behaviour: the last definition wins without a trace.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for ConflictsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 
@@ -820,6 +839,7 @@ impl Default for EkosConfig {
             migrate: MigrateConfig::default(),
             semantics: SemanticsConfig::default(),
             freshness: FreshnessConfig::default(),
+            conflicts: ConflictsConfig::default(),
         }
     }
 }
@@ -930,6 +950,10 @@ log-level = "debug"
         assert!(!cfg.freshness.enabled);
         assert_eq!(cfg.freshness.ttl_seconds, 5);
         assert!(toml::from_str::<EkosConfig>("[freshness]\nttl = 5\n").is_err());
+        // RFC 0172: conflicts are on by default too.
+        assert!(EkosConfig::default().conflicts.enabled);
+        let cfg: EkosConfig = toml::from_str("[conflicts]\nenabled = false\n").unwrap();
+        assert!(!cfg.conflicts.enabled);
     }
 
     /// RFC 0026: document-semantics extraction is opt-in, so a config that never

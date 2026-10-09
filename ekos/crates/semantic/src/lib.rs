@@ -5,6 +5,7 @@
 //! read from the CKM, never from raw KIR.
 
 pub mod business_semantics;
+pub mod conflicts;
 pub mod data_lineage;
 pub mod doc_links;
 pub mod ontology;
@@ -660,6 +661,19 @@ impl CompilerPass for SemanticCompilerPass {
             );
         }
 
+        // ── RFC 0172: one id, several definitions ──────────────────────────────
+        // Two files that define the same object (LedgerSMB re-creates `user_preference` in a
+        // migration) used to both reach the CKM, the later silently winning. Collapse them to that
+        // same winner, and record every attribute they disagree on.
+        let conflicts_on = ctx.config.conflicts.enabled;
+        let mut conflict_graph = KirGraph::new();
+        if conflicts_on {
+            merge_graphs(
+                &mut conflict_graph,
+                conflicts::duplicate_definitions(&mut combined),
+            );
+        }
+
         // ── Identity resolution ───────────────────────────────────────────────
         let resolution = DefaultResolver::new().resolve(&combined);
 
@@ -708,7 +722,25 @@ impl CompilerPass for SemanticCompilerPass {
                 }
             }
         }
+        // RFC 0172: what an exact-name merge is about to drop, recorded before it does.
+        if conflicts_on {
+            merge_graphs(
+                &mut conflict_graph,
+                conflicts::merge_losses(&combined, &auto_merge),
+            );
+        }
         let mut resolved = apply_merges(combined, &auto_merge);
+        if !conflict_graph.objects.is_empty() {
+            ctx.diagnostics.lock().unwrap().warning(
+                "CONF001",
+                format!(
+                    "{} conflicting-evidence item(s): sources disagree about one fact — both claims \
+                     kept; see `ekos conflicts list` after commit (RFC 0172)",
+                    conflict_graph.objects.len()
+                ),
+            );
+        }
+        merge_graphs(&mut resolved, conflict_graph);
 
         // ── Review candidates ───────────────────────────────────────────────────
         let (review_evidence, review_relationships) = review_candidates_for(&review);

@@ -15,6 +15,17 @@ pub fn status(config: &EkosConfig, cwd: &Path, storage: bool, json: bool) -> Res
             crate::freshness::check(config, cwd, 0).summary_line()
         );
     }
+    // RFC 0172 — sources that disagree, as of the last commit or decision.
+    if !json
+        && config.conflicts.enabled
+        && let Some(c) = crate::commands::conflicts::recorded_counts(config, cwd)
+        && c.total() > 0
+    {
+        println!(
+            "  Conflicts     : {} open, {} resolved, {} dismissed (`ekos conflicts list`)",
+            c.open, c.resolved, c.dismissed
+        );
+    }
     Ok(())
 }
 
@@ -127,6 +138,9 @@ pub struct StatusJson {
     /// RFC 0171 — does the ledger still match the source? Omitted when `[freshness]` is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub freshness: Option<crate::freshness::Freshness>,
+    /// RFC 0172 — `{open, resolved, dismissed}` as of the last commit or decision.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conflicts: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -199,6 +213,7 @@ pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> 
                 last_write: None,
                 storage: storage_json(config, cwd, distributed, partitioned, fact),
                 freshness: freshness_json(config, cwd),
+                conflicts: conflicts_json(config, cwd),
             });
         }
         let ledger = Ledger::open(&path).map_err(|e| anyhow::anyhow!("cannot open ledger: {e}"))?;
@@ -223,7 +238,17 @@ pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> 
         last_write: last_write(config, cwd, distributed, partitioned, fact),
         storage: storage_json(config, cwd, distributed, partitioned, fact),
         freshness: freshness_json(config, cwd),
+        conflicts: conflicts_json(config, cwd),
     })
+}
+
+fn conflicts_json(config: &EkosConfig, cwd: &Path) -> Option<serde_json::Value> {
+    if !config.conflicts.enabled {
+        return None;
+    }
+    crate::commands::conflicts::recorded_counts(config, cwd).map(
+        |c| serde_json::json!({ "open": c.open, "resolved": c.resolved, "dismissed": c.dismissed }),
+    )
 }
 
 /// Paths listed per category in `status --json`; `ekos freshness` has the full report.

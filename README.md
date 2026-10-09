@@ -560,6 +560,29 @@ spanning the database (`Table`/`View`/`Procedure`/`Trigger`) and the code of Per
 Rust or Elixir when each namespace's share is unremarkable on its own; a `Table` beside a
 same-named `View` still conflicts (RFC 0147 amendment b — LedgerSMB 16 → 0 conflicts).
 
+**When sources disagree, both claims are kept (RFC 0172).** A table created in two files with
+different columns, a column type an exact-name merge would have dropped, two labels for one code
+from different sources — each becomes a `ConflictingEvidence` item instead of the last one silently
+winning: every claim with its file and line, what EKOS kept, and a `Disputes` link to the object.
+Values are normalized first (`INT`/`INTEGER`/`SERIAL` are one type), a fact only one side states is
+unknown rather than a disagreement, and prose is never compared.
+
+```bash
+ekos conflicts list
+#   [open] account.category = 'A'.label  — 2 source(s) disagree: "asset"  vs  "L"
+#   [open] user_preference.columns  — 2 source(s) disagree: ["dateformat","id",…]  vs  ["id","name","user_id","value"]
+ekos conflicts show "account.category = 'A'.label"   # each claim's path:line and source
+ekos conflicts resolve user_preference.columns --both-valid --note "1.9 replaces the table"  # human-only
+ekos conflicts resolve "account.category = 'A'.label" --pick 1 --as ann
+```
+
+A decision holds while the claims are unchanged; when one changes, the conflict reopens with the old
+decision kept. Agents read conflicts over MCP (`ekos_conflicts`, and `open_conflicts` on
+`ekos_state`) and are told to present an open one as a disagreement, never one side as fact; no MCP
+tool can resolve one. On LedgerSMB: 5 conflicts — `user_preference` (re-created by a 1.9 migration)
+and 4 code labels, two of them a CASE that rewrites `'A'`↔`'L'` misread as a label. `[conflicts]
+enabled = false` restores the old behaviour.
+
 ### Real schema and class structure from source (RFC 0091/0092)
 
 **File-based SQL schema needs a dialect.** `.sql` files parse under the `generic` (ANSI) dialect
@@ -1094,7 +1117,8 @@ T), `ekos_audit` (the write history of one object/relationship with the pipeline
 source artifact behind each version — RFC 0135; the source artifact is the object/relationship's
 own recovered `KnowledgeArtifact` id(s) where `compile` tracked one, falling back to the run's CKM
 content hash for compiler-synthesized objects like rollups and risks), `ekos_status` (with a
-`freshness` block: does the ledger still match the source? RFC 0171),
+`freshness` block: does the ledger still match the source? RFC 0171), `ekos_conflicts` (where
+sources disagree about one fact, every claim with its file and line — read-only, RFC 0172),
 `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
 explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
 `ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,

@@ -938,6 +938,9 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     if config.semantics.enabled {
         tools.extend(semantics_tool_definitions());
     }
+    if config.conflicts.enabled {
+        tools.push(conflicts_tool_definition());
+    }
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
@@ -949,6 +952,22 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
 /// a hypothesis recovered from code is never handed over as a fact. There is deliberately no MCP
 /// tool that confirms, rejects or edits one — that is `ekos semantics confirm|reject|edit` /
 /// `ekos import linkml`, human-only (a source-scan test in `semantics.rs` enforces it).
+/// RFC 0172 — read-only; settling a conflict is CLI-only.
+fn conflicts_tool_definition() -> Value {
+    json!({
+        "name": "ekos_conflicts",
+        "description": "Where EKOS's sources DISAGREE about one fact — a table defined differently in two files, a column type an identity merge would have dropped, two different labels for one code. Each item lists every claim with its file and line. An `open` conflict is unresolved: present the disagreement, never just one side as fact. Only a person can resolve one (on the CLI); this tool only reads.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "subject": { "type": "string", "description": "Narrow to conflicts about this object (name substring or id)" },
+                "status": { "type": "string", "enum": ["open", "resolved", "dismissed", "all"], "description": "Default open" },
+                "limit": { "type": "integer", "description": "Max items (default 20, max 100)" }
+            }
+        }
+    })
+}
+
 fn semantics_tool_definitions() -> Vec<Value> {
     vec![
         json!({
@@ -1499,6 +1518,22 @@ fn call_tool(
         return session_read(config, workspace, ledger, name, args);
     }
 
+    if name == "ekos_conflicts" {
+        if !config.conflicts.enabled {
+            anyhow::bail!("conflict detection is disabled — set [conflicts] enabled = true");
+        }
+        let ledger = cache.get(config, workspace)?;
+        let limit = bounded_arg(args, "limit", 20, 1, 100)? as usize;
+        return super::conflicts::agent_list(
+            config,
+            workspace,
+            ledger,
+            args.get("subject").and_then(Value::as_str),
+            args.get("status").and_then(Value::as_str).unwrap_or("open"),
+            limit,
+        );
+    }
+
     if matches!(name, "ekos_semantics_lookup" | "ekos_semantics_gaps") {
         if !config.semantics.enabled {
             anyhow::bail!("business semantics are disabled — set [semantics] enabled = true");
@@ -1634,10 +1669,20 @@ fn call_tool(
                 }
                 None => runtime.reconstruct_state(&id)?,
             };
-            state
+            let mut value = state
                 .map(|s| serde_json::to_value(&s))
                 .transpose()?
-                .ok_or_else(|| anyhow::anyhow!("object not found: {}", id))
+                .ok_or_else(|| anyhow::anyhow!("object not found: {}", id))?;
+            // RFC 0172 — sources that disagree about this object, unresolved.
+            if config.conflicts.enabled
+                && let Some(obj) = value.as_object_mut()
+            {
+                let open = super::conflicts::open_for(config, workspace, ledger, &id)?;
+                if !open.is_empty() {
+                    obj.insert("open_conflicts".into(), json!(open));
+                }
+            }
+            Ok(value)
         }
         "ekos_dependents" => {
             let id = required_id(args)?;
@@ -2860,7 +2905,9 @@ mod tests {
                 "ekos_architecture_drift",
                 "ekos_architecture_diff",
                 "ekos_identity_review",
-                "ekos_architecture_review"
+                "ekos_architecture_review",
+                // RFC 0172 — on by default, read-only.
+                "ekos_conflicts"
             ]
         );
         for tool in tools {
@@ -3428,6 +3475,21 @@ mod tests {
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(body["objects"], 0);
         assert_eq!(body["entries"], 0);
+    }
+
+    /// RFC 0172 — `ekos_conflicts` is listed by default (read-only), and gone when disabled.
+    #[test]
+    fn conflicts_tool_is_listed_unless_disabled() {
+        let names = |config: &EkosConfig| -> Vec<String> {
+            tool_definitions(config, &Extensions::default())
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let mut config = EkosConfig::default();
+        assert!(names(&config).contains(&"ekos_conflicts".to_string()));
+        config.conflicts.enabled = false;
+        assert!(!names(&config).contains(&"ekos_conflicts".to_string()));
     }
 
     /// RFC 0171 — `ekos_status` carries a freshness block, and a read tool gets one extra note

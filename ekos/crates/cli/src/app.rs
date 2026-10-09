@@ -164,6 +164,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: SemanticsCommands,
     },
+    /// Where sources disagree about one fact — both claims kept, for a person to decide (RFC 0172)
+    Conflicts {
+        #[command(subcommand)]
+        subcommand: ConflictsCommands,
+    },
     /// Export compiled knowledge to other formats (RFC 0170: LinkML)
     Export {
         #[command(subcommand)]
@@ -829,6 +834,48 @@ enum ClickHouseCommands {
 }
 
 #[derive(Subcommand)]
+enum ConflictsCommands {
+    /// The current conflicts: duplicate definitions, merge losses, label mismatches
+    List {
+        /// Only one status: open, resolved or dismissed
+        #[arg(long)]
+        status: Option<String>,
+        /// Only one type: duplicate_definition, merge_loss or label_mismatch
+        #[arg(long = "type")]
+        conflict_type: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One conflict with every claim's file and line
+    Show {
+        /// The conflict's name (`subject.attribute`) or id
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decide a conflict (human-only; never via MCP): which claim is right, or both are
+    Resolve {
+        /// The conflict's name (`subject.attribute`) or id
+        target: String,
+        /// The 1-based number of the right claim, as `show` lists them
+        #[arg(
+            long,
+            conflicts_with = "both_valid",
+            required_unless_present = "both_valid"
+        )]
+        pick: Option<usize>,
+        /// Both claims are valid (needs --note)
+        #[arg(long)]
+        both_valid: bool,
+        /// Who is deciding (default: $USER)
+        #[arg(long = "as")]
+        by: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum SemanticsCommands {
     /// List the current concepts, enum meanings, constraints, gaps and rationale links — every one
     /// a hypothesis recovered from code traces, never a confirmed definition
@@ -1185,6 +1232,35 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             crate::commands::recover::run_with(&config, &cwd, parallel, &extensions).await
         }
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
+        Commands::Conflicts { subcommand } => match subcommand {
+            ConflictsCommands::List {
+                status,
+                conflict_type,
+                json,
+            } => crate::commands::conflicts::list(
+                &config,
+                &cwd,
+                status.as_deref(),
+                conflict_type.as_deref(),
+                json,
+            ),
+            ConflictsCommands::Show { target, json } => {
+                crate::commands::conflicts::show(&config, &cwd, &target, json)
+            }
+            ConflictsCommands::Resolve {
+                target,
+                pick,
+                both_valid,
+                by,
+                note,
+            } => {
+                let decision = match (pick, both_valid) {
+                    (Some(n), false) => ekos_semantic::conflicts::Resolution::Pick(n),
+                    _ => ekos_semantic::conflicts::Resolution::BothValid,
+                };
+                crate::commands::conflicts::resolve(&config, &cwd, &target, decision, by, note)
+            }
+        },
         Commands::Semantics { subcommand } => match subcommand {
             SemanticsCommands::List { kind, status, json } => crate::commands::semantics::list(
                 &config,
