@@ -79,6 +79,16 @@ enum Commands {
         #[arg(long)]
         all: bool,
     },
+    /// Which source files changed since the ledger was committed, and which compiled objects
+    /// cite them (RFC 0171)
+    Freshness {
+        /// Emit one machine-readable JSON object instead of the text report
+        #[arg(long)]
+        json: bool,
+        /// Paths listed per category (changed / added / removed)
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
     /// Check the environment and configuration
     Doctor {
         /// Emit one machine-readable JSON object instead of the text checklist (RFC 0129 R5)
@@ -1093,7 +1103,8 @@ fn emits_machine_output(command: &Commands) -> bool {
         Commands::Status { json, .. }
         | Commands::Doctor { json }
         | Commands::Ekl { json, .. }
-        | Commands::Coverage { json, .. } => *json,
+        | Commands::Coverage { json, .. }
+        | Commands::Freshness { json, .. } => *json,
         Commands::Graph {
             subcommand: GraphCommands::Export { .. },
         } => true,
@@ -1165,6 +1176,9 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         ),
         Commands::Coverage { json, strict, all } => {
             crate::commands::coverage::run(&config, &cwd, json, strict, all)
+        }
+        Commands::Freshness { json, limit } => {
+            crate::commands::freshness::run(&config, &cwd, json, limit)
         }
         Commands::Build => crate::commands::build::run_with(&config, &cwd, &extensions).await,
         Commands::Recover { parallel } => {

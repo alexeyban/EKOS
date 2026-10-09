@@ -6,6 +6,19 @@ use serde::Serialize;
 use std::path::Path;
 
 pub fn status(config: &EkosConfig, cwd: &Path, storage: bool, json: bool) -> Result<()> {
+    status_report(config, cwd, storage, json)?;
+    // RFC 0171 — one line on whether the ledger still matches the source (text form only; the
+    // JSON form carries a `freshness` object).
+    if !json && config.freshness.enabled {
+        println!(
+            "  Source        : {}",
+            crate::freshness::check(config, cwd, 0).summary_line()
+        );
+    }
+    Ok(())
+}
+
+fn status_report(config: &EkosConfig, cwd: &Path, storage: bool, json: bool) -> Result<()> {
     // RFC 0127 R2: `--json` is a pure alternate presentation — it shares the same backend opener
     // as the text path below and adds zero side effects, so `ekos status` and `ekos status --json`
     // can never disagree, and RFC 0116's `ekos status` == `ekos ledger status` byte-identity for
@@ -111,6 +124,9 @@ pub struct StatusJson {
     /// the ledger itself. `null` on a distributed workspace (no local store) or one never built.
     pub last_write: Option<DateTime<Utc>>,
     pub storage: StorageJson,
+    /// RFC 0171 — does the ledger still match the source? Omitted when `[freshness]` is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freshness: Option<crate::freshness::Freshness>,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,6 +198,7 @@ pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> 
                 integrity: "unchecked",
                 last_write: None,
                 storage: storage_json(config, cwd, distributed, partitioned, fact),
+                freshness: freshness_json(config, cwd),
             });
         }
         let ledger = Ledger::open(&path).map_err(|e| anyhow::anyhow!("cannot open ledger: {e}"))?;
@@ -205,7 +222,18 @@ pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> 
         integrity: "unchecked",
         last_write: last_write(config, cwd, distributed, partitioned, fact),
         storage: storage_json(config, cwd, distributed, partitioned, fact),
+        freshness: freshness_json(config, cwd),
     })
+}
+
+/// Paths listed per category in `status --json`; `ekos freshness` has the full report.
+const STATUS_FRESHNESS_PATHS: usize = 10;
+
+fn freshness_json(config: &EkosConfig, cwd: &Path) -> Option<crate::freshness::Freshness> {
+    config
+        .freshness
+        .enabled
+        .then(|| crate::freshness::check(config, cwd, STATUS_FRESHNESS_PATHS))
 }
 
 /// Per-component byte/file breakdown, one shape per backend (RFC 0127 §5).

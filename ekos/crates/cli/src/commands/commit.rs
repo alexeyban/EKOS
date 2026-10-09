@@ -28,6 +28,11 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
 
     let model: CkModel = ekos_common::compress::read_json_auto(&model_path)?;
 
+    // RFC 0171: the source moved after `ekos build` — this commit records the older source.
+    if let Some(warning) = crate::freshness::changed_since_build(config, cwd) {
+        eprintln!("warning: {warning}");
+    }
+
     let ledger = open_ledger(config, cwd)?;
 
     // RFC 0135 Part B — every entry this `commit` writes carries `(run_id, stage, ckm hash)`.
@@ -247,6 +252,15 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
         );
     }
     println!("  Ledger:                {}", store_display(config, cwd));
+
+    // RFC 0171 — the ledger now reflects what `ekos build` observed.
+    if config.freshness.enabled {
+        match crate::freshness::promote_after_commit(config, cwd) {
+            Ok(true) => {}
+            Ok(false) => tracing::debug!("no source manifest to promote (built before RFC 0171)"),
+            Err(e) => tracing::warn!("could not record the committed source manifest: {e}"),
+        }
+    }
 
     Ok(())
 }

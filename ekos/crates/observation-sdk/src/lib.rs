@@ -139,12 +139,19 @@ pub fn walk_observed(
     }
 }
 
-/// Compute a `Fingerprint` for the source tree rooted at `ctx.workspace_root`.
-pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
-    use sha2::{Digest, Sha256};
+/// One observed file's metadata, relative to `ctx.workspace_root` (RFC 0171).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FileStamp {
+    pub path: String,
+    pub size: u64,
+    /// Modification time in nanoseconds since the Unix epoch; 0 when the platform has none.
+    pub mtime_nanos: u128,
+}
 
-    let mut entries: Vec<(String, u64, u128)> = Vec::new();
-
+/// Every file `ekos build` would observe under `ctx.workspace_root`, with size and mtime, sorted
+/// by path. Metadata only — no file is read (RFC 0171: no new raw-content entry point).
+pub fn source_manifest(ctx: &ScanContext) -> Vec<FileStamp> {
+    let mut entries: Vec<FileStamp> = Vec::new();
     walk_observed(
         ctx,
         |rel, meta| {
@@ -154,20 +161,35 @@ pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_nanos())
                 .unwrap_or(0);
-            entries.push((rel.to_string(), meta.len(), mtime_nanos));
+            entries.push(FileStamp {
+                path: rel.to_string(),
+                size: meta.len(),
+                mtime_nanos,
+            });
         },
         |_| {},
     );
-
     entries.sort();
+    entries
+}
+
+/// The `Fingerprint` of a manifest from [`source_manifest`] — the same hash
+/// [`source_fingerprint`] has always produced, so existing `fingerprints.json` entries stay valid.
+pub fn fingerprint_of(entries: &[FileStamp]) -> Fingerprint {
+    use sha2::{Digest, Sha256};
 
     let mut hasher = Sha256::new();
-    for (path, size, mtime) in &entries {
-        hasher.update(path.as_bytes());
-        hasher.update(size.to_le_bytes());
-        hasher.update(mtime.to_le_bytes());
+    for e in entries {
+        hasher.update(e.path.as_bytes());
+        hasher.update(e.size.to_le_bytes());
+        hasher.update(e.mtime_nanos.to_le_bytes());
     }
     Fingerprint(hex::encode(hasher.finalize()))
+}
+
+/// Compute a `Fingerprint` for the source tree rooted at `ctx.workspace_root`.
+pub fn source_fingerprint(ctx: &ScanContext) -> Fingerprint {
+    fingerprint_of(&source_manifest(ctx))
 }
 
 /// Metadata about a completed scan.
@@ -237,6 +259,45 @@ pub use ObserveError as ObserverError;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0171 moved the walk into `source_manifest`; the hash must be byte-identical to the
+    /// pre-0171 tuple-based one, or every workspace's `fingerprints.json` would miss once.
+    #[test]
+    fn fingerprint_is_unchanged_by_the_manifest_refactor() {
+        use sha2::{Digest, Sha256};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/b.rs"), "fn b() {}").unwrap();
+        std::fs::write(dir.path().join("a.sql"), "create table t (id int);").unwrap();
+        let ctx = ScanContext::new(dir.path());
+
+        let mut old: Vec<(String, u64, u128)> = Vec::new();
+        walk_observed(
+            &ctx,
+            |rel, meta| {
+                let m = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
+                old.push((rel.to_string(), meta.len(), m));
+            },
+            |_| {},
+        );
+        old.sort();
+        let mut h = Sha256::new();
+        for (p, size, m) in &old {
+            h.update(p.as_bytes());
+            h.update(size.to_le_bytes());
+            h.update(m.to_le_bytes());
+        }
+        assert_eq!(source_fingerprint(&ctx).0, hex::encode(h.finalize()));
+
+        let manifest = source_manifest(&ctx);
+        let paths: Vec<&str> = manifest.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["a.sql", "src/b.rs"]);
+    }
 
     #[test]
     fn is_ignored_catches_prefix_segments() {

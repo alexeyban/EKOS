@@ -42,6 +42,8 @@ pub struct EkosConfig {
     pub migrate: MigrateConfig,
     #[serde(default)]
     pub semantics: SemanticsConfig,
+    #[serde(default)]
+    pub freshness: FreshnessConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,6 +267,33 @@ impl Default for SemanticsConfig {
             llm_definitions: false,
             llm_max_definitions: default_semantics_llm_max(),
             ontology: None,
+        }
+    }
+}
+
+/// RFC 0171 — `[freshness]`: compare the source tree with what the ledger was compiled from.
+/// On by default; reads file metadata only (size, mtime), never contents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct FreshnessConfig {
+    /// `false` turns off every check: `ekos status`/`doctor` lines, the `FRESH001` warning at
+    /// compile/commit, and the MCP note.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// How long the MCP server reuses one check before walking the tree again.
+    #[serde(default = "default_freshness_ttl")]
+    pub ttl_seconds: u64,
+}
+
+fn default_freshness_ttl() -> u64 {
+    30
+}
+
+impl Default for FreshnessConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl_seconds: default_freshness_ttl(),
         }
     }
 }
@@ -790,6 +819,7 @@ impl Default for EkosConfig {
             session_memory: SessionMemoryConfig::default(),
             migrate: MigrateConfig::default(),
             semantics: SemanticsConfig::default(),
+            freshness: FreshnessConfig::default(),
         }
     }
 }
@@ -887,6 +917,19 @@ log-level = "debug"
         let cfg = EkosConfig::default();
         assert_eq!(cfg.workspace.log_level, "info");
         assert!(!cfg.observe.ignore_patterns.is_empty());
+    }
+
+    /// RFC 0171: freshness is on by default (metadata only), and the section parses.
+    #[test]
+    fn freshness_defaults_on_and_parses() {
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert!(cfg.freshness.enabled);
+        assert_eq!(cfg.freshness.ttl_seconds, 30);
+        let cfg: EkosConfig =
+            toml::from_str("[freshness]\nenabled = false\nttl-seconds = 5\n").unwrap();
+        assert!(!cfg.freshness.enabled);
+        assert_eq!(cfg.freshness.ttl_seconds, 5);
+        assert!(toml::from_str::<EkosConfig>("[freshness]\nttl = 5\n").is_err());
     }
 
     /// RFC 0026: document-semantics extraction is opt-in, so a config that never

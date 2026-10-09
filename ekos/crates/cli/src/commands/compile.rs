@@ -26,6 +26,11 @@ fn knowledge_artifact_ids(store: &dyn ArtifactStore) -> Vec<String> {
 pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let ckm_dir = config.ekos_dir(cwd).join("ckm");
 
+    // RFC 0171: compiling artifacts from a build that no longer matches the source.
+    if let Some(warning) = crate::freshness::changed_since_build(config, cwd) {
+        eprintln!("warning: {warning}");
+    }
+
     // One store instance shared with the pass context: two pack stores over
     // the same segments would go stale on each other's appends (RFC 0015).
     let store: Arc<dyn ArtifactStore> = Arc::new(

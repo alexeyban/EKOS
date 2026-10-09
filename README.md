@@ -259,6 +259,34 @@ schema is written in, excludes third-party and generated directories that would 
 compiled as if they were your own code, and prints an inventory of what it found. See
 [RFC 0152](ekos/docs/rfcs/0152-first-run-self-verification.md).
 
+### Is the ledger still current? (RFC 0171)
+
+The ledger describes the source as it was at the last `ekos commit`. `ekos build` records every
+observed file's size and modification time, and a successful commit marks that list as "what the
+ledger reflects". From then on EKOS compares it with the files on disk. It reads metadata only,
+never file contents, and a file that was only touched also counts as changed.
+
+```bash
+ekos status            # … Source : fresh — ledger reflects the source as of 2026-10-09 12:35 UTC (git c4f01c7)
+ekos freshness         # what changed since, and which compiled objects cite those files
+```
+
+```
+Changed (1):
+  schema.sql
+    may be stale: File schema.sql, Table customers, Table orders
+Removed (1):
+  app.py
+    may be stale: File app.py, PythonSymbol total
+```
+
+`ekos compile` and `ekos commit` warn `FRESH001` when the source moved after `ekos build`.
+`ekos doctor` includes a "Source freshness" line. Over MCP, `ekos_status` carries a `freshness`
+block, and when the source has changed every read tool's answer gets one extra note saying the
+ledger may be behind, so an agent knows not to trust facts about those files. `[freshness] enabled
+= false` turns all of this off; `ttl-seconds` (default 30) sets how long the MCP server reuses one
+check.
+
 ### Upgrading and removing
 
 Re-running the install command replaces the binary in place with the latest release; there is no
@@ -1065,7 +1093,8 @@ reported; RFC 0127), `ekos_diff` (raw ledger-entry changes since
 T), `ekos_audit` (the write history of one object/relationship with the pipeline run, stage, and
 source artifact behind each version — RFC 0135; the source artifact is the object/relationship's
 own recovered `KnowledgeArtifact` id(s) where `compile` tracked one, falling back to the run's CKM
-content hash for compiler-synthesized objects like rollups and risks), `ekos_status`,
+content hash for compiler-synthesized objects like rollups and risks), `ekos_status` (with a
+`freshness` block: does the ledger still match the source? RFC 0171),
 `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
 explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
 `ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,

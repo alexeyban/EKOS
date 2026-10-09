@@ -4,7 +4,7 @@ use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, IndexArtifact, PackArtifactStore};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
-use ekos_observation_sdk::{Observer, ScanContext, source_fingerprint};
+use ekos_observation_sdk::{Observer, ScanContext, fingerprint_of, source_manifest};
 use ekos_plugin_clickhouse::{ClickHouseHttpClient, ClickHouseObserver};
 use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
@@ -306,6 +306,8 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     let logic_version =
         ekos_common::PIPELINE_LOGIC_VERSION.wrapping_add(ext.logic_version().wrapping_mul(1_000));
 
+    let mut built_stamps: Vec<(std::path::PathBuf, Vec<ekos_observation_sdk::FileStamp>)> =
+        Vec::new();
     for base in &observe_paths {
         // RFC 0044 Phase 1: distinguishes objects from different projects when `[observe] paths`
         // lists more than one entry — empty for the overwhelmingly common `paths = ["."]` case,
@@ -334,7 +336,11 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
         let ctx =
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
 
-        let fp = source_fingerprint(&ctx);
+        // RFC 0171: one walk gives both the fingerprint (unchanged hash) and the per-file
+        // manifest the freshness check compares against later.
+        let stamps = source_manifest(&ctx);
+        let fp = fingerprint_of(&stamps);
+        built_stamps.push((base.clone(), stamps));
         let fp_key = fingerprint_cache_key(base, logic_version, &redaction_config);
         if !ledger_is_empty && fingerprints.get(&fp_key) == Some(&fp.0) {
             connectors_skipped_cached += observers.len();
@@ -507,6 +513,13 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     }
 
     save_fingerprints(&fingerprint_path, &fingerprints)?;
+    // RFC 0171 — what this build observed; `ekos commit` promotes it once the ledger has it.
+    if config.freshness.enabled {
+        let manifest = crate::freshness::manifest_from(config, cwd, &built_stamps);
+        if let Err(e) = crate::freshness::record_build(config, cwd, &manifest) {
+            tracing::warn!("could not write the source manifest (RFC 0171): {e}");
+        }
+    }
 
     // ── Write build index (snapshot) ─────────────────────────────────────────
     let build_id = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();

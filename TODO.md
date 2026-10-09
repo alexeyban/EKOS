@@ -6265,6 +6265,15 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       `review`/`load` — determinism by construction rather than by seed.
 - [ ] CLI `--as` is an unauthenticated claim; document that four-eyes needs the console's OIDC path.
 
+## Source freshness (RFC 0171) — on by default `[freshness]`
+
+- [x] Per-file manifest recorded by `ekos build` (same walk, unchanged fingerprint hash), promoted
+      by a successful `ekos commit` (devlog_243)
+- [x] `ekos freshness` (changed/added/removed files + the objects citing them), `ekos status` /
+      `doctor` line, `FRESH001` at compile/commit, MCP `ekos_status` block + note on read results
+- [ ] Remote sources (GitHub, Confluence, ClickHouse): only files under `[observe] paths` are compared
+- [ ] Optional content hash for a changed-mtime/same-size file, so `touch` stops counting as a change
+
 ## Business semantics → LinkML (RFC 0170) — experimental, opt-in `[semantics]`
 
 Source plan: "EKOS × LinkML: Recovering the Semantic Layer from Technical Traces". EKOS feeds

@@ -82,7 +82,13 @@ pub struct StoreCache {
     /// fingerprint check below), so a cached answer can never outlive the workspace state it was
     /// computed against.
     result_cache: std::collections::HashMap<(String, String), Value>,
+    /// RFC 0171 — the last source-freshness check and when it ran, reused for
+    /// `[freshness] ttl-seconds` so a busy server does not walk the tree on every call.
+    freshness: Option<(std::time::Instant, crate::freshness::Freshness)>,
 }
+
+/// Paths per category in `ekos_status`'s freshness block; `ekos freshness` has the full list.
+const MCP_FRESHNESS_PATHS: usize = 10;
 
 impl StoreCache {
     pub fn new() -> Self {
@@ -90,7 +96,29 @@ impl StoreCache {
             store: None,
             fingerprint: None,
             result_cache: std::collections::HashMap::new(),
+            freshness: None,
         }
+    }
+
+    /// RFC 0171 — whether the ledger still matches the source, memoised for the configured TTL.
+    /// `None` when `[freshness]` is off.
+    fn freshness(
+        &mut self,
+        config: &EkosConfig,
+        workspace: &Path,
+    ) -> Option<crate::freshness::Freshness> {
+        if !config.freshness.enabled {
+            return None;
+        }
+        let ttl = std::time::Duration::from_secs(config.freshness.ttl_seconds);
+        if let Some((at, f)) = &self.freshness
+            && at.elapsed() < ttl
+        {
+            return Some(f.clone());
+        }
+        let f = crate::freshness::check(config, workspace, MCP_FRESHNESS_PATHS);
+        self.freshness = Some((std::time::Instant::now(), f.clone()));
+        Some(f)
     }
 
     /// The currently-fresh read-only store, reopening only when the on-disk
@@ -1246,6 +1274,31 @@ fn tool_ok(result: &Value) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": false })
 }
 
+/// RFC 0171 — a read tool's result plus, when the source moved after the last commit, one extra
+/// text item saying so. The result itself is untouched.
+fn tool_ok_with_freshness(result: &Value, f: Option<&crate::freshness::Freshness>) -> Value {
+    let mut out = tool_ok(result);
+    if let Some(f) = f.filter(|f| f.status == crate::freshness::Status::SourceChanged)
+        && let Some(content) = out["content"].as_array_mut()
+    {
+        content.push(json!({ "type": "text", "text": freshness_note(f) }));
+    }
+    out
+}
+
+fn freshness_note(f: &crate::freshness::Freshness) -> String {
+    let when = f
+        .committed_at
+        .map(|t| format!(" (committed {})", t.format("%Y-%m-%d %H:%M UTC")))
+        .unwrap_or_default();
+    format!(
+        "Note: the ledger may be behind the source{when}: {} file(s) changed, {} added, {} removed \
+         since the last `ekos commit`. Facts from those files may be stale; `ekos_status` lists \
+         them, and `ekos build` … `ekos commit` brings the ledger up to date.",
+        f.changed_count, f.added_count, f.removed_count
+    )
+}
+
 fn tool_err(e: &anyhow::Error) -> Value {
     json!({ "content": [{ "type": "text", "text": e.to_string() }], "isError": true })
 }
@@ -1372,7 +1425,8 @@ fn tools_call(
         log_call(
             config, workspace, name, cost_class, &reason, true, 0, &result,
         );
-        return tool_ok(&result);
+        let fresh = cache.freshness(config, workspace);
+        return tool_ok_with_freshness(&result, fresh.as_ref());
     }
 
     let start = std::time::Instant::now();
@@ -1392,7 +1446,19 @@ fn tools_call(
                 duration_ms,
                 &result,
             );
-            tool_ok(&result)
+            let fresh = cache.freshness(config, workspace);
+            if name == "ekos_status" {
+                // The block lives in the result itself; no separate note needed.
+                let mut result = result;
+                if let (Some(f), Some(obj)) = (&fresh, result.as_object_mut()) {
+                    obj.insert(
+                        "freshness".into(),
+                        serde_json::to_value(f).unwrap_or(Value::Null),
+                    );
+                }
+                return tool_ok(&result);
+            }
+            tool_ok_with_freshness(&result, fresh.as_ref())
         }
         Err(e) => tool_err(&e),
     }
@@ -3362,6 +3428,59 @@ mod tests {
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(body["objects"], 0);
         assert_eq!(body["entries"], 0);
+    }
+
+    /// RFC 0171 — `ekos_status` carries a freshness block, and a read tool gets one extra note
+    /// item only once the source moved after the last commit.
+    #[test]
+    fn freshness_block_and_note_follow_the_source() {
+        let mut config = EkosConfig::default();
+        config.freshness.ttl_seconds = 0; // re-check on every call in this test
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("schema.sql"), "create table t (id int);").unwrap();
+        {
+            // An empty ledger, so read tools have something to open.
+            let ledger = ekos_ledger::FactLedger::open(&facts_dir(&config, dir)).unwrap();
+            drop(ledger);
+        }
+        crate::freshness::record_build(&config, dir, &crate::freshness::scan(&config, dir))
+            .unwrap();
+        crate::freshness::promote_after_commit(&config, dir).unwrap();
+
+        let call = |cache: &mut StoreCache, name: &str, args: Value| {
+            let line = req(9, "tools/call", json!({ "name": name, "arguments": args }));
+            parse(&handle_message(&config, dir, &line, cache).unwrap())
+        };
+        let mut cache = StoreCache::new();
+
+        let status = call(&mut cache, "ekos_status", json!({}));
+        let body: Value =
+            serde_json::from_str(status["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["freshness"]["status"], "fresh");
+        let search = call(&mut cache, "ekos_search", json!({ "query": "t" }));
+        assert_eq!(search["result"]["content"].as_array().unwrap().len(), 1);
+
+        std::fs::write(
+            dir.join("schema.sql"),
+            "create table t (id int, name text);",
+        )
+        .unwrap();
+
+        let status = call(&mut cache, "ekos_status", json!({}));
+        let body: Value =
+            serde_json::from_str(status["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["freshness"]["status"], "source_changed");
+        assert_eq!(body["freshness"]["changed"], json!(["schema.sql"]));
+        let search = call(&mut cache, "ekos_search", json!({ "query": "t" }));
+        let content = search["result"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2, "result plus the freshness note");
+        assert!(
+            content[1]["text"]
+                .as_str()
+                .unwrap()
+                .contains("1 file(s) changed")
+        );
     }
 
     #[test]

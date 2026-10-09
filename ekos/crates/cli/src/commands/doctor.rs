@@ -224,6 +224,17 @@ fn collect_checks(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Vec<Ch
     }
 
     checks.push(coverage_check(config, cwd));
+    if config.freshness.enabled {
+        // RFC 0171 — always `ok`: a ledger behind the source is not a broken environment, but the
+        // detail says so, with the command that lists what moved.
+        let f = crate::freshness::check(config, cwd, 0);
+        let detail = if f.status == crate::freshness::Status::SourceChanged {
+            format!("{} — see `ekos freshness`", f.summary_line())
+        } else {
+            f.summary_line()
+        };
+        checks.push(Check::ok("Source freshness", detail));
+    }
 
     checks
 }
