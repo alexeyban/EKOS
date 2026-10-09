@@ -1298,6 +1298,7 @@ version = "1.0.3"
 dependencies = [
  "ekos-common",
  "ekos-migrate",
+ "ekos-migrate-dq",
  "ekos-migrate-validate",
  "postgres",
  "serde",

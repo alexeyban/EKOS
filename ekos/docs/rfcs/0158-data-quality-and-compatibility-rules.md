@@ -77,6 +77,8 @@ with `rule = "DQ.CONSIST.DOC"`, carrying both sides as evidence — the document
 Confluence page, a README section, a column comment recovered by RFC 0146 Phase 2) and the measured
 value.
 
+**Delivered as RFC 0172 Phase 3 (2026-10-09):** `ekos migrate assess` writes the `DQ.CONSIST.DOC` finding, and a contradicted claim also becomes a `ConflictingEvidence` (`doc_vs_data`) item. See that RFC for the claim grammar and the live verification.
+
 Kept deliberately small: it fires only where documentation makes a *checkable* claim (never null,
 unique, one of a fixed set, within a range) about a column that was profiled. Free-text mismatch
 detection is not attempted.

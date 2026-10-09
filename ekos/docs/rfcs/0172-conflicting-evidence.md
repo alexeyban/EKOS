@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Implemented — Phases 1 and 2 (2026-10-09); Phase 3 (doc-vs-data in Migrate) not started |
+| **Status** | Implemented — Phases 1–3 (2026-10-09) |
 | **Supersedes** | the "`ConflictingEvidence` diagnostic path" earlier drafts assumed (RFC 0148, 0154, 0158 and devlog_189/204 record that it never existed) |
 
 ## Problem
@@ -68,9 +68,35 @@ Nothing in `commands/mcp.rs` may reach the resolve path, and a source-scan test 
 | `ekos status` / `--json` | count of open conflicts |
 | `[conflicts] enabled = true` | default on; `false` restores the old silent behaviour |
 
+## Phase 3 — documentation vs data (RFC 0158 `DQ.CONSIST.DOC`)
+
+`ekos migrate assess` reads each assessed column's documentation from two places:
+- the repository's `COMMENT ON COLUMN`, as compiled by RFC 0146, which carries `path:line`;
+- the live catalog comment, already redacted by `pg-live`.
+
+`ekos_migrate_dq::doc_claims::extract` keeps only **checkable** claims, at most one per kind and per column (the repository wins):
+
+| Claim | Read from | Counted as violating |
+|---|---|---|
+| `not_null` | "never null", "is required", "mandatory", … — suppressed by "may be null", "optional", … | `IS NULL` |
+| `unique` | "unique", "no duplicates" — suppressed by "unique per/within …", "not unique" | duplicates beyond the first |
+| `one_of` | a legend (`A=asset,L=liability`) or "one of …" / "values: …" | non-null values outside the set (`::text NOT IN (…)`) |
+| `range` | "between X and Y", "positive", "non-negative", "at least / at most N" (numeric columns only) | non-null values outside the bounds |
+
+A `not_null` claim on a column declared `NOT NULL` is skipped, because the database already enforces it. Each query counts rows: no value leaves the database, identifiers are quoted, and the documented values are SQL literals with quotes doubled.
+
+Every checked claim becomes a `DQ.CONSIST.DOC` finding (`warn`, never blocking), with its affected-row count and its query. A contradicted claim also becomes a `ConflictingEvidence` item (`doc_vs_data`):
+- the documentation claim, with its file and line;
+- the measured side ("has NULL values", "has values outside that set", …), qualitative so a review is not reopened just because the count moved;
+- a `measured` property with the count, the query and when it ran;
+- a `Disputes` link to the repository's `Table`, or to the `MigrationUnit` when the repository has no such table.
+
+These conflicts belong to `assess`, not `commit`, so they live in their own manifest (`.ekos/conflicts/migrate.json`, table → ids). A re-assessment replaces that table's entry, so a contradiction fixed in the data stops being current, and a commit never drops them.
+
+**Verified live** (docker-compose `migrate-pg`, `crates/pg-live/tests/live_doc_claims.rs`, plus a CLI run): 6 claims checked, 6 contradicted. A repository comment cites `sql/schema.sql:11`, and a live-only one cites the catalog. A declared `NOT NULL` column was skipped, and a comment with no claim produced nothing. After a dismissal and a data fix, a re-assessment kept the dismissal and dropped the two fixed conflicts.
+
 ## Not in this RFC
 
-- **Phase 3, doc-vs-data:** in `migrate-dq`, a documented, checkable claim compared with profiled data (RFC 0158 `DQ.CONSIST.DOC`), emitted in the same shape.
 - **Flags in answers:** a `disputed: true` flag on `ekos_query` / `ekos_retrieve` claims.
 - **Console:** a conflicts view, and the RFC 0127 graph halo.
 

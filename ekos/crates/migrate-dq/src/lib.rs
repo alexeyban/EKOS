@@ -14,6 +14,7 @@
 
 pub mod catalog;
 pub mod completeness;
+pub mod doc_claims;
 pub mod infer;
 pub mod model;
 

@@ -1355,6 +1355,13 @@ What each stage guarantees:
 - **Assessment measures, it does not guess.** Each finding carries the SQL that measured it.
   Undeclared foreign keys are inferred from real joins in the compiled code *and* in
   `pg_stat_statements`, then checked by inclusion before anything is claimed.
+- **Documentation is checked against the data** (`DQ.CONSIST.DOC`, RFC 0172 Phase 3). Where a
+  column's repository or live comment makes a checkable claim — "never null", "unique", "one of
+  open, closed or void", an `A=asset,L=liability` legend, "between 0 and 100", "positive" — assess
+  counts the rows that contradict it (counts only, no values). A contradicted claim becomes a
+  `doc_vs_data` conflict carrying both sides: the comment with its `path:line`, and the measured
+  count with its query. `ekos conflicts list --type doc_vs_data`; a re-assessment drops the ones the
+  data no longer contradicts.
 - **Every executed statement is parsed and classified** (never string-matched). An unparseable,
   unknown or credential-carrying statement is refused. Outside the sandbox, a statement runs only if
   an approval matches its artifact id, content hash and environment — there is no override.

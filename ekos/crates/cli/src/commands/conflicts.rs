@@ -23,6 +23,54 @@ fn manifest_path(config: &EkosConfig, cwd: &Path) -> PathBuf {
     config.ekos_dir(cwd).join("conflicts").join("current.json")
 }
 
+/// Phase 3: doc-vs-data conflicts belong to `ekos migrate assess`, not to `commit`, so they live in
+/// their own manifest (`table → ids`) that a commit never overwrites.
+fn migrate_manifest_path(config: &EkosConfig, cwd: &Path) -> PathBuf {
+    config.ekos_dir(cwd).join("conflicts").join("migrate.json")
+}
+
+/// `ekos migrate assess`: these are now the doc-vs-data conflicts for `table` (replacing what an
+/// earlier assessment of that table recorded), and the counts are refreshed.
+pub fn record_migrate(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    table: &str,
+    ids: &[KirId],
+) -> Result<()> {
+    let path = migrate_manifest_path(config, cwd);
+    let mut map: BTreeMap<String, Vec<String>> = std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let mut v: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+    v.sort();
+    if v.is_empty() {
+        map.remove(table);
+    } else {
+        map.insert(table.to_string(), v);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&map)?)?;
+    let commit_ids = commit_ids(config, cwd).unwrap_or_default();
+    write_manifest(
+        config,
+        cwd,
+        &commit_ids,
+        count(&items_in(config, cwd, ledger)?),
+    )
+}
+
+fn migrate_ids(config: &EkosConfig, cwd: &Path) -> BTreeSet<String> {
+    std::fs::read(migrate_manifest_path(config, cwd))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<BTreeMap<String, Vec<String>>>(&b).ok())
+        .map(|m| m.into_values().flatten().collect())
+        .unwrap_or_default()
+}
+
 fn s<'a>(o: &'a KirObject, key: &str) -> &'a str {
     o.properties.get(key).and_then(Value::as_str).unwrap_or("")
 }
@@ -157,16 +205,7 @@ pub fn items_in(
     cwd: &Path,
     ledger: &dyn KnowledgeStore,
 ) -> Result<Vec<KirObject>> {
-    let current: Option<BTreeSet<String>> = std::fs::read(manifest_path(config, cwd))
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .and_then(|v| {
-            v["ids"].as_array().map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(str::to_string))
-                    .collect()
-            })
-        });
+    let current = current_ids(config, cwd);
     let mut items: Vec<KirObject> = ledger
         .all_objects()?
         .into_iter()
@@ -193,7 +232,21 @@ pub fn open_about(items: &[KirObject], subject: &KirId) -> Vec<Value> {
         .collect()
 }
 
+/// What is current: the commit's conflicts plus Migrate's. `None` when neither manifest exists yet
+/// (then every conflict in the ledger counts).
 fn current_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
+    let migrate = migrate_ids(config, cwd);
+    match commit_ids(config, cwd) {
+        Some(mut c) => {
+            c.extend(migrate);
+            Some(c)
+        }
+        None if !migrate.is_empty() => Some(migrate),
+        None => None,
+    }
+}
+
+fn commit_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
     std::fs::read(manifest_path(config, cwd))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
@@ -290,6 +343,7 @@ pub fn brief(o: &KirObject) -> Value {
         "chosen_by_ekos": o.properties.get("chosen"),
         "picked_claim": o.properties.get("picked_claim"),
         "review_note": o.properties.get("review_note"),
+        "measured": o.properties.get("measured"),
     })
 }
 
@@ -445,6 +499,15 @@ pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Re
     if let Some(chosen) = o.properties.get("chosen").filter(|v| !v.is_null()) {
         println!("  EKOS kept: {chosen}");
     }
+    // RFC 0172 Phase 3 — the measurement behind a doc-vs-data conflict, so it can be re-run.
+    if let Some(m) = o.properties.get("measured") {
+        println!(
+            "  measured:  {} row(s) contradict the documentation ({})",
+            m["violating_rows"],
+            m["measured_at"].as_str().unwrap_or("?")
+        );
+        println!("  query:     {}", m["sql"].as_str().unwrap_or(""));
+    }
     if let Some(p) = o.properties.get("picked_claim") {
         println!(
             "  picked:    {} ({})",
@@ -499,9 +562,8 @@ pub fn resolve(
         source_artifact_id: None,
     }));
     ledger.append_object(&next)?;
-    if let Some(ids) = current_ids(config, cwd) {
-        write_manifest(config, cwd, &ids, count(&items_in(config, cwd, &*ledger)?))?;
-    }
+    let ids = commit_ids(config, cwd).unwrap_or_default();
+    write_manifest(config, cwd, &ids, count(&items_in(config, cwd, &*ledger)?))?;
     println!(
         "{} — {} by {by}{}",
         next.name,

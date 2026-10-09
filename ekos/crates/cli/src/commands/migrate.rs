@@ -606,6 +606,18 @@ pub fn assess(
         )?)
     })?;
     report_completeness(&catalog, &findings);
+    assess_doc_claims(
+        config,
+        cwd,
+        store.as_ref(),
+        &name,
+        &dsn,
+        &run_id,
+        &targets,
+        &units,
+        &catalog,
+        measure,
+    )?;
     assess_inferred_keys(
         config,
         store.as_ref(),
@@ -640,6 +652,322 @@ pub fn assess(
         )?;
     }
     Ok(())
+}
+
+/// One documented, checkable claim about a live column, and where it was read.
+struct DocCheck {
+    table: String,
+    column: String,
+    claim: ekos_migrate_dq::doc_claims::DocClaim,
+    /// `column_comment` (the repository's `COMMENT ON COLUMN`) or `live_comment` (the catalog's).
+    source: &'static str,
+    path: String,
+    line: Option<u32>,
+    sql: String,
+    affected: Option<i64>,
+}
+
+/// The repository's column documentation: table name (lowercase, as compiled) → the `Table`
+/// object and `column → (description, path, line)`.
+type RepoDocs = std::collections::HashMap<
+    String,
+    (
+        ekos_kir::KirObject,
+        std::collections::HashMap<String, (String, String, Option<u32>)>,
+    ),
+>;
+
+fn repo_column_docs(store: &dyn ekos_ledger::KnowledgeStore) -> Result<RepoDocs> {
+    let mut out = RepoDocs::new();
+    for o in store.all_objects()? {
+        if !matches!(o.kind, ekos_kir::ObjectKind::Table) {
+            continue;
+        }
+        let mut cols = std::collections::HashMap::new();
+        for c in o
+            .properties
+            .get("columns")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let (Some(name), Some(desc)) = (
+                c.get("name").and_then(|v| v.as_str()),
+                c.get("description").and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            cols.insert(
+                name.trim_matches('"').to_lowercase(),
+                (
+                    desc.to_string(),
+                    c.get("description_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    c.get("description_line")
+                        .and_then(|v| v.as_u64())
+                        .map(|l| l as u32),
+                ),
+            );
+        }
+        out.insert(o.name.to_lowercase(), (o, cols));
+    }
+    Ok(out)
+}
+
+/// RFC 0158 `DQ.CONSIST.DOC`, delivered as RFC 0172 Phase 3. Where a column's documentation makes
+/// a checkable claim (never null, unique, one of a set, a numeric range), count the rows that
+/// contradict it. Every claim becomes a finding; a contradicted one also becomes a
+/// `ConflictingEvidence` item carrying both sides. Counts only — no value leaves the database.
+#[allow(clippy::too_many_arguments)]
+fn assess_doc_claims(
+    config: &EkosConfig,
+    cwd: &Path,
+    store: &dyn ekos_ledger::KnowledgeStore,
+    project: &str,
+    dsn: &str,
+    run_id: &str,
+    targets: &[String],
+    units: &[(ekos_kir::KirObject, UnitState)],
+    catalog: &ekos_pg_live::CatalogSnapshot,
+    measure: bool,
+) -> Result<()> {
+    use ekos_migrate_dq::doc_claims::{self, Claim};
+    let repo = repo_column_docs(store)?;
+    let mut checks: Vec<DocCheck> = Vec::new();
+    for table in targets {
+        let bare = table.rsplit('.').next().unwrap_or(table).to_lowercase();
+        let repo_table = repo
+            .get(&table.to_lowercase())
+            .or_else(|| repo.get(&bare))
+            .map(|(_, cols)| cols);
+        let prefix = format!("{table}.");
+        for col in catalog
+            .of_kind(ObjectKind::Column)
+            .filter(|c| c.qualified_name.starts_with(&prefix))
+        {
+            let column = col.qualified_name[prefix.len()..].to_string();
+            let data_type = col.detail["type"].as_str().unwrap_or_default().to_string();
+            let declared_not_null = col.detail["not_null"].as_bool().unwrap_or(false);
+            let mut sources: Vec<(&'static str, String, Option<u32>, String)> = Vec::new();
+            if let Some((desc, path, line)) =
+                repo_table.and_then(|cols| cols.get(&column.to_lowercase()))
+            {
+                sources.push(("column_comment", path.clone(), *line, desc.clone()));
+            }
+            if let Some(comment) = col.detail["comment"].as_str()
+                && sources
+                    .iter()
+                    .all(|(_, _, _, t)| t.trim() != comment.trim())
+            {
+                sources.push((
+                    "live_comment",
+                    format!("live:{table}"),
+                    None,
+                    comment.into(),
+                ));
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            for (source, path, line, text) in sources {
+                for claim in doc_claims::extract(&text) {
+                    // Enforced by the declaration, so the data cannot disagree.
+                    if claim.claim == Claim::NotNull && declared_not_null {
+                        continue;
+                    }
+                    if !seen.insert(claim.claim.key()) {
+                        continue;
+                    }
+                    let Some(sql) = claim.claim.violation_sql(table, &column, &data_type) else {
+                        continue;
+                    };
+                    checks.push(DocCheck {
+                        table: table.clone(),
+                        column: column.clone(),
+                        claim,
+                        source,
+                        path: path.clone(),
+                        line,
+                        sql,
+                        affected: None,
+                    });
+                }
+            }
+        }
+    }
+
+    if measure && !checks.is_empty() {
+        checks = off_runtime(move || {
+            let src = open_source(config, dsn, run_id)?;
+            for c in &mut checks {
+                // As for every rule: a measurement that fails stays unmeasured, never zero.
+                c.affected = ekos_pg_live::profile::estimate_cost(&src, &c.sql)
+                    .ok()
+                    .and(src.raw_query(&c.sql).ok())
+                    .and_then(|rows| rows.first()?.first()?.trim().parse::<i64>().ok());
+            }
+            Ok(checks)
+        })?;
+    }
+
+    // Findings — every checked claim, contradicted or not.
+    let facts: Vec<ekos_migrate::FindingFact> = checks
+        .iter()
+        .map(|c| {
+            let at = match c.line {
+                Some(l) => format!("{}:{l}", c.path),
+                None => c.path.clone(),
+            };
+            ekos_migrate::FindingFact {
+                rule_id: "DQ.CONSIST.DOC".into(),
+                family: "consistency".into(),
+                severity: "warn".into(),
+                target: None,
+                lossiness: None,
+                object: format!("{}.{} [doc: {}]", c.table, c.column, c.claim.claim.key()),
+                message: format!(
+                    "the documentation ({}, {at}) says {} is {}",
+                    c.source,
+                    c.column,
+                    c.claim.claim.describe()
+                ),
+                affected_rows: c.affected,
+                evidence_sql: Some(c.sql.clone()),
+                blocks: false,
+            }
+        })
+        .collect();
+    profile_facts::write_findings(store, project, &facts, run_id)?;
+
+    // Conflicts — the contradicted ones, both sides kept.
+    if config.conflicts.enabled {
+        let by_table: std::collections::BTreeMap<&str, Vec<&DocCheck>> =
+            targets.iter().map(|t| (t.as_str(), Vec::new())).collect();
+        let mut by_table = by_table;
+        for c in checks.iter().filter(|c| c.affected.is_some_and(|n| n > 0)) {
+            by_table.entry(c.table.as_str()).or_default().push(c);
+        }
+        store.set_write_context(Some(ekos_ledger::provenance::WriteContext {
+            run_id: run_id.to_string(),
+            stage: "migrate:assess:doc-claims".into(),
+            source_artifact_id: None,
+        }));
+        for (table, contradicted) in &by_table {
+            let bare = table.rsplit('.').next().unwrap_or(table).to_lowercase();
+            let subject = repo
+                .get(&table.to_lowercase())
+                .or_else(|| repo.get(&bare))
+                .map(|(o, _)| o.clone())
+                .or_else(|| {
+                    units
+                        .iter()
+                        .find(|(u, _)| u.name == *table)
+                        .map(|(u, _)| u.clone())
+                });
+            let mut ids = Vec::new();
+            if let Some(subject) = subject {
+                for c in contradicted {
+                    let data_says = match &c.claim.claim {
+                        Claim::NotNull => "has NULL values",
+                        Claim::Unique => "has duplicate values",
+                        Claim::OneOf { .. } => "has values outside that set",
+                        Claim::Range { .. } => "has values outside that range",
+                    };
+                    let claims = vec![
+                        ekos_semantic::conflicts::Claim {
+                            value: serde_json::json!(c.claim.claim.describe()),
+                            path: c.path.clone(),
+                            line: c.line,
+                            source: c.source.to_string(),
+                        },
+                        ekos_semantic::conflicts::Claim {
+                            value: serde_json::json!(data_says),
+                            path: format!("live:{}", c.table),
+                            line: None,
+                            source: "measured".into(),
+                        },
+                    ];
+                    let mut g = ekos_semantic::conflicts::conflict(
+                        &subject,
+                        &format!(
+                            "columns.{}.doc_{}",
+                            c.column.to_lowercase(),
+                            c.claim.claim.key()
+                        ),
+                        ekos_semantic::conflicts::DOC_VS_DATA,
+                        claims,
+                        None,
+                    );
+                    for o in &mut g.objects {
+                        o.properties.insert(
+                            "measured".into(),
+                            serde_json::json!({
+                                "violating_rows": c.affected,
+                                "sql": c.sql,
+                                "project": project,
+                                "run_id": run_id,
+                                "measured_at": chrono::Utc::now().to_rfc3339(),
+                            }),
+                        );
+                    }
+                    for ev in &g.evidence {
+                        store.append_evidence(ev)?;
+                    }
+                    for o in &mut g.objects {
+                        crate::commands::conflicts::carry_review(store, o)?;
+                        store.append_object(o)?;
+                        ids.push(o.id);
+                    }
+                    for r in &g.relationships {
+                        store.append_relationship(r)?;
+                    }
+                }
+            }
+            crate::commands::conflicts::record_migrate(config, cwd, store, table, &ids)?;
+        }
+        store.set_write_context(None);
+    }
+
+    report_doc_claims(&checks, measure);
+    Ok(())
+}
+
+fn report_doc_claims(checks: &[DocCheck], measured: bool) {
+    if checks.is_empty() {
+        println!("\nDocumentation vs data: no column documentation makes a checkable claim.");
+        return;
+    }
+    let contradicted: Vec<&DocCheck> = checks
+        .iter()
+        .filter(|c| c.affected.is_some_and(|n| n > 0))
+        .collect();
+    println!(
+        "\nDocumentation vs data (DQ.CONSIST.DOC): {} claim(s) checked, {} contradicted{}",
+        checks.len(),
+        contradicted.len(),
+        if measured {
+            ""
+        } else {
+            " (not measured — run without --no-measure)"
+        }
+    );
+    for c in &contradicted {
+        let at = match c.line {
+            Some(l) => format!("{}:{l}", c.path),
+            None => c.path.clone(),
+        };
+        println!(
+            "  {}.{}: documented as {} ({}), but {} row(s) disagree",
+            c.table,
+            c.column,
+            c.claim.claim.describe(),
+            at,
+            c.affected.unwrap_or_default()
+        );
+    }
+    if !contradicted.is_empty() {
+        println!("  Both sides are kept as conflicts: `ekos conflicts list --type doc_vs_data`.");
+    }
 }
 
 fn report_findings(findings: &[ekos_migrate_dq::Finding], measured: bool) {

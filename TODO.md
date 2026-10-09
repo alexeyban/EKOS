@@ -6047,7 +6047,7 @@ mode is a false green. If cross-engine hash canonicalization is wrong, that must
       explicit `JOIN … ON` and implicit `WHERE a.x = b.y`. Live-verified: a join existing only in the
       workload was found and measured, and a join present in both sources had its confidence raised
       from one place to two.
-- [ ] Doc-vs-data conflict findings — the `ConflictingEvidence` shape exists now (RFC 0172, devlog_244); this is its Phase 3 in `migrate-dq`
+- [x] Doc-vs-data conflict findings — RFC 0172 Phase 3 (devlog_245): `DQ.CONSIST.DOC` finding per checkable documented claim, `doc_vs_data` conflict when the data contradicts it; verified live
 - [ ] Gate the completeness check on real dispositions rather than reporting it (needs RFC 0161)
 
 ## Migrate Phase 4 — Map, design, generate, execute (RFC 0159, 0160)
@@ -6273,7 +6273,8 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [x] Phase 2: `label_mismatches` at commit, human-only `ekos conflicts resolve` with carry-forward,
       MCP `ekos_conflicts` + `open_conflicts` on `ekos_state`, counts in `ekos status`
 - [x] LedgerSMB: 5 conflicts (1 duplicate definition, 4 labels; 2 labels are misreadings)
-- [ ] Phase 3: doc-vs-data findings in `migrate-dq` (RFC 0158 `DQ.CONSIST.DOC`) in the same shape
+- [x] Phase 3: doc-vs-data findings in `migrate assess` (RFC 0158 `DQ.CONSIST.DOC`), `migrate-dq::doc_claims`, live test `pg-live/tests/live_doc_claims.rs` (devlog_245)
+- [ ] Doc claims from Markdown/Confluence pages that name a column (only column comments are read today)
 - [ ] `disputed: true` on `ekos_query`/`ekos_retrieve` claims about a disputed attribute
 - [ ] Console conflicts view + RFC 0127 graph halo
 - [ ] The `case_label` source misreads a CASE that rewrites a code (`'A'`→`'L'`) as a label — fix

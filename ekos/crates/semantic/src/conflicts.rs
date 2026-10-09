@@ -33,6 +33,8 @@ pub const DISMISSED: &str = "dismissed";
 pub const DUPLICATE_DEFINITION: &str = "duplicate_definition";
 pub const MERGE_LOSS: &str = "merge_loss";
 pub const LABEL_MISMATCH: &str = "label_mismatch";
+/// Phase 3: a column's documentation makes a checkable claim the measured data contradicts.
+pub const DOC_VS_DATA: &str = "doc_vs_data";
 
 /// Review state carried across commits; never part of the signature.
 pub const REVIEW_FIELDS: [&str; 7] = [
@@ -234,6 +236,20 @@ fn kind_label(kind: &ObjectKind) -> String {
         ObjectKind::Custom(k) => k.clone(),
         other => format!("{other:?}"),
     }
+}
+
+/// One conflict about `subject`, as a graph to append — for detectors outside this module (RFC 0172
+/// Phase 3, `ekos migrate assess`). Same id rule, evidence and `Disputes` link as every other.
+pub fn conflict(
+    subject: &KirObject,
+    attribute: &str,
+    conflict_type: &str,
+    claims: Vec<Claim>,
+    chosen: Option<Value>,
+) -> KirGraph {
+    let mut out = KirGraph::new();
+    emit(&mut out, subject, attribute, conflict_type, claims, chosen);
+    out
 }
 
 /// Compare `members` (the last one is what EKOS keeps) and emit one conflict per attribute on
