@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased (on `main` since v1.0.3)
+
+49 commits, RFCs 0154–0172, devlogs 204–245. Not yet tagged; build from source or wait for the
+next release.
+
+**New capabilities**
+- **EKOS Migrate** (RFC 0154–0162, opt-in `[migrate]`): PostgreSQL → ClickHouse.
+  - **Assess:** live catalog and profiling (PII suppressed, read-only sessions), drift against the repository's DDL, data-quality and compatibility rules that measure affected rows, inferred foreign keys from real code joins and `pg_stat_statements`.
+  - **Load:** type mapping with lossiness, a ClickHouse design and generated DDL, a statement classifier with guarded execution, human-only approvals pinned to evidence.
+  - **Validate and report:** V1–V3 validation, a compiled and citation-verified report. Verified live on a real table.
+- **Stored procedures, views and triggers** (RFC 0163, 0169): every PL/pgSQL routine is parsed (LedgerSMB 212/212) and linked to the tables it reads and writes and the routines it calls. Views become ledger objects. Triggers are classified by what their function does. All three are documented like code.
+- **Business semantics → LinkML** (RFC 0170, opt-in `[semantics]`):
+  - concepts, code meanings, constraints and gaps recovered from SQL, dbt, Perl, Python and glossaries;
+  - a human-only review loop;
+  - `ekos export linkml` / `ekos import linkml`;
+  - MCP `ekos_semantics_lookup` / `ekos_semantics_gaps`;
+  - a web console Semantics tab;
+  - a reproducible LedgerSMB demo (`demo/ledgersmb-linkml/`).
+- **Source freshness** (RFC 0171, on by default): `ekos status` / `doctor` / `freshness` say whether the ledger still matches the source, and which compiled objects cite changed files. `FRESH001` at compile/commit; MCP `ekos_status` carries the same report.
+- **ConflictingEvidence** (RFC 0172, on by default): when sources disagree, both claims are kept, never the last one silently. The detectors cover:
+  - duplicate definitions;
+  - merge losses;
+  - label mismatches;
+  - documentation vs data in `ekos migrate assess` (`DQ.CONSIST.DOC`).
+
+  Resolving is human-only through `ekos conflicts list|show|resolve`; MCP has a read-only `ekos_conflicts`.
+
+**Fixes**
+- `ekos resolve` no longer stops on same-name groups across the database and code namespaces (LedgerSMB 16 → 0 conflicts).
+- Compile output is now deterministic when two files define the same object: artifacts are read in source order, not timestamp-hashed id order.
+- The MCP server refuses argument names a tool does not declare. Plus audit fixes: a forgeable console session, bounded MCP traversal, panic isolation, a rustls advisory.
+- 14 EKOS Migrate defects found running it on LedgerSMB, plus 3 cross-engine validation defects found against live engines.
+
 ## v1.0.3 — 2026-09-24
 
 **No functional change to the `ekos` binary.** Not one `.rs` file differs from v1.0.2, so these

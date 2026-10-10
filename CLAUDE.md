@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_245.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_246.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -162,8 +162,9 @@ match — cross-system, RFC 0029, or same-source fuzzy, RFC 0063; the tool doesn
 origin, only `Custom("SameAs")` kind) and `ekos_architecture_review` (confirm/reject an
 LLM-classified crate role, RFC 0109). Every other tool is read-only, going through `Runtime`
 only. This repo's own `.claude/skills/ekos-knowledge` and `.claude/skills/memory` skills consume
-this server — an older scripted walkthrough of the whole pipeline is archived under `archive/demo/`
-for historical reference (no longer actively maintained against current CLI behavior).
+this server. Runnable demos live under `demo/` (`ledgersmb-linkml/`, `session-memory/`,
+`binary-demo/`); the old twelve-act walkthrough was removed in the 2026-10-10 cleanup (it is in git
+history before that date).
 
 ### LLM-backed passes
 

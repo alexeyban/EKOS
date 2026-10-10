@@ -5,7 +5,9 @@
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
 [![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=alexeyban_EKOS)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
 
-EKOS is an AI-native platform that continuously reconstructs, compiles, stores and serves enterprise knowledge.
+EKOS is the open-source knowledge layer for AI agents: a compiler that turns source code, SQL,
+documentation and Git history into evidence-backed knowledge that agents query over MCP. Project
+site and documentation: **[ekos.dev](https://ekos.dev)**.
 
 Unlike traditional enterprise systems that manage data, documents or metadata independently, EKOS treats the entire enterprise as a living knowledge system — a permanently evolving semantic model that can be trusted by both humans and AI.
 
@@ -99,8 +101,10 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `marketing`, `docs-gen`, `dbt-gen`, `common`, `cli`, `demo-server`, `segment-backend` / `cluster` /
 `distributed` (RFC 0111/0113's partitioned + horizontally-distributed storage — see below),
 `simulation` (RFC 0047-0055's opt-in World Engine — see below), `clickhouse-query` (RFC 0056's
-opt-in live NL-to-SQL query engine — see below), and `evals` (RFC 0138's answer-grading harness — see
-below). The same workspace also builds `ekos` with a generic extension seam (RFC 0149) that out-of-tree
+opt-in live NL-to-SQL query engine — see below), `evals` (RFC 0138's answer-grading harness — see
+below), `session` (RFC 0151 agent session memory), `plpgsql` (RFC 0163's PL/pgSQL parser and
+procedural IR), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-validate`, `migrate-approval`,
+`migrate-report`, `migrate-target-clickhouse` and `pg-live` (RFC 0154–0162 — see below). The same workspace also builds `ekos` with a generic extension seam (RFC 0149) that out-of-tree
 builds plug extra connectors and MCP tools into.
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs (live-verified against a real
@@ -1487,13 +1491,6 @@ keyword) — all reported the same honest way, not silently patched or hidden, a
 day (RFC 0059, RFC 0060, RFC 0061 — see `devlog_61.md`), each with a live re-verification against
 the same real repo, not just a passing unit test.
 
-### Demo: skills + custom subagents (archived)
-
-An earlier twelve-act scripted demo of EKOS's Claude Code integration (two skills, six custom
-subagents) is archived under `archive/demo/` for historical reference — no longer actively
-maintained against current CLI behavior, so treat it as a record of what once worked rather than
-a runnable walkthrough.
-
 ### Compact storage (RFC 0015)
 
 Workspaces created before RFC 0015 can be shrunk in place (both commands verify before
@@ -1770,9 +1767,10 @@ RFC 0030). The project site is [ekos.dev](https://ekos.dev).
 | v0.7 | AI Layer |
 | v1.0 | Enterprise Knowledge Compiler |
 
-The workspace is versioned `1.0.0`, released 2026-09-23 — the `v1.0` row above. What has actually
-shipped — RFCs up to 0170 and 242 devlogs so far — is tracked phase by phase in [TODO.md](TODO.md)
-and the devlogs, not by this table. See [CHANGELOG.md](CHANGELOG.md) for what 1.0.0 commits to.
+The latest release is `v1.0.3` (2026-09-24); 1.0.0 (2026-09-23) is the `v1.0` row above. `main` is
+ahead of it — RFCs up to 0172 and 245 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
+"Unreleased" section lists what landed since. The phase-by-phase record is [TODO.md](TODO.md) and
+the devlogs, not this table.
 
 ## Team
 

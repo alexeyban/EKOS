@@ -85,10 +85,9 @@ the following are treated as security issues:
 
 ### Out of scope
 
-- **The EKOS token / Solana smart contract.** The token is a separate system from this codebase.
-  For token-contract or tokenomics-related concerns, see [TOKENOMICS.md](TOKENOMICS.md) or reach
-  out via [@ekosproject](https://x.com/ekosproject). This repository's security policy covers
-  the Rust codebase and its runtime behavior only.
+- **Anything outside this codebase**, including the community token, which is a separate system.
+  This repository's security policy covers the Rust codebase and its runtime behavior only; for
+  anything else, reach out via [@ekosproject](https://x.com/ekosproject).
 - **Denial of service via resource exhaustion on self-hosted instances** you control (e.g.,
   feeding EKOS an intentionally huge repository on your own machine) — this is a
   performance/robustness concern, not a security vulnerability, unless it demonstrates an
