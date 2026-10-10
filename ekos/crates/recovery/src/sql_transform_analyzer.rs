@@ -124,7 +124,7 @@ impl CompilerPass for SqlTransformAnalyzerPass {
     /// `v2` = RFC 0170 Phase 3: a top-level `SELECT`'s graph carries its `predicates`.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a top-level SELECT's graph carries `predicates`.
-        "v2+predicates/2"
+        "v2+predicates/3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {

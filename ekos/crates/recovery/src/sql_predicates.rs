@@ -23,7 +23,9 @@ use std::ops::ControlFlow;
 /// Bumped whenever this module's output changes for the same SQL. Every pass that records
 /// predicates folds it into its cache key, so an extractor change can never be served stale.
 /// `2` = RFC 0170: filters through CTEs and derived tables restated on base tables.
-pub const PREDICATES_VERSION: &str = "predicates/2";
+/// `3` = a `CASE` result labels a code only when it depends on that code alone and the `CASE` does
+/// not rewrite the column into its own codes (RFC 0172 found `'A'` → `'L'` read as a label).
+pub const PREDICATES_VERSION: &str = "predicates/3";
 
 pub use ekos_kir::predicates::{Clause, NEW_ROW, OLD_ROW, PredicateSite, canonical_text};
 
@@ -512,35 +514,82 @@ fn nested_atoms(e: &Expr, scope: &Scope, clause: Clause, out: &mut Vec<Predicate
 }
 
 /// The `CASE` branches that test a column against literals, each labelled with its literal result.
+///
+/// A branch's literal names the code it tests only when it is a function of that code alone:
+/// - the branch tests that one column and nothing else — in `WHEN balance > 0 AND category = 'A'
+///   THEN 'L'` the result depends on the balance too;
+/// - the `CASE` does not rewrite the column into its own domain — an `ELSE` of the same column, or
+///   a result that is itself one of the codes it tests (`'A'` → `'L'`, `'L'` → `'A'`), is a sign
+///   flip, not a meaning.
+///
+/// Such branches still record their site, just without a label.
 fn case_sites(e: &Expr, scope: &Scope, out: &mut Vec<PredicateSite>) {
     let Expr::Case {
         operand,
         conditions,
         results,
-        ..
+        else_result,
     } = e
     else {
         return;
     };
+    let mut branches: Vec<(Vec<PredicateSite>, Option<String>)> = Vec::new();
+    let mut outputs: BTreeSet<String> = BTreeSet::new();
     for (cond, result) in conditions.iter().zip(results) {
         let label = literal(result).filter(|l| l.starts_with('\''));
-        let found = match operand {
+        outputs.extend(label.clone());
+        let (found, sole) = match operand {
             // `CASE status WHEN 1 THEN …`
-            Some(op) => scope.resolve(op).and_then(|col| {
-                literal(cond).map(|v| vec![site(col, "in", vec![v], Clause::Case)])
-            }),
+            Some(op) => (
+                scope
+                    .resolve(op)
+                    .and_then(|col| {
+                        literal(cond).map(|v| vec![site(col, "in", vec![v], Clause::Case)])
+                    })
+                    .unwrap_or_default(),
+                true,
+            ),
             None => {
                 let mut v = Vec::new();
                 conjuncts(cond, scope, Clause::Case, &mut v);
-                Some(v)
+                let sole = single_test(cond, scope);
+                (v, sole)
             }
         };
-        for mut s in found.unwrap_or_default() {
+        branches.push((found, label.filter(|_| sole)));
+    }
+    let key = |s: &PredicateSite| (s.relation.clone(), s.column.clone());
+    // The columns this `CASE` maps back into themselves.
+    let mut rewritten: BTreeSet<(Option<String>, String)> = BTreeSet::new();
+    if let Some(col) = else_result.as_deref().and_then(|e| scope.resolve(e)) {
+        rewritten.insert((col.relation, col.column));
+    }
+    for (found, _) in &branches {
+        for s in found {
+            if s.values.iter().any(|v| outputs.contains(v)) {
+                rewritten.insert(key(s));
+            }
+        }
+    }
+    for (found, label) in branches {
+        for mut s in found {
             s.top_level = false;
-            s.label = label.clone();
+            s.label = label.clone().filter(|_| !rewritten.contains(&key(&s)));
             out.push(s);
         }
     }
+}
+
+/// Whether a searched-`CASE` condition is one test of one column (`x = 'A'`, `x IN (…)`,
+/// `x = 'A' OR x = 'B'`), with nothing else deciding the branch.
+fn single_test(cond: &Expr, scope: &Scope) -> bool {
+    let mut e = cond;
+    while let Expr::Nested(inner) = e {
+        e = inner;
+    }
+    atom(e, scope, Clause::Case)
+        .or_else(|| or_of_equalities(e, scope, Clause::Case))
+        .is_some()
 }
 
 // ── The walk ────────────────────────────────────────────────────────────────────────────────
@@ -926,6 +975,42 @@ mod tests {
             ]
         );
         assert!(p.iter().all(|s| s.clause == Clause::Case && !s.top_level));
+    }
+
+    #[test]
+    fn a_case_that_rewrites_a_code_labels_nothing() {
+        // LedgerSMB `FinStatements.sql`: a sign flip, not a meaning of 'A' or 'L'.
+        let p = preds(
+            "SELECT CASE WHEN (b.balance > 0 AND a.category = 'A') THEN 'L' \
+             WHEN (b.balance < 0 AND a.category = 'L') THEN 'A' ELSE a.category END \
+             FROM account a JOIN balances b ON b.id = a.id",
+        );
+        let cat: Vec<&PredicateSite> = p.iter().filter(|s| s.column == "category").collect();
+        assert_eq!(cat.len(), 2, "the sites are still recorded: {p:?}");
+        assert!(p.iter().all(|s| s.label.is_none()), "{p:?}");
+    }
+
+    #[test]
+    fn a_label_needs_the_code_alone() {
+        // Another column decides the branch too.
+        let p = preds("SELECT CASE WHEN o.status = 1 AND o.paid THEN 'done' END FROM orders o");
+        assert!(p.iter().all(|s| s.label.is_none()), "{p:?}");
+        // A swap of codes with no other condition is still a rewrite.
+        let p = preds(
+            "SELECT CASE WHEN a.category = 'A' THEN 'L' WHEN a.category = 'L' THEN 'A' END \
+             FROM account a",
+        );
+        assert!(p.iter().all(|s| s.label.is_none()), "{p:?}");
+        // So is an ELSE that passes the column through.
+        let p = preds("SELECT CASE WHEN a.kind = 'X' THEN 'Y' ELSE a.kind END FROM account a");
+        assert!(p.iter().all(|s| s.label.is_none()), "{p:?}");
+        // Parentheses and an OR of the same column's codes still label.
+        let p = preds(
+            "SELECT CASE WHEN (o.status = 1 OR o.status = 2) THEN 'open' ELSE 'closed' END \
+             FROM orders o",
+        );
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].label.as_deref(), Some("'open'"));
     }
 
     #[test]

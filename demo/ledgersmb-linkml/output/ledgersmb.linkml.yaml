@@ -606,9 +606,9 @@ enums:
           ekos_status: confirmed
           ekos_confidence: '0.9'
           ekos_reviewed_by: demo-reviewer
-          ekos_source: case_label, column_comment
+          ekos_source: column_comment
           ekos_usage_sites: '14'
-          ekos_evidence: sql/Pg-database.sql:72; sql/modules/FinStatements.sql:690; sql/changes/mc/create-migration-validation-data.sql:136; sql/changes/mc/create-migration-validation-data.sql:157
+          ekos_evidence: sql/Pg-database.sql:72; sql/changes/mc/create-migration-validation-data.sql:136; sql/changes/mc/create-migration-validation-data.sql:157; sql/modules/Account.sql:855
       E:
         description: Expense
         annotations:
@@ -636,9 +636,9 @@ enums:
           ekos_status: confirmed
           ekos_confidence: '0.9'
           ekos_reviewed_by: demo-reviewer
-          ekos_source: case_label, column_comment
+          ekos_source: column_comment
           ekos_usage_sites: '6'
-          ekos_evidence: sql/Pg-database.sql:72; sql/modules/FinStatements.sql:692; sql/modules/Account.sql:28; sql/modules/Account.sql:44
+          ekos_evidence: sql/Pg-database.sql:72; sql/modules/Account.sql:28; sql/modules/Account.sql:44; sql/modules/Account.sql:856
       Q:
         description: Equity
         annotations:

@@ -6272,13 +6272,15 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       `ekos conflicts list|show` (devlog_244)
 - [x] Phase 2: `label_mismatches` at commit, human-only `ekos conflicts resolve` with carry-forward,
       MCP `ekos_conflicts` + `open_conflicts` on `ekos_state`, counts in `ekos status`
-- [x] LedgerSMB: 5 conflicts (1 duplicate definition, 4 labels; 2 labels are misreadings)
+- [x] LedgerSMB: 5 conflicts (1 duplicate definition, 4 labels; 2 labels are misreadings) → 3 after
+      the `case_label` fix (devlog_247)
 - [x] Phase 3: doc-vs-data findings in `migrate assess` (RFC 0158 `DQ.CONSIST.DOC`), `migrate-dq::doc_claims`, live test `pg-live/tests/live_doc_claims.rs` (devlog_245)
 - [ ] Doc claims from Markdown/Confluence pages that name a column (only column comments are read today)
 - [ ] `disputed: true` on `ekos_query`/`ekos_retrieve` claims about a disputed attribute
 - [ ] Console conflicts view + RFC 0127 graph halo
-- [ ] The `case_label` source misreads a CASE that rewrites a code (`'A'`→`'L'`) as a label — fix
-      the extractor; the conflict detector currently catches it
+- [x] The `case_label` source misread a CASE that rewrites a code (`'A'`→`'L'`) as a label — a
+      branch labels a code only when it tests that column alone and the CASE does not map the
+      column back into its own codes (`predicates/3`, devlog_247)
 
 ## Source freshness (RFC 0171) — on by default `[freshness]`
 

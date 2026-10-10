@@ -540,7 +540,7 @@ impl CompilerPass for DbtAnalyzerPass {
     /// carry description, type and dbt tests.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a model carries `predicates`.
-        "v4+predicates/2"
+        "v4+predicates/3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {

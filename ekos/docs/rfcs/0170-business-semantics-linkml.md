@@ -110,6 +110,11 @@ source found, in this priority:
 | `lookup_seed` (own key) | `oe_class.id = 2` → `oe_class`'s own seeded row `(2,'Purchase Order')` | 0.8 |
 | `case_label` | `CASE WHEN x.kind = 1 THEN 'AP'` | 0.5 |
 
+A `CASE` result is a `case_label` only when the branch tests that one column and nothing else, and
+the `CASE` does not rewrite the column into its own codes (an `ELSE` of the same column, or a result
+that is itself one of the tested codes). `CASE WHEN balance > 0 AND category = 'A' THEN 'L' … ELSE
+category END` is a sign flip, not a meaning (`predicates/3`, RFC 0172).
+
 A value the referenced lookup table seeds *without* any label column is still a gap, and the gap
 says which table declares it.
 

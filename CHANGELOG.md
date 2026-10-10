@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-49 commits, RFCs 0154–0172, devlogs 204–245. Not yet tagged; build from source or wait for the
+51 commits, RFCs 0154–0172, devlogs 204–247. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -31,6 +31,7 @@ next release.
 - `ekos resolve` no longer stops on same-name groups across the database and code namespaces (LedgerSMB 16 → 0 conflicts).
 - Compile output is now deterministic when two files define the same object: artifacts are read in source order, not timestamp-hashed id order.
 - The MCP server refuses argument names a tool does not declare. Plus audit fixes: a forgeable console session, bounded MCP traversal, panic isolation, a rustls advisory.
+- Business semantics no longer reads a `CASE` that rewrites a code (`'A'` → `'L'`, a sign flip) as that code's label; a branch's result is a label only when it depends on the code alone (LedgerSMB 5 → 3 conflicts).
 - 14 EKOS Migrate defects found running it on LedgerSMB, plus 3 cross-engine validation defects found against live engines.
 
 ## v1.0.3 — 2026-09-24

@@ -13,7 +13,7 @@ When two sources make different claims about the same thing, EKOS keeps one and 
 |---|---|---|
 | Same-id duplicates in the CKM | Both objects reach the ledger, `SEM002` logs "duplicate object id", and the later path wins (devlog_242) | `user_preference`: `sql/Pg-database.sql` (`language`, `stylesheet`, …) vs `sql/changes/1.9/transpose_user_prefs.sql` (`user_id`, `name`, `value`) |
 | Exact-name auto-merges (`apply_merges`) | The non-canonical objects are dropped with their properties | a table whose DDL, dbt model and ORM model disagree on a column type |
-| Code meanings (RFC 0170 `meanings`) | The highest-confidence label wins; the others are kept but never compared | `account.category = 'A'`: the column comment says *asset*, and `FinStatements.sql:690` was read as *L* — that CASE is a sign flip, not a label |
+| Code meanings (RFC 0170 `meanings`) | The highest-confidence label wins; the others are kept but never compared | `account.category = 'A'`: the column comment says *asset*, and `FinStatements.sql:690` was read as *L* — that CASE is a sign flip, not a label (the extractor was fixed after this detector surfaced it, `predicates/3`) |
 
 Identity's `SameNameDifferentKind` and RFC 0170's `ConceptConflict` are different problems: one is about names across kinds, the other compares concepts with each other, not the evidence behind one fact.
 

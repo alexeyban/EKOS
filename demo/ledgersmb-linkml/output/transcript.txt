@@ -5,11 +5,11 @@
    544bcd947 2026-09-13 Merge pull request #9872 from ehuelsmann/fix/master/readonly-elements
 
 == 2. ekos build → recover → resolve → compile → commit
-   build   ok (27s)
+   build   ok (28s)
    recover ok (2s)
    resolve ok (0s)
    compile ok (1s)
-   commit  ok (461s)
+   commit  ok (431s)
      recovering business semantics…
      recovering business semantics — 30s
      Business semantics:    47 concept(s), 222 coded value(s) in 61 column(s) (179 explained), 60 constraint(s), 15 gap(s), 0 conflict(s), 128 rationale link(s), 17 mapping suggestion(s) — all hypotheses (458 of 649 predicate sites resolved; 1133 new ledger entries)
@@ -115,10 +115,10 @@ Wrote work/review.linkml.yaml — 120 class(es), 59 enum(s), status filter Hypot
      [confirmed] ApprovedTransaction (recovered as TransactionsApproved)  — transactions.approved IS TRUE  (28 site(s), recurring, confidence 0.6)
      [confirmed] ActiveYearEnd (recovered as YearendNotReversed)  — yearend.reversed IS FALSE  (7 site(s), recurring, confidence 0.5)
    EnumMeaning (12)
-     [confirmed] account.category = 'A'  → Asset (expert)  (14 usage site(s); from case_label, column_comment)
+     [confirmed] account.category = 'A'  → Asset (expert)  (14 usage site(s); from column_comment)
      [confirmed] account.category = 'E'  → Expense (expert)  (17 usage site(s); from column_comment)
      [confirmed] account.category = 'I'  → Income (expert)  (9 usage site(s); from column_comment)
-     [confirmed] account.category = 'L'  → Liability (expert)  (6 usage site(s); from case_label, column_comment)
+     [confirmed] account.category = 'L'  → Liability (expert)  (6 usage site(s); from column_comment)
      [confirmed] account.category = 'Q'  → Equity (expert)  (5 usage site(s); from column_comment)
      [confirmed] entity_credit_account.entity_class = 1  → Vendor  (4 usage site(s); from app_constant, lookup_seed)
      [confirmed] entity_credit_account.entity_class = 2  → Customer  (3 usage site(s); from app_constant, lookup_seed)

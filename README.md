@@ -583,8 +583,10 @@ ekos conflicts resolve "account.category = 'A'.label" --pick 1 --as ann
 A decision holds while the claims are unchanged; when one changes, the conflict reopens with the old
 decision kept. Agents read conflicts over MCP (`ekos_conflicts`, and `open_conflicts` on
 `ekos_state`) and are told to present an open one as a disagreement, never one side as fact; no MCP
-tool can resolve one. On LedgerSMB: 5 conflicts — `user_preference` (re-created by a 1.9 migration)
-and 4 code labels, two of them a CASE that rewrites `'A'`↔`'L'` misread as a label. `[conflicts]
+tool can resolve one. On LedgerSMB: 3 conflicts — `user_preference` (re-created by a 1.9 migration)
+and 2 order-class labels where an API query names the counterparty (`customer`) rather than the
+order type. The detector first surfaced a CASE that swaps `'A'`↔`'L'` misread as a label; the
+extractor no longer reads a rewrite as a meaning. `[conflicts]
 enabled = false` restores the old behaviour.
 
 ### Real schema and class structure from source (RFC 0091/0092)
@@ -1768,7 +1770,7 @@ RFC 0030). The project site is [ekos.dev](https://ekos.dev).
 | v1.0 | Enterprise Knowledge Compiler |
 
 The latest release is `v1.0.3` (2026-09-24); 1.0.0 (2026-09-23) is the `v1.0` row above. `main` is
-ahead of it — RFCs up to 0172 and 245 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
+ahead of it — RFCs up to 0172 and 247 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
 "Unreleased" section lists what landed since. The phase-by-phase record is [TODO.md](TODO.md) and
 the devlogs, not this table.
 

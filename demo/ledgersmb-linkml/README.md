@@ -90,8 +90,8 @@ enums:
         annotations:
           ekos_status: confirmed
           ekos_reviewed_by: demo-reviewer
-          ekos_source: case_label, column_comment
-          ekos_evidence: sql/Pg-database.sql:72; sql/modules/FinStatements.sql:690; …
+          ekos_source: column_comment
+          ekos_evidence: sql/Pg-database.sql:72; sql/changes/mc/create-migration-validation-data.sql:136; …
 ```
 
 Table classes such as `Account` come from the DDL and are marked `ekos_status: observed`. Their `NOT NULL` columns become `required`. Because the `account.category` `CHECK` was confirmed, `category`'s range becomes the `AccountCategory` enum, and LinkML's own validator then enforces it:
