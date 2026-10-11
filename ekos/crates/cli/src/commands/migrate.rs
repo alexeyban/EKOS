@@ -659,7 +659,8 @@ struct DocCheck {
     table: String,
     column: String,
     claim: ekos_migrate_dq::doc_claims::DocClaim,
-    /// `column_comment` (the repository's `COMMENT ON COLUMN`) or `live_comment` (the catalog's).
+    /// `column_comment` (the repository's `COMMENT ON COLUMN`), `live_comment` (the catalog's) or
+    /// `doc_page` (a sentence in a Markdown or Confluence page that names the column).
     source: &'static str,
     path: String,
     line: Option<u32>,
@@ -677,9 +678,73 @@ type RepoDocs = std::collections::HashMap<
     ),
 >;
 
-fn repo_column_docs(store: &dyn ekos_ledger::KnowledgeStore) -> Result<RepoDocs> {
+/// One sentence in a documentation page that names a column: its text, and where it is.
+#[derive(Debug, Clone, PartialEq)]
+struct PageClaim {
+    text: String,
+    path: String,
+    line: Option<u32>,
+}
+
+/// The documentation pages' column mentions (`ekos_recovery::column_mentions`), by
+/// `(table as written, column)`, both lowercase. Sorted by place, so the first page to state a
+/// claim is the same on every run.
+type PageDocs = std::collections::HashMap<(String, String), Vec<PageClaim>>;
+
+fn page_column_docs(objects: &[ekos_kir::KirObject]) -> PageDocs {
+    let mut out = PageDocs::new();
+    for o in objects {
+        let Some(mentions) = o
+            .properties
+            .get(ekos_recovery::column_mentions::PROPERTY)
+            .and_then(|v| {
+                serde_json::from_value::<Vec<ekos_recovery::column_mentions::ColumnMention>>(
+                    v.clone(),
+                )
+                .ok()
+            })
+        else {
+            continue;
+        };
+        let path = o
+            .properties
+            .get("source_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&o.name)
+            .to_string();
+        for m in mentions {
+            out.entry((m.table, m.column)).or_default().push(PageClaim {
+                text: m.text,
+                path: path.clone(),
+                line: (m.line > 0).then_some(m.line),
+            });
+        }
+    }
+    for claims in out.values_mut() {
+        claims.sort_by(|a, b| (&a.path, a.line, &a.text).cmp(&(&b.path, b.line, &b.text)));
+        claims.dedup();
+    }
+    out
+}
+
+/// The page sentences about `table.column`: a page may write the table qualified (`public.oe`)
+/// or bare (`oe`).
+fn page_claims_for<'a>(pages: &'a PageDocs, table: &str, column: &str) -> Vec<&'a PageClaim> {
+    let table = table.to_lowercase();
+    let bare = table.rsplit('.').next().unwrap_or(&table).to_string();
+    let column = column.to_lowercase();
+    let mut keys = vec![(table.clone(), column.clone())];
+    if bare != table {
+        keys.push((bare, column));
+    }
+    let mut out: Vec<&PageClaim> = keys.iter().filter_map(|k| pages.get(k)).flatten().collect();
+    out.sort_by(|a, b| (&a.path, a.line, &a.text).cmp(&(&b.path, b.line, &b.text)));
+    out
+}
+
+fn repo_column_docs(objects: &[ekos_kir::KirObject]) -> Result<RepoDocs> {
     let mut out = RepoDocs::new();
-    for o in store.all_objects()? {
+    for o in objects.iter().cloned() {
         if !matches!(o.kind, ekos_kir::ObjectKind::Table) {
             continue;
         }
@@ -734,7 +799,10 @@ fn assess_doc_claims(
     measure: bool,
 ) -> Result<()> {
     use ekos_migrate_dq::doc_claims::{self, Claim};
-    let repo = repo_column_docs(store)?;
+    let objects = store.all_objects()?;
+    let repo = repo_column_docs(&objects)?;
+    let pages = page_column_docs(&objects);
+    drop(objects);
     let mut checks: Vec<DocCheck> = Vec::new();
     for table in targets {
         let bare = table.rsplit('.').next().unwrap_or(table).to_lowercase();
@@ -766,6 +834,16 @@ fn assess_doc_claims(
                     format!("live:{table}"),
                     None,
                     comment.into(),
+                ));
+            }
+            // After the comments: a comment is the column's own documentation, a page sentence
+            // is about it. The claim is read without the column's name in it.
+            for page in page_claims_for(&pages, table, &column) {
+                sources.push((
+                    "doc_page",
+                    page.path.clone(),
+                    page.line,
+                    ekos_recovery::column_mentions::without_mention(&page.text),
                 ));
             }
             let mut seen = std::collections::BTreeSet::new();
@@ -2929,6 +3007,61 @@ fn whoami() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0172 — page sentences reach the column they name, written qualified or bare, in a
+    /// stable order, and nothing reaches a column no page names.
+    #[test]
+    fn page_sentences_are_found_for_the_column_they_name() {
+        let section = |name: &str, path: &str, mentions: serde_json::Value| {
+            let mut o =
+                ekos_kir::KirObject::new(name, ekos_kir::ObjectKind::Custom("Section".into()));
+            o.properties
+                .insert(ekos_recovery::column_mentions::PROPERTY.into(), mentions);
+            o.properties
+                .insert("source_path".into(), serde_json::json!(path));
+            o
+        };
+        let objects = vec![
+            section(
+                "b",
+                "docs/b.md",
+                serde_json::json!([
+                    {"table": "invoice", "column": "status", "text": "`invoice.status` is unique.", "line": 9}
+                ]),
+            ),
+            section(
+                "a",
+                "docs/a.md",
+                serde_json::json!([
+                    {"table": "public.invoice", "column": "status", "text": "`public.invoice.status` is never null.", "line": 4},
+                    {"table": "other.invoice", "column": "status", "text": "`other.invoice.status` is unique.", "line": 5}
+                ]),
+            ),
+            // A Confluence page: no lines.
+            section(
+                "c",
+                "confluence:ENG:42",
+                serde_json::json!([
+                    {"table": "invoice", "column": "qty", "text": "`invoice.qty` is always positive", "line": 0}
+                ]),
+            ),
+            ekos_kir::KirObject::new("invoice", ekos_kir::ObjectKind::Table),
+        ];
+        let pages = page_column_docs(&objects);
+
+        let found = page_claims_for(&pages, "public.invoice", "Status");
+        let places: Vec<(&str, Option<u32>)> =
+            found.iter().map(|p| (p.path.as_str(), p.line)).collect();
+        // The other schema's table is not this one.
+        assert_eq!(places, vec![("docs/a.md", Some(4)), ("docs/b.md", Some(9))]);
+        let qty = page_claims_for(&pages, "public.invoice", "qty");
+        assert_eq!(
+            (qty[0].path.as_str(), qty[0].line),
+            ("confluence:ENG:42", None)
+        );
+        assert!(page_claims_for(&pages, "public.invoice", "total").is_empty());
+        assert!(page_claims_for(&pages, "public.order", "status").is_empty());
+    }
 
     /// Two rules on one column are two facts with one name. Both must be in the snapshot, and the
     /// hashes must not depend on read order — otherwise raise-then-approve reports "changed".

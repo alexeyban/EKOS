@@ -10,6 +10,7 @@ pub mod architecture_reasoning;
 pub mod cache;
 pub mod cicd_analyzer;
 pub mod clickhouse_analyzer;
+pub mod column_mentions;
 pub mod confluence_analyzer;
 pub mod crate_topology_analyzer;
 pub mod crypto_analyzer;

@@ -6275,7 +6275,11 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [x] LedgerSMB: 5 conflicts (1 duplicate definition, 4 labels; 2 labels are misreadings) → 3 after
       the `case_label` fix (devlog_247)
 - [x] Phase 3: doc-vs-data findings in `migrate assess` (RFC 0158 `DQ.CONSIST.DOC`), `migrate-dq::doc_claims`, live test `pg-live/tests/live_doc_claims.rs` (devlog_245)
-- [ ] Doc claims from Markdown/Confluence pages that name a column (only column comments are read today)
+- [x] Doc claims from Markdown/Confluence pages: a sentence naming exactly one `table.column` in code
+      formatting is a third documentation source for `migrate assess` (`recovery::column_mentions`,
+      verified live, devlog_250)
+- [ ] Page claims are matched by table and column name only; a page about another database's table of
+      the same name would be read too
 - [x] `disputed: true` + conflict ids on `ekos_query`/`ekos_retrieve` claims about a disputed attribute,
       one `RSN008` per disputed entity in the answer (RFC 0173, devlog_248)
 - [x] The same marker in `ekos ask`: only a disputed claim's line and an entity note change, so every

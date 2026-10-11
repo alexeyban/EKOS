@@ -1369,7 +1369,8 @@ What each stage guarantees:
   Undeclared foreign keys are inferred from real joins in the compiled code *and* in
   `pg_stat_statements`, then checked by inclusion before anything is claimed.
 - **Documentation is checked against the data** (`DQ.CONSIST.DOC`, RFC 0172 Phase 3). Where a
-  column's repository or live comment makes a checkable claim — "never null", "unique", "one of
+  column's repository or live comment — or a sentence in a Markdown or Confluence page that names
+  exactly one `` `table.column` `` in code formatting — makes a checkable claim — "never null", "unique", "one of
   open, closed or void", an `A=asset,L=liability` legend, "between 0 and 100", "positive" — assess
   counts the rows that contradict it (counts only, no values). A contradicted claim becomes a
   `doc_vs_data` conflict carrying both sides: the comment with its `path:line`, and the measured
@@ -1777,7 +1778,7 @@ RFC 0030). The project site is [ekos.dev](https://ekos.dev).
 | v1.0 | Enterprise Knowledge Compiler |
 
 The latest release is `v1.0.3` (2026-09-24); 1.0.0 (2026-09-23) is the `v1.0` row above. `main` is
-ahead of it — RFCs up to 0174 and 249 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
+ahead of it — RFCs up to 0174 and 250 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
 "Unreleased" section lists what landed since. The phase-by-phase record is [TODO.md](TODO.md) and
 the devlogs, not this table.
 

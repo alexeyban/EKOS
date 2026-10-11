@@ -95,8 +95,9 @@ impl CompilerPass for ConfluenceAnalyzerPass {
     }
 
     /// `v2` = RFC 0170: glossary sections/pages carry their entries (`glossary`).
+    /// `v3` = RFC 0172: pages carry the sentences that name one column (`column_mentions`).
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -172,6 +173,18 @@ impl CompilerPass for ConfluenceAnalyzerPass {
                         serde_json::json!(format!("confluence:{}:{}", data.space_key, data.id)),
                     );
                 }
+            }
+            // RFC 0172: sentences that name one column.
+            let mentions = crate::column_mentions::parse_html(&data.body);
+            if !mentions.is_empty() {
+                obj.properties.insert(
+                    crate::column_mentions::PROPERTY.into(),
+                    serde_json::json!(mentions),
+                );
+                obj.properties.insert(
+                    "source_path".into(),
+                    serde_json::json!(format!("confluence:{}:{}", data.space_key, data.id)),
+                );
             }
             graph.objects.push(obj);
         }

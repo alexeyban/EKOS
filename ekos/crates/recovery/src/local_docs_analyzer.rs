@@ -192,8 +192,9 @@ impl CompilerPass for LocalDocAnalyzerPass {
     }
 
     /// `v2` = RFC 0170: glossary sections/pages carry their entries (`glossary`).
+    /// `v3` = RFC 0172: sections carry the sentences that name one column (`column_mentions`).
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -396,6 +397,21 @@ impl CompilerPass for LocalDocAnalyzerPass {
                                 .insert("source_path".into(), serde_json::json!(data.path));
                         }
                     }
+                }
+                // RFC 0172: sentences that name one column — candidates for a documentation
+                // claim `ekos migrate assess` can check against the data.
+                let mentions = crate::column_mentions::parse_text(
+                    &section.text,
+                    section.line_start.unwrap_or(0),
+                );
+                if !mentions.is_empty() {
+                    sec_obj.properties.insert(
+                        crate::column_mentions::PROPERTY.into(),
+                        serde_json::json!(mentions),
+                    );
+                    sec_obj
+                        .properties
+                        .insert("source_path".into(), serde_json::json!(data.path));
                 }
                 if let Some(heading) = &section.heading {
                     sec_obj
@@ -867,6 +883,46 @@ mod tests {
             ev.fragment.contains("docs/rfcs/0001-compiler-core.md:4-9"),
             "{}",
             ev.fragment
+        );
+    }
+
+    /// RFC 0172 — a section records the sentences that name one column, with their real lines;
+    /// a section that names none carries no such property.
+    #[tokio::test]
+    async fn a_section_records_the_sentences_that_name_one_column() {
+        let (c, _dir) = ctx();
+        let sections = serde_json::json!([
+            { "index": 0, "page": null, "text": "# Invoices\n\n`invoice.status` is one of open, closed or void.",
+              "heading": "Invoices", "heading_path": ["Invoices"], "line_start": 1, "line_end": 3 },
+            { "index": 1, "page": null, "text": "Nothing about columns here.",
+              "heading": "Notes", "heading_path": ["Invoices", "Notes"], "line_start": 4, "line_end": 5 }
+        ]);
+        let id = seed_doc_with_sections(
+            &c,
+            "docs/data.md",
+            "md",
+            "# Invoices",
+            serde_json::json!([]),
+            sections,
+        );
+        let graph = run_pass(vec![id], c).await;
+        let section = |i| {
+            graph
+                .objects
+                .iter()
+                .find(|o| o.id == section_kir_id("docs/data.md", i))
+                .unwrap()
+        };
+        let mentions = &section(0).properties[crate::column_mentions::PROPERTY];
+        assert_eq!(mentions.as_array().unwrap().len(), 1);
+        assert_eq!(mentions[0]["table"], "invoice");
+        assert_eq!(mentions[0]["column"], "status");
+        assert_eq!(mentions[0]["line"], 3);
+        assert_eq!(section(0).properties["source_path"], "docs/data.md");
+        assert!(
+            !section(1)
+                .properties
+                .contains_key(crate::column_mentions::PROPERTY)
         );
     }
 

@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-54 commits, RFCs 0154–0174, devlogs 204–249. Not yet tagged; build from source or wait for the
+55 commits, RFCs 0154–0174, devlogs 204–250. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -23,7 +23,7 @@ next release.
   - duplicate definitions;
   - merge losses;
   - label mismatches;
-  - documentation vs data in `ekos migrate assess` (`DQ.CONSIST.DOC`).
+  - documentation vs data in `ekos migrate assess` (`DQ.CONSIST.DOC`): claims in column comments, and in Markdown or Confluence sentences that name one `table.column`.
 
   Resolving is human-only through `ekos conflicts list|show|resolve`; MCP has a read-only `ekos_conflicts`.
   An `ekos_query` / `ekos_retrieve` claim about an attribute with an open conflict carries `disputed: true` and the conflict ids, and `ekos ask` tells the model the same (RFC 0173). A label conflict is also linked to its column's table. The web console has a Conflicts tab and rings disputed objects in the graph (RFC 0174).

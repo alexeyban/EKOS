@@ -70,9 +70,10 @@ Nothing in `commands/mcp.rs` may reach the resolve path, and a source-scan test 
 
 ## Phase 3 — documentation vs data (RFC 0158 `DQ.CONSIST.DOC`)
 
-`ekos migrate assess` reads each assessed column's documentation from two places:
+`ekos migrate assess` reads each assessed column's documentation from three places, in this order:
 - the repository's `COMMENT ON COLUMN`, as compiled by RFC 0146, which carries `path:line`;
-- the live catalog comment, already redacted by `pg-live`.
+- the live catalog comment, already redacted by `pg-live`;
+- documentation pages (added 2026-10-11, see "Documentation pages" below): a sentence in a Markdown file or a Confluence page that names the column.
 
 `ekos_migrate_dq::doc_claims::extract` keeps only **checkable** claims, at most one per kind and per column (the repository wins):
 
@@ -94,6 +95,14 @@ Every checked claim becomes a `DQ.CONSIST.DOC` finding (`warn`, never blocking),
 These conflicts belong to `assess`, not `commit`, so they live in their own manifest (`.ekos/conflicts/migrate.json`, table → ids). A re-assessment replaces that table's entry, so a contradiction fixed in the data stops being current, and a commit never drops them.
 
 **Verified live** (docker-compose `migrate-pg`, `crates/pg-live/tests/live_doc_claims.rs`, plus a CLI run): 6 claims checked, 6 contradicted. A repository comment cites `sql/schema.sql:11`, and a live-only one cites the catalog. A declared `NOT NULL` column was skipped, and a comment with no claim produced nothing. After a dismissal and a data fix, a re-assessment kept the dismissal and dropped the two fixed conflicts.
+
+### Documentation pages
+
+Recovery cannot know which tables exist, so it only records candidates. `ekos_recovery::column_mentions` keeps every sentence, list item or table row that names **exactly one** `table.column` (or `schema.table.column`) in code formatting — backticks in Markdown, `<code>` in Confluence. A `Section` or `Page` carries them as `column_mentions`, each with its line. Fenced code blocks are skipped, and a sentence naming two columns is about neither.
+
+At `assess`, a mention is used when its table (qualified or bare) and column match an assessed live column. The claim is read from the sentence with the column's name removed, so `unique_id` is not a uniqueness claim. A page claim has source `doc_page` and cites `path:line` (a Confluence page: `confluence:<space>:<id>`, no line). Comments come first, so a page adds only the claim kinds the comments do not make.
+
+**Verified live:** a table with one repository comment and a Markdown data dictionary. 5 claims checked, 4 contradicted: `never null` from `sql/schema.sql:10`, and `unique`, `one of open, closed, void` and `greater than 0` from `docs/data-dictionary.md` lines 5, 5 and 9. The `between 0 and 100` claim held. A sentence naming two columns and a query in a fenced block produced nothing.
 
 ## Not in this RFC
 
