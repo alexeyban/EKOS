@@ -24,12 +24,26 @@ pub const SOURCE_MANIFEST: &str = "source-manifest.json";
 pub const COMMITTED_MANIFEST: &str = "committed-manifest.json";
 /// Printed with every report, so a touched-only file is never mistaken for an edit.
 pub const RULE: &str = "a file counts as changed when its size or modification time differs";
+/// The rule under `[freshness] content-hash = true`.
+pub const RULE_HASHED: &str = "a file counts as changed when its size differs, or its \
+    modification time differs and its content hash does too";
 
 /// One file's metadata in a manifest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stamp {
     pub size: u64,
     pub mtime_nanos: u64,
+    /// SHA-256 of the file's bytes — only recorded by `ekos build` under `[freshness]
+    /// content-hash = true`, and never for a file RFC 0043 excludes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+}
+
+/// The content hash of one file, or `None` when it cannot be read.
+fn hash_file(path: &Path) -> Option<String> {
+    std::fs::read(path)
+        .ok()
+        .map(|bytes| ekos_common::ContentHash::of(&bytes).as_str().to_string())
 }
 
 /// Every observed file, keyed by workspace-relative path, plus where the tree was in git.
@@ -70,6 +84,7 @@ impl SourceManifest {
                 Stamp {
                     size: s.size,
                     mtime_nanos: u64::try_from(s.mtime_nanos).unwrap_or(u64::MAX),
+                    hash: None,
                 },
             );
         }
@@ -94,14 +109,32 @@ impl ManifestDiff {
     }
 }
 
-/// `then` → `now`.
+/// `then` → `now`, by size and modification time alone.
 pub fn diff(then: &SourceManifest, now: &SourceManifest) -> ManifestDiff {
+    diff_with(then, now, |_| None)
+}
+
+/// `then` → `now`. A file whose size is unchanged, whose time moved and whose `then` stamp has
+/// a content hash is asked for its hash now through `hash_now`; an equal hash means it was only
+/// touched. `hash_now` is called for those files only, so a check reads next to nothing.
+pub fn diff_with(
+    then: &SourceManifest,
+    now: &SourceManifest,
+    hash_now: impl Fn(&str) -> Option<String>,
+) -> ManifestDiff {
     let mut d = ManifestDiff::default();
     for (path, stamp) in &now.files {
         match then.files.get(path) {
             None => d.added.push(path.clone()),
-            Some(old) if old != stamp => d.changed.push(path.clone()),
-            Some(_) => {}
+            Some(old) if old.size == stamp.size && old.mtime_nanos == stamp.mtime_nanos => {}
+            Some(old) => {
+                let touched_only = old.size == stamp.size
+                    && old.hash.is_some()
+                    && (stamp.hash.clone().or_else(|| hash_now(path))) == old.hash;
+                if !touched_only {
+                    d.changed.push(path.clone());
+                }
+            }
         }
     }
     for path in then.files.keys() {
@@ -163,6 +196,23 @@ pub fn manifest_from(
         m.add(&prefix_for(base, cwd), stamps);
     }
     without_own_state(m, config, cwd)
+}
+
+/// `ekos build` under `[freshness] content-hash = true`: add each file's content hash. A file
+/// RFC 0043 excludes (`.env`, key files, …) is left without one — its bytes are never read here,
+/// so it keeps the size-and-time rule.
+pub fn add_hashes(m: &mut SourceManifest, config: &EkosConfig, cwd: &Path) {
+    let redaction = config.redaction_config();
+    for (path, stamp) in &mut m.files {
+        if !ekos_common::redaction::is_excluded_path(path, &redaction) {
+            stamp.hash = hash_file(&cwd.join(path));
+        }
+    }
+}
+
+/// `then` → the source now, reading a touched file's bytes only when `then` recorded its hash.
+fn diff_now(then: &SourceManifest, now: &SourceManifest, cwd: &Path) -> ManifestDiff {
+    diff_with(then, now, |path| hash_file(&cwd.join(path)))
 }
 
 /// Walk every observe path now (metadata only) — what the source looks like at this moment.
@@ -234,7 +284,7 @@ pub fn changed_since_build(config: &EkosConfig, cwd: &Path) -> Option<String> {
         return None;
     }
     let built = read_manifest(&manifest_path(config, cwd, SOURCE_MANIFEST))?;
-    let d = diff(&built, &scan(config, cwd));
+    let d = diff_now(&built, &scan(config, cwd), cwd);
     (!d.is_empty()).then(|| {
         format!(
             "FRESH001 {} file(s) changed since `ekos build` ({} changed, {} added, {} removed{}) \
@@ -365,7 +415,8 @@ pub fn check(config: &EkosConfig, cwd: &Path, limit: usize) -> Freshness {
         );
     };
     let now = scan(config, cwd);
-    let d = diff(&committed, &now);
+    let d = diff_now(&committed, &now, cwd);
+    let hashed = committed.files.values().any(|s| s.hash.is_some());
     let cap = |v: &Vec<String>| v.iter().take(limit).cloned().collect::<Vec<_>>();
     Freshness {
         // A new git commit that changed no observed file is still fresh: the ledger describes
@@ -384,7 +435,7 @@ pub fn check(config: &EkosConfig, cwd: &Path, limit: usize) -> Freshness {
         changed: cap(&d.changed),
         added: cap(&d.added),
         removed: cap(&d.removed),
-        rule: RULE,
+        rule: if hashed { RULE_HASHED } else { RULE },
         note: None,
     }
 }
@@ -565,6 +616,73 @@ mod tests {
         let w = changed_since_build(&config, cwd).unwrap();
         assert!(w.starts_with("FRESH001 1 file(s)"), "{w}");
         assert!(w.contains("schema.sql"));
+    }
+
+    #[test]
+    fn a_touched_file_with_an_equal_content_hash_is_not_changed() {
+        let hashed = |h: &str| {
+            let mut m = manifest(&[("a.sql", 10, 1), ("b.sql", 10, 1), ("c.sql", 10, 1)]);
+            for s in m.files.values_mut() {
+                s.hash = Some(h.into());
+            }
+            m
+        };
+        let then = hashed("same");
+        // a: touched only. b: touched and rewritten with the same size. c: grew.
+        let now = manifest(&[("a.sql", 10, 2), ("b.sql", 10, 2), ("c.sql", 11, 2)]);
+        let asked = std::cell::RefCell::new(Vec::new());
+        let d = diff_with(&then, &now, |p| {
+            asked.borrow_mut().push(p.to_string());
+            Some(if p == "a.sql" { "same" } else { "other" }.to_string())
+        });
+        assert_eq!(d.changed, vec!["b.sql", "c.sql"]);
+        // A different size is a change without reading anything.
+        assert_eq!(*asked.borrow(), vec!["a.sql", "b.sql"]);
+
+        // A manifest built without hashes keeps the size-and-time rule and reads nothing.
+        let plain = manifest(&[("a.sql", 10, 1)]);
+        let d = diff_with(&plain, &manifest(&[("a.sql", 10, 2)]), |_| {
+            panic!("no hash was recorded, so none may be computed")
+        });
+        assert_eq!(d.changed, vec!["a.sql"]);
+        // A file that cannot be read now counts as changed.
+        let d = diff_with(&then, &manifest(&[("a.sql", 10, 2)]), |_| None);
+        assert_eq!(d.changed, vec!["a.sql"]);
+    }
+
+    /// `[freshness] content-hash = true` end to end: a moved modification time alone is fresh,
+    /// an edit of the same size is not, and an RFC 0043-excluded file is never hashed.
+    #[test]
+    fn content_hash_tells_a_touch_from_an_edit() {
+        let (dir, mut config) = workspace();
+        let cwd = dir.path();
+        config.freshness.content_hash = true;
+        std::fs::write(cwd.join(".env"), "TOKEN=x").unwrap();
+        let mut built = scan(&config, cwd);
+        add_hashes(&mut built, &config, cwd);
+        assert!(built.files["schema.sql"].hash.is_some());
+        assert!(
+            built.files.get(".env").is_none_or(|s| s.hash.is_none()),
+            "an excluded file's bytes are never read"
+        );
+        // As if the file had been touched since: the recorded time is older than the disk's.
+        built.files.get_mut("schema.sql").unwrap().mtime_nanos -= 1;
+        record_build(&config, cwd, &built).unwrap();
+        promote_after_commit(&config, cwd).unwrap();
+
+        let f = check(&config, cwd, 10);
+        assert_eq!(f.status, Status::Fresh, "{:?}", f.changed);
+        assert_eq!(f.rule, RULE_HASHED);
+        assert!(changed_since_build(&config, cwd).is_none());
+
+        // Same length, different bytes.
+        let text = std::fs::read_to_string(cwd.join("schema.sql")).unwrap();
+        let edited: String = text.chars().rev().collect();
+        assert_eq!(edited.len(), text.len());
+        std::fs::write(cwd.join("schema.sql"), edited).unwrap();
+        let f = check(&config, cwd, 10);
+        assert_eq!(f.status, Status::SourceChanged);
+        assert_eq!(f.changed, vec!["schema.sql"]);
     }
 
     #[test]

@@ -111,6 +111,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
         ai = ai.with_artifact_store(Arc::new(store));
     }
 
+    // RFC 0173 — graded answers mark disputed claims exactly as `ekos ask` does.
+    if run_config.conflicts.enabled {
+        ai = ai.with_disputes(super::conflicts::dispute_lookup(&run_config, cwd, &*ledger));
+    }
+
     let outcomes = ekos_evals::run_all(&ai, &runtime, &*ledger, &scenarios).await;
     let report = report::build_with_transcripts(
         &dataset_name,

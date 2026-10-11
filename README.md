@@ -268,7 +268,10 @@ compiled as if they were your own code, and prints an inventory of what it found
 The ledger describes the source as it was at the last `ekos commit`. `ekos build` records every
 observed file's size and modification time, and a successful commit marks that list as "what the
 ledger reflects". From then on EKOS compares it with the files on disk. It reads metadata only,
-never file contents, and a file that was only touched also counts as changed.
+never file contents, and a file that was only touched also counts as changed. With `[freshness]
+content-hash = true` (off by default) `ekos build` also records a content hash per file, and a file
+whose time moved but whose bytes did not is no longer reported; files excluded as secrets are never
+hashed.
 
 ```bash
 ekos status            # … Source : fresh — ledger reflects the source as of 2026-10-09 12:35 UTC (git c4f01c7)
@@ -1778,7 +1781,7 @@ RFC 0030). The project site is [ekos.dev](https://ekos.dev).
 | v1.0 | Enterprise Knowledge Compiler |
 
 The latest release is `v1.0.3` (2026-09-24); 1.0.0 (2026-09-23) is the `v1.0` row above. `main` is
-ahead of it — RFCs up to 0174 and 250 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
+ahead of it — RFCs up to 0174 and 251 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
 "Unreleased" section lists what landed since. The phase-by-phase record is [TODO.md](TODO.md) and
 the devlogs, not this table.
 

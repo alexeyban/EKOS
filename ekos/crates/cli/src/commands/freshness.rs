@@ -70,7 +70,7 @@ pub fn run(config: &EkosConfig, cwd: &Path, json: bool, limit: usize) -> Result<
     println!(
         "{stale} compiled object(s) cite a changed or removed file. Rebuild with `ekos build` … `ekos commit`."
     );
-    println!("Rule: {}.", freshness::RULE);
+    println!("Rule: {}.", f.rule);
     Ok(())
 }
 

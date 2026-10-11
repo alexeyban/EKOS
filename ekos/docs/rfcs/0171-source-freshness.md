@@ -42,6 +42,13 @@ The MCP server memoises the check for `[freshness] ttl-seconds` (default 30), so
 
 **What "changed" means.** Size or mtime differs. No content hash is stored, so a file that was only `touch`ed counts as changed. The CLI output states this rule. Hashing every file on every check would cost more than the check is worth, and an mtime-only false positive is cheap: it only suggests a rebuild.
 
+**Amendment (2026-10-11): an opt-in content hash.** A fresh checkout or a `touch` moves every modification time, and then the whole tree reads as changed. With `[freshness] content-hash = true`:
+- `ekos build` also records each file's SHA-256 in the manifest. That is one more read of every observed file, at build only.
+- A check still walks metadata only. It reads a file's bytes in exactly one case: the size is unchanged, the time moved, and the committed manifest has a hash for it. An equal hash means the file was only touched.
+- A file RFC 0043 excludes (`.env`, key files) is never read, so it keeps the size-and-time rule.
+- The hash lives in `.ekos/*-manifest.json` only. It is not folded into the build fingerprint, and nothing reaches the artifact store or the ledger.
+- The printed rule changes to say so. A manifest built without hashes behaves exactly as before.
+
 **Raw-content safety (RFC 0043).** Only file metadata is read, never contents. This adds no raw-content entry point, and nothing needs redacting.
 
 ## Configuration
@@ -50,6 +57,7 @@ The MCP server memoises the check for `[freshness] ttl-seconds` (default 30), so
 [freshness]
 enabled = true        # default; false turns off every check, the FRESH001 warning and the MCP note
 ttl-seconds = 30      # MCP memo
+content-hash = false  # true: a touched-only file is not a change (build reads every file once more)
 ```
 
 ## Not in scope

@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-55 commits, RFCs 0154–0174, devlogs 204–250. Not yet tagged; build from source or wait for the
+56 commits, RFCs 0154–0174, devlogs 204–251. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -18,7 +18,7 @@ next release.
   - MCP `ekos_semantics_lookup` / `ekos_semantics_gaps`;
   - a web console Semantics tab;
   - a reproducible LedgerSMB demo (`demo/ledgersmb-linkml/`).
-- **Source freshness** (RFC 0171, on by default): `ekos status` / `doctor` / `freshness` say whether the ledger still matches the source, and which compiled objects cite changed files. `FRESH001` at compile/commit; MCP `ekos_status` carries the same report.
+- **Source freshness** (RFC 0171, on by default): `ekos status` / `doctor` / `freshness` say whether the ledger still matches the source, and which compiled objects cite changed files. `FRESH001` at compile/commit; MCP `ekos_status` carries the same report. Opt-in `[freshness] content-hash = true` stops a `touch`ed file from counting as changed.
 - **ConflictingEvidence** (RFC 0172, on by default): when sources disagree, both claims are kept, never the last one silently. The detectors cover:
   - duplicate definitions;
   - merge losses;

@@ -515,7 +515,10 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     save_fingerprints(&fingerprint_path, &fingerprints)?;
     // RFC 0171 — what this build observed; `ekos commit` promotes it once the ledger has it.
     if config.freshness.enabled {
-        let manifest = crate::freshness::manifest_from(config, cwd, &built_stamps);
+        let mut manifest = crate::freshness::manifest_from(config, cwd, &built_stamps);
+        if config.freshness.content_hash {
+            crate::freshness::add_hashes(&mut manifest, config, cwd);
+        }
         if let Err(e) = crate::freshness::record_build(config, cwd, &manifest) {
             tracing::warn!("could not write the source manifest (RFC 0171): {e}");
         }

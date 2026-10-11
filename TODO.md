@@ -6288,7 +6288,7 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       about the table surfaces it (devlog_249)
 - [x] Console Conflicts tab (list, claims, pick / both valid, write role) + graph ring on objects with an
       open conflict (RFC 0174, devlog_249)
-- [ ] `ekos eval run` does not pass the dispute lookup (the eval corpus has no conflicts)
+- [x] `ekos eval run` passes the dispute lookup, like `ekos ask` (devlog_251)
 - [x] The `case_label` source misread a CASE that rewrites a code (`'A'`→`'L'`) as a label — a
       branch labels a code only when it tests that column alone and the CASE does not map the
       column back into its own codes (`predicates/3`, devlog_247)
@@ -6300,7 +6300,8 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [x] `ekos freshness` (changed/added/removed files + the objects citing them), `ekos status` /
       `doctor` line, `FRESH001` at compile/commit, MCP `ekos_status` block + note on read results
 - [ ] Remote sources (GitHub, Confluence, ClickHouse): only files under `[observe] paths` are compared
-- [ ] Optional content hash for a changed-mtime/same-size file, so `touch` stops counting as a change
+- [x] Opt-in `[freshness] content-hash = true`: a content hash per file at build, compared only for
+      same-size files whose time moved, so `touch` stops counting as a change (devlog_251)
 
 ## Business semantics → LinkML (RFC 0170) — experimental, opt-in `[semantics]`
 

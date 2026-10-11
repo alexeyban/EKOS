@@ -285,6 +285,13 @@ pub struct FreshnessConfig {
     /// How long the MCP server reuses one check before walking the tree again.
     #[serde(default = "default_freshness_ttl")]
     pub ttl_seconds: u64,
+    /// Off by default. `true` makes `ekos build` also record a content hash per file, so a file
+    /// whose modification time moved but whose bytes did not (`touch`, a fresh checkout) stops
+    /// counting as changed. Build then reads every observed file once more; a check only reads
+    /// the files whose size is unchanged and whose time moved. Files RFC 0043 excludes are never
+    /// hashed.
+    #[serde(default)]
+    pub content_hash: bool,
 }
 
 fn default_freshness_ttl() -> u64 {
@@ -296,6 +303,7 @@ impl Default for FreshnessConfig {
         Self {
             enabled: true,
             ttl_seconds: default_freshness_ttl(),
+            content_hash: false,
         }
     }
 }
