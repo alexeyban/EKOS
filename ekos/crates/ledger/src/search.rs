@@ -48,6 +48,36 @@ const WRITER_HEAP_BYTES: usize = 32 * 1024 * 1024;
 /// content boost still never outranks something the user's query literally
 /// named.
 const MEMORY_PATH_BOOST: f32 = 5.0;
+
+/// How many times `limit` the relaxed (any-term) pass fetches before its hits are re-ranked by
+/// coverage (RFC 0177).
+const RELAXED_POOL_FACTOR: usize = 4;
+
+/// The reciprocal-rank constant for fusing the relaxed band's two orders — the usual 60.
+const RELAXED_RRF_K: f32 = 60.0;
+
+/// The order of the relaxed band (RFC 0177): `covered[i]` is how many query terms the hit at
+/// BM25 rank `i` matched, and the result lists those ranks best first. Two rankings are fused by
+/// reciprocal rank — BM25, and coverage with BM25 breaking ties — and BM25 breaks a fused tie.
+fn fuse_bm25_with_coverage(covered: &[usize]) -> Vec<usize> {
+    let mut by_coverage: Vec<usize> = (0..covered.len()).collect();
+    by_coverage.sort_by_key(|&rank| (std::cmp::Reverse(covered[rank]), rank));
+    let mut coverage_rank = vec![0usize; covered.len()];
+    for (position, &rank) in by_coverage.iter().enumerate() {
+        coverage_rank[rank] = position;
+    }
+    let rr = |rank: usize| 1.0 / (RELAXED_RRF_K + rank as f32 + 1.0);
+    let mut order: Vec<usize> = (0..covered.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (fa, fb) = (rr(a) + rr(coverage_rank[a]), rr(b) + rr(coverage_rank[b]));
+        fb.total_cmp(&fa).then(a.cmp(&b))
+    });
+    order
+}
+
+/// How many documents a single term is looked up in to count coverage. A term in more documents
+/// than this says little about any of them, and a hit it misses is counted one term short.
+const COVERAGE_LOOKUP_LIMIT: usize = 2000;
 /// The literal indexed token [`SearchIndex::upsert`] writes to the
 /// `memory_path` field when its `is_memory_path` argument is true (the
 /// caller derives that from `KirObject::is_under_memory_path`), and
@@ -85,6 +115,13 @@ impl ScoredHit {
 fn terr(e: impl std::fmt::Display) -> LedgerError {
     LedgerError::Corrupt(format!("search index: {e}"))
 }
+
+/// What text of an object is indexed (`KirObject::indexed_content`). **Bump it whenever that
+/// changes**, or existing workspaces keep searching the old text.
+///
+/// - `2` — RFC 0177: a symbol's `description`, `signature` and `fields`.
+const CONTENT_VERSION: &str = "2";
+const CONTENT_VERSION_FILE: &str = "content_version";
 
 /// Wipes `dir`'s on-disk contents so a subsequent `Index::open_or_create` starts genuinely fresh
 /// — the self-heal path for a stale on-disk tantivy schema (RFC 0103: e.g. RFC 0101 added a new
@@ -186,8 +223,33 @@ impl SearchIndex {
         let f_memory_path = schema_builder.add_text_field("memory_path", STRING);
         let schema = schema_builder.build();
 
-        let mmap_dir = tantivy::directory::MmapDirectory::open(dir).map_err(terr)?;
+        // RFC 0177 — the index holds text derived from each object, so a change to *which* text
+        // is derived leaves an existing index without it: nothing is wrong with the schema, and
+        // every object simply stays indexed the old way until it is next written. A recorded
+        // version that differs is handled like a stale schema: wipe and replay.
         let mut rebuilt = false;
+        let version_path = dir.join(CONTENT_VERSION_FILE);
+        if writable {
+            let recorded = std::fs::read_to_string(&version_path).unwrap_or_default();
+            if !fresh && recorded.trim() != CONTENT_VERSION {
+                rebuild_stale_schema(dir)?;
+                rebuilt = true;
+            }
+            std::fs::write(&version_path, CONTENT_VERSION).map_err(LedgerError::Io)?;
+        } else if std::fs::read_to_string(&version_path)
+            .unwrap_or_default()
+            .trim()
+            != CONTENT_VERSION
+        {
+            // A read-only open must not rebuild. Search still works, over the older text.
+            tracing::warn!(
+                "the search index at {} was built before a change to what is indexed; run a \
+                 command that writes to the ledger (for example `ekos ledger repair`) once to \
+                 rebuild it",
+                dir.display()
+            );
+        }
+        let mmap_dir = tantivy::directory::MmapDirectory::open(dir).map_err(terr)?;
 
         // A read-only open must use `Index::open`, never `open_or_create`. The latter takes
         // tantivy's `META_LOCK` and will create the index if absent — both writes. On a genuinely
@@ -604,22 +666,40 @@ impl SearchIndex {
             for (raw, term, prefix) in &terms {
                 should.push((Occur::Should, expanded(raw, term, *prefix)));
             }
-            let relaxed = self.run_query(&searcher, BooleanQuery::new(should), limit)?;
+            // RFC 0177 — a wider pool than `limit`, because the band is re-ranked below: a long
+            // section that holds most of the question's words scores under a symbol whose short
+            // name holds one of them, and at `limit` it was not a candidate at all.
+            let pool = limit.saturating_mul(RELAXED_POOL_FACTOR);
+            let relaxed = self.run_query(&searcher, BooleanQuery::new(should), pool)?;
 
             let seen: std::collections::HashSet<Uuid> = out.iter().map(|h| h.id).collect();
 
             // RFC 0139 §3.7 — how many terms each relaxed hit actually matched. One small BM25
             // lookup per term (~2ms each on this corpus, against a pipeline that spends seconds in
-            // the LLM), which buys a graded signal instead of a binary "was relaxed" flag. Ranking
-            // is untouched: this only annotates the hits the OR pass already chose.
+            // the LLM), which buys a graded signal instead of a binary "was relaxed" flag.
             let mut coverage: std::collections::HashMap<Uuid, usize> =
                 std::collections::HashMap::new();
             for (raw, term, prefix) in &terms {
                 let q = BooleanQuery::new(vec![(Occur::Must, expanded(raw, term, *prefix))]);
-                for (id, _, _) in self.run_query(&searcher, q, limit.saturating_mul(4))? {
+                for (id, _, _) in self.run_query(&searcher, q, COVERAGE_LOOKUP_LIMIT.max(pool))? {
                     *coverage.entry(id).or_insert(0) += 1;
                 }
             }
+            // RFC 0177 — the band is ordered by two rankings fused (reciprocal rank, as RFC 0120
+            // fuses arms): the OR pass's BM25 order, and coverage with BM25 breaking ties. By BM25
+            // alone a question's top partial matches were whatever had one of its words in a
+            // short name; by coverage alone a long file that mentions everything once buried the
+            // symbol the question describes.
+            let covered: Vec<usize> = relaxed
+                .iter()
+                .map(|(id, _, _)| coverage.get(id).copied().unwrap_or(1).min(n_terms))
+                .collect();
+            let mut slots: Vec<Option<(Uuid, String, f32)>> =
+                relaxed.into_iter().map(Some).collect();
+            let relaxed: Vec<(Uuid, String, f32)> = fuse_bm25_with_coverage(&covered)
+                .into_iter()
+                .filter_map(|rank| slots[rank].take())
+                .collect();
 
             // Anchor the appended band strictly below the weakest strict hit so the result list
             // stays strictly decreasing (`retrieval::RankedResults` documents that invariant).
@@ -760,6 +840,9 @@ mod tests {
         // fails before it ever gets to compare schemas, so this must surface as a real error,
         // not be silently caught by the schema-mismatch self-heal arm.
         std::fs::write(dir.path().join("meta.json"), b"not valid json").unwrap();
+        // An index of the current content version: one without a recorded version is rebuilt for
+        // that reason (RFC 0177) before its `meta.json` is ever read.
+        std::fs::write(dir.path().join(CONTENT_VERSION_FILE), CONTENT_VERSION).unwrap();
 
         let result = SearchIndex::open(dir.path());
         assert!(
@@ -887,6 +970,29 @@ mod tests {
                 "a 1-of-4 match must not count as evidence, got {}",
                 noise.coverage()
             );
+        }
+
+        /// RFC 0177 — the measured failure: for a full question, the passage holding most of its
+        /// words ranked under objects whose short name held one of them.
+        #[test]
+        fn a_hit_covering_most_of_the_question_rises_past_one_word_matches() {
+            // Thirty one-term hits by BM25, then a hit that matched six terms.
+            let mut covered = vec![1usize; 30];
+            covered.push(6);
+            let order = super::super::fuse_bm25_with_coverage(&covered);
+            let at = order.iter().position(|&rank| rank == 30).unwrap();
+            assert!(at < 15, "rank 30 by BM25 alone, {at} fused");
+            // The best BM25 hit is not thrown away for it.
+            assert!(order.iter().position(|&rank| rank == 0).unwrap() < 3);
+        }
+
+        #[test]
+        fn equal_coverage_keeps_the_bm25_order() {
+            assert_eq!(
+                super::super::fuse_bm25_with_coverage(&[2, 2, 2, 2]),
+                [0, 1, 2, 3]
+            );
+            assert!(super::super::fuse_bm25_with_coverage(&[]).is_empty());
         }
 
         /// RFC 0139 §3.2 — the measured failure: a question saying "LlmProvider" produced the

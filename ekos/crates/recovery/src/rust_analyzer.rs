@@ -92,8 +92,9 @@ impl CompilerPass for RustAnalyzerPass {
     /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
     /// `v4` = RFC 0141 §1/§2 (`signature` on function/method symbols; `call_count` /
     /// `call_site_line` / `caller_is_test` on `Calls` edges).
+    /// `v5` = RFC 0177 (`fields` on struct and enum symbols).
     fn version(&self) -> &str {
-        "v4"
+        "v5"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -282,6 +283,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     item_span(s),
                     None,
                 );
+                set_fields(&mut result, struct_fields(&s.fields));
                 result.symbol_count += 1;
             }
             Item::Enum(e) => {
@@ -295,6 +297,13 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
                     doc,
                     item_span(e),
                     None,
+                );
+                set_fields(
+                    &mut result,
+                    e.variants
+                        .iter()
+                        .map(|v| declaration(&v.ident.to_string(), None, &v.attrs))
+                        .collect(),
                 );
                 result.symbol_count += 1;
             }
@@ -507,6 +516,60 @@ fn signature_text(source: &str, sig: &syn::Signature, brace: &syn::token::Brace)
         None
     } else {
         Some(text.to_string())
+    }
+}
+
+/// RFC 0177 §3 B — a struct's named fields, each as `name: Type`, with its doc comment after a
+/// dash when it has one. Tuple and unit structs have no field names to record.
+fn struct_fields(fields: &syn::Fields) -> Vec<String> {
+    let syn::Fields::Named(named) = fields else {
+        return Vec::new();
+    };
+    named
+        .named
+        .iter()
+        .filter_map(|f| {
+            let name = f.ident.as_ref()?.to_string();
+            Some(declaration(&name, Some(type_text(&f.ty)), &f.attrs))
+        })
+        .collect()
+}
+
+/// A type as written, without the spaces a token stream puts around punctuation.
+fn type_text(ty: &syn::Type) -> String {
+    use quote::ToTokens;
+    ty.to_token_stream()
+        .to_string()
+        .replace(" :: ", "::")
+        .replace(" < ", "<")
+        .replace(" >", ">")
+        .replace("& ", "&")
+        .replace(" ,", ",")
+}
+
+fn declaration(name: &str, ty: Option<String>, attrs: &[syn::Attribute]) -> String {
+    let mut out = name.to_string();
+    if let Some(ty) = ty {
+        out.push_str(": ");
+        out.push_str(&ty);
+    }
+    if let Some(doc) = extract_doc_comment(attrs) {
+        out.push_str(" — ");
+        out.push_str(&doc.split_whitespace().collect::<Vec<_>>().join(" "));
+    }
+    out
+}
+
+/// Record `fields` on the symbol [`add_symbol`] just pushed. Nothing is written for a type
+/// without any — an empty list would read as "has no fields" where the truth is "none named".
+fn set_fields(result: &mut RustFileResult, fields: Vec<String>) {
+    if fields.is_empty() {
+        return;
+    }
+    if let Some(symbol) = result.objects.last_mut() {
+        symbol
+            .properties
+            .insert("fields".into(), serde_json::json!(fields));
     }
 }
 
@@ -858,6 +921,39 @@ mod tests {
                 .all(|r| r.kind != RelationshipKind::Calls),
             "method name `run` is ambiguous between A::run and B::run in this file"
         );
+    }
+
+    #[test]
+    fn a_struct_and_an_enum_record_their_fields() {
+        let result = parse(
+            "pub struct Evidence {\n    pub id: Id,\n    /// The analyzer's own confidence.\n    \
+             pub confidence: f32,\n    pub at: Option<DateTime<Utc>>,\n}\n\
+             pub struct Unit;\n\
+             pub enum Kind {\n    /// A table.\n    Table,\n    Custom(String),\n}\n",
+        );
+        let fields_of = |name: &str| {
+            result
+                .objects
+                .iter()
+                .find(|o| o.name == name)
+                .unwrap()
+                .properties
+                .get("fields")
+                .cloned()
+        };
+        assert_eq!(
+            fields_of("Evidence"),
+            Some(serde_json::json!([
+                "id: Id",
+                "confidence: f32 — The analyzer's own confidence.",
+                "at: Option<DateTime<Utc>>"
+            ]))
+        );
+        assert_eq!(
+            fields_of("Kind"),
+            Some(serde_json::json!(["Table — A table.", "Custom"]))
+        );
+        assert_eq!(fields_of("Unit"), None);
     }
 
     #[test]

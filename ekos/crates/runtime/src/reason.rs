@@ -528,11 +528,12 @@ fn exec_node(
                 } else {
                     format!("search match: {}", hit.name)
                 };
-                let mut item = entity_item_with_excerpt(
+                let mut item = entity_item_for_query(
                     runtime,
                     hit.id,
                     claim,
                     serde_json::Value::String(hit.name),
+                    query,
                 )?;
                 item.weak = weak;
                 items.push(item);
@@ -623,6 +624,9 @@ fn exec_node(
                 return Ok(());
             }
 
+            let mut reached: std::collections::HashSet<KirId> =
+                neighbors.iter().map(|o| o.id).collect();
+            reached.insert(id);
             for obj in neighbors {
                 let item = entity_item_with_excerpt(
                     runtime,
@@ -635,6 +639,26 @@ fn exec_node(
                 // answers (`code` correctness 72.7% -> 18.2%). The gate above is the lever instead.
                 items.push(item);
             }
+
+            // RFC 0177 §3 C — a requested "what depends on module M" also means what depends on
+            // M's contents. An import is recorded per imported path, so `M::self`, `M::redact`
+            // and `M::Config` are separate objects with separate dependents, and the seed alone
+            // answered with whoever happened to import the module by its own name.
+            if !*supporting && matches!(op, StructuralOp::Dependents | StructuralOp::Impact) {
+                for member in module_members(runtime, id, &seed_name)? {
+                    for obj in runtime.graph_op(*op, &member.id, *hops)? {
+                        if !reached.insert(obj.id) {
+                            continue;
+                        }
+                        items.push(entity_item_with_excerpt(
+                            runtime,
+                            obj.id,
+                            format!("{} — {label} {}", obj.name, member.name),
+                            serde_json::Value::String(obj.id.0.to_string()),
+                        )?);
+                    }
+                }
+            }
         }
 
         PlanNode::Compose { steps } => {
@@ -644,6 +668,39 @@ fn exec_node(
         }
     }
     Ok(())
+}
+
+/// The other objects of `seed`'s kind that name something inside the module `seed` stands for
+/// (RFC 0177 §3 C). Only a seed named `M::self` — the module itself, as an import path — has
+/// members: `M::redact` is one item, and its dependents are its own.
+fn module_members(
+    runtime: &Runtime,
+    seed: KirId,
+    seed_name: &str,
+) -> Result<Vec<ekos_kir::KirObject>, RuntimeError> {
+    let Some(module) = seed_name.strip_suffix("::self") else {
+        return Ok(Vec::new());
+    };
+    let Some(kind) = runtime.load_object(&seed)?.map(|o| o.kind) else {
+        return Ok(Vec::new());
+    };
+    let prefix = format!("{module}::");
+    let mut members = Vec::new();
+    for hit in runtime
+        .retrieve(&crate::RetrievalRequest::lexical(module))?
+        .hits
+    {
+        if hit.id == seed || !hit.name.starts_with(&prefix) {
+            continue;
+        }
+        if let Some(object) = runtime.load_object(&hit.id)?
+            && object.kind == kind
+        {
+            members.push(object);
+        }
+    }
+    members.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(members)
 }
 
 /// Bound on the extra descriptive text [`entity_item_with_excerpt`] appends to a claim (RFC
@@ -659,7 +716,7 @@ fn entity_item(
     claim: String,
     value: serde_json::Value,
 ) -> Result<EvidenceItem, RuntimeError> {
-    entity_item_inner(runtime, id, claim, value, false)
+    entity_item_inner(runtime, id, claim, value, false, None)
 }
 
 /// Same as [`entity_item`], but for a `Search`/`Graph`-sourced claim: appends a bounded slice of
@@ -672,7 +729,19 @@ fn entity_item_with_excerpt(
     claim: String,
     value: serde_json::Value,
 ) -> Result<EvidenceItem, RuntimeError> {
-    entity_item_inner(runtime, id, claim, value, true)
+    entity_item_inner(runtime, id, claim, value, true, None)
+}
+
+/// [`entity_item_with_excerpt`] for a search hit: the excerpt is the part of the object's text
+/// that matched `query`, not its opening (RFC 0177 §3 A).
+fn entity_item_for_query(
+    runtime: &Runtime,
+    id: KirId,
+    claim: String,
+    value: serde_json::Value,
+    query: &str,
+) -> Result<EvidenceItem, RuntimeError> {
+    entity_item_inner(runtime, id, claim, value, true, Some(query))
 }
 
 fn entity_item_inner(
@@ -681,11 +750,12 @@ fn entity_item_inner(
     claim: String,
     value: serde_json::Value,
     with_excerpt: bool,
+    query: Option<&str>,
 ) -> Result<EvidenceItem, RuntimeError> {
     let state = runtime.reconstruct_state(&id)?;
     let claim = match (
         with_excerpt,
-        state.as_ref().and_then(|s| excerpt_of(&s.object)),
+        state.as_ref().and_then(|s| excerpt_of(&s.object, query)),
     ) {
         (true, Some(excerpt)) => format!("{claim} — {excerpt}"),
         _ => claim,
@@ -736,7 +806,7 @@ fn entity_item_inner(
 /// is exactly the text BM25 indexed via `KirObject::indexed_content()`: previously matched,
 /// ranked, and then discarded one line before the claim was rendered. Truncated to
 /// [`CLAIM_EXCERPT_MAX_CHARS`], never longer.
-fn excerpt_of(object: &ekos_kir::KirObject) -> Option<String> {
+fn excerpt_of(object: &ekos_kir::KirObject, query: Option<&str>) -> Option<String> {
     let text = object
         .properties
         .get("excerpt")
@@ -751,7 +821,91 @@ fn excerpt_of(object: &ekos_kir::KirObject) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(truncate_chars(trimmed, CLAIM_EXCERPT_MAX_CHARS))
+    Some(match query {
+        Some(query) => matched_window(trimmed, query, CLAIM_EXCERPT_MAX_CHARS),
+        None => truncate_chars(trimmed, CLAIM_EXCERPT_MAX_CHARS),
+    })
+}
+
+/// Query words shorter than this say too little to place a window by.
+const MIN_WINDOW_TERM_CHARS: usize = 3;
+
+/// The `max`-char window of `text` that holds the most distinct `query` words (RFC 0177 §3 A),
+/// marked with an ellipsis on each side that was cut. A stored section runs to thousands of
+/// characters and the claim shows a few hundred: showing the opening meant a section was found by
+/// a sentence the model never saw. Ties go to the earliest window, and a text with no query word
+/// in it shows its opening as before.
+fn matched_window(text: &str, query: &str, max: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max {
+        return text.to_string();
+    }
+    let lower: Vec<char> = chars
+        .iter()
+        .map(|c| c.to_lowercase().next().unwrap_or(*c))
+        .collect();
+    let mut terms: Vec<Vec<char>> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.chars().count() >= MIN_WINDOW_TERM_CHARS)
+        .map(|t| t.to_lowercase().chars().collect())
+        .collect();
+    terms.sort();
+    terms.dedup();
+    // (position, term index) of every occurrence, in text order.
+    let mut hits: Vec<(usize, usize)> = Vec::new();
+    for (t, term) in terms.iter().enumerate() {
+        let mut from = 0;
+        while from + term.len() <= lower.len() {
+            match lower[from..]
+                .windows(term.len())
+                .position(|w| w == term.as_slice())
+            {
+                Some(at) => {
+                    hits.push((from + at, t));
+                    from += at + term.len();
+                }
+                None => break,
+            }
+        }
+    }
+    hits.sort();
+    if hits.is_empty() {
+        return truncate_chars(text, max);
+    }
+    // A window opens a little before a hit, so the hit is read in its sentence.
+    let lead = max / 4;
+    let mut best = (0usize, 0usize);
+    for &(pos, _) in &hits {
+        let start = pos.saturating_sub(lead);
+        let end = start + max;
+        let mut seen = vec![false; terms.len()];
+        for &(p, t) in &hits {
+            if p >= start && p + terms[t].len() <= end {
+                seen[t] = true;
+            }
+        }
+        let score = seen.iter().filter(|s| **s).count();
+        if score > best.1 {
+            best = (start, score);
+        }
+    }
+    let mut start = best.0.min(chars.len() - max);
+    // Open on a word, not inside one.
+    if start > 0 {
+        while start < chars.len() && !chars[start - 1].is_whitespace() {
+            start += 1;
+        }
+    }
+    let end = (start + max).min(chars.len());
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.extend(&chars[start..end]);
+    if end < chars.len() {
+        out.push('…');
+    }
+    out
 }
 
 /// Truncates `s` to at most `max` chars (not bytes — safe on multi-byte UTF-8), appending an
@@ -855,23 +1009,32 @@ fn source_text_item(
 ) -> Option<EvidenceItem> {
     let state = runtime.reconstruct_state(&id).ok()??;
     let (start, end) = span_of(&state.object)?;
-    let path = state.evidence.first()?.location.path.clone();
-    let artifact_id = latest_source_artifact_id(runtime, &id)?;
-    let artifact = store.read(&artifact_id).ok()??;
-    let source = artifact.get("data")?.get("source")?.as_str()?;
+    let first = state.evidence.first()?;
+    let path = first.location.path.clone();
     let end_capped = end.min(start + MAX_SOURCE_TEXT_LINES - 1);
-    let text = full_span_text(source, start, end_capped);
-    if text.is_empty() {
+    let (text, end_shown) = match artifact_span_text(runtime, store, &id, start, end_capped) {
+        Some(text) => (text, end_capped),
+        // RFC 0177 — the id a real commit records is the knowledge artifact's (`ka:…`), which
+        // holds compiled KIR and no file text, so on a real ledger the read above finds nothing.
+        // The symbol's own evidence fragment is its source, sliced at recover time from text that
+        // had already passed redaction; it is capped there, so say which lines it covers.
+        None => {
+            let text = first.fragment.trim_end().to_string();
+            let lines = text.lines().count() as u64;
+            (text, end.min(start + lines.saturating_sub(1)))
+        }
+    };
+    if text.trim().is_empty() {
         return None;
     }
     Some(EvidenceItem {
         claim: format!(
-            "full source text of `{}` ({path}:{start}-{end_capped}):\n{text}",
+            "full source text of `{}` ({path}:{start}-{end_shown}):\n{text}",
             state.object.name
         ),
         value: serde_json::Value::String(text),
-        source: state.evidence.first().map(|e| e.id),
-        location: format!("{path}:{start}-{end_capped}"),
+        source: Some(first.id),
+        location: format!("{path}:{start}-{end_shown}"),
         confidence: 1.0,
         extracted_by: provenance_of(&state.object),
         entity: Some(id),
@@ -880,6 +1043,22 @@ fn source_text_item(
         disputed: false,
         conflicts: Vec::new(),
     })
+}
+
+/// The lines `start..=end` of the observation artifact `id` was compiled from, when the ledger
+/// names one that holds file text.
+fn artifact_span_text(
+    runtime: &Runtime,
+    store: &dyn ekos_artifact::ArtifactStore,
+    id: &KirId,
+    start: u64,
+    end: u64,
+) -> Option<String> {
+    let artifact_id = latest_source_artifact_id(runtime, id)?;
+    let artifact = store.read(&artifact_id).ok()??;
+    let source = artifact.get("data")?.get("source")?.as_str()?;
+    let text = full_span_text(source, start, end);
+    (!text.is_empty()).then_some(text)
 }
 
 /// The artifact a symbol's *most recent* write descends from — `audit_trail` is ordered oldest
@@ -1225,13 +1404,54 @@ mod tests {
     // ── RFC 0139-followup "B1" fix: Search/Graph claims carry retrieved prose ───────────────
 
     #[test]
+    fn a_window_shows_the_passage_that_matched_not_the_opening() {
+        let text = format!(
+            "{} There is no object-level delete or tombstone anywhere. {}",
+            "Opening words about something else. ".repeat(20),
+            "Closing words. ".repeat(20)
+        );
+        let shown = matched_window(&text, "object deleted tombstone", 120);
+        assert!(shown.contains("tombstone"), "{shown}");
+        assert!(shown.starts_with('…') && shown.ends_with('…'), "{shown}");
+        assert!(shown.chars().count() <= 122);
+    }
+
+    #[test]
+    fn a_window_prefers_the_place_with_more_distinct_query_words() {
+        let text = format!(
+            "edition edition edition. {} The workspace edition is 2024. {}",
+            "x ".repeat(200),
+            "y ".repeat(200)
+        );
+        let shown = matched_window(&text, "workspace edition", 80);
+        assert!(shown.contains("workspace edition is 2024"), "{shown}");
+    }
+
+    #[test]
+    fn a_text_without_any_query_word_shows_its_opening() {
+        let text = "alpha ".repeat(100);
+        assert_eq!(
+            matched_window(&text, "zebra", 40),
+            truncate_chars(&text, 40)
+        );
+    }
+
+    #[test]
+    fn a_short_text_is_shown_whole_and_multibyte_text_is_not_split() {
+        assert_eq!(matched_window("short text", "text", 280), "short text");
+        let text = "é".repeat(400) + " конец строки";
+        let shown = matched_window(&text, "конец", 50);
+        assert!(shown.contains("конец"), "{shown}");
+    }
+
+    #[test]
     fn excerpt_of_prefers_excerpt_over_description() {
         let mut obj = KirObject::new("doc", ObjectKind::Custom("Section".into()));
         obj.properties
             .insert("description".into(), serde_json::json!("fallback text"));
         obj.properties
             .insert("excerpt".into(), serde_json::json!("real excerpt text"));
-        assert_eq!(excerpt_of(&obj).as_deref(), Some("real excerpt text"));
+        assert_eq!(excerpt_of(&obj, None).as_deref(), Some("real excerpt text"));
     }
 
     #[test]
@@ -1239,13 +1459,13 @@ mod tests {
         let mut obj = KirObject::new("parse", ObjectKind::Custom("RustSymbol".into()));
         obj.properties
             .insert("description".into(), serde_json::json!("parses input"));
-        assert_eq!(excerpt_of(&obj).as_deref(), Some("parses input"));
+        assert_eq!(excerpt_of(&obj, None).as_deref(), Some("parses input"));
     }
 
     #[test]
     fn excerpt_of_is_none_for_an_object_with_neither_property() {
         let obj = KirObject::new("bare", ObjectKind::Table);
-        assert_eq!(excerpt_of(&obj), None);
+        assert_eq!(excerpt_of(&obj, None), None);
     }
 
     #[test]
@@ -1253,7 +1473,7 @@ mod tests {
         let mut obj = KirObject::new("blank", ObjectKind::Custom("Section".into()));
         obj.properties
             .insert("excerpt".into(), serde_json::json!("   "));
-        assert_eq!(excerpt_of(&obj), None);
+        assert_eq!(excerpt_of(&obj, None), None);
     }
 
     #[test]
@@ -1262,7 +1482,7 @@ mod tests {
         let long_text = "x".repeat(CLAIM_EXCERPT_MAX_CHARS + 50);
         obj.properties
             .insert("excerpt".into(), serde_json::json!(long_text));
-        let excerpt = excerpt_of(&obj).unwrap();
+        let excerpt = excerpt_of(&obj, None).unwrap();
         assert_eq!(excerpt.chars().count(), CLAIM_EXCERPT_MAX_CHARS + 1); // +1 for the ellipsis
         assert!(excerpt.ends_with('…'));
     }
@@ -1341,6 +1561,81 @@ mod tests {
             "graph claim should carry the retrieved excerpt too: {:?}",
             item.claim
         );
+    }
+
+    /// RFC 0177 §3 C — imports are recorded per imported path, so the module and each of its
+    /// items are separate objects with separate dependents.
+    #[test]
+    fn dependents_of_a_module_include_dependents_of_its_members() {
+        let (l, _d) = temp();
+        let module = |name: &str| KirObject::new(name, ObjectKind::Custom("RustModule".into()));
+        let file = |name: &str| KirObject::new(name, ObjectKind::File);
+        let (itself, member, other) = (
+            module("app::redaction::self"),
+            module("app::redaction::redact"),
+            module("app::redaction_tools::run"),
+        );
+        let (uses_self, uses_member, uses_other) =
+            (file("ingest.rs"), file("recover.rs"), file("tools.rs"));
+        for o in [
+            &itself,
+            &member,
+            &other,
+            &uses_self,
+            &uses_member,
+            &uses_other,
+        ] {
+            l.append_object(o).unwrap();
+        }
+        for (from, to) in [
+            (&uses_self, &itself),
+            (&uses_member, &member),
+            (&uses_other, &other),
+        ] {
+            l.append_relationship(&KirRelationship::new(
+                RelationshipKind::DependsOn,
+                from.id,
+                to.id,
+            ))
+            .unwrap();
+        }
+        let rt = Runtime::new(&l);
+        let dependents_of = |seed: KirId| {
+            let plan = QueryPlan {
+                raw: "what depends on it".into(),
+                query_type: QueryType::Structural,
+                root: PlanNode::Graph {
+                    op: StructuralOp::Dependents,
+                    seed: EntityRef::Resolved(seed),
+                    hops: 1,
+                    supporting: false,
+                },
+                confidence: 1.0,
+            };
+            execute(&plan, &rt).unwrap().items
+        };
+
+        let items = dependents_of(itself.id);
+        let claim_of = |id: KirId| {
+            items
+                .iter()
+                .find(|i| i.entity == Some(id))
+                .map(|i| i.claim.clone())
+        };
+        assert!(claim_of(uses_self.id).is_some());
+        let through_member = claim_of(uses_member.id).expect("a member's dependent is listed");
+        assert!(
+            through_member.contains("app::redaction::redact"),
+            "the claim names the member it reaches: {through_member}"
+        );
+        assert!(
+            claim_of(uses_other.id).is_none(),
+            "a module that only shares a name prefix is not a member"
+        );
+
+        // One item is not the module: its dependents are its own.
+        let items = dependents_of(member.id);
+        assert!(items.iter().all(|i| i.entity != Some(uses_self.id)));
     }
 
     /// RFC 0139 §3.0 — the entity gate. A hub's neighbourhood describes the corpus, not the
@@ -1809,8 +2104,46 @@ mod tests {
             );
         }
 
+        /// RFC 0177 — what a real commit records: a `ka:` knowledge-artifact id, which holds no
+        /// file text. The symbol's own evidence fragment is then its source.
         #[test]
-        fn an_entity_with_no_recorded_source_artifact_is_silently_skipped() {
+        fn a_symbol_whose_artifact_holds_no_file_text_shows_its_evidence_fragment() {
+            let (l, _d) = temp();
+            let store_dir = TempDir::new().unwrap();
+            let fragment = "pub struct Thing {\n    pub confidence: f32,\n}";
+            let ev = KirEvidence::new(SourceLocation::file("src/lib.rs"), fragment);
+            l.append_evidence(&ev).unwrap();
+            let mut obj = KirObject::new("Thing", ObjectKind::Custom("RustSymbol".into()));
+            obj.properties.insert(
+                "source_span".into(),
+                serde_json::json!({"start_line": 10, "end_line": 12}),
+            );
+            obj.evidence.push(ev.id);
+            let id = obj.id;
+            l.set_write_context(Some(WriteContext {
+                run_id: "run-1".into(),
+                stage: "commit".into(),
+                source_artifact_id: Some("ka:0123abcd".into()),
+            }));
+            l.append_object(&obj).unwrap();
+            l.set_write_context(None);
+            let rt = Runtime::new(&l);
+            let store = FileSystemArtifactStore::new(store_dir.path());
+
+            let mut set = evidence_set_for(&[id]);
+            attach_source_text(&mut set, &rt, &store, 3);
+            let added = set.items.last().unwrap();
+            assert!(
+                added.claim.contains("pub confidence: f32"),
+                "{}",
+                added.claim
+            );
+            assert_eq!(added.location, "src/lib.rs:10-12");
+            assert_eq!(added.source, Some(ev.id));
+        }
+
+        #[test]
+        fn an_entity_with_no_source_artifact_and_no_evidence_is_silently_skipped() {
             let (l, _d) = temp();
             let store_dir = TempDir::new().unwrap();
             // Span-carrying, but written with no WriteContext at all (pre-RFC-0135 shape).

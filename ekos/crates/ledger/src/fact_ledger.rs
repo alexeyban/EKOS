@@ -3224,6 +3224,48 @@ mod tests {
 
     /// The search index is derived: deleting its directory and reopening
     /// rebuilds it from segments with nothing lost (RFC 0016 Phase 5).
+    /// RFC 0177 — an index built before a symbol's doc comment was indexed does not hold it, and
+    /// nothing about its schema says so. The recorded content version does.
+    #[test]
+    fn an_index_built_under_an_older_content_version_is_rebuilt_on_a_writable_open() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("factledger");
+        let symbol = KirObject::new("redact", ObjectKind::Custom("RustSymbol".into()))
+            .with_property(
+                "description",
+                serde_json::json!("removes secrets from wombat text"),
+            );
+        {
+            let ledger = FactLedger::open(&path).unwrap();
+            ledger.append_object(&symbol).unwrap();
+        }
+        // What an older build left behind: the same documents, indexed without the description.
+        // Emptying the index while keeping its watermark stands in for that.
+        let search = path.join("search");
+        let watermark = std::fs::read_to_string(search.join("last_tx")).unwrap();
+        std::fs::remove_dir_all(&search).unwrap();
+        {
+            let (mut index, _) = crate::search::SearchIndex::open(&search).unwrap();
+            index.commit(None).unwrap();
+        }
+        std::fs::write(search.join("last_tx"), &watermark).unwrap();
+        {
+            let ledger = FactLedger::open(&path).unwrap();
+            assert!(
+                ledger.find_objects("wombat").unwrap().is_empty(),
+                "with a current version and watermark nothing is replayed"
+            );
+        }
+
+        std::fs::write(search.join("content_version"), "1").unwrap();
+        let ledger = FactLedger::open(&path).unwrap();
+        assert_eq!(ledger.find_objects("wombat").unwrap().len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(search.join("content_version")).unwrap(),
+            "2"
+        );
+    }
+
     #[test]
     fn search_index_rebuilds_after_deletion() {
         let dir = tempdir().unwrap();

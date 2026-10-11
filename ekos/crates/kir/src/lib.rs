@@ -270,11 +270,42 @@ impl KirObject {
             .get("ai_usage")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        [excerpt, symbols.as_str(), ocr_text, ai_overview, ai_usage]
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
+        // RFC 0177 — what the author wrote about a symbol and how it is declared. Neither was
+        // searchable: a question that described a function in its doc comment's own words found
+        // every document quoting that comment and never the function. `fields` are a struct's
+        // field (or an enum's variant) declarations.
+        let text_of = |key: &str| {
+            self.properties
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+        };
+        let (description, signature) = (text_of("description"), text_of("signature"));
+        let fields = self
+            .properties
+            .get("fields")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        [
+            excerpt,
+            symbols.as_str(),
+            ocr_text,
+            ai_overview,
+            ai_usage,
+            description,
+            signature,
+            fields.as_str(),
+        ]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
     }
 
     /// RFC 0101: `true` when this object was observed under a `memory/`
@@ -662,6 +693,27 @@ mod tests {
         assert!(content.contains("an excerpt"));
         assert!(content.contains("foo bar"));
         assert!(content.contains("scanned words"));
+    }
+
+    #[test]
+    fn indexed_content_includes_a_symbols_doc_comment_signature_and_fields() {
+        let obj = KirObject::new("KirEvidence", ObjectKind::Custom("RustSymbol".into()))
+            .with_property("description", serde_json::json!("Provenance of a claim."))
+            .with_property(
+                "signature",
+                serde_json::json!("pub fn build() -> Arc<dyn Llm>"),
+            )
+            .with_property(
+                "fields",
+                serde_json::json!(["confidence: f32", "location: SourceLocation"]),
+            );
+        let content = obj.indexed_content();
+        for expected in ["Provenance of a claim.", "Arc<dyn Llm>", "confidence: f32"] {
+            assert!(
+                content.contains(expected),
+                "{expected} missing from {content}"
+            );
+        }
     }
 
     #[test]

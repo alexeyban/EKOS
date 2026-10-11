@@ -64,6 +64,10 @@ pub struct ScenarioReport {
     /// attribution pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<String>,
+    /// RFC 0177 §5 — every expected fact was in the evidence the model was given. Absent for a
+    /// scenario without expected facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facts_shown: Option<bool>,
     /// RFC 0139 §1 — pipeline diagnostic codes (`AI001`, `RSN001`, …). Always recorded; these are
     /// small and are the direct evidence for citation-parse failures.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -104,6 +108,7 @@ impl From<&EvalOutcome> for ScenarioReport {
             latency_ms: o.latency.as_secs_f64() * 1000.0,
             error: o.error.clone(),
             attribution: o.transcript.attribution.map(|a| a.as_str().to_string()),
+            facts_shown: o.facts_shown,
             diagnostics: o.transcript.diagnostics.clone(),
             answer: None,
             evidence_text: None,
@@ -154,10 +159,22 @@ pub struct Metrics {
     /// citation are different defects with different fixes — and this one currently measures 0.
     #[serde(default)]
     pub invalid_citation_rate: Option<f32>,
-    /// How many scenarios produced an answer but cited nothing — the population `groundedness`
-    /// silently excludes today (RFC 0139 §2.3). Reported so the metric's coverage is visible.
+    /// Answers that are not refusals and cite nothing (RFC 0139 §2.3). Each scores 0 for
+    /// groundedness. A refusal has nothing to cite and is counted in `refusals` (RFC 0177 §1).
     #[serde(default)]
     pub uncited_answers: usize,
+    /// Answers that open as a refusal or a premise rejection, on any scenario.
+    #[serde(default)]
+    pub refusals: usize,
+    /// Scenarios whose runner returned an error. Any makes the run fail (RFC 0177 §4).
+    #[serde(default)]
+    pub errored: usize,
+    /// Of the scenarios stating expected facts, how many had every fact in the evidence the model
+    /// was given, and how many such scenarios there were (RFC 0177 §5).
+    #[serde(default)]
+    pub facts_shown: usize,
+    #[serde(default)]
+    pub facts_scenarios: usize,
     pub avg_tokens: Option<f64>,
     pub p95_latency_ms: f64,
     /// Scenarios whose LLM call was served from the disk cache — no fresh network call.
@@ -183,6 +200,12 @@ pub struct Metrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
+    /// RFC 0177 §5 — no model was called: only retrieval and evidence assembly were measured.
+    #[serde(default)]
+    pub evidence_only: bool,
+    /// RFC 0177 §3 D — objects left out of search because their text quotes a scenario question.
+    #[serde(default)]
+    pub question_echoes_excluded: usize,
     pub dataset: String,
     pub agent: String,
     pub runtime: String,
@@ -225,7 +248,11 @@ fn default_ruler_version() -> u32 {
 ///   specific identifiers were used; generic words like `ledger` or `build` also resolve to *an*
 ///   object, but not to the one their question is about — adding those would have manufactured
 ///   coverage rather than signal.
-pub const RULER_VERSION: u32 = 5;
+/// - **v6** — RFC 0177: a refusal is not an "answered but uncited" row; `Premise not supported.` is
+///   a refusal; recall@10 is counted per expected name (any object bearing it), and a name that
+///   resolves to nothing is a miss even beside one that resolves; a run with an errored scenario
+///   fails.
+pub const RULER_VERSION: u32 = 6;
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
     let (sum, n) = values.fold((0.0f32, 0usize), |(s, n), v| (s + v, n + 1));
@@ -309,6 +336,13 @@ pub fn build_with_transcripts(
         bad as f32 / citing_scenarios as f32
     });
     let uncited_answers = outcomes.iter().filter(|o| o.answered_uncited).count();
+    let refusals = outcomes.iter().filter(|o| o.refused).count();
+    let errored = outcomes.iter().filter(|o| o.error.is_some()).count();
+    let facts_scenarios = outcomes.iter().filter(|o| o.facts_shown.is_some()).count();
+    let facts_shown = outcomes
+        .iter()
+        .filter(|o| o.facts_shown == Some(true))
+        .count();
 
     let answer_correctness = mean_f32(outcomes.iter().filter_map(|o| o.answer_score));
     let evidence_groundedness = mean_f32(outcomes.iter().filter_map(|o| o.groundedness_score));
@@ -344,13 +378,18 @@ pub fn build_with_transcripts(
         (n > 0).then_some(sum.as_secs_f64() * 1000.0)
     };
 
-    let status_pass = answer_correctness.is_none_or(|v| v >= gates.min_answer_correctness)
+    // RFC 0177 §4 — with every scenario errored each mean is `None` and every gate below holds
+    // vacuously; a run that could not be measured has not passed.
+    let status_pass = errored == 0
+        && answer_correctness.is_none_or(|v| v >= gates.min_answer_correctness)
         && evidence_groundedness.is_none_or(|v| v >= gates.min_evidence_groundedness)
         && completeness.is_none_or(|v| v >= gates.min_completeness)
         && recall_at_10.is_none_or(|v| v >= gates.min_recall_at_10 as f64)
         && hallucination_rate <= gates.max_hallucination_rate;
 
     Report {
+        evidence_only: false,
+        question_echoes_excluded: 0,
         dataset: dataset.to_string(),
         agent: agent.to_string(),
         runtime: runtime.to_string(),
@@ -368,6 +407,10 @@ pub fn build_with_transcripts(
             fabrication_rate,
             invalid_citation_rate,
             uncited_answers,
+            refusals,
+            errored,
+            facts_shown,
+            facts_scenarios,
             avg_tokens,
             p95_latency_ms,
             cache_hits,
@@ -468,7 +511,17 @@ pub fn render_text(report: &Report) -> String {
     out.push_str("─────────────────────────────\n\n");
     out.push_str(&format!("Dataset: {}\n", report.dataset));
     out.push_str(&format!("Agent: {}\n", report.agent));
-    out.push_str(&format!("Runtime: {}\n\n", report.runtime));
+    out.push_str(&format!("Runtime: {}\n", report.runtime));
+    if report.question_echoes_excluded > 0 {
+        out.push_str(&format!(
+            "Left out of search: {} objects that quote a scenario question\n",
+            report.question_echoes_excluded
+        ));
+    }
+    out.push('\n');
+    if report.evidence_only {
+        return render_evidence_only(report, out);
+    }
     out.push_str(&format!(
         "{}\n",
         row("Scenarios:", &m.scenarios.to_string())
@@ -513,10 +566,21 @@ pub fn render_text(report: &Report) -> String {
         )
     ));
     out.push_str(&format!(
-        "{}\n\n",
+        "{}\n",
         row(
             "Answered but uncited:",
-            &format!("{} (excluded from groundedness)", m.uncited_answers)
+            &format!("{} (each scores 0 for groundedness)", m.uncited_answers)
+        )
+    ));
+    out.push_str(&format!("{}\n", row("Refusals:", &m.refusals.to_string())));
+    out.push_str(&format!(
+        "{}\n\n",
+        row(
+            "Facts in evidence:",
+            &format!(
+                "{}/{} (scenarios whose expected facts all reached the model)",
+                m.facts_shown, m.facts_scenarios
+            )
         )
     ));
     out.push_str(&format!(
@@ -567,10 +631,65 @@ pub fn render_text(report: &Report) -> String {
             )
         ));
     }
+    if m.errored > 0 {
+        out.push_str(&format!(
+            "{}\n\n",
+            row(
+                "Errored:",
+                &format!("{} (a run with an errored scenario fails)", m.errored)
+            )
+        ));
+    }
     out.push_str(&format!(
         "Status: {}\n",
         if m.status_pass { "PASS" } else { "FAIL" }
     ));
+    out
+}
+
+/// The report of a run that called no model (RFC 0177 §5): retrieval and evidence assembly only.
+fn render_evidence_only(report: &Report, mut out: String) -> String {
+    let m = &report.metrics;
+    out.push_str(&format!(
+        "{}\n",
+        row("Scenarios:", &m.scenarios.to_string())
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        row("Recall@10:", &fmt_pct64(m.recall_at_10))
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        row(
+            "Facts in evidence:",
+            &format!("{}/{}", m.facts_shown, m.facts_scenarios)
+        )
+    ));
+    let missing: Vec<&str> = report
+        .scenarios
+        .iter()
+        .filter(|s| s.facts_shown == Some(false))
+        .map(|s| s.id.as_str())
+        .collect();
+    if !missing.is_empty() {
+        out.push_str(&format!("  not shown: {}\n", missing.join(", ")));
+    }
+    let low: Vec<String> = report
+        .scenarios
+        .iter()
+        .filter_map(|s| {
+            s.retrieval_recall
+                .filter(|r| *r < 1.0)
+                .map(|r| format!("{} ({:.0}%)", s.id, r * 100.0))
+        })
+        .collect();
+    if !low.is_empty() {
+        out.push_str(&format!("  recall below 100%: {}\n", low.join(", ")));
+    }
+    if m.errored > 0 {
+        out.push_str(&format!("{}\n", row("Errored:", &m.errored.to_string())));
+    }
+    out.push_str("\nNo model was called. Answers were not graded.\n");
     out
 }
 
@@ -595,6 +714,8 @@ mod tests {
             cited_count: 1,
             invalid_citation_count: 0,
             answered_uncited: false,
+            refused: false,
+            facts_shown: None,
             not_gradable: false,
             transcript: Default::default(),
             tokens: Some(TokenUsage {
@@ -607,6 +728,52 @@ mod tests {
             error: None,
             passed,
         }
+    }
+
+    /// RFC 0177 §4 — every mean is `None` when every scenario errored, so every gate held
+    /// vacuously and a run that measured nothing printed `PASS`.
+    #[test]
+    fn a_run_with_an_errored_scenario_fails_even_when_nothing_else_was_measured() {
+        let errored = EvalOutcome {
+            answer_score: None,
+            evidence_score: None,
+            completeness_score: None,
+            retrieval_recall: None,
+            groundedness_score: None,
+            error: Some("api error 403".into()),
+            passed: false,
+            ..outcome(false, false)
+        };
+        let report = build("t", "a", "local", &[errored], GateThresholds::default());
+        assert_eq!(report.metrics.errored, 1);
+        assert!(!report.metrics.status_pass);
+        assert!(render_text(&report).contains("Errored:"));
+    }
+
+    /// RFC 0177 §1 — a refusal has nothing to cite.
+    #[test]
+    fn refusals_and_uncited_answers_are_counted_apart() {
+        let refusal = EvalOutcome {
+            refused: true,
+            cited_count: 0,
+            ..outcome(true, false)
+        };
+        let uncited = EvalOutcome {
+            answered_uncited: true,
+            cited_count: 0,
+            ..outcome(false, false)
+        };
+        let report = build(
+            "t",
+            "a",
+            "local",
+            &[refusal, uncited],
+            GateThresholds::default(),
+        );
+        assert_eq!(
+            (report.metrics.refusals, report.metrics.uncited_answers),
+            (1, 1)
+        );
     }
 
     #[test]

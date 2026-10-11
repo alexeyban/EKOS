@@ -45,9 +45,13 @@ pub struct EvalOutcome {
     pub should_refuse: bool,
     pub cited_count: usize,
     pub invalid_citation_count: usize,
-    /// An answer was produced but cited nothing — the population `groundedness` silently excludes
-    /// (RFC 0139 §2.3).
+    /// An answer that is not a refusal and cites nothing (RFC 0139 §2.3, RFC 0177 §1). A refusal
+    /// has nothing to cite and is counted in `refused` instead.
     pub answered_uncited: bool,
+    /// The answer reads as a refusal or a premise rejection (RFC 0177 §1).
+    pub refused: bool,
+    /// See [`facts_shown`].
+    pub facts_shown: Option<bool>,
     /// RFC 0139 §2.2 — the scenario carried no applicable check at all. Previously such a scenario
     /// scored a silent 1.0 and passed; now it fails visibly, because a suite that cannot grade a
     /// question should say so rather than count it as a success.
@@ -149,6 +153,27 @@ pub fn attribute(scenario: &Scenario, run: &ScenarioRun) -> Attribution {
     }
 }
 
+/// Whether every expected fact is present in the evidence the model was given (RFC 0177 §5).
+/// `None` when the scenario states no facts or no evidence text was captured. Independent of the
+/// answer, so it measures retrieval on its own — with or without a model call.
+pub fn facts_shown(scenario: &Scenario, run: &ScenarioRun) -> Option<bool> {
+    if scenario.expected_facts.is_empty() {
+        return None;
+    }
+    let text = run.evidence_text.as_deref()?;
+    let prose: String = text
+        .lines()
+        .map(claim_prose_only)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tokens = normalize::tokens(&prose);
+    Some(scenario.expected_facts.iter().all(|fact| {
+        fact.alternates()
+            .iter()
+            .any(|alt| normalize::contains_tokens(&tokens, &normalize::tokens(alt)))
+    }))
+}
+
 /// Strips `render_evidence`'s trailing ` [location]` and ` (evidence <id>)` annotations from one
 /// rendered claim line, leaving just the claim prose (RFC 0139-followup "D4" fix). Without this, a
 /// fact whose name is a substring of a file path in the location suffix (e.g. "rust_analyzer"
@@ -192,12 +217,15 @@ pub fn evaluate(
             cited_count: 0,
             invalid_citation_count: 0,
             answered_uncited: false,
+            refused: false,
+            facts_shown: None,
             not_gradable: false,
             transcript: transcript_of(run, Attribution::NotApplicable),
         };
     }
 
     let answer_text = run.answer.as_deref();
+    let refused = answer_text.is_some_and(groundedness::looks_like_a_refusal);
     let evidence_check = evidence::check(scenario, &run.evidence_refs, ledger);
 
     let answer_score = answer::score(scenario, answer_text);
@@ -256,7 +284,9 @@ pub fn evaluate(
         should_refuse: scenario.should_refuse,
         cited_count: evidence_check.cited,
         invalid_citation_count: evidence_check.invalid_ids.len(),
-        answered_uncited: run.answer.is_some() && evidence_check.cited == 0,
+        answered_uncited: run.answer.is_some() && evidence_check.cited == 0 && !refused,
+        refused,
+        facts_shown: facts_shown(scenario, run),
         not_gradable,
         transcript: transcript_of(run, attribute(scenario, run)),
     }
@@ -313,6 +343,28 @@ mod attribution_tests {
             evidence_text: Some(evidence.into()),
             ..Default::default()
         }
+    }
+
+    /// RFC 0177 §1 — a refusal has nothing to cite, so it is not an uncited answer.
+    #[test]
+    fn a_refusal_is_not_an_uncited_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = ekos_ledger::Ledger::open(&dir.path().join("db.sqlite")).unwrap();
+        let s = scenario(&[]);
+        let refused = evaluate(
+            &s,
+            &run("Insufficient evidence. I looked for X.", ""),
+            &ledger,
+        );
+        assert!(refused.refused && !refused.answered_uncited);
+        let premise = evaluate(
+            &s,
+            &run("Premise not supported. There is no fee.", ""),
+            &ledger,
+        );
+        assert!(premise.refused && !premise.answered_uncited);
+        let bare = evaluate(&s, &run("It is the widget crate.", ""), &ledger);
+        assert!(!bare.refused && bare.answered_uncited);
     }
 
     #[test]

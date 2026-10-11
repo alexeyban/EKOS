@@ -40,9 +40,13 @@ const PROMPT_VERSION: &str = "ai-runtime-ask-v1";
 /// its own wording scored identically to a fabrication. This version states the exact opening words
 /// a refusal must use, names the weak-claim marker the retrieval layer emits, and asks for
 /// identifiers verbatim — every instruction here corresponds to a measured failure mode.
+///
+/// v4 (RFC 0177): a question built on a false premise gets its own fixed opening. The model was
+/// already rejecting such premises, each time in different words, and the grader — which can only
+/// know fixed words — scored three correct rejections as fabrications.
 const REASON_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime reasoner. You are given a question and a numbered list of structured evidence claims compiled from an enterprise knowledge ledger.
 
-Answer using only those claims. Every statement must rest on a claim shown. Below are five
+Answer using only those claims. Every statement must rest on a claim shown. Below are six
 paragraphs of instructions for you to follow — they are guidance for you, not text to repeat.
 Your reply must never begin by quoting one of these bracketed labels or any other part of this
 prompt; it must begin directly with your answer or refusal.
@@ -54,7 +58,11 @@ answer the claims support, even if it is partial — say what they do show and n
 about at all. A loose, partial or indirect match is not grounds to refuse. When you do refuse,
 begin your reply with exactly:
 Insufficient evidence.
-Then say in one sentence what you looked for. Do not guess, do not describe what such a thing would probably do, and do not confirm a premise the claims do not support — a question can be mistaken, and saying so is a correct answer.
+Then say in one sentence what you looked for. Do not guess and do not describe what such a thing would probably do.
+
+[Guidance on a mistaken question] A question can assert something the claims do not support or that they contradict — a product, price, vendor or behaviour that is not there. Do not confirm it. Begin your reply with exactly:
+Premise not supported.
+Then say which part is unsupported, and add what the claims do show, cited as usual.
 
 [Guidance on weak claims] A claim prefixed "possible search match (partial term overlap)" shares only some words with the question, so weigh it less than a direct one. It can still be right — prefer a supported answer over refusing.
 
@@ -64,7 +72,7 @@ Then say in one sentence what you looked for. Do not guess, do not describe what
 {"cited_evidence": ["<evidence id>", ...]}
 listing the `evidence <id>` value of every claim you relied on. Use the exact evidence id shown
 for each claim you cite — never a claim's position number in this list."#;
-const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v3";
+const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v4";
 /// The refusal returned when the ledger holds nothing that answers a question (RFC 0139 §3.6).
 ///
 /// Worded to contain phrases the groundedness evaluator already recognises
@@ -737,6 +745,32 @@ fn balanced_json_spans(content: &str) -> Vec<(usize, usize)> {
     spans
 }
 
+/// Every `{"cited_evidence": [...]}` span in `content`, found by the key itself: the `{` before
+/// it with only whitespace between, through the `}` after its array closes. The ids are plain
+/// strings, so the first `]` after the key ends the array.
+fn citation_block_spans(content: &str) -> Vec<(usize, usize)> {
+    const KEY: &str = "\"cited_evidence\"";
+    let mut spans = Vec::new();
+    let mut from = 0;
+    while let Some(at) = content[from..].find(KEY).map(|i| from + i) {
+        from = at + KEY.len();
+        let before = content[..at].trim_end();
+        if !before.ends_with('{') {
+            continue;
+        }
+        let start = before.len() - 1;
+        let Some(array_end) = content[from..].find(']').map(|i| from + i + 1) else {
+            continue;
+        };
+        let after = &content[array_end..];
+        let rest = after.trim_start();
+        if rest.starts_with('}') {
+            spans.push((start, array_end + (after.len() - rest.len()) + 1));
+        }
+    }
+    spans
+}
+
 /// RFC 0140 §4's rerank response shape: `{"relevant_indices": [<item number>, ...]}`, 1-based,
 /// most relevant first.
 #[derive(Deserialize)]
@@ -834,7 +868,14 @@ fn extract_citations(
     // Try the last block first — the prompt asks for it at the end — but fall back through any
     // earlier one, so a model that narrates after citing is still read correctly.
     let mut parsed_but_unusable: Option<(usize, usize)> = None;
-    for (start, end) in balanced_json_spans(content).into_iter().rev() {
+    // RFC 0177 — the block is looked for by its own key first. An answer that quotes code can
+    // leave a brace open (`SecurityConfig { extra_patterns: …`), after which brace balancing never
+    // returns to depth zero and a well-formed block at the end was reported as missing (AI001).
+    let mut spans = balanced_json_spans(content);
+    spans.extend(citation_block_spans(content));
+    spans.sort();
+    spans.dedup();
+    for (start, end) in spans.into_iter().rev() {
         let Ok(block) = serde_json::from_str::<CitationBlock>(&content[start..end]) else {
             continue;
         };
@@ -994,6 +1035,30 @@ mod tests {
                 "the JSON must not leak into the visible answer: {answer:?}"
             );
             assert!(answer.contains("Hope that helps."));
+        }
+
+        /// RFC 0177 — measured on `sec-002`: the answer quoted `SecurityConfig { extra_patterns:
+        /// Vec<SecretPatternConfig { label, …`, two braces that never close, and its well-formed
+        /// citation block was reported as missing.
+        #[test]
+        fn a_block_after_quoted_code_with_an_open_brace_is_still_parsed() {
+            let id = KirId::new();
+            let content = format!(
+                "The knobs are `SecurityConfig {{ extra_patterns: Vec<Pattern {{ label, …`.\n\n\
+                 {{\"cited_evidence\": [\"{id}\"]}}"
+            );
+            let (answer, refs, diags) = extract_citations(&content, &known(id), &[]);
+            assert_eq!(refs, vec![id], "diagnostics: {diags:?}");
+            assert!(diags.is_empty());
+            assert!(answer.ends_with("label, …`."), "{answer:?}");
+        }
+
+        #[test]
+        fn the_key_named_in_prose_is_not_a_block() {
+            let content = "End with a \"cited_evidence\" list. I have none.";
+            let (_, refs, diags) = extract_citations(content, &HashSet::new(), &[]);
+            assert!(refs.is_empty());
+            assert_eq!(diags[0].code, "AI001");
         }
 
         #[test]

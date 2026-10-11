@@ -1,11 +1,10 @@
 //! Retrieval evaluator (RFC 0138) — recall@10 of `Scenario::expected_objects` against a ranked
-//! id list. Deliberately reuses `ekos_runtime::retrieval_eval::recall_at_k` (RFC 0126) rather than
-//! reimplementing rank-metric math a second time.
+//! id list. Recall is counted per expected *name* (RFC 0177): any object bearing the name, in the top
+//! ten, finds it.
 
 use crate::schema::Scenario;
 use ekos_kir::KirId;
 use ekos_ledger::KnowledgeStore;
-use ekos_runtime::retrieval_eval::recall_at_k;
 use std::collections::HashMap;
 
 /// Resolve `Scenario::expected_objects` (names) to ids and score `ranked_ids`' recall@10 against
@@ -28,25 +27,31 @@ pub fn recall_at_10(
     if ranked_ids.is_empty() {
         return None;
     }
-    let name_to_id: HashMap<String, KirId> = ledger
-        .all_objects()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|o| (o.name.to_lowercase(), o.id))
-        .collect();
-    let relevant: Vec<KirId> = scenario
+    // RFC 0177 — a name is not an id. Several objects can carry one name (a file and the document
+    // read from it; a function and the import path that names it), and a map from name to a
+    // single id kept whichever the ledger listed last: a query that ranked the file first scored
+    // 0 when the map happened to hold its twin. An expected name is found when any object bearing
+    // it is in the top ten.
+    let mut name_to_ids: HashMap<String, Vec<KirId>> = HashMap::new();
+    for object in ledger.all_objects().unwrap_or_default() {
+        name_to_ids
+            .entry(object.name.to_lowercase())
+            .or_default()
+            .push(object.id);
+    }
+    let top: &[KirId] = &ranked_ids[..ranked_ids.len().min(10)];
+    // RFC 0139 §2.6 — a name that resolves to nothing is a miss, not a smaller relevant set: a
+    // typo'd or renamed object must not make recall look better.
+    let found = scenario
         .expected_objects
         .iter()
-        .filter_map(|n| name_to_id.get(&n.to_lowercase()).copied())
-        .collect();
-    // RFC 0139 §2.6 — a name that resolves to nothing used to be dropped silently, shrinking the
-    // relevant set instead of failing. A typo'd or renamed object therefore made recall look
-    // *better* (fewer things to find), which is the wrong direction for a mistake to push a
-    // metric. Scoring it 0.0 makes an unverifiable expectation visible instead of flattering.
-    if relevant.is_empty() {
-        return Some(0.0);
-    }
-    Some(recall_at_k(ranked_ids, &relevant, 10))
+        .filter(|name| {
+            name_to_ids
+                .get(&name.to_lowercase())
+                .is_some_and(|ids| ids.iter().any(|id| top.contains(id)))
+        })
+        .count();
+    Some(found as f64 / scenario.expected_objects.len() as f64)
 }
 
 #[cfg(test)]
@@ -79,6 +84,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Ledger::open(&dir.path().join("db.sqlite")).unwrap();
         assert_eq!(recall_at_10(&scenario(vec![]), &[], &store), None);
+    }
+
+    /// RFC 0177 — a file and the document read from it carry one name.
+    #[test]
+    fn a_name_borne_by_two_objects_is_found_when_either_is_ranked() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Ledger::open(&dir.path().join("db.sqlite")).unwrap();
+        let file = KirObject::new("docs/a.md", ObjectKind::File);
+        let document = KirObject::new("docs/a.md", ObjectKind::Custom("Document".into()));
+        store.append_object(&file).unwrap();
+        store.append_object(&document).unwrap();
+        let s = scenario(vec!["docs/a.md"]);
+        assert_eq!(recall_at_10(&s, &[file.id], &store), Some(1.0));
+        assert_eq!(recall_at_10(&s, &[document.id], &store), Some(1.0));
+    }
+
+    #[test]
+    fn a_name_that_resolves_to_nothing_is_a_miss_beside_one_that_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Ledger::open(&dir.path().join("db.sqlite")).unwrap();
+        let found = KirObject::new("real", ObjectKind::File);
+        store.append_object(&found).unwrap();
+        let s = scenario(vec!["real", "renamed_away"]);
+        assert_eq!(recall_at_10(&s, &[found.id], &store), Some(0.5));
     }
 
     #[test]

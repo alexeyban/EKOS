@@ -12,6 +12,7 @@
 //! report   — aggregation + the text/JSON report
 //! ```
 
+pub mod echoes;
 pub mod evaluators;
 pub mod history;
 pub mod regrade;
@@ -33,11 +34,24 @@ pub async fn run_all(
     ledger: &dyn KnowledgeStore,
     scenarios: &[Scenario],
 ) -> Vec<evaluators::EvalOutcome> {
+    run_all_with(ai, runtime, ledger, scenarios, false).await
+}
+
+/// [`run_all`]; with `evidence_only` no model is called (RFC 0177 §5).
+pub async fn run_all_with(
+    ai: &AiRuntime<'_>,
+    runtime: &Runtime<'_>,
+    ledger: &dyn KnowledgeStore,
+    scenarios: &[Scenario],
+    evidence_only: bool,
+) -> Vec<evaluators::EvalOutcome> {
     let mut outcomes = Vec::with_capacity(scenarios.len());
     for scenario in scenarios {
         let run = match scenario.mode {
             Mode::Retrieval => runners::retrieval_runner::run(runtime, scenario),
-            Mode::Reason | Mode::Ask => runners::agent_runner::run(ai, runtime, scenario).await,
+            Mode::Reason | Mode::Ask => {
+                runners::agent_runner::run_with(ai, runtime, scenario, evidence_only).await
+            }
         };
         outcomes.push(evaluators::evaluate(scenario, &run, ledger));
     }
@@ -125,5 +139,35 @@ mod tests {
         assert_eq!(outcomes[0].retrieval_recall, Some(1.0));
         // Retrieval mode never calls the LLM, so nothing token-related was gathered.
         assert!(outcomes[2].tokens.is_none());
+    }
+
+    /// RFC 0177 §5 — the evidence-only run grades retrieval and asks no model.
+    #[tokio::test]
+    async fn an_evidence_only_run_calls_no_model_and_still_says_whether_the_fact_was_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Ledger::open(&dir.path().join("db.sqlite")).unwrap();
+        let ev = KirEvidence::new(SourceLocation::file("src/w.rs"), "fn build_widget() {}");
+        store.append_evidence(&ev).unwrap();
+        let mut obj = KirObject::new("build_widget", ObjectKind::Custom("RustSymbol".to_string()))
+            .with_property("description", serde_json::json!("Assembles a sprocket."));
+        obj.evidence.push(ev.id);
+        store.append_object(&obj).unwrap();
+
+        let runtime = Runtime::over(&store);
+        let llm = Arc::new(MockLlmProvider::new("THE MODEL WAS CALLED".to_string()));
+        let ai = AiRuntime::new(&runtime, llm, AiRuntimeConfig::default());
+        let mut shown = scenario("shown", "build_widget", Mode::Reason, vec![]);
+        shown.expected_facts = vec!["sprocket".into()];
+        let mut missing = scenario("missing", "build_widget", Mode::Reason, vec![]);
+        missing.expected_facts = vec!["flange".into()];
+
+        let outcomes = run_all_with(&ai, &runtime, &store, &[shown, missing], true).await;
+        for outcome in &outcomes {
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+            assert_eq!(outcome.transcript.answer, None);
+            assert!(outcome.tokens.is_none());
+        }
+        assert_eq!(outcomes[0].facts_shown, Some(true));
+        assert_eq!(outcomes[1].facts_shown, Some(false));
     }
 }

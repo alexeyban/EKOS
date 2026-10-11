@@ -29,6 +29,10 @@ pub struct EvalRunOpts<'a> {
     /// (RFC 0139 §1). Off by default because a 101-scenario suite's transcripts are ~1MB of JSON;
     /// on, a saved report can be re-graded offline instead of re-run against the LLM.
     pub save_answers: bool,
+    /// RFC 0177 §5 — measure retrieval and evidence assembly only; no model is called.
+    pub evidence_only: bool,
+    /// Search the corpus as it is, including documents that quote a scenario's question.
+    pub keep_question_echoes: bool,
 }
 
 /// Human label for what actually answered. Records the resolved model for every provider, not just
@@ -110,14 +114,28 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
     let run_config = with_agent(config, opts.agent)?;
 
     let artifact_dir = run_config.artifact_dir(cwd);
-    let llm = build_llm_provider(&run_config, &artifact_dir);
-    check_not_mock(
-        llm.as_ref(),
-        &agent_label(&run_config),
-        resolved_key_env(&run_config),
-    )?;
+    let llm: Arc<dyn LlmProvider> = if opts.evidence_only {
+        // Never asked: the runner skips the model call.
+        Arc::new(ekos_recovery::llm::MockLlmProvider::new(String::new()))
+    } else {
+        let llm = build_llm_provider(&run_config, &artifact_dir);
+        check_not_mock(
+            llm.as_ref(),
+            &agent_label(&run_config),
+            resolved_key_env(&run_config),
+        )?;
+        llm
+    };
     let ledger = open_store_read_only(&run_config, cwd)?;
-    let runtime = Runtime::over(&*ledger);
+    // RFC 0177 §3 D — a document that quotes a scenario's question outranks the object that
+    // answers it. Found once from the dataset itself and left out of search for the whole run.
+    let echoes = if opts.keep_question_echoes {
+        Default::default()
+    } else {
+        ekos_evals::echoes::question_echoes(&ledger.all_objects()?, &scenarios)
+    };
+    let echo_count = echoes.len();
+    let runtime = Runtime::over(&*ledger).excluding_from_search(echoes);
     let mut ai = AiRuntime::new(&runtime, llm, super::ask::ai_config(&run_config));
     // RFC 0140 §3 — same best-effort wiring as `ask.rs`: grading must not depend on the artifact
     // store being present, only benefit from it when it is.
@@ -130,19 +148,28 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
         ai = ai.with_disputes(super::conflicts::dispute_lookup(&run_config, cwd, &*ledger));
     }
 
-    let outcomes = ekos_evals::run_all(&ai, &runtime, &*ledger, &scenarios).await;
-    let report = report::build_with_transcripts(
+    let outcomes =
+        ekos_evals::run_all_with(&ai, &runtime, &*ledger, &scenarios, opts.evidence_only).await;
+    let agent = if opts.evidence_only {
+        "none (evidence only)".to_string()
+    } else {
+        agent_label(&run_config)
+    };
+    let mut report = report::build_with_transcripts(
         &dataset_name,
-        &agent_label(&run_config),
+        &agent,
         "local",
         &outcomes,
         GateThresholds::default(),
         opts.save_answers,
     );
+    report.evidence_only = opts.evidence_only;
+    report.question_echoes_excluded = echo_count;
 
     if let Some(output) = &opts.output {
         tokio::fs::write(output, serde_json::to_string_pretty(&report)?).await?;
-    } else {
+    } else if !opts.evidence_only {
+        // An evidence-only run graded no answers, so it is not a row in `ekos eval history`.
         let default_dir = cwd.join("evals").join("reports");
         if default_dir.is_dir() {
             let filename = format!(
@@ -165,6 +192,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
         println!("{}", report::render_text(&report));
     }
 
+    if opts.evidence_only {
+        if report.metrics.errored > 0 {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     if !report.metrics.status_pass {
         std::process::exit(1);
     }

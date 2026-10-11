@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-58 commits, RFCs 0154–0176, devlogs 204–253. Not yet tagged; build from source or wait for the
+59 commits, RFCs 0154–0177, devlogs 204–254. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -41,6 +41,17 @@ next release.
 - **Migrate:** `DQ.UNIQ.001` no longer blocks on foreign-key columns. Inferred keys attribute each join column to the table its qualifier names (it proposed `country.country_id → entity.id`).
 - **Treasury:** explorer reads are paged; a history past 10,000 rows used to be cut short silently. One that cannot be read whole is now an error.
 - **Evals:** `ekos eval run --agent ollama` works under a cloud `[llm]` config.
+
+**Search and answers** (RFC 0177)
+- **A symbol's doc comment and signature are searchable.** They were not indexed, so a question that described a function found every document quoting its comment and not the function. Existing workspaces re-index on the next command that writes to the ledger (`ekos ledger repair` does it at once).
+- **Partial matches** are ranked by how many of the question's words they hold as well as by BM25.
+- **A search hit shows the passage that matched,** not the opening of its text.
+- **`ekos ask` shows a symbol's source.** The lookup behind "full source text" found nothing on a real ledger; it now falls back to the source recorded with the symbol.
+- **"What depends on module M"** includes what depends on M's items.
+- **A file is found by its name** without directory or extension.
+- **A question built on a false premise** is answered `Premise not supported.` and a cited correction.
+- **Rust struct and enum symbols record their fields** (after the next `ekos recover`).
+- **Evals:** `ekos eval run --evidence-only` measures retrieval without calling a model. A run with an errored scenario fails. Refusals are counted apart from uncited answers. Recall@10 counts an expected name as found when any object bearing it is ranked.
 
 **Fixes**
 - `ekos resolve` no longer stops on same-name groups across the database and code namespaces (LedgerSMB 16 → 0 conflicts).

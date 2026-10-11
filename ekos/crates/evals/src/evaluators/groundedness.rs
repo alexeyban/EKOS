@@ -40,7 +40,13 @@ const DEFAULT_REFUSAL_PHRASES: &[&str] = &[
     "no direct evidence",
     "not possible to determine",
     "claims mention",
+    PREMISE_REJECTION,
 ];
+
+/// The fixed opening the reason prompt asks for when a question asserts something the claims do
+/// not support (RFC 0177 §2). A stated outcome, like "insufficient evidence" — not a loose phrase:
+/// wording such as "does not" appears in fabricated answers too and is deliberately absent.
+pub const PREMISE_REJECTION: &str = "premise not supported";
 
 /// Whether `answer` reads as a refusal by [`DEFAULT_REFUSAL_PHRASES`] alone, with no
 /// scenario-specific phrasing considered (RFC 0139-followup "D1" fix). Exposed to
@@ -90,6 +96,32 @@ pub fn score(scenario: &Scenario, answer: Option<&str>, evidence: &EvidenceCheck
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The grader knows fixed words only, so the prompt has to state them (RFC 0139 §4.3,
+    /// RFC 0177 §2): a model graded against words it was never shown is graded on luck.
+    #[test]
+    fn the_reason_prompt_states_both_openings_the_grader_accepts() {
+        let prompt = ekos_runtime::AiRuntimeConfig::default()
+            .reason_system_prompt
+            .to_lowercase();
+        assert!(prompt.contains("insufficient evidence."));
+        assert!(prompt.contains(&format!("{PREMISE_REJECTION}.")));
+    }
+
+    #[test]
+    fn a_premise_rejection_is_a_refusal() {
+        assert!(looks_like_a_refusal(
+            "Premise not supported. The claims show the vector index is EKOS's own module."
+        ));
+    }
+
+    #[test]
+    fn a_denial_in_loose_wording_is_not_a_refusal() {
+        // "does not" reads like a denial and is in plenty of invented answers too.
+        assert!(!looks_like_a_refusal(
+            "The Enterprise Edition does not charge per seat; the fee is $4,000 a year."
+        ));
+    }
     use crate::schema::Mode;
 
     fn scenario(should_refuse: bool) -> Scenario {

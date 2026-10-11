@@ -16,6 +16,17 @@ use std::time::Instant;
 /// `mode: retrieval` scenarios are rejected — route those through
 /// [`super::retrieval_runner::run`] instead, since they need no `AiRuntime` at all.
 pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario) -> ScenarioRun {
+    run_with(ai, runtime, scenario, false).await
+}
+
+/// [`run`]; with `evidence_only` the model is not called (RFC 0177 §5). Everything gathered
+/// offline — the plan, the evidence the model would be shown, the ranked ids — is still captured.
+pub async fn run_with(
+    ai: &AiRuntime<'_>,
+    runtime: &Runtime<'_>,
+    scenario: &Scenario,
+    evidence_only: bool,
+) -> ScenarioRun {
     debug_assert_ne!(
         scenario.mode,
         Mode::Retrieval,
@@ -26,8 +37,9 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
     let resource_before = resource::sample();
     let start = Instant::now();
     let answer_result = match scenario.mode {
-        Mode::Ask => ai.ask(&scenario.question).await,
-        Mode::Reason | Mode::Retrieval => ai.reason(&scenario.question).await,
+        _ if evidence_only => Ok(None),
+        Mode::Ask => ai.ask(&scenario.question).await.map(Some),
+        Mode::Reason | Mode::Retrieval => ai.reason(&scenario.question).await.map(Some),
     };
     let latency = start.elapsed();
     let resource_delta = ResourceDelta::between(resource_before, resource::sample());
@@ -39,7 +51,12 @@ pub async fn run(ai: &AiRuntime<'_>, runtime: &Runtime<'_>, scenario: &Scenario)
     };
 
     let mut run = match answer_result {
-        Ok(answer) => ScenarioRun {
+        Ok(None) => ScenarioRun {
+            latency,
+            resource: resource_delta,
+            ..Default::default()
+        },
+        Ok(Some(answer)) => ScenarioRun {
             answer: Some(answer.answer),
             evidence_refs: answer.evidence_refs,
             token_usage: Some(answer.token_usage),

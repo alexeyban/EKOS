@@ -1559,6 +1559,7 @@ dependencies = [
  "oxc_parser",
  "oxc_span",
  "proc-macro2",
+ "quote",
  "regex",
  "reqwest",
  "roxmltree",

@@ -611,6 +611,13 @@ enum EvalCommands {
         /// attributed and the run re-graded offline later (RFC 0139). Adds ~1MB per full run.
         #[arg(long)]
         save_answers: bool,
+        /// Measure retrieval only: Recall@10 and whether each scenario's expected facts are in
+        /// the evidence a model would be shown. Calls no model (RFC 0177)
+        #[arg(long)]
+        evidence_only: bool,
+        /// Do not leave documents that quote a scenario's question out of search (RFC 0177)
+        #[arg(long)]
+        keep_question_echoes: bool,
     },
     /// Re-score a saved report under the current evaluators — no LLM calls (RFC 0139)
     Regrade {
@@ -1876,6 +1883,8 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 json,
                 output,
                 save_answers,
+                evidence_only,
+                keep_question_echoes,
             } => {
                 let opts = crate::commands::eval::EvalRunOpts {
                     dataset: dataset.as_deref(),
@@ -1886,6 +1895,8 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                     json,
                     output,
                     save_answers,
+                    evidence_only,
+                    keep_question_echoes,
                 };
                 crate::commands::eval::run(&config, &cwd, opts).await
             }

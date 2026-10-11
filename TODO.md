@@ -6411,8 +6411,45 @@ LinkML; generation stays in LinkML.
 - [ ] `sql_transform_analyzer`'s statement splitter is still `split(';')` (wrong inside
       dollar-quoted bodies); give it RFC 0176's fallback
 - [ ] EKL property filters are applied after a full scan; push them down if a large ledger needs it
-- [ ] `ekos eval run` prints `Status: PASS` when every scenario errored (seen with a missing local
-      model): an errored scenario should fail the run
+- [x] `ekos eval run` prints `Status: PASS` when every scenario errored (seen with a missing local
+      model): an errored scenario should fail the run *(RFC 0177, devlog_254)*
 - [ ] Rebuild the EKOS self-workspace (its ledger is from 2026-09-23 and has no source manifest)
       before the next comparable eval; a Zen run is metered and needs a go-ahead
+      *(still open after RFC 0177: `recover` and `commit` call the configured model for SQL
+      analysis, document semantics and `[llm-description]`, so the rebuild itself is metered here)*
 
+## Eval follow-up: retrieval, refusals, uncited answers (RFC 0177) — devlog_254, 2026-10-11
+
+- [x] A symbol's doc comment, signature and fields are indexed for search
+- [x] The search index records a content version and is rebuilt when it differs
+- [x] The partial-match band is ordered by BM25 rank fused with coverage rank
+- [x] A search hit's claim shows the window of its text that matched
+- [x] A symbol's source text falls back to its evidence fragment (the artifact lookup found
+      nothing on a real ledger: 0 of 101 scenarios)
+- [x] Dependents of `M::self` include dependents of every `M::…` import-path object
+- [x] A file is found by its name without directory or extension
+- [x] `Premise not supported.` as a fixed opening, accepted by the grader
+- [x] Refusals counted apart from uncited answers; a run with an errored scenario fails
+- [x] `ekos eval run --evidence-only`; question echoes left out of search and counted
+- [x] Recall@10 counts an expected name found when any object bearing it is ranked
+- [x] Rust struct and enum symbols record `fields` (pass `v5`; needs a recover to appear)
+- [ ] A generic file's text past its first ~900 characters is not in the ledger (`code-004`:
+      `edition = "2024"` is on line 69 of `ekos/Cargo.toml`). Either record the workspace edition
+      as a `Crate` fact in `crate_topology_analyzer`, or section long non-Markdown files
+- [ ] A symbol records a knowledge-artifact id (`ka:…`), never the observation artifact holding
+      its file, so source text beyond the 40-line evidence fragment cannot be shown. Record the
+      observation artifact id on the symbol at recover
+- [ ] A documentation section that describes a symbol outranks the symbol (`arch-007`,
+      `arch-017`, `code-009`, `code-013`, `lin-009` pass on the section; Recall@10 misses the
+      symbol). Candidate: the symbols a top-ranked section references become a retrieval signal
+- [ ] `fields` for Python, Elixir and JavaScript types
+- [ ] A read-only command only warns about an index built under an older content version;
+      `ekos doctor` should report it too
+- [ ] A dependents claim about an object without evidence (a `Crate`) shows no evidence id, so an
+      answer built from such claims has nothing valid to cite (`dep-001`, AI002). Carry the
+      relationship's own evidence, or the manifest's
+- [ ] `Premise not supported.` was used on one real question (`arch-015`), and two correct denials
+      used neither fixed opening (`adv-001`, `sec-003`). Tune the prompt against the local model
+      first; each cloud try is metered
+- [ ] A devlog that names an adversarial scenario's invented entity is not a verbatim question
+      echo and stays searchable (`adv-001`)

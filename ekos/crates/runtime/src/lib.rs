@@ -97,16 +97,29 @@ pub struct World {
 /// fact engine's `FactLedger`).
 pub struct Runtime<'a> {
     ledger: &'a dyn KnowledgeStore,
+    /// Ids [`Self::retrieve`] leaves out (RFC 0177 §3 D). Empty except in an eval run.
+    search_excluded: std::collections::HashSet<KirId>,
 }
 
 impl<'a> Runtime<'a> {
     pub fn new<S: KnowledgeStore>(ledger: &'a S) -> Self {
-        Self { ledger }
+        Self::over(ledger)
     }
 
     /// Construct from an already-erased store reference.
     pub fn over(ledger: &'a dyn KnowledgeStore) -> Self {
-        Self { ledger }
+        Self {
+            ledger,
+            search_excluded: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Leave `ids` out of [`Self::retrieve`] (RFC 0177 §3 D). `ekos eval run` uses it for
+    /// documents that quote a scenario's question: they match the question better than the object
+    /// that answers it. Search only — a named object is still loaded, and its graph still read.
+    pub fn excluding_from_search(mut self, ids: std::collections::HashSet<KirId>) -> Self {
+        self.search_excluded = ids;
+        self
     }
 
     // ── Current-state queries ─────────────────────────────────────────────────
@@ -380,6 +393,11 @@ impl<'a> Runtime<'a> {
         results
             .hits
             .retain(|h| !self.is_session_memory(&h.id, &h.name, h.kind.as_ref()));
+        if !self.search_excluded.is_empty() {
+            results
+                .hits
+                .retain(|h| !self.search_excluded.contains(&h.id));
+        }
         Ok(results)
     }
 
@@ -1842,6 +1860,7 @@ mod session_isolation_tests {
             // no KIR entity in the return type
             "new",
             "over",
+            "excluding_from_search",
             "audit_trail",
             "fact",
             "facts_of",

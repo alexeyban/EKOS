@@ -710,7 +710,8 @@ max-tokens = 8192            # reasoning models spend hidden tokens; 1024/2048 t
 For local Ollama, `[llm] context-window = 8192` (the default; also `OLLAMA_NUM_CTX`) is sent as `num_ctx` —
 without it Ollama silently truncated long prompts — and EKOS warns when a prompt fills the window.
 `ekos doctor` shows the effective window or custom endpoint. Hosted models bill per token; a full
-101-scenario `ekos eval run` on DeepSeek V4 Flash costs about $0.08. DeepSeek V4 Flash is a reasoning model whose
+101-scenario `ekos eval run` on DeepSeek V4 Flash costs about $0.08. `ekos eval run --evidence-only`
+calls no model: it reports Recall@10 and whether each scenario's expected facts reach the evidence. DeepSeek V4 Flash is a reasoning model whose
 hidden reasoning counts against `max-tokens` — use `[ai] max-tokens = 8192` or some answers come back empty.
 
 ### Documentation generation (RFC 0035/0037/0042/0090/0094/0095)
@@ -865,7 +866,9 @@ three operations, built as RFCs 0119–0126 (`devlog_143`–`devlog_149`):
   undifferentiated list. For the top few entities in each answer's evidence set, `ekos ask` also
   reads the entity's real, on-demand source text straight from the artifact store — never the live
   filesystem, so it never bypasses redaction (RFC 0140 §3) — giving the model the actual code
-  behind a claim, not just a name and a short excerpt. An opt-in `[retrieval] rerank = "llm"`
+  behind a claim, not just a name and a short excerpt. When the artifact store holds no file text
+  for the entity, the source recorded with the symbol at recover time (up to 40 lines) is shown
+  instead (RFC 0177). An opt-in `[retrieval] rerank = "llm"`
   (off by default) asks the model to reorder the top candidate evidence items by real relevance
   before it answers (RFC 0140 §4) — never on the deterministic retrieval-ranking path RFC 0126's
   CI gate checks, only inside the REASON answer pipeline itself.
@@ -875,6 +878,18 @@ Retrieval quality is CI-gated: `ekos_runtime::retrieval_eval` holds a checked-in
 and a reference estate, and a workspace test fails the build if Recall@10 / MRR / nDCG@10 or
 intent-classification accuracy drops more than 2% below the recorded baseline;
 `cargo bench --bench retrieval_eval` prints the current scoreboard (RFC 0126).
+
+What search reads and how it ranks (RFC 0177):
+
+- An object is indexed by its name, kind, excerpt, and for a symbol its doc comment, signature and
+  fields. An index built by an older version is rebuilt on the next command that writes to the
+  ledger; `ekos ledger repair` does it at once.
+- A hit that holds every word of the query ranks first. Hits that hold some of the words follow,
+  ordered by BM25 rank fused with how many words each holds.
+- A file is found by its name without directory or extension (`0043-secrets-and-pii-redaction`).
+- The excerpt shown with a hit is the passage that matched the query.
+- A question that asserts something the evidence does not support is answered
+  `Premise not supported.`, followed by what the evidence does show.
 
 ### The vector arm — semantic search (RFC 0125, opt-in)
 

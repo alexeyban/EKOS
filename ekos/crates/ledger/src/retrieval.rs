@@ -269,15 +269,47 @@ pub fn exact_name_matches(query: &str, candidates: &[ScoredCandidate]) -> Vec<Sc
     if q.is_empty() {
         return Vec::new();
     }
-    candidates
-        .iter()
-        .filter(|c| c.name.trim().to_lowercase() == q)
-        .cloned()
-        .map(|mut c| {
-            c.raw_score = 1.0;
-            c
+    let promote = |matches: fn(&str, &str) -> bool| -> Vec<ScoredCandidate> {
+        candidates
+            .iter()
+            .filter(|c| matches(&c.name.trim().to_lowercase(), &q))
+            .cloned()
+            .map(|mut c| {
+                c.raw_score = 1.0;
+                c
+            })
+            .collect()
+    };
+    let exact = promote(|name, q| name == q);
+    if !exact.is_empty() {
+        return exact;
+    }
+    // RFC 0177 §3 E — a file is asked for by the name people use for it, which has no directory
+    // and often no extension (`0043-secrets-and-pii-redaction`). BM25 ranked that file below a
+    // dozen of its own sections. A stem shared by many files (`lib`, `mod`) names none of them.
+    let by_file_name = promote(names_file);
+    let distinct: std::collections::HashSet<&str> =
+        by_file_name.iter().map(|c| c.name.as_str()).collect();
+    if distinct.len() <= MAX_FILES_NAMED_BY_STEM {
+        by_file_name
+    } else {
+        Vec::new()
+    }
+}
+
+/// More files than this sharing a name means the name picks out no file.
+const MAX_FILES_NAMED_BY_STEM: usize = 3;
+
+/// Whether `name` (lowercase) is a path whose file name, with or without its extension, is `q`.
+fn names_file(name: &str, q: &str) -> bool {
+    let Some((_, file)) = name.rsplit_once('/') else {
+        return false;
+    };
+    // A section is named `<path> § <heading>`: what follows its last dot is not an extension.
+    file == q
+        || file.rsplit_once('.').is_some_and(|(stem, ext)| {
+            stem == q && !ext.is_empty() && ext.chars().all(char::is_alphanumeric)
         })
-        .collect()
 }
 
 /// Resolve a dotted attribute path against a compiled object — the fact-lookup primitive behind
@@ -384,6 +416,36 @@ mod tests {
         assert_eq!(fused.len(), 1);
         assert_eq!(fused[0].name, "x"); // x wins: appears in both lists
         assert_eq!(fused[0].signals.len(), 2);
+    }
+
+    #[test]
+    fn a_file_is_found_by_its_name_without_directory_or_extension() {
+        let c = |name: &str| ScoredCandidate {
+            id: KirId::new(),
+            name: name.into(),
+            kind: None,
+            raw_score: 0.1,
+        };
+        let candidates = [
+            c("docs/rfcs/0043-redaction.md § Design"),
+            c("docs/rfcs/0043-redaction.md"),
+            c("src/lib.rs"),
+            c("a/lib.rs"),
+            c("b/lib.rs"),
+            c("c/lib.rs"),
+        ];
+        let names = |q: &str| -> Vec<String> {
+            exact_name_matches(q, &candidates)
+                .into_iter()
+                .map(|c| c.name)
+                .collect()
+        };
+        assert_eq!(names("0043-redaction"), ["docs/rfcs/0043-redaction.md"]);
+        assert_eq!(names("0043-Redaction.md"), ["docs/rfcs/0043-redaction.md"]);
+        // Four files are called `lib`; the name picks out none of them.
+        assert!(names("lib").is_empty());
+        // A full name still wins over a stem.
+        assert_eq!(names("src/lib.rs"), ["src/lib.rs"]);
     }
 
     #[test]
