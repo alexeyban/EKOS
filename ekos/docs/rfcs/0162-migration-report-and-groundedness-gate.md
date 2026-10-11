@@ -1,6 +1,6 @@
 # RFC 0162 — Evidence-backed migration report and the groundedness gate
 
-**Status:** Draft
+**Status:** Implemented (Markdown report); HTML/PDF renderers are open ("Migrate Phase 5" in `TODO.md`)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (foundation), RFC 0156 (validation results and controls), RFC 0158

@@ -1,7 +1,8 @@
 # RFC 0164 — Logic lowering, constrained reconstruction and differential execution
 
-**Status:** Draft — not started. Its RFC 0163 prerequisites are met as of 2026-10-03 (a real node
-set with spans, computed fidelity, routine/table links, trigger classes — devlog_233)
+**Status:** Phase 1 implemented (2026-10-11, devlog_252): deterministic view lowering with a
+round trip, the anti-invention check, the fidelity gate and trigger proposals. Constrained
+reconstruction and V5 differential execution are not started — see "Phase 1" below
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0163 (the procedural IR this consumes — a hard prerequisite), RFC 0154 (coverage
@@ -129,6 +130,80 @@ Each is a proposal requiring a disposition, because every one of them moves *whe
 A validation trigger becoming a DQ rule means bad rows now arrive and are detected afterwards
 instead of being rejected on write — a real behavioural change that a human must accept explicitly.
 
+## Phase 1 — what is built (2026-10-11)
+
+A new crate, `ekos-migrate-logic`, and two commands. No model is called and no database is opened;
+nothing is written to the ledger or the target.
+
+| Piece | Where | What it does |
+|---|---|---|
+| View lowering | `lower.rs`, `ekos migrate lower` | A PostgreSQL `CREATE VIEW` becomes a ClickHouse `CREATE VIEW`, or a list of named blockers |
+| Round trip | `lower.rs` | The emitted text is parsed with the ClickHouse grammar and lowered again; it must come back identical |
+| Anti-invention check | `invention.rs`, `ekos migrate check-candidate` | A candidate is rejected when it states a table, column, literal, function or comparison its source does not |
+| Fidelity gate | `gate.rs` | Only a routine at `Statements` fidelity with no dynamic SQL may be reconstructed |
+| Trigger proposals | `triggers.rs` | One proposed shape per class, with the behaviour change it implies; `Mixed`/`Unknown` get none |
+
+### Decisions that differ from the text above
+
+- **The lowerer writes SQL through one walker, not through RFC 0160's builder.** That builder
+  emits `CREATE TABLE` from a design; it has no query model. The rule it stood for is kept: every
+  name goes through one quoting function, and nothing from the source is copied as text.
+- **The walker is a whitelist.** Each `match` over the parsed statement ends in an arm that
+  blocks. A construct with no rule stops the lowering by name (`LOGIC.CH.FUNCTION: string_agg()
+  has no lowering rule`); it is never passed through.
+- **The round trip is a fixed point, not an IR diff.** The source has no dataflow IR for a view
+  yet (the first open item under Phase 6 in `TODO.md`). What is checked: the text parses under the
+  target grammar, and the walker reading it as ClickHouse writes the same text. It found two
+  defects on the first run: an escaped backtick the target grammar does not read, and type names
+  the parser prints in another case.
+- **Every lowering is also run through the anti-invention check** against its own source before
+  it is shown. A rewrite that added a literal or a comparison would be blocked as
+  `LOGIC.INVENTION`.
+- **A materialized view is always a blocker.** The refreshable form needs a schedule and a target
+  table, which is a design decision, so no statement is emitted for it.
+- **Proposals are printed, not persisted.** `MigrationProposal` objects, their R3 approval and the
+  completeness accounting are the next step; until then `ekos migrate lower --json` is the record.
+
+### What the lowering rewrites, and why
+
+Each row is a case where the same text runs on both engines and returns something else. All were
+measured on ClickHouse 24.8 (`crates/migrate-logic/tests/clickhouse_semantics.sql`, live suite).
+
+| PostgreSQL | ClickHouse default | Emitted |
+|---|---|---|
+| `sum`/`min`/`max` over no rows is `NULL` | `0` for a non-Nullable column | `sumOrNull` … |
+| an outer join fills the missing side with `NULL` | with the type's default (`0`, `''`) | `SETTINGS join_use_nulls = 1` |
+| a name in `WHERE` is the column | the `SELECT` alias of that name | `SETTINGS prefer_column_name_to_alias = 1` |
+| `ORDER BY x DESC` puts `NULL` first | last | `DESC NULLS FIRST` |
+| `UNION` removes duplicates | needs a setting | `UNION DISTINCT` |
+| `CAST(NULL AS integer)` is `NULL` | an error | `CAST(… AS Nullable(Int32))` |
+| `length` counts characters | bytes | `char_length` |
+| unquoted names fold to lower case | names are case-sensitive | folded, then quoted |
+
+Blocked, because the answer depends on something this layer cannot see or cannot keep: `/`
+(integer or float division depends on operand types), `NOT IN` over anything but non-null
+literals, `IS TRUE`/`IS FALSE`, `avg` (exact in PostgreSQL, float in ClickHouse), every function
+without a rule, window functions, `DISTINCT ON`, CTEs, `EXCEPT`/`INTERSECT`, subqueries in
+expressions, casts with a lossy or unmeasured mapping, view column lists.
+
+### Measured on LedgerSMB
+
+| | |
+|---|---|
+| Views | 17: 7 lowered, 10 blocked (7 on functions without a rule, 7 on query shape, 4 on a cast type, 3 on `/`) |
+| Triggers | 42: 34 proposals, 8 left to a person (`Mixed`) |
+| Routines | 556: 233 eligible, 21 ineligible (dynamic SQL or gaps), 302 not PL/pgSQL |
+
+The 41% of views lowered is the honest floor for this rule set, not a target. The largest single
+gain is function coverage (`string_agg`, `repeat`, `to_char`).
+
+### Still open
+
+- Constrained reconstruction (the LLM step) and its `MigrationProposal` records.
+- V5 differential execution, fixtures from branch conditions, branch coverage.
+- Lowering `ProcStmt::Sql`, SQL-language functions and set-returning functions.
+- Persisting proposals and trigger dispositions; wiring them into approvals and the report.
+
 ## Testing
 
 - Lowering round-trip: emitted SQL re-parses and re-lowers to an IR matching the source IR, over
@@ -171,9 +246,9 @@ instead of being rejected on write — a real behavioural change that a human mu
 
 ## Acceptance criteria
 
-- [ ] Every view in both corpora lowers deterministically and round-trips.
-- [ ] The anti-invention check rejects an invented predicate and accepts a faithful one.
-- [ ] Reconstruction is impossible on `Signature` or `Partial` fidelity.
+- [ ] Every view in both corpora lowers deterministically and round-trips. *(Every lowered view round-trips; LedgerSMB lowers 7 of 17, Pagila not run.)*
+- [x] The anti-invention check rejects an invented predicate and accepts a faithful one.
+- [ ] Reconstruction is impossible on `Signature` or `Partial` fidelity. *(The gate exists and `check-candidate` enforces it; there is no reconstruction path yet to enforce it in.)*
 - [ ] Planted logic defects are caught by V5 on generated fixtures.
 - [ ] Branch coverage is reported per object, with a ratcheted floor.
-- [ ] No trigger is auto-translated; each produces a classified proposal or a human-decision finding.
+- [x] No trigger is auto-translated; each produces a classified proposal or a human-decision finding.

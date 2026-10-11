@@ -1,6 +1,6 @@
 # RFC 0154 — EKOS Migrate: architecture, state machine and fact model
 
-**Status:** Draft
+**Status:** Implemented (Phase 0, 2026-09-24, devlog_205)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0135 (provenance & determinism — Parts B/C/D are hard dependencies),

@@ -55,6 +55,8 @@ pub struct SqlAnalyzerPass {
     /// Resolved at construction time from a `SqlDialectParser` (RFC 0031) — which
     /// `sqlparser` dialect grammar to parse `sql` with.
     dialect: Box<dyn Dialect + Send + Sync>,
+    /// The dialect's name, for a `SQL001` that says which grammar the file failed under.
+    dialect_name: String,
     /// `COMMENT ON TABLE`/`COLUMN` text lifted from the raw SQL before `preprocess` removed it
     /// (RFC 0146 Phase 2). Applied to the graph after the structural parse, ahead of the LLM.
     comments: Vec<crate::sql_comments::SqlComment>,
@@ -85,6 +87,7 @@ impl SqlAnalyzerPass {
             source_path,
             llm,
             dialect: dialect_parser.sqlparser_dialect(),
+            dialect_name: dialect_parser.name().to_string(),
             max_tokens_override: None,
         }
     }
@@ -137,11 +140,12 @@ impl CompilerPass for SqlAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v4` = RFC 0176: per-statement fallback and `ALTER TABLE … ADD … FOREIGN KEY`.
     /// `v3` = RFC 0170 Phase 3: a seed row cites its own line. `v2` = RFC 0170: `Table` objects gained `check_constraints`, `seed_rows` and column
     /// `not_null`/`primary_key`/`unique`/`description_line`. `cache_inputs` hashes only the SQL, so
     /// without this a workspace recovered before 0170 keeps serving tables without them.
     fn version(&self) -> &str {
-        "v3"
+        "v4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -153,13 +157,18 @@ impl CompilerPass for SqlAnalyzerPass {
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
         // ── Structural parse ────────────────────────────────────────────────
-        let mut graph = parse_ddl_structural(&self.sql, &self.source_path, &*self.dialect);
+        let (mut graph, report) =
+            parse_ddl_structural_report(&self.sql, &self.source_path, &*self.dialect);
+
+        if let Some(message) = report.skipped_message(&self.source_path) {
+            ctx.diagnostics.lock().unwrap().warning("SQL005", message);
+        }
 
         if graph.objects.is_empty() {
-            ctx.diagnostics
-                .lock()
-                .unwrap()
-                .warning("SQL001", format!("no tables found in {}", self.source_path));
+            ctx.diagnostics.lock().unwrap().warning(
+                "SQL001",
+                no_tables_message(&self.sql, &self.source_path, &self.dialect_name, &report),
+            );
             return Ok(());
         }
 
@@ -319,7 +328,167 @@ fn foreign_key_kir_id(from: KirId, to: KirId, fk_desc: &str) -> KirId {
 /// `&GenericDialect {}` directly for ANSI-baseline callers/tests that don't need the full
 /// `SqlDialectParser` machinery.
 pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect) -> KirGraph {
+    parse_ddl_structural_report(sql, source_path, dialect).0
+}
+
+/// One statement the per-statement fallback could not parse (RFC 0176).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedStatement {
+    /// 1-based line of the statement's first word.
+    pub line: usize,
+    /// Its first few words, on one line — enough to recognise it.
+    pub head: String,
+    pub error: String,
+}
+
+/// What [`parse_ddl_structural_report`] did with a file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DdlParseReport {
+    /// Statements the fallback looked at. Zero when the file parsed whole.
+    pub statements: usize,
+    pub skipped: Vec<SkippedStatement>,
+    /// Set when nothing could be parsed at all: the whole-file error.
+    pub failed: Option<String>,
+}
+
+impl DdlParseReport {
+    /// The `SQL005` line, when statements were skipped.
+    pub fn skipped_message(&self, source_path: &str) -> Option<String> {
+        if self.skipped.is_empty() {
+            return None;
+        }
+        let tables = self
+            .skipped
+            .iter()
+            .filter(|s| is_create_table(&s.head))
+            .count();
+        let mut msg = format!(
+            "{source_path}: {} of {} statements were not parsed and skipped",
+            self.skipped.len(),
+            self.statements
+        );
+        if tables > 0 {
+            msg.push_str(&format!(
+                " — {tables} of them CREATE TABLE, so those tables are missing"
+            ));
+        }
+        for s in self.skipped.iter().take(3) {
+            msg.push_str(&format!("; line {}: `{}` — {}", s.line, s.head, s.error));
+        }
+        if self.skipped.len() > 3 {
+            msg.push_str(&format!("; and {} more", self.skipped.len() - 3));
+        }
+        Some(msg)
+    }
+}
+
+fn is_create_table(head: &str) -> bool {
+    let words: Vec<String> = head
+        .split_whitespace()
+        .take(5)
+        .map(str::to_ascii_uppercase)
+        .collect();
+    words.first().is_some_and(|w| w == "CREATE") && words.iter().any(|w| w == "TABLE")
+}
+
+/// `CREATE … TABLE` statements in `sql`, counted on code only (not inside strings, comments or
+/// dollar-quoted bodies).
+fn create_table_statements(sql: &str) -> usize {
+    use ekos_sql_dialect_sdk::lex;
+    let chars: Vec<char> = sql.chars().collect();
+    lex::statement_spans(&chars)
+        .into_iter()
+        .filter(|&(start, end)| {
+            let from = lex::skip_trivia(&chars, start).min(end);
+            let head: String = chars[from..end].iter().take(80).collect();
+            is_create_table(&head)
+        })
+        .count()
+}
+
+/// The `SQL001` line. A file that states tables and yields none is almost always parsed under the
+/// wrong dialect, and "no tables found" reads as "this file has no schema" (RFC 0176).
+fn no_tables_message(
+    sql: &str,
+    source_path: &str,
+    dialect_name: &str,
+    report: &DdlParseReport,
+) -> String {
+    let stated = create_table_statements(sql);
+    if stated == 0 {
+        return format!("no tables found in {source_path}");
+    }
+    let error = report
+        .skipped
+        .iter()
+        .find(|s| is_create_table(&s.head))
+        .map(|s| format!("line {}: {}", s.line, s.error))
+        .or_else(|| report.failed.clone())
+        .unwrap_or_else(|| "no parse error was recorded".to_string());
+    format!(
+        "no tables recovered from {source_path}, though it contains {stated} CREATE TABLE \
+         statement(s): none parsed under dialect {dialect_name:?}. Check \
+         [[recover.sql.dialect-rules]] in ekos.toml. First error — {error}"
+    )
+}
+
+/// RFC 0176: parse what can be parsed. Each top-level statement is tried alone; one that fails is
+/// blanked out — spaces, line breaks kept — and the blanked file is parsed whole, so every line
+/// number downstream is still the file's own.
+fn parse_statement_by_statement(
+    sql: &str,
+    dialect: &dyn Dialect,
+) -> Option<(Vec<Statement>, DdlParseReport)> {
+    use ekos_sql_dialect_sdk::lex;
+    let chars: Vec<char> = sql.chars().collect();
+    let spans = lex::statement_spans(&chars);
+    let mut blanked = chars.clone();
+    let mut report = DdlParseReport::default();
+    for (start, end) in spans {
+        let from = lex::skip_trivia(&chars, start).min(end);
+        if chars[from..end]
+            .iter()
+            .all(|c| c.is_whitespace() || *c == ';')
+        {
+            continue;
+        }
+        report.statements += 1;
+        let text: String = chars[start..end].iter().collect();
+        let Err(e) = Parser::parse_sql(dialect, &text) else {
+            continue;
+        };
+        for c in &mut blanked[start..end] {
+            if *c != '\n' {
+                *c = ' ';
+            }
+        }
+        let head: String = chars[from..end].iter().collect();
+        let head = head
+            .split_whitespace()
+            .take(6)
+            .collect::<Vec<_>>()
+            .join(" ");
+        report.skipped.push(SkippedStatement {
+            line: chars[..from].iter().filter(|c| **c == '\n').count() + 1,
+            head: head.chars().take(80).collect(),
+            error: e.to_string(),
+        });
+    }
+    if report.skipped.len() == report.statements {
+        return None;
+    }
+    let text: String = blanked.into_iter().collect();
+    Parser::parse_sql(dialect, &text).ok().map(|s| (s, report))
+}
+
+/// [`parse_ddl_structural`], with an account of what could not be parsed (RFC 0176).
+pub fn parse_ddl_structural_report(
+    sql: &str,
+    source_path: &str,
+    dialect: &dyn Dialect,
+) -> (KirGraph, DdlParseReport) {
     let mut graph = KirGraph::new();
+    let mut report = DdlParseReport::default();
 
     let stmts = match Parser::parse_sql(dialect, sql) {
         Ok(s) => s,
@@ -331,12 +500,19 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect)
             let repaired = crate::statement_repair::ensure_statement_separators(sql);
             match Parser::parse_sql(dialect, &repaired) {
                 Ok(s) => s,
-                Err(_) => {
-                    warn!(
-                        "sqlparser failed on {source_path}: {first_err}; falling back to empty graph"
-                    );
-                    return graph;
-                }
+                Err(_) => match parse_statement_by_statement(sql, dialect) {
+                    Some((s, r)) => {
+                        report = r;
+                        s
+                    }
+                    None => {
+                        warn!(
+                            "sqlparser failed on {source_path}: {first_err}; falling back to empty graph"
+                        );
+                        report.failed = Some(first_err.to_string());
+                        return (graph, report);
+                    }
+                },
             }
         }
     };
@@ -445,9 +621,45 @@ pub fn parse_ddl_structural(sql: &str, source_path: &str, dialect: &dyn Dialect)
                 }
             }
         }
+        // RFC 0176: `ALTER TABLE a ADD [CONSTRAINT …] FOREIGN KEY (…) REFERENCES b (…)` — how
+        // `pg_dump` states every foreign key.
+        if let Statement::AlterTable {
+            name, operations, ..
+        } = stmt
+        {
+            let from_name = name.to_string().to_lowercase();
+            let Some(&from_id) = table_ids.get(&from_name) else {
+                continue;
+            };
+            for op in operations {
+                if let sqlparser::ast::AlterTableOperation::AddConstraint(
+                    TableConstraint::ForeignKey {
+                        foreign_table,
+                        referred_columns,
+                        columns: fk_columns,
+                        ..
+                    },
+                ) = op
+                {
+                    let to_name = foreign_table.to_string().to_lowercase();
+                    if let Some(&to_id) = table_ids.get(&to_name) {
+                        add_fk_relationship(
+                            &mut graph,
+                            source_path,
+                            from_id,
+                            to_id,
+                            &from_name,
+                            &col_names(fk_columns),
+                            &to_name,
+                            &col_names(referred_columns),
+                        );
+                    }
+                }
+            }
+        }
     }
 
-    graph
+    (graph, report)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1252,6 +1464,114 @@ mod tests {
         );
     }
 
+    // ── RFC 0176 ─────────────────────────────────────────────────────────
+
+    const ONE_BAD_STATEMENT: &str = "CREATE TABLE a (id int PRIMARY KEY);\n\
+        FROBNICATE THE widget;\n\
+        CREATE TABLE b (id int PRIMARY KEY, a_id int REFERENCES a(id));\n\
+        INSERT INTO a (id) VALUES (7);\n";
+
+    #[test]
+    fn one_unknown_statement_no_longer_loses_the_file() {
+        let (g, report) = parse_ddl_structural_report(
+            ONE_BAD_STATEMENT,
+            "s.sql",
+            &sqlparser::dialect::PostgreSqlDialect {},
+        );
+        let mut names: Vec<&str> = g.objects.iter().map(|o| o.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["a", "b"]);
+        assert_eq!(g.relationships.len(), 1);
+        assert_eq!(report.statements, 4);
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.skipped[0].line, 2);
+        assert_eq!(report.skipped[0].head, "FROBNICATE THE widget;");
+        let msg = report.skipped_message("s.sql").unwrap();
+        assert!(msg.contains("1 of 4 statements"), "{msg}");
+        assert!(!msg.contains("CREATE TABLE"), "{msg}");
+    }
+
+    #[test]
+    fn lines_after_a_skipped_statement_are_still_the_files_own() {
+        let g = parse_ddl_structural(
+            ONE_BAD_STATEMENT,
+            "s.sql",
+            &sqlparser::dialect::PostgreSqlDialect {},
+        );
+        let a = g.objects.iter().find(|o| o.name == "a").unwrap();
+        assert_eq!(a.properties["seed_rows"][0]["line"], 4);
+    }
+
+    #[test]
+    fn a_semicolon_in_a_dollar_quoted_body_does_not_split_a_statement() {
+        let sql = "CREATE TABLE a (id int);\n\
+            FROBNICATE $$ one; two; three $$;\n\
+            CREATE TABLE b (id int);\n";
+        let (g, report) =
+            parse_ddl_structural_report(sql, "s.sql", &sqlparser::dialect::PostgreSqlDialect {});
+        assert_eq!(g.objects.len(), 2);
+        assert_eq!(report.statements, 3);
+        assert_eq!(report.skipped.len(), 1);
+    }
+
+    #[test]
+    fn a_file_that_parses_whole_reports_nothing() {
+        let (g, report) =
+            parse_ddl_structural_report(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
+        assert_eq!(g.objects.len(), 6);
+        assert_eq!(report, DdlParseReport::default());
+        assert!(report.skipped_message("ecommerce.sql").is_none());
+    }
+
+    #[test]
+    fn a_skipped_create_table_is_named_as_a_lost_table() {
+        let sql = "CREATE TABLE a (id int);\nCREATE TABLE b (id int) FROBNICATED BY x;\n";
+        let (g, report) =
+            parse_ddl_structural_report(sql, "s.sql", &sqlparser::dialect::PostgreSqlDialect {});
+        assert_eq!(g.objects.len(), 1);
+        let msg = report.skipped_message("s.sql").unwrap();
+        assert!(msg.contains("1 of them CREATE TABLE"), "{msg}");
+        assert!(msg.contains("line 2"), "{msg}");
+    }
+
+    #[test]
+    fn sql001_says_why_when_the_file_states_tables() {
+        let sql = "CREATE TABLE b (id int) FROBNICATED BY x;\n";
+        let (g, report) =
+            parse_ddl_structural_report(sql, "s.sql", &sqlparser::dialect::PostgreSqlDialect {});
+        assert!(g.objects.is_empty());
+        let msg = no_tables_message(sql, "s.sql", "postgres", &report);
+        assert!(msg.contains("1 CREATE TABLE statement(s)"), "{msg}");
+        assert!(msg.contains("\"postgres\""), "{msg}");
+        assert!(msg.contains("dialect-rules"), "{msg}");
+        // A string that mentions CREATE TABLE is not a statement.
+        let plain = "SELECT 'CREATE TABLE x';\n";
+        let (_, report) =
+            parse_ddl_structural_report(plain, "q.sql", &sqlparser::dialect::PostgreSqlDialect {});
+        assert_eq!(
+            no_tables_message(plain, "q.sql", "postgres", &report),
+            "no tables found in q.sql"
+        );
+    }
+
+    #[test]
+    fn alter_table_foreign_keys_become_edges() {
+        let sql = "CREATE TABLE b (id int PRIMARY KEY);\n\
+            CREATE TABLE a (id int PRIMARY KEY, b_id int, z_id int);\n\
+            ALTER TABLE ONLY a ADD CONSTRAINT a_b_fkey FOREIGN KEY (b_id) REFERENCES b(id);\n\
+            ALTER TABLE ONLY a ADD CONSTRAINT a_z_fkey FOREIGN KEY (z_id) REFERENCES z(id);\n";
+        let g = parse_ddl_structural(sql, "dump.sql", &sqlparser::dialect::PostgreSqlDialect {});
+        assert_eq!(g.relationships.len(), 1);
+        let (a, b) = (
+            g.objects.iter().find(|o| o.name == "a").unwrap(),
+            g.objects.iter().find(|o| o.name == "b").unwrap(),
+        );
+        assert_eq!(
+            (g.relationships[0].from, g.relationships[0].to),
+            (a.id, b.id)
+        );
+    }
+
     #[test]
     fn structural_parse_extracts_six_tables() {
         let graph = parse_ddl_structural(ECOMMERCE_SQL, "ecommerce.sql", &GenericDialect {});
@@ -1388,20 +1708,30 @@ mod tests {
         assert!(!cols.as_array().unwrap().is_empty());
     }
 
-    /// RFC 0031 regression: this exact file, parsed with `GenericDialect` (pre-RFC-0031
-    /// behavior for every `.sql` file, regardless of content), fails outright — 0 tables
-    /// recovered, matching devlog_31's documented 0%-mapped finding.
+    /// RFC 0031 regression: this exact file fails as a whole under `GenericDialect` (pre-RFC-0031
+    /// behavior for every `.sql` file), devlog_31's 0%-mapped finding. Since RFC 0176 it degrades
+    /// per statement instead of recovering nothing, and says what it skipped — the right dialect
+    /// still recovers more, with nothing skipped.
     #[test]
-    fn generic_dialect_fails_on_real_mysql_hash_comments_fixture() {
-        let graph = parse_ddl_structural(
+    fn generic_dialect_degrades_on_real_mysql_hash_comments_fixture() {
+        use ekos_plugin_sql_dialect_mysql::MySqlDialectParser;
+
+        let (generic, report) = parse_ddl_structural_report(
             MYSQL_HASH_COMMENTS_SQL,
             "mysql_hash_comments.sql",
             &GenericDialect {},
         );
         assert!(
-            graph.objects.is_empty(),
-            "GenericDialect is expected to fail on '#' comments, recovering 0 tables"
+            !report.skipped.is_empty(),
+            "GenericDialect cannot parse '#' comments; the report must say what was skipped"
         );
+        let (mysql, mysql_report) = parse_ddl_structural_report(
+            MYSQL_HASH_COMMENTS_SQL,
+            "mysql_hash_comments.sql",
+            &*MySqlDialectParser.sqlparser_dialect(),
+        );
+        assert_eq!(mysql_report, DdlParseReport::default());
+        assert!(generic.objects.len() < mysql.objects.len());
     }
 
     /// The fix: selecting `MySqlDialect` (via the registry, exercised here directly) parses

@@ -1,0 +1,17 @@
+[package]
+name = "ekos-migrate-logic"
+description = "RFC 0164 — deterministic lowering of recovered logic to a target, the anti-invention check, the fidelity gate and trigger redesign proposals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-migrate-target-clickhouse.workspace = true
+ekos-plpgsql.workspace = true
+sqlparser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

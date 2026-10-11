@@ -1,6 +1,6 @@
 # RFC 0157 — Live PostgreSQL connector, profiling tiers, and redaction at the live entry point
 
-**Status:** Draft
+**Status:** Implemented, verified live ("Migrate Phase 2" in `TODO.md`)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (foundation), RFC 0043 (redaction baseline), RFC 0146 (PostgreSQL dialect —

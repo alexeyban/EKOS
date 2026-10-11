@@ -103,7 +103,7 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `simulation` (RFC 0047-0055's opt-in World Engine — see below), `clickhouse-query` (RFC 0056's
 opt-in live NL-to-SQL query engine — see below), `evals` (RFC 0138's answer-grading harness — see
 below), `session` (RFC 0151 agent session memory), `plpgsql` (RFC 0163's PL/pgSQL parser and
-procedural IR), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-validate`, `migrate-approval`,
+procedural IR), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-logic`, `migrate-validate`, `migrate-approval`,
 `migrate-report`, `migrate-target-clickhouse` and `pg-live` (RFC 0154–0162 — see below). The same workspace also builds `ekos` with a generic extension seam (RFC 0149) that out-of-tree
 builds plug extra connectors and MCP tools into.
 
@@ -616,13 +616,21 @@ dialect = "clickhouse"
 ```
 
 This matters for any real schema **dump** — `pg_dump` output, a ClickHouse `structure.sql`, or
-hand-written DDL past plain ANSI. `parse_ddl_structural` parses the whole file in one pass, so a
-single statement the dialect can't handle (`CREATE TYPE … AS ENUM`, `CREATE SEQUENCE`,
-`ENGINE = MergeTree`, `CODEC(...)`, …) discards *every* table in that file — reported only as a
-buried `SQL001: no tables found` warning, never an error. The `postgres` / `clickhouse` dialects
-carry the preprocessing (RFC 0057/0058/0059) that makes real dumps parse; `generic` does not. If
-`ekos ekl "FIND Object WHERE kind = 'Table' COUNT"` returns 0 for a repo that clearly has a
-schema, this rule is missing.
+hand-written DDL past plain ANSI. The `postgres` / `clickhouse` dialects carry the preprocessing
+(RFC 0057/0058/0059) that makes real dumps parse; `generic` does not.
+
+A statement the dialect cannot parse costs that statement, not the file (RFC 0176). The rest of
+the file is still recovered, and `ekos recover` says what was skipped:
+
+- `SQL005` — `<file>: 2 of 61 statements were not parsed and skipped`, with the line, the first
+  words and the parser's error for each. A skipped `CREATE TABLE` is called out as a lost table.
+- `SQL001` — when a file states a `CREATE TABLE` and no table was recovered, the message names the
+  dialect it was parsed under and the first error, and points at `[[recover.sql.dialect-rules]]`.
+  A file with no `CREATE TABLE` keeps the plain `no tables found`.
+
+If `ekos ekl "FIND Object WHERE kind = 'Table' COUNT"` returns 0 for a repo that clearly has a
+schema, read those two warnings first. Foreign keys declared after the tables, as `pg_dump` writes
+them (`ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY`), become `ForeignKey` edges too.
 
 **Hand-written schemas need more than the right dialect (RFC 0146).** Everything above was tuned
 against `pg_dump`, which emits a narrow, mechanical subset of PostgreSQL. A human-maintained schema
@@ -1120,7 +1128,7 @@ server over stdio (RFC 0013), a raw TCP socket (`--tcp`, RFC 0115), or Streamabl
 `lexical`/`vector`/`hybrid` for semantic matching, plus `arms_run` in the response — RFC 0125),
 `ekos_query` /
 `ekos_retrieve` (compiled fact + graph answers and the inspectable query plan / evidence set, no
-LLM — RFC 0124), `ekos_ekl` (EKL supports point-in-time `AS OF <timestamp>` queries,
+LLM — RFC 0124), `ekos_ekl` (EKL filters on built-in columns and on any property, `WHERE status = 'confirmed'` or a nested `a.b`; a field no candidate has is an `unknown field` error, not an empty result — RFC 0175; it supports point-in-time `AS OF <timestamp>` queries,
 `COUNT`/`GROUP BY` aggregation — RFC 0096, and `SEMANTIC 'text'` retrieval candidate sets — RFC
 0124), `ekos_neighborhood` (`depth` 0-3, stops at `max_objects` — default 500, at most
 5,000 — and says so with `truncated: true`),
@@ -1357,6 +1365,8 @@ ekos migrate load --unit public.orders                   # create, then copy chu
 ekos migrate validate --unit public.orders --tier v3     # V1 counts, V2 aggregates, V3 row hashes
 ekos migrate report --out report.md     # compiled from ledger facts, every claim cited
 ekos migrate status                     # units by state, and what is blocking
+ekos migrate lower --database lsmb --sql   # views → ClickHouse, trigger proposals, routine eligibility
+ekos migrate check-candidate --source open_items --candidate view.sql   # does it state anything new?
 ```
 
 What each stage guarantees:
@@ -1366,6 +1376,25 @@ What each stage guarantees:
   carrying a password is refused rather than parsed and stripped — it has already leaked into shell
   history. Row values never reach the ledger either: profiles hold statistics, and a column
   classified as PII gets no bounds and no top-k at any tier.
+- **Logic is lowered by rule, or not at all (RFC 0164, Phase 1).** `ekos migrate lower` reads the
+  recovered views, triggers and routines from the ledger and their definitions from the source
+  files. It opens no connection, calls no model and writes nothing.
+  - A view becomes a ClickHouse `CREATE VIEW`, rewritten where the same text would return
+    something else: `sumOrNull` for `sum`, `join_use_nulls` for outer joins, explicit `NULLS FIRST`,
+    `Nullable(T)` casts, `char_length`, quoted names. Each rewrite is listed under the view.
+  - Anything without a rule blocks the view by name (`LOGIC.CH.DIVISION_TYPES`,
+    `LOGIC.CH.FUNCTION: string_agg() has no lowering rule`). A materialized view always blocks: a
+    ClickHouse materialized view is an insert trigger, not a stored result.
+  - The emitted statement must parse under the ClickHouse grammar and read back identically, and
+    must state nothing its source does not.
+  - A trigger gets a proposed replacement per class and the behaviour change it implies; `Mixed`
+    and `Unknown` triggers are left to a person. No trigger is translated.
+  - A routine is eligible for reconstruction only when every statement was recovered and none is
+    built at run time.
+
+  `ekos migrate check-candidate` applies the second check to a statement you supply: it is rejected
+  if it names a table, column, literal, function or comparison the source does not. Reconstruction
+  by a model and differential execution (V5) are not built yet.
 - **Sessions are read-only against the source** (`default_transaction_read_only`, statement/lock
   timeouts, low `work_mem`, a replica-lag guard that refuses a run above the configured threshold).
 - **Assessment measures, it does not guess.** Each finding carries the SQL that measured it.

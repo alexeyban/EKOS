@@ -92,6 +92,9 @@ const DQ_SENTINEL_DATE: Rule = Rule {
 
 /// Duplicates on a column the schema treats as unique-ish. Measured, because "the application
 /// guarantees it" is a claim and this is the cheapest way to check it.
+///
+/// A column a declared foreign key references *from* is skipped: `order_line.order_id` is
+/// key-shaped by name and repeats on purpose (RFC 0175).
 const DQ_DUPLICATE_KEY: Rule = Rule {
     id: "DQ.UNIQ.001",
     title: "duplicate values in a key-shaped column",
@@ -103,6 +106,7 @@ const DQ_DUPLICATE_KEY: Rule = Rule {
         let n = c.column.to_ascii_lowercase();
         (n.ends_with("_id") || n == "id" || n.ends_with("_key") || n.ends_with("_code"))
             && c.distinct_estimate.is_some()
+            && !c.references_another_table
     },
     measure: |c| {
         Some(format!(

@@ -43,6 +43,27 @@ fn agent_label(config: &EkosConfig) -> String {
     }
 }
 
+/// `config` with `--agent` applied. `[llm] model` and `base-url` name a model and an endpoint of
+/// the *configured* provider, so they are dropped when the run switches to another one: with
+/// `provider = "openai"`, `model = "deepseek-…"`, `--agent ollama` used to ask the local Ollama
+/// for the cloud model's name and fail every scenario.
+fn with_agent(config: &EkosConfig, agent: Option<&str>) -> Result<EkosConfig> {
+    let mut run_config = config.clone();
+    let provider = match agent {
+        None => return Ok(run_config),
+        Some("claude") | Some("anthropic") => None,
+        Some("ollama") => Some("ollama".to_string()),
+        Some("openai") => Some("openai".to_string()),
+        Some(other) => anyhow::bail!("unknown --agent {other:?} (want claude/ollama/openai)"),
+    };
+    if provider != run_config.llm.provider {
+        run_config.llm.model = None;
+        run_config.llm.base_url = None;
+    }
+    run_config.llm.provider = provider;
+    Ok(run_config)
+}
+
 /// RFC 0138 Phase 4: `build_llm_provider` silently degrades to the stub `MockLlmProvider` when
 /// the configured provider's API key isn't set — a reasonable default for `recover`/`commit`
 /// (structural analysis without LLM enrichment is a legitimate degraded mode there), but for
@@ -86,14 +107,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
         );
     }
 
-    let mut run_config = config.clone();
-    match opts.agent {
-        Some("claude") | Some("anthropic") => run_config.llm.provider = None,
-        Some("ollama") => run_config.llm.provider = Some("ollama".to_string()),
-        Some("openai") => run_config.llm.provider = Some("openai".to_string()),
-        Some(other) => anyhow::bail!("unknown --agent {other:?} (want claude/ollama/openai)"),
-        None => {}
-    }
+    let run_config = with_agent(config, opts.agent)?;
 
     let artifact_dir = run_config.artifact_dir(cwd);
     let llm = build_llm_provider(&run_config, &artifact_dir);
@@ -236,6 +250,27 @@ pub fn regrade(cwd: &Path, config: &EkosConfig, opts: EvalRegradeOpts) -> Result
 mod tests {
     use super::*;
     use ekos_recovery::MockLlmProvider;
+
+    #[test]
+    fn switching_agent_drops_the_configured_providers_model_and_endpoint() {
+        let mut config = EkosConfig::default();
+        config.llm.provider = Some("openai".into());
+        config.llm.model = Some("deepseek-v4-flash".into());
+        config.llm.base_url = Some("https://example.invalid/v1".into());
+
+        let local = with_agent(&config, Some("ollama")).unwrap();
+        assert_eq!(local.llm.provider.as_deref(), Some("ollama"));
+        assert_eq!(local.llm.model, None);
+        assert_eq!(local.llm.base_url, None);
+
+        // The same provider, or no override, keeps what the config says.
+        for agent in [None, Some("openai")] {
+            let same = with_agent(&config, agent).unwrap();
+            assert_eq!(same.llm.model.as_deref(), Some("deepseek-v4-flash"));
+            assert!(same.llm.base_url.is_some());
+        }
+        assert!(with_agent(&config, Some("gpt")).is_err());
+    }
 
     #[test]
     fn a_real_provider_passes_the_mock_check() {

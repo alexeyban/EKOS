@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-56 commits, RFCs 0154–0174, devlogs 204–251. Not yet tagged; build from source or wait for the
+57 commits, RFCs 0154–0176, devlogs 204–252. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -10,6 +10,7 @@ next release.
   - **Assess:** live catalog and profiling (PII suppressed, read-only sessions), drift against the repository's DDL, data-quality and compatibility rules that measure affected rows, inferred foreign keys from real code joins and `pg_stat_statements`.
   - **Load:** type mapping with lossiness, a ClickHouse design and generated DDL, a statement classifier with guarded execution, human-only approvals pinned to evidence.
   - **Validate and report:** V1–V3 validation, a compiled and citation-verified report. Verified live on a real table.
+- **Logic lowering, Phase 1** (RFC 0164): `ekos migrate lower` turns recovered PostgreSQL views into ClickHouse views by rule, with each rewrite listed, or blocks them by a named rule. The output is checked to parse on the target and to state nothing the source does not. Triggers get a proposed replacement per class; routines get an eligibility verdict. `ekos migrate check-candidate` runs the anti-invention check on a statement you supply. No model, no connection, nothing written. Reconstruction and differential execution are not built.
 - **Stored procedures, views and triggers** (RFC 0163, 0169): every PL/pgSQL routine is parsed (LedgerSMB 212/212) and linked to the tables it reads and writes and the routines it calls. Views become ledger objects. Triggers are classified by what their function does. All three are documented like code.
 - **Business semantics → LinkML** (RFC 0170, opt-in `[semantics]`):
   - concepts, code meanings, constraints and gaps recovered from SQL, dbt, Perl, Python and glossaries;
@@ -27,6 +28,13 @@ next release.
 
   Resolving is human-only through `ekos conflicts list|show|resolve`; MCP has a read-only `ekos_conflicts`.
   An `ekos_query` / `ekos_retrieve` claim about an attribute with an open conflict carries `disputed: true` and the conflict ids, and `ekos ask` tells the model the same (RFC 0173). A label conflict is also linked to its column's table. The web console has a Conflicts tab and rings disputed objects in the graph (RFC 0174).
+
+**Fixed: results that were wrong without saying so** (RFC 0175, 0176)
+- **EKL** filters, sorts and groups on properties (`WHERE status = 'confirmed'`, nested `a.b`). A field no candidate has is an `unknown field` error; it used to return 0 rows.
+- **SQL schemas:** one statement the dialect cannot parse no longer discards every table in the file. `SQL005` lists what was skipped; `SQL001` names the dialect and the error when a file states tables and yields none. `ALTER TABLE … ADD … FOREIGN KEY` becomes a foreign-key edge. LedgerSMB: 184 → 197 tables, 218 → 229 foreign keys.
+- **Migrate:** `DQ.UNIQ.001` no longer blocks on foreign-key columns. Inferred keys attribute each join column to the table its qualifier names (it proposed `country.country_id → entity.id`).
+- **Treasury:** explorer reads are paged; a history past 10,000 rows used to be cut short silently. One that cannot be read whole is now an error.
+- **Evals:** `ekos eval run --agent ollama` works under a cloud `[llm]` config.
 
 **Fixes**
 - `ekos resolve` no longer stops on same-name groups across the database and code namespaces (LedgerSMB 16 → 0 conflicts).

@@ -119,6 +119,10 @@ pub struct ColumnContext {
     /// values (RFC 0157).
     pub pii: bool,
     pub row_count: i64,
+    /// `true` when a declared foreign key has this column on its referencing side. Such a column
+    /// repeats by design — many `acc_trans` rows share one `trans_id` — so a rule about duplicate
+    /// keys must not read its name as a claim of uniqueness (RFC 0175).
+    pub references_another_table: bool,
 }
 
 impl ColumnContext {

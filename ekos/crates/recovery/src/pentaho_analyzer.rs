@@ -498,6 +498,7 @@ fn map_step(step: &roxmltree::Node, step_type: &str, xml: &str) -> TransformNode
             TransformNode::Source {
                 object_name,
                 columns,
+                alias: None,
             }
         }
         "FilterRows" => TransformNode::Filter {
@@ -849,7 +850,7 @@ mod tests {
         let graph = sample_graph();
         assert!(matches!(
             &graph.nodes[0],
-            TransformNode::Source { object_name, columns }
+            TransformNode::Source { object_name, columns, .. }
                 if object_name == "dbo.cust_mstr" && columns.is_empty()
         ));
     }
@@ -895,7 +896,7 @@ FROM Sales.SalesPerson
             parse_kettle_xml("jobs/sales_person.ktr", "transformation", KTR_WITH_ROW_META).unwrap();
         assert!(matches!(
             &graph.nodes[0],
-            TransformNode::Source { object_name, columns }
+            TransformNode::Source { object_name, columns, .. }
                 if object_name == "Sales.SalesPerson"
                     && columns == &vec!["BusinessEntityID".to_string(), "TerritoryID".to_string()]
         ));

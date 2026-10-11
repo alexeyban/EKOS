@@ -1,6 +1,6 @@
 # RFC 0159 — Type mapping registry and ClickHouse target design
 
-**Status:** Draft
+**Status:** Implemented; design and mapping facts are not persisted yet ("Migrate Phase 4" in `TODO.md`)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (foundation), RFC 0157 (profiles drive specialization), RFC 0158 (lossiness

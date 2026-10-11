@@ -899,11 +899,13 @@ dependencies = [
  "ekos-migrate",
  "ekos-migrate-approval",
  "ekos-migrate-dq",
+ "ekos-migrate-logic",
  "ekos-migrate-report",
  "ekos-migrate-target-clickhouse",
  "ekos-migrate-validate",
  "ekos-observation-sdk",
  "ekos-pg-live",
+ "ekos-plpgsql",
  "ekos-plugin-clickhouse",
  "ekos-plugin-confluence",
  "ekos-plugin-crypto",
@@ -1238,6 +1240,18 @@ dependencies = [
  "ekos-migrate",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ekos-migrate-logic"
+version = "1.0.3"
+dependencies = [
+ "ekos-migrate-target-clickhouse",
+ "ekos-plpgsql",
+ "serde",
+ "serde_json",
+ "sqlparser",
  "thiserror 2.0.18",
 ]
 

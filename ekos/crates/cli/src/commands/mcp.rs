@@ -4109,6 +4109,7 @@ mod tests {
                 TransformNode::Source {
                     object_name: "dbo.cust_mstr".to_string(),
                     columns: vec!["id".to_string(), "status".to_string()],
+                    alias: None,
                 },
                 TransformNode::Filter {
                     condition: condition.to_string(),

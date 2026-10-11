@@ -1849,7 +1849,9 @@ These items have no single phase — they must be maintained and grown throughou
     *generic* PII in free text — email addresses in prose are not yet covered (only credential-
     shaped secrets); structured connector-modeled PII (git commit author name/email) is
     intentionally exempt, see the RFC's Non-goals.
-  - [ ] *Env-var-only connector secrets* — not yet done. Connectors need DB passwords and API
+  - [ ] *Env-var-only connector secrets* — partly done: Migrate connection aliases have no
+    password field, only `secret-env` (RFC 0154). Still open: a literal `password = "…"` is
+    silently ignored rather than refused, and `ekos doctor` does not check the variables. Original note: Connectors need DB passwords and API
     tokens (Postgres, Salesforce, SAP). Standardise: all secrets referenced by env-var name in
     `ekos.toml` (e.g., `password_env = "PG_PASSWORD"`), never as literal values; `ekos doctor`
     verifies referenced vars exist.
@@ -3066,7 +3068,10 @@ are excluded — see the full exclusion list in the planning history if needed.
   connector, not just crypto (RFC 0017); dynamic/runtime plugin loading (`.so`/WASM) — RFC 0031
   itself calls this "a known limitation, not solved here" (RFC 0006, RFC 0031).
 
-- [ ] **`SQL001` should be actionable, not just "no tables found".** When `parse_ddl_structural`
+- [ ] *(RFC 0176 closed three parts of this: `SQL001` names the dialect and the first error when the
+  file states a `CREATE TABLE`; one bad statement no longer loses the file; `ALTER TABLE … ADD …
+  FOREIGN KEY` becomes an edge. Open: Ecto `schema`/migration → `Table`.)*
+  **`SQL001` should be actionable, not just "no tables found".** When `parse_ddl_structural`
   produces zero tables but the file text contains `CREATE TABLE`, that is almost always a dialect
   misconfiguration (wrong / missing `[[recover.sql.dialect-rules]]`), not an empty schema. The
   warning currently reads like the file has no schema. Found live (devlog_177): the `analytics`
@@ -5337,8 +5342,9 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [x] **Verified non-destructive**: after dropping 9,130 files, `recover` produced *identical*
     symbol counts (2,623 Rust symbols / 1,734 `Calls` / 128 JS modules / 2,518 JS symbols). All
     signal retained.
-  - [ ] **Re-run `ekos eval run`** — every published answer-quality number so far was measured
-    against a corpus that was ~94% not our code.
+  - [x] **Re-run `ekos eval run`** — done on the clean corpus: local llama3 2026-09-09 and 09-14
+    (101 scenarios: 49.7% answer, 51.6% grounded), then Zen `deepseek-v4-flash` 70 → 79 → 87/101
+    (devlog_185/186). Found stale 2026-10-11; a further local run is in `evals/reports/`.
   - [ ] **`[llm-description]` still unrun**: enabled, but both rebuilds declined the cost prompt
     (6,471 calls on the clean corpus, was 44,257), so the ledger has no `ai_overview`/`ai_usage`.
 - [x] **RFC 0141 §4 — `properties.kind` → `symbol_kind` (devlog_174).** A symbol carried two facts
@@ -5394,12 +5400,12 @@ are excluded — see the full exclusion list in the planning history if needed.
     shape.
   - [x] `mscorlib.dll` first produced a single **34 MB artifact**; `DecompiledAst::split_by_type` makes
     both backends emit one artifact per type.
-  - [ ] No statement-level reconstruction (`Fidelity::Structural`). The decompiler sidecar is *defined but
+  - [x] *(closed: RFC 0150 in the private `ekos-binary` repo, devlog_192; MCP argument checking devlog_225)* No statement-level reconstruction (`Fidelity::Structural`). The decompiler sidecar is *defined but
     unbuilt* behind the same seam — build it only if a customer needs real method bodies.
-  - [ ] Obfuscated/packed binaries are out of scope; detection is in scope but not yet implemented.
+  - [x] *(closed: RFC 0150 in the private `ekos-binary` repo, devlog_192; MCP argument checking devlog_225)* Obfuscated/packed binaries are out of scope; detection is in scope but not yet implemented.
   - [ ] `Calls` edges resolve only to methods compiled in the same run — framework targets stay as the
     method's `call_targets` property. Revisit if cross-workspace assembly resolution is ever wanted.
-  - [ ] The LLM reconstruction stage has not been run against a real provider yet (subscription/promo-token
+  - [x] *(closed: RFC 0150 in the private `ekos-binary` repo, devlog_192; MCP argument checking devlog_225)* The LLM reconstruction stage has not been run against a real provider yet (subscription/promo-token
     policy); its guards are unit-tested, not live-measured. Run it on a real legacy app before Phase 5.
   - [x] **First real-app run (devlog_190, 2026-09-18)** — `alexeyban/tsd` WinCE barcode-terminal
     `bin/Release`, 12 assemblies. Found and fixed four defects: .NET `Calls` joined **0 of 36,107** call
@@ -5408,12 +5414,12 @@ are excluded — see the full exclusion list in the planning history if needed.
     client (shared source + duplicate exe copies) — now scoped by `CallSite::target_assembly`; the
     `System.Data.`/`System.IO.Path` I/O prefixes claimed in-memory work (**4,130 → 174** boundaries).
     Now 10,956 edges, all cross-binary edges matching a real `AssemblyRef`.
-  - [ ] Method-level I/O patterns: `DataSet.ReadXml(path)`/`WriteXml(path)` are real file I/O but share
+  - [x] *(closed: RFC 0150 in the private `ekos-binary` repo, devlog_192; MCP argument checking devlog_225)* Method-level I/O patterns: `DataSet.ReadXml(path)`/`WriteXml(path)` are real file I/O but share
     an owner with in-memory `DataSet` members, so the owner-prefix table cannot claim them.
-  - [ ] `BinaryMethod.call_targets` is capped at 32 (`capped()`, shared with literals) with **no truncation
+  - [x] *(closed: RFC 0150 in the private `ekos-binary` repo, devlog_192; MCP argument checking devlog_225)* `BinaryMethod.call_targets` is capped at 32 (`capped()`, shared with literals) with **no truncation
     marker** — a caller-scan over it gives false "never called" answers (devlog_190 follow-up). Record
     `call_targets_truncated`/total count like the literal lists do, or document it on the property.
-  - [ ] MCP tools ignore unknown arguments silently (`ekos_impact` given `max_depth` ran at its default
+  - [x] *(closed: RFC 0150 in the private `ekos-binary` repo, devlog_192; MCP argument checking devlog_225)* MCP tools ignore unknown arguments silently (`ekos_impact` given `max_depth` ran at its default
     `max_hops: 5`). Consider rejecting unknown keys against the published `inputSchema`.
 
 - [x] **RFC 0149 — extension seam; binary decompiler moved to a private repo (devlog_191, 2026-09-18).**
@@ -5481,19 +5487,22 @@ are excluded — see the full exclusion list in the planning history if needed.
     hit the 4,096 floor. The budget scales with table count; reasoning cost scales with *input* size.
   - [ ] Table inheritance as a real `RelationshipKind` — would recover the 21 `INHERITS` edges Phase 1 drops
     and the 3 inherited-column comments that currently have nowhere to land.
-  - [ ] Residual parse blockers, same shape as fixes already shipped: `DROP OPERATOR`, `DROP AGGREGATE`,
+  - [ ] *(since RFC 0176 each of these costs one statement, reported as `SQL005`, not the file)*
+    Residual parse blockers, same shape as fixes already shipped: `DROP OPERATOR`, `DROP AGGREGATE`,
     `OVERRIDING SYSTEM VALUE`, `:'psql_var'` interpolation.
-  - [ ] Per-statement fallback for `parse_ddl_structural` (own RFC) — `sql_transform_analyzer` has one, the
+  - [x] *(RFC 0176, devlog_252: LedgerSMB 184 → 197 tables, 218 → 229 foreign keys; `SQL005` names what was skipped)*
+    Per-statement fallback for `parse_ddl_structural` (own RFC) — `sql_transform_analyzer` has one, the
     DDL path does not. Note its existing splitter uses `sql.split(';')` (`sql_transform_analyzer.rs:322`),
     wrong inside dollar-quoted bodies; reuse RFC 0146's scanner.
-  - [ ] LedgerSMB `SQL001` is 251 of 277 files — most legitimately declare no tables, but worth a pass to
+  - [x] *(RFC 0176: 236 files now, and `SQL001` separates "declares no table" from "states a `CREATE TABLE` that did not parse" — 2 files: a `CREATE TEMPORARY TABLE … AS` and a psql `:var`)*
+    LedgerSMB `SQL001` is 251 of 277 files — most legitimately declare no tables, but worth a pass to
     confirm none are silent losses.
 
 - [~] **RFC 0032 — DAO treasury compliance: payment ↔ approval matching — implemented 2026-09-19, Snapshot half live-verified 2026-09-22 (devlog_194). Explorer half still NOT live-verified.**
   - [x] `ekos/plugins/treasury` (Etherscan-family explorer client) and `ekos/plugins/governance` (Snapshot GraphQL), each with a `Mock*Client`; `TreasuryAnalyzerPass` / `GovernanceAnalyzerPass`; `ekos_identity::treasury` scorer; `ekos treasury scan`; `ekos_identity_review` accepts `AuthorizedBy`.
   - [x] End-to-end fixture test through the real pipeline (`crates/cli/tests/treasury_pipeline.rs`).
   - [x] **`SnapshotClient` run against the live hub 2026-09-22** — field shapes, types, paging across a real boundary and short-page-is-the-end all confirmed; committed as `#[ignore]`d live tests (`plugins/governance/tests/live_snapshot.rs`, no API key needed). **Found a silent failure:** a renamed (`aave.eth` → `aavedao.eth`), misspelled or empty space id returns HTTP 200 with an empty proposal list and no GraphQL error — so zero proposals made `ekos treasury scan` report every payment as unapproved. Both observers now warn on an empty result.
-  - [ ] **`RealTreasuryClient` does not paginate** — one request per endpoint, no `page`/`offset`, so a treasury with >10,000 transfers on `txlist`/`txlistinternal`/`tokentx` is silently truncated and those payments simply never appear. Walk `startblock` forward when a response returns exactly 10,000 rows. Do this before live verification, not after — a small treasury would pass live tests and tell you nothing.
+  - [x] *(RFC 0175: pages by block window at 10,000 rows; a history that cannot be read whole is an error, never a short list)* **`RealTreasuryClient` does not paginate** — one request per endpoint, no `page`/`offset`, so a treasury with >10,000 transfers on `txlist`/`txlistinternal`/`tokentx` is silently truncated and those payments simply never appear. Walk `startblock` forward when a response returns exactly 10,000 rows. Do this before live verification, not after — a small treasury would pass live tests and tell you nothing.
   - [ ] **Run `RealTreasuryClient` against a live explorer** — parsing is unit-tested against the documented shapes only; rate limits (3 back-to-back calls, no backoff), chain quirks, casing differences and a string-valued `result` error are unverified. Needs `EKOS_TREASURY_API_KEY` (one Etherscan key, V2 multichain, chain picked by `EKOS_TREASURY_CHAIN_ID`) and a real treasury address. **Deferred 2026-09-23** — only needed when the treasury feature is actually used.
   - [ ] `SnapshotClient` live coverage is read-path only — hub rate limiting under a long crawl and the `max_pages` × 100 ceiling on a >5,000-proposal space are still untested.
   - [ ] **Tune weights and the 0.3 floor on real DAO ground truth** — RFC 0029's values were reused unvalidated.
@@ -6155,7 +6164,7 @@ Not done:
 - [ ] Out of scope, stated in the RFC: views from live catalogs (RFC 0157 does not write to the
       ledger), dbt models materialized as views, column-level lineage through a view
 
-### RFC 0164 — Lowering, reconstruction, V5 · **not started** (RFC still Draft)
+### RFC 0164 — Lowering, reconstruction, V5 · **Phase 1 done (devlog_252)**, reconstruction and V5 not started
 
 Prerequisites now in place: a real node set with spans (the anti-invention check is no longer
 vacuous), `eligible_for_reconstruction` computed on every `Procedure`, routine/table links, and
@@ -6163,19 +6172,31 @@ trigger classes for the redesign proposals.
 
 - [ ] Lower `ProcStmt::Sql` into the dataflow `TransformGraph` — today only the *footprint*
       (tables read/written, functions called) is extracted, not the dataflow graph
-- [ ] Deterministic lowering with round-trip checking; CH incremental-MV semantics trap handled
-- [ ] Anti-invention check against the procedural IR's node set
-- [ ] Fidelity gate enforced in a reconstruction path (the label exists; nothing consumes it yet)
+- [x] Deterministic lowering of **views** with round-trip checking (`ekos migrate lower`, crate
+      `ekos-migrate-logic`); a materialized view is always a blocker, never a ClickHouse MV.
+      LedgerSMB: 7 of 17 views lowered, 10 blocked by named rule
+- [ ] Lowering coverage: functions without a rule (`string_agg`, `repeat`, `to_char`, …), CTEs,
+      `/` once operand types are known from the catalog; SQL-language and set-returning functions
+- [ ] Persist lowerings and trigger proposals as `MigrationProposal` objects with R3 approval
+      (today `ekos migrate lower --json` is the record); run Pagila
+- [x] Anti-invention check against the procedural IR's node set (`ekos migrate check-candidate`;
+      every lowering is also run through it)
+- [ ] Fidelity gate enforced in a reconstruction path — the gate exists (`gate.rs`) and
+      `check-candidate` refuses an ineligible routine; there is no reconstruction path yet
 - [ ] V5 differential execution on IR-derived fixtures; branch coverage reported with a ratchet
-- [ ] Trigger redesign proposals per class (`Mixed` / `Unknown` → human decision, no proposal)
+- [x] Trigger redesign proposals per class (`Mixed` / `Unknown` → human decision, no proposal)
 
 ### Existing issues surfaced by this work — not fixed, not caused by it
 
-- [ ] A table defined in more than one file (schema + migration) shares one id (`table_kir_id` is
+- [x] *(the later path wins deterministically since devlog_242, and each disagreeing attribute is a
+      `ConflictingEvidence` item since RFC 0172; modelling `ALTER`s on the base DDL stays open below)*
+      A table defined in more than one file (schema + migration) shares one id (`table_kir_id` is
       name-only): `SEM002 duplicate object id`, and the ledger flips between versions on every
       commit (3 LedgerSMB tables)
 - [ ] Rollups re-write their `Contains` edges on every commit of unchanged input
-- [ ] EKL filters only on `kind`/`name`; `WHERE <property> = …` silently returns 0 rows, not an error
+- [x] EKL filters only on `kind`/`name`; `WHERE <property> = …` silently returns 0 rows, not an error
+      — RFC 0175: properties are filterable (also `a.b` paths, `ORDER BY`, `GROUP BY`), and a field
+      no candidate has is `unknown field`, naming the built-in columns
 - [ ] `*.sql@1`-style files (LedgerSMB alternate migrations) are not observed as SQL
 - [ ] `compile` prints one `SEM002` warning per `Contains` edge from a `File` (expected, resolved at
       `commit`) — on LedgerSMB that is ~600 lines of noise for zero real problems
@@ -6253,9 +6274,12 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       in the CKM (`SEM002`), the later path winning — deterministic since devlog_242, not modelled. EKOS's repository
       view of LedgerSMB is the pre-upgrade schema: 316 drift findings, e.g. `acc_trans.amount` vs
       `amount_bc`.
-- [ ] `DQ.UNIQ.001` fires BLOCK on foreign-key columns (`acc_trans.trans_id`, `chart_id`, …) — skip
-      columns covered by a declared or inferred FK.
-- [ ] Join-harvest alias resolution attributes columns to the wrong table
+- [x] `DQ.UNIQ.001` fires BLOCK on foreign-key columns (`acc_trans.trans_id`, `chart_id`, …) —
+      RFC 0175: skipped for a column on the referencing side of a **declared** FK. An inferred FK is
+      a candidate, so it does not suppress the rule.
+- [x] *(RFC 0175: `Source` nodes keep their alias; each key side goes to the table its qualifier
+      names, and a side that cannot be attributed drops the observation)*
+      Join-harvest alias resolution attributes columns to the wrong table
       (`country.country_id → entity.id`); measurement prevents a false claim, but the candidates are
       noise.
 - [ ] Transform dispositions: a BLOCK like `COMPAT.CH.INFINITE_TIMESTAMP` (`tax.validto`) has no
@@ -6362,3 +6386,22 @@ LinkML; generation stays in LinkML.
 - [x] Compile read knowledge artifacts in timestamp-hashed id order — a table defined in two files
       kept the definition read last, so counts changed between runs (46/47 concepts on identical
       input). Now source-path order (devlog_242)
+
+## Silent wrong results and DDL fallback (RFC 0175, 0176) — devlog_252, 2026-10-11
+
+- [x] EKL property fields and an `unknown field` error
+- [x] Join keys attributed by their own qualifier; `Source` nodes keep their alias
+- [x] `DQ.UNIQ.001` skips the referencing side of a declared foreign key
+- [x] Treasury explorer reads paged by block window
+- [x] Per-statement fallback for structural DDL, `SQL005`, a `SQL001` that says why, foreign keys
+      from `ALTER TABLE`
+- [x] `ekos eval run --agent ollama` under a cloud `[llm]` config asked Ollama for the cloud
+      model's name; a switched provider now drops the configured model and base URL
+- [ ] `sql_transform_analyzer`'s statement splitter is still `split(';')` (wrong inside
+      dollar-quoted bodies); give it RFC 0176's fallback
+- [ ] EKL property filters are applied after a full scan; push them down if a large ledger needs it
+- [ ] `ekos eval run` prints `Status: PASS` when every scenario errored (seen with a missing local
+      model): an errored scenario should fail the run
+- [ ] Rebuild the EKOS self-workspace (its ledger is from 2026-09-23 and has no source manifest)
+      before the next comparable eval; a Zen run is metered and needs a go-ahead
+

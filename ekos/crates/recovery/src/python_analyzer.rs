@@ -1022,6 +1022,7 @@ fn calls_to_nodes(calls: &[RawCall], source: &str) -> Vec<TransformNode> {
                     nodes.push(TransformNode::Source {
                         object_name: name,
                         columns: Vec::new(),
+                        alias: None,
                     });
                 }
                 i += 1;
@@ -1032,6 +1033,7 @@ fn calls_to_nodes(calls: &[RawCall], source: &str) -> Vec<TransformNode> {
                 nodes.push(TransformNode::Source {
                     object_name,
                     columns: Vec::new(),
+                    alias: None,
                 });
                 i += 1;
             }

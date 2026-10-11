@@ -1,6 +1,6 @@
 # RFC 0155 — Canonical value serialization and cross-engine checksums
 
-**Status:** Draft
+**Status:** Implemented (2026-09, devlog_206 on); open items under "Migrate Phase 1" in `TODO.md`
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (EKOS Migrate foundation), RFC 0156 (validation tiers, the first consumer),

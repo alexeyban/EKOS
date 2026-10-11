@@ -1,6 +1,6 @@
 # RFC 0158 — Data-quality rules, target compatibility, and the source-coverage completeness check
 
-**Status:** Draft
+**Status:** Implemented; the completeness check reports but does not gate ("Migrate Phase 3" in `TODO.md`)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (foundation — this RFC carries its coverage requirement), RFC 0157 (profiles

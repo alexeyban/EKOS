@@ -425,6 +425,29 @@ enum MigrateCommands {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// RFC 0164: lower every recovered view to the target, propose a redesign per trigger, and
+    /// say which routines may be reconstructed. Reads the ledger and source files only
+    Lower {
+        /// Target database the migrated tables live in; replaces a source schema qualifier
+        #[arg(long)]
+        database: Option<String>,
+        /// Print the lowered statement under each view
+        #[arg(long)]
+        sql: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// RFC 0164: check that a candidate target statement states nothing its source does not
+    CheckCandidate {
+        /// The View or Procedure it replaces: a name, or `<path>:<name>` when several share one
+        #[arg(long)]
+        source: String,
+        /// File holding the candidate ClickHouse statement
+        #[arg(long)]
+        candidate: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Units by state, and what is blocking
     Status {
         /// Project name (default: `[migrate] project` from ekos.toml)
@@ -1713,6 +1736,16 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 threshold,
                 out,
             } => crate::commands::migrate::report(&config, &cwd, project, threshold, out),
+            MigrateCommands::Lower {
+                database,
+                sql,
+                json,
+            } => crate::commands::migrate_logic::lower(&config, &cwd, database, sql, json),
+            MigrateCommands::CheckCandidate {
+                source,
+                candidate,
+                json,
+            } => crate::commands::migrate_logic::check(&config, &cwd, &source, &candidate, json),
             MigrateCommands::Status { project } => {
                 crate::commands::migrate::status(&config, &cwd, project)
             }

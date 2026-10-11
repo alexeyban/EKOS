@@ -1,6 +1,6 @@
 # RFC 0161 — Risk classes, approval workflow and evidence snapshots
 
-**Status:** Draft
+**Status:** Implemented; `ekos migrate signoff` is open ("Migrate Phase 5" in `TODO.md`)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (foundation — risk table and human-only rule originate there), RFC 0160

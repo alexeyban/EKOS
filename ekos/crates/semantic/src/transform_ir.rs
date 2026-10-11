@@ -61,6 +61,10 @@ pub enum TransformNode {
     Source {
         object_name: String,
         columns: Vec<String>,
+        /// The alias the source text gave this read (`FROM entity e` → `e`), when it gave one.
+        /// A join key written `e.id` can only be attributed to its table through it (RFC 0175).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alias: Option<String>,
     },
     /// A row-filtering predicate, kept as parsed source text, never evaluated.
     Filter {
@@ -139,8 +143,15 @@ impl TransformNode {
             Self::Source {
                 object_name,
                 columns,
+                alias,
+            } => {
+                props.insert("object_name".into(), object_name.clone().into());
+                props.insert("columns".into(), columns.clone().into());
+                if let Some(alias) = alias {
+                    props.insert("alias".into(), alias.clone().into());
+                }
             }
-            | Self::Sink {
+            Self::Sink {
                 object_name,
                 columns,
             } => {
@@ -320,16 +331,19 @@ mod tests {
         let a = TransformNode::Source {
             object_name: "dbo.cust_mstr".into(),
             columns: vec!["id".into(), "name".into()],
+            alias: None,
         };
         let b = TransformNode::Source {
             object_name: "dbo.cust_mstr".into(),
             columns: vec!["id".into(), "name".into()],
+            alias: None,
         };
         assert_eq!(content_id(&a), content_id(&b));
 
         let c = TransformNode::Source {
             object_name: "dbo.cust_mstr".into(),
             columns: vec!["id".into()],
+            alias: None,
         };
         assert_ne!(content_id(&a), content_id(&c));
     }
@@ -479,6 +493,7 @@ mod tests {
                 TransformNode::Source {
                     object_name: "dbo.cust_mstr".into(),
                     columns: vec!["id".into(), "status".into()],
+                    alias: None,
                 },
                 TransformNode::Filter {
                     condition: "status = 'active'".into(),

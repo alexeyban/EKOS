@@ -204,7 +204,13 @@ impl<'a> Lexer<'a> {
     fn read_ident(&mut self) -> String {
         let start = self.pos;
         while self.pos < self.bytes.len()
-            && (self.bytes[self.pos].is_ascii_alphanumeric() || self.bytes[self.pos] == b'_')
+            && (self.bytes[self.pos].is_ascii_alphanumeric()
+                || self.bytes[self.pos] == b'_'
+                // RFC 0175: `a.b` is one field, a path into a nested property.
+                || (self.bytes[self.pos] == b'.'
+                    && self.bytes.get(self.pos + 1).is_some_and(|c| {
+                        c.is_ascii_alphanumeric() || *c == b'_'
+                    })))
         {
             self.pos += 1;
         }

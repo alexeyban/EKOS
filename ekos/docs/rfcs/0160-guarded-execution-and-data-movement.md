@@ -1,6 +1,6 @@
 # RFC 0160 — Guarded execution: statement classifier, environments and data movement
 
-**Status:** Draft
+**Status:** Implemented; resume and throttling of a load are open ("Migrate Phase 4" in `TODO.md`)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (foundation), RFC 0159 (the DDL and designs executed here), RFC 0161 (risk and

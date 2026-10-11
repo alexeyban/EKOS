@@ -122,9 +122,10 @@ impl CompilerPass for SqlTransformAnalyzerPass {
     }
 
     /// `v2` = RFC 0170 Phase 3: a top-level `SELECT`'s graph carries its `predicates`.
+    /// `v3` = RFC 0175: a `Source` node carries the alias it was read under.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a top-level SELECT's graph carries `predicates`.
-        "v2+predicates/3"
+        "v3+predicates/3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -521,11 +522,12 @@ fn select_to_graph(select: &Select, origin: TransformOrigin) -> TransformGraph {
 
 fn table_factor_node(factor: &TableFactor, nodes: &mut Vec<TransformNode>) -> NodeId {
     match factor {
-        TableFactor::Table { name, .. } => push(
+        TableFactor::Table { name, alias, .. } => push(
             nodes,
             TransformNode::Source {
                 object_name: name.to_string(),
                 columns: Vec::new(),
+                alias: alias.as_ref().map(|a| a.name.value.clone()),
             },
         ),
         other => push(

@@ -1,6 +1,6 @@
 # RFC 0156 — Validation tiers, bisect, divergence classification and planted controls
 
-**Status:** Draft
+**Status:** Implemented for tiers V1–V3, verified live; V0 and persisted tier results are open ("Migrate Phase 1" in `TODO.md`)
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0154 (foundation), RFC 0155 (canonical serialization — the layer below this one),

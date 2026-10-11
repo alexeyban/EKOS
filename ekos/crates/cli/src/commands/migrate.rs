@@ -21,7 +21,7 @@ fn new_run_id() -> String {
     format!("migrate-{}", uuid::Uuid::new_v4())
 }
 
-fn require_enabled(config: &EkosConfig) -> Result<()> {
+pub(super) fn require_enabled(config: &EkosConfig) -> Result<()> {
     if !config.migrate.enabled {
         bail!(
             "EKOS Migrate is disabled. Enable it in ekos.toml:\n\n[migrate]\nenabled = true\n\n\
@@ -529,6 +529,7 @@ pub fn assess(
                 },
             ));
 
+            let referencing = constraint_columns(&src, table, 'f')?;
             for c in &cols {
                 let column = c
                     .qualified_name
@@ -538,6 +539,7 @@ pub fn assess(
                     .to_string();
                 let ctx = ekos_migrate_dq::ColumnContext {
                     table: table.clone(),
+                    references_another_table: referencing.contains(&column),
                     column,
                     data_type: c.data_type.clone(),
                     nullable: c.null_fraction > 0.0 || c.data_type.is_empty(),
@@ -2806,6 +2808,26 @@ fn harvest_join_observations(
         })
         .collect();
 
+    // Qualifier → table, per graph: every table read in it under its own name and under the alias
+    // the source text gave it.
+    let mut scopes: HashMap<&str, JoinScope> = HashMap::new();
+    for o in nodes.values() {
+        if o.properties.get("node_type").and_then(|v| v.as_str()) != Some("Source") {
+            continue;
+        }
+        let (Some((path, _)), Some(table)) = (
+            o.name.rsplit_once(':'),
+            o.properties.get("object_name").and_then(|v| v.as_str()),
+        ) else {
+            continue;
+        };
+        scopes
+            .entry(path)
+            .or_default()
+            .add(table, o.properties.get("alias").and_then(|v| v.as_str()));
+    }
+    let no_scope = JoinScope::default();
+
     let mut out = Vec::new();
     for o in nodes.values() {
         if o.properties.get("node_type").and_then(|v| v.as_str()) != Some("Join") {
@@ -2814,37 +2836,114 @@ fn harvest_join_observations(
         let Some((path, _)) = o.name.rsplit_once(':') else {
             continue;
         };
+        let scope = scopes.get(path).unwrap_or(&no_scope);
+        // The table an operand *is*, used only for a key written without a qualifier. An operand
+        // that is itself a join has no single table, so it resolves to nothing.
         let operand = |key: &str| -> Option<String> {
             let idx = o.properties.get(key)?.as_u64()?;
             let start = by_slot.get(&(path.to_string(), idx))?;
             source_object_name(start, &by_slot, path, store)
         };
-        let (Some(left_table), Some(right_table)) = (operand("left"), operand("right")) else {
-            continue;
-        };
+        let (left_table, right_table) = (operand("left"), operand("right"));
 
         let Some(keys) = o.properties.get("keys").and_then(|v| v.as_array()) else {
             continue;
         };
         for k in keys {
-            // `keys` is a list of `[left_column, right_column]` pairs.
+            // `keys` is a list of `[a, b]` pairs in the order the source text wrote them, which is
+            // not the order of the operands: `ON c.id = e.country_id` and its mirror are the same
+            // join. So each side is attributed by its own qualifier (RFC 0175).
             let Some(pair) = k.as_array() else { continue };
-            let (Some(lc), Some(rc)) = (
+            let (Some(a), Some(b)) = (
                 pair.first().and_then(|v| v.as_str()),
                 pair.get(1).and_then(|v| v.as_str()),
             ) else {
                 continue;
             };
+            let (Some((lt, lc)), Some((rt, rc))) = (
+                scope.attribute(a, left_table.as_deref()),
+                scope.attribute(b, right_table.as_deref()),
+            ) else {
+                continue;
+            };
             out.push(ekos_migrate_dq::JoinObservation {
-                left_table: bare_table(&left_table),
-                left_column: bare_column(lc),
-                right_table: bare_table(&right_table),
-                right_column: bare_column(rc),
+                left_table: lt,
+                left_column: lc,
+                right_table: rt,
+                right_column: rc,
                 source: path.to_string(),
             });
         }
     }
+    // `nodes` is a hash map; the candidates built from this must not depend on its order.
+    out.sort_by(|a, b| {
+        (
+            &a.source,
+            &a.left_table,
+            &a.left_column,
+            &a.right_table,
+            &a.right_column,
+        )
+            .cmp(&(
+                &b.source,
+                &b.left_table,
+                &b.left_column,
+                &b.right_table,
+                &b.right_column,
+            ))
+    });
     Ok(out)
+}
+
+/// The names one recovered query can qualify a column with: each table it reads, and each alias.
+///
+/// `None` marks a qualifier that names two different tables in the same graph. A column written
+/// under it is not attributed at all — a wrong table would become an inferred-key candidate that
+/// looks derived (RFC 0175; `country.country_id → entity.id` on LedgerSMB).
+#[derive(Debug, Default)]
+struct JoinScope(std::collections::HashMap<String, Option<String>>);
+
+impl JoinScope {
+    fn add(&mut self, object_name: &str, alias: Option<&str>) {
+        let table = bare_table(object_name);
+        for qualifier in [Some(table.clone()), alias.map(unquoted)]
+            .into_iter()
+            .flatten()
+        {
+            self.0
+                .entry(qualifier)
+                .and_modify(|t| {
+                    if t.as_deref() != Some(table.as_str()) {
+                        *t = None;
+                    }
+                })
+                .or_insert_with(|| Some(table.clone()));
+        }
+    }
+
+    /// `(table, column)` for one side of a join key. A qualified column goes to the table its
+    /// qualifier names; an unqualified one to `operand`, the single table on that side of the
+    /// join, when there is one. Anything that is not a plain column reference is `None`.
+    fn attribute(&self, raw: &str, operand: Option<&str>) -> Option<(String, String)> {
+        let plain = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.' | '"' | '$');
+        if raw.is_empty() || !raw.chars().all(plain) {
+            return None;
+        }
+        let parts: Vec<String> = raw.split('.').map(unquoted).collect();
+        let column = parts.last()?.clone();
+        if column.is_empty() {
+            return None;
+        }
+        if parts.len() == 1 {
+            return operand.map(|t| (bare_table(t), column));
+        }
+        let table = self.0.get(&parts[parts.len() - 2])?.clone()?;
+        Some((table, column))
+    }
+}
+
+fn unquoted(s: &str) -> String {
+    s.trim_matches('"').to_lowercase()
 }
 
 /// Walk upstream from a node until a `Source` is reached, and return its `object_name`.
@@ -2859,7 +2958,12 @@ fn source_object_name(
 ) -> Option<String> {
     let mut current = start;
     for _ in 0..8 {
-        if current.properties.get("node_type").and_then(|v| v.as_str()) == Some("Source") {
+        let node_type = current.properties.get("node_type").and_then(|v| v.as_str());
+        // A join has two inputs; following either one would pick a table by accident.
+        if node_type == Some("Join") {
+            return None;
+        }
+        if node_type == Some("Source") {
             return current
                 .properties
                 .get("object_name")
@@ -2883,17 +2987,12 @@ fn source_object_name(
     None
 }
 
-/// `dbo.cust_mstr` → `cust_mstr`, and `c.customer_id` → `customer_id`.
+/// `dbo.cust_mstr` → `cust_mstr`.
 ///
-/// Join predicates in recovered SQL are written against whatever alias the query used, and an alias
-/// is not a table. Reducing both sides to a bare name is what lets a candidate be matched against
-/// the live catalog at all; the cost is that two same-named tables in different schemas collapse,
-/// which the caller resolves against the live catalog.
+/// Reducing a table to its bare name is what lets a candidate be matched against the live catalog
+/// at all; the cost is that two same-named tables in different schemas collapse, which the caller
+/// resolves against the live catalog. A column's table comes from [`JoinScope::attribute`].
 fn bare_table(raw: &str) -> String {
-    raw.rsplit('.').next().unwrap_or(raw).to_lowercase()
-}
-
-fn bare_column(raw: &str) -> String {
     raw.rsplit('.').next().unwrap_or(raw).to_lowercase()
 }
 
@@ -2985,13 +3084,19 @@ fn unvalidated_constraints(src: &PgSource, table: &str) -> Result<Vec<String>> {
 }
 
 fn primary_key_columns(src: &PgSource, table: &str) -> Result<Vec<String>> {
+    constraint_columns(src, table, 'p')
+}
+
+/// The columns of `table` that take part in a constraint of one `pg_constraint.contype`: `p` for
+/// the primary key, `f` for the referencing side of every declared foreign key.
+fn constraint_columns(src: &PgSource, table: &str, contype: char) -> Result<Vec<String>> {
     let (schema, name) = table.split_once('.').unwrap_or(("public", table));
     let rows = src.raw_query(&format!(
         "SELECT a.attname FROM pg_constraint con \
          JOIN pg_class c ON c.oid = con.conrelid \
          JOIN pg_namespace n ON n.oid = c.relnamespace \
          JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(con.conkey) \
-         WHERE n.nspname = '{}' AND c.relname = '{}' AND con.contype = 'p'",
+         WHERE n.nspname = '{}' AND c.relname = '{}' AND con.contype = '{contype}'",
         schema.replace('\'', "''"),
         name.replace('\'', "''")
     ))?;
@@ -3417,8 +3522,56 @@ mod tests {
         assert_eq!(bare_table("dbo.cust_mstr"), "cust_mstr");
         assert_eq!(bare_table("ekos_fk.orders"), "orders");
         assert_eq!(bare_table("Orders"), "orders");
-        assert_eq!(bare_column("o.customer_id"), "customer_id");
-        assert_eq!(bare_column("customer_id"), "customer_id");
+    }
+
+    #[test]
+    fn a_join_key_goes_to_the_table_its_qualifier_names() {
+        let mut scope = JoinScope::default();
+        scope.add("public.entity", Some("e"));
+        scope.add("country", None);
+        scope.add("company", Some("c"));
+        // Written order is not operand order, and the operand on that side may be another table.
+        assert_eq!(
+            scope.attribute("country.id", Some("entity")),
+            Some(("country".into(), "id".into()))
+        );
+        assert_eq!(
+            scope.attribute("e.country_id", Some("country")),
+            Some(("entity".into(), "country_id".into()))
+        );
+        assert_eq!(
+            scope.attribute("public.entity.id", None),
+            Some(("entity".into(), "id".into()))
+        );
+        assert_eq!(
+            scope.attribute("\"C\".entity_id", None),
+            Some(("company".into(), "entity_id".into()))
+        );
+    }
+
+    #[test]
+    fn a_join_key_that_cannot_be_attributed_is_dropped() {
+        let mut scope = JoinScope::default();
+        scope.add("entity", Some("a"));
+        scope.add("company", Some("a"));
+        // One alias for two tables, an unknown alias, an expression, and an unqualified column
+        // with no single table on its side.
+        assert_eq!(scope.attribute("a.id", Some("entity")), None);
+        assert_eq!(scope.attribute("x.id", Some("entity")), None);
+        assert_eq!(scope.attribute("lower(entity.name)", Some("entity")), None);
+        assert_eq!(scope.attribute("id", None), None);
+        assert_eq!(
+            scope.attribute("id", Some("public.entity")),
+            Some(("entity".into(), "id".into()))
+        );
+        // The same table read twice under two aliases is not ambiguous.
+        let mut twice = JoinScope::default();
+        twice.add("entity", Some("p"));
+        twice.add("entity", Some("q"));
+        assert_eq!(
+            twice.attribute("q.parent_id", None),
+            Some(("entity".into(), "parent_id".into()))
+        );
     }
 
     /// A ledger with no Transformation IR yields no candidates, and must say why rather than

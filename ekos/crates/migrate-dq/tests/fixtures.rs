@@ -299,3 +299,27 @@ fn an_unprofiled_unconstrained_numeric_says_so_rather_than_choosing() {
     assert!(f.message.contains("narrowing-safe"), "{}", f.message);
     assert!(f.message.contains("precision 14"), "{}", f.message);
 }
+
+/// RFC 0175: a key-shaped column on the referencing side of a declared foreign key repeats by
+/// design, so the duplicate-key rule says nothing about it.
+#[test]
+fn a_foreign_key_column_is_not_a_duplicate_key_finding() {
+    let profiled = ColumnContext {
+        distinct_estimate: Some(40.0),
+        ..col("public.acc_trans", "trans_id", "integer")
+    };
+    assert!(
+        evaluate_column(&profiled)
+            .iter()
+            .any(|f| f.rule_id == "DQ.UNIQ.001")
+    );
+    let referencing = ColumnContext {
+        references_another_table: true,
+        ..profiled
+    };
+    assert!(
+        evaluate_column(&referencing)
+            .iter()
+            .all(|f| f.rule_id != "DQ.UNIQ.001")
+    );
+}

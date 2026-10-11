@@ -25,6 +25,17 @@ pub enum EklError {
     /// returning current-state neighborhood data under a historical query.
     #[error("AS OF is not yet supported combined with FROM-anchored queries")]
     AsOfWithFromUnsupported,
+    /// RFC 0175: a `WHERE` / `ORDER BY` / `GROUP BY` field that is neither a built-in column nor
+    /// a property of any candidate row. It used to match nothing and return 0 rows, which reads
+    /// as "no such objects".
+    #[error(
+        "unknown field '{field}': not a built-in column ({builtin}) and no matching {entity} has a property of that name"
+    )]
+    UnknownField {
+        field: String,
+        builtin: String,
+        entity: &'static str,
+    },
 }
 
 /// A table of result rows, one `HashMap<String, Value>` per row.
@@ -59,7 +70,9 @@ impl<'a> EklInterpreter<'a> {
     }
 
     pub fn execute(&self, ast: &EklAst) -> Result<EklResult, EklError> {
-        let mut rows = self.candidate_rows(ast)?;
+        let wanted = property_fields(ast);
+        let mut rows = self.candidate_rows(ast, &wanted)?;
+        check_fields(ast, &rows)?;
         rows.retain(|row| ast.predicates.iter().all(|p| eval_predicate(row, p)));
 
         if ast.count {
@@ -91,7 +104,7 @@ impl<'a> EklInterpreter<'a> {
         Ok(EklResult { rows })
     }
 
-    fn candidate_rows(&self, ast: &EklAst) -> Result<Vec<Row>, EklError> {
+    fn candidate_rows(&self, ast: &EklAst, wanted: &[String]) -> Result<Vec<Row>, EklError> {
         if let Some(at) = ast.as_of {
             if ast.from.is_some() {
                 return Err(EklError::AsOfWithFromUnsupported);
@@ -101,13 +114,13 @@ impl<'a> EklInterpreter<'a> {
                     .runtime
                     .list_objects_at(at)?
                     .iter()
-                    .map(object_row)
+                    .map(|o| object_row(o, wanted))
                     .collect(),
                 Entity::Relationship => self
                     .runtime
                     .list_relationships_at(at)?
                     .iter()
-                    .map(relationship_row)
+                    .map(|r| relationship_row(r, wanted))
                     .collect(),
             });
         }
@@ -122,7 +135,7 @@ impl<'a> EklInterpreter<'a> {
             let mut rows = Vec::new();
             for hit in hits.hits {
                 if let Some(obj) = self.runtime.load_object(&hit.id)? {
-                    rows.push(object_row(&obj));
+                    rows.push(object_row(&obj, wanted));
                 }
             }
             return Ok(rows);
@@ -133,23 +146,31 @@ impl<'a> EklInterpreter<'a> {
                 .runtime
                 .list_objects()?
                 .iter()
-                .map(object_row)
+                .map(|o| object_row(o, wanted))
                 .collect()),
             (Entity::Relationship, None) => Ok(self
                 .runtime
                 .list_relationships()?
                 .iter()
-                .map(relationship_row)
+                .map(|r| relationship_row(r, wanted))
                 .collect()),
             (Entity::Object, Some(name)) => {
                 let anchor = self.resolve_anchor(name)?;
                 let graph = self.expand_from_anchor(anchor, ast)?;
-                Ok(graph.objects.iter().map(object_row).collect())
+                Ok(graph
+                    .objects
+                    .iter()
+                    .map(|o| object_row(o, wanted))
+                    .collect())
             }
             (Entity::Relationship, Some(name)) => {
                 let anchor = self.resolve_anchor(name)?;
                 let graph = self.expand_from_anchor(anchor, ast)?;
-                Ok(graph.relationships.iter().map(relationship_row).collect())
+                Ok(graph
+                    .relationships
+                    .iter()
+                    .map(|r| relationship_row(r, wanted))
+                    .collect())
             }
         }
     }
@@ -199,7 +220,91 @@ impl<'a> EklInterpreter<'a> {
     }
 }
 
-fn object_row(obj: &KirObject) -> Row {
+const OBJECT_COLUMNS: [&str; 5] = ["id", "name", "kind", "evidence", "created_at"];
+const RELATIONSHIP_COLUMNS: [&str; 5] = ["id", "kind", "from", "to", "created_at"];
+
+fn builtin_columns(entity: &Entity) -> &'static [&'static str] {
+    match entity {
+        Entity::Object => &OBJECT_COLUMNS,
+        Entity::Relationship => &RELATIONSHIP_COLUMNS,
+    }
+}
+
+/// RFC 0175: the fields a query names that are not built-in columns. Each is read from the row's
+/// `properties` — only these, so a scan does not copy every property of every object.
+fn property_fields(ast: &EklAst) -> Vec<String> {
+    let builtin = builtin_columns(&ast.entity);
+    let mut out: Vec<String> = Vec::new();
+    let named = ast
+        .predicates
+        .iter()
+        .map(|p| &p.field)
+        .chain(&ast.returns)
+        .chain(ast.order_by.iter().map(|(f, _)| f))
+        .chain(&ast.group_by);
+    for f in named {
+        if !builtin.contains(&f.as_str()) && !out.contains(f) {
+            out.push(f.clone());
+        }
+    }
+    out
+}
+
+/// A property by name, or by a dotted path into nested objects (`a.b`). A key that itself
+/// contains a dot wins over the path reading.
+fn property_value<'v>(properties: &'v HashMap<String, Value>, field: &str) -> Option<&'v Value> {
+    if let Some(v) = properties.get(field) {
+        return Some(v);
+    }
+    let mut parts = field.split('.');
+    let mut v = properties.get(parts.next()?)?;
+    for part in parts {
+        v = v.as_object()?.get(part)?;
+    }
+    Some(v)
+}
+
+fn add_properties(row: &mut Row, properties: &HashMap<String, Value>, wanted: &[String]) {
+    for f in wanted {
+        if let Some(v) = property_value(properties, f) {
+            row.insert(f.clone(), v.clone());
+        }
+    }
+}
+
+/// RFC 0175: a filter, sort or group field no candidate row has is an error, not an empty result.
+/// With no candidates there is nothing to check against. `RETURN` of an unknown field stays
+/// `null` — a property only some objects carry is normal there.
+fn check_fields(ast: &EklAst, rows: &[Row]) -> Result<(), EklError> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let builtin = builtin_columns(&ast.entity);
+    let checked = ast
+        .predicates
+        .iter()
+        .map(|p| &p.field)
+        .chain(ast.order_by.iter().map(|(f, _)| f))
+        .chain(&ast.group_by);
+    for f in checked {
+        if builtin.contains(&f.as_str()) || (ast.count && f == "count") {
+            continue;
+        }
+        if !rows.iter().any(|r| r.contains_key(f)) {
+            return Err(EklError::UnknownField {
+                field: f.clone(),
+                builtin: builtin.join(", "),
+                entity: match ast.entity {
+                    Entity::Object => "object",
+                    Entity::Relationship => "relationship",
+                },
+            });
+        }
+    }
+    Ok(())
+}
+
+fn object_row(obj: &KirObject, wanted: &[String]) -> Row {
     let mut row = Row::new();
     row.insert("id".into(), Value::String(obj.id.to_string()));
     row.insert("name".into(), Value::String(obj.name.clone()));
@@ -217,10 +322,11 @@ fn object_row(obj: &KirObject) -> Row {
         "created_at".into(),
         Value::String(obj.created_at.to_rfc3339()),
     );
+    add_properties(&mut row, &obj.properties, wanted);
     row
 }
 
-fn relationship_row(rel: &KirRelationship) -> Row {
+fn relationship_row(rel: &KirRelationship, wanted: &[String]) -> Row {
     let mut row = Row::new();
     row.insert("id".into(), Value::String(rel.id.to_string()));
     // Display, not Debug: matches object_row's obj.kind.to_string() above.
@@ -236,6 +342,7 @@ fn relationship_row(rel: &KirRelationship) -> Row {
         "created_at".into(),
         Value::String(rel.created_at.to_rfc3339()),
     );
+    add_properties(&mut row, &rel.properties, wanted);
     row
 }
 
@@ -408,6 +515,104 @@ mod tests {
     fn run(runtime: &Runtime, query: &str) -> EklResult {
         let ast = ekl_parse(query).unwrap();
         EklInterpreter::new(runtime).execute(&ast).unwrap()
+    }
+
+    // ── RFC 0175: property fields ────────────────────────────────────────
+
+    fn property_fixture() -> (Ledger, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let ledger = Ledger::open(&dir.path().join("ledger.db")).unwrap();
+        let mut a = KirObject::new("a", ObjectKind::Table);
+        a.properties
+            .insert("status".into(), Value::String("hypothesis".into()));
+        a.properties
+            .insert("stats".into(), serde_json::json!({"rows": 12}));
+        let mut b = KirObject::new("b", ObjectKind::Table);
+        b.properties
+            .insert("status".into(), Value::String("confirmed".into()));
+        let c = KirObject::new("c", ObjectKind::Table);
+        let mut rel = KirRelationship::new(RelationshipKind::ForeignKey, a.id, b.id);
+        rel.properties
+            .insert("column".into(), Value::String("b_id".into()));
+        for o in [&a, &b, &c] {
+            ledger.append_object(o).unwrap();
+        }
+        ledger.append_relationship(&rel).unwrap();
+        (ledger, dir)
+    }
+
+    #[test]
+    fn where_filters_on_a_property() {
+        let (ledger, _dir) = property_fixture();
+        let rt = Runtime::new(&ledger);
+        let result = run(
+            &rt,
+            "FIND Object WHERE status = 'confirmed' RETURN name, status",
+        );
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0]["name"], Value::String("b".into()));
+        assert_eq!(result.rows[0]["status"], Value::String("confirmed".into()));
+    }
+
+    #[test]
+    fn a_dotted_field_reads_a_nested_property() {
+        let (ledger, _dir) = property_fixture();
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Object WHERE stats.rows > 10");
+        assert_eq!(result.rows.len(), 1);
+        assert_eq!(result.rows[0]["name"], Value::String("a".into()));
+    }
+
+    #[test]
+    fn count_groups_by_a_property() {
+        let (ledger, _dir) = property_fixture();
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Object COUNT GROUP BY status");
+        // The object without the property groups under the empty key.
+        assert_eq!(result.rows.len(), 3);
+    }
+
+    #[test]
+    fn relationship_properties_filter_too() {
+        let (ledger, _dir) = property_fixture();
+        let rt = Runtime::new(&ledger);
+        let result = run(&rt, "FIND Relationship WHERE column = 'b_id'");
+        assert_eq!(result.rows.len(), 1);
+    }
+
+    #[test]
+    fn a_field_no_row_has_is_an_error_not_zero_rows() {
+        let (ledger, _dir) = property_fixture();
+        let rt = Runtime::new(&ledger);
+        let ast = ekl_parse("FIND Object WHERE statuz = 'confirmed'").unwrap();
+        let err = EklInterpreter::new(&rt).execute(&ast).unwrap_err();
+        assert!(matches!(err, EklError::UnknownField { ref field, .. } if field == "statuz"));
+        assert!(err.to_string().contains("id, name, kind"));
+    }
+
+    #[test]
+    fn an_unknown_field_over_no_candidates_is_empty() {
+        let dir = TempDir::new().unwrap();
+        let ledger = Ledger::open(&dir.path().join("ledger.db")).unwrap();
+        let rt = Runtime::new(&ledger);
+        assert!(run(&rt, "FIND Object WHERE statuz = 'x'").rows.is_empty());
+    }
+
+    #[test]
+    fn a_built_in_column_wins_over_a_property_of_the_same_name() {
+        let dir = TempDir::new().unwrap();
+        let ledger = Ledger::open(&dir.path().join("ledger.db")).unwrap();
+        let mut o = KirObject::new("real", ObjectKind::Table);
+        o.properties
+            .insert("name".into(), Value::String("shadow".into()));
+        ledger.append_object(&o).unwrap();
+        let rt = Runtime::new(&ledger);
+        assert_eq!(run(&rt, "FIND Object WHERE name = 'real'").rows.len(), 1);
+        assert!(
+            run(&rt, "FIND Object WHERE name = 'shadow'")
+                .rows
+                .is_empty()
+        );
     }
 
     #[test]

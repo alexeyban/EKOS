@@ -248,13 +248,39 @@ impl RealTreasuryClient {
     }
 
     async fn rows(&self, action: &str, address: &str) -> Result<Vec<Value>, TreasuryClientError> {
+        collect_pages(
+            EXPLORER_PAGE_ROWS,
+            MAX_PAGES,
+            |start_block, first| async move {
+                if !first {
+                    // Explorer free tiers allow a few calls a second.
+                    tokio::time::sleep(PAGE_PAUSE).await;
+                }
+                self.page(action, address, start_block).await
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            TreasuryClientError::Api(m) => TreasuryClientError::Api(format!("{action}: {m}")),
+            other => other,
+        })
+    }
+
+    async fn page(
+        &self,
+        action: &str,
+        address: &str,
+        start_block: u64,
+    ) -> Result<Vec<Value>, TreasuryClientError> {
         let mut req = self.http.get(&self.base_url).query(&[
             ("chainid", self.chain_id.to_string()),
             ("module", "account".into()),
             ("action", action.into()),
             ("address", address.into()),
-            ("startblock", "0".into()),
+            ("startblock", start_block.to_string()),
             ("endblock", "99999999999".into()),
+            ("page", "1".into()),
+            ("offset", EXPLORER_PAGE_ROWS.to_string()),
             ("sort", "asc".into()),
         ]);
         if let Some(key) = &self.api_key {
@@ -266,6 +292,73 @@ impl RealTreasuryClient {
         }
         parse_explorer_result(&resp.json::<Value>().await?)
     }
+}
+
+/// The most rows an Etherscan-family explorer returns for one request (`page` × `offset` is capped
+/// at 10,000 on every `module=account` list action).
+pub const EXPLORER_PAGE_ROWS: usize = 10_000;
+/// 5 million rows per action. A treasury past that is refused, not truncated.
+const MAX_PAGES: usize = 500;
+const PAGE_PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Read a whole ascending history through a row cap (RFC 0175).
+///
+/// `fetch(start_block, first)` returns up to `page_rows` rows from `start_block` on, oldest first.
+/// A full page means there may be more, and the next request starts **at** the last block seen,
+/// not after it, because the cap can cut a block in half. Rows of that block already returned are
+/// skipped by count, so two identical transfers in one transaction both survive.
+///
+/// Two cases cannot be read completely and are errors rather than a short history: one block with
+/// a full page of rows (the window cannot move past it) and more than `max_pages` pages. A payment
+/// that silently never appears reads as "nothing was paid".
+pub async fn collect_pages<F, Fut>(
+    page_rows: usize,
+    max_pages: usize,
+    mut fetch: F,
+) -> Result<Vec<Value>, TreasuryClientError>
+where
+    F: FnMut(u64, bool) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<Value>, TreasuryClientError>>,
+{
+    let mut out: Vec<Value> = Vec::new();
+    let mut start_block = 0u64;
+    // Rows of `start_block` already in `out`, by serialized form → how many.
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for page in 0..max_pages {
+        let rows = fetch(start_block, page == 0).await?;
+        let full = rows.len() >= page_rows;
+        let last_block = rows.last().map(|r| n(r, "blockNumber"));
+        for row in rows {
+            if n(&row, "blockNumber") == start_block
+                && let Some(left) = seen.get_mut(&row.to_string())
+                && *left > 0
+            {
+                *left -= 1;
+                continue;
+            }
+            out.push(row);
+        }
+        let Some(last_block) = last_block.filter(|_| full) else {
+            return Ok(out);
+        };
+        if last_block == start_block && page > 0 || last_block < start_block {
+            return Err(TreasuryClientError::Api(format!(
+                "block {start_block} alone has {page_rows} or more rows, so the history after it \
+                 cannot be read through this explorer's row cap; refusing to return a truncated history"
+            )));
+        }
+        seen.clear();
+        for row in out.iter().rev() {
+            if n(row, "blockNumber") != last_block {
+                break;
+            }
+            *seen.entry(row.to_string()).or_default() += 1;
+        }
+        start_block = last_block;
+    }
+    Err(TreasuryClientError::Api(format!(
+        "more than {max_pages} pages of {page_rows} rows; refusing to return a truncated history"
+    )))
 }
 
 #[async_trait]
@@ -456,6 +549,73 @@ mod tests {
             None
         );
         assert_eq!(decode_memo("0x"), None);
+    }
+
+    // ── RFC 0175: pagination ─────────────────────────────────────────────
+
+    fn row(block: u64, hash: &str) -> Value {
+        json!({ "blockNumber": block.to_string(), "hash": hash })
+    }
+
+    /// An explorer holding `history`, capped at `cap` rows a request.
+    async fn paged(
+        history: Vec<Value>,
+        cap: usize,
+        max_pages: usize,
+    ) -> (Result<Vec<Value>, TreasuryClientError>, usize) {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let got = collect_pages(cap, max_pages, |start, _| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let page: Vec<Value> = history
+                .iter()
+                .filter(|r| n(r, "blockNumber") >= start)
+                .take(cap)
+                .cloned()
+                .collect();
+            async move { Ok(page) }
+        })
+        .await;
+        (got, calls.into_inner())
+    }
+
+    #[tokio::test]
+    async fn a_history_longer_than_the_row_cap_is_read_whole() {
+        // Block 2 straddles the first page boundary, and holds two identical rows.
+        let history = vec![
+            row(1, "a"),
+            row(2, "b"),
+            row(2, "c"),
+            row(2, "c"),
+            row(3, "d"),
+            row(4, "e"),
+            row(5, "f"),
+        ];
+        let (got, calls) = paged(history.clone(), 4, 50).await;
+        assert_eq!(got.unwrap(), history);
+        assert_eq!(calls, 3);
+    }
+
+    #[tokio::test]
+    async fn a_short_history_is_one_request() {
+        let history = vec![row(1, "a"), row(1, "b")];
+        let (got, calls) = paged(history.clone(), 3, 50).await;
+        assert_eq!(got.unwrap(), history);
+        assert_eq!(calls, 1);
+        let (got, calls) = paged(Vec::new(), 3, 50).await;
+        assert!(got.unwrap().is_empty());
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn a_history_that_cannot_be_read_whole_is_an_error_not_a_short_one() {
+        // One block with more rows than a request returns.
+        let history: Vec<Value> = (0..7).map(|i| row(9, &format!("h{i}"))).collect();
+        let (got, _) = paged(history, 3, 50).await;
+        assert!(got.unwrap_err().to_string().contains("truncated"));
+        // More pages than the limit.
+        let history: Vec<Value> = (0..40).map(|i| row(i, "h")).collect();
+        let (got, _) = paged(history, 3, 2).await;
+        assert!(got.unwrap_err().to_string().contains("truncated"));
     }
 
     #[test]
