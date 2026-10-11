@@ -17,6 +17,7 @@
 //! | `CAST(NULL AS integer)` is `NULL` | an error | `CAST(… AS Nullable(Int32))` |
 //! | `length` counts characters | bytes | `char_length` |
 //! | unquoted names fold to lower case | names are case-sensitive | folded, then quoted |
+//! | `u.id` is output as `id` | as `u.id` when `id` is ambiguous | `u.id AS id` |
 //!
 //! Where the right answer depends on something this layer cannot see — operand types for `/`, a
 //! refresh schedule for a materialized view — it blocks and says so.
@@ -81,6 +82,7 @@ pub const FUNCTION: &str = "LOGIC.CH.FUNCTION";
 pub const DIVISION: &str = "LOGIC.CH.DIVISION_TYPES";
 pub const NULL_SEMANTICS: &str = "LOGIC.CH.NULL_SEMANTICS";
 pub const TYPE: &str = "LOGIC.CH.TYPE";
+pub const OUTPUT_NAME: &str = "LOGIC.CH.OUTPUT_NAME";
 pub const ROUND_TRIP: &str = "LOGIC.ROUND_TRIP";
 
 /// Which grammar the statement being walked was parsed with.
@@ -155,6 +157,28 @@ fn clip(s: &str) -> String {
         format!("{}…", one_line.chars().take(120).collect::<String>())
     } else {
         one_line
+    }
+}
+
+/// The name PostgreSQL gives an unaliased select-list expression, where that is a rule this
+/// module can state: a column is its last identifier, a function call its name, `CASE` is `case`,
+/// and a cast of a column keeps the column's name.
+fn output_name(e: &Expr) -> Option<String> {
+    let folded = |i: &Ident| match i.quote_style {
+        None => i.value.to_lowercase(),
+        Some(_) => i.value.clone(),
+    };
+    match e {
+        Expr::Identifier(i) => Some(folded(i)),
+        Expr::CompoundIdentifier(parts) => parts.last().map(folded),
+        Expr::Function(f) => f.name.0.last().map(|i| i.value.to_lowercase()),
+        Expr::Case { .. } => Some("case".into()),
+        Expr::Cast { expr, .. } => match expr.as_ref() {
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => output_name(expr),
+            _ => None,
+        },
+        Expr::Nested(inner) => output_name(inner),
+        _ => None,
     }
 }
 
@@ -421,9 +445,55 @@ impl Walker<'_> {
                 self.block(QUERY_SHAPE, "DISTINCT ON");
             }
         }
+        let joined = s.from.len() > 1 || s.from.iter().any(|t| !t.joins.is_empty());
         let mut items = Vec::new();
         for item in &s.projection {
+            if joined
+                && self.side == Side::Postgres
+                && matches!(
+                    item,
+                    SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(..)
+                )
+            {
+                self.block(
+                    OUTPUT_NAME,
+                    format!(
+                        "{item} over a join: ClickHouse names a column `t.c` when another joined \
+                         table has a `c` too, and which columns those are is not known here. \
+                         List the columns"
+                    ),
+                );
+            }
             items.push(match item {
+                // PostgreSQL names an output column after its last identifier (`u.id` is `id`).
+                // ClickHouse keeps the qualifier when the bare name is ambiguous, so the name is
+                // stated. Found by V5 on LedgerSMB's `user_listable`.
+                // A bare column already has the same name on both.
+                SelectItem::UnnamedExpr(e @ Expr::Identifier(_)) => self.expr(e),
+                SelectItem::UnnamedExpr(e) if self.side == Side::Postgres => match output_name(e) {
+                    Some(name) => {
+                        // An alias equal to its own column's name shadows nothing.
+                        if !matches!(e, Expr::CompoundIdentifier(_)) {
+                            needs.prefer_column = true;
+                        }
+                        self.note(
+                            "an unaliased select-list item is given the column name PostgreSQL \
+                             gives it",
+                        );
+                        format!("{} AS {}", self.expr(e), quote_ident(&name))
+                    }
+                    None => {
+                        self.block(
+                            OUTPUT_NAME,
+                            format!(
+                                "an unnamed expression in the select list: {} — the engines \
+                                     name its column differently. Give it an alias in the source",
+                                clip(&e.to_string())
+                            ),
+                        );
+                        self.expr(e)
+                    }
+                },
                 SelectItem::UnnamedExpr(e) => self.expr(e),
                 SelectItem::ExprWithAlias { expr, alias } => {
                     needs.prefer_column = true;
@@ -975,12 +1045,15 @@ mod tests {
         );
         assert_eq!(
             l.sql,
-            "CREATE VIEW `open_items` AS SELECT `i`.`id`, `i`.`amount` FROM `items` AS `i` \
-             WHERE (`i`.`closed` = false)"
+            "CREATE VIEW `open_items` AS SELECT `i`.`id` AS `id`, `i`.`amount` AS `amount` \
+             FROM `items` AS `i` WHERE (`i`.`closed` = false)"
         );
         assert_eq!(
             l.notes,
-            ["a schema qualifier was replaced by the target database"]
+            [
+                "a schema qualifier was replaced by the target database",
+                "an unaliased select-list item is given the column name PostgreSQL gives it"
+            ]
         );
         let star = lowered("CREATE VIEW v AS SELECT t.* FROM t");
         assert!(star.notes[0].starts_with("* is expanded when the view is queried"));
@@ -1008,12 +1081,12 @@ mod tests {
     #[test]
     fn aggregates_keep_null_over_no_rows() {
         let l = lowered(
-            "CREATE VIEW v AS SELECT account, sum(amount), max(day), count(*), count(DISTINCT payer) \
-             FROM t GROUP BY account HAVING sum(amount) > 0",
+            "CREATE VIEW v AS SELECT account, sum(amount), max(day), count(*), \
+             count(DISTINCT payer) AS payers FROM t GROUP BY account HAVING sum(amount) > 0",
         );
         assert!(
             l.sql.contains(
-                "sumOrNull(`amount`), maxOrNull(`day`), count(*), count(DISTINCT `payer`)"
+                "`account`, sumOrNull(`amount`) AS `sum`, maxOrNull(`day`) AS `max`, count(*) AS `count`, count(DISTINCT `payer`) AS `payers`"
             ),
             "{}",
             l.sql
@@ -1065,23 +1138,24 @@ mod tests {
         );
         assert_eq!(
             l.sql,
-            "CREATE VIEW `v` AS SELECT `id` FROM `a` UNION DISTINCT (SELECT `b`.`id` FROM `b` \
-             LEFT OUTER JOIN `c` ON (`c`.`id` = `b`.`id`) SETTINGS join_use_nulls = 1)"
+            "CREATE VIEW `v` AS SELECT `id` FROM `a` UNION DISTINCT (SELECT `b`.`id` AS `id` \
+             FROM `b` LEFT OUTER JOIN `c` ON (`c`.`id` = `b`.`id`) SETTINGS join_use_nulls = 1)"
         );
     }
 
     #[test]
     fn casts_concat_case_and_length_are_rewritten() {
         let l = lowered(
-            "CREATE VIEW v AS SELECT id::text, CAST(amount AS numeric(12,2)), first || ' ' || last, \
+            "CREATE VIEW v AS SELECT id::text, CAST(amount AS numeric(12,2)), \
+             first || ' ' || last AS full_name, \
              CASE WHEN length(code) > 3 THEN 'long' ELSE 'short' END FROM t \
              WHERE kind IN ('a', 'b') AND day BETWEEN 1 AND 9 AND name ILIKE 'x%'",
         );
         for part in [
-            "CAST(`id` AS Nullable(String))",
-            "CAST(`amount` AS Nullable(Decimal64(2)))",
-            "concat(concat(`first`, ' '), `last`)",
-            "CASE WHEN (char_length(`code`) > 3) THEN 'long' ELSE 'short' END",
+            "CAST(`id` AS Nullable(String)) AS `id`",
+            "CAST(`amount` AS Nullable(Decimal64(2))) AS `amount`",
+            "concat(concat(`first`, ' '), `last`) AS `full_name`",
+            "CASE WHEN (char_length(`code`) > 3) THEN 'long' ELSE 'short' END AS `case`",
             "(`kind` IN ('a', 'b'))",
             "(`day` BETWEEN 1 AND 9)",
             "(`name` ILIKE 'x%')",
@@ -1135,7 +1209,13 @@ mod tests {
     fn what_would_change_meaning_is_blocked_by_name() {
         for (sql, code) in [
             ("CREATE MATERIALIZED VIEW v AS SELECT id FROM t", MATVIEW),
-            ("CREATE VIEW v AS SELECT a / b FROM t", DIVISION),
+            ("CREATE VIEW v AS SELECT a / b AS r FROM t", DIVISION),
+            ("CREATE VIEW v AS SELECT a + b FROM t", OUTPUT_NAME),
+            (
+                "CREATE VIEW v AS SELECT t.*, u.x FROM t JOIN u ON u.id = t.id",
+                OUTPUT_NAME,
+            ),
+            ("CREATE VIEW v AS SELECT * FROM t, u", OUTPUT_NAME),
             (
                 "CREATE VIEW v AS SELECT id FROM t WHERE x NOT IN (1, NULL)",
                 NULL_SEMANTICS,
@@ -1190,7 +1270,7 @@ mod tests {
 
     #[test]
     fn every_blocker_is_reported_not_only_the_first() {
-        let c = codes("CREATE MATERIALIZED VIEW v AS SELECT a / b, now() FROM t");
+        let c = codes("CREATE MATERIALIZED VIEW v AS SELECT a / b AS r, now() FROM t");
         assert_eq!(c, [DIVISION, FUNCTION, MATVIEW]);
     }
 

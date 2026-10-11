@@ -27,9 +27,13 @@ pub const FINDING_KIND: &str = "MigrationFinding";
 /// An approval request and its decision (RFC 0161).
 pub const APPROVAL_KIND: &str = "MigrationApproval";
 
+/// A proposed target implementation of recovered logic, or a proposed redesign of a trigger
+/// (RFC 0164). Always `status: proposed` when written; only a person moves it on.
+pub const PROPOSAL_KIND: &str = "MigrationProposal";
+
 /// Every object kind this crate writes. The CLI guard test in `ekos-identity` asserts each has a
 /// registry row; this constant is what makes that list reviewable in one place.
-pub const ALL_KINDS: [&str; 8] = [
+pub const ALL_KINDS: [&str; 9] = [
     PROJECT_KIND,
     UNIT_KIND,
     CONNECTION_KIND,
@@ -38,6 +42,7 @@ pub const ALL_KINDS: [&str; 8] = [
     DRIFT_KIND,
     FINDING_KIND,
     APPROVAL_KIND,
+    PROPOSAL_KIND,
 ];
 
 /// Emitted on every state transition (RFC 0154 — the state machine's second write).

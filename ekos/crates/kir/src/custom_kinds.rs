@@ -240,6 +240,11 @@ prefixes constantly",
         note: "(project, rule id, object) — RFC 0158 DQ / compatibility finding",
     },
     CustomKind {
+        name: "MigrationProposal",
+        structurally_keyed: true,
+        note: "(source object id) — RFC 0164 proposed lowering / reconstruction / trigger redesign",
+    },
+    CustomKind {
         name: "MigrationApproval",
         structurally_keyed: true,
         note: "(project, request id) — RFC 0161 approval request and decision",

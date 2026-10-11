@@ -17,7 +17,7 @@ use ekos_pg_live::{PgSource, SessionPolicy, profile as pgprofile};
 use std::path::Path;
 
 /// One id per `ekos migrate` invocation, grouping every write that verb makes (RFC 0135 Part B).
-fn new_run_id() -> String {
+pub(super) fn new_run_id() -> String {
     format!("migrate-{}", uuid::Uuid::new_v4())
 }
 
@@ -154,7 +154,10 @@ pub fn status(config: &EkosConfig, cwd: &Path, project: Option<String>) -> Resul
 /// lives in an environment variable the config only *names*. A missing alias is an error with the
 /// TOML to add, because guessing `localhost:5432` would silently point a migration at the wrong
 /// database.
-fn resolve_alias<'a>(config: &'a EkosConfig, alias: &str) -> Result<&'a MigrateConnection> {
+pub(super) fn resolve_alias<'a>(
+    config: &'a EkosConfig,
+    alias: &str,
+) -> Result<&'a MigrateConnection> {
     config.migrate.connections.get(alias).ok_or_else(|| {
         anyhow::anyhow!(
             "no connection named '{alias}'. Add it to ekos.toml:\n\n\
@@ -176,7 +179,7 @@ fn resolve_alias<'a>(config: &'a EkosConfig, alias: &str) -> Result<&'a MigrateC
 /// same shape RFC 0160's chunk parallelism will use: database work happens on its own thread, and
 /// **results are collected before anything touches the store**. The ledger handle never crosses the
 /// boundary, so its thread-safety stays nobody else's problem.
-fn off_runtime<T, F>(f: F) -> Result<T>
+pub(super) fn off_runtime<T, F>(f: F) -> Result<T>
 where
     F: FnOnce() -> Result<T> + Send,
     T: Send,

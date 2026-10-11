@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-57 commits, RFCs 0154–0176, devlogs 204–252. Not yet tagged; build from source or wait for the
+58 commits, RFCs 0154–0176, devlogs 204–253. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -10,7 +10,13 @@ next release.
   - **Assess:** live catalog and profiling (PII suppressed, read-only sessions), drift against the repository's DDL, data-quality and compatibility rules that measure affected rows, inferred foreign keys from real code joins and `pg_stat_statements`.
   - **Load:** type mapping with lossiness, a ClickHouse design and generated DDL, a statement classifier with guarded execution, human-only approvals pinned to evidence.
   - **Validate and report:** V1–V3 validation, a compiled and citation-verified report. Verified live on a real table.
-- **Logic lowering, Phase 1** (RFC 0164): `ekos migrate lower` turns recovered PostgreSQL views into ClickHouse views by rule, with each rewrite listed, or blocks them by a named rule. The output is checked to parse on the target and to state nothing the source does not. Triggers get a proposed replacement per class; routines get an eligibility verdict. `ekos migrate check-candidate` runs the anti-invention check on a statement you supply. No model, no connection, nothing written. Reconstruction and differential execution are not built.
+- **Logic lowering** (RFC 0164), for PostgreSQL views → ClickHouse:
+  - `ekos migrate lower` lowers a view by rule and lists each rewrite, or blocks it by a named rule. The output must parse on the target, read back identically, and state nothing the source does not.
+  - `ekos migrate v5` runs each lowered view against its source on a PostgreSQL and a ClickHouse sandbox, over a fixture built from the view's own comparisons, and reports branch coverage with the verdict. Both connections must be marked `sandbox = true`.
+  - `ekos migrate reconstruct` sends one fully recovered PL/pgSQL routine to a model and keeps the answer only if it invents nothing. A model that is not local needs `--allow-metered` per run.
+  - `ekos migrate check-candidate` runs the anti-invention check on a statement you supply.
+  - Triggers get a proposed replacement per class; `--record` saves proposals as `MigrationProposal`, status `proposed`.
+  - Not built: V5 for routines, approval of proposals.
 - **Stored procedures, views and triggers** (RFC 0163, 0169): every PL/pgSQL routine is parsed (LedgerSMB 212/212) and linked to the tables it reads and writes and the routines it calls. Views become ledger objects. Triggers are classified by what their function does. All three are documented like code.
 - **Business semantics → LinkML** (RFC 0170, opt-in `[semantics]`):
   - concepts, code meanings, constraints and gaps recovered from SQL, dbt, Perl, Python and glossaries;

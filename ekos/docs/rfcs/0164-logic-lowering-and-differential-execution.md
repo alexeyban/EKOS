@@ -1,8 +1,9 @@
 # RFC 0164 — Logic lowering, constrained reconstruction and differential execution
 
-**Status:** Phase 1 implemented (2026-10-11, devlog_252): deterministic view lowering with a
-round trip, the anti-invention check, the fidelity gate and trigger proposals. Constrained
-reconstruction and V5 differential execution are not started — see "Phase 1" below
+**Status:** Implemented for views, in two phases (2026-10-11, devlog_252 and devlog_253):
+deterministic lowering with a round trip, the anti-invention check, the fidelity gate, trigger
+proposals, V5 differential execution on generated fixtures, constrained reconstruction, and
+persisted proposals. Open: V5 for routines, approval wiring, lowering coverage — see "Phase 2"
 **Date:** 2026-09-24
 **Supersedes:** none
 **Related:** RFC 0163 (the procedural IR this consumes — a hard prerequisite), RFC 0154 (coverage
@@ -194,15 +195,102 @@ expressions, casts with a lossy or unmeasured mapping, view column lists.
 | Triggers | 42: 34 proposals, 8 left to a person (`Mixed`) |
 | Routines | 556: 233 eligible, 21 ineligible (dynamic SQL or gaps), 302 not PL/pgSQL |
 
-The 41% of views lowered is the honest floor for this rule set, not a target. The largest single
+That count was too high: V5 later showed four of the seven were wrong on output column names (see Phase 2). The honest number for this rule set is 3 of 17. The largest single
 gain is function coverage (`string_agg`, `repeat`, `to_char`).
+
+## Phase 2 — V5, reconstruction, persistence (2026-10-11)
+
+| Piece | Where | What it does |
+|---|---|---|
+| V5 for views | `v5.rs`, `ekos migrate v5` | Runs the source view on a PostgreSQL sandbox and the lowered view on a ClickHouse sandbox over a generated fixture, and compares the canonical result sets |
+| Sandbox sessions | `pg-live/src/sandbox.rs`, `commands/migrate_logic.rs` | PostgreSQL: one transaction in a schema of its own, always rolled back. ClickHouse: a database of its own, always dropped |
+| Reconstruction | `reconstruct.rs`, `ekos migrate reconstruct` | The prompt for one routine, and the verdict on a model's answer |
+| Proposals | `MigrationProposal` kind, `--record` | A lowering, a trigger redesign or a surviving model candidate, saved with `status: proposed` |
+
+### V5
+
+**The fixture is built from the view's own comparisons.** For each `column <op> literal` (also
+`IN` and `BETWEEN`), the column's values include the literal and its neighbours; every column takes
+`NULL`; text takes one non-ASCII value. Columns the view compares are **crossed**: every
+combination appears. Taking each comparison both ways is not enough when two are joined by `AND` —
+a boundary row that the other filter always removes shows nothing. The first live run missed
+`<` → `<=` for exactly that reason.
+
+**Branch coverage is measured, not assumed.** For each such comparison, the source engine is asked
+how many fixture rows make it true and how many do not. The verdict always carries the number:
+`V5 passed: 27 source row(s), 27 target row(s), 0 differing, over 54 fixture row(s); 1/1
+comparisons taken both ways (100%); 2 more not measured`. Comparisons between two columns are
+counted as not measured.
+
+**What the view returns is asked of the source engine.** Output columns and their types come from
+`information_schema` on the sandbox after the view is created, and each is rendered by RFC 0155's
+canonical expression on both sides. Results are compared as multisets; row order is not checked.
+
+**Not run is never a pass.** V5 reports `not_run` with the reason when a view reads something EKOS
+has no table for, names a column no recovered table has, reads a column type the fixture cannot
+generate (`char(n)`, `bytea`, …), has a `LIMIT`, returns a type with no canonical rule, or when the
+PostgreSQL sandbox is not UTF8 (in `SQL_ASCII`, `length('é')` is 2).
+
+**It only writes to a declared sandbox.** `[migrate.connections.<alias>] sandbox = true` is
+required on both connections, and a DSN that is some project's migration source is refused even
+with the mark. The read-only source session type (`PgSource`) cannot produce a sandbox session.
+
+**Planted defects.** The live suite damages a passing lowering nine ways — a moved boundary, a
+changed constant, an inverted comparison, a dropped filter, a shorter `IN` list, an inner join for
+an outer one, another aggregate, a missing `prefer_column_name_to_alias`, `length` for
+`char_length` — and requires V5 to fail on each.
+
+**What V5 found on its first real run.** ClickHouse names an output column `u.id` where
+PostgreSQL names it `id`, when another joined table also has an `id`. Four LedgerSMB views that
+Phase 1 had lowered were wrong in that way. The lowering now gives every unaliased select-list item
+the name PostgreSQL gives it, and blocks `*` over a join (`LOGIC.CH.OUTPUT_NAME`), where the
+ambiguous names are not knowable without the catalog.
+
+**A limit of the fixture.** Every fixture column is `Nullable` on the target, because every column
+takes `NULL`. A missing `join_use_nulls` therefore does not show in V5: a Nullable column's default
+is already `NULL`. That rule is covered by the engine-semantics suite instead.
+
+### Reconstruction
+
+`ekos migrate reconstruct --source <routine>` runs one routine through three fences:
+
+1. The gate, before any model is asked. A routine with gaps or dynamic SQL prints `NOT SENT` and
+   costs nothing.
+2. The model. A local Ollama model needs no flag. Anything else needs `--allow-metered` for that
+   run; there is no config switch for it. (This answers the second open question.)
+3. The anti-invention check on the answer. One unmapped atom rejects it.
+
+A candidate that survives is printed, and with `--record` saved as a `MigrationProposal` with
+author `llm`, the model name, the prompt version and a hash of the prompt. It is marked
+`v5: not_run`, because V5 for routines is not built. The output says what the check cannot see: it
+finds what was added, not what was left out.
+
+On LedgerSMB with local `llama3`, the first routine tried (`entity__list_classes`) came back
+reading `system.tables` and filtering on a `role` column. Rejected, 7 of 17 atoms unmapped.
+
+### Measured on LedgerSMB after Phase 2
+
+| | |
+|---|---|
+| Views lowered | 3 of 17 (was 7: four were wrong on output names and are now blocked) |
+| V5 | 2 passed, 1 not run (`account.category` is `CHAR(1)`) |
+| Proposals recorded | 3 lowerings; 34 trigger redesigns with `lower --record` |
 
 ### Still open
 
-- Constrained reconstruction (the LLM step) and its `MigrationProposal` records.
-- V5 differential execution, fixtures from branch conditions, branch coverage.
-- Lowering `ProcStmt::Sql`, SQL-language functions and set-returning functions.
-- Persisting proposals and trigger dispositions; wiring them into approvals and the report.
+- **V5 for routines.** It needs argument fixtures, execution of PL/pgSQL with side effects rolled
+  back, and a comparison of written rows. Until then a reconstructed routine is unexecuted.
+- **Approval.** A proposal is `proposed` and stays so: `ekos migrate review`/`approve` do not take
+  proposals yet, so nothing generated here can be executed on a target through the guarded
+  executor.
+- **Lowering coverage.** Functions without a rule, CTEs, `/` once operand types come from the
+  catalog, SQL-language and set-returning functions, `ProcStmt::Sql`.
+- **Fixture types.** `char(n)`, `timestamptz`, `uuid`, `bytea`, arrays.
+- **Text ordering.** `<`/`>` on text depends on the source's collation; ClickHouse compares bytes.
+  The lowering does not know column types, so it cannot block these; V5 on a sandbox with the
+  source's collation would show it.
+- **A branch-coverage floor.** The number is reported per view; no ratchet is enforced.
+- **Pagila.** Not run.
 
 ## Testing
 
@@ -239,16 +327,17 @@ gain is function coverage (`string_agg`, `repeat`, `to_char`).
 ## Open questions
 
 - [ ] Branch-coverage floor for V5 — what is achievable on LedgerSMB before the number is set?
-- [ ] Should reconstruction be restricted to a local model (per the no-metered-calls constraint) or
-      is a cloud model acceptable when the user explicitly opts in per run?
+- [x] Should reconstruction be restricted to a local model (per the no-metered-calls constraint) or
+      is a cloud model acceptable when the user explicitly opts in per run? **Per run, by flag
+      (`--allow-metered`); never by config.**
 - [ ] For objects that cannot reach V5 at all (non-deterministic by nature), is a documented
       human-signed exemption the right exit, or do they block sign-off?
 
 ## Acceptance criteria
 
-- [ ] Every view in both corpora lowers deterministically and round-trips. *(Every lowered view round-trips; LedgerSMB lowers 7 of 17, Pagila not run.)*
+- [ ] Every view in both corpora lowers deterministically and round-trips. *(Every lowered view round-trips; LedgerSMB lowers 3 of 17, Pagila not run.)*
 - [x] The anti-invention check rejects an invented predicate and accepts a faithful one.
-- [ ] Reconstruction is impossible on `Signature` or `Partial` fidelity. *(The gate exists and `check-candidate` enforces it; there is no reconstruction path yet to enforce it in.)*
-- [ ] Planted logic defects are caught by V5 on generated fixtures.
-- [ ] Branch coverage is reported per object, with a ratcheted floor.
+- [x] Reconstruction is impossible on `Signature` or `Partial` fidelity. *(Checked before the model is asked; a test provider that panics when called proves it.)*
+- [x] Planted logic defects are caught by V5 on generated fixtures. *(Views; nine defects, live suite.)*
+- [ ] Branch coverage is reported per object, with a ratcheted floor. *(Reported per view; no floor yet.)*
 - [x] No trigger is auto-translated; each produces a classified proposal or a human-decision finding.

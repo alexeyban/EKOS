@@ -6164,7 +6164,7 @@ Not done:
 - [ ] Out of scope, stated in the RFC: views from live catalogs (RFC 0157 does not write to the
       ledger), dbt models materialized as views, column-level lineage through a view
 
-### RFC 0164 — Lowering, reconstruction, V5 · **Phase 1 done (devlog_252)**, reconstruction and V5 not started
+### RFC 0164 — Lowering, reconstruction, V5 · **done for views (devlog_252, devlog_253)**; V5 for routines and approval open
 
 Prerequisites now in place: a real node set with spans (the anti-invention check is no longer
 vacuous), `eligible_for_reconstruction` computed on every `Procedure`, routine/table links, and
@@ -6174,16 +6174,27 @@ trigger classes for the redesign proposals.
       (tables read/written, functions called) is extracted, not the dataflow graph
 - [x] Deterministic lowering of **views** with round-trip checking (`ekos migrate lower`, crate
       `ekos-migrate-logic`); a materialized view is always a blocker, never a ClickHouse MV.
-      LedgerSMB: 7 of 17 views lowered, 10 blocked by named rule
+      LedgerSMB: 3 of 17 views lowered (7 before V5 showed four were wrong on output column
+      names; those are now blocked as `LOGIC.CH.OUTPUT_NAME`)
 - [ ] Lowering coverage: functions without a rule (`string_agg`, `repeat`, `to_char`, …), CTEs,
       `/` once operand types are known from the catalog; SQL-language and set-returning functions
-- [ ] Persist lowerings and trigger proposals as `MigrationProposal` objects with R3 approval
-      (today `ekos migrate lower --json` is the record); run Pagila
+- [x] Persist lowerings, trigger proposals and surviving model candidates as `MigrationProposal`
+      objects (`--record`, status `proposed`)
+- [ ] Approval of a proposal: `ekos migrate review`/`approve` do not take proposals, so nothing
+      generated here can run on a target through the guarded executor; run Pagila
 - [x] Anti-invention check against the procedural IR's node set (`ekos migrate check-candidate`;
       every lowering is also run through it)
-- [ ] Fidelity gate enforced in a reconstruction path — the gate exists (`gate.rs`) and
-      `check-candidate` refuses an ineligible routine; there is no reconstruction path yet
-- [ ] V5 differential execution on IR-derived fixtures; branch coverage reported with a ratchet
+- [x] Fidelity gate enforced in the reconstruction path (`ekos migrate reconstruct`): an
+      ineligible routine never reaches the model — a test provider that panics when called
+- [x] Constrained reconstruction: prompt, model call behind `--allow-metered` unless local,
+      anti-invention on the answer
+- [x] V5 differential execution for **views** on fixtures derived from the view's comparisons;
+      branch coverage reported with every verdict; nine planted defects caught live
+- [ ] V5 for routines (argument fixtures, side effects rolled back, written rows compared)
+- [ ] A branch-coverage floor enforced as a ratchet (reported today, not gated)
+- [ ] V5 fixture types: `char(n)`, `timestamptz`, `uuid`, `bytea`, arrays
+- [ ] Ordered comparisons on text depend on the source collation; ClickHouse compares bytes. Not
+      blocked by the lowering (no column types there)
 - [x] Trigger redesign proposals per class (`Mixed` / `Unknown` → human decision, no proposal)
 
 ### Existing issues surfaced by this work — not fixed, not caused by it

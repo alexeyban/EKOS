@@ -434,6 +434,40 @@ enum MigrateCommands {
         /// Print the lowered statement under each view
         #[arg(long)]
         sql: bool,
+        /// Save each lowering and trigger proposal as a `MigrationProposal`, status `proposed`
+        #[arg(long)]
+        record: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// RFC 0164 V5: run each lowered view against its source on two sandbox engines, over a
+    /// fixture built from the view's own comparisons. Both connections must be `sandbox = true`
+    V5 {
+        /// PostgreSQL sandbox, as `postgres://<alias>/<database>`
+        #[arg(long)]
+        source_sandbox: String,
+        /// ClickHouse sandbox, as `clickhouse://<alias>/<database>`
+        #[arg(long)]
+        target_sandbox: String,
+        /// Save each proposal together with its V5 result
+        #[arg(long)]
+        record: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// RFC 0164: ask the configured model for a ClickHouse implementation of one PL/pgSQL
+    /// routine. Refused before any call unless every statement was recovered; the answer is kept
+    /// only if it states nothing the routine does not
+    Reconstruct {
+        /// The routine: a name, or `<path>:<name>` when several share one
+        #[arg(long)]
+        source: String,
+        /// Allow a model that is not local (and so may be billed) for this run
+        #[arg(long)]
+        allow_metered: bool,
+        /// Save a surviving candidate as a `MigrationProposal` (author `llm`, status `proposed`)
+        #[arg(long)]
+        record: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1739,8 +1773,38 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             MigrateCommands::Lower {
                 database,
                 sql,
+                record,
                 json,
-            } => crate::commands::migrate_logic::lower(&config, &cwd, database, sql, json),
+            } => crate::commands::migrate_logic::lower(&config, &cwd, database, sql, record, json),
+            MigrateCommands::V5 {
+                source_sandbox,
+                target_sandbox,
+                record,
+                json,
+            } => crate::commands::migrate_logic::run_v5(
+                &config,
+                &cwd,
+                &source_sandbox,
+                &target_sandbox,
+                record,
+                json,
+            ),
+            MigrateCommands::Reconstruct {
+                source,
+                allow_metered,
+                record,
+                json,
+            } => {
+                crate::commands::migrate_logic::run_reconstruct(
+                    &config,
+                    &cwd,
+                    &source,
+                    allow_metered,
+                    record,
+                    json,
+                )
+                .await
+            }
             MigrateCommands::CheckCandidate {
                 source,
                 candidate,

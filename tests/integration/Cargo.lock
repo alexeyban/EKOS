@@ -1145,6 +1145,7 @@ name = "ekos-migrate-logic"
 version = "1.0.3"
 dependencies = [
  "ekos-migrate-target-clickhouse",
+ "ekos-migrate-validate",
  "ekos-plpgsql",
  "serde",
  "serde_json",

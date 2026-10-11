@@ -380,6 +380,11 @@ pub struct MigrateConnection {
     /// Maximum replica lag tolerated before a run is refused (RFC 0157).
     #[serde(default = "default_max_replica_lag")]
     pub max_replica_lag_seconds: f64,
+    /// `true` marks a throwaway engine EKOS may **write** to (RFC 0164 V5 loads fixtures there).
+    /// Never set it on a migration source: V5 refuses a connection without it, and that refusal
+    /// is the only thing between a fixture and a real database.
+    #[serde(default)]
+    pub sandbox: bool,
 }
 
 fn default_chunk_rows() -> i64 {

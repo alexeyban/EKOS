@@ -23,12 +23,14 @@
 pub mod catalog;
 pub mod pii;
 pub mod profile;
+pub mod sandbox;
 pub mod session;
 pub mod workload;
 
 pub use catalog::{CatalogObject, CatalogSnapshot, ObjectKind, introspect, reconcile};
 pub use pii::{Classification, PiiClass};
 pub use profile::{ColumnProfile, ProfileTier, TableProfile};
+pub use sandbox::PgSandbox;
 pub use session::{PgSource, SessionPolicy, WriteCheck};
 pub use workload::{QueryShape, WorkloadJoin};
 

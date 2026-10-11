@@ -1367,6 +1367,9 @@ ekos migrate report --out report.md     # compiled from ledger facts, every clai
 ekos migrate status                     # units by state, and what is blocking
 ekos migrate lower --database lsmb --sql   # views → ClickHouse, trigger proposals, routine eligibility
 ekos migrate check-candidate --source open_items --candidate view.sql   # does it state anything new?
+ekos migrate v5 --source-sandbox postgres://sbpg/scratch --target-sandbox clickhouse://sbch/scratch
+                                        # run each lowered view against its source, on sandboxes
+ekos migrate reconstruct --source close_period   # one routine → a model → kept only if it invents nothing
 ```
 
 What each stage guarantees:
@@ -1393,8 +1396,28 @@ What each stage guarantees:
     built at run time.
 
   `ekos migrate check-candidate` applies the second check to a statement you supply: it is rejected
-  if it names a table, column, literal, function or comparison the source does not. Reconstruction
-  by a model and differential execution (V5) are not built yet.
+  if it names a table, column, literal, function or comparison the source does not.
+  `--record` on `lower` saves each lowering and trigger proposal as a `MigrationProposal` with
+  `status: proposed`.
+- **A lowered view is run against its source (V5).** `ekos migrate v5` builds a small fixture from
+  the view's own comparisons — the literal and its neighbours for every `column <op> literal`,
+  `NULL` in every column, compared columns crossed — loads it into a PostgreSQL sandbox and a
+  ClickHouse sandbox, and compares what the source view and the lowered view return.
+  - The verdict always carries branch coverage: how many of the view's comparisons the fixture took
+    both ways. `V5 passed` alone is never printed.
+  - A view that cannot be run (`char(n)` column, a `LIMIT`, a column the recovered tables lack)
+    is `not run`, with the reason. Not run is not a pass.
+  - Both connections must be marked `sandbox = true` under `[migrate.connections.<alias>]`, and a
+    migration source is refused even with the mark. PostgreSQL work happens in one transaction in
+    its own schema and is rolled back; ClickHouse work in its own database, which is dropped.
+  - Rows are compared as multisets. Row order is not checked.
+- **A model's rewrite of a routine is kept only if it invents nothing.**
+  `ekos migrate reconstruct` sends one PL/pgSQL routine to the configured model.
+  - A routine with unrecovered statements or dynamic SQL is never sent.
+  - A model that is not local needs `--allow-metered` on that run; there is no config switch.
+  - The answer is rejected if it names a table, column, literal, function or comparison the
+    routine does not. A survivor is a proposal, unexecuted: the check finds what was added, not
+    what was left out, and V5 for routines is not built.
 - **Sessions are read-only against the source** (`default_transaction_read_only`, statement/lock
   timeouts, low `work_mem`, a replica-lag guard that refuses a run above the configured threshold).
 - **Assessment measures, it does not guess.** Each finding carries the SQL that measured it.
