@@ -27,6 +27,20 @@ The same suite on the same ledger now scores 95 of 101, and no failure is attrib
 | Answered but uncited | 11 | 2 |
 | Failures attributed to retrieval | 6 | 0 |
 
+The local model (`llama3`, same ledger, earlier run re-graded under the current ruler):
+
+| | Before | After |
+|---|---|---|
+| Scenarios passed | 64 / 101 | 65 / 101 |
+| Answer correctness | 65.9% | 72.2% |
+| Evidence groundedness | 76.9% | 75.8% |
+| Fabrication (of 20 refusal scenarios) | 40% | 35% |
+| Answered but uncited | 9 | 16 |
+| Failures attributed to retrieval | 10 | 2 |
+| Failures attributed to generation | 12 | 16 |
+
+Retrieval failures moved to generation failures: the fact is now shown and the small model does not use it, and it cites less often with the longer evidence. Every prompt of this run filled its 8,192-token window, as in the earlier run.
+
 Both runs use the self-workspace ledger from 2026-09-23. It was not re-recovered: `recover` and `commit` call the configured model, which is metered here.
 
 ---
