@@ -585,7 +585,11 @@ decision kept. Agents read conflicts over MCP (`ekos_conflicts`, and `open_confl
 `ekos_state`) and are told to present an open one as a disagreement, never one side as fact; no MCP
 tool can resolve one. Answers say so too (RFC 0173): an `ekos_query` / `ekos_retrieve` claim about an
 attribute with an open conflict carries `disputed: true` and the conflict ids, since its value is
-only the side EKOS kept. On LedgerSMB: 3 conflicts — `user_preference` (re-created by a 1.9 migration)
+only the side EKOS kept, and `ekos ask` tells the model the same in the evidence it reads. A label
+conflict is also linked to the table its column belongs to, so a question about the table surfaces
+it. The web console's **Conflicts** tab lists every conflict with each claim's file and line, lets a
+write-role user pick the right claim or mark both valid, and the graph rings objects with an open
+conflict (RFC 0174). On LedgerSMB: 3 conflicts — `user_preference` (re-created by a 1.9 migration)
 and 2 order-class labels where an API query names the counterparty (`customer`) rather than the
 order type. The detector first surfaced a CASE that swaps `'A'`↔`'L'` misread as a label; the
 extractor no longer reads a rewrite as a meaning. `[conflicts]
@@ -1773,7 +1777,7 @@ RFC 0030). The project site is [ekos.dev](https://ekos.dev).
 | v1.0 | Enterprise Knowledge Compiler |
 
 The latest release is `v1.0.3` (2026-09-24); 1.0.0 (2026-09-23) is the `v1.0` row above. `main` is
-ahead of it — RFCs up to 0173 and 248 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
+ahead of it — RFCs up to 0174 and 249 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
 "Unreleased" section lists what landed since. The phase-by-phase record is [TODO.md](TODO.md) and
 the devlogs, not this table.
 

@@ -71,6 +71,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<
         ai = ai.with_artifact_store(Arc::new(store));
     }
 
+    // RFC 0173: a claim about an attribute sources disagree on is marked as disputed.
+    if config.conflicts.enabled {
+        ai = ai.with_disputes(super::conflicts::dispute_lookup(config, cwd, &*ledger));
+    }
+
     // `--explain` (REASON only): assemble the plan + evidence once, for the text block and --json.
     let explain_data = if explain {
         Some((ai.plan(question)?, ai.gather_evidence(question)?))

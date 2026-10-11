@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
+import type { Conflict } from "../api/types";
+import { disputedIds } from "./conflicts-shared";
 import type { GraphCanvasHandle } from "./GraphCanvas";
 import { colorFor, SERVER_LAYOUT_THRESHOLD, type GLink, type GNode } from "./graph-shared";
 import { impactHopMap, neighborhoodToGraph, type ImpactOut, type NeighborhoodOut } from "./graph-v2";
@@ -168,6 +170,15 @@ export function Graph() {
       ),
     enabled: isolate !== null,
   });
+
+  // RFC 0174 — objects with an open conflict get a ring. A failed read just draws no rings.
+  const openConflicts = useQuery({
+    queryKey: ["conflicts", id, "open"],
+    queryFn: () => api<Conflict[]>(`/workspaces/${id}/conflicts?status=open`),
+    enabled: id !== "",
+    retry: false,
+  });
+  const disputed = useMemo(() => disputedIds(openConflicts.data), [openConflicts.data]);
 
   // RFC 0136 §3 — a hop-distance node list, overlaid on whatever graph is already on screen.
   const impactQuery = useQuery({
@@ -464,6 +475,7 @@ export function Graph() {
                 dimKind={!isolate && expanded ? focusKind : null}
                 asOf={isolate ? null : asOf}
                 impactHops={impactHops}
+                disputed={disputed}
                 onNodeClick={(n) => {
                   if (n.isAggregate) setFocusKind(n.label);
                   else {

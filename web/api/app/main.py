@@ -20,6 +20,7 @@ from .routes import (
     auth,
     commands,
     config,
+    conflicts,
     evals,
     graph,
     meta,
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
         graph,
         evals,
         semantics,
+        conflicts,
     ):
         app.include_router(r.router, prefix="/api")
 

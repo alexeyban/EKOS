@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
-pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig, ConversationTurn};
+pub use ai::{AiAnswer, AiError, AiRuntime, AiRuntimeConfig, ConversationTurn, DisputeLookup};
 /// RFC 0119 — the retrieval seam, re-exported so consumers import it from `ekos_runtime`.
 pub use ekos_ledger::{ArmSet, Hit, RankedResults, RetrievalRequest, Signal, SignalSource};
 /// RFC 0127 R1 — bulk graph extraction.

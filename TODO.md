@@ -6278,8 +6278,13 @@ the git history, a hostile-input run against the real MCP server, and timing on 
 - [ ] Doc claims from Markdown/Confluence pages that name a column (only column comments are read today)
 - [x] `disputed: true` + conflict ids on `ekos_query`/`ekos_retrieve` claims about a disputed attribute,
       one `RSN008` per disputed entity in the answer (RFC 0173, devlog_248)
-- [ ] The same marker in `ekos ask` (changes the prompt — needs an RFC 0138 eval run first)
-- [ ] Console conflicts view + RFC 0127 graph halo
+- [x] The same marker in `ekos ask`: only a disputed claim's line and an entity note change, so every
+      other prompt is byte-identical (a test pins it) and no eval run was needed (devlog_249)
+- [x] A label conflict is also linked to its column's table (`conflicts::column_links`), so a question
+      about the table surfaces it (devlog_249)
+- [x] Console Conflicts tab (list, claims, pick / both valid, write role) + graph ring on objects with an
+      open conflict (RFC 0174, devlog_249)
+- [ ] `ekos eval run` does not pass the dispute lookup (the eval corpus has no conflicts)
 - [x] The `case_label` source misread a CASE that rewrites a code (`'A'`→`'L'`) as a label — a
       branch labels a code only when it tests that column alone and the CASE does not map the
       column back into its own codes (`predicates/3`, devlog_247)

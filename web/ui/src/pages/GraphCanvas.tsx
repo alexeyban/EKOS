@@ -10,6 +10,9 @@ export interface GraphCanvasHandle {
   exportGltf: () => void;
 }
 
+// RFC 0174 — the ring around an object two sources disagree about.
+const DISPUTED_RING = "#fbbf24";
+
 export const GraphCanvas = forwardRef<
   GraphCanvasHandle,
   {
@@ -20,10 +23,11 @@ export const GraphCanvas = forwardRef<
     dimKind: string | null; // when set, nodes of other kinds are dimmed
     asOf: string | null; // RFC 0134 — hide anything minted after this instant
     impactHops?: Map<string, number> | null; // RFC 0136 §3 — id -> hop distance, when active
+    disputed?: Set<string> | null; // RFC 0174 — objects with an open conflict get a ring
     onNodeClick: (n: GNode) => void;
   }
 >(function GraphCanvas(
-  { nodes, links, focusId, selectedId, dimKind, asOf, impactHops, onNodeClick },
+  { nodes, links, focusId, selectedId, dimKind, asOf, impactHops, disputed, onNodeClick },
   ref,
 ) {
   const fgRef = useRef<ForceGraphMethods<GNode, GLink> | undefined>(undefined);
@@ -117,11 +121,24 @@ export const GraphCanvas = forwardRef<
         nodeLabel={(n) =>
           n.isAggregate
             ? `${n.label} — ${n.count} objects`
-            : `${n.label}<br/><span style="opacity:.6">${n.kind}</span>`
+            : `${n.label}<br/><span style="opacity:.6">${n.kind}</span>${
+                disputed?.has(n.id) ? "<br/>sources disagree — see Conflicts" : ""
+              }`
         }
-        nodeCanvasObjectMode={(n) => (n.isAggregate ? "after" : undefined)}
+        nodeCanvasObjectMode={(n) =>
+          n.isAggregate || disputed?.has(n.id) ? "after" : undefined
+        }
         nodeCanvasObject={(n, ctx, scale) => {
-          if (!n.isAggregate) return;
+          if (!n.isAggregate) {
+            // The library draws a node as a disc of radius sqrt(val) * nodeRelSize.
+            const r = Math.sqrt(1 + 8 * (n.degree / maxDeg)) * 4;
+            ctx.beginPath();
+            ctx.arc(n.x ?? 0, n.y ?? 0, r + 2.5 / scale, 0, 2 * Math.PI);
+            ctx.strokeStyle = DISPUTED_RING;
+            ctx.lineWidth = 2 / scale;
+            ctx.stroke();
+            return;
+          }
           ctx.font = `${12 / scale}px sans-serif`;
           ctx.fillStyle = "#d6d3e6";
           ctx.textAlign = "center";

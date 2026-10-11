@@ -440,6 +440,58 @@ pub fn label_mismatches(enums: &[KirObject]) -> KirGraph {
     out
 }
 
+/// RFC 0173 — a label conflict disputes its `EnumMeaning`, but a reader asks about the table. For
+/// each label conflict in `found` whose meaning names a table that exactly one of `tables` has,
+/// a second `Disputes` link from the conflict to that table. The link carries the attribute as
+/// the table sees it (`columns.<column>.meaning`) and the table's name, so a claim about the
+/// table's columns can be flagged.
+pub fn column_links(
+    found: &KirGraph,
+    enums: &[KirObject],
+    tables: &[KirObject],
+) -> Vec<KirRelationship> {
+    let text = |o: &KirObject, k: &str| -> Option<String> {
+        o.properties
+            .get(k)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    let mut out = Vec::new();
+    for c in &found.objects {
+        if text(c, "conflict_type").as_deref() != Some(LABEL_MISMATCH) {
+            continue;
+        }
+        let Some(meaning) = enums
+            .iter()
+            .find(|e| Some(e.id.to_string()) == text(c, "subject_id"))
+        else {
+            continue;
+        };
+        let (Some(table), Some(column)) = (text(meaning, "table"), text(meaning, "column")) else {
+            continue;
+        };
+        let mut named = tables
+            .iter()
+            .filter(|t| t.kind == ObjectKind::Table && t.name == table);
+        let (Some(t), None) = (named.next(), named.next()) else {
+            continue;
+        };
+        let attribute = format!("columns.{}.meaning", column.to_lowercase());
+        let mut rel = KirRelationship::deterministic(
+            RelationshipKind::Custom(DISPUTES.into()),
+            c.id,
+            t.id,
+            &attribute,
+        );
+        rel.properties.insert("attribute".into(), json!(attribute));
+        rel.properties
+            .insert("subject_name".into(), json!(t.name.clone()));
+        out.push(rel);
+    }
+    out.sort_by_key(|r| r.id.to_string());
+    out
+}
+
 // ── Review ──────────────────────────────────────────────────────────────────────────────────
 
 fn status(o: &KirObject) -> &str {
@@ -789,6 +841,41 @@ mod tests {
             c.objects[0].properties["claims"].as_array().unwrap().len(),
             2
         );
+    }
+
+    /// RFC 0173 — a label conflict is also linked to the one table its column belongs to.
+    #[test]
+    fn a_label_conflict_is_linked_to_its_columns_table_when_the_name_is_unique() {
+        let mut e = enum_meaning(json!([
+            {"label":"asset","source":"column_comment","path":"sql/Pg-database.sql","line":72},
+            {"label":"L","source":"case_label","path":"sql/modules/FinStatements.sql","line":690}
+        ]));
+        e.properties.insert("table".into(), json!("account"));
+        e.properties.insert("column".into(), json!("Category"));
+        let found = label_mismatches(std::slice::from_ref(&e));
+        let account = KirObject::new("account", ObjectKind::Table);
+        let other = KirObject::new("parts", ObjectKind::Table);
+        // Same name, another kind: not a table, so it neither matches nor makes it ambiguous.
+        let view = KirObject::new("account", ObjectKind::Custom("View".into()));
+
+        let enums = [e];
+        let links = column_links(&found, &enums, &[account.clone(), other, view]);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].from, found.objects[0].id);
+        assert_eq!(links[0].to, account.id);
+        assert_eq!(links[0].kind, RelationshipKind::Custom(DISPUTES.into()));
+        assert_eq!(links[0].properties["attribute"], "columns.category.meaning");
+        assert_eq!(links[0].properties["subject_name"], "account");
+        // Stable id, and not the conflict's own link to the meaning.
+        let again = column_links(&found, &enums, std::slice::from_ref(&account));
+        assert_eq!(again[0].id, links[0].id);
+        assert!(found.relationships.iter().all(|r| r.id != links[0].id));
+
+        // Two tables with that name: no guess.
+        let twin = KirObject::new("account", ObjectKind::Table);
+        assert!(column_links(&found, &enums, &[account, twin]).is_empty());
+        // No table at all, or a meaning that names none.
+        assert!(column_links(&found, &enums, &[]).is_empty());
     }
 
     #[test]

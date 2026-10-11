@@ -64,6 +64,10 @@ const router = createBrowserRouter([
             lazy: () => import("./pages/Semantics").then((m) => ({ Component: m.Semantics })),
           },
           {
+            path: "conflicts",
+            lazy: () => import("./pages/Conflicts").then((m) => ({ Component: m.Conflicts })),
+          },
+          {
             path: "config",
             lazy: () => import("./pages/Config").then((m) => ({ Component: m.Config })),
           },

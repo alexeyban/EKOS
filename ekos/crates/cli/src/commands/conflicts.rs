@@ -124,7 +124,17 @@ pub fn commit_step(
             .into_iter()
             .filter(|o| matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == "EnumMeaning"))
             .collect();
-        let g = conflicts::label_mismatches(&enums);
+        let mut g = conflicts::label_mismatches(&enums);
+        // RFC 0173 — also link each label conflict to the table its column belongs to.
+        if !g.objects.is_empty() {
+            let tables: Vec<KirObject> = ledger
+                .all_objects()?
+                .into_iter()
+                .filter(|o| o.kind == ekos_kir::ObjectKind::Table)
+                .collect();
+            let links = conflicts::column_links(&g, &enums, &tables);
+            g.relationships.extend(links);
+        }
         for ev in &g.evidence {
             ledger.append_evidence(ev)?;
         }
@@ -269,18 +279,27 @@ pub fn open_for(
 ) -> Result<Vec<Value>> {
     let mut out: Vec<Value> = open_items_for(&current_ids(config, cwd), ledger, subject)?
         .iter()
-        .map(brief)
+        .map(|l| brief(&l.item))
         .collect();
     out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     Ok(out)
+}
+
+/// An open conflict reached from `subject`, with the attribute and subject name as that link
+/// states them: a label conflict reaches its table through an RFC 0173 column link, where the
+/// attribute is `columns.<column>.meaning`, not the conflict's own `label`.
+struct Linked {
+    item: KirObject,
+    attribute: String,
+    subject: String,
 }
 
 fn open_items_for(
     current: &Option<BTreeSet<String>>,
     ledger: &dyn KnowledgeStore,
     subject: &KirId,
-) -> Result<Vec<KirObject>> {
-    let mut out = Vec::new();
+) -> Result<Vec<Linked>> {
+    let mut out: Vec<Linked> = Vec::new();
     for rel in ledger.relationships_for(subject)? {
         if rel.to != *subject
             || !matches!(&rel.kind, ekos_kir::RelationshipKind::Custom(k) if k == conflicts::DISPUTES)
@@ -296,7 +315,18 @@ fn open_items_for(
         if let Some(o) = ledger.get_object(&rel.from)?
             && s(&o, "status") == OPEN
         {
-            out.push(o);
+            let stated = |k: &str| {
+                rel.properties
+                    .get(k)
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| s(&o, k))
+                    .to_string()
+            };
+            out.push(Linked {
+                attribute: stated("attribute"),
+                subject: stated("subject_name"),
+                item: o,
+            });
         }
     }
     Ok(out)
@@ -311,15 +341,37 @@ pub fn flag_disputed(
     evidence: &mut ekos_runtime::reason::EvidenceSet,
 ) -> Result<usize> {
     let current = current_ids(config, cwd);
-    evidence.mark_disputed(|entity| {
-        Ok(open_items_for(&current, ledger, entity)?
-            .iter()
-            .map(|o| ekos_runtime::reason::OpenDispute {
-                conflict: o.id,
-                subject: s(o, "subject_name").to_string(),
-                attribute: s(o, "attribute").to_string(),
-            })
-            .collect())
+    evidence.mark_disputed(|entity| disputes_of(&current, ledger, entity))
+}
+
+fn disputes_of(
+    current: &Option<BTreeSet<String>>,
+    ledger: &dyn KnowledgeStore,
+    entity: &KirId,
+) -> Result<Vec<ekos_runtime::reason::OpenDispute>> {
+    Ok(open_items_for(current, ledger, entity)?
+        .into_iter()
+        .map(|l| ekos_runtime::reason::OpenDispute {
+            conflict: l.item.id,
+            subject: l.subject,
+            attribute: l.attribute,
+        })
+        .collect())
+}
+
+/// The same lookup for `ekos ask` ([`ekos_runtime::AiRuntime::with_disputes`]). A read that fails
+/// marks nothing rather than failing the answer.
+pub fn dispute_lookup<'a>(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &'a dyn KnowledgeStore,
+) -> ekos_runtime::DisputeLookup<'a> {
+    let current = current_ids(config, cwd);
+    Box::new(move |entity| {
+        disputes_of(&current, ledger, entity).unwrap_or_else(|e| {
+            tracing::warn!("could not read the conflicts about {entity}: {e}");
+            Vec::new()
+        })
     })
 }
 
@@ -616,6 +668,8 @@ mod tests {
             ObjectKind::Custom("EnumMeaning".into()),
         );
         o.properties.insert("label".into(), json!("asset"));
+        o.properties.insert("table".into(), json!("account"));
+        o.properties.insert("column".into(), json!("category"));
         o.properties.insert(
             "meanings".into(),
             json!([
@@ -661,6 +715,62 @@ mod tests {
             items[0].properties["picked_claim"]["path"],
             "sql/Pg-database.sql"
         );
+    }
+
+    /// RFC 0173 — a label conflict is reachable from the table its column belongs to: the
+    /// table's `columns` claim is flagged, and `ekos_state`'s list for the table carries it.
+    #[test]
+    fn a_label_conflict_flags_claims_about_its_table() {
+        use ekos_runtime::reason::{EvidenceItem, EvidenceSet, PlanNode, QueryPlan};
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path();
+        let mut config = EkosConfig::default();
+        config.semantics.enabled = true;
+        let account = KirObject::new("account", ObjectKind::Table);
+        let ledger = open_store(&config, cwd).unwrap();
+        ledger.append_object(&account).unwrap();
+        ledger.append_object(&enum_meaning()).unwrap();
+        commit_step(&config, cwd, &*ledger, &[]).unwrap();
+
+        let about_account = open_for(&config, cwd, &*ledger, &account.id).unwrap();
+        assert_eq!(about_account.len(), 1);
+        assert_eq!(about_account[0]["conflict_type"], "label_mismatch");
+
+        let item = |attr: &str| EvidenceItem {
+            claim: format!("account.{attr} = …"),
+            value: Value::Null,
+            source: None,
+            location: String::new(),
+            confidence: 1.0,
+            extracted_by: String::new(),
+            entity: Some(account.id),
+            weak: false,
+            attr: Some(attr.into()),
+            disputed: false,
+            conflicts: Vec::new(),
+        };
+        let mut set = EvidenceSet {
+            items: vec![item("columns"), item("schema")],
+            plan: QueryPlan {
+                raw: "account columns".into(),
+                query_type: ekos_runtime::retrieval::QueryType::Lookup,
+                root: PlanNode::Compose { steps: Vec::new() },
+                confidence: 1.0,
+            },
+            diagnostics: Vec::new(),
+        };
+        assert_eq!(flag_disputed(&config, cwd, &*ledger, &mut set).unwrap(), 1);
+        assert!(set.items[0].disputed && !set.items[1].disputed);
+        assert!(
+            set.diagnostics[0]
+                .message
+                .contains("account (columns.category.meaning)"),
+            "{}",
+            set.diagnostics[0].message
+        );
+
+        // An unchanged re-commit writes nothing new, link included.
+        assert_eq!(commit_step(&config, cwd, &*ledger, &[]).unwrap().written, 0);
     }
 
     /// RFC 0172: settling a conflict stays human-only.

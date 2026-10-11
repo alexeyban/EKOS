@@ -953,3 +953,9 @@ textarea.lm-yaml {
   background: var(--ground);
   font-style: italic;
 }
+
+/* RFC 0174 — conflicts view */
+.conflict-claims li {
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+}

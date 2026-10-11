@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-52 commits, RFCs 0154–0173, devlogs 204–248. Not yet tagged; build from source or wait for the
+54 commits, RFCs 0154–0174, devlogs 204–249. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -26,7 +26,7 @@ next release.
   - documentation vs data in `ekos migrate assess` (`DQ.CONSIST.DOC`).
 
   Resolving is human-only through `ekos conflicts list|show|resolve`; MCP has a read-only `ekos_conflicts`.
-  An `ekos_query` / `ekos_retrieve` claim about an attribute with an open conflict carries `disputed: true` and the conflict ids (RFC 0173).
+  An `ekos_query` / `ekos_retrieve` claim about an attribute with an open conflict carries `disputed: true` and the conflict ids, and `ekos ask` tells the model the same (RFC 0173). A label conflict is also linked to its column's table. The web console has a Conflicts tab and rings disputed objects in the graph (RFC 0174).
 
 **Fixes**
 - `ekos resolve` no longer stops on same-name groups across the database and code namespaces (LedgerSMB 16 → 0 conflicts).

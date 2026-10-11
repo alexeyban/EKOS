@@ -12,7 +12,10 @@ export; and an **Evals** tab browsing every saved RFC 0138 `ekos eval run` repor
 per-scenario detail), with a new run triggerable from the existing **Run** tab like any other
 allowlisted command. A **Semantics** tab (RFC 0170) reviews business-semantics hypotheses
 (confirm/reject/edit with evidence) and views/edits the exported LinkML schema, round-tripping
-YAML edits through `ekos import linkml`. Decisions are write-role, CLI-only (never MCP), and
+YAML edits through `ekos import linkml`. A **Conflicts** tab (RFC 0174) lists where sources
+disagree about one fact, with every claim's file and line, and records a decision (this claim is
+right, or both are valid) through `ekos conflicts resolve`; the **Graph** rings objects that have an
+open conflict. Decisions are write-role, CLI-only (never MCP), and
 attributed to the signed-in user. See the root [`README.md`](../README.md)'s own "Web console" section for the
 full, versioned feature list per RFC; this file stays focused on running and developing the
 console itself.

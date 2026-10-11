@@ -282,3 +282,31 @@ export interface ImportPlan {
   errors: string[];
   applied: number;
 }
+
+// ── RFC 0172/0174 conflicting evidence ──────────────────────────────────────────────────────
+
+export type ConflictStatus = "open" | "resolved" | "dismissed";
+
+/** One source's side of a disagreement. */
+export interface ConflictClaim {
+  value: unknown;
+  path: string;
+  line: number | null;
+  source: string;
+}
+
+/** One conflict as `ekos conflicts list --json` prints it. */
+export interface Conflict {
+  id: string;
+  name: string;
+  subject: { id: string; name: string; kind: string };
+  attribute: string;
+  conflict_type: string;
+  status: ConflictStatus;
+  status_meaning: string;
+  claims: ConflictClaim[] | null;
+  chosen_by_ekos: unknown;
+  picked_claim: ConflictClaim | null;
+  review_note: string | null;
+  measured: { violating_rows?: number; query?: string; measured_at?: string } | null;
+}

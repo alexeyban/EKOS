@@ -37,6 +37,8 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     ("export", "linkml", "--json"): frozenset({"--status"}),
     # The same schema as YAML text, for the console's editor (`read_text`).
     ("export", "linkml", "--yaml"): frozenset({"--status"}),
+    # RFC 0172 conflicting evidence — read only.
+    ("conflicts", "list", "--json"): frozenset({"--status", "--type"}),
 }
 
 # Shapes that end in exactly one positional argument, which must match the pattern. The only one

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Implemented (2026-10-11) |
+| **Status** | Implemented (2026-10-11), with the `ekos ask` and table-link amendments below |
 | **Depends on** | RFC 0172 (ConflictingEvidence), RFC 0123/0124 (Query Plan IR, `EvidenceSet`, the QUERY tools) |
 
 ## Problem
@@ -39,11 +39,15 @@ A conflict's attribute disputes a claim when it equals the claim's `attr` or is 
 
 Cost is one `relationships_for` per distinct entity in the answer, the same as `ekos_state` pays for one object.
 
+## Amendment (same day): `ekos ask` and table links
+
+**`ekos ask`.** `AiRuntime::with_disputes(lookup)` runs the same marking inside `gather_evidence`. In the evidence the model reads, a disputed claim's line ends with a fixed marker (`reason::DISPUTED_MARKER`), and each `RSN008` is appended as a `Note:` line, because a search or graph claim states no attribute and is never marked itself. The system prompt is unchanged. So an answer that touches no open conflict gets a byte-identical prompt; a test pins that, and it is why no RFC 0138 eval run was needed. `ekos eval run` does not pass the lookup.
+
+**Label conflicts reach their table.** A `label_mismatch` disputes its `EnumMeaning`, so a question about the table missed it. At commit, `conflicts::column_links` adds a second `Disputes` link from each label conflict to the table its meaning names, when exactly one `Table` has that name. The link carries `attribute = columns.<column>.meaning` and the table's name; the lookup uses the link's attribute when it has one. `ekos_state` on the table lists the conflict too.
+
 ## Not in this RFC
 
-- **`ekos ask`.** The LLM answer path does not mark disputes yet. It would change the prompt, so it needs an RFC 0138 eval run first.
-- **Claims about the column a code belongs to.** A `label_mismatch` disputes its `EnumMeaning`, not the `Table`. A question about the table does not surface it unless the meaning is in the evidence set.
-- **Console:** the conflicts view and the RFC 0127 graph halo (still open from RFC 0172).
+- **Console:** see RFC 0174.
 
 ## Tests
 

@@ -20,6 +20,7 @@ const TABS = [
   { to: "runs", label: "History" },
   { to: "evals", label: "Evals" },
   { to: "semantics", label: "Semantics" },
+  { to: "conflicts", label: "Conflicts" },
   { to: "config", label: "ekos.toml" },
 ];
 

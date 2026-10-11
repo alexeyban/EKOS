@@ -215,7 +215,13 @@ pub struct AiRuntime<'a> {
     /// ([`Self::with_artifact_store`]); `None` (every pre-existing call site, unchanged) leaves
     /// `gather_evidence`'s output exactly as it was before this RFC.
     artifact_store: Option<Arc<dyn ArtifactStore>>,
+    /// RFC 0173 — an entity's open conflicts, when the caller can tell ([`Self::with_disputes`]).
+    disputes: Option<DisputeLookup<'a>>,
 }
+
+/// An entity's open conflicts (RFC 0172). The caller supplies it because which conflicts are
+/// current is recorded beside the ledger, not in it.
+pub type DisputeLookup<'a> = Box<dyn Fn(&KirId) -> Vec<crate::reason::OpenDispute> + 'a>;
 
 impl<'a> AiRuntime<'a> {
     pub fn new(
@@ -228,7 +234,17 @@ impl<'a> AiRuntime<'a> {
             llm,
             config,
             artifact_store: None,
+            disputes: None,
         }
+    }
+
+    /// Opt into RFC 0173: every [`Self::gather_evidence`] result has the claims about an
+    /// attribute with an open conflict marked, so the rendered evidence the model reads says the
+    /// value is only one side. Without it, and for an answer that touches no conflict, the prompt
+    /// is byte-identical to before.
+    pub fn with_disputes(mut self, lookup: DisputeLookup<'a>) -> Self {
+        self.disputes = Some(lookup);
+        self
     }
 
     /// Opt into RFC 0140 §3: the top `config.source_text_top_k` distinct entities in each
@@ -312,6 +328,9 @@ impl<'a> AiRuntime<'a> {
     pub fn gather_evidence(&self, question: &str) -> Result<EvidenceSet, AiError> {
         let plan = self.plan(question)?;
         let mut evidence = execute(&plan, self.runtime)?;
+        if let Some(lookup) = &self.disputes {
+            let _ = evidence.mark_disputed(|id| Ok::<_, std::convert::Infallible>(lookup(id)));
+        }
         if let Some(store) = &self.artifact_store {
             attach_source_text(
                 &mut evidence,
@@ -1525,6 +1544,91 @@ mod tests {
         assert!(answer.answer.contains("Orders is a table"));
         assert_eq!(answer.evidence_refs, vec![ev_id]);
         assert!(answer.diagnostics.is_empty());
+    }
+
+    /// Keeps the user prompt it was sent.
+    struct PromptMock(std::sync::Mutex<String>);
+
+    #[async_trait::async_trait]
+    impl LlmProvider for PromptMock {
+        fn model_name(&self) -> &str {
+            "prompt-mock"
+        }
+        async fn complete(
+            &self,
+            req: &LlmRequest<'_>,
+        ) -> Result<ekos_recovery::llm::LlmResponse, LlmError> {
+            *self.0.lock().unwrap() = req.user.to_string();
+            Ok(ekos_recovery::llm::LlmResponse {
+                content: r#"An answer. {"cited_evidence": []}"#.to_string(),
+                model: "prompt-mock".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            })
+        }
+    }
+
+    /// RFC 0173 — the model is told a claim is disputed, only when one is, and the answer
+    /// carries the `RSN008` note. With no open conflict the prompt is byte-identical.
+    #[tokio::test]
+    async fn reason_tells_the_model_which_claims_are_disputed() {
+        use crate::reason::{DISPUTED_MARKER, OpenDispute};
+        let (ledger, _dir) = temp_ledger();
+        let (orders, _) = seed(&ledger);
+        let runtime = Runtime::new(&ledger);
+        let conflict = KirId::new();
+        async fn prompt_with<'a>(
+            runtime: &'a Runtime<'a>,
+            question: &str,
+            lookup: Option<DisputeLookup<'a>>,
+        ) -> (String, AiAnswer) {
+            let llm = Arc::new(PromptMock(std::sync::Mutex::new(String::new())));
+            let mut ai = AiRuntime::new(runtime, llm.clone(), AiRuntimeConfig::default());
+            if let Some(lookup) = lookup {
+                ai = ai.with_disputes(lookup);
+            }
+            let answer = ai.reason(question).await.unwrap();
+            let prompt = llm.0.lock().unwrap().clone();
+            (prompt, answer)
+        }
+
+        let (plain, _) = prompt_with(&runtime, "orders", None).await;
+        assert!(!plain.contains("DISPUTED"));
+
+        let (quiet, answer) = prompt_with(&runtime, "orders", Some(Box::new(|_| Vec::new()))).await;
+        assert_eq!(quiet, plain);
+        assert!(answer.diagnostics.iter().all(|d| d.code != "RSN008"));
+
+        let lookup = || -> DisputeLookup<'_> {
+            Box::new(move |id| {
+                if *id == orders {
+                    vec![OpenDispute {
+                        conflict,
+                        subject: "orders".into(),
+                        attribute: "kind".into(),
+                    }]
+                } else {
+                    Vec::new()
+                }
+            })
+        };
+        let (marked, answer) = prompt_with(&runtime, "orders", Some(lookup())).await;
+        let disputed: Vec<&str> = marked
+            .lines()
+            .filter(|l| l.contains(DISPUTED_MARKER))
+            .collect();
+        assert!(!disputed.is_empty(), "{marked}");
+        assert!(disputed.iter().all(|l| l.contains("orders.kind = ")));
+        assert!(answer.diagnostics.iter().any(|d| d.code == "RSN008"));
+
+        // A question answered with search and graph claims only: no claim states the attribute,
+        // so the note about the entity is what tells the model.
+        let (noted, _) = prompt_with(&runtime, "what is the orders table", Some(lookup())).await;
+        assert!(!noted.contains(DISPUTED_MARKER), "{noted}");
+        assert!(
+            noted.contains("Note: sources disagree about orders (kind)"),
+            "{noted}"
+        );
     }
 
     #[tokio::test]

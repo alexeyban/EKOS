@@ -929,6 +929,10 @@ pub fn plan_question(question: &str, runtime: &Runtime) -> Result<QueryPlan, Run
     Ok(plan(&understand(question, runtime)?))
 }
 
+/// What a disputed claim says in the rendered evidence (RFC 0173).
+pub const DISPUTED_MARKER: &str = " — DISPUTED: sources disagree about this and nobody has \
+    decided; this value is only the side EKOS kept, so say that it is disputed";
+
 /// Render an [`EvidenceSet`] as the numbered, cite-able context block the LLM sees.
 pub fn render_evidence(set: &EvidenceSet) -> String {
     if set.items.is_empty() {
@@ -945,7 +949,14 @@ pub fn render_evidence(set: &EvidenceSet) -> String {
             Some(id) => format!(" (evidence {id})"),
             None => String::new(),
         };
-        out.push_str(&format!("{}. {}{loc}{src}\n", i + 1, item.claim));
+        // RFC 0173 — only on a claim with an open conflict, so every other prompt is unchanged.
+        let disputed = if item.disputed { DISPUTED_MARKER } else { "" };
+        out.push_str(&format!("{}. {}{disputed}{loc}{src}\n", i + 1, item.claim));
+    }
+    // A search or graph claim states no attribute, so it is never marked itself; the note about
+    // its entity is the only way the reader of this block learns the entity is disputed.
+    for d in set.diagnostics.iter().filter(|d| d.code == "RSN008") {
+        out.push_str(&format!("Note: {}\n", d.message));
     }
     out
 }
