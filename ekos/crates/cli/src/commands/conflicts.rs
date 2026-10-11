@@ -267,7 +267,19 @@ pub fn open_for(
     ledger: &dyn KnowledgeStore,
     subject: &KirId,
 ) -> Result<Vec<Value>> {
-    let current = current_ids(config, cwd);
+    let mut out: Vec<Value> = open_items_for(&current_ids(config, cwd), ledger, subject)?
+        .iter()
+        .map(brief)
+        .collect();
+    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    Ok(out)
+}
+
+fn open_items_for(
+    current: &Option<BTreeSet<String>>,
+    ledger: &dyn KnowledgeStore,
+    subject: &KirId,
+) -> Result<Vec<KirObject>> {
     let mut out = Vec::new();
     for rel in ledger.relationships_for(subject)? {
         if rel.to != *subject
@@ -284,11 +296,31 @@ pub fn open_for(
         if let Some(o) = ledger.get_object(&rel.from)?
             && s(&o, "status") == OPEN
         {
-            out.push(brief(&o));
+            out.push(o);
         }
     }
-    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     Ok(out)
+}
+
+/// RFC 0173 — mark the claims in a query answer whose attribute has an open conflict. One
+/// `Disputes` lookup per distinct entity in the set; the manifests are read once.
+pub fn flag_disputed(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    evidence: &mut ekos_runtime::reason::EvidenceSet,
+) -> Result<usize> {
+    let current = current_ids(config, cwd);
+    evidence.mark_disputed(|entity| {
+        Ok(open_items_for(&current, ledger, entity)?
+            .iter()
+            .map(|o| ekos_runtime::reason::OpenDispute {
+                conflict: o.id,
+                subject: s(o, "subject_name").to_string(),
+                attribute: s(o, "attribute").to_string(),
+            })
+            .collect())
+    })
 }
 
 /// MCP `ekos_conflicts` — read-only. `subject` narrows to conflicts whose subject or name contains

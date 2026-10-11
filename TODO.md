@@ -6276,7 +6276,9 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       the `case_label` fix (devlog_247)
 - [x] Phase 3: doc-vs-data findings in `migrate assess` (RFC 0158 `DQ.CONSIST.DOC`), `migrate-dq::doc_claims`, live test `pg-live/tests/live_doc_claims.rs` (devlog_245)
 - [ ] Doc claims from Markdown/Confluence pages that name a column (only column comments are read today)
-- [ ] `disputed: true` on `ekos_query`/`ekos_retrieve` claims about a disputed attribute
+- [x] `disputed: true` + conflict ids on `ekos_query`/`ekos_retrieve` claims about a disputed attribute,
+      one `RSN008` per disputed entity in the answer (RFC 0173, devlog_248)
+- [ ] The same marker in `ekos ask` (changes the prompt — needs an RFC 0138 eval run first)
 - [ ] Console conflicts view + RFC 0127 graph halo
 - [x] The `case_label` source misread a CASE that rewrites a code (`'A'`→`'L'`) as a label — a
       branch labels a code only when it tests that column alone and the CASE does not map the

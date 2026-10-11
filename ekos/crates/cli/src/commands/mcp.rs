@@ -1075,7 +1075,7 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_query",
-            "description": "Structured answer from compiled knowledge — fact lookup and named graph traversal, no LLM. Give a natural-language question ('what does authenticate return', 'what depends on the orders table'); returns a typed list of atomic claims, each with its source location and the analyzer that produced it. Use this instead of ekos_search+ekos_state when the question is about one entity's facts or its dependency graph.",
+            "description": "Structured answer from compiled knowledge — fact lookup and named graph traversal, no LLM. Give a natural-language question ('what does authenticate return', 'what depends on the orders table'); returns a typed list of atomic claims, each with its source location and the analyzer that produced it. A claim with `disputed: true` states only the side EKOS kept of an unresolved disagreement between sources — report both sides (its `conflicts` ids go to ekos_conflicts). Use this instead of ekos_search+ekos_state when the question is about one entity's facts or its dependency graph.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1086,7 +1086,7 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_retrieve",
-            "description": "Debug/inspect how EKOS would answer a question: returns the compiled QueryPlan (how the question was classified and routed), the EvidenceSet it produces, and the query understanding (resolved entities + keywords). No LLM, no synthesis — this is 'show your work' for ekos_query / ekos ask.",
+            "description": "Debug/inspect how EKOS would answer a question: returns the compiled QueryPlan (how the question was classified and routed), the EvidenceSet it produces (claims about an attribute sources disagree on carry `disputed: true`), and the query understanding (resolved entities + keywords). No LLM, no synthesis — this is 'show your work' for ekos_query / ekos ask.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1592,14 +1592,21 @@ fn call_tool(
         "ekos_query" => {
             let question = required_str(args, "question")?;
             let plan = plan_question(question, &runtime)?;
-            let evidence = execute(&plan, &runtime)?;
+            let mut evidence = execute(&plan, &runtime)?;
+            // RFC 0173 — a claim about an attribute sources disagree on says so.
+            if config.conflicts.enabled {
+                super::conflicts::flag_disputed(config, workspace, ledger, &mut evidence)?;
+            }
             Ok(serde_json::to_value(&evidence)?)
         }
         "ekos_retrieve" => {
             let question = required_str(args, "question")?;
             let understanding = understand(question, &runtime)?;
             let plan = plan_question(question, &runtime)?;
-            let evidence = execute(&plan, &runtime)?;
+            let mut evidence = execute(&plan, &runtime)?;
+            if config.conflicts.enabled {
+                super::conflicts::flag_disputed(config, workspace, ledger, &mut evidence)?;
+            }
             // RFC 0126: also run the raw retrieval seam so "show your work" includes which arms
             // fired and how long each took.
             let retrieved = runtime.retrieve(&RetrievalRequest::lexical(question))?;
@@ -3475,6 +3482,122 @@ mod tests {
             serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(body["objects"], 0);
         assert_eq!(body["entries"], 0);
+    }
+
+    /// RFC 0173 — a query claim about an attribute with an open conflict is flagged, on both
+    /// query tools; a decided conflict, or `[conflicts] enabled = false`, flags nothing.
+    #[test]
+    fn query_claims_about_a_disputed_attribute_are_flagged() {
+        use ekos_kir::{KirObject, ObjectKind};
+        use ekos_ledger::Ledger;
+        use ekos_semantic::conflicts::{self, Claim};
+
+        let mut config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let mut orders = KirObject::new("orders", ObjectKind::Table);
+        orders.properties.insert(
+            "columns".into(),
+            json!([{"name": "id", "data_type": "bigint"}]),
+        );
+        orders.properties.insert("schema".into(), json!("public"));
+        let claim = |value: &str, path: &str| Claim {
+            value: json!(value),
+            path: path.into(),
+            line: Some(3),
+            source: "sql".into(),
+        };
+        let graph = conflicts::conflict(
+            &orders,
+            "columns.id.data_type",
+            conflicts::DUPLICATE_DEFINITION,
+            vec![
+                claim("integer", "schema.sql"),
+                claim("bigint", "changes/1.sql"),
+            ],
+            Some(json!("bigint")),
+        );
+        let conflict = graph.objects[0].clone();
+        {
+            let ledger = Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+            ledger.append_object(&orders).unwrap();
+            for e in &graph.evidence {
+                ledger.append_evidence(e).unwrap();
+            }
+            for o in &graph.objects {
+                ledger.append_object(o).unwrap();
+            }
+            for r in &graph.relationships {
+                ledger.append_relationship(r).unwrap();
+            }
+        }
+
+        let ask = |config: &EkosConfig, tool: &str| -> Value {
+            let line = req(
+                30,
+                "tools/call",
+                json!({ "name": tool, "arguments": { "question": "orders columns" } }),
+            );
+            let resp =
+                parse(&handle_message(config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+            assert_eq!(resp["result"]["isError"], false, "{resp}");
+            serde_json::from_str(tool_text(&resp)).unwrap()
+        };
+        let disputed = |evidence: &Value| -> Vec<Value> {
+            evidence["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|i| i["disputed"] == true)
+                .cloned()
+                .collect()
+        };
+
+        let body = ask(&config, "ekos_query");
+        let flagged = disputed(&body);
+        assert!(!flagged.is_empty(), "no disputed claim in {body}");
+        for item in &flagged {
+            assert_eq!(item["attr"], "columns");
+            assert_eq!(item["conflicts"], json!([conflict.id.to_string()]));
+        }
+        // The same table's other facts are not what the sources disagree on.
+        assert!(
+            body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["attr"] == "schema" && i.get("disputed").is_none())
+        );
+        assert!(
+            body["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "RSN008")
+        );
+        assert!(!disputed(&ask(&config, "ekos_retrieve")["evidence"]).is_empty());
+
+        config.conflicts.enabled = false;
+        assert!(disputed(&ask(&config, "ekos_query")).is_empty());
+        config.conflicts.enabled = true;
+
+        // A person decided it: the claim is reported as settled again.
+        let mut decided = conflict.clone();
+        decided
+            .properties
+            .insert("status".into(), json!(conflicts::DISMISSED));
+        Ledger::open(&config.ledger_path(tmp.path()))
+            .unwrap()
+            .append_object(&decided)
+            .unwrap();
+        let body = ask(&config, "ekos_query");
+        assert!(disputed(&body).is_empty());
+        assert!(
+            body["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|d| d["code"] != "RSN008")
+        );
     }
 
     /// RFC 0172 — `ekos_conflicts` is listed by default (read-only), and gone when disabled.

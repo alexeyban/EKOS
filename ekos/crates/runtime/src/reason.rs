@@ -299,6 +299,37 @@ pub struct EvidenceItem {
     /// set looks: see [`EvidenceSet::is_all_weak`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub weak: bool,
+    /// The fact this claim states (`columns`, `label`, …) — only a `Fact` claim has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attr: Option<String>,
+    /// RFC 0173 — sources disagree about this claim's attribute and nobody has decided: the value
+    /// is only the side EKOS kept. Set by [`EvidenceSet::mark_disputed`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disputed: bool,
+    /// The open `ConflictingEvidence` items behind [`disputed`](Self::disputed), sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<KirId>,
+}
+
+/// One open conflict about an entity (RFC 0172), as [`EvidenceSet::mark_disputed`] needs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenDispute {
+    /// The `ConflictingEvidence` object.
+    pub conflict: KirId,
+    /// The disputed entity's name, for the diagnostic.
+    pub subject: String,
+    /// The attribute the sources disagree on — `columns`, `columns.id.data_type`, `label`, …
+    pub attribute: String,
+}
+
+impl OpenDispute {
+    /// True when this conflict is about the fact `attr` or something nested under it:
+    /// `columns.id.data_type` disputes `columns`, `check_constraints` does not.
+    fn disputes(&self, attr: &str) -> bool {
+        self.attribute
+            .strip_prefix(attr)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+    }
 }
 
 /// The typed output of [`execute`] — the input to the LLM's "explain this" step.
@@ -334,6 +365,71 @@ impl EvidenceSet {
                 format!("evidence set truncated to {cap} items — {dropped} dropped"),
             ));
         }
+    }
+
+    /// RFC 0173 — flag every fact claim whose attribute has an open conflict, and add one `RSN008`
+    /// warning per entity in the set that has any. `open` returns an entity's open conflicts and
+    /// is asked once per distinct entity; the Runtime cannot answer that itself, because which
+    /// conflicts are current is recorded beside the ledger, not in it. Returns the number of
+    /// claims flagged.
+    pub fn mark_disputed<E>(
+        &mut self,
+        mut open: impl FnMut(&KirId) -> Result<Vec<OpenDispute>, E>,
+    ) -> Result<usize, E> {
+        let mut by_entity: std::collections::HashMap<KirId, Vec<OpenDispute>> =
+            std::collections::HashMap::new();
+        let mut order = Vec::new();
+        let mut flagged = 0;
+        for item in &mut self.items {
+            let Some(entity) = item.entity else { continue };
+            let disputes = match by_entity.entry(entity) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    order.push(entity);
+                    e.insert(open(&entity)?)
+                }
+            };
+            let Some(attr) = item.attr.as_deref() else {
+                continue;
+            };
+            let mut ids: Vec<KirId> = disputes
+                .iter()
+                .filter(|d| d.disputes(attr))
+                .map(|d| d.conflict)
+                .collect();
+            if ids.is_empty() {
+                continue;
+            }
+            ids.sort_by_key(|id| id.to_string());
+            ids.dedup();
+            item.disputed = true;
+            item.conflicts = ids;
+            flagged += 1;
+        }
+        for entity in order {
+            let disputes = &by_entity[&entity];
+            let Some(first) = disputes.first() else {
+                continue;
+            };
+            let mut attrs: Vec<&str> = disputes.iter().map(|d| d.attribute.as_str()).collect();
+            attrs.sort_unstable();
+            attrs.dedup();
+            let mut ids: Vec<String> = disputes.iter().map(|d| d.conflict.to_string()).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            self.diagnostics.push(Diagnostic::warning(
+                "RSN008",
+                format!(
+                    "sources disagree about {} ({}) and nobody has decided — a claim marked \
+                     `disputed` is only the side EKOS kept; report both sides, see ekos_conflicts \
+                     ({})",
+                    first.subject,
+                    attrs.join(", "),
+                    ids.join(", ")
+                ),
+            ));
+        }
+        Ok(flagged)
     }
 
     /// Every distinct `source` evidence id — the "known evidence" set a citation is checked against.
@@ -457,20 +553,20 @@ fn exec_node(
                 .unwrap_or_else(|| "?".to_string());
             if attr == ALL_FACTS {
                 for (k, v) in runtime.facts_of(&id)? {
-                    items.push(entity_item(
-                        runtime,
-                        id,
-                        format!("{name}.{k} = {}", render_value(&v)),
-                        v,
-                    )?);
+                    let mut item =
+                        entity_item(runtime, id, format!("{name}.{k} = {}", render_value(&v)), v)?;
+                    item.attr = Some(k);
+                    items.push(item);
                 }
             } else if let Some(v) = runtime.fact(&id, attr)? {
-                items.push(entity_item(
+                let mut item = entity_item(
                     runtime,
                     id,
                     format!("{name}.{attr} = {}", render_value(&v)),
                     v,
-                )?);
+                )?;
+                item.attr = Some(attr.clone());
+                items.push(item);
             } else {
                 diagnostics.push(Diagnostic::info(
                     "RSN004",
@@ -628,6 +724,9 @@ fn entity_item_inner(
         // fact/graph claim is never weak, since it was reached structurally rather than by
         // vocabulary similarity.
         weak: false,
+        attr: None,
+        disputed: false,
+        conflicts: Vec::new(),
     })
 }
 
@@ -777,6 +876,9 @@ fn source_text_item(
         extracted_by: provenance_of(&state.object),
         entity: Some(id),
         weak: false,
+        attr: None,
+        disputed: false,
+        conflicts: Vec::new(),
     })
 }
 
@@ -1404,6 +1506,161 @@ mod tests {
         assert!(set.diagnostics.iter().any(|d| d.code == "RSN005"));
     }
 
+    // ── RFC 0173: disputed claims ───────────────────────────────────────────
+
+    /// `Compose[Fact "*", Graph dependents]` over `orders`, plus who looked what up.
+    fn disputed_set(
+        disputes: &[(&str, KirId)],
+    ) -> (EvidenceSet, KirId, std::cell::RefCell<Vec<KirId>>) {
+        let (l, _d) = temp();
+        let (orders, ..) = seed(&l);
+        let mut with_cols = l.get_object(&orders).unwrap().unwrap();
+        with_cols.properties.insert(
+            "columns".into(),
+            serde_json::json!([{"name": "id", "data_type": "integer"}]),
+        );
+        l.append_object(&with_cols).unwrap();
+        let dependent = KirObject::new("order_items", ObjectKind::Table);
+        l.append_object(&dependent).unwrap();
+        l.append_relationship(&KirRelationship::new(
+            RelationshipKind::ForeignKey,
+            dependent.id,
+            orders,
+        ))
+        .unwrap();
+        let rt = Runtime::new(&l);
+        let plan = QueryPlan {
+            raw: "orders".into(),
+            query_type: QueryType::Lookup,
+            root: PlanNode::Compose {
+                steps: vec![
+                    PlanNode::Fact {
+                        entity: EntityRef::Resolved(orders),
+                        attr: ALL_FACTS.into(),
+                    },
+                    PlanNode::Graph {
+                        op: StructuralOp::Dependents,
+                        seed: EntityRef::Resolved(orders),
+                        hops: 1,
+                        supporting: false,
+                    },
+                ],
+            },
+            confidence: 1.0,
+        };
+        let mut set = execute(&plan, &rt).unwrap();
+        let asked = std::cell::RefCell::new(Vec::new());
+        set.mark_disputed(|id| {
+            asked.borrow_mut().push(*id);
+            Ok::<_, std::convert::Infallible>(if *id == orders {
+                disputes
+                    .iter()
+                    .map(|(attribute, conflict)| OpenDispute {
+                        conflict: *conflict,
+                        subject: "orders".into(),
+                        attribute: attribute.to_string(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            })
+        })
+        .unwrap();
+        (set, orders, asked)
+    }
+
+    fn fact<'a>(set: &'a EvidenceSet, attr: &str) -> &'a EvidenceItem {
+        set.items
+            .iter()
+            .find(|i| i.attr.as_deref() == Some(attr))
+            .unwrap_or_else(|| panic!("no {attr} fact in {:?}", set.items))
+    }
+
+    #[test]
+    fn a_fact_on_a_disputed_attribute_is_flagged_and_nothing_else_is() {
+        let conflict = KirId::new();
+        // Nested under `columns`, so it disputes the `columns` fact.
+        let (set, orders, _) = disputed_set(&[("columns.id.data_type", conflict)]);
+
+        let columns = fact(&set, "columns");
+        assert!(columns.disputed);
+        assert_eq!(columns.conflicts, vec![conflict]);
+
+        // Another fact about the same table, and the graph claim about its dependent, are not
+        // what the sources disagree on.
+        assert!(!fact(&set, "schema").disputed);
+        let graph: Vec<_> = set.items.iter().filter(|i| i.attr.is_none()).collect();
+        assert!(!graph.is_empty());
+        assert!(
+            graph
+                .iter()
+                .all(|i| !i.disputed && i.conflicts.is_empty() && i.entity != Some(orders))
+        );
+        assert_eq!(set.items.iter().filter(|i| i.disputed).count(), 1);
+
+        // The set still says the entity is disputed, once.
+        let notes: Vec<_> = set
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "RSN008")
+            .collect();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].message.contains("orders (columns.id.data_type)"));
+        assert!(notes[0].message.contains(&conflict.to_string()));
+    }
+
+    #[test]
+    fn an_attribute_that_only_shares_a_prefix_does_not_dispute_the_fact() {
+        // `schema_owner` is not `schema` and not nested under it.
+        let (set, ..) = disputed_set(&[("schema_owner", KirId::new())]);
+        assert!(set.items.iter().all(|i| !i.disputed));
+        // …but the entity does have an open conflict, so the set says so.
+        assert_eq!(
+            set.diagnostics
+                .iter()
+                .filter(|d| d.code == "RSN008")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn no_disputes_changes_nothing_and_adds_no_fields() {
+        let (set, ..) = disputed_set(&[]);
+        assert!(set.items.iter().all(|i| !i.disputed));
+        assert!(set.diagnostics.iter().all(|d| d.code != "RSN008"));
+        let json = serde_json::to_value(&set).unwrap();
+        for item in json["items"].as_array().unwrap() {
+            assert!(item.get("disputed").is_none());
+            assert!(item.get("conflicts").is_none());
+        }
+        // A graph claim states no fact, so it carries no `attr` either.
+        assert!(
+            json["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i.get("attr").is_none())
+        );
+    }
+
+    #[test]
+    fn each_entity_is_looked_up_once() {
+        let (set, orders, asked) = disputed_set(&[("columns", KirId::new())]);
+        let asked = asked.into_inner();
+        // Every fact of `orders` is one entity; the dependent is another.
+        assert!(
+            set.items
+                .iter()
+                .filter(|i| i.entity == Some(orders))
+                .count()
+                > 1
+        );
+        assert_eq!(asked.iter().filter(|id| **id == orders).count(), 1);
+        let distinct: std::collections::HashSet<_> = asked.iter().collect();
+        assert_eq!(distinct.len(), asked.len());
+    }
+
     // ── RFC 0140 §3: on-demand source text ──────────────────────────────────
 
     mod source_text {
@@ -1436,6 +1693,9 @@ mod tests {
                         extracted_by: String::new(),
                         entity: Some(id),
                         weak: false,
+                        attr: None,
+                        disputed: false,
+                        conflicts: Vec::new(),
                     })
                     .collect(),
                 plan: empty_plan(),

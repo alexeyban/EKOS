@@ -900,6 +900,9 @@ mod tests {
                 extracted_by: String::new(),
                 entity: None,
                 weak,
+                attr: None,
+                disputed: false,
+                conflicts: Vec::new(),
             }
         }
 
@@ -1584,6 +1587,9 @@ mod tests {
                 extracted_by: String::new(),
                 entity: None,
                 weak: false,
+                attr: None,
+                disputed: false,
+                conflicts: Vec::new(),
             }
         }
 

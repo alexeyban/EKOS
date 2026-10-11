@@ -97,7 +97,7 @@ These conflicts belong to `assess`, not `commit`, so they live in their own mani
 
 ## Not in this RFC
 
-- **Flags in answers:** a `disputed: true` flag on `ekos_query` / `ekos_retrieve` claims.
+- **Flags in answers:** a `disputed: true` flag on `ekos_query` / `ekos_retrieve` claims. Shipped later as RFC 0173.
 - **Console:** a conflicts view, and the RFC 0127 graph halo.
 
 ## Tests
