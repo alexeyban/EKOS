@@ -62,14 +62,17 @@ export function Conflicts() {
           )}
           <ul className="sem-items">
             {shown.map((c) => (
-              <li
-                key={c.id}
-                className={selected === c.id ? "selected" : ""}
-                onClick={() => setSelected(c.id)}
-              >
+              <li key={c.id} className={selected === c.id ? "selected" : ""}>
                 <div className="sem-item-head">
                   <span className="chip">{TYPE_LABEL[c.conflict_type] ?? c.conflict_type}</span>
-                  <strong>{c.name}</strong>
+                  <button
+                    type="button"
+                    className="sem-item-pick"
+                    aria-pressed={selected === c.id}
+                    onClick={() => setSelected(c.id)}
+                  >
+                    {c.name}
+                  </button>
                   <span className={conflictChip(c.status)}>{c.status}</span>
                 </div>
                 <div className="muted sem-item-sum">
@@ -202,7 +205,7 @@ function ConflictPanel({
           <>
             {me.mode === "token" && (
               <label className="sem-field">
-                Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)
+                <span>Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)</span>
                 <input
                   aria-label="reviewer"
                   value={reviewer}
@@ -211,7 +214,7 @@ function ConflictPanel({
               </label>
             )}
             <label className="sem-field">
-              Note (required to say both are valid)
+              <span>Note (required to say both are valid)</span>
               <textarea
                 aria-label="note"
                 rows={2}

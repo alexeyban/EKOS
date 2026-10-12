@@ -208,7 +208,7 @@ function Annotations({ a }: { a: LinkmlClass["annotations"] }) {
     <dl className="sem-props">
       {rows.map(([k]) => (
         <div key={k}>
-          <dt>{k.replace(/^ekos_/, "").replace(/_/g, " ")}</dt>
+          <dt>{k.replace(/^ekos_/, "").replaceAll("_", " ")}</dt>
           <dd>{annotation(a, k)}</dd>
         </div>
       ))}
@@ -535,7 +535,7 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
       />
       {me.role === "write" && me.mode === "token" && (
         <label className="sem-field">
-          Reviewer (recorded as token:&lt;name&gt;)
+          <span>Reviewer (recorded as token:&lt;name&gt;)</span>
           <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
         </label>
       )}
@@ -551,7 +551,7 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
           Download .yaml
         </button>
         <label className="lm-upload">
-          Load file…
+          <span>Load file…</span>
           <input
             type="file"
             accept=".yaml,.yml"

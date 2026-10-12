@@ -54,6 +54,7 @@ next release.
 - **Evals:** `ekos eval run --evidence-only` measures retrieval without calling a model. A run with an errored scenario fails. Refusals are counted apart from uncited answers. Recall@10 counts an expected name as found when any object bearing it is ranked.
 
 **Fixes**
+- Web console: rows in the Semantics and Conflicts lists can be opened from the keyboard. Applying an edited LinkML schema no longer blocks other requests while the file is written.
 - `ekos resolve` no longer stops on same-name groups across the database and code namespaces (LedgerSMB 16 → 0 conflicts).
 - Compile output is now deterministic when two files define the same object: artifacts are read in source order, not timestamp-hashed id order.
 - The MCP server refuses argument names a tool does not declare. Plus audit fixes: a forgeable console session, bounded MCP traversal, panic isolation, a rustls advisory.

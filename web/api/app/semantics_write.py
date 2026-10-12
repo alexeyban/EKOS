@@ -171,6 +171,12 @@ async def review(ekos_bin: str, workspace_path: str, argv: list[str]) -> str:
     return out.strip()
 
 
+def _write_fd(fd: int, text: str) -> None:
+    """Write `text` to an open descriptor and close it. Blocking: call it off the event loop."""
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+
+
 async def import_linkml(
     ekos_bin: str, workspace_path: str, yaml_text: str, *, dry_run: bool, reviewer: str | None
 ) -> dict[str, Any]:
@@ -182,8 +188,7 @@ async def import_linkml(
         raise ReviewError("applying an import needs a reviewer")
     fd, tmp = tempfile.mkstemp(prefix="ekos-linkml-", suffix=".yaml")
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(yaml_text)
+        await asyncio.to_thread(_write_fd, fd, yaml_text)
         argv = ["import", "linkml", tmp, "--json"]
         if dry_run:
             argv.append("--dry-run")

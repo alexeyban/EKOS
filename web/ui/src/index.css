@@ -689,10 +689,38 @@ main:has(.sem-page) {
   margin: 0.5rem 0 0;
 }
 .sem-items li {
+  position: relative;
   padding: 0.55rem 0.5rem;
   border-top: 1px solid var(--rule);
   cursor: pointer;
   border-radius: 6px;
+}
+/* The row's name is the button that selects it; its ::after covers the row, so a click anywhere
+   on the row still selects and the keyboard reaches it too. */
+.sem-item-pick {
+  border: none;
+  background: none;
+  color: inherit;
+  padding: 0;
+  font-weight: 700;
+  text-align: left;
+}
+.sem-item-pick::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.sem-item-pick:focus-visible {
+  outline: none;
+}
+.sem-item-pick:focus-visible::after {
+  outline: 2px solid var(--accent-a);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.sem-items li input[type="checkbox"] {
+  position: relative;
+  z-index: 1;
 }
 .sem-items li:hover {
   background: var(--ground);

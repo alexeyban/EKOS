@@ -131,7 +131,7 @@ export function SemanticsItemPanel({
           <dl className="sem-props">
             {SHOWN.filter((k) => prop(d, k) !== "").map((k) => (
               <div key={k}>
-                <dt>{k.replace(/_/g, " ")}</dt>
+                <dt>{k.replaceAll("_", " ")}</dt>
                 <dd>{prop(d, k)}</dd>
               </div>
             ))}
@@ -171,7 +171,7 @@ export function SemanticsItemPanel({
                 <>
                   {me.mode === "token" && (
                     <label className="sem-field">
-                      Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)
+                      <span>Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)</span>
                       <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
                     </label>
                   )}
@@ -179,13 +179,13 @@ export function SemanticsItemPanel({
                     <>
                       {d.kind === "EnumMeaning" ? (
                         <label className="sem-field">
-                          Label (what this code means)
+                          <span>Label (what this code means)</span>
                           <input value={label} onChange={(e) => setLabel(e.target.value)} />
                         </label>
                       ) : (
                         <>
                           <label className="sem-field">
-                            Name
+                            <span>Name</span>
                             <input
                               value={name}
                               placeholder={d.name}
@@ -193,7 +193,7 @@ export function SemanticsItemPanel({
                             />
                           </label>
                           <label className="sem-field">
-                            Description
+                            <span>Description</span>
                             <textarea
                               rows={3}
                               value={description}

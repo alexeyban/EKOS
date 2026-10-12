@@ -76,6 +76,18 @@ describe("conflict helpers", () => {
 });
 
 describe("Conflicts view", () => {
+  it("opens a conflict from the keyboard: the row's name is a real button", async () => {
+    vi.spyOn(client, "api").mockResolvedValue([conflict()]);
+    renderAs(reader);
+    const pick = await screen.findByRole("button", { name: "user_preference.columns" });
+    expect(pick).toHaveAttribute("aria-pressed", "false");
+    pick.focus();
+    expect(pick).toHaveFocus();
+    fireEvent.click(pick);
+    expect(await screen.findByText("sql/Pg-database.sql:40 · sql")).toBeInTheDocument();
+    expect(pick).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("lists open conflicts and shows both claims with where each comes from", async () => {
     const api = vi.spyOn(client, "api").mockResolvedValue([conflict()]);
     renderAs(reader);

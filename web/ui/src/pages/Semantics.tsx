@@ -177,23 +177,25 @@ function Review({ me }: { me: Me }) {
         )}
         <ul className="sem-items">
           {shown.map((i) => (
-            <li
-              key={i.id}
-              className={selected === i.id ? "selected" : ""}
-              onClick={() => setSelected(i.id)}
-            >
+            <li key={i.id} className={selected === i.id ? "selected" : ""}>
               <div className="sem-item-head">
                 {canWrite && REVIEWABLE.includes(i.kind) && (
                   <input
                     type="checkbox"
                     aria-label={`select ${displayName(i)}`}
                     checked={picked.has(i.id)}
-                    onClick={(e) => e.stopPropagation()}
                     onChange={() => toggle(i.id)}
                   />
                 )}
                 <span className="chip">{KIND_LABEL[i.kind]}</span>
-                <strong>{displayName(i)}</strong>
+                <button
+                  type="button"
+                  className="sem-item-pick"
+                  aria-pressed={selected === i.id}
+                  onClick={() => setSelected(i.id)}
+                >
+                  {displayName(i)}
+                </button>
                 <span className={statusChip(status(i))}>{status(i).replace("_", " ")}</span>
               </div>
               <div className="muted sem-item-sum">{summary(i)}</div>
@@ -249,13 +251,16 @@ function Gaps({ me }: { me: Me }) {
             </h4>
             <ul className="sem-items">
               {list.map((g) => (
-                <li
-                  key={g.id}
-                  className={selected === g.id ? "selected" : ""}
-                  onClick={() => setSelected(g.id)}
-                >
+                <li key={g.id} className={selected === g.id ? "selected" : ""}>
                   <div className="sem-item-head">
-                    <strong>{displayName(g)}</strong>
+                    <button
+                      type="button"
+                      className="sem-item-pick"
+                      aria-pressed={selected === g.id}
+                      onClick={() => setSelected(g.id)}
+                    >
+                      {displayName(g)}
+                    </button>
                     <span className={statusChip(status(g))}>{status(g).replace("_", " ")}</span>
                   </div>
                   <div className="muted sem-item-sum">

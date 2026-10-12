@@ -102,8 +102,8 @@ pub async fn commit_step(
         .map(|o| o.id.to_string())
         .collect();
     let path = manifest_path(config, cwd);
-    std::fs::create_dir_all(path.parent().unwrap())?;
-    std::fs::write(
+    tokio::fs::create_dir_all(path.parent().unwrap()).await?;
+    tokio::fs::write(
         &path,
         serde_json::to_vec_pretty(&json!({
             "rfc": "0170",
@@ -113,6 +113,7 @@ pub async fn commit_step(
             "ids": ids,
         }))?,
     )
+    .await
     .with_context(|| format!("writing {}", path.display()))?;
     Ok(Some((out.stats, written)))
 }

@@ -101,6 +101,19 @@ describe("semantics helpers", () => {
 });
 
 describe("Semantics review", () => {
+  it("opens a hypothesis from the keyboard: the row's name is a real button", async () => {
+    vi.spyOn(client, "api").mockImplementation(async (path: string) =>
+      path.includes(`/items/${ID}`) ? detail : [concept()],
+    );
+    renderAt("/w/ws1/semantics", reader);
+    const pick = await screen.findByRole("button", { name: "PartsNotObsolete" });
+    pick.focus();
+    expect(pick).toHaveFocus();
+    fireEvent.click(pick);
+    expect(await screen.findByText("sql/modules/Parts.sql:12")).toBeInTheDocument();
+    expect(pick).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("lists hypotheses and opens one with its evidence", async () => {
     vi.spyOn(client, "api").mockImplementation(async (path: string) =>
       path.includes(`/items/${ID}`) ? detail : [concept()],

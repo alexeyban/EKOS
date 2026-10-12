@@ -64,7 +64,28 @@ Without a scan there is no way to know whether a refactor brought a function und
 
 ---
 
+## Follow-up: the quality gate failed on Reliability
+
+The scan of this work (revision `165c818`) confirmed the complexity numbers: open issues 59 → 24, one Rust function over the limit. The gate still failed, on one condition: Reliability on new code was C and must be A. Six bugs, all in code added since the previous scan and none in the refactors.
+
+| Finding | Where | Fix |
+|---|---|---|
+| Blocking file I/O in an `async fn` (2, major) | `commands/semantics.rs::commit_step` | `tokio::fs::create_dir_all` / `tokio::fs::write` |
+| Blocking file write in an `async` function (1, major) | `web/api/app/semantics_write.py::import_linkml` | The temp-file write runs in `asyncio.to_thread` |
+| A list row with a click handler and no keyboard access (3, minor) | `Conflicts.tsx`, `Semantics.tsx` (two lists) | The row's name is a `<button>`; its `::after` covers the row |
+
+The Python one mattered most: an edited schema of up to 8 MiB was written on the console's event loop. `ruff.toml` allows small inline file operations on purpose; this one is not small.
+
+The rows could not be opened from the keyboard at all. A click anywhere on a row still selects it. The checkbox in a row sits above the button's overlay, so it no longer needs `stopPropagation`.
+
+Thirteen smells tagged with a low reliability impact went with them: label text followed directly by its field (8, the text is now in a `<span>`), `replace(/_/g, …)` (2, now `replaceAll`), and the three handlers on `<li>`.
+
+---
+
 ## Knowledge Captured
+
+- **A gate can fail on the code beside the work.** The refactor commits were the first scan since the console's Semantics and Conflicts tabs landed, so their findings counted as new code. Read the gate's conditions, not only the issue count.
+- **Any bug on new code keeps Reliability below A**, whatever its severity. Minor ones alone give B.
 
 - **A scan's issue list ages with the code.** The public issues API works without a token and reports the analysed revision; compare it with `HEAD` before treating the list as the work.
 - **A blind rename during extraction can shadow.** Moving a block into a function whose parameter was renamed `path` put it under a local `let path = …`. A test on section names caught it. Name the parameter differently from every local in the block.
@@ -89,6 +110,9 @@ Without a scan there is no way to know whether a refactor brought a function und
 | `ekos/crates/runtime/src/{lib,reason,retrieval}.rs`, `ekos/crates/ledger/src/search.rs`, `ekos/crates/ekl/src/parser.rs`, `ekos/crates/migrate-logic/src/{lower,v5,invention}.rs` | Helpers |
 | 56 files | Method references for single-method closures |
 | `web/ui/src/pages/Graph.tsx` | Toolbar, sidebar and status components |
+| `ekos/crates/cli/src/commands/semantics.rs` | Manifest written with `tokio::fs` |
+| `web/api/app/semantics_write.py` | Temp-file write off the event loop |
+| `web/ui/src/pages/{Conflicts,Semantics,SemanticsItemPanel,Linkml}.tsx`, `web/ui/src/index.css`, two test files | Rows selectable from the keyboard; label text in spans; `replaceAll` |
 | `sonar-project.properties` | `python:S7503` exception for four files |
 | `scripts/cogc/`, `scripts/cognitive-complexity.sh` | New: local checker |
 | `CLAUDE.md`, `TODO.md` | Devlog number; open items |
