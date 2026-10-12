@@ -294,24 +294,17 @@ pub fn linkml(config: &EkosConfig, cwd: &Path, opts: &LinkmlOptions) -> Result<(
     Ok(())
 }
 
-/// The schema, or `None` when the status filter admits nothing.
-pub fn build_schema(
-    ledger: &dyn KnowledgeStore,
-    items: &[KirObject],
-    status: StatusFilter,
-    name: &str,
-    vocab: &ekos_semantic::ontology::Vocabulary,
-) -> Result<Option<Value>> {
-    let admitted: Vec<&KirObject> = items
-        .iter()
-        .filter(|o| matches!(kind(o), k if k == CONCEPT || k == ENUM_MEANING || k == CONSTRAINT))
-        .filter(|o| status.admits(&text(o, "status")))
-        .collect();
-    if admitted.is_empty() {
-        return Ok(None);
-    }
+/// What the schema says beside its definitions: open gaps and open disagreements.
+struct Annotations {
+    /// Gap question per `(table, column, value)`.
+    value_gaps: BTreeMap<(String, String, String), String>,
+    /// Gap question per concept name.
+    concept_gaps: BTreeMap<String, String>,
+    /// Open disagreements between concepts, per concept name.
+    conflicts: BTreeMap<String, Vec<String>>,
+}
 
-    // Gaps per subject: `table.column = value` for values, concept name for concepts.
+fn collect_annotations(items: &[KirObject]) -> Annotations {
     let mut value_gaps: BTreeMap<(String, String, String), String> = BTreeMap::new();
     let mut concept_gaps: BTreeMap<String, String> = BTreeMap::new();
     // Open disagreements between concepts, per concept name.
@@ -346,6 +339,381 @@ pub fn build_schema(
             _ => {}
         }
     }
+    Annotations {
+        value_gaps,
+        concept_gaps,
+        conflicts,
+    }
+}
+
+type EnumNames = BTreeMap<(String, String), String>;
+
+/// A table class's attributes, one per recovered column. A composite primary key is not marked:
+/// LinkML allows one identifier per class.
+fn table_attributes(obj: &KirObject, t: &str, enum_name: &EnumNames) -> Mapping {
+    let mut attrs = Mapping::new();
+    if let Some(Json::Array(cols)) = obj.properties.get("columns") {
+        for c in cols {
+            let Some(col) = c["name"].as_str() else {
+                continue;
+            };
+            let col_l = col.to_lowercase();
+            let sql_type = c["data_type"].as_str().unwrap_or_default();
+            let flag = |k: &str| c[k].as_bool().unwrap_or(false);
+            let mut annotations = vec![("ekos_sql_type", s(sql_type))];
+            if let Some(e) = enum_name.get(&(t.to_string(), col_l.clone())) {
+                annotations.push(("ekos_enum", s(e.clone())));
+            }
+            attrs.insert(
+                s(col_l.clone()),
+                map(vec![
+                    ("range", s(linkml_range(sql_type))),
+                    (
+                        "required",
+                        if flag("not_null") {
+                            Value::Bool(true)
+                        } else {
+                            Value::Null
+                        },
+                    ),
+                    (
+                        "identifier",
+                        if flag("primary_key") {
+                            Value::Bool(true)
+                        } else {
+                            Value::Null
+                        },
+                    ),
+                    (
+                        "description",
+                        c["description"]
+                            .as_str()
+                            .map(|d| s(d.trim()))
+                            .unwrap_or(Value::Null),
+                    ),
+                    ("annotations", map(annotations)),
+                ]),
+            );
+        }
+    }
+    // Single-column primary key only: LinkML allows one identifier per class.
+    let ids = attrs
+        .values()
+        .filter(|v| v.get("identifier").is_some())
+        .count();
+    if ids > 1 {
+        for v in attrs.values_mut() {
+            if let Some(m) = v.as_mapping_mut() {
+                m.remove(s("identifier"));
+            }
+        }
+    }
+    attrs
+}
+
+/// What one top-level predicate of a CHECK constraint says about its column, as slot usage.
+fn predicate_usage(
+    p: &Json,
+    t: &str,
+    col: &str,
+    values: &[String],
+    enum_name: &EnumNames,
+) -> Vec<(&'static str, Value)> {
+    let num = |v: &str| {
+        v.parse::<f64>().ok().map(|f| {
+            if f.fract() == 0.0 {
+                Value::Number((f as i64).into())
+            } else {
+                Value::Number(f.into())
+            }
+        })
+    };
+    let mut usage = vec![];
+    match (p["op"].as_str().unwrap_or_default(), values) {
+        (">=", [v]) => usage.push(("minimum_value", num(v).unwrap_or(Value::Null))),
+        ("<=", [v]) => usage.push(("maximum_value", num(v).unwrap_or(Value::Null))),
+        ("between", [a, b]) => {
+            usage.push(("minimum_value", num(a).unwrap_or(Value::Null)));
+            usage.push(("maximum_value", num(b).unwrap_or(Value::Null)));
+        }
+        ("like", [v]) => usage.push(("pattern", s(like_to_regex(&unquote(v))))),
+        ("in", _) => {
+            if let Some(e) = enum_name.get(&(t.to_string(), col.to_string())) {
+                usage.push(("range", s(e.clone())));
+            }
+        }
+        ("is_not_null", _) => usage.push(("required", Value::Bool(true))),
+        _ => {}
+    }
+    if usage.iter().all(|(_, v)| matches!(v, Value::Null)) {
+        usage.clear();
+    }
+    usage
+}
+
+/// A table class's `slot_usage`: the bounds, patterns and ranges its admitted CHECK constraints
+/// state, each annotated with the constraint it came from.
+fn table_slot_usage(
+    ledger: &dyn KnowledgeStore,
+    t: &str,
+    constraints: Option<&Vec<&KirObject>>,
+    attrs: &Mapping,
+    enum_name: &EnumNames,
+) -> Mapping {
+    let mut slot_usage = Mapping::new();
+    for c in constraints.into_iter().flatten() {
+        let structured: Vec<Json> = prop(c, "structured")
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for p in structured
+            .iter()
+            .filter(|p| p["top_level"].as_bool() == Some(true))
+        {
+            let col = p["column"].as_str().unwrap_or_default().to_lowercase();
+            if !attrs.contains_key(s(col.clone())) {
+                continue;
+            }
+            let values: Vec<String> = p["values"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut usage = predicate_usage(p, t, &col, &values, enum_name);
+            let refs = evidence_refs(ledger, c, 3);
+            usage.push((
+                "annotations",
+                map(vec![
+                    ("ekos_id", s(c.id.to_string())),
+                    ("ekos_status", s(text(c, "status"))),
+                    ("ekos_constraint", s(text(c, "expression"))),
+                    ("ekos_evidence", s(refs.join("; "))),
+                ]),
+            ));
+            // Several CHECKs on one column: the later one's bounds are kept, all are annotated.
+            let entry = slot_usage
+                .entry(s(col.clone()))
+                .or_insert_with(|| Value::Mapping(Mapping::new()));
+            if let Some(m) = entry.as_mapping_mut() {
+                for (k, v) in usage {
+                    if !matches!(v, Value::Null) {
+                        m.insert(s(k), v);
+                    }
+                }
+            }
+        }
+    }
+    slot_usage
+}
+
+/// The open gap and disagreements recorded against one concept.
+struct ConceptNotes<'a> {
+    gap: Option<&'a String>,
+    conflicts: &'a [String],
+}
+
+/// The class for one admitted concept, a subclass of its table's class.
+fn concept_class(
+    ledger: &dyn KnowledgeStore,
+    o: &KirObject,
+    parent: &str,
+    rationale: &HashMap<String, &KirObject>,
+    notes: &ConceptNotes<'_>,
+) -> Result<Value> {
+    let subject = text(o, "table");
+    let expert = text(o, "expert_name");
+    let refs = evidence_refs(ledger, o, 6);
+    let mut commits: Vec<String> = Vec::new();
+    for r in ledger.relationships_for(&o.id)? {
+        if r.from == o.id
+            && r.kind == RelationshipKind::Custom(EXPLAINED_BY.into())
+            && let Some(link) = rationale.get(&r.to.to_string())
+        {
+            let sha = text(link, "sha");
+            commits.push(format!(
+                "commit {} \"{}\" ({})",
+                &sha[..sha.len().min(10)],
+                text(link, "summary"),
+                text(link, "date").split('T').next().unwrap_or_default()
+            ));
+        }
+    }
+    commits.sort();
+    // An expert's description replaces the generated one outright (the predicate stays in
+    // `ekos_definition`), so a round trip through `ekos import linkml` never grows it.
+    let author = o.properties.get("description").and_then(Json::as_str);
+    let description = match o
+        .properties
+        .get("expert_description")
+        .and_then(Json::as_str)
+    {
+        Some(expert) => expert.trim().to_string(),
+        None => format!(
+            "{}Rows of `{subject}` where {}.",
+            author
+                .map(|d| format!("{}\n", d.trim()))
+                .unwrap_or_default(),
+            text(o, "definition")
+        ),
+    };
+    let mut comments: Vec<Value> = vec![s(format!(
+        "EKOS {} recovered from {} site(s); name {}.",
+        text(o, "status"),
+        text(o, "sites"),
+        if !expert.is_empty() {
+            format!(
+                "given by {} (recovered as `{}`)",
+                text(o, "reviewed_by"),
+                o.name
+            )
+        } else if text(o, "name_source") == "view" {
+            format!("taken from view `{}`", text(o, "view"))
+        } else {
+            "derived from the predicate, not from any author".to_string()
+        }
+    ))];
+    if let Some(q) = notes.gap {
+        comments.push(s(format!("GAP: {q}")));
+    }
+    for q in notes.conflicts {
+        comments.push(s(format!("CONFLICT: {q}")));
+    }
+    Ok(map(vec![
+        ("is_a", s(parent)),
+        ("description", s(description)),
+        ("comments", Value::Sequence(comments)),
+        (
+            "annotations",
+            map(vec![
+                ("ekos_id", s(o.id.to_string())),
+                ("ekos_status", s(text(o, "status"))),
+                ("ekos_confidence", s(text(o, "confidence"))),
+                ("ekos_definition", s(text(o, "definition"))),
+                ("ekos_origin", s(text(o, "origin"))),
+                ("ekos_evidence", s(refs.join("; "))),
+                (
+                    "ekos_rationale",
+                    if commits.is_empty() {
+                        Value::Null
+                    } else {
+                        s(commits.join("; "))
+                    },
+                ),
+                (
+                    "ekos_gap",
+                    notes.gap.map(|q| s(q.clone())).unwrap_or(Value::Null),
+                ),
+            ]),
+        ),
+    ]))
+}
+
+/// The permissible values of one coded column, in value order, each with its label, sources and
+/// any open gap.
+fn permissible_values(
+    ledger: &dyn KnowledgeStore,
+    t: &str,
+    c: &str,
+    values: &[&KirObject],
+    value_gaps: &BTreeMap<(String, String, String), String>,
+) -> Mapping {
+    let mut pvs = Mapping::new();
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| {
+        let (va, vb) = (text(a, "value"), text(b, "value"));
+        match (va.parse::<i64>(), vb.parse::<i64>()) {
+            (Ok(x), Ok(y)) => x.cmp(&y),
+            _ => va.cmp(&vb),
+        }
+    });
+    for v in sorted {
+        let value = text(v, "value");
+        let label = match text(v, "expert_label") {
+            e if e.is_empty() => text(v, "label"),
+            e => e,
+        };
+        let sources: Vec<String> = prop(v, "meanings")
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|m| m["source"].as_str().map(str::to_string))
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let gap = value_gaps.get(&(t.to_string(), c.to_string(), value.clone()));
+        pvs.insert(
+            s(unquote(&value)),
+            map(vec![
+                (
+                    "description",
+                    if label.is_empty() {
+                        Value::Null
+                    } else {
+                        s(label)
+                    },
+                ),
+                (
+                    "annotations",
+                    map(vec![
+                        ("ekos_id", s(v.id.to_string())),
+                        ("ekos_status", s(text(v, "status"))),
+                        ("ekos_confidence", s(text(v, "confidence"))),
+                        ("ekos_reviewed_by", opt(v, "reviewed_by")),
+                        (
+                            "ekos_suggested_exact_mappings",
+                            suggestion_annotations(&item_suggestions(v))[0].1.clone(),
+                        ),
+                        (
+                            "ekos_suggested_close_mappings",
+                            suggestion_annotations(&item_suggestions(v))[1].1.clone(),
+                        ),
+                        (
+                            "ekos_source",
+                            if sources.is_empty() {
+                                Value::Null
+                            } else {
+                                s(sources.join(", "))
+                            },
+                        ),
+                        ("ekos_usage_sites", s(text(v, "usage_sites"))),
+                        ("ekos_evidence", s(evidence_refs(ledger, v, 4).join("; "))),
+                        ("ekos_gap", gap.map(|q| s(q.clone())).unwrap_or(Value::Null)),
+                    ]),
+                ),
+            ]),
+        );
+    }
+    pvs
+}
+
+/// The schema, or `None` when the status filter admits nothing.
+pub fn build_schema(
+    ledger: &dyn KnowledgeStore,
+    items: &[KirObject],
+    status: StatusFilter,
+    name: &str,
+    vocab: &ekos_semantic::ontology::Vocabulary,
+) -> Result<Option<Value>> {
+    let admitted: Vec<&KirObject> = items
+        .iter()
+        .filter(|o| matches!(kind(o), k if k == CONCEPT || k == ENUM_MEANING || k == CONSTRAINT))
+        .filter(|o| status.admits(&text(o, "status")))
+        .collect();
+    if admitted.is_empty() {
+        return Ok(None);
+    }
+
+    // Gaps per subject: `table.column = value` for values, concept name for concepts.
+    let Annotations {
+        value_gaps,
+        concept_gaps,
+        conflicts,
+    } = collect_annotations(items);
 
     // Tables referenced by any admitted item, with their recovered columns.
     let all = ledger.all_objects()?;
@@ -403,138 +771,9 @@ pub fn build_schema(
     let mut classes = Mapping::new();
     for (t, class) in &table_class {
         let obj = tables[t];
-        let mut attrs = Mapping::new();
-        if let Some(Json::Array(cols)) = obj.properties.get("columns") {
-            for c in cols {
-                let Some(col) = c["name"].as_str() else {
-                    continue;
-                };
-                let col_l = col.to_lowercase();
-                let sql_type = c["data_type"].as_str().unwrap_or_default();
-                let flag = |k: &str| c[k].as_bool().unwrap_or(false);
-                let mut annotations = vec![("ekos_sql_type", s(sql_type))];
-                if let Some(e) = enum_name.get(&(t.clone(), col_l.clone())) {
-                    annotations.push(("ekos_enum", s(e.clone())));
-                }
-                attrs.insert(
-                    s(col_l.clone()),
-                    map(vec![
-                        ("range", s(linkml_range(sql_type))),
-                        (
-                            "required",
-                            if flag("not_null") {
-                                Value::Bool(true)
-                            } else {
-                                Value::Null
-                            },
-                        ),
-                        (
-                            "identifier",
-                            if flag("primary_key") {
-                                Value::Bool(true)
-                            } else {
-                                Value::Null
-                            },
-                        ),
-                        (
-                            "description",
-                            c["description"]
-                                .as_str()
-                                .map(|d| s(d.trim()))
-                                .unwrap_or(Value::Null),
-                        ),
-                        ("annotations", map(annotations)),
-                    ]),
-                );
-            }
-        }
-        // Single-column primary key only: LinkML allows one identifier per class.
-        let ids = attrs
-            .values()
-            .filter(|v| v.get("identifier").is_some())
-            .count();
-        if ids > 1 {
-            for v in attrs.values_mut() {
-                if let Some(m) = v.as_mapping_mut() {
-                    m.remove(s("identifier"));
-                }
-            }
-        }
+        let attrs = table_attributes(obj, t, &enum_name);
 
-        let mut slot_usage = Mapping::new();
-        for c in constraints.get(t).into_iter().flatten() {
-            let structured: Vec<Json> = prop(c, "structured")
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            for p in structured
-                .iter()
-                .filter(|p| p["top_level"].as_bool() == Some(true))
-            {
-                let col = p["column"].as_str().unwrap_or_default().to_lowercase();
-                if !attrs.contains_key(s(col.clone())) {
-                    continue;
-                }
-                let values: Vec<String> = p["values"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let num = |v: &str| {
-                    v.parse::<f64>().ok().map(|f| {
-                        if f.fract() == 0.0 {
-                            Value::Number((f as i64).into())
-                        } else {
-                            Value::Number(f.into())
-                        }
-                    })
-                };
-                let mut usage = vec![];
-                match (p["op"].as_str().unwrap_or_default(), values.as_slice()) {
-                    (">=", [v]) => usage.push(("minimum_value", num(v).unwrap_or(Value::Null))),
-                    ("<=", [v]) => usage.push(("maximum_value", num(v).unwrap_or(Value::Null))),
-                    ("between", [a, b]) => {
-                        usage.push(("minimum_value", num(a).unwrap_or(Value::Null)));
-                        usage.push(("maximum_value", num(b).unwrap_or(Value::Null)));
-                    }
-                    ("like", [v]) => usage.push(("pattern", s(like_to_regex(&unquote(v))))),
-                    ("in", _) => {
-                        if let Some(e) = enum_name.get(&(t.clone(), col.clone())) {
-                            usage.push(("range", s(e.clone())));
-                        }
-                    }
-                    ("is_not_null", _) => usage.push(("required", Value::Bool(true))),
-                    _ => {}
-                }
-                if usage.iter().all(|(_, v)| matches!(v, Value::Null)) {
-                    usage.clear();
-                }
-                let refs = evidence_refs(ledger, c, 3);
-                usage.push((
-                    "annotations",
-                    map(vec![
-                        ("ekos_id", s(c.id.to_string())),
-                        ("ekos_status", s(text(c, "status"))),
-                        ("ekos_constraint", s(text(c, "expression"))),
-                        ("ekos_evidence", s(refs.join("; "))),
-                    ]),
-                ));
-                // Several CHECKs on one column: the later one's bounds are kept, all are annotated.
-                let entry = slot_usage
-                    .entry(s(col.clone()))
-                    .or_insert_with(|| Value::Mapping(Mapping::new()));
-                if let Some(m) = entry.as_mapping_mut() {
-                    for (k, v) in usage {
-                        if !matches!(v, Value::Null) {
-                            m.insert(s(k), v);
-                        }
-                    }
-                }
-            }
-        }
+        let slot_usage = table_slot_usage(ledger, t, constraints.get(t), &attrs, &enum_name);
 
         let description = obj
             .properties
@@ -595,169 +834,21 @@ pub fn build_schema(
             &mut used,
             "Concept",
         );
-        let refs = evidence_refs(ledger, o, 6);
-        let mut commits: Vec<String> = Vec::new();
-        for r in ledger.relationships_for(&o.id)? {
-            if r.from == o.id
-                && r.kind == RelationshipKind::Custom(EXPLAINED_BY.into())
-                && let Some(link) = rationale.get(&r.to.to_string())
-            {
-                let sha = text(link, "sha");
-                commits.push(format!(
-                    "commit {} \"{}\" ({})",
-                    &sha[..sha.len().min(10)],
-                    text(link, "summary"),
-                    text(link, "date").split('T').next().unwrap_or_default()
-                ));
-            }
-        }
-        commits.sort();
-        // An expert's description replaces the generated one outright (the predicate stays in
-        // `ekos_definition`), so a round trip through `ekos import linkml` never grows it.
-        let author = o.properties.get("description").and_then(Json::as_str);
-        let description = match o
-            .properties
-            .get("expert_description")
-            .and_then(Json::as_str)
-        {
-            Some(expert) => expert.trim().to_string(),
-            None => format!(
-                "{}Rows of `{subject}` where {}.",
-                author
-                    .map(|d| format!("{}\n", d.trim()))
-                    .unwrap_or_default(),
-                text(o, "definition")
-            ),
+        let notes = ConceptNotes {
+            gap: concept_gaps.get(&o.name),
+            conflicts: conflicts
+                .get(&o.name)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
         };
-        let mut comments: Vec<Value> = vec![s(format!(
-            "EKOS {} recovered from {} site(s); name {}.",
-            text(o, "status"),
-            text(o, "sites"),
-            if !expert.is_empty() {
-                format!(
-                    "given by {} (recovered as `{}`)",
-                    text(o, "reviewed_by"),
-                    o.name
-                )
-            } else if text(o, "name_source") == "view" {
-                format!("taken from view `{}`", text(o, "view"))
-            } else {
-                "derived from the predicate, not from any author".to_string()
-            }
-        ))];
-        if let Some(q) = concept_gaps.get(&o.name) {
-            comments.push(s(format!("GAP: {q}")));
-        }
-        for q in conflicts.get(&o.name).into_iter().flatten() {
-            comments.push(s(format!("CONFLICT: {q}")));
-        }
-        classes.insert(
-            s(class),
-            map(vec![
-                ("is_a", s(parent.clone())),
-                ("description", s(description)),
-                ("comments", Value::Sequence(comments)),
-                (
-                    "annotations",
-                    map(vec![
-                        ("ekos_id", s(o.id.to_string())),
-                        ("ekos_status", s(text(o, "status"))),
-                        ("ekos_confidence", s(text(o, "confidence"))),
-                        ("ekos_definition", s(text(o, "definition"))),
-                        ("ekos_origin", s(text(o, "origin"))),
-                        ("ekos_evidence", s(refs.join("; "))),
-                        (
-                            "ekos_rationale",
-                            if commits.is_empty() {
-                                Value::Null
-                            } else {
-                                s(commits.join("; "))
-                            },
-                        ),
-                        (
-                            "ekos_gap",
-                            concept_gaps
-                                .get(&o.name)
-                                .map(|q| s(q.clone()))
-                                .unwrap_or(Value::Null),
-                        ),
-                    ]),
-                ),
-            ]),
-        );
+        let entry = concept_class(ledger, o, parent, &rationale, &notes)?;
+        classes.insert(s(class), entry);
     }
 
     // Enums.
     let mut enums = Mapping::new();
     for ((t, c), values) in &enum_values {
-        let mut pvs = Mapping::new();
-        let mut sorted = values.clone();
-        sorted.sort_by(|a, b| {
-            let (va, vb) = (text(a, "value"), text(b, "value"));
-            match (va.parse::<i64>(), vb.parse::<i64>()) {
-                (Ok(x), Ok(y)) => x.cmp(&y),
-                _ => va.cmp(&vb),
-            }
-        });
-        for v in sorted {
-            let value = text(v, "value");
-            let label = match text(v, "expert_label") {
-                e if e.is_empty() => text(v, "label"),
-                e => e,
-            };
-            let sources: Vec<String> = prop(v, "meanings")
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|m| m["source"].as_str().map(str::to_string))
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .collect()
-                })
-                .unwrap_or_default();
-            let gap = value_gaps.get(&(t.clone(), c.clone(), value.clone()));
-            pvs.insert(
-                s(unquote(&value)),
-                map(vec![
-                    (
-                        "description",
-                        if label.is_empty() {
-                            Value::Null
-                        } else {
-                            s(label)
-                        },
-                    ),
-                    (
-                        "annotations",
-                        map(vec![
-                            ("ekos_id", s(v.id.to_string())),
-                            ("ekos_status", s(text(v, "status"))),
-                            ("ekos_confidence", s(text(v, "confidence"))),
-                            ("ekos_reviewed_by", opt(v, "reviewed_by")),
-                            (
-                                "ekos_suggested_exact_mappings",
-                                suggestion_annotations(&item_suggestions(v))[0].1.clone(),
-                            ),
-                            (
-                                "ekos_suggested_close_mappings",
-                                suggestion_annotations(&item_suggestions(v))[1].1.clone(),
-                            ),
-                            (
-                                "ekos_source",
-                                if sources.is_empty() {
-                                    Value::Null
-                                } else {
-                                    s(sources.join(", "))
-                                },
-                            ),
-                            ("ekos_usage_sites", s(text(v, "usage_sites"))),
-                            ("ekos_evidence", s(evidence_refs(ledger, v, 4).join("; "))),
-                            ("ekos_gap", gap.map(|q| s(q.clone())).unwrap_or(Value::Null)),
-                        ]),
-                    ),
-                ]),
-            );
-        }
+        let pvs = permissible_values(ledger, t, c, values, &value_gaps);
         enums.insert(
             s(enum_name[&(t.clone(), c.clone())].clone()),
             map(vec![

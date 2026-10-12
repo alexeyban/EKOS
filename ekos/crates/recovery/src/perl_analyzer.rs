@@ -446,6 +446,17 @@ fn current_package(stack: &[Block], statement_package: Option<KirId>) -> Option<
         .or(statement_package)
 }
 
+/// Whether `raw_line` is inside a POD block, tracking the block across lines in `in_pod`: the
+/// directive that opens one and the `=cut` that closes it are both part of it.
+fn in_pod_line(in_pod: &mut bool, raw_line: &str) -> bool {
+    if *in_pod {
+        *in_pod = !raw_line.starts_with("=cut");
+        return true;
+    }
+    *in_pod = is_pod_start(raw_line);
+    *in_pod
+}
+
 /// Records a package (declared or named by a `use`). Returns its id, and its index in
 /// `result.objects` when this is the first time the file names it.
 fn declare_package(
@@ -589,18 +600,10 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
         // POD blocks and everything past `__END__`/`__DATA__` are documentation and data, not
         // code — skipped wholesale so their prose can never be mistaken for a declaration or
         // desynchronize brace depth.
-        if in_pod {
-            if raw_line.starts_with("=cut") {
-                in_pod = false;
-            }
+        if in_pod_line(&mut in_pod, raw_line) {
             continue;
         }
-        if is_pod_start(raw_line) {
-            in_pod = true;
-            continue;
-        }
-        let trimmed_raw = raw_line.trim();
-        if trimmed_raw == "__END__" || trimmed_raw == "__DATA__" {
+        if matches!(raw_line.trim(), "__END__" | "__DATA__") {
             break;
         }
 
@@ -613,12 +616,8 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
         if let Some(rest) = trimmed.strip_prefix("package ") {
             if let Some(name) = extract_package_name(rest) {
                 let (pkg_id, created) = declare_package(name, project, &mut result, &mut seen);
-                if created.is_some() {
-                    result.package_count += 1;
-                }
-                if first_package_obj.is_none() {
-                    first_package_obj = created;
-                }
+                result.package_count += usize::from(created.is_some());
+                first_package_obj = first_package_obj.or(created);
                 result.relationships.push(KirRelationship::deterministic(
                     RelationshipKind::Contains,
                     file_id,

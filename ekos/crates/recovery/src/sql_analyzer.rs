@@ -490,31 +490,8 @@ pub fn parse_ddl_structural_report(
     let mut graph = KirGraph::new();
     let mut report = DdlParseReport::default();
 
-    let stmts = match Parser::parse_sql(dialect, sql) {
-        Ok(s) => s,
-        Err(first_err) => {
-            // Fallback (GitHub issue #3): some hand-written scripts omit `;` between top-level
-            // statements — retry once with synthetic separators inserted. See
-            // `statement_repair`'s doc comment for why this is only attempted after the
-            // unmodified text has already failed to parse.
-            let repaired = crate::statement_repair::ensure_statement_separators(sql);
-            match Parser::parse_sql(dialect, &repaired) {
-                Ok(s) => s,
-                Err(_) => match parse_statement_by_statement(sql, dialect) {
-                    Some((s, r)) => {
-                        report = r;
-                        s
-                    }
-                    None => {
-                        warn!(
-                            "sqlparser failed on {source_path}: {first_err}; falling back to empty graph"
-                        );
-                        report.failed = Some(first_err.to_string());
-                        return (graph, report);
-                    }
-                },
-            }
-        }
+    let Some(stmts) = parse_ddl_statements(sql, source_path, dialect, &mut report) else {
+        return (graph, report);
     };
 
     // First pass: create KirObject per table, collect name → KirId mapping.
@@ -552,114 +529,152 @@ pub fn parse_ddl_structural_report(
     }
 
     // Second pass: extract FK constraints into KirRelationship.
-    // Handles both table-level CONSTRAINT FOREIGN KEY and inline column REFERENCES.
+    let mut fks = ForeignKeys {
+        graph: &mut graph,
+        source_path,
+        table_ids: &table_ids,
+    };
     for stmt in &stmts {
-        if let Statement::CreateTable(ct) = stmt {
-            let from_name = ct.name.to_string().to_lowercase();
-            let from_id = match table_ids.get(&from_name) {
-                Some(&id) => id,
-                None => continue,
-            };
+        match stmt {
+            Statement::CreateTable(ct) => fks.in_create_table(ct),
+            // RFC 0176: `ALTER TABLE a ADD [CONSTRAINT …] FOREIGN KEY (…) REFERENCES b (…)` —
+            // how `pg_dump` states every foreign key.
+            Statement::AlterTable {
+                name, operations, ..
+            } => fks.in_alter_table(&name.to_string().to_lowercase(), operations),
+            _ => {}
+        }
+    }
 
-            // Table-level: FOREIGN KEY (col) REFERENCES tbl(col)
-            for constraint in &ct.constraints {
-                if let TableConstraint::ForeignKey {
+    (graph, report)
+}
+
+/// The file's statements: parsed whole, else with synthetic separators, else one statement at a
+/// time (`report` then says which were skipped). `None` when nothing parses; `report.failed`
+/// carries the first error.
+fn parse_ddl_statements(
+    sql: &str,
+    source_path: &str,
+    dialect: &dyn Dialect,
+    report: &mut DdlParseReport,
+) -> Option<Vec<Statement>> {
+    let first_err = match Parser::parse_sql(dialect, sql) {
+        Ok(s) => return Some(s),
+        Err(e) => e,
+    };
+    // Fallback (GitHub issue #3): some hand-written scripts omit `;` between top-level
+    // statements — retry once with synthetic separators inserted. See `statement_repair`'s doc
+    // comment for why this is only attempted after the unmodified text has already failed to
+    // parse.
+    let repaired = crate::statement_repair::ensure_statement_separators(sql);
+    if let Ok(s) = Parser::parse_sql(dialect, &repaired) {
+        return Some(s);
+    }
+    if let Some((s, r)) = parse_statement_by_statement(sql, dialect) {
+        *report = r;
+        return Some(s);
+    }
+    warn!("sqlparser failed on {source_path}: {first_err}; falling back to empty graph");
+    report.failed = Some(first_err.to_string());
+    None
+}
+
+/// Where foreign keys are written, and the tables this file created.
+struct ForeignKeys<'a> {
+    graph: &'a mut KirGraph,
+    source_path: &'a str,
+    table_ids: &'a HashMap<String, KirId>,
+}
+
+impl ForeignKeys<'_> {
+    /// One foreign-key edge, when both tables are ones this file created.
+    fn add(
+        &mut self,
+        from_name: &str,
+        from_cols: &str,
+        foreign_table: &sqlparser::ast::ObjectName,
+        ref_cols: &str,
+    ) {
+        let to_name = foreign_table.to_string().to_lowercase();
+        let (Some(&from_id), Some(&to_id)) =
+            (self.table_ids.get(from_name), self.table_ids.get(&to_name))
+        else {
+            return;
+        };
+        add_fk_relationship(
+            self.graph,
+            self.source_path,
+            from_id,
+            to_id,
+            from_name,
+            from_cols,
+            &to_name,
+            ref_cols,
+        );
+    }
+
+    /// Table-level `FOREIGN KEY (col) REFERENCES tbl(col)` and inline `col INT REFERENCES tbl(id)`.
+    fn in_create_table(&mut self, ct: &sqlparser::ast::CreateTable) {
+        let from_name = ct.name.to_string().to_lowercase();
+        for constraint in &ct.constraints {
+            if let TableConstraint::ForeignKey {
+                foreign_table,
+                referred_columns,
+                columns: fk_columns,
+                ..
+            } = constraint
+            {
+                self.add(
+                    &from_name,
+                    &col_names(fk_columns),
                     foreign_table,
-                    referred_columns,
-                    columns: fk_columns,
-                    ..
-                } = constraint
-                {
-                    let to_name = foreign_table.to_string().to_lowercase();
-                    if let Some(&to_id) = table_ids.get(&to_name) {
-                        add_fk_relationship(
-                            &mut graph,
-                            source_path,
-                            from_id,
-                            to_id,
-                            &from_name,
-                            &col_names(fk_columns),
-                            &to_name,
-                            &col_names(referred_columns),
-                        );
-                    }
-                }
-            }
-
-            // Inline: col_name INT REFERENCES other_table(id)
-            for col in &ct.columns {
-                for opt in &col.options {
-                    if let ColumnOption::ForeignKey {
-                        foreign_table,
-                        referred_columns,
-                        ..
-                    } = &opt.option
-                    {
-                        let to_name = foreign_table.to_string().to_lowercase();
-                        if let Some(&to_id) = table_ids.get(&to_name) {
-                            let ref_cols = if referred_columns.is_empty() {
-                                "id".to_string()
-                            } else {
-                                referred_columns
-                                    .iter()
-                                    .map(|c| c.value.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            };
-                            add_fk_relationship(
-                                &mut graph,
-                                source_path,
-                                from_id,
-                                to_id,
-                                &from_name,
-                                &col.name.value,
-                                &to_name,
-                                &ref_cols,
-                            );
-                        }
-                    }
-                }
+                    &col_names(referred_columns),
+                );
             }
         }
-        // RFC 0176: `ALTER TABLE a ADD [CONSTRAINT …] FOREIGN KEY (…) REFERENCES b (…)` — how
-        // `pg_dump` states every foreign key.
-        if let Statement::AlterTable {
-            name, operations, ..
-        } = stmt
-        {
-            let from_name = name.to_string().to_lowercase();
-            let Some(&from_id) = table_ids.get(&from_name) else {
-                continue;
-            };
-            for op in operations {
-                if let sqlparser::ast::AlterTableOperation::AddConstraint(
-                    TableConstraint::ForeignKey {
-                        foreign_table,
-                        referred_columns,
-                        columns: fk_columns,
-                        ..
-                    },
-                ) = op
+        for col in &ct.columns {
+            for opt in &col.options {
+                if let ColumnOption::ForeignKey {
+                    foreign_table,
+                    referred_columns,
+                    ..
+                } = &opt.option
                 {
-                    let to_name = foreign_table.to_string().to_lowercase();
-                    if let Some(&to_id) = table_ids.get(&to_name) {
-                        add_fk_relationship(
-                            &mut graph,
-                            source_path,
-                            from_id,
-                            to_id,
-                            &from_name,
-                            &col_names(fk_columns),
-                            &to_name,
-                            &col_names(referred_columns),
-                        );
-                    }
+                    let ref_cols = if referred_columns.is_empty() {
+                        "id".to_string()
+                    } else {
+                        col_names(referred_columns)
+                    };
+                    self.add(&from_name, &col.name.value, foreign_table, &ref_cols);
                 }
             }
         }
     }
 
-    (graph, report)
+    fn in_alter_table(
+        &mut self,
+        from_name: &str,
+        operations: &[sqlparser::ast::AlterTableOperation],
+    ) {
+        for op in operations {
+            if let sqlparser::ast::AlterTableOperation::AddConstraint(
+                TableConstraint::ForeignKey {
+                    foreign_table,
+                    referred_columns,
+                    columns: fk_columns,
+                    ..
+                },
+            ) = op
+            {
+                self.add(
+                    from_name,
+                    &col_names(fk_columns),
+                    foreign_table,
+                    &col_names(referred_columns),
+                );
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

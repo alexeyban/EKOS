@@ -600,23 +600,21 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
             // block — otherwise a later real `do` could wrongly stitch together a start line from
             // one clause and an end line from another. Cleared unconditionally, re-armed below
             // only on a genuine first occurrence.
-            pending_symbol = None;
-            if let Some((name, arity)) = parse_def_line(trimmed, kind) {
-                let owner = current_module(&stack).unwrap_or(file_id);
-                let def = DefLine {
-                    text: trimmed,
-                    kind,
-                    name,
-                    arity,
-                    doc: doc_comments.doc.get(&line_idx),
-                };
-                if let Some(sym_id) = declare_symbol(def, owner, project, &mut result, &mut seen) {
-                    // RFC 0088: arm the source-span tracker on this, the first (and only
-                    // span-carrying) clause — the matching `do`/`end` pair is found generically
-                    // below, possibly several real lines later (guard clause).
-                    pending_symbol = Some((sym_id, line_idx + 1));
-                }
-            }
+            let owner = current_module(&stack).unwrap_or(file_id);
+            // RFC 0088: armed on the first (and only span-carrying) clause — the matching
+            // `do`/`end` pair is found generically below, possibly several lines later.
+            pending_symbol = parse_def_line(trimmed, kind)
+                .and_then(|(name, arity)| {
+                    let def = DefLine {
+                        text: trimmed,
+                        kind,
+                        name,
+                        arity,
+                        doc: doc_comments.doc.get(&line_idx),
+                    };
+                    declare_symbol(def, owner, project, &mut result, &mut seen)
+                })
+                .map(|sym_id| (sym_id, line_idx + 1));
             // Fall through to the generic scan: this line's own trailing `do` (if the signature
             // and guard fit on one line) or lack of one (guard continues to a later line, or a
             // one-line `, do:` form) is handled uniformly below, same as any other line.

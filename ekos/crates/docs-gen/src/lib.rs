@@ -2552,6 +2552,22 @@ pub fn render_architecture(
     let page_names = unique_page_file_names(objects, "md");
     let kind_by_id: HashMap<KirId, &ObjectKind> = objects.iter().map(|o| (o.id, &o.kind)).collect();
 
+    let crates: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
+        .collect();
+    let name_by_id: HashMap<KirId, &str> =
+        objects.iter().map(|o| (o.id, o.name.as_str())).collect();
+    let cx = ArchCtx {
+        objects,
+        relationships,
+        layer_overrides,
+        page_names: &page_names,
+        kind_by_id: &kind_by_id,
+        crates: &crates,
+        name_by_id: &name_by_id,
+    };
+
     out.push_str("## Architecture Summary\n\n");
     out.push_str(
         "_Executive Overview (RFC 0068 §14) — only fields EKOS can back with real compiled \
@@ -2565,6 +2581,78 @@ pub fn render_architecture(
     ));
 
     out.push_str("## System Context\n\n");
+    arch_system_context(&cx, &mut out);
+
+    out.push_str("## System Decomposition\n\n");
+    arch_system_decomposition(&cx, &mut out);
+
+    out.push_str("## Components\n\n");
+    arch_components(&cx, &mut out);
+
+    out.push_str("## Subsystems\n\n");
+    arch_subsystems(&cx, &mut out);
+
+    out.push_str("## Crate & Workspace Topology\n\n");
+    arch_crate_workspace_topology(&cx, &mut out);
+
+    out.push_str("## Component View\n\n");
+    out.push_str(
+        "_C4 Component (RFC 0068 §18) — one level inside a Container. Each `Crate` below whose \
+         manifest directory matches a compiled `Rollup` (RFC 0044) links through to that \
+         subsystem's real member-file breakdown; a crate with no matching rollup either has too \
+         few member files to summarize (RFC 0044's own ≥2-member threshold) or none were \
+         compiled — not fabricated either way._\n\n",
+    );
+    out.push_str(&render_component_view(&crates, objects, &page_names));
+
+    out.push_str("## Technology Inventory\n\n");
+    arch_technology_inventory(&cx, &mut out);
+
+    out.push_str("## Runtime View\n\n");
+    arch_runtime_view(&cx, &mut out);
+
+    out.push_str("## Data Architecture\n\n");
+    out.push_str(
+        "_RFC 0068 §22 (\"A major EKOS capability\") — real compiled data stores and real \
+         compiled transformations/lineage; domain grouping, ownership, lifecycle, and data \
+         quality each say explicitly why they're not computed yet rather than being guessed \
+         at._\n\n",
+    );
+    out.push_str(&render_data_architecture(objects, relationships));
+
+    out.push_str("## Open Questions\n\n");
+    arch_open_questions(&cx, &mut out);
+
+    out.push_str("## CI/CD Pipelines\n\n");
+    arch_ci_cd_pipelines(&cx, &mut out);
+
+    out.push_str("## Entity Relationships\n\n");
+    arch_entity_relationships(&cx, &mut out);
+
+    out.push_str("## Dependency Graph\n\n");
+    arch_dependency_graph(&cx, &mut out);
+
+    RenderedPage {
+        file_name: "Architecture.md".to_string(),
+        content: out,
+    }
+}
+
+/// What every section of the architecture page reads.
+struct ArchCtx<'a> {
+    objects: &'a [KirObject],
+    relationships: &'a [KirRelationship],
+    layer_overrides: &'a [LayerOverride],
+    page_names: &'a HashMap<KirId, String>,
+    kind_by_id: &'a HashMap<KirId, &'a ObjectKind>,
+    crates: &'a [&'a KirObject],
+    name_by_id: &'a HashMap<KirId, &'a str>,
+}
+
+/// The `## System Context` section's body.
+fn arch_system_context(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
+    let relationships = cx.relationships;
     out.push_str(
         "_C4 System Context (RFC 0068 §15) — the compiled workspace as one system, and the real \
          external technologies it depends on. One level broader than the Container view below; \
@@ -2577,8 +2665,14 @@ pub fn render_architecture(
     } else {
         out.push('\n');
     }
+}
 
-    out.push_str("## System Decomposition\n\n");
+/// The `## System Decomposition` section's body.
+fn arch_system_decomposition(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
+    let relationships = cx.relationships;
+    let layer_overrides = cx.layer_overrides;
+    let page_names = cx.page_names;
     out.push_str(
         "_C4 Container-level decomposition (RFC 0068 §16/§68), one level inside System Context \
          above — real Backend/Frontend/Database layers, grouped from each compiled `File`/`Table` \
@@ -2600,10 +2694,13 @@ pub fn render_architecture(
         objects,
         relationships,
         layer_overrides,
-        &page_names,
+        page_names,
     ));
+}
 
-    out.push_str("## Components\n\n");
+/// The `## Components` section's body.
+fn arch_components(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
     let counts = count_by_kind(objects, is_significant);
     if counts.is_empty() {
         out.push_str("_No compiled objects yet._\n\n");
@@ -2616,8 +2713,12 @@ pub fn render_architecture(
         }
         out.push('\n');
     }
+}
 
-    out.push_str("## Subsystems\n\n");
+/// The `## Subsystems` section's body.
+fn arch_subsystems(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
+    let page_names = cx.page_names;
     out.push_str(
         "_Deterministic rollups (RFC 0044) — one per directory/project group with ≥2 member \
          files, zero LLM. Each links to a detail page with real member counts and boundary \
@@ -2647,17 +2748,19 @@ pub fn render_architecture(
         }
         out.push('\n');
     }
+}
 
-    out.push_str("## Crate & Workspace Topology\n\n");
+/// The `## Crate & Workspace Topology` section's body.
+fn arch_crate_workspace_topology(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
+    let relationships = cx.relationships;
+    let page_names = cx.page_names;
+    let crates = cx.crates;
     out.push_str(
         "_C4 mapping (RFC 0065 §23): each crate below is a C4 **Container** — the natural \
          deployable/buildable unit in a Rust workspace — and each entry under Technologies is a \
          C4 **External System** the workspace depends on but doesn't own._\n\n",
     );
-    let crates: Vec<&KirObject> = objects
-        .iter()
-        .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Crate"))
-        .collect();
     let crate_ids: HashSet<KirId> = crates.iter().map(|c| c.id).collect();
     let crate_name_by_id: HashMap<KirId, &str> =
         crates.iter().map(|c| (c.id, c.name.as_str())).collect();
@@ -2672,7 +2775,7 @@ pub fn render_architecture(
     if crates.is_empty() {
         out.push_str(&render_rollup_container_fallback(
             objects,
-            &page_names,
+            page_names,
             "_No Cargo-based crate manifests compiled for this workspace — showing each real \
              compiled `Rollup` (RFC 0044) as this project's Container-level topology instead, \
              since \"crate\" doesn't apply outside a Rust workspace._\n\n",
@@ -2689,24 +2792,18 @@ pub fn render_architecture(
         ));
         out.push_str("[Crate & Workspace Topology diagram (SVG)](crate-topology.svg)\n\n");
     }
+}
 
-    out.push_str("## Component View\n\n");
-    out.push_str(
-        "_C4 Component (RFC 0068 §18) — one level inside a Container. Each `Crate` below whose \
-         manifest directory matches a compiled `Rollup` (RFC 0044) links through to that \
-         subsystem's real member-file breakdown; a crate with no matching rollup either has too \
-         few member files to summarize (RFC 0044's own ≥2-member threshold) or none were \
-         compiled — not fabricated either way._\n\n",
-    );
-    out.push_str(&render_component_view(&crates, objects, &page_names));
-
-    out.push_str("## Technology Inventory\n\n");
+/// The `## Technology Inventory` section's body.
+fn arch_technology_inventory(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
+    let relationships = cx.relationships;
+    let page_names = cx.page_names;
+    let name_by_id = cx.name_by_id;
     out.push_str(
         "_C4 External System-level dependencies (RFC 0068 §61's Technology Inventory), each \
          linked to its own detail page where one was compiled._\n\n",
     );
-    let name_by_id: HashMap<KirId, &str> =
-        objects.iter().map(|o| (o.id, o.name.as_str())).collect();
     let technologies: Vec<&KirObject> = objects
         .iter()
         .filter(|o| matches!(&o.kind, ObjectKind::Custom(s) if s == "Technology"))
@@ -2742,8 +2839,11 @@ pub fn render_architecture(
         }
         out.push('\n');
     }
+}
 
-    out.push_str("## Runtime View\n\n");
+/// The `## Runtime View` section's body.
+fn arch_runtime_view(cx: &ArchCtx<'_>, out: &mut String) {
+    let relationships = cx.relationships;
     out.push_str(
         "_Basic Runtime View (RFC 0068 §20) — real behavior, not structure. `SequenceDiagrams.md` \
          (generated alongside this page) already renders every real compiled call/data-flow \
@@ -2763,17 +2863,11 @@ pub fn render_architecture(
     } else {
         out.push_str("_No call or data-flow sequences compiled._\n\n");
     }
+}
 
-    out.push_str("## Data Architecture\n\n");
-    out.push_str(
-        "_RFC 0068 §22 (\"A major EKOS capability\") — real compiled data stores and real \
-         compiled transformations/lineage; domain grouping, ownership, lifecycle, and data \
-         quality each say explicitly why they're not computed yet rather than being guessed \
-         at._\n\n",
-    );
-    out.push_str(&render_data_architecture(objects, relationships));
-
-    out.push_str("## Open Questions\n\n");
+/// The `## Open Questions` section's body.
+fn arch_open_questions(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
     out.push_str(
         "_Explicit knowledge gaps (RFC 0065 §17) — not errors, and not silently dropped: each \
          entry below is something a deterministic pass found it could not resolve, evidence-backed \
@@ -2806,8 +2900,26 @@ pub fn render_architecture(
         }
         out.push('\n');
     }
+}
 
-    out.push_str("## CI/CD Pipelines\n\n");
+/// A pipeline's jobs, each with its steps.
+fn pipeline_jobs(pipeline: &KirObject, out: &mut String) {
+    let Some(jobs) = pipeline.properties.get("jobs").and_then(|v| v.as_array()) else {
+        return;
+    };
+    for job in jobs {
+        let job_name = job.get("name").and_then(|v| v.as_str()).unwrap_or("job");
+        out.push_str(&format!("- **{job_name}**\n"));
+        let steps = job.get("steps").and_then(|v| v.as_array());
+        for s in steps.into_iter().flatten().filter_map(|step| step.as_str()) {
+            out.push_str(&format!("  - {s}\n"));
+        }
+    }
+}
+
+/// The `## CI/CD Pipelines` section's body.
+fn arch_ci_cd_pipelines(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
     let pipelines: Vec<&KirObject> = objects
         .iter()
         .filter(|o| o.kind == ObjectKind::Pipeline)
@@ -2827,24 +2939,16 @@ pub fn render_architecture(
                     out.push_str(&format!("Triggers: `{}`\n\n", names.join("`, `")));
                 }
             }
-            if let Some(jobs) = pipeline.properties.get("jobs").and_then(|v| v.as_array()) {
-                for job in jobs {
-                    let job_name = job.get("name").and_then(|v| v.as_str()).unwrap_or("job");
-                    out.push_str(&format!("- **{job_name}**\n"));
-                    if let Some(steps) = job.get("steps").and_then(|v| v.as_array()) {
-                        for step in steps {
-                            if let Some(s) = step.as_str() {
-                                out.push_str(&format!("  - {s}\n"));
-                            }
-                        }
-                    }
-                }
-            }
+            pipeline_jobs(pipeline, out);
             out.push('\n');
         }
     }
+}
 
-    out.push_str("## Entity Relationships\n\n");
+/// The `## Entity Relationships` section's body.
+fn arch_entity_relationships(cx: &ArchCtx<'_>, out: &mut String) {
+    let objects = cx.objects;
+    let relationships = cx.relationships;
     let tables: Vec<KirObject> = objects
         .iter()
         .filter(|o| o.kind == ObjectKind::Table)
@@ -2859,8 +2963,14 @@ pub fn render_architecture(
         out.push_str(&render_er_diagram(&tables, relationships));
         out.push('\n');
     }
+}
 
-    out.push_str("## Dependency Graph\n\n");
+/// The `## Dependency Graph` section's body.
+fn arch_dependency_graph(cx: &ArchCtx<'_>, out: &mut String) {
+    let relationships = cx.relationships;
+    let page_names = cx.page_names;
+    let kind_by_id = cx.kind_by_id;
+    let name_by_id = cx.name_by_id;
     let mut by_kind: HashMap<String, Vec<&KirRelationship>> = HashMap::new();
     for rel in relationships {
         if is_feeds_into(&rel.kind) {
@@ -2915,18 +3025,13 @@ pub fn render_architecture(
                 }
                 out.push('\n');
             } else {
-                out.push_str(&render_relationship_kind_graph(kind, rels, &name_by_id));
+                out.push_str(&render_relationship_kind_graph(kind, rels, name_by_id));
                 out.push_str(&format!(
                     "[{kind} Dependency Graph diagram (SVG)](dependency-graph-{}.svg)\n\n",
                     slugify(kind)
                 ));
             }
         }
-    }
-
-    RenderedPage {
-        file_name: "Architecture.md".to_string(),
-        content: out,
     }
 }
 

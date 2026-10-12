@@ -151,88 +151,21 @@ pub fn link_procedures(graph: &mut KirGraph) -> ProcedureLinkStats {
         }
     }
 
-    let mut ambiguous: BTreeSet<String> = BTreeSet::new();
-    // One edge per id — the id is a function of (kind, from, to). Two spellings of one target
-    // (`defaults` and `[% slschema %].defaults`) would otherwise emit the same id twice with
-    // different `match` values, and the ledger would flip between them on every commit.
-    let mut new: BTreeMap<Uuid, KirRelationship> = BTreeMap::new();
-    let mut put = |rel: KirRelationship| match new.get(&rel.id.0) {
-        Some(existing) if existing.properties["match"] == json!("exact") => {}
-        _ => {
-            new.insert(rel.id.0, rel);
-        }
-    };
+    let mut links = Links::default();
     for o in &graph.objects {
         if is_custom(o, "ProcedureStatement") {
-            for (key, kind) in [("reads", "ReadsFrom"), ("writes", "WritesTo")] {
-                for name in strings(o, key) {
-                    match tables.resolve(&name) {
-                        Ok((t, how)) => {
-                            put(edge(RelationshipKind::Custom(kind.into()), o, t, how, &[]))
-                        }
-                        Err(true) => {
-                            ambiguous.insert(name);
-                        }
-                        Err(false) => {}
-                    }
-                }
-            }
+            links.statement(o, &tables);
         } else if is_custom(o, "Procedure") || is_custom(o, "View") {
             // A view links from its own query's footprint exactly as a routine does — reads only.
-            // read / write / read_write per table, and the strongest way any spelling matched it.
-            let mut access: BTreeMap<Uuid, (bool, bool, &'static str)> = BTreeMap::new();
-            for (key, write) in [("reads", false), ("writes", true)] {
-                for name in strings(o, key) {
-                    match tables.resolve(&name) {
-                        Ok((t, how)) => {
-                            let e = access.entry(t.0).or_insert((false, false, how));
-                            if how == "exact" {
-                                e.2 = how;
-                            }
-                            if write {
-                                e.1 = true;
-                            } else {
-                                e.0 = true;
-                            }
-                        }
-                        Err(true) => {
-                            ambiguous.insert(name);
-                        }
-                        Err(false) => {}
-                    }
-                }
-            }
-            for (t, (r, w, how)) in access {
-                let mode = match (r, w) {
-                    (true, true) => "read_write",
-                    (false, true) => "write",
-                    _ => "read",
-                };
-                put(edge(
-                    RelationshipKind::DependsOn,
-                    o,
-                    KirId(t),
-                    how,
-                    &[("access", json!(mode))],
-                ));
-            }
-            for name in strings(o, "calls") {
-                match routines.resolve(&name) {
-                    Ok((callee, how)) => put(edge(RelationshipKind::Calls, o, callee, how, &[])),
-                    Err(true) => {
-                        ambiguous.insert(name);
-                    }
-                    Err(false) => {}
-                }
-            }
+            links.routine(o, &tables, &routines);
         }
     }
 
     let mut stats = ProcedureLinkStats {
-        ambiguous: ambiguous.len(),
+        ambiguous: links.ambiguous.len(),
         ..Default::default()
     };
-    for rel in new.values() {
+    for rel in links.new.values() {
         match &rel.kind {
             RelationshipKind::DependsOn => stats.depends_on += 1,
             RelationshipKind::Calls => stats.calls += 1,
@@ -240,8 +173,94 @@ pub fn link_procedures(graph: &mut KirGraph) -> ProcedureLinkStats {
             _ => stats.writes_to += 1,
         }
     }
-    graph.relationships.extend(new.into_values());
+    graph.relationships.extend(links.new.into_values());
     stats
+}
+
+/// The edges being collected, and the names that matched more than one object.
+#[derive(Default)]
+struct Links {
+    /// One edge per id — the id is a function of (kind, from, to). Two spellings of one target
+    /// (`defaults` and `[% slschema %].defaults`) would otherwise emit the same id twice with
+    /// different `match` values, and the ledger would flip between them on every commit.
+    new: BTreeMap<Uuid, KirRelationship>,
+    ambiguous: BTreeSet<String>,
+}
+
+impl Links {
+    /// Keeps `rel` unless an exact match for the same id is already held.
+    fn put(&mut self, rel: KirRelationship) {
+        match self.new.get(&rel.id.0) {
+            Some(existing) if existing.properties["match"] == json!("exact") => {}
+            _ => {
+                self.new.insert(rel.id.0, rel);
+            }
+        }
+    }
+
+    /// Resolves `name` in `index`; an ambiguous name is recorded and yields nothing.
+    fn resolve(&mut self, index: &NameIndex, name: String) -> Option<(KirId, &'static str)> {
+        match index.resolve(&name) {
+            Ok(found) => Some(found),
+            Err(true) => {
+                self.ambiguous.insert(name);
+                None
+            }
+            Err(false) => None,
+        }
+    }
+
+    /// A routine statement's `ReadsFrom` / `WritesTo` edges.
+    fn statement(&mut self, o: &KirObject, tables: &NameIndex) {
+        for (key, kind) in [("reads", "ReadsFrom"), ("writes", "WritesTo")] {
+            for name in strings(o, key) {
+                if let Some((t, how)) = self.resolve(tables, name) {
+                    self.put(edge(RelationshipKind::Custom(kind.into()), o, t, how, &[]));
+                }
+            }
+        }
+    }
+
+    /// A routine's or view's `DependsOn` edge per table, and a routine's `Calls` edges.
+    fn routine(&mut self, o: &KirObject, tables: &NameIndex, routines: &NameIndex) {
+        // read / write / read_write per table, and the strongest way any spelling matched it.
+        let mut access: BTreeMap<Uuid, (bool, bool, &'static str)> = BTreeMap::new();
+        for (key, write) in [("reads", false), ("writes", true)] {
+            for name in strings(o, key) {
+                let Some((t, how)) = self.resolve(tables, name) else {
+                    continue;
+                };
+                let e = access.entry(t.0).or_insert((false, false, how));
+                if how == "exact" {
+                    e.2 = how;
+                }
+                if write {
+                    e.1 = true;
+                } else {
+                    e.0 = true;
+                }
+            }
+        }
+        for (t, (r, w, how)) in access {
+            let mode = match (r, w) {
+                (true, true) => "read_write",
+                (false, true) => "write",
+                _ => "read",
+            };
+            self.put(edge(
+                RelationshipKind::DependsOn,
+                o,
+                KirId(t),
+                how,
+                &[("access", json!(mode))],
+            ));
+        }
+        for name in strings(o, "calls") {
+            if let Some((callee, how)) = self.resolve(routines, name) {
+                self.put(edge(RelationshipKind::Calls, o, callee, how, &[]));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
