@@ -77,7 +77,7 @@ impl Observer for JavaScriptObserver {
 
             let is_js = abs_path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .is_some_and(|e| EXTENSIONS.iter().any(|ext| e.eq_ignore_ascii_case(ext)));
             if !is_js {
                 continue;

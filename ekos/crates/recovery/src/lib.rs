@@ -149,7 +149,7 @@ mod relationship_determinism_guard {
         let mut bad = Vec::new();
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            if path.extension().and_then(std::ffi::OsStr::to_str) != Some("rs") {
                 continue;
             }
             let src = strip_test_modules(&std::fs::read_to_string(&path).unwrap());

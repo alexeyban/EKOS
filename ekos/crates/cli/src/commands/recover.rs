@@ -102,7 +102,7 @@ pub async fn run_with(
             let path = entry.path();
             let is_sql = path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .map(|e| e.eq_ignore_ascii_case("sql"))
                 .unwrap_or(false);
             if !is_sql {
@@ -254,7 +254,7 @@ pub async fn run_with(
             let path = entry.path();
             let is_candidate = path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .map(|e| {
                     DEP_SCAN_EXTENSIONS
                         .iter()
@@ -760,7 +760,7 @@ pub async fn run_with(
             let path = entry.path();
             let is_yaml = path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .map(|e| e.eq_ignore_ascii_case("yml") || e.eq_ignore_ascii_case("yaml"))
                 .unwrap_or(false);
             let under_workflows = path
@@ -863,7 +863,7 @@ pub async fn run_with(
                 let path = m_entry.path();
                 let ext = path
                     .extension()
-                    .and_then(|e| e.to_str())
+                    .and_then(std::ffi::OsStr::to_str)
                     .map(str::to_ascii_lowercase);
                 let is_sql = ext.as_deref() == Some("sql");
                 let is_yaml = matches!(ext.as_deref(), Some("yml") | Some("yaml"));

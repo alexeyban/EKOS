@@ -14,6 +14,71 @@ pub async fn run(config: &EkosConfig, cwd: &Path, yes: bool) -> Result<()> {
     run_with(config, cwd, yes, &Extensions::none()).await
 }
 
+type SourceContext<'a> = &'a dyn Fn(&[String]) -> ekos_ledger::provenance::WriteContext;
+
+/// Writes the canonical objects. Returns how many were written, how many the ledger already
+/// had, and the ids of the conflicts this compile found (RFC 0172, for
+/// `.ekos/conflicts/current.json`).
+fn write_objects(
+    ledger: &dyn KnowledgeStore,
+    model: &CkModel,
+    per_source_ctx: SourceContext<'_>,
+) -> Result<(usize, usize, Vec<ekos_kir::KirId>)> {
+    let (mut written, mut skipped) = (0usize, 0usize);
+    let obj_total = model.objects.len();
+    let obj_progress = ProgressLine::for_phase("writing objects");
+    let mut compiled_conflicts: Vec<ekos_kir::KirId> = Vec::new();
+    for ckm_obj in &model.objects {
+        ledger.set_write_context(Some(per_source_ctx(&ckm_obj.source_artifact_ids)));
+        let mut kir_obj = ckm_object_to_kir(ckm_obj);
+        preserve_claim_review_status(ledger, &mut kir_obj)?;
+        if ekos_semantic::conflicts::is_conflict(&kir_obj) {
+            crate::commands::conflicts::carry_review(ledger, &mut kir_obj)?;
+            compiled_conflicts.push(kir_obj.id);
+        }
+        if ledger.append_object(&kir_obj)? {
+            written += 1;
+        } else {
+            skipped += 1;
+        }
+        obj_progress.tick(written + skipped, obj_total);
+    }
+    obj_progress.finish();
+    Ok((written, skipped, compiled_conflicts))
+}
+
+/// Writes the canonical relationships and returns how many were new.
+fn write_relationships(
+    ledger: &dyn KnowledgeStore,
+    model: &CkModel,
+    per_source_ctx: SourceContext<'_>,
+) -> Result<usize> {
+    let mut rels_written = 0usize;
+    let rel_total = model.relationships.len();
+    let rel_progress = ProgressLine::for_phase("writing relationships");
+    for (i, ckm_rel) in model.relationships.iter().enumerate() {
+        ledger.set_write_context(Some(per_source_ctx(&ckm_rel.source_artifact_ids)));
+        let kir_rel = ckm_rel_to_kir(ckm_rel);
+        if ledger.append_relationship(&kir_rel)? {
+            rels_written += 1;
+        }
+        // Counts iterations, not writes: a re-run skips already-known ids, and a bar that stalled
+        // while the loop was still churning would recreate the exact problem this fixes.
+        rel_progress.tick(i + 1, rel_total);
+    }
+    rel_progress.finish();
+    Ok(rels_written)
+}
+
+/// RFC 0171 — the ledger now reflects what `ekos build` observed.
+fn promote_source_manifest(config: &EkosConfig, cwd: &Path) {
+    match crate::freshness::promote_after_commit(config, cwd) {
+        Ok(true) => {}
+        Ok(false) => tracing::debug!("no source manifest to promote (built before RFC 0171)"),
+        Err(e) => tracing::warn!("could not record the committed source manifest: {e}"),
+    }
+}
+
 /// [`run`] with RFC 0149 extensions: each one's `after_commit` step runs over the fully
 /// committed ledger, after `[llm-description]` and before `[embeddings]`.
 pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensions) -> Result<()> {
@@ -53,9 +118,6 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     };
     ledger.set_write_context(Some(write_ctx("commit")));
 
-    let mut objects_written = 0usize;
-    let mut objects_skipped = 0usize;
-    let mut rels_written = 0usize;
     let mut evidence_written = 0usize;
 
     // RFC 0135 Part B follow-up — stamp each committed object/relationship with its own
@@ -89,41 +151,11 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     ev_progress.finish();
 
     // Write canonical objects.
-    let obj_total = model.objects.len();
-    let obj_progress = ProgressLine::for_phase("writing objects");
-    // RFC 0172 — the conflicts this compile found, for `.ekos/conflicts/current.json`.
-    let mut compiled_conflicts: Vec<ekos_kir::KirId> = Vec::new();
-    for ckm_obj in &model.objects {
-        ledger.set_write_context(Some(per_source_ctx(&ckm_obj.source_artifact_ids)));
-        let mut kir_obj = ckm_object_to_kir(ckm_obj);
-        preserve_claim_review_status(&*ledger, &mut kir_obj)?;
-        if ekos_semantic::conflicts::is_conflict(&kir_obj) {
-            crate::commands::conflicts::carry_review(&*ledger, &mut kir_obj)?;
-            compiled_conflicts.push(kir_obj.id);
-        }
-        if ledger.append_object(&kir_obj)? {
-            objects_written += 1;
-        } else {
-            objects_skipped += 1;
-        }
-        obj_progress.tick(objects_written + objects_skipped, obj_total);
-    }
-    obj_progress.finish();
+    let (objects_written, objects_skipped, compiled_conflicts) =
+        write_objects(&*ledger, &model, &per_source_ctx)?;
 
     // Write canonical relationships.
-    let rel_total = model.relationships.len();
-    let rel_progress = ProgressLine::for_phase("writing relationships");
-    for (i, ckm_rel) in model.relationships.iter().enumerate() {
-        ledger.set_write_context(Some(per_source_ctx(&ckm_rel.source_artifact_ids)));
-        let kir_rel = ckm_rel_to_kir(ckm_rel);
-        if ledger.append_relationship(&kir_rel)? {
-            rels_written += 1;
-        }
-        // Counts iterations, not writes: a re-run skips already-known ids, and a bar that stalled
-        // while the loop was still churning would recreate the exact problem this fixes.
-        rel_progress.tick(i + 1, rel_total);
-    }
-    rel_progress.finish();
+    let rels_written = write_relationships(&*ledger, &model, &per_source_ctx)?;
 
     ledger.set_write_context(Some(write_ctx("commit:rollup")));
 
@@ -277,11 +309,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
 
     // RFC 0171 — the ledger now reflects what `ekos build` observed.
     if config.freshness.enabled {
-        match crate::freshness::promote_after_commit(config, cwd) {
-            Ok(true) => {}
-            Ok(false) => tracing::debug!("no source manifest to promote (built before RFC 0171)"),
-            Err(e) => tracing::warn!("could not record the committed source manifest: {e}"),
-        }
+        promote_source_manifest(config, cwd);
     }
 
     Ok(())

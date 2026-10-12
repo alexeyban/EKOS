@@ -593,6 +593,51 @@ fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -
         .collect()
 }
 
+/// KirId → the KnowledgeArtifact id(s) it was recovered from (RFC 0135 Part B follow-up).
+type Provenance = HashMap<KirId, std::collections::BTreeSet<String>>;
+
+/// Every knowledge artifact in `ids` merged into one graph, how many there were, and where each
+/// object and relationship came from. An artifact that does not read as KIR is skipped with a
+/// `SEM000` warning.
+fn load_knowledge(
+    ctx: &PassContext,
+    ids: &[ekos_artifact::ArtifactId],
+) -> (KirGraph, usize, Provenance) {
+    let mut combined = KirGraph::new();
+    let mut ka_count = 0usize;
+    // RFC 0135 Part B follow-up — KirId → the KnowledgeArtifact id(s) it was recovered from.
+    let mut provenance: HashMap<KirId, std::collections::BTreeSet<String>> = HashMap::new();
+
+    for id in ids {
+        let json = match ctx.artifact_store.read(id) {
+            Ok(Some(j)) => j,
+            _ => continue,
+        };
+        if json["artifact_type"].as_str() != Some("knowledge") {
+            continue;
+        }
+        match serde_json::from_value::<KirGraph>(json["kir"].clone()) {
+            Ok(graph) => {
+                let ka = id.to_string();
+                for o in &graph.objects {
+                    provenance.entry(o.id).or_default().insert(ka.clone());
+                }
+                for r in &graph.relationships {
+                    provenance.entry(r.id).or_default().insert(ka.clone());
+                }
+                merge_graphs(&mut combined, graph);
+                ka_count += 1;
+            }
+            Err(e) => ctx
+                .diagnostics
+                .lock()
+                .unwrap()
+                .warning("SEM000", format!("skipping artifact {id}: {e}")),
+        }
+    }
+    (combined, ka_count, provenance)
+}
+
 #[async_trait]
 impl CompilerPass for SemanticCompilerPass {
     fn name(&self) -> &str {
@@ -621,38 +666,7 @@ impl CompilerPass for SemanticCompilerPass {
             .map_err(|e| PassError::failed(format!("artifact store list failed: {e}")))?;
         let ids = dedup_knowledge_artifact_ids(&*ctx.artifact_store, &all_ids);
 
-        let mut combined = KirGraph::new();
-        let mut ka_count = 0usize;
-        // RFC 0135 Part B follow-up — KirId → the KnowledgeArtifact id(s) it was recovered from.
-        let mut provenance: HashMap<KirId, std::collections::BTreeSet<String>> = HashMap::new();
-
-        for id in &ids {
-            let json = match ctx.artifact_store.read(id) {
-                Ok(Some(j)) => j,
-                _ => continue,
-            };
-            if json["artifact_type"].as_str() != Some("knowledge") {
-                continue;
-            }
-            match serde_json::from_value::<KirGraph>(json["kir"].clone()) {
-                Ok(graph) => {
-                    let ka = id.to_string();
-                    for o in &graph.objects {
-                        provenance.entry(o.id).or_default().insert(ka.clone());
-                    }
-                    for r in &graph.relationships {
-                        provenance.entry(r.id).or_default().insert(ka.clone());
-                    }
-                    merge_graphs(&mut combined, graph);
-                    ka_count += 1;
-                }
-                Err(e) => ctx
-                    .diagnostics
-                    .lock()
-                    .unwrap()
-                    .warning("SEM000", format!("skipping artifact {id}: {e}")),
-            }
-        }
+        let (mut combined, ka_count, mut provenance) = load_knowledge(ctx, &ids);
 
         if ka_count == 0 {
             ctx.diagnostics.lock().unwrap().warning(
@@ -1516,7 +1530,7 @@ mod relationship_determinism_guard {
         let mut bad = Vec::new();
         for entry in std::fs::read_dir(&dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            if path.extension().and_then(std::ffi::OsStr::to_str) != Some("rs") {
                 continue;
             }
             let src = strip_test_modules(&std::fs::read_to_string(&path).unwrap());

@@ -50,7 +50,7 @@ fn definition(config: &EkosConfig, cwd: &Path, o: &KirObject) -> Result<String, 
     let span = |key: &str| {
         o.properties
             .get(key)
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .map(|n| n as usize)
     };
     let (Some(start), Some(end)) = (span("span_start"), span("span_end")) else {
@@ -70,7 +70,7 @@ fn definition(config: &EkosConfig, cwd: &Path, o: &KirObject) -> Result<String, 
 }
 
 fn location(o: &KirObject) -> String {
-    match o.properties.get("line").and_then(|v| v.as_u64()) {
+    match o.properties.get("line").and_then(serde_json::Value::as_u64) {
         Some(line) => format!("{}:{line}", text(o, "source_path")),
         None => text(o, "source_path").to_string(),
     }
@@ -208,94 +208,58 @@ fn tally_line(rows: &[Value]) -> String {
         .join(", ")
 }
 
-/// `ekos migrate lower`.
-pub fn lower(
-    config: &EkosConfig,
-    cwd: &Path,
-    database: Option<String>,
-    show_sql: bool,
-    record: bool,
-    as_json: bool,
-) -> Result<()> {
-    super::migrate::require_enabled(config)?;
-    let store = super::store::open_store(config, cwd)?;
-    let objects = store.all_objects()?;
-    let options = LowerOptions { database };
-
-    let views: Vec<Value> = sorted(&objects, "View")
-        .into_iter()
-        .map(|o| view_row(config, cwd, o, &options))
-        .collect();
-    let triggers: Vec<Value> = sorted(&objects, "Trigger")
-        .into_iter()
-        .map(trigger_row)
-        .collect();
-    let routines: Vec<Value> = sorted(&objects, "Procedure")
-        .into_iter()
-        .map(routine_row)
-        .collect();
-
-    let recorded = if record {
-        let mut proposals = Vec::new();
-        for (source, row) in sorted(&objects, "View").into_iter().zip(&views) {
-            if row["outcome"] == "lowered" {
-                let mut body = json!({
-                    "target": "clickhouse",
-                    "sql": row["sql"],
-                    "sql_hash": ekos_common::ContentHash::of(
-                        row["sql"].as_str().unwrap_or_default().as_bytes()
-                    ).as_str(),
-                    "logic_hash": row["logic_hash"],
-                    "notes": row["notes"],
-                });
-                // A V5 result already recorded for this same logic still holds; recording the
-                // lowering again must not erase it. A changed lowering starts unexecuted.
-                let earlier = objects.iter().find(|o| o.id == proposal_id(source));
-                if let Some(v5) = earlier
-                    .filter(|o| o.properties.get("logic_hash") == Some(&row["logic_hash"]))
-                    .and_then(|o| o.properties.get("v5"))
-                {
-                    body["v5"] = v5.clone();
-                }
-                proposals.push(proposal(source, "view", "lowering", body));
+/// The proposals `--record` saves: one per lowered view, one per trigger with a proposed rule.
+fn lowering_proposals(
+    objects: &[KirObject],
+    views: &[Value],
+    triggers: &[Value],
+) -> Vec<KirObject> {
+    let mut proposals = Vec::new();
+    for (source, row) in sorted(objects, "View").into_iter().zip(views) {
+        if row["outcome"] == "lowered" {
+            let mut body = json!({
+                "target": "clickhouse",
+                "sql": row["sql"],
+                "sql_hash": ekos_common::ContentHash::of(
+                    row["sql"].as_str().unwrap_or_default().as_bytes()
+                ).as_str(),
+                "logic_hash": row["logic_hash"],
+                "notes": row["notes"],
+            });
+            // A V5 result already recorded for this same logic still holds; recording the
+            // lowering again must not erase it. A changed lowering starts unexecuted.
+            let earlier = objects.iter().find(|o| o.id == proposal_id(source));
+            if let Some(v5) = earlier
+                .filter(|o| o.properties.get("logic_hash") == Some(&row["logic_hash"]))
+                .and_then(|o| o.properties.get("v5"))
+            {
+                body["v5"] = v5.clone();
             }
+            proposals.push(proposal(source, "view", "lowering", body));
         }
-        for (source, row) in sorted(&objects, "Trigger").into_iter().zip(&triggers) {
-            if row["outcome"] == "proposed" {
-                proposals.push(proposal(
-                    source,
-                    "trigger",
-                    "rule",
-                    json!({
-                        "classification": row["classification"],
-                        "shape": row["shape"],
-                        "proposal": row["proposal"],
-                        "behaviour_change": row["behaviour_change"],
-                    }),
-                ));
-            }
-        }
-        Some(write_proposals(store.as_ref(), &proposals, "lower")?)
-    } else {
-        None
-    };
-
-    if as_json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&json!({
-                "views": views, "triggers": triggers, "routines": routines,
-                "summary": {
-                    "views": tally(&views), "triggers": tally(&triggers), "routines": tally(&routines),
-                },
-            }))?
-        );
-        return Ok(());
     }
+    for (source, row) in sorted(objects, "Trigger").into_iter().zip(triggers) {
+        if row["outcome"] == "proposed" {
+            proposals.push(proposal(
+                source,
+                "trigger",
+                "rule",
+                json!({
+                    "classification": row["classification"],
+                    "shape": row["shape"],
+                    "proposal": row["proposal"],
+                    "behaviour_change": row["behaviour_change"],
+                }),
+            ));
+        }
+    }
+    proposals
+}
 
-    println!("Views: {} — {}", views.len(), tally_line(&views));
+/// One line per view with its notes or blockers, then the blockers counted by rule.
+fn print_view_rows(views: &[Value], show_sql: bool) {
     let mut by_code: BTreeMap<String, usize> = BTreeMap::new();
-    for v in &views {
+    for v in views {
         let name = v["name"].as_str().unwrap_or_default();
         let source = v["source"].as_str().unwrap_or_default();
         match v["outcome"].as_str() {
@@ -331,9 +295,10 @@ pub fn lower(
             println!("    {n:>4}  {code}");
         }
     }
+}
 
-    println!("\nTriggers: {} — {}", triggers.len(), tally_line(&triggers));
-    for t in &triggers {
+fn print_trigger_rows(triggers: &[Value]) {
+    for t in triggers {
         let name = t["name"].as_str().unwrap_or_default();
         let class = t["classification"].as_str().unwrap_or_default();
         match t["outcome"].as_str() {
@@ -353,6 +318,60 @@ pub fn lower(
             ),
         }
     }
+}
+
+/// `ekos migrate lower`.
+pub fn lower(
+    config: &EkosConfig,
+    cwd: &Path,
+    database: Option<String>,
+    show_sql: bool,
+    record: bool,
+    as_json: bool,
+) -> Result<()> {
+    super::migrate::require_enabled(config)?;
+    let store = super::store::open_store(config, cwd)?;
+    let objects = store.all_objects()?;
+    let options = LowerOptions { database };
+
+    let views: Vec<Value> = sorted(&objects, "View")
+        .into_iter()
+        .map(|o| view_row(config, cwd, o, &options))
+        .collect();
+    let triggers: Vec<Value> = sorted(&objects, "Trigger")
+        .into_iter()
+        .map(trigger_row)
+        .collect();
+    let routines: Vec<Value> = sorted(&objects, "Procedure")
+        .into_iter()
+        .map(routine_row)
+        .collect();
+
+    let recorded = if record {
+        let proposals = lowering_proposals(&objects, &views, &triggers);
+        Some(write_proposals(store.as_ref(), &proposals, "lower")?)
+    } else {
+        None
+    };
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "views": views, "triggers": triggers, "routines": routines,
+                "summary": {
+                    "views": tally(&views), "triggers": tally(&triggers), "routines": tally(&routines),
+                },
+            }))?
+        );
+        return Ok(());
+    }
+
+    println!("Views: {} — {}", views.len(), tally_line(&views));
+    print_view_rows(&views, show_sql);
+
+    println!("\nTriggers: {} — {}", triggers.len(), tally_line(&triggers));
+    print_trigger_rows(&triggers);
 
     println!("\nRoutines: {} — {}", routines.len(), tally_line(&routines));
     for r in routines.iter().filter(|r| r["outcome"] == "ineligible") {
@@ -673,7 +692,7 @@ pub fn run_v5(
     let run_id = super::migrate::new_run_id();
     let short: String = run_id
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
+        .filter(char::is_ascii_alphanumeric)
         .take(20)
         .collect();
 

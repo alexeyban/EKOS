@@ -104,7 +104,7 @@ impl CompilerPass for ConfluenceAnalyzerPass {
         let mut ids: Vec<String> = self
             .page_artifact_ids
             .iter()
-            .map(|id| id.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         ids.sort();
         ids

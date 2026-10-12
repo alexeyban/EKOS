@@ -35,7 +35,7 @@ pub async fn publish(
 
     let filename = devlog_path
         .file_name()
-        .and_then(|n| n.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .map(str::to_string);
     let content = tokio::fs::read_to_string(&devlog_path)
         .await

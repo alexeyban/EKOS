@@ -90,7 +90,7 @@ impl Observer for PentahoObserver {
                 continue;
             }
 
-            let Some(ext) = abs_path.extension().and_then(|e| e.to_str()) else {
+            let Some(ext) = abs_path.extension().and_then(std::ffi::OsStr::to_str) else {
                 continue;
             };
             let Some(kind) = kettle_kind(ext) else {

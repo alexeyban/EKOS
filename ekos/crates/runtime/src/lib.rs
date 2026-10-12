@@ -142,6 +142,21 @@ impl<'a> Runtime<'a> {
         Ok(self.load_neighborhood_bounded(id, depth, usize::MAX)?.0)
     }
 
+    /// Whether a walk may follow `rel`. An unconfirmed RFC 0029 identity candidate is a
+    /// hypothesis, not a fact, and an unconfirmed agent note (RFC 0151) is not part of the
+    /// compiled graph — neither is traversed as if it were a real edge.
+    fn is_traversable(&self, rel: &KirRelationship) -> bool {
+        !rel.is_pending_review() && !self.is_session_relationship(rel)
+    }
+
+    /// The object with this id, unless it is unknown or session memory (RFC 0151).
+    fn compiled_object(&self, id: &KirId) -> Result<Option<KirObject>, RuntimeError> {
+        Ok(self
+            .ledger
+            .get_object(id)?
+            .filter(|o| !Self::is_session_kind(&o.kind)))
+    }
+
     /// [`Self::load_neighborhood`] that stops collecting once the graph holds `max_objects`
     /// objects, and says so: the returned `bool` is `true` when the walk stopped early.
     ///
@@ -181,40 +196,27 @@ impl<'a> Runtime<'a> {
             }
 
             for rel in self.ledger.relationships_for(&current_id)? {
-                // An unconfirmed RFC 0029 identity candidate is a hypothesis,
-                // not a fact — never traversed as if it were a real edge.
-                if rel.is_pending_review() {
+                if !self.is_traversable(&rel) {
                     continue;
                 }
-                // RFC 0151: an unconfirmed agent note is not part of the compiled graph.
-                if self.is_session_relationship(&rel) {
-                    continue;
-                }
-
-                let neighbour_id = if rel.from == current_id {
-                    rel.to
-                } else {
-                    rel.from
-                };
+                let neighbour_id = other_endpoint(&rel, &current_id);
 
                 // Avoid duplicate relationships.
                 if seen_rels.insert(rel.id) {
                     graph.add_relationship(rel);
                 }
 
-                if !visited.contains(&neighbour_id) {
-                    if graph.objects.len() >= max_objects {
-                        truncated = true;
-                        break 'walk;
-                    }
-                    visited.insert(neighbour_id);
-                    if let Some(neighbour) = self.ledger.get_object(&neighbour_id)? {
-                        if Self::is_session_kind(&neighbour.kind) {
-                            continue;
-                        }
-                        graph.add_object(neighbour);
-                        queue.push_back((neighbour_id, current_depth + 1));
-                    }
+                if visited.contains(&neighbour_id) {
+                    continue;
+                }
+                if graph.objects.len() >= max_objects {
+                    truncated = true;
+                    break 'walk;
+                }
+                visited.insert(neighbour_id);
+                if let Some(neighbour) = self.compiled_object(&neighbour_id)? {
+                    graph.add_object(neighbour);
+                    queue.push_back((neighbour_id, current_depth + 1));
                 }
             }
         }
@@ -1882,5 +1884,14 @@ mod session_isolation_tests {
             "new Runtime read method(s) {unaudited:?} — decide whether they can return RFC 0151 \
              session memory, filter them if so, then add them to AUDITED"
         );
+    }
+}
+
+/// The end of `rel` that is not `current`.
+fn other_endpoint(rel: &KirRelationship, current: &KirId) -> KirId {
+    if rel.from == *current {
+        rel.to
+    } else {
+        rel.from
     }
 }

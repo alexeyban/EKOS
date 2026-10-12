@@ -300,163 +300,126 @@ impl Parser {
 
     fn parse_query(&mut self) -> Result<EklAst, ParseError> {
         self.expect_keyword("FIND")?;
-        let entity = self.parse_entity()?;
-
-        let mut predicates = Vec::new();
-        let mut from = None;
-        let mut semantic = None;
-        let mut via = None;
-        let mut depth = None;
-        let mut returns = Vec::new();
-        let mut order_by = None;
-        let mut limit = None;
-        let mut as_of = None;
-        let mut count = false;
-        let mut group_by = None;
+        let mut ast = EklAst {
+            entity: self.parse_entity()?,
+            predicates: Vec::new(),
+            from: None,
+            semantic: None,
+            via: None,
+            depth: None,
+            returns: Vec::new(),
+            order_by: None,
+            limit: None,
+            as_of: None,
+            count: false,
+            group_by: None,
+        };
 
         if self.peek_keyword("WHERE") {
             self.advance();
-            predicates.push(self.parse_predicate()?);
+            ast.predicates.push(self.parse_predicate()?);
             while self.peek_keyword("AND") {
                 self.advance();
-                predicates.push(self.parse_predicate()?);
+                ast.predicates.push(self.parse_predicate()?);
             }
         }
 
         // FROM / RETURN / ORDER BY / LIMIT may appear in any order.
-        loop {
-            if self.peek_keyword("FROM") {
-                self.advance();
-                from = Some(self.expect_string()?);
-            } else if self.peek_keyword("SEMANTIC") {
-                self.advance();
-                semantic = Some(self.expect_string()?);
-                // an inline `LIMIT k` right after the string is a convenience; the trailing
-                // LIMIT clause still works and folds into the same field.
-                if self.peek_keyword("LIMIT") {
-                    self.advance();
-                    limit = Some(self.expect_num()? as u64);
-                }
-            } else if self.peek_keyword("VIA") {
-                self.advance();
-                via = Some(self.expect_ident()?);
-            } else if self.peek_keyword("DEPTH") {
-                self.advance();
-                depth = Some(self.expect_num()? as u32);
-            } else if self.peek_keyword("RETURN") {
-                self.advance();
-                returns.push(self.expect_ident()?);
-                while matches!(self.peek(), Some(Token::Comma)) {
-                    self.advance();
-                    returns.push(self.expect_ident()?);
-                }
-            } else if self.peek_keyword("ORDER") {
-                self.advance();
-                self.expect_keyword("BY")?;
-                let field = self.expect_ident()?;
-                let dir = if self.peek_keyword("DESC") {
-                    self.advance();
-                    Order::Desc
-                } else if self.peek_keyword("ASC") {
-                    self.advance();
-                    Order::Asc
-                } else {
-                    Order::Asc
-                };
-                order_by = Some((field, dir));
-            } else if self.peek_keyword("LIMIT") {
-                self.advance();
-                limit = Some(self.expect_num()? as u64);
-            } else if self.peek_keyword("AS") {
-                self.advance();
-                self.expect_keyword("OF")?;
-                let pos = self.peek_pos();
-                let raw = self.expect_string()?;
-                let parsed = DateTime::parse_from_rfc3339(&raw)
-                    .map_err(|e| ParseError {
-                        message: format!("invalid AS OF timestamp '{raw}': {e}"),
-                        position: pos,
-                    })?
-                    .with_timezone(&Utc);
-                as_of = Some(parsed);
-            } else if self.peek_keyword("COUNT") {
-                self.advance();
-                count = true;
-            } else if self.peek_keyword("GROUP") {
-                self.advance();
-                self.expect_keyword("BY")?;
-                group_by = Some(self.expect_ident()?);
-            } else {
-                break;
-            }
-        }
+        while self.parse_clause(&mut ast)? {}
 
         if self.pos != self.tokens.len() {
-            let pos = self.peek_pos();
-            return Err(ParseError {
-                message: format!("unexpected trailing token {}", describe(self.peek())),
-                position: pos,
-            });
+            return Err(self.error_here(format!(
+                "unexpected trailing token {}",
+                describe(self.peek())
+            )));
         }
-
-        if via.is_some() && from.is_none() {
-            let pos = self.peek_pos();
-            return Err(ParseError {
-                message: "VIA requires a FROM anchor".to_string(),
-                position: pos,
-            });
+        if let Some(message) = incompatible_clauses(&ast) {
+            return Err(self.error_here(message));
         }
+        Ok(ast)
+    }
 
-        if semantic.is_some() {
-            let bad = if from.is_some() {
-                Some("FROM (SEMANTIC is a search anchor, FROM is a graph anchor)")
-            } else if as_of.is_some() {
-                Some("AS OF (retrieval has no point-in-time form)")
-            } else if count {
-                Some("COUNT (rank a set, not a scalar — use a plain FIND to count)")
-            } else if entity != Entity::Object {
-                Some("FIND Relationship (SEMANTIC retrieves objects)")
-            } else {
-                None
-            };
-            if let Some(what) = bad {
-                return Err(ParseError {
-                    message: format!("SEMANTIC is not compatible with {what}"),
-                    position: self.peek_pos(),
-                });
+    fn error_here(&self, message: String) -> ParseError {
+        ParseError {
+            message,
+            position: self.peek_pos(),
+        }
+    }
+
+    /// Parses one trailing clause into `ast`. `false` when the next token starts none.
+    fn parse_clause(&mut self, ast: &mut EklAst) -> Result<bool, ParseError> {
+        if self.peek_keyword("FROM") {
+            self.advance();
+            ast.from = Some(self.expect_string()?);
+        } else if self.peek_keyword("SEMANTIC") {
+            self.advance();
+            ast.semantic = Some(self.expect_string()?);
+            // an inline `LIMIT k` right after the string is a convenience; the trailing
+            // LIMIT clause still works and folds into the same field.
+            if self.peek_keyword("LIMIT") {
+                self.advance();
+                ast.limit = Some(self.expect_num()? as u64);
             }
+        } else if self.peek_keyword("VIA") {
+            self.advance();
+            ast.via = Some(self.expect_ident()?);
+        } else if self.peek_keyword("DEPTH") {
+            self.advance();
+            ast.depth = Some(self.expect_num()? as u32);
+        } else if self.peek_keyword("RETURN") {
+            self.advance();
+            ast.returns.push(self.expect_ident()?);
+            while matches!(self.peek(), Some(Token::Comma)) {
+                self.advance();
+                ast.returns.push(self.expect_ident()?);
+            }
+        } else if self.peek_keyword("ORDER") {
+            self.advance();
+            self.expect_keyword("BY")?;
+            let field = self.expect_ident()?;
+            ast.order_by = Some((field, self.parse_direction()));
+        } else if self.peek_keyword("LIMIT") {
+            self.advance();
+            ast.limit = Some(self.expect_num()? as u64);
+        } else if self.peek_keyword("AS") {
+            self.advance();
+            self.expect_keyword("OF")?;
+            ast.as_of = Some(self.parse_timestamp()?);
+        } else if self.peek_keyword("COUNT") {
+            self.advance();
+            ast.count = true;
+        } else if self.peek_keyword("GROUP") {
+            self.advance();
+            self.expect_keyword("BY")?;
+            ast.group_by = Some(self.expect_ident()?);
+        } else {
+            return Ok(false);
         }
+        Ok(true)
+    }
 
-        if group_by.is_some() && !count {
-            let pos = self.peek_pos();
-            return Err(ParseError {
-                message: "GROUP BY requires COUNT".to_string(),
+    /// An optional `ASC` / `DESC`; ascending when neither is written.
+    fn parse_direction(&mut self) -> Order {
+        if self.peek_keyword("DESC") {
+            self.advance();
+            return Order::Desc;
+        }
+        if self.peek_keyword("ASC") {
+            self.advance();
+        }
+        Order::Asc
+    }
+
+    /// The RFC 3339 instant of an `AS OF '<ts>'` clause.
+    fn parse_timestamp(&mut self) -> Result<DateTime<Utc>, ParseError> {
+        let pos = self.peek_pos();
+        let raw = self.expect_string()?;
+        Ok(DateTime::parse_from_rfc3339(&raw)
+            .map_err(|e| ParseError {
+                message: format!("invalid AS OF timestamp '{raw}': {e}"),
                 position: pos,
-            });
-        }
-
-        if count && !returns.is_empty() {
-            let pos = self.peek_pos();
-            return Err(ParseError {
-                message: "RETURN is not compatible with COUNT".to_string(),
-                position: pos,
-            });
-        }
-
-        Ok(EklAst {
-            entity,
-            predicates,
-            from,
-            semantic,
-            via,
-            depth,
-            returns,
-            order_by,
-            limit,
-            as_of,
-            count,
-            group_by,
-        })
+            })?
+            .with_timezone(&Utc))
     }
 
     fn parse_entity(&mut self) -> Result<Entity, ParseError> {
@@ -532,6 +495,40 @@ fn describe(t: Option<&Token>) -> String {
 pub fn ekl_parse(input: &str) -> Result<EklAst, ParseError> {
     let tokens = Lexer::new(input).tokenize()?;
     Parser::new(tokens).parse_query()
+}
+
+/// The message for the first combination of clauses that cannot be used together, if any.
+fn incompatible_clauses(ast: &EklAst) -> Option<String> {
+    if ast.via.is_some() && ast.from.is_none() {
+        return Some("VIA requires a FROM anchor".to_string());
+    }
+    if ast.semantic.is_some()
+        && let Some(what) = semantic_conflict(ast)
+    {
+        return Some(format!("SEMANTIC is not compatible with {what}"));
+    }
+    if ast.group_by.is_some() && !ast.count {
+        return Some("GROUP BY requires COUNT".to_string());
+    }
+    if ast.count && !ast.returns.is_empty() {
+        return Some("RETURN is not compatible with COUNT".to_string());
+    }
+    None
+}
+
+/// What a `SEMANTIC` query also carries that it cannot.
+fn semantic_conflict(ast: &EklAst) -> Option<&'static str> {
+    if ast.from.is_some() {
+        Some("FROM (SEMANTIC is a search anchor, FROM is a graph anchor)")
+    } else if ast.as_of.is_some() {
+        Some("AS OF (retrieval has no point-in-time form)")
+    } else if ast.count {
+        Some("COUNT (rank a set, not a scalar — use a plain FIND to count)")
+    } else if ast.entity != Entity::Object {
+        Some("FIND Relationship (SEMANTIC retrieves objects)")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

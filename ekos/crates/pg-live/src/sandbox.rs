@@ -44,7 +44,7 @@ impl PgSandbox {
         // Only what cannot break out of an identifier.
         let suffix: String = run_id
             .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
+            .filter(char::is_ascii_alphanumeric)
             .take(24)
             .collect();
         Ok(Self {

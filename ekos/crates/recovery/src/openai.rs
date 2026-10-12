@@ -297,10 +297,16 @@ fn apply_stream_line(acc: &mut StreamAccumulator, line: &str, on_chunk: &mut dyn
         on_chunk(text.to_string());
     }
     if let Some(usage) = event.get("usage") {
-        if let Some(t) = usage.get("prompt_tokens").and_then(|v| v.as_u64()) {
+        if let Some(t) = usage
+            .get("prompt_tokens")
+            .and_then(serde_json::Value::as_u64)
+        {
             acc.input_tokens = t as u32;
         }
-        if let Some(t) = usage.get("completion_tokens").and_then(|v| v.as_u64()) {
+        if let Some(t) = usage
+            .get("completion_tokens")
+            .and_then(serde_json::Value::as_u64)
+        {
             acc.output_tokens = t as u32;
         }
     }

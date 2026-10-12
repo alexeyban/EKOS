@@ -239,7 +239,7 @@ fn apply_stream_line(acc: &mut StreamAccumulator, line: &str, on_chunk: &mut dyn
                 if let Some(tokens) = message
                     .get("usage")
                     .and_then(|u| u.get("input_tokens"))
-                    .and_then(|v| v.as_u64())
+                    .and_then(serde_json::Value::as_u64)
                 {
                     acc.input_tokens = tokens as u32;
                 }
@@ -259,7 +259,7 @@ fn apply_stream_line(acc: &mut StreamAccumulator, line: &str, on_chunk: &mut dyn
             if let Some(tokens) = event
                 .get("usage")
                 .and_then(|u| u.get("output_tokens"))
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
             {
                 acc.output_tokens = tokens as u32;
             }

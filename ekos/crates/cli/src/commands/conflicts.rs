@@ -43,7 +43,7 @@ pub fn record_migrate(
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
-    let mut v: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+    let mut v: Vec<String> = ids.iter().map(std::string::ToString::to_string).collect();
     v.sort();
     if v.is_empty() {
         map.remove(table);
@@ -117,7 +117,10 @@ pub fn commit_step(
     ledger: &dyn KnowledgeStore,
     compiled: &[KirId],
 ) -> Result<ConflictStats> {
-    let mut ids: BTreeSet<String> = compiled.iter().map(|i| i.to_string()).collect();
+    let mut ids: BTreeSet<String> = compiled
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     let mut written = 0usize;
     if config.semantics.enabled {
         let enums: Vec<KirObject> = super::semantics::items_in(config, cwd, ledger)?

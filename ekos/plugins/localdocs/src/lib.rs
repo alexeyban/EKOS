@@ -182,6 +182,141 @@ impl LocalDocsObserver {
                 .any(|e| e.eq_ignore_ascii_case(ext))
         })
     }
+
+    /// The sanitized text recognised in a document's images, capped, and how many images gave
+    /// any. Adds what sanitizing removed to `sanitized_count`.
+    fn ocr_text(
+        &self,
+        images: &[EmbeddedImage],
+        abs_path: &std::path::Path,
+        sanitized_count: &mut usize,
+    ) -> (String, usize) {
+        let mut ocr_text = String::new();
+        let mut ocr_image_count = 0usize;
+        for image in images {
+            match self.ocr.recognize(image) {
+                Ok(text) if !text.trim().is_empty() => {
+                    let clean = sanitize_text(text.trim());
+                    *sanitized_count += clean.removed;
+                    if !ocr_text.is_empty() {
+                        ocr_text.push('\n');
+                    }
+                    ocr_text.push_str(&clean.text);
+                    ocr_image_count += 1;
+                }
+                Ok(_) => {}
+                Err(OcrError::Unavailable(msg)) => {
+                    tracing::warn!(
+                        "localdocs observer: OCR unavailable for {}: {msg}",
+                        abs_path.display()
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "localdocs observer: OCR failed for {}: {err}",
+                        abs_path.display()
+                    );
+                }
+            }
+        }
+        (
+            ocr_text.chars().take(OCR_TEXT_MAX_CHARS).collect(),
+            ocr_image_count,
+        )
+    }
+}
+
+/// Whether a walked entry is a directory named by one of the scan's ignore patterns.
+fn is_ignored_dir(entry: &walkdir::DirEntry, ctx: &ScanContext) -> bool {
+    entry.file_type().is_dir()
+        && entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| ctx.ignore_patterns.iter().any(|p| name == p.as_str()))
+}
+
+/// `abs_path` relative to `root`, with forward slashes; `None` when it is not under `root`.
+fn relative_path(root: &std::path::Path, abs_path: &std::path::Path) -> Option<String> {
+    let rel = abs_path.strip_prefix(root).ok()?;
+    // Same real bug `plugins/file` had (RFC 0088's own live verification found
+    // it there first): a real, valid `[observe] paths` entry can be a single
+    // bare file, not a directory (this project's own config: `paths = [...,
+    // "README.md", "CHANGELOG.md"]`) — `WalkDir::new(root)` then yields exactly
+    // one entry equal to `root` itself, and stripping it from itself leaves an
+    // empty relative path. Falls back to the file's own name so a real README
+    // observed this way is never silently nameless.
+    if rel.as_os_str().is_empty() {
+        return Some(
+            abs_path
+                .file_name()
+                .map(|n| n.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default(),
+        );
+    }
+    Some(rel.to_string_lossy().replace('\\', "/"))
+}
+
+/// A document's tables as JSON, capped and sanitized. Adds what sanitizing removed to
+/// `sanitized_count`.
+fn tables_json(tables: &[ExtractedTable], sanitized_count: &mut usize) -> Vec<serde_json::Value> {
+    tables
+        .iter()
+        .take(TABLES_MAX)
+        .map(|t| {
+            let rows: Vec<Vec<String>> = t
+                .rows
+                .iter()
+                .take(TABLE_ROWS_MAX)
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| {
+                            let clean = sanitize_text(cell);
+                            *sanitized_count += clean.removed;
+                            clean.text
+                        })
+                        .collect()
+                })
+                .collect();
+            serde_json::json!({ "page": t.page, "rows": rows })
+        })
+        .collect()
+}
+
+/// A document's sections as JSON, capped and sanitized.
+fn sections_json(
+    sections: &[DocumentSection],
+    sanitized_count: &mut usize,
+) -> Vec<serde_json::Value> {
+    sections
+        .iter()
+        .take(SECTIONS_MAX)
+        .map(|s| section_json(s, sanitized_count))
+        .collect()
+}
+
+fn section_json(s: &DocumentSection, sanitized_count: &mut usize) -> serde_json::Value {
+    let clean = sanitize_text(&s.text);
+    *sanitized_count += clean.removed;
+    let text: String = clean.text.chars().take(SECTION_TEXT_MAX_CHARS).collect();
+    let mut section = serde_json::json!({ "index": s.index, "page": s.page, "text": text });
+    // RFC 0144: structural fields only when present, so non-Markdown
+    // artifacts stay byte-identical to before.
+    if let Some(heading) = &s.heading {
+        let clean_heading = sanitize_text(heading);
+        *sanitized_count += clean_heading.removed;
+        let path: Vec<String> = s
+            .heading_path
+            .iter()
+            .map(|h| sanitize_text(h).text)
+            .collect();
+        section["heading"] = serde_json::json!(clean_heading.text);
+        section["heading_path"] = serde_json::json!(path);
+    }
+    if let (Some(start), Some(end)) = (s.line_start, s.line_end) {
+        section["line_start"] = serde_json::json!(start);
+        section["line_end"] = serde_json::json!(end);
+    }
+    section
 }
 
 #[async_trait]
@@ -195,14 +330,10 @@ impl Observer for LocalDocsObserver {
         let target = root.display().to_string();
         let mut pkg = ObservationPackage::new("localdocs", &target);
 
-        for entry in WalkDir::new(root).into_iter().filter_entry(|e| {
-            if e.file_type().is_dir()
-                && let Some(name) = e.file_name().to_str()
-            {
-                return !ctx.ignore_patterns.iter().any(|p| name == p.as_str());
-            }
-            true
-        }) {
+        for entry in WalkDir::new(root)
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, ctx))
+        {
             let entry = match entry {
                 Ok(e) => e,
                 Err(err) => {
@@ -217,26 +348,14 @@ impl Observer for LocalDocsObserver {
             }
 
             let abs_path = entry.path();
-            let rel_path = match abs_path.strip_prefix(root) {
-                // Same real bug `plugins/file` had (RFC 0088's own live verification found
-                // it there first): a real, valid `[observe] paths` entry can be a single
-                // bare file, not a directory (this project's own config: `paths = [...,
-                // "README.md", "CHANGELOG.md"]`) — `WalkDir::new(root)` then yields exactly
-                // one entry equal to `root` itself, and stripping it from itself leaves an
-                // empty relative path. Falls back to the file's own name so a real README
-                // observed this way is never silently nameless.
-                Ok(r) if r.as_os_str().is_empty() => abs_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().replace('\\', "/"))
-                    .unwrap_or_default(),
-                Ok(r) => r.to_string_lossy().replace('\\', "/"),
-                Err(_) => continue,
+            let Some(rel_path) = relative_path(root, abs_path) else {
+                continue;
             };
             if ctx.is_ignored(&rel_path) {
                 continue;
             }
 
-            let Some(ext) = abs_path.extension().and_then(|e| e.to_str()) else {
+            let Some(ext) = abs_path.extension().and_then(std::ffi::OsStr::to_str) else {
                 continue;
             };
             let Some(parser) = self.parser_for(ext) else {
@@ -283,89 +402,11 @@ impl Observer for LocalDocsObserver {
             sanitized_count += text_clean.removed;
             let excerpt: String = text_clean.text.chars().take(EXCERPT_MAX_CHARS).collect();
 
-            let mut ocr_text = String::new();
-            let mut ocr_image_count = 0usize;
-            for image in &parsed.images {
-                match self.ocr.recognize(image) {
-                    Ok(text) if !text.trim().is_empty() => {
-                        let clean = sanitize_text(text.trim());
-                        sanitized_count += clean.removed;
-                        if !ocr_text.is_empty() {
-                            ocr_text.push('\n');
-                        }
-                        ocr_text.push_str(&clean.text);
-                        ocr_image_count += 1;
-                    }
-                    Ok(_) => {}
-                    Err(OcrError::Unavailable(msg)) => {
-                        tracing::warn!(
-                            "localdocs observer: OCR unavailable for {}: {msg}",
-                            abs_path.display()
-                        );
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            "localdocs observer: OCR failed for {}: {err}",
-                            abs_path.display()
-                        );
-                    }
-                }
-            }
-            let ocr_text: String = ocr_text.chars().take(OCR_TEXT_MAX_CHARS).collect();
+            let (ocr_text, ocr_image_count) =
+                self.ocr_text(&parsed.images, abs_path, &mut sanitized_count);
 
-            let tables_json: Vec<serde_json::Value> = parsed
-                .tables
-                .iter()
-                .take(TABLES_MAX)
-                .map(|t| {
-                    let rows: Vec<Vec<String>> = t
-                        .rows
-                        .iter()
-                        .take(TABLE_ROWS_MAX)
-                        .map(|row| {
-                            row.iter()
-                                .map(|cell| {
-                                    let clean = sanitize_text(cell);
-                                    sanitized_count += clean.removed;
-                                    clean.text
-                                })
-                                .collect()
-                        })
-                        .collect();
-                    serde_json::json!({ "page": t.page, "rows": rows })
-                })
-                .collect();
-
-            let sections_json: Vec<serde_json::Value> = parsed
-                .sections
-                .iter()
-                .take(SECTIONS_MAX)
-                .map(|s| {
-                    let clean = sanitize_text(&s.text);
-                    sanitized_count += clean.removed;
-                    let text: String = clean.text.chars().take(SECTION_TEXT_MAX_CHARS).collect();
-                    let mut section =
-                        serde_json::json!({ "index": s.index, "page": s.page, "text": text });
-                    // RFC 0144: structural fields only when present, so non-Markdown
-                    // artifacts stay byte-identical to before.
-                    if let Some(heading) = &s.heading {
-                        let clean_heading = sanitize_text(heading);
-                        sanitized_count += clean_heading.removed;
-                        let path: Vec<String> = s
-                            .heading_path
-                            .iter()
-                            .map(|h| sanitize_text(h).text)
-                            .collect();
-                        section["heading"] = serde_json::json!(clean_heading.text);
-                        section["heading_path"] = serde_json::json!(path);
-                    }
-                    if let (Some(start), Some(end)) = (s.line_start, s.line_end) {
-                        section["line_start"] = serde_json::json!(start);
-                        section["line_end"] = serde_json::json!(end);
-                    }
-                    section
-                })
-                .collect();
+            let tables_json = tables_json(&parsed.tables, &mut sanitized_count);
+            let sections_json = sections_json(&parsed.sections, &mut sanitized_count);
 
             if sanitized_count > 0 {
                 tracing::warn!(

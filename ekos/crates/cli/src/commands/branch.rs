@@ -53,7 +53,7 @@ pub fn list(config: &EkosConfig, cwd: &Path) -> Result<()> {
             for entry in std::fs::read_dir(&branches)? {
                 let path = entry?.path();
                 if path.is_dir()
-                    && let Some(name) = path.file_name().and_then(|s| s.to_str())
+                    && let Some(name) = path.file_name().and_then(std::ffi::OsStr::to_str)
                 {
                     println!("{name}");
                 }
@@ -64,10 +64,10 @@ pub fn list(config: &EkosConfig, cwd: &Path) -> Result<()> {
     for entry in std::fs::read_dir(&ledger_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("db") {
+        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("db") {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        let Some(stem) = path.file_stem().and_then(std::ffi::OsStr::to_str) else {
             continue;
         };
         if stem == "ledger" {

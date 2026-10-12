@@ -485,7 +485,9 @@ fn select_to_graph(select: &Select, origin: TransformOrigin) -> TransformGraph {
     }
 
     let group_by_exprs: Vec<String> = match &select.group_by {
-        GroupByExpr::Expressions(exprs, _) => exprs.iter().map(|e| e.to_string()).collect(),
+        GroupByExpr::Expressions(exprs, _) => {
+            exprs.iter().map(std::string::ToString::to_string).collect()
+        }
         GroupByExpr::All(_) => vec!["ALL".to_string()],
     };
     let aggs = extract_aggregates(&select.projection);

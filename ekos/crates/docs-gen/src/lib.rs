@@ -358,6 +358,90 @@ pub fn render_object_page(
     render_markdown_object_page(&model)
 }
 
+fn md_relationships(model: &ObjectPageModel, out: &mut String) {
+    out.push_str("## Relationships\n\n");
+    if model.relationship_groups.is_empty() {
+        out.push_str("_No compiled relationships touch this object._\n\n");
+    } else {
+        for (kind, rows) in &model.relationship_groups {
+            out.push_str(&format!("### {kind}\n\n"));
+            for row in rows {
+                let arrow = if row.outgoing { "→" } else { "←" };
+                let direction = match &row.other_name {
+                    Some(name) => format!("{arrow} {name} (`{}`)", row.other_id),
+                    None => format!("{arrow} `{}`", row.other_id),
+                };
+                out.push_str(&format!("- {direction}"));
+                match &row.evidence {
+                    RowEvidence::Resolved(fragment) => {
+                        out.push_str(&format!(" — evidence: {fragment}"))
+                    }
+                    RowEvidence::Unavailable => out.push_str(" — evidence unavailable"),
+                    RowEvidence::None => {}
+                }
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+    }
+}
+
+fn md_evidence(model: &ObjectPageModel, out: &mut String) {
+    out.push_str("## Evidence\n\n");
+    if model.evidence.is_empty() {
+        out.push_str("_No evidence cited._\n");
+    } else {
+        for row in &model.evidence {
+            match &row.resolved {
+                Some((fragment, confidence)) => out.push_str(&format!(
+                    "- `{}` — {fragment} (confidence: {confidence:.2})\n",
+                    row.id
+                )),
+                None => out.push_str(&format!("- `{}` — evidence unavailable\n", row.id)),
+            }
+        }
+    }
+}
+
+fn md_ai_overview(model: &ObjectPageModel, out: &mut String) {
+    // RFC 0088: only rendered when the compile-time `describe_objects` step actually reached
+    // this object — omitted entirely otherwise, not shown empty, matching this whole codebase's
+    // "absence over a fabricated placeholder" convention for every opt-in LLM section.
+    if model.ai_overview.is_some() || model.ai_usage.is_some() {
+        out.push_str("## AI-Assisted Overview\n\n");
+        out.push_str(
+            "_LLM-generated, evidence-grounded (RFC 0088) — describes what the compiled \
+             structure/real source shows, not a human-written claim. Never a substitute for \
+             `## Definition` above; read alongside it, not instead of it._\n\n",
+        );
+        if let Some(overview) = &model.ai_overview {
+            out.push_str(overview.trim());
+            out.push_str("\n\n");
+        }
+        if let Some(usage) = &model.ai_usage {
+            out.push_str("**Usage:** ");
+            out.push_str(usage.trim());
+            out.push_str("\n\n");
+        }
+    }
+}
+
+fn md_prose(model: &ObjectPageModel, out: &mut String) {
+    if let Some(prose) = &model.prose {
+        out.push_str("## Overview\n\n");
+        out.push_str(prose.text.trim());
+        out.push_str("\n\n");
+        if !prose.cited_evidence.is_empty() {
+            let ids: Vec<String> = prose
+                .cited_evidence
+                .iter()
+                .map(|id| format!("`{id}`"))
+                .collect();
+            out.push_str(&format!("_Cited evidence: {}_\n\n", ids.join(", ")));
+        }
+    }
+}
+
 /// Render `model` as a Markdown page.
 pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
     let mut out = String::new();
@@ -393,19 +477,7 @@ pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
         _ => {}
     }
 
-    if let Some(prose) = &model.prose {
-        out.push_str("## Overview\n\n");
-        out.push_str(prose.text.trim());
-        out.push_str("\n\n");
-        if !prose.cited_evidence.is_empty() {
-            let ids: Vec<String> = prose
-                .cited_evidence
-                .iter()
-                .map(|id| format!("`{id}`"))
-                .collect();
-            out.push_str(&format!("_Cited evidence: {}_\n\n", ids.join(", ")));
-        }
-    }
+    md_prose(model, &mut out);
 
     out.push_str("## Properties\n\n");
     if model.properties.is_empty() {
@@ -418,52 +490,9 @@ pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
         out.push('\n');
     }
 
-    // RFC 0088: only rendered when the compile-time `describe_objects` step actually reached
-    // this object — omitted entirely otherwise, not shown empty, matching this whole codebase's
-    // "absence over a fabricated placeholder" convention for every opt-in LLM section.
-    if model.ai_overview.is_some() || model.ai_usage.is_some() {
-        out.push_str("## AI-Assisted Overview\n\n");
-        out.push_str(
-            "_LLM-generated, evidence-grounded (RFC 0088) — describes what the compiled \
-             structure/real source shows, not a human-written claim. Never a substitute for \
-             `## Definition` above; read alongside it, not instead of it._\n\n",
-        );
-        if let Some(overview) = &model.ai_overview {
-            out.push_str(overview.trim());
-            out.push_str("\n\n");
-        }
-        if let Some(usage) = &model.ai_usage {
-            out.push_str("**Usage:** ");
-            out.push_str(usage.trim());
-            out.push_str("\n\n");
-        }
-    }
+    md_ai_overview(model, &mut out);
 
-    out.push_str("## Relationships\n\n");
-    if model.relationship_groups.is_empty() {
-        out.push_str("_No compiled relationships touch this object._\n\n");
-    } else {
-        for (kind, rows) in &model.relationship_groups {
-            out.push_str(&format!("### {kind}\n\n"));
-            for row in rows {
-                let arrow = if row.outgoing { "→" } else { "←" };
-                let direction = match &row.other_name {
-                    Some(name) => format!("{arrow} {name} (`{}`)", row.other_id),
-                    None => format!("{arrow} `{}`", row.other_id),
-                };
-                out.push_str(&format!("- {direction}"));
-                match &row.evidence {
-                    RowEvidence::Resolved(fragment) => {
-                        out.push_str(&format!(" — evidence: {fragment}"))
-                    }
-                    RowEvidence::Unavailable => out.push_str(" — evidence unavailable"),
-                    RowEvidence::None => {}
-                }
-                out.push('\n');
-            }
-            out.push('\n');
-        }
-    }
+    md_relationships(model, &mut out);
 
     out.push_str("## Diagram\n\n");
     match &model.diagram_markdown {
@@ -474,24 +503,103 @@ pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
         None => out.push_str("_No relationships to diagram._\n\n"),
     }
 
-    out.push_str("## Evidence\n\n");
-    if model.evidence.is_empty() {
-        out.push_str("_No evidence cited._\n");
-    } else {
-        for row in &model.evidence {
-            match &row.resolved {
-                Some((fragment, confidence)) => out.push_str(&format!(
-                    "- `{}` — {fragment} (confidence: {confidence:.2})\n",
-                    row.id
-                )),
-                None => out.push_str(&format!("- `{}` — evidence unavailable\n", row.id)),
-            }
-        }
-    }
+    md_evidence(model, &mut out);
 
     RenderedPage {
         file_name: page_file_name(&model.kind, &model.name, "md"),
         content: out,
+    }
+}
+
+fn html_relationships(model: &ObjectPageModel, body: &mut String) {
+    body.push_str("<h2>Relationships</h2>\n");
+    if model.relationship_groups.is_empty() {
+        body.push_str("<p class=\"empty\">No compiled relationships touch this object.</p>\n");
+    } else {
+        for (kind, rows) in &model.relationship_groups {
+            body.push_str(&format!("<h3>{}</h3>\n<ul>\n", html_escape(kind)));
+            for row in rows {
+                let arrow = if row.outgoing { "&rarr;" } else { "&larr;" };
+                let label = match &row.other_name {
+                    Some(name) => format!(
+                        "{arrow} {} <code>{}</code>",
+                        html_escape(name),
+                        row.other_id
+                    ),
+                    None => format!("{arrow} <code>{}</code>", row.other_id),
+                };
+                let evidence_html = match &row.evidence {
+                    RowEvidence::Resolved(fragment) => {
+                        format!(" — evidence: {}", html_escape(fragment))
+                    }
+                    RowEvidence::Unavailable => " — evidence unavailable".to_string(),
+                    RowEvidence::None => String::new(),
+                };
+                body.push_str(&format!("<li>{label}{evidence_html}</li>\n"));
+            }
+            body.push_str("</ul>\n");
+        }
+    }
+}
+
+fn html_evidence(model: &ObjectPageModel, body: &mut String) {
+    body.push_str("<h2>Evidence</h2>\n");
+    if model.evidence.is_empty() {
+        body.push_str("<p class=\"empty\">No evidence cited.</p>\n");
+    } else {
+        body.push_str("<ul>\n");
+        for row in &model.evidence {
+            match &row.resolved {
+                Some((fragment, confidence)) => body.push_str(&format!(
+                    "<li><code>{}</code> — {} (confidence: {confidence:.2})</li>\n",
+                    row.id,
+                    html_escape(fragment)
+                )),
+                None => body.push_str(&format!(
+                    "<li><code>{}</code> — evidence unavailable</li>\n",
+                    row.id
+                )),
+            }
+        }
+        body.push_str("</ul>\n");
+    }
+}
+
+fn html_ai_overview(model: &ObjectPageModel, body: &mut String) {
+    if model.ai_overview.is_some() || model.ai_usage.is_some() {
+        body.push_str("<h2>AI-Assisted Overview</h2>\n");
+        body.push_str(
+            "<p class=\"empty\">LLM-generated, evidence-grounded (RFC 0088) &mdash; describes \
+             what the compiled structure/real source shows, not a human-written claim. Never a \
+             substitute for Definition above; read alongside it, not instead of it.</p>\n",
+        );
+        if let Some(overview) = &model.ai_overview {
+            body.push_str(&format!("<p>{}</p>\n", html_escape(overview.trim())));
+        }
+        if let Some(usage) = &model.ai_usage {
+            body.push_str(&format!(
+                "<p><strong>Usage:</strong> {}</p>\n",
+                html_escape(usage.trim())
+            ));
+        }
+    }
+}
+
+fn html_prose(model: &ObjectPageModel, body: &mut String) {
+    if let Some(prose) = &model.prose {
+        body.push_str("<h2>Overview</h2>\n");
+        body.push_str(&format!("<p>{}</p>\n", html_escape(prose.text.trim())));
+        if !prose.cited_evidence.is_empty() {
+            let ids: Vec<String> = prose
+                .cited_evidence
+                .iter()
+                .map(|id| format!("<code>{id}</code>"))
+                .collect();
+            body.push_str(&format!(
+                "<p class=\"empty\">Cited evidence: {}</p>\n",
+                ids.join(", ")
+            ));
+        }
     }
 }
 
@@ -544,21 +652,7 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
         _ => {}
     }
 
-    if let Some(prose) = &model.prose {
-        body.push_str("<h2>Overview</h2>\n");
-        body.push_str(&format!("<p>{}</p>\n", html_escape(prose.text.trim())));
-        if !prose.cited_evidence.is_empty() {
-            let ids: Vec<String> = prose
-                .cited_evidence
-                .iter()
-                .map(|id| format!("<code>{id}</code>"))
-                .collect();
-            body.push_str(&format!(
-                "<p class=\"empty\">Cited evidence: {}</p>\n",
-                ids.join(", ")
-            ));
-        }
-    }
+    html_prose(model, &mut body);
 
     body.push_str("<h2>Properties</h2>\n");
     if model.properties.is_empty() {
@@ -575,52 +669,9 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
         body.push_str("</tbody>\n</table>\n");
     }
 
-    if model.ai_overview.is_some() || model.ai_usage.is_some() {
-        body.push_str("<h2>AI-Assisted Overview</h2>\n");
-        body.push_str(
-            "<p class=\"empty\">LLM-generated, evidence-grounded (RFC 0088) &mdash; describes \
-             what the compiled structure/real source shows, not a human-written claim. Never a \
-             substitute for Definition above; read alongside it, not instead of it.</p>\n",
-        );
-        if let Some(overview) = &model.ai_overview {
-            body.push_str(&format!("<p>{}</p>\n", html_escape(overview.trim())));
-        }
-        if let Some(usage) = &model.ai_usage {
-            body.push_str(&format!(
-                "<p><strong>Usage:</strong> {}</p>\n",
-                html_escape(usage.trim())
-            ));
-        }
-    }
+    html_ai_overview(model, &mut body);
 
-    body.push_str("<h2>Relationships</h2>\n");
-    if model.relationship_groups.is_empty() {
-        body.push_str("<p class=\"empty\">No compiled relationships touch this object.</p>\n");
-    } else {
-        for (kind, rows) in &model.relationship_groups {
-            body.push_str(&format!("<h3>{}</h3>\n<ul>\n", html_escape(kind)));
-            for row in rows {
-                let arrow = if row.outgoing { "&rarr;" } else { "&larr;" };
-                let label = match &row.other_name {
-                    Some(name) => format!(
-                        "{arrow} {} <code>{}</code>",
-                        html_escape(name),
-                        row.other_id
-                    ),
-                    None => format!("{arrow} <code>{}</code>", row.other_id),
-                };
-                let evidence_html = match &row.evidence {
-                    RowEvidence::Resolved(fragment) => {
-                        format!(" — evidence: {}", html_escape(fragment))
-                    }
-                    RowEvidence::Unavailable => " — evidence unavailable".to_string(),
-                    RowEvidence::None => String::new(),
-                };
-                body.push_str(&format!("<li>{label}{evidence_html}</li>\n"));
-            }
-            body.push_str("</ul>\n");
-        }
-    }
+    html_relationships(model, &mut body);
 
     body.push_str("<h2>Diagram</h2>\n");
     match &model.diagram_markdown {
@@ -632,26 +683,7 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
         None => body.push_str("<p class=\"empty\">No relationships to diagram.</p>\n"),
     }
 
-    body.push_str("<h2>Evidence</h2>\n");
-    if model.evidence.is_empty() {
-        body.push_str("<p class=\"empty\">No evidence cited.</p>\n");
-    } else {
-        body.push_str("<ul>\n");
-        for row in &model.evidence {
-            match &row.resolved {
-                Some((fragment, confidence)) => body.push_str(&format!(
-                    "<li><code>{}</code> — {} (confidence: {confidence:.2})</li>\n",
-                    row.id,
-                    html_escape(fragment)
-                )),
-                None => body.push_str(&format!(
-                    "<li><code>{}</code> — evidence unavailable</li>\n",
-                    row.id
-                )),
-            }
-        }
-        body.push_str("</ul>\n");
-    }
+    html_evidence(model, &mut body);
 
     RenderedPage {
         file_name: page_file_name(&model.kind, &model.name, "html"),
@@ -1305,6 +1337,43 @@ fn layer_membership_for_edges(
     extended
 }
 
+/// Whether a relationship kind is a real dependency or data flow between tiers.
+fn is_cross_tier_kind(kind: &RelationshipKind) -> bool {
+    matches!(kind, RelationshipKind::DependsOn) || is_reads_from(kind) || is_writes_to(kind)
+}
+
+/// The decomposition diagram's nodes, in a fixed order, each labelled with what it holds.
+fn decomposition_nodes(
+    counts: &HashMap<&str, usize>,
+    db_technology_bucket: &HashMap<KirId, &'static str>,
+) -> Vec<(String, String)> {
+    let labels: [(&str, &str, &str); 4] = [
+        ("layer_backend", "Backend", "file"),
+        ("layer_frontend", "Frontend", "file"),
+        ("layer_sql", "SQL Database", "table"),
+        ("layer_clickhouse", "ClickHouse Database", "table"),
+    ];
+    // RFC 0086 (Phase 6): a real database-adapter Technology can name a real SQL/ClickHouse
+    // dependency with zero real compiled `Table` rows behind it (e.g. Ecto configured, no schema
+    // recovered yet) — the node must still exist so the edge to it isn't silently dropped
+    // (`render_graph_svg` skips edges referencing an id absent from `nodes`), with an honest label
+    // rather than a fabricated table count.
+    let db_config_only_buckets: HashSet<&str> = db_technology_bucket.values().copied().collect();
+    let mut nodes = Vec::new();
+    for (key, label, unit) in labels {
+        if let Some(&count) = counts.get(key) {
+            let plural = if count == 1 { "" } else { "s" };
+            nodes.push((key.to_string(), format!("{label} ({count} {unit}{plural})")));
+        } else if db_config_only_buckets.contains(key) {
+            nodes.push((
+                key.to_string(),
+                format!("{label} (config only, no {unit}s compiled)"),
+            ));
+        }
+    }
+    nodes
+}
+
 /// Builds the `## System Decomposition` graph (RFC 0068's C4 Container-level intent for a
 /// non-Rust project, RFC 0083 Phase 3): one node per real, non-empty layer — Backend, Frontend,
 /// SQL Database, ClickHouse Database (the two real `Table` `source_system` (RFC 0056) values kept
@@ -1378,45 +1447,14 @@ fn system_decomposition_graph(
         return None;
     }
 
-    let labels: [(&str, &str, &str); 4] = [
-        ("layer_backend", "Backend", "file"),
-        ("layer_frontend", "Frontend", "file"),
-        ("layer_sql", "SQL Database", "table"),
-        ("layer_clickhouse", "ClickHouse Database", "table"),
-    ];
-    // RFC 0086 (Phase 6): a real database-adapter Technology can name a real SQL/ClickHouse
-    // dependency with zero real compiled `Table` rows behind it (e.g. Ecto configured, no schema
-    // recovered yet) — the node must still exist so the edge to it isn't silently dropped
-    // (`render_graph_svg` skips edges referencing an id absent from `nodes`), with an honest label
-    // rather than a fabricated table count.
-    let db_config_only_buckets: HashSet<&str> = db_technology_bucket.values().copied().collect();
-    let mut nodes = Vec::new();
-    for (key, label, unit) in labels {
-        if let Some(&count) = counts.get(key) {
-            let plural = if count == 1 { "" } else { "s" };
-            nodes.push((key.to_string(), format!("{label} ({count} {unit}{plural})")));
-        } else if db_config_only_buckets.contains(key) {
-            nodes.push((
-                key.to_string(),
-                format!("{label} (config only, no {unit}s compiled)"),
-            ));
-        }
-    }
+    let nodes = decomposition_nodes(&counts, &db_technology_bucket);
 
-    let mut edge_pairs: HashSet<(&str, &str)> = HashSet::new();
-    for rel in relationships {
-        let is_real_cross_tier_edge = matches!(rel.kind, RelationshipKind::DependsOn)
-            || is_reads_from(&rel.kind)
-            || is_writes_to(&rel.kind);
-        if !is_real_cross_tier_edge {
-            continue;
-        }
-        if let (Some(from_key), Some(to_key)) = (node_key(&rel.from), node_key(&rel.to))
-            && from_key != to_key
-        {
-            edge_pairs.insert((from_key, to_key));
-        }
-    }
+    let edge_pairs: HashSet<(&str, &str)> = relationships
+        .iter()
+        .filter(|rel| is_cross_tier_kind(&rel.kind))
+        .filter_map(|rel| Some((node_key(&rel.from)?, node_key(&rel.to)?)))
+        .filter(|(from_key, to_key)| from_key != to_key)
+        .collect();
     let mut edges: Vec<(String, String)> = edge_pairs
         .into_iter()
         .map(|(a, b)| (a.to_string(), b.to_string()))
@@ -2297,6 +2335,91 @@ fn components_cross_reference(kind: &str) -> Option<&'static str> {
     }
 }
 
+/// One data store's bullet: its edge counts, who uses it, and its columns when compiled.
+fn data_store_entry(
+    store: &KirObject,
+    relationships: &[KirRelationship],
+    kind_of: &HashMap<KirId, &ObjectKind>,
+) -> String {
+    let mut out = String::new();
+    let is_custom = |o: &KirObject, k: &str| matches!(&o.kind, ObjectKind::Custom(c) if c == k);
+    let from_is = |r: &KirRelationship, k: &str| matches!(kind_of.get(&r.from), Some(ObjectKind::Custom(c)) if c == k);
+    let fk_count = relationships
+        .iter()
+        .filter(|r| {
+            matches!(r.kind, RelationshipKind::ForeignKey)
+                && (r.from == store.id || r.to == store.id)
+        })
+        .count();
+    let reads = relationships
+        .iter()
+        .filter(|r| is_reads_from(&r.kind) && r.to == store.id && !from_is(r, "ProcedureStatement"))
+        .count();
+    let writes = relationships
+        .iter()
+        .filter(|r| is_writes_to(&r.kind) && r.to == store.id && !from_is(r, "ProcedureStatement"))
+        .count();
+    // RFC 0163/0169: routines and views that depend on this store, counted once each.
+    let users: HashSet<KirId> = relationships
+        .iter()
+        .filter(|r| {
+            r.kind == RelationshipKind::DependsOn
+                && r.to == store.id
+                && (from_is(r, "Procedure") || from_is(r, "View"))
+        })
+        .map(|r| r.from)
+        .collect();
+    let used_by = if users.is_empty() {
+        String::new()
+    } else {
+        format!(", used by {} routine(s)/view(s)", users.len())
+    };
+    let marker = if is_custom(store, "View") {
+        " (view)"
+    } else {
+        ""
+    };
+    out.push_str(&format!(
+        "- **{}**{marker} — {fk_count} real foreign-key edge(s), read by {reads} \
+         transformation(s), written by {writes} transformation(s){used_by}\n",
+        store.name
+    ));
+    if let Some(columns) = store_columns(store) {
+        out.push_str(&format!("  - Columns: {}\n", columns.join(", ")));
+    }
+    out
+}
+
+/// A store's column names (with types where compiled); `None` when it has none.
+///
+/// RFC 0091: real column names, compiled by either raw SQL DDL parsing
+/// (`sql_analyzer.rs`) or ORM-model recognition (`python_analyzer.rs`) — both write the
+/// same `columns: [{"name", "data_type"}]` shape, so this reads identically regardless
+/// of origin. Omitted entirely (not "no columns compiled") when the property is simply
+/// absent — a store from a source that doesn't extract columns at all is a different,
+/// honest case from one that's real and known to be empty.
+fn store_columns(store: &KirObject) -> Option<Vec<String>> {
+    let columns = store.properties.get("columns").and_then(|v| v.as_array())?;
+    if columns.is_empty() {
+        return None;
+    }
+    let names: Vec<String> = columns
+        .iter()
+        .map(|c| {
+            // A view's declared columns are bare names (RFC 0169).
+            if let Some(bare) = c.as_str() {
+                return bare.to_string();
+            }
+            let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            match c.get("data_type").and_then(|v| v.as_str()) {
+                Some(dt) => format!("{name} ({dt})"),
+                None => name.to_string(),
+            }
+        })
+        .collect();
+    Some(names)
+}
+
 /// Render RFC 0068 §22 Data Architecture: real compiled `Table`/`Dataset` objects (data stores,
 /// with each one's real foreign-key edge count) and real compiled Transformation IR data flows
 /// (RFC 0027, `Custom("FeedsInto")` edges) — link-through to `SequenceDiagrams.md`'s existing
@@ -2323,7 +2446,6 @@ fn render_data_architecture(objects: &[KirObject], relationships: &[KirRelations
     // Who is on the other end of an edge decides what it counts as: a routine statement's
     // `ReadsFrom`/`WritesTo` (RFC 0163) is not a transformation — it is counted under "used by".
     let kind_of: HashMap<KirId, &ObjectKind> = objects.iter().map(|o| (o.id, &o.kind)).collect();
-    let from_is = |r: &KirRelationship, k: &str| matches!(kind_of.get(&r.from), Some(ObjectKind::Custom(c)) if c == k);
 
     out.push_str("### Data Stores\n\n");
     if stores.is_empty() {
@@ -2335,75 +2457,7 @@ fn render_data_architecture(objects: &[KirObject], relationships: &[KirRelations
             stores.len()
         ));
         for store in &stores {
-            let fk_count = relationships
-                .iter()
-                .filter(|r| {
-                    matches!(r.kind, RelationshipKind::ForeignKey)
-                        && (r.from == store.id || r.to == store.id)
-                })
-                .count();
-            let reads = relationships
-                .iter()
-                .filter(|r| {
-                    is_reads_from(&r.kind) && r.to == store.id && !from_is(r, "ProcedureStatement")
-                })
-                .count();
-            let writes = relationships
-                .iter()
-                .filter(|r| {
-                    is_writes_to(&r.kind) && r.to == store.id && !from_is(r, "ProcedureStatement")
-                })
-                .count();
-            // RFC 0163/0169: routines and views that depend on this store, counted once each.
-            let users: HashSet<KirId> = relationships
-                .iter()
-                .filter(|r| {
-                    r.kind == RelationshipKind::DependsOn
-                        && r.to == store.id
-                        && (from_is(r, "Procedure") || from_is(r, "View"))
-                })
-                .map(|r| r.from)
-                .collect();
-            let used_by = if users.is_empty() {
-                String::new()
-            } else {
-                format!(", used by {} routine(s)/view(s)", users.len())
-            };
-            let marker = if is_custom(store, "View") {
-                " (view)"
-            } else {
-                ""
-            };
-            out.push_str(&format!(
-                "- **{}**{marker} — {fk_count} real foreign-key edge(s), read by {reads} \
-                 transformation(s), written by {writes} transformation(s){used_by}\n",
-                store.name
-            ));
-            // RFC 0091: real column names, compiled by either raw SQL DDL parsing
-            // (`sql_analyzer.rs`) or ORM-model recognition (`python_analyzer.rs`) — both write the
-            // same `columns: [{"name", "data_type"}]` shape, so this reads identically regardless
-            // of origin. Omitted entirely (not "no columns compiled") when the property is simply
-            // absent — a store from a source that doesn't extract columns at all is a different,
-            // honest case from one that's real and known to be empty.
-            if let Some(columns) = store.properties.get("columns").and_then(|v| v.as_array())
-                && !columns.is_empty()
-            {
-                let names: Vec<String> = columns
-                    .iter()
-                    .map(|c| {
-                        // A view's declared columns are bare names (RFC 0169).
-                        if let Some(bare) = c.as_str() {
-                            return bare.to_string();
-                        }
-                        let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        match c.get("data_type").and_then(|v| v.as_str()) {
-                            Some(dt) => format!("{name} ({dt})"),
-                            None => name.to_string(),
-                        }
-                    })
-                    .collect();
-                out.push_str(&format!("  - Columns: {}\n", names.join(", ")));
-            }
+            out.push_str(&data_store_entry(store, relationships, &kind_of));
         }
         out.push('\n');
     }

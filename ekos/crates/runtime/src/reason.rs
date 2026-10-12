@@ -400,7 +400,7 @@ impl EvidenceSet {
             if ids.is_empty() {
                 continue;
             }
-            ids.sort_by_key(|id| id.to_string());
+            ids.sort_by_key(std::string::ToString::to_string);
             ids.dedup();
             item.disputed = true;
             item.conflicts = ids;
@@ -491,182 +491,243 @@ fn exec_node(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), RuntimeError> {
     match node {
-        PlanNode::Resolve { mention } => {
-            if let Some(hit) = runtime
-                .retrieve(&crate::RetrievalRequest::lexical(mention.as_str()))?
-                .hits
-                .into_iter()
-                .next()
-            {
-                ctx.bindings.insert(mention.clone(), hit.id);
-                ctx.last_resolved = Some(hit.id);
-            } else {
-                diagnostics.push(Diagnostic::warning(
-                    "RSN002",
-                    format!("could not resolve mention {mention:?} to any object"),
-                ));
-            }
-        }
-
-        PlanNode::Search { query, limit } => {
-            let mut req = crate::RetrievalRequest::lexical(query.as_str());
-            req.limit = *limit;
-            req.per_arm_limit = (*limit).max(req.per_arm_limit);
-            let hits = runtime.retrieve(&req)?;
-            for hit in hits.hits.into_iter().take(*limit) {
-                // RFC 0139 §3.6/§3.7: a hit that matched too little of the query shares vocabulary
-                // with the question without being evidence the thing asked about exists. The
-                // ledger applies the coverage threshold and marks such hits `Bm25Relaxed`;
-                // labelling them in the claim keeps the distinction visible to the model, and
-                // `weak` lets the caller tell an all-weak evidence set from a real one.
-                let weak = hit
-                    .signals
-                    .iter()
-                    .any(|s| s.source == ekos_ledger::SignalSource::Bm25Relaxed);
-                let claim = if weak {
-                    format!("possible search match (partial term overlap): {}", hit.name)
-                } else {
-                    format!("search match: {}", hit.name)
-                };
-                let mut item = entity_item_for_query(
-                    runtime,
-                    hit.id,
-                    claim,
-                    serde_json::Value::String(hit.name),
-                    query,
-                )?;
-                item.weak = weak;
-                items.push(item);
-            }
-        }
-
+        PlanNode::Resolve { mention } => exec_resolve(mention, runtime, ctx, diagnostics),
+        PlanNode::Search { query, limit } => exec_search(query, *limit, runtime, items),
         PlanNode::Fact { entity, attr } => {
-            let Some(id) = ctx.resolve(entity) else {
-                diagnostics.push(Diagnostic::warning(
-                    "RSN003",
-                    "fact step had no entity to read".to_string(),
-                ));
-                return Ok(());
-            };
-            let name = runtime
-                .load_object(&id)?
-                .map(|o| o.name)
-                .unwrap_or_else(|| "?".to_string());
-            if attr == ALL_FACTS {
-                for (k, v) in runtime.facts_of(&id)? {
-                    let mut item =
-                        entity_item(runtime, id, format!("{name}.{k} = {}", render_value(&v)), v)?;
-                    item.attr = Some(k);
-                    items.push(item);
-                }
-            } else if let Some(v) = runtime.fact(&id, attr)? {
-                let mut item = entity_item(
-                    runtime,
-                    id,
-                    format!("{name}.{attr} = {}", render_value(&v)),
-                    v,
-                )?;
-                item.attr = Some(attr.clone());
-                items.push(item);
-            } else {
-                diagnostics.push(Diagnostic::info(
-                    "RSN004",
-                    format!("{name} has no {attr:?} fact"),
-                ));
-            }
+            exec_fact(entity, attr, runtime, ctx, items, diagnostics)
         }
-
         PlanNode::Graph {
             op,
             seed,
             hops,
             supporting,
-        } => {
-            let Some(id) = ctx.resolve(seed) else {
-                diagnostics.push(Diagnostic::warning(
-                    "RSN003",
-                    "graph step had no seed to traverse from".to_string(),
-                ));
-                return Ok(());
-            };
-            let seed_name = runtime
-                .load_object(&id)?
-                .map(|o| o.name)
-                .unwrap_or_else(|| "?".to_string());
-            let label = op_label(*op);
-            let neighbors = runtime.graph_op(*op, &id, *hops)?;
-
-            // RFC 0139 §3.0 — the entity gate.
-            //
-            // A *supporting* neighbourhood is context the planner attached around a search, not
-            // something the reader asked for. When the entity it expands is a hub, that context
-            // stops being informative: in an EKOS workspace the token "ekos" appears in nearly
-            // every question, resolves to the `ekos` object, and its 1-hop neighbourhood is the
-            // whole crate graph. Measured on the RFC 0138 suite, that made **26 completely
-            // different questions receive byte-identical evidence**, and gave adversarial
-            // questions ("what port does the message broker listen on?") a list of real crates to
-            // fabricate from.
-            //
-            // Gating on neighbourhood size rather than on a name-blocklist keeps it
-            // self-justifying: if one expansion would consume most of the evidence budget, it is
-            // describing the corpus, not the question. A *requested* traversal ("what depends on
-            // X") is never gated — there the size is the answer.
-            if *supporting && neighbors.len() > MAX_SUPPORTING_NEIGHBORS {
-                diagnostics.push(Diagnostic::warning(
-                    "RSN007",
-                    format!(
-                        "skipped supporting neighbourhood of {seed_name} — {} neighbours exceeds \
-                         the {MAX_SUPPORTING_NEIGHBORS}-item budget for background context; a hub \
-                         entity's neighbourhood describes the corpus, not this question",
-                        neighbors.len()
-                    ),
-                ));
-                return Ok(());
-            }
-
-            let mut reached: std::collections::HashSet<KirId> =
-                neighbors.iter().map(|o| o.id).collect();
-            reached.insert(id);
-            for obj in neighbors {
-                let item = entity_item_with_excerpt(
-                    runtime,
-                    obj.id,
-                    format!("{} — {label} {seed_name}", obj.name),
-                    serde_json::Value::String(obj.id.0.to_string()),
-                )?;
-                // `weak` stays false here: an ungated supporting neighbourhood is small enough to
-                // be real context, and marking it weak was measured twice to collapse legitimate
-                // answers (`code` correctness 72.7% -> 18.2%). The gate above is the lever instead.
-                items.push(item);
-            }
-
-            // RFC 0177 §3 C — a requested "what depends on module M" also means what depends on
-            // M's contents. An import is recorded per imported path, so `M::self`, `M::redact`
-            // and `M::Config` are separate objects with separate dependents, and the seed alone
-            // answered with whoever happened to import the module by its own name.
-            if !*supporting && matches!(op, StructuralOp::Dependents | StructuralOp::Impact) {
-                for member in module_members(runtime, id, &seed_name)? {
-                    for obj in runtime.graph_op(*op, &member.id, *hops)? {
-                        if !reached.insert(obj.id) {
-                            continue;
-                        }
-                        items.push(entity_item_with_excerpt(
-                            runtime,
-                            obj.id,
-                            format!("{} — {label} {}", obj.name, member.name),
-                            serde_json::Value::String(obj.id.0.to_string()),
-                        )?);
-                    }
-                }
-            }
-        }
-
+        } => exec_graph(
+            GraphStep {
+                op: *op,
+                seed,
+                hops: *hops,
+                supporting: *supporting,
+            },
+            runtime,
+            ctx,
+            items,
+            diagnostics,
+        ),
         PlanNode::Compose { steps } => {
             for step in steps {
                 exec_node(step, runtime, ctx, items, diagnostics)?;
             }
+            Ok(())
         }
     }
+}
+
+fn exec_resolve(
+    mention: &str,
+    runtime: &Runtime,
+    ctx: &mut ExecCtx,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), RuntimeError> {
+    if let Some(hit) = runtime
+        .retrieve(&crate::RetrievalRequest::lexical(mention))?
+        .hits
+        .into_iter()
+        .next()
+    {
+        ctx.bindings.insert(mention.to_string(), hit.id);
+        ctx.last_resolved = Some(hit.id);
+    } else {
+        diagnostics.push(Diagnostic::warning(
+            "RSN002",
+            format!("could not resolve mention {mention:?} to any object"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn exec_search(
+    query: &str,
+    limit: usize,
+    runtime: &Runtime,
+    items: &mut Vec<EvidenceItem>,
+) -> Result<(), RuntimeError> {
+    let mut req = crate::RetrievalRequest::lexical(query);
+    req.limit = limit;
+    req.per_arm_limit = limit.max(req.per_arm_limit);
+    let hits = runtime.retrieve(&req)?;
+    for hit in hits.hits.into_iter().take(limit) {
+        // RFC 0139 §3.6/§3.7: a hit that matched too little of the query shares vocabulary
+        // with the question without being evidence the thing asked about exists. The
+        // ledger applies the coverage threshold and marks such hits `Bm25Relaxed`;
+        // labelling them in the claim keeps the distinction visible to the model, and
+        // `weak` lets the caller tell an all-weak evidence set from a real one.
+        let weak = hit
+            .signals
+            .iter()
+            .any(|s| s.source == ekos_ledger::SignalSource::Bm25Relaxed);
+        let claim = if weak {
+            format!("possible search match (partial term overlap): {}", hit.name)
+        } else {
+            format!("search match: {}", hit.name)
+        };
+        let mut item = entity_item_for_query(
+            runtime,
+            hit.id,
+            claim,
+            serde_json::Value::String(hit.name),
+            query,
+        )?;
+        item.weak = weak;
+        items.push(item);
+    }
+
+    Ok(())
+}
+
+fn exec_fact(
+    entity: &EntityRef,
+    attr: &str,
+    runtime: &Runtime,
+    ctx: &mut ExecCtx,
+    items: &mut Vec<EvidenceItem>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), RuntimeError> {
+    let Some(id) = ctx.resolve(entity) else {
+        diagnostics.push(Diagnostic::warning(
+            "RSN003",
+            "fact step had no entity to read".to_string(),
+        ));
+        return Ok(());
+    };
+    let name = runtime
+        .load_object(&id)?
+        .map(|o| o.name)
+        .unwrap_or_else(|| "?".to_string());
+    if attr == ALL_FACTS {
+        for (k, v) in runtime.facts_of(&id)? {
+            let mut item =
+                entity_item(runtime, id, format!("{name}.{k} = {}", render_value(&v)), v)?;
+            item.attr = Some(k);
+            items.push(item);
+        }
+    } else if let Some(v) = runtime.fact(&id, attr)? {
+        let mut item = entity_item(
+            runtime,
+            id,
+            format!("{name}.{attr} = {}", render_value(&v)),
+            v,
+        )?;
+        item.attr = Some(attr.to_string());
+        items.push(item);
+    } else {
+        diagnostics.push(Diagnostic::info(
+            "RSN004",
+            format!("{name} has no {attr:?} fact"),
+        ));
+    }
+
+    Ok(())
+}
+
+/// A `PlanNode::Graph` step's own fields.
+struct GraphStep<'a> {
+    op: StructuralOp,
+    seed: &'a EntityRef,
+    hops: u32,
+    supporting: bool,
+}
+
+fn exec_graph(
+    step: GraphStep<'_>,
+    runtime: &Runtime,
+    ctx: &mut ExecCtx,
+    items: &mut Vec<EvidenceItem>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), RuntimeError> {
+    let GraphStep {
+        op,
+        seed,
+        hops,
+        supporting,
+    } = step;
+    let Some(id) = ctx.resolve(seed) else {
+        diagnostics.push(Diagnostic::warning(
+            "RSN003",
+            "graph step had no seed to traverse from".to_string(),
+        ));
+        return Ok(());
+    };
+    let seed_name = runtime
+        .load_object(&id)?
+        .map(|o| o.name)
+        .unwrap_or_else(|| "?".to_string());
+    let label = op_label(op);
+    let neighbors = runtime.graph_op(op, &id, hops)?;
+
+    // RFC 0139 §3.0 — the entity gate.
+    //
+    // A *supporting* neighbourhood is context the planner attached around a search, not
+    // something the reader asked for. When the entity it expands is a hub, that context
+    // stops being informative: in an EKOS workspace the token "ekos" appears in nearly
+    // every question, resolves to the `ekos` object, and its 1-hop neighbourhood is the
+    // whole crate graph. Measured on the RFC 0138 suite, that made **26 completely
+    // different questions receive byte-identical evidence**, and gave adversarial
+    // questions ("what port does the message broker listen on?") a list of real crates to
+    // fabricate from.
+    //
+    // Gating on neighbourhood size rather than on a name-blocklist keeps it
+    // self-justifying: if one expansion would consume most of the evidence budget, it is
+    // describing the corpus, not the question. A *requested* traversal ("what depends on
+    // X") is never gated — there the size is the answer.
+    if supporting && neighbors.len() > MAX_SUPPORTING_NEIGHBORS {
+        diagnostics.push(Diagnostic::warning(
+            "RSN007",
+            format!(
+                "skipped supporting neighbourhood of {seed_name} — {} neighbours exceeds \
+                 the {MAX_SUPPORTING_NEIGHBORS}-item budget for background context; a hub \
+                 entity's neighbourhood describes the corpus, not this question",
+                neighbors.len()
+            ),
+        ));
+        return Ok(());
+    }
+
+    let mut reached: std::collections::HashSet<KirId> = neighbors.iter().map(|o| o.id).collect();
+    reached.insert(id);
+    for obj in neighbors {
+        let item = entity_item_with_excerpt(
+            runtime,
+            obj.id,
+            format!("{} — {label} {seed_name}", obj.name),
+            serde_json::Value::String(obj.id.0.to_string()),
+        )?;
+        // `weak` stays false here: an ungated supporting neighbourhood is small enough to
+        // be real context, and marking it weak was measured twice to collapse legitimate
+        // answers (`code` correctness 72.7% -> 18.2%). The gate above is the lever instead.
+        items.push(item);
+    }
+
+    // RFC 0177 §3 C — a requested "what depends on module M" also means what depends on
+    // M's contents. An import is recorded per imported path, so `M::self`, `M::redact`
+    // and `M::Config` are separate objects with separate dependents, and the seed alone
+    // answered with whoever happened to import the module by its own name.
+    if !supporting && matches!(op, StructuralOp::Dependents | StructuralOp::Impact) {
+        for member in module_members(runtime, id, &seed_name)? {
+            for obj in runtime.graph_op(op, &member.id, hops)? {
+                if !reached.insert(obj.id) {
+                    continue;
+                }
+                items.push(entity_item_with_excerpt(
+                    runtime,
+                    obj.id,
+                    format!("{} — {label} {}", obj.name, member.name),
+                    serde_json::Value::String(obj.id.0.to_string()),
+                )?);
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -254,7 +254,7 @@ mod tests {
     use super::*;
 
     fn set(v: &[&str]) -> BTreeSet<String> {
-        v.iter().map(|s| s.to_string()).collect()
+        v.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

@@ -94,7 +94,7 @@ impl ParquetExportReader {
             .filter(|p| {
                 p.is_dir()
                     && p.file_name()
-                        .and_then(|n| n.to_str())
+                        .and_then(std::ffi::OsStr::to_str)
                         .is_some_and(|n| n.starts_with("batch_id="))
             })
             .collect();
@@ -149,7 +149,7 @@ impl CryptoExportReader for ParquetExportReader {
         };
         let batch_id = batch_dir
             .file_name()
-            .and_then(|n| n.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .and_then(|n| n.strip_prefix("batch_id="))
             .unwrap_or_default()
             .to_string();

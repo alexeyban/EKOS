@@ -81,7 +81,7 @@ impl CompilerPass for GitAnalyzerPass {
         let mut ids: Vec<String> = self
             .commit_artifact_ids
             .iter()
-            .map(|id| id.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         ids.sort();
         if let Some(repo_id) = &self.repo_artifact_id {

@@ -96,7 +96,7 @@ fn canon_decimal(digits: &str, scale: u32, approved: Option<u32>) -> Result<Stri
         Some(rest) => (true, rest),
         None => (false, digits),
     };
-    if mag.is_empty() || !mag.bytes().all(|b| b.is_ascii_digit()) {
+    if mag.is_empty() || !mag.bytes().all(|c| c.is_ascii_digit()) {
         return Err(CanonError::MalformedDecimal(digits.to_string()));
     }
 

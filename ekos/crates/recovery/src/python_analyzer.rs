@@ -103,7 +103,11 @@ impl CompilerPass for PythonAnalyzerPass {
     }
 
     fn cache_inputs(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
+        let mut ids: Vec<String> = self
+            .artifact_ids
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ids.sort();
         ids
     }
@@ -545,7 +549,11 @@ fn extract_orm_columns(body: &[ast::Stmt]) -> Vec<OrmColumn> {
         let ast::Expr::Call(call) = call_expr else {
             continue;
         };
-        let data_type = call.args.first().and_then(type_hint).map(|s| s.to_string());
+        let data_type = call
+            .args
+            .first()
+            .and_then(type_hint)
+            .map(std::string::ToString::to_string);
         columns.push(OrmColumn {
             name: name.to_string(),
             data_type,
@@ -913,7 +921,7 @@ fn positional_string_arg(call: &ast::ExprCall, index: usize) -> Option<String> {
 fn keyword_arg<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a ast::Expr> {
     call.keywords
         .iter()
-        .find(|k| k.arg.as_ref().map(|i| i.as_str()) == Some(name))
+        .find(|k| k.arg.as_ref().map(ast::Identifier::as_str) == Some(name))
         .map(|k| &k.value)
 }
 

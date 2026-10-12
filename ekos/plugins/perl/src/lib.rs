@@ -93,7 +93,7 @@ impl Observer for PerlObserver {
 
             let ext = abs_path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .map(str::to_ascii_lowercase);
             let Some(ext) = ext else { continue };
             let is_cgi = ext == "cgi";

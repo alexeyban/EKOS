@@ -20,15 +20,9 @@ pub struct AskOpts<'a> {
     pub explain: bool,
 }
 
-pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<'_>) -> Result<()> {
-    let AskOpts {
-        json,
-        stream,
-        session,
-        mut classic,
-        explain,
-    } = opts;
-
+/// Rejects flag combinations that cannot work together, and returns whether the classic path is
+/// used: `--stream` implies it, because REASON streaming is not supported.
+fn resolve_classic(json: bool, stream: bool, classic: bool, explain: bool) -> Result<bool> {
     if json && stream {
         anyhow::bail!(
             "--stream is not compatible with --json — --json needs the complete structured result, not a partial one"
@@ -39,15 +33,48 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<
             "--explain is not compatible with --classic — the classic path has no compiled plan to show"
         );
     }
-    if stream && !classic {
-        if explain {
-            anyhow::bail!("--stream is not compatible with --explain");
-        }
-        eprintln!(
-            "note: --stream uses the classic retrieval path (REASON streaming is not supported)"
-        );
-        classic = true;
+    if !stream || classic {
+        return Ok(classic);
     }
+    if explain {
+        anyhow::bail!("--stream is not compatible with --explain");
+    }
+    eprintln!("note: --stream uses the classic retrieval path (REASON streaming is not supported)");
+    Ok(true)
+}
+
+/// Prints the evidence an answer cites, one line each.
+fn print_sources(
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    evidence_refs: &[ekos_kir::KirId],
+) -> Result<()> {
+    if evidence_refs.is_empty() {
+        return Ok(());
+    }
+    println!("\nSources:");
+    for id in evidence_refs {
+        if let Some(ev) = ledger.get_evidence(id)? {
+            println!(
+                "  [{:.0}%] {} — \"{}\"",
+                ev.confidence * 100.0,
+                ev.location.path,
+                ev.fragment
+            );
+        }
+    }
+    Ok(())
+}
+
+pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<'_>) -> Result<()> {
+    let AskOpts {
+        json,
+        stream,
+        session,
+        classic,
+        explain,
+    } = opts;
+
+    let classic = resolve_classic(json, stream, classic, explain)?;
 
     let session_path = session
         .map(|name| session_path(config, cwd, name))
@@ -141,19 +168,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<
         println!("{}", answer.answer);
     }
 
-    if !answer.evidence_refs.is_empty() {
-        println!("\nSources:");
-        for id in &answer.evidence_refs {
-            if let Some(ev) = ledger.get_evidence(id)? {
-                println!(
-                    "  [{:.0}%] {} — \"{}\"",
-                    ev.confidence * 100.0,
-                    ev.location.path,
-                    ev.fragment
-                );
-            }
-        }
-    }
+    print_sources(&*ledger, &answer.evidence_refs)?;
 
     for diag in &answer.diagnostics {
         eprintln!("warning: {}", diag.message);

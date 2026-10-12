@@ -104,7 +104,11 @@ impl CompilerPass for ElixirAnalyzerPass {
     }
 
     fn cache_inputs(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
+        let mut ids: Vec<String> = self
+            .artifact_ids
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ids.sort();
         ids
     }
@@ -603,7 +607,7 @@ fn strip_comment(line: &str) -> &str {
 
 fn extract_module_name(rest: &str) -> Option<String> {
     let name = rest.split_whitespace().next()?;
-    if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+    if name.chars().next().is_some_and(char::is_uppercase) {
         Some(name.to_string())
     } else {
         None
@@ -726,11 +730,7 @@ fn prescan_multi_alias_targets(source: &str) -> HashMap<usize, Vec<String>> {
             continue;
         };
         let target_prefix = &rest[..brace_pos];
-        if !target_prefix
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_uppercase())
-        {
+        if !target_prefix.chars().next().is_some_and(char::is_uppercase) {
             i += 1;
             continue;
         }
@@ -782,7 +782,7 @@ fn extract_dependency_target(line: &str) -> Option<String> {
                 .next()
                 .unwrap_or(first)
                 .trim_end_matches(['.', ':']);
-            if target.chars().next().is_some_and(|c| c.is_uppercase()) {
+            if target.chars().next().is_some_and(char::is_uppercase) {
                 return Some(target.to_string());
             }
             return None;

@@ -70,7 +70,12 @@ pub fn routine_gate(ir: &ProcedureIr) -> Result<(), Ineligible> {
 pub fn recorded_gate(
     properties: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), Ineligible> {
-    let count = |key: &str| properties.get(key).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let count = |key: &str| {
+        properties
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize
+    };
     let fidelity = properties
         .get("fidelity")
         .map(|v| match v {

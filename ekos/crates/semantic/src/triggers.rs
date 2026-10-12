@@ -165,6 +165,77 @@ fn classify(
     }
 }
 
+/// The class of a trigger whose function is defined in several files: which body runs is not
+/// known — but if every definition classifies the same, the class holds whichever one runs.
+fn classify_definitions<'a>(
+    name: &str,
+    table: &str,
+    routines: &NameIndex,
+    by_id: &dyn Fn(KirId) -> Option<&'a KirObject>,
+    callees_of: &dyn Fn(&KirObject) -> Vec<String>,
+) -> (&'static str, Vec<String>) {
+    // A pass-through placeholder (`RETURN NEW` and nothing else) carries no logic: when
+    // a real definition exists, the placeholders are set aside — and said so.
+    let all: Vec<&KirObject> = routines
+        .candidates(name)
+        .into_iter()
+        .filter_map(by_id)
+        .collect();
+    let is_stub =
+        |f: &&KirObject| f.properties.get("pass_through").and_then(Value::as_bool) == Some(true);
+    let real: Vec<&KirObject> = all.iter().copied().filter(|f| !is_stub(f)).collect();
+    // Placeholders are set aside only when a real definition remains to classify.
+    let set_aside = if real.is_empty() {
+        0
+    } else {
+        all.len() - real.len()
+    };
+    let defs = if real.is_empty() { all } else { real };
+    let each: Vec<(&KirObject, (&'static str, Vec<String>))> = defs
+        .into_iter()
+        .map(|f| (f, classify(table, Ok(f), &callees_of(f))))
+        .collect();
+    let note_stubs = |reasons: &mut Vec<String>| {
+        if set_aside > 0 {
+            reasons.push(format!(
+                "set aside {set_aside} placeholder definition(s) whose body is empty or only `RETURN NEW|OLD`"
+            ));
+        }
+    };
+    let classes: BTreeSet<&str> = each.iter().map(|(_, (c, _))| *c).collect();
+    if classes.len() == 1 {
+        let only = each[0].1.0;
+        let mut reasons = each[0].1.1.clone();
+        if each.len() > 1 {
+            reasons.push(format!(
+                "`{name}` has {} definitions; all classify as {only}",
+                each.len()
+            ));
+        }
+        note_stubs(&mut reasons);
+        (only, reasons)
+    } else {
+        let per: Vec<String> = each
+            .iter()
+            .map(|(f, (c, _))| {
+                let path = f
+                    .properties
+                    .get("source_path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?");
+                format!("{c} ({path})")
+            })
+            .collect();
+        let mut reasons = vec![format!(
+            "`{name}` has {} definitions that classify differently: {}",
+            each.len(),
+            per.join(", ")
+        )];
+        note_stubs(&mut reasons);
+        ("Mixed", reasons)
+    }
+}
+
 /// Link every `Trigger` to its table and function, and set `classification` /
 /// `classification_reasons` on it.
 pub fn link_and_classify_triggers(graph: &mut KirGraph) -> TriggerLinkStats {
@@ -250,67 +321,7 @@ pub fn link_and_classify_triggers(graph: &mut KirGraph) -> TriggerLinkStats {
             // Defined in several files: which body runs is not known — but if every definition
             // classifies the same, the class holds whichever one runs.
             (Err(_), Some(name)) if routines.candidates(name).len() > 1 => {
-                // A pass-through placeholder (`RETURN NEW` and nothing else) carries no logic: when
-                // a real definition exists, the placeholders are set aside — and said so.
-                let all: Vec<&KirObject> = routines
-                    .candidates(name)
-                    .into_iter()
-                    .filter_map(by_id)
-                    .collect();
-                let is_stub = |f: &&KirObject| {
-                    f.properties.get("pass_through").and_then(Value::as_bool) == Some(true)
-                };
-                let real: Vec<&KirObject> = all.iter().copied().filter(|f| !is_stub(f)).collect();
-                // Placeholders are set aside only when a real definition remains to classify.
-                let set_aside = if real.is_empty() {
-                    0
-                } else {
-                    all.len() - real.len()
-                };
-                let defs = if real.is_empty() { all } else { real };
-                let each: Vec<(&KirObject, (&'static str, Vec<String>))> = defs
-                    .into_iter()
-                    .map(|f| (f, classify(&table, Ok(f), &callees_of(f))))
-                    .collect();
-                let note_stubs = |reasons: &mut Vec<String>| {
-                    if set_aside > 0 {
-                        reasons.push(format!(
-                            "set aside {set_aside} placeholder definition(s) whose body is empty or only `RETURN NEW|OLD`"
-                        ));
-                    }
-                };
-                let classes: BTreeSet<&str> = each.iter().map(|(_, (c, _))| *c).collect();
-                if classes.len() == 1 {
-                    let only = each[0].1.0;
-                    let mut reasons = each[0].1.1.clone();
-                    if each.len() > 1 {
-                        reasons.push(format!(
-                            "`{name}` has {} definitions; all classify as {only}",
-                            each.len()
-                        ));
-                    }
-                    note_stubs(&mut reasons);
-                    (only, reasons)
-                } else {
-                    let per: Vec<String> = each
-                        .iter()
-                        .map(|(f, (c, _))| {
-                            let path = f
-                                .properties
-                                .get("source_path")
-                                .and_then(Value::as_str)
-                                .unwrap_or("?");
-                            format!("{c} ({path})")
-                        })
-                        .collect();
-                    let mut reasons = vec![format!(
-                        "`{name}` has {} definitions that classify differently: {}",
-                        each.len(),
-                        per.join(", ")
-                    )];
-                    note_stubs(&mut reasons);
-                    ("Mixed", reasons)
-                }
+                classify_definitions(name, &table, &routines, &by_id, &callees_of)
             }
             _ => {
                 let callees = match &function {

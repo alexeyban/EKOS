@@ -65,7 +65,7 @@ fn sentences(line: &str) -> Vec<&str> {
         match c {
             '`' => in_code = !in_code,
             '.' | '!' | '?' | ';'
-                if !in_code && bytes.get(i + 1).is_none_or(|b| b.is_ascii_whitespace()) =>
+                if !in_code && bytes.get(i + 1).is_none_or(u8::is_ascii_whitespace) =>
             {
                 out.push(&line[start..=i]);
                 start = i + 1;

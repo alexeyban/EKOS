@@ -321,7 +321,7 @@ fn segment_paths(root: &Path) -> Result<Vec<(u32, PathBuf)>, StoreError> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir(root)? {
         let path = entry?.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        let Some(name) = path.file_name().and_then(std::ffi::OsStr::to_str) else {
             continue;
         };
         if let Some(num) = name

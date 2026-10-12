@@ -221,12 +221,12 @@ fn sections_from_graph(graph: &KirGraph) -> Vec<SectionInput> {
             // a reason to skip it; its own name still scopes the id uniquely.
             path: owner
                 .get(&o.id)
-                .map(|p| p.to_string())
+                .map(std::string::ToString::to_string)
                 .unwrap_or_else(|| o.name.clone()),
             index: o
                 .properties
                 .get("section_index")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0) as usize,
             excerpt: o
                 .properties
@@ -643,7 +643,7 @@ mod tests {
                 .filter(|o| o.kind == ObjectKind::Custom("Concept".into()))
                 .map(|o| o.id)
                 .collect();
-            run_ids.sort_by_key(|id| id.to_string());
+            run_ids.sort_by_key(std::string::ToString::to_string);
             ids.push(run_ids);
         }
 

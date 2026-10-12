@@ -724,7 +724,7 @@ impl FactIndexes {
         let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)?
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("run"))
+            .filter(|p| p.extension().and_then(std::ffi::OsStr::to_str) == Some("run"))
             .collect();
         paths.sort();
         for path in paths {

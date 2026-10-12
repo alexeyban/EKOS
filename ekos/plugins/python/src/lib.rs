@@ -77,7 +77,7 @@ impl Observer for PythonObserver {
 
             let is_py = abs_path
                 .extension()
-                .and_then(|e| e.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .is_some_and(|e| e.eq_ignore_ascii_case("py"));
             if !is_py {
                 continue;

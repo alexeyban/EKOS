@@ -56,7 +56,7 @@ fn ledgersmb_embedded_sql_parses_above_the_floor() {
                             o.properties["line"],
                             o.properties
                                 .get("footprint_errors")
-                                .map(|v| v.to_string())
+                                .map(std::string::ToString::to_string)
                                 .unwrap_or_default()
                         ));
                     }

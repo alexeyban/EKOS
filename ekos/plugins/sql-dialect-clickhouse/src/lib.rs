@@ -87,76 +87,100 @@ fn preprocess_clickhouse_ddl(sql: &str) -> String {
 /// balanced closing paren for; a malformed `CODEC` (no following `(`, or an unmatched paren) is
 /// left untouched and fails downstream exactly as it does today.
 fn strip_codec_clauses(sql: &str) -> String {
+    rewrite_outside_quotes(sql, codec_clause_end)
+}
+
+/// The index right after a well-formed `CODEC(...)` clause starting at `i`, with the whitespace
+/// before it already removed from `out`. `None` when no such clause starts here.
+fn codec_clause_end(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
+    if !is_word_boundary_match(chars, i, "CODEC") {
+        return None;
+    }
+    let open = skip_whitespace(chars, i + "CODEC".chars().count());
+    if chars.get(open) != Some(&'(') {
+        return None;
+    }
+    let close = matching_paren(chars, open)?;
+    // Drop the single space/tab that separated the data type (or a prior
+    // option) from CODEC — otherwise it dangles before the next `,`/`)`.
+    while matches!(out.chars().last(), Some(' ') | Some('\t')) {
+        out.pop();
+    }
+    Some(close + 1)
+}
+
+/// Copies `sql` to a new string, leaving quoted regions (single-quoted literals with backslash
+/// escapes, backtick-quoted identifiers) untouched. At every other position `clause` is asked
+/// whether a clause to drop starts there: it returns the index to continue from, and may trim
+/// what was already written to `out`.
+fn rewrite_outside_quotes(
+    sql: &str,
+    mut clause: impl FnMut(&[char], usize, &mut String) -> Option<usize>,
+) -> String {
     let chars: Vec<char> = sql.chars().collect();
     let mut out = String::with_capacity(sql.len());
     let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_backtick = false;
 
     while i < chars.len() {
-        let c = chars[i];
-
-        if in_single_quote {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_single_quote = false;
-            }
+        if let Some(end) = quoted_region_end(&chars, i) {
+            out.extend(&chars[i..end]);
+            i = end;
+        } else if let Some(next) = clause(&chars, i, &mut out) {
+            i = next;
+        } else {
+            out.push(chars[i]);
             i += 1;
-            continue;
         }
-
-        if in_backtick {
-            out.push(c);
-            if c == '`' {
-                in_backtick = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if c == '\'' {
-            in_single_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-
-        if c == '`' {
-            in_backtick = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-
-        if is_word_boundary_match(&chars, i, "CODEC") {
-            let after = i + "CODEC".chars().count();
-            let mut j = after;
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if chars.get(j) == Some(&'(')
-                && let Some(close) = matching_paren(&chars, j)
-            {
-                // Drop the single space/tab that separated the data type (or a prior
-                // option) from CODEC — otherwise it dangles before the next `,`/`)`.
-                while matches!(out.chars().last(), Some(' ') | Some('\t')) {
-                    out.pop();
-                }
-                i = close + 1;
-                continue;
-            }
-        }
-
-        out.push(c);
-        i += 1;
     }
 
     out
+}
+
+/// The exclusive end of the quoted region opening at `i`, or `None` when `chars[i]` opens none.
+/// An unterminated region runs to the end of input.
+fn quoted_region_end(chars: &[char], i: usize) -> Option<usize> {
+    match chars.get(i)? {
+        '\'' => Some(single_quoted_end(chars, i)),
+        '`' => Some(
+            chars[i + 1..]
+                .iter()
+                .position(|c| *c == '`')
+                .map_or(chars.len(), |p| i + p + 2),
+        ),
+        _ => None,
+    }
+}
+
+/// The exclusive end of the single-quoted literal opening at `open`; a backslash escapes the
+/// character after it.
+fn single_quoted_end(chars: &[char], open: usize) -> usize {
+    let mut i = open + 1;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' if i + 1 < chars.len() => i += 2,
+            '\'' => return i + 1,
+            _ => i += 1,
+        }
+    }
+    chars.len()
+}
+
+/// The first index at or after `i` that is not whitespace.
+fn skip_whitespace(chars: &[char], mut i: usize) -> usize {
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+/// Removes trailing spaces, tabs and line breaks from `out`.
+fn trim_trailing_whitespace(out: &mut String) {
+    while matches!(
+        out.chars().last(),
+        Some(' ') | Some('\t') | Some('\n') | Some('\r')
+    ) {
+        out.pop();
+    }
 }
 
 /// Strips ClickHouse's table-level `INDEX <name> <expr> TYPE <type_expr> GRANULARITY <n>`
@@ -165,78 +189,25 @@ fn strip_codec_clauses(sql: &str) -> String {
 /// emitted) so the enclosing column list stays well-formed. Only removes a clause where a
 /// well-formed `GRANULARITY <digits>` was actually found; a malformed one is left untouched.
 fn strip_index_clauses(sql: &str) -> String {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut out = String::with_capacity(sql.len());
-    let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_backtick = false;
+    rewrite_outside_quotes(sql, index_clause_end)
+}
 
-    while i < chars.len() {
-        let c = chars[i];
-
-        if in_single_quote {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_single_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-        if in_backtick {
-            out.push(c);
-            if c == '`' {
-                in_backtick = false;
-            }
-            i += 1;
-            continue;
-        }
-        if c == '\'' {
-            in_single_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '`' {
-            in_backtick = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-
-        if is_word_boundary_match(&chars, i, "INDEX")
-            && let Some(end) = find_index_clause_end(&chars, i)
-        {
-            let mut k = end;
-            while k < chars.len() && chars[k].is_whitespace() {
-                k += 1;
-            }
-            while matches!(
-                out.chars().last(),
-                Some(' ') | Some('\t') | Some('\n') | Some('\r')
-            ) {
-                out.pop();
-            }
-            if chars.get(k) == Some(&',') {
-                i = k + 1;
-                continue;
-            }
-            if out.ends_with(',') {
-                out.pop();
-            }
-            i = end;
-            continue;
-        }
-
-        out.push(c);
-        i += 1;
+/// The index to continue from after an `INDEX … GRANULARITY <n>` clause starting at `i`, with
+/// one adjacent comma removed. `None` when no well-formed clause starts here.
+fn index_clause_end(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
+    if !is_word_boundary_match(chars, i, "INDEX") {
+        return None;
     }
-
-    out
+    let end = find_index_clause_end(chars, i)?;
+    let k = skip_whitespace(chars, end);
+    trim_trailing_whitespace(out);
+    if chars.get(k) == Some(&',') {
+        return Some(k + 1);
+    }
+    if out.ends_with(',') {
+        out.pop();
+    }
+    Some(end)
 }
 
 /// Finds the end index (exclusive) of an `INDEX ... GRANULARITY <n>` clause starting at
@@ -247,51 +218,46 @@ fn strip_index_clauses(sql: &str) -> String {
 fn find_index_clause_end(chars: &[char], index_start: usize) -> Option<usize> {
     let mut i = index_start;
     let mut depth = 0i32;
-    let mut in_string = false;
 
     while i < chars.len() {
         let c = chars[i];
-        if in_string {
-            if c == '\\' && i + 1 < chars.len() {
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
         if c == '\'' {
-            in_string = true;
-            i += 1;
+            i = single_quoted_end(chars, i);
             continue;
         }
         if depth == 0 {
             if is_word_boundary_match(chars, i, "GRANULARITY") {
-                let mut j = i + "GRANULARITY".chars().count();
-                while j < chars.len() && chars[j].is_whitespace() {
-                    j += 1;
-                }
-                let digits_start = j;
-                while j < chars.len() && chars[j].is_ascii_digit() {
-                    j += 1;
-                }
-                return if j > digits_start { Some(j) } else { None };
+                return granularity_value_end(chars, i);
             }
             if c == ',' || c == ')' {
                 return None;
             }
         }
-        match c {
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            _ => {}
-        }
+        depth += paren_step(c);
         i += 1;
     }
 
     None
+}
+
+/// The index right after the digits of `GRANULARITY <digits>` starting at `i`; `None` without
+/// digits.
+fn granularity_value_end(chars: &[char], i: usize) -> Option<usize> {
+    let digits_start = skip_whitespace(chars, i + "GRANULARITY".chars().count());
+    let mut j = digits_start;
+    while j < chars.len() && chars[j].is_ascii_digit() {
+        j += 1;
+    }
+    (j > digits_start).then_some(j)
+}
+
+/// How a character changes paren depth.
+fn paren_step(c: char) -> i32 {
+    match c {
+        '(' => 1,
+        ')' => -1,
+        _ => 0,
+    }
 }
 
 /// Strips `<keyword> [<keyword2>] <expr>` clauses `sqlparser`'s `ClickHouseDialect` has no parse
@@ -306,89 +272,36 @@ fn strip_keyword_expr_clause(
     keyword2: Option<&str>,
     terminators: &[&str],
 ) -> String {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut out = String::with_capacity(sql.len());
-    let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_backtick = false;
-
-    while i < chars.len() {
-        let c = chars[i];
-
-        if in_single_quote {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_single_quote = false;
-            }
-            i += 1;
-            continue;
+    rewrite_outside_quotes(sql, |chars, i, out| {
+        let body_start = keyword_clause_body_start(chars, i, keyword, keyword2)?;
+        let end = scan_to_terminator(chars, body_start, terminators);
+        // Only safe to trim the whitespace right before `end` when `end` is a `;` or
+        // end of input — trimming before a terminator *keyword* would glue it directly
+        // onto whatever precedes it (`MergeTreePRIMARY`).
+        if chars.get(end) == Some(&';') || end == chars.len() {
+            trim_trailing_whitespace(out);
         }
-        if in_backtick {
-            out.push(c);
-            if c == '`' {
-                in_backtick = false;
-            }
-            i += 1;
-            continue;
-        }
-        if c == '\'' {
-            in_single_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '`' {
-            in_backtick = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
+        Some(end)
+    })
+}
 
-        if is_word_boundary_match(&chars, i, keyword) {
-            let after_keyword = i + keyword.chars().count();
-            let (matched, clause_body_start) = match keyword2 {
-                Some(kw2) => {
-                    let mut k = after_keyword;
-                    while k < chars.len() && chars[k].is_whitespace() {
-                        k += 1;
-                    }
-                    if is_word_boundary_match(&chars, k, kw2) {
-                        (true, k + kw2.chars().count())
-                    } else {
-                        (false, after_keyword)
-                    }
-                }
-                None => (true, after_keyword),
-            };
-
-            if matched {
-                let end = scan_to_terminator(&chars, clause_body_start, terminators);
-                // Only safe to trim the whitespace right before `end` when `end` is a `;` or
-                // end of input — trimming before a terminator *keyword* would glue it directly
-                // onto whatever precedes it (`MergeTreePRIMARY`).
-                if chars.get(end) == Some(&';') || end == chars.len() {
-                    while matches!(
-                        out.chars().last(),
-                        Some(' ') | Some('\t') | Some('\n') | Some('\r')
-                    ) {
-                        out.pop();
-                    }
-                }
-                i = end;
-                continue;
-            }
-        }
-
-        out.push(c);
-        i += 1;
+/// Where the expression of a `<keyword> [<keyword2>] <expr>` clause starting at `i` begins.
+/// `None` when `keyword` is not here, or `keyword2` is required and does not follow it.
+fn keyword_clause_body_start(
+    chars: &[char],
+    i: usize,
+    keyword: &str,
+    keyword2: Option<&str>,
+) -> Option<usize> {
+    if !is_word_boundary_match(chars, i, keyword) {
+        return None;
     }
-
-    out
+    let after_keyword = i + keyword.chars().count();
+    let Some(kw2) = keyword2 else {
+        return Some(after_keyword);
+    };
+    let k = skip_whitespace(chars, after_keyword);
+    is_word_boundary_match(chars, k, kw2).then(|| k + kw2.chars().count())
 }
 
 /// Scans forward from `start`, tracking paren depth and single-quoted strings, and returns the
@@ -448,71 +361,21 @@ fn scan_to_terminator(chars: &[char], start: usize, terminators: &[&str]) -> usi
 /// the same file — `SqlAnalyzerPass` parses a whole file in one `Parser::parse_sql` call and
 /// discards everything on any single statement's failure.
 fn strip_create_dictionary_statements(sql: &str) -> String {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut out = String::with_capacity(sql.len());
-    let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_backtick = false;
-
-    while i < chars.len() {
-        let c = chars[i];
-
-        if in_single_quote {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_single_quote = false;
-            }
-            i += 1;
-            continue;
+    rewrite_outside_quotes(sql, |chars, i, _out| {
+        if !is_word_boundary_match(chars, i, "CREATE") {
+            return None;
         }
-        if in_backtick {
-            out.push(c);
-            if c == '`' {
-                in_backtick = false;
-            }
-            i += 1;
-            continue;
+        let j = skip_whitespace(chars, i + "CREATE".chars().count());
+        if !is_word_boundary_match(chars, j, "DICTIONARY") {
+            return None;
         }
-        if c == '\'' {
-            in_single_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '`' {
-            in_backtick = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-
-        if is_word_boundary_match(&chars, i, "CREATE") {
-            let mut j = i + "CREATE".chars().count();
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if is_word_boundary_match(&chars, j, "DICTIONARY") {
-                let terminator = scan_to_terminator(&chars, j, &[]);
-                let end = if chars.get(terminator) == Some(&';') {
-                    terminator + 1
-                } else {
-                    terminator
-                };
-                i = end;
-                continue;
-            }
-        }
-
-        out.push(c);
-        i += 1;
-    }
-
-    out
+        let terminator = scan_to_terminator(chars, j, &[]);
+        Some(if chars.get(terminator) == Some(&';') {
+            terminator + 1
+        } else {
+            terminator
+        })
+    })
 }
 
 fn is_ident_char(c: char) -> bool {

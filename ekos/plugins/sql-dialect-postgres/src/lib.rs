@@ -487,77 +487,91 @@ fn leading_keyword(statement: &str) -> String {
 /// clause — keeping the rest of the `ALTER TABLE` statement intact, unlike whole-statement
 /// stripping — loses nothing already captured, same reasoning as `strip_unlogged_before_table`.
 fn strip_not_valid_clause(sql: &str) -> String {
+    rewrite_code(sql, |chars, i, out| {
+        let valid = second_keyword_start(chars, i, "NOT", "VALID")?;
+        trim_trailing_blanks(out);
+        Some(valid + "VALID".chars().count())
+    })
+}
+
+/// Copies `sql` to a new string, leaving single-quoted strings (backslash escapes), double-quoted
+/// identifiers and `--` line comments untouched. At every other position `clause` is asked
+/// whether something to drop starts there: it returns the index to continue from, and may edit
+/// what was already written to `out`.
+fn rewrite_code(
+    sql: &str,
+    mut clause: impl FnMut(&[char], usize, &mut String) -> Option<usize>,
+) -> String {
     let chars: Vec<char> = sql.chars().collect();
     let mut out = String::with_capacity(sql.len());
     let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
 
     while i < chars.len() {
-        let c = chars[i];
-
-        if in_single_quote {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_single_quote = false;
-            }
+        if let Some(end) = opaque_region_end(&chars, i) {
+            out.extend(&chars[i..end]);
+            i = end;
+        } else if let Some(next) = clause(&chars, i, &mut out) {
+            i = next;
+        } else {
+            out.push(chars[i]);
             i += 1;
-            continue;
         }
-        if in_double_quote {
-            out.push(c);
-            if c == '"' {
-                in_double_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-        if c == '\'' {
-            in_single_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '"' {
-            in_double_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '-' && chars.get(i + 1) == Some(&'-') {
-            while i < chars.len() && chars[i] != '\n' {
-                out.push(chars[i]);
-                i += 1;
-            }
-            continue;
-        }
-
-        if is_word_boundary_match(&chars, i, "NOT") {
-            let mut j = i + "NOT".chars().count();
-            let ws_start = j;
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if is_word_boundary_match(&chars, j, "VALID") && j > ws_start {
-                let after = j + "VALID".chars().count();
-                while matches!(out.chars().last(), Some(' ') | Some('\t')) {
-                    out.pop();
-                }
-                i = after;
-                continue;
-            }
-        }
-
-        out.push(c);
-        i += 1;
     }
 
     out
+}
+
+/// The exclusive end of the string, quoted identifier or line comment opening at `i`, or `None`
+/// when none opens there. A line comment ends before its newline; an unterminated quote runs to
+/// the end of input.
+fn opaque_region_end(chars: &[char], i: usize) -> Option<usize> {
+    let rest_end = |from: usize, stop: char| {
+        chars[from..]
+            .iter()
+            .position(|c| *c == stop)
+            .map(|p| from + p)
+    };
+    match chars.get(i)? {
+        '\'' => Some(single_quoted_end(chars, i)),
+        '"' => Some(rest_end(i + 1, '"').map_or(chars.len(), |p| p + 1)),
+        '-' if chars.get(i + 1) == Some(&'-') => Some(rest_end(i, '\n').unwrap_or(chars.len())),
+        _ => None,
+    }
+}
+
+/// The exclusive end of the single-quoted literal opening at `open`; a backslash escapes the
+/// character after it.
+fn single_quoted_end(chars: &[char], open: usize) -> usize {
+    let mut i = open + 1;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' if i + 1 < chars.len() => i += 2,
+            '\'' => return i + 1,
+            _ => i += 1,
+        }
+    }
+    chars.len()
+}
+
+/// Where `second` starts when `first` is at `i` and `second` follows it after at least one
+/// whitespace character, both at word boundaries.
+fn second_keyword_start(chars: &[char], i: usize, first: &str, second: &str) -> Option<usize> {
+    if !is_word_boundary_match(chars, i, first) {
+        return None;
+    }
+    let ws_start = i + first.chars().count();
+    let mut j = ws_start;
+    while j < chars.len() && chars[j].is_whitespace() {
+        j += 1;
+    }
+    (j > ws_start && is_word_boundary_match(chars, j, second)).then_some(j)
+}
+
+/// Removes trailing spaces and tabs from `out`.
+fn trim_trailing_blanks(out: &mut String) {
+    while matches!(out.chars().last(), Some(' ') | Some('\t')) {
+        out.pop();
+    }
 }
 
 /// Removes the `UNLOGGED` keyword from `CREATE UNLOGGED TABLE` — `sqlparser`'s `parse_create`
@@ -572,79 +586,14 @@ fn strip_not_valid_clause(sql: &str) -> String {
 /// no information lost, not even the durability nuance beyond what DDL recovery ever modeled to
 /// begin with (nothing in EKOS's KIR represents `UNLOGGED`/WAL behavior today).
 fn strip_unlogged_before_table(sql: &str) -> String {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut out = String::with_capacity(sql.len());
-    let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-
-    while i < chars.len() {
-        let c = chars[i];
-
-        if in_single_quote {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_single_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-        if in_double_quote {
-            out.push(c);
-            if c == '"' {
-                in_double_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-        if c == '\'' {
-            in_single_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '"' {
-            in_double_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '-' && chars.get(i + 1) == Some(&'-') {
-            while i < chars.len() && chars[i] != '\n' {
-                out.push(chars[i]);
-                i += 1;
-            }
-            continue;
-        }
-
-        if is_word_boundary_match(&chars, i, "UNLOGGED") {
-            let mut j = i + "UNLOGGED".chars().count();
-            let ws_start = j;
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if is_word_boundary_match(&chars, j, "TABLE") && j > ws_start {
-                // Drop "UNLOGGED" and the whitespace around it; keep exactly one separating
-                // space before "TABLE" so "CREATE" + "TABLE" don't glue together.
-                while matches!(out.chars().last(), Some(' ') | Some('\t')) {
-                    out.pop();
-                }
-                i = j;
-                out.push(' ');
-                continue;
-            }
-        }
-
-        out.push(c);
-        i += 1;
-    }
-
-    out
+    rewrite_code(sql, |chars, i, out| {
+        let table = second_keyword_start(chars, i, "UNLOGGED", "TABLE")?;
+        // Drop "UNLOGGED" and the whitespace around it; keep exactly one separating
+        // space before "TABLE" so "CREATE" + "TABLE" don't glue together.
+        trim_trailing_blanks(out);
+        out.push(' ');
+        Some(table)
+    })
 }
 
 /// Strips whole statements whose leading keywords (in order, e.g. `["CREATE", "SEQUENCE"]` to
@@ -659,75 +608,20 @@ fn strip_unlogged_before_table(sql: &str) -> String {
 /// generalized to an arbitrary leading-keyword sequence so `CREATE SEQUENCE` and `ALTER SEQUENCE`
 /// share one implementation.
 fn strip_statements_starting_with(sql: &str, keywords: &[&str]) -> String {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut out = String::with_capacity(sql.len());
-    let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-
-    while i < chars.len() {
-        let c = chars[i];
-
-        if in_single_quote {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_single_quote = false;
-            }
-            i += 1;
-            continue;
+    // A line comment is copied verbatim by `rewrite_code`: its content (which may contain `;` or
+    // keyword text, e.g. a `pg_dump` header naming the very statement kind being stripped) must
+    // never be scanned as real SQL.
+    rewrite_code(sql, |chars, i, _out| {
+        if !matches_leading_keywords(chars, i, keywords) {
+            return None;
         }
-        if in_double_quote {
-            out.push(c);
-            if c == '"' {
-                in_double_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-        if c == '\'' {
-            in_single_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '"' {
-            in_double_quote = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '-' && chars.get(i + 1) == Some(&'-') {
-            // Line comment: copy verbatim through the next newline (or end of input) — its
-            // content (which may contain `;` or keyword text, e.g. a `pg_dump` header naming
-            // the very statement kind being stripped) must never be scanned as real SQL.
-            while i < chars.len() && chars[i] != '\n' {
-                out.push(chars[i]);
-                i += 1;
-            }
-            continue;
-        }
-
-        if matches_leading_keywords(&chars, i, keywords) {
-            let terminator = scan_to_terminator(&chars, i, &[]);
-            let end = if chars.get(terminator) == Some(&';') {
-                terminator + 1
-            } else {
-                terminator
-            };
-            i = end;
-            continue;
-        }
-
-        out.push(c);
-        i += 1;
-    }
-
-    out
+        let terminator = scan_to_terminator(chars, i, &[]);
+        Some(if chars.get(terminator) == Some(&';') {
+            terminator + 1
+        } else {
+            terminator
+        })
+    })
 }
 
 /// True if `keywords` occur one after another starting at `chars[start]`, each at a word

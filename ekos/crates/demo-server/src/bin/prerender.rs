@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         .filter_map(std::result::Result::ok)
     {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
             continue;
         }
         let rel = path.strip_prefix(&src).unwrap();

@@ -191,50 +191,53 @@ fn reject_embedded_credentials_ast(statements: &[Statement]) -> Result<(), Class
 
 /// Visit every table factor in a statement's `FROM` clauses, including inside a subquery.
 fn visit_table_factors(st: &Statement, f: &mut impl FnMut(&sqlparser::ast::TableFactor)) {
-    use sqlparser::ast::{Query, SetExpr, TableFactor};
-
-    fn walk_query(q: &Query, f: &mut impl FnMut(&TableFactor)) {
-        match q.body.as_ref() {
-            SetExpr::Select(s) => {
-                for t in &s.from {
-                    walk_factor(&t.relation, f);
-                    for j in &t.joins {
-                        walk_factor(&j.relation, f);
-                    }
-                }
-            }
-            SetExpr::Query(inner) => walk_query(inner, f),
-            SetExpr::SetOperation { left, right, .. } => {
-                for side in [left, right] {
-                    if let SetExpr::Select(s) = side.as_ref() {
-                        for t in &s.from {
-                            walk_factor(&t.relation, f);
-                            for j in &t.joins {
-                                walk_factor(&j.relation, f);
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn walk_factor(factor: &TableFactor, f: &mut impl FnMut(&TableFactor)) {
-        f(factor);
-        if let TableFactor::Derived { subquery, .. } = factor {
-            walk_query(subquery, f);
-        }
-    }
-
     match st {
-        Statement::Query(q) => walk_query(q, f),
+        Statement::Query(q) => walk_query_factors(q, f),
         Statement::Insert(i) => {
             if let Some(src) = &i.source {
-                walk_query(src, f);
+                walk_query_factors(src, f);
             }
         }
         _ => {}
+    }
+}
+
+fn walk_query_factors(q: &sqlparser::ast::Query, f: &mut impl FnMut(&sqlparser::ast::TableFactor)) {
+    use sqlparser::ast::SetExpr;
+
+    match q.body.as_ref() {
+        SetExpr::Select(s) => walk_select_factors(s, f),
+        SetExpr::Query(inner) => walk_query_factors(inner, f),
+        SetExpr::SetOperation { left, right, .. } => {
+            for side in [left, right] {
+                if let SetExpr::Select(s) = side.as_ref() {
+                    walk_select_factors(s, f);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_select_factors(
+    select: &sqlparser::ast::Select,
+    f: &mut impl FnMut(&sqlparser::ast::TableFactor),
+) {
+    for t in &select.from {
+        walk_factor(&t.relation, f);
+        for j in &t.joins {
+            walk_factor(&j.relation, f);
+        }
+    }
+}
+
+fn walk_factor(
+    factor: &sqlparser::ast::TableFactor,
+    f: &mut impl FnMut(&sqlparser::ast::TableFactor),
+) {
+    f(factor);
+    if let sqlparser::ast::TableFactor::Derived { subquery, .. } = factor {
+        walk_query_factors(subquery, f);
     }
 }
 

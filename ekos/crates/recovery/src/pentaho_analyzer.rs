@@ -105,7 +105,11 @@ impl CompilerPass for PentahoAnalyzerPass {
     }
 
     fn cache_inputs(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
+        let mut ids: Vec<String> = self
+            .artifact_ids
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ids.sort();
         ids
     }

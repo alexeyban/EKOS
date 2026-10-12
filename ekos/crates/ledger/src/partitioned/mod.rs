@@ -526,7 +526,7 @@ impl PartitionedLedger {
             let p = entry.path();
             if let Some(num) = p
                 .file_name()
-                .and_then(|n| n.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .and_then(|n| n.strip_prefix("run-"))
                 .and_then(|n| n.strip_suffix(".jsonl"))
                 .and_then(|n| n.parse::<u32>().ok())
@@ -656,7 +656,7 @@ impl PartitionedLedger {
                     let p = entry.path();
                     let keep = p
                         .file_name()
-                        .and_then(|n| n.to_str())
+                        .and_then(std::ffi::OsStr::to_str)
                         .map(|n| n == format!("run-{run:07}.jsonl"))
                         .unwrap_or(false);
                     if !keep && p.extension().is_some_and(|e| e == "jsonl") {

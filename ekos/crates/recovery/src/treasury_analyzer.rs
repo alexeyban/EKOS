@@ -67,7 +67,11 @@ impl CompilerPass for TreasuryAnalyzerPass {
     }
 
     fn cache_inputs(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.artifact_ids.iter().map(|i| i.to_string()).collect();
+        let mut ids: Vec<String> = self
+            .artifact_ids
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ids.sort();
         ids
     }

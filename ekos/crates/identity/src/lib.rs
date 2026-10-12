@@ -417,6 +417,96 @@ fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObje
         })
 }
 
+/// Conflict detection over all objects, cross-kind: one normalised name borne by more than one
+/// kind, unless the group is one of the expected co-existences.
+fn detect_kind_conflicts(objects: &[KirObject]) -> Vec<ConflictReport> {
+    let mut by_norm: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, obj) in objects.iter().enumerate() {
+        by_norm
+            .entry(similarity::normalize(&obj.name))
+            .or_default()
+            .push(i);
+    }
+
+    let mut conflicts = Vec::new();
+    for (norm, indices) in &by_norm {
+        if indices.len() < 2 {
+            continue;
+        }
+        let first_kind = &objects[indices[0]].kind;
+        let has_kind_mismatch = indices[1..].iter().any(|&i| &objects[i].kind != first_kind);
+        if has_kind_mismatch {
+            if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i]))
+                || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
+                || is_expected_binary_declaration_group(indices.iter().map(|&i| &objects[i]))
+                || is_expected_sql_namespace_group(indices.iter().map(|&i| &objects[i]))
+                || is_expected_cross_namespace_group(indices.iter().map(|&i| &objects[i]))
+            {
+                continue;
+            }
+            let ids: Vec<KirId> = indices.iter().map(|&i| objects[i].id).collect();
+            let kinds: Vec<String> = indices
+                .iter()
+                .map(|&i| format!("{}", objects[i].kind))
+                .collect();
+            conflicts.push(ConflictReport {
+                kind: ConflictKind::SameNameDifferentKind,
+                ids,
+                description: format!("'{norm}' appears as multiple kinds: {}", kinds.join(", ")),
+            });
+        }
+    }
+    conflicts
+}
+
+/// Resolution candidates grouped by (kind, first 3 chars of the normalised name).
+fn candidate_blocks(objects: &[KirObject]) -> HashMap<(String, String), Vec<usize>> {
+    //
+    // A `Custom(_)` kind that is *structurally keyed* (`ekos_kir::custom_kinds`) is never a
+    // resolution candidate — each instance is already identified by a file path / manifest
+    // dir / (source, index), so no two distinct instances can be the same real-world entity.
+    // Without the exclusion, instances of one kind share a long name prefix that scores high
+    // on Jaro-Winkler and `structural_score`'s same-kind `1.0` fallback (no `columns`
+    // property) adds a flat +0.3 floor, collapsing a whole book / crate graph / module tree
+    // into one canonical object (RFC 0024's Section case: 8,624 raw objects → 120, devlog 27).
+    // The registry has the per-kind key and RFC for all ~18 keyed kinds.
+    //
+    // `Custom("Concept")` (RFC 0026) is the mirror image — two mentions of one concept across
+    // documents *should* merge — so it is `structurally_keyed: false`. What is excluded is a
+    // degenerate *name*: one word or under `MIN_CONCEPT_NAME_CHARS` ("data", "the API"). A
+    // concrete concept ("Data Replication") blocks normally and must clear the stricter
+    // `CONCEPT_MERGE_THRESHOLD` to actually merge.
+    let mut blocks: HashMap<(String, String), Vec<usize>> = HashMap::new();
+    for (i, obj) in objects.iter().enumerate() {
+        // RFC 0135 Part D — the exclusion set is derived from the single
+        // `ekos_kir::custom_kinds` registry (`structurally_keyed == true`), never a literal
+        // list maintained here. That is deliberate: the old inline list was rediscovered live
+        // ~13 times — Section (RFC 0024, devlog 27), TransformNode (0027), Rust/Python
+        // symbols+modules (0041/0038), Crate (0042, 39→1), Claim + ArchitectureGap (0065,
+        // proactive), Elixir/JS symbols+modules (0081/0085, an 18× duplicated SameAs found by
+        // reading a real entity page), Document (0023, two real README.md). Each kind's
+        // structural key and RFC live in the registry. A `recovery`/`semantic` coverage test
+        // fails CI if a new `Custom` kind an analyzer emits is missing from it.
+        if matches!(&obj.kind, ObjectKind::Custom(k) if ekos_kir::custom_kinds::is_structurally_keyed(k))
+        {
+            continue;
+        }
+        let norm = similarity::normalize(&obj.name);
+        if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Concept")
+            && (norm.split_whitespace().count() < MIN_CONCEPT_NAME_WORDS
+                || norm.chars().count() < MIN_CONCEPT_NAME_CHARS)
+        {
+            continue;
+        }
+        let prefix: String = norm.chars().take(3).collect();
+        blocks
+            .entry((format!("{}", obj.kind), prefix))
+            .or_default()
+            .push(i);
+    }
+    blocks
+}
+
 impl IdentityResolver for DefaultResolver {
     fn resolve(&self, graph: &KirGraph) -> ResolutionResult {
         let objects = &graph.objects;
@@ -433,91 +523,8 @@ impl IdentityResolver for DefaultResolver {
             };
         }
 
-        // ── Conflict detection (all objects, cross-kind) ──────────────────────
-        let mut by_norm: HashMap<String, Vec<usize>> = HashMap::new();
-        for (i, obj) in objects.iter().enumerate() {
-            by_norm
-                .entry(similarity::normalize(&obj.name))
-                .or_default()
-                .push(i);
-        }
-
-        let mut conflicts = Vec::new();
-        for (norm, indices) in &by_norm {
-            if indices.len() < 2 {
-                continue;
-            }
-            let first_kind = &objects[indices[0]].kind;
-            let has_kind_mismatch = indices[1..].iter().any(|&i| &objects[i].kind != first_kind);
-            if has_kind_mismatch {
-                if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i]))
-                    || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
-                    || is_expected_binary_declaration_group(indices.iter().map(|&i| &objects[i]))
-                    || is_expected_sql_namespace_group(indices.iter().map(|&i| &objects[i]))
-                    || is_expected_cross_namespace_group(indices.iter().map(|&i| &objects[i]))
-                {
-                    continue;
-                }
-                let ids: Vec<KirId> = indices.iter().map(|&i| objects[i].id).collect();
-                let kinds: Vec<String> = indices
-                    .iter()
-                    .map(|&i| format!("{}", objects[i].kind))
-                    .collect();
-                conflicts.push(ConflictReport {
-                    kind: ConflictKind::SameNameDifferentKind,
-                    ids,
-                    description: format!(
-                        "'{norm}' appears as multiple kinds: {}",
-                        kinds.join(", ")
-                    ),
-                });
-            }
-        }
-
-        // ── Build blocks: (kind_str, first 3 chars of normalised name) ────────
-        //
-        // A `Custom(_)` kind that is *structurally keyed* (`ekos_kir::custom_kinds`) is never a
-        // resolution candidate — each instance is already identified by a file path / manifest
-        // dir / (source, index), so no two distinct instances can be the same real-world entity.
-        // Without the exclusion, instances of one kind share a long name prefix that scores high
-        // on Jaro-Winkler and `structural_score`'s same-kind `1.0` fallback (no `columns`
-        // property) adds a flat +0.3 floor, collapsing a whole book / crate graph / module tree
-        // into one canonical object (RFC 0024's Section case: 8,624 raw objects → 120, devlog 27).
-        // The registry has the per-kind key and RFC for all ~18 keyed kinds.
-        //
-        // `Custom("Concept")` (RFC 0026) is the mirror image — two mentions of one concept across
-        // documents *should* merge — so it is `structurally_keyed: false`. What is excluded is a
-        // degenerate *name*: one word or under `MIN_CONCEPT_NAME_CHARS` ("data", "the API"). A
-        // concrete concept ("Data Replication") blocks normally and must clear the stricter
-        // `CONCEPT_MERGE_THRESHOLD` to actually merge.
-        let mut blocks: HashMap<(String, String), Vec<usize>> = HashMap::new();
-        for (i, obj) in objects.iter().enumerate() {
-            // RFC 0135 Part D — the exclusion set is derived from the single
-            // `ekos_kir::custom_kinds` registry (`structurally_keyed == true`), never a literal
-            // list maintained here. That is deliberate: the old inline list was rediscovered live
-            // ~13 times — Section (RFC 0024, devlog 27), TransformNode (0027), Rust/Python
-            // symbols+modules (0041/0038), Crate (0042, 39→1), Claim + ArchitectureGap (0065,
-            // proactive), Elixir/JS symbols+modules (0081/0085, an 18× duplicated SameAs found by
-            // reading a real entity page), Document (0023, two real README.md). Each kind's
-            // structural key and RFC live in the registry. A `recovery`/`semantic` coverage test
-            // fails CI if a new `Custom` kind an analyzer emits is missing from it.
-            if matches!(&obj.kind, ObjectKind::Custom(k) if ekos_kir::custom_kinds::is_structurally_keyed(k))
-            {
-                continue;
-            }
-            let norm = similarity::normalize(&obj.name);
-            if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Concept")
-                && (norm.split_whitespace().count() < MIN_CONCEPT_NAME_WORDS
-                    || norm.chars().count() < MIN_CONCEPT_NAME_CHARS)
-            {
-                continue;
-            }
-            let prefix: String = norm.chars().take(3).collect();
-            blocks
-                .entry((format!("{}", obj.kind), prefix))
-                .or_default()
-                .push(i);
-        }
+        let conflicts = detect_kind_conflicts(objects);
+        let blocks = candidate_blocks(objects);
 
         // ── Pairwise scoring within blocks → Union-Find ───────────────────────
         let mut uf = UnionFind::new(n);

@@ -212,6 +212,85 @@ pub fn recover_views(source_path: &str, sql: &str, dialect: &dyn Dialect) -> (Ki
     recover_views_in(source_path, sql, dialect, None)
 }
 
+/// A view's name: from the parsed statement (unquoted parts lowercased), else from its tokens.
+fn view_name(parsed: Option<&Statement>, text: &str) -> Option<String> {
+    let Some(Statement::CreateView { name, .. }) = parsed else {
+        return name_from_tokens(text);
+    };
+    let parts: Vec<String> = name
+        .0
+        .iter()
+        .map(|i| {
+            if i.quote_style.is_some() {
+                i.value.clone()
+            } else {
+                i.value.to_ascii_lowercase()
+            }
+        })
+        .collect();
+    Some(parts.join("."))
+}
+
+/// What a definition states: its query's footprint, then `materialized`, `temporary`,
+/// `or_replace` and its column list. An unparsed definition is read from its leading words.
+fn view_facts(def: &Definition<'_>) -> (Footprint, bool, bool, bool, Vec<String>) {
+    if let Some(Statement::CreateView {
+        query,
+        materialized,
+        temporary,
+        or_replace,
+        columns,
+        ..
+    }) = &def.parsed
+    {
+        return (
+            query_footprint(query),
+            *materialized,
+            *temporary,
+            *or_replace,
+            columns.iter().map(|c| c.name.value.clone()).collect(),
+        );
+    }
+    // What the statement says about itself is still known from its words.
+    let words = head_words(def.text, 6);
+    let has = |w: &str| words.iter().any(|x| x == w);
+    let fp = Footprint {
+        errors: def.error.iter().cloned().collect(),
+        fragments: 1,
+        ..Default::default()
+    };
+    (
+        fp,
+        has("MATERIALIZED"),
+        has("TEMP") || has("TEMPORARY"),
+        has("REPLACE"),
+        Vec::new(),
+    )
+}
+
+/// The evidence for a `COMMENT ON VIEW` that describes the view keyed `key`.
+fn comment_evidence(
+    source_path: &str,
+    key: &str,
+    line: u32,
+    name: &str,
+    text: &str,
+) -> KirEvidence {
+    let mut ev = KirEvidence::new(
+        SourceLocation {
+            path: source_path.to_string(),
+            line: Some(line),
+            column: None,
+        },
+        clip(&format!("COMMENT ON VIEW {name} IS {text}"), MAX_FRAGMENT),
+    );
+    ev.id = KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("view-comment:{key}").as_bytes(),
+    ));
+    ev
+}
+
 /// [`recover_views`], with each view attached to the `File` whose id key is `file_key`.
 pub fn recover_views_in(
     source_path: &str,
@@ -241,23 +320,8 @@ pub fn recover_views_in(
             Ok(_) => (None, Some("not a single CREATE VIEW statement".to_string())),
             Err(e) => (None, Some(e.to_string())),
         };
-        let name = match &parsed {
-            Some(Statement::CreateView { name, .. }) => name
-                .0
-                .iter()
-                .map(|i| {
-                    if i.quote_style.is_some() {
-                        i.value.clone()
-                    } else {
-                        i.value.to_ascii_lowercase()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("."),
-            _ => match name_from_tokens(st.text) {
-                Some(n) => n,
-                None => continue,
-            },
+        let Some(name) = view_name(parsed.as_ref(), st.text) else {
+            continue;
         };
         let def = Definition {
             position,
@@ -305,39 +369,7 @@ pub fn recover_views_in(
             &Uuid::NAMESPACE_URL,
             format!("view:{key}").as_bytes(),
         ));
-        let (fp, materialized, temporary, or_replace, columns) = match &def.parsed {
-            Some(Statement::CreateView {
-                query,
-                materialized,
-                temporary,
-                or_replace,
-                columns,
-                ..
-            }) => (
-                query_footprint(query),
-                *materialized,
-                *temporary,
-                *or_replace,
-                columns.iter().map(|c| c.name.value.clone()).collect(),
-            ),
-            _ => {
-                // What the statement says about itself is still known from its words.
-                let words = head_words(def.text, 6);
-                let has = |w: &str| words.iter().any(|x| x == w);
-                let fp = Footprint {
-                    errors: def.error.iter().cloned().collect(),
-                    fragments: 1,
-                    ..Default::default()
-                };
-                (
-                    fp,
-                    has("MATERIALIZED"),
-                    has("TEMP") || has("TEMPORARY"),
-                    has("REPLACE"),
-                    Vec::<String>::new(),
-                )
-            }
-        };
+        let (fp, materialized, temporary, or_replace, columns) = view_facts(def);
         stats.views += 1;
         if fp.errors.is_empty() {
             stats.parsed += 1;
@@ -372,21 +404,7 @@ pub fn recover_views_in(
         );
         obj.evidence.push(evidence_id);
         if let Some(c) = docs.get(&index) {
-            let mut ev = KirEvidence::new(
-                SourceLocation {
-                    path: source_path.to_string(),
-                    line: Some(c.line),
-                    column: None,
-                },
-                clip(
-                    &format!("COMMENT ON VIEW {} IS {}", c.name, c.text),
-                    MAX_FRAGMENT,
-                ),
-            );
-            ev.id = KirId(Uuid::new_v5(
-                &Uuid::NAMESPACE_URL,
-                format!("view-comment:{key}").as_bytes(),
-            ));
+            let ev = comment_evidence(source_path, key, c.line, &c.name, &c.text);
             obj.evidence.push(graph.add_evidence(ev));
             obj.properties.insert("description".into(), json!(c.text));
         }

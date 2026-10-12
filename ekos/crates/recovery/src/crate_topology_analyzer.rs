@@ -164,7 +164,7 @@ fn resolve_dep_entry(value: &toml::Value) -> DepResolution {
             if let Some(toml::Value::String(path)) = t.get("path") {
                 return DepResolution::Path(path.clone());
             }
-            if t.get("workspace").and_then(|v| v.as_bool()) == Some(true) {
+            if t.get("workspace").and_then(toml::Value::as_bool) == Some(true) {
                 return DepResolution::Unresolved; // resolved by the caller via `workspace_deps`
             }
             if let Some(toml::Value::String(version)) = t.get("version") {
@@ -264,7 +264,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                             None => WorkspaceDep::Version(
                                 t.get("version")
                                     .and_then(|v| v.as_str())
-                                    .map(|s| s.to_string()),
+                                    .map(std::string::ToString::to_string),
                             ),
                         },
                         toml::Value::String(v) => WorkspaceDep::Version(Some(v.clone())),

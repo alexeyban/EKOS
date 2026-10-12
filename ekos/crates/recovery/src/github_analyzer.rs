@@ -94,7 +94,7 @@ fn find_closed_issue_numbers(body: &str) -> Vec<u64> {
             let Some(rest) = after.strip_prefix('#') else {
                 continue;
             };
-            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
             if let Ok(n) = digits.parse::<u64>()
                 && !out.contains(&n)
             {
@@ -122,7 +122,7 @@ fn find_bare_issue_numbers(body: &str) -> Vec<u64> {
             continue;
         }
         let rest = &body[idx + 1..];
-        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
         if let Ok(n) = digits.parse::<u64>()
             && !out.contains(&n)
         {
@@ -162,7 +162,7 @@ fn find_full_url_issue_numbers(body: &str, owner: &str, repo: &str) -> Vec<u64> 
             start = abs + prefix.len();
             let digits: String = lower[start..]
                 .chars()
-                .take_while(|c| c.is_ascii_digit())
+                .take_while(char::is_ascii_digit)
                 .collect();
             if let Ok(n) = digits.parse::<u64>()
                 && !out.contains(&n)
@@ -203,7 +203,7 @@ impl CompilerPass for GitHubAnalyzerPass {
         let mut ids: Vec<String> = self
             .item_artifact_ids
             .iter()
-            .map(|id| id.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         ids.sort();
         ids

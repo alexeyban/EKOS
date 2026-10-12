@@ -80,7 +80,7 @@ impl CompilerPass for ClickHouseAnalyzerPass {
         let mut ids: Vec<String> = self
             .table_artifact_ids
             .iter()
-            .map(|id| id.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         ids.sort();
         ids

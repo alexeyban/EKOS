@@ -271,16 +271,8 @@ impl Walker<'_> {
         }
     }
 
-    fn query(&mut self, q: &Query, top: bool) -> (String, Needs) {
-        if q.with.is_some() {
-            self.block(QUERY_SHAPE, "WITH (common table expressions)");
-        }
-        if q.fetch.is_some() || !q.locks.is_empty() || q.for_clause.is_some() {
-            self.block(QUERY_SHAPE, "FETCH / FOR UPDATE / FOR … clause");
-        }
-        if !q.limit_by.is_empty() || q.format_clause.is_some() {
-            self.block(QUERY_SHAPE, "LIMIT BY / FORMAT clause");
-        }
+    /// What a query's own `SETTINGS` clause records. A source may not carry one.
+    fn settings_needs(&mut self, q: &Query) -> Needs {
         let mut needs = Needs::default();
         if let Some(settings) = &q.settings {
             if self.side == Side::Postgres {
@@ -296,6 +288,50 @@ impl Walker<'_> {
                 }
             }
         }
+        needs
+    }
+
+    /// ` ORDER BY …` with every key's direction and NULL placement stated.
+    fn order_by(&mut self, order: &sqlparser::ast::OrderBy) -> String {
+        if order.interpolate.is_some() {
+            self.block(QUERY_SHAPE, "ORDER BY … INTERPOLATE");
+        }
+        let mut keys = Vec::new();
+        for o in &order.exprs {
+            if o.with_fill.is_some() {
+                self.block(QUERY_SHAPE, "ORDER BY … WITH FILL");
+            }
+            let descending = o.asc == Some(false);
+            // PostgreSQL: NULL sorts as the largest value. ClickHouse: last either way.
+            let nulls_first = match (o.nulls_first, self.side) {
+                (Some(explicit), _) => explicit,
+                (None, Side::Postgres) => descending,
+                (None, Side::ClickHouse) => false,
+            };
+            if o.nulls_first.is_none() && descending {
+                self.note("ORDER BY … DESC states NULLS FIRST, PostgreSQL's default");
+            }
+            keys.push(format!(
+                "{} {} NULLS {}",
+                self.expr(&o.expr),
+                if descending { "DESC" } else { "ASC" },
+                if nulls_first { "FIRST" } else { "LAST" }
+            ));
+        }
+        format!(" ORDER BY {}", keys.join(", "))
+    }
+
+    fn query(&mut self, q: &Query, top: bool) -> (String, Needs) {
+        if q.with.is_some() {
+            self.block(QUERY_SHAPE, "WITH (common table expressions)");
+        }
+        if q.fetch.is_some() || !q.locks.is_empty() || q.for_clause.is_some() {
+            self.block(QUERY_SHAPE, "FETCH / FOR UPDATE / FOR … clause");
+        }
+        if !q.limit_by.is_empty() || q.format_clause.is_some() {
+            self.block(QUERY_SHAPE, "LIMIT BY / FORMAT clause");
+        }
+        let mut needs = self.settings_needs(q);
         let simple =
             q.order_by.is_none() && q.limit.is_none() && q.offset.is_none() && q.settings.is_none();
         let (mut sql, body_needs) = self.set_expr(&q.body, top && simple);
@@ -304,32 +340,7 @@ impl Walker<'_> {
             needs = body_needs;
         }
         if let Some(order) = &q.order_by {
-            if order.interpolate.is_some() {
-                self.block(QUERY_SHAPE, "ORDER BY … INTERPOLATE");
-            }
-            let mut keys = Vec::new();
-            for o in &order.exprs {
-                if o.with_fill.is_some() {
-                    self.block(QUERY_SHAPE, "ORDER BY … WITH FILL");
-                }
-                let descending = o.asc == Some(false);
-                // PostgreSQL: NULL sorts as the largest value. ClickHouse: last either way.
-                let nulls_first = match (o.nulls_first, self.side) {
-                    (Some(explicit), _) => explicit,
-                    (None, Side::Postgres) => descending,
-                    (None, Side::ClickHouse) => false,
-                };
-                if o.nulls_first.is_none() && descending {
-                    self.note("ORDER BY … DESC states NULLS FIRST, PostgreSQL's default");
-                }
-                keys.push(format!(
-                    "{} {} NULLS {}",
-                    self.expr(&o.expr),
-                    if descending { "DESC" } else { "ASC" },
-                    if nulls_first { "FIRST" } else { "LAST" }
-                ));
-            }
-            sql.push_str(&format!(" ORDER BY {}", keys.join(", ")));
+            sql.push_str(&self.order_by(order));
         }
         if let Some(limit) = &q.limit {
             sql.push_str(&format!(" LIMIT {}", self.count_literal(limit, "LIMIT")));

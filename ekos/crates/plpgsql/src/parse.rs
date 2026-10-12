@@ -1270,6 +1270,60 @@ const ROUTINE_ATTRIBUTES: &[&str] = &[
     "RETURN",
 ];
 
+/// The arguments of the list opening at `toks[*i]`, split on top-level commas so `numeric(10,2)`
+/// stays one argument. `*i` is left just past the closing parenthesis.
+fn argument_list(src: &str, toks: &[crate::lex::Spanned], i: &mut usize) -> Vec<String> {
+    use crate::lex::Tok;
+    let mut arguments = Vec::new();
+    let mut depth = 0i32;
+    let mut seg = toks[*i].end;
+    for t in &toks[*i..] {
+        *i += 1;
+        match t.tok {
+            Tok::Punct('(') => depth += 1,
+            Tok::Punct(')') => {
+                depth -= 1;
+                if depth == 0 {
+                    arguments.push(src[seg..t.start].trim().to_string());
+                    break;
+                }
+            }
+            Tok::Punct(',') if depth == 1 => {
+                arguments.push(src[seg..t.start].trim().to_string());
+                seg = t.end;
+            }
+            _ => {}
+        }
+    }
+    arguments.retain(|a| !a.is_empty());
+    arguments
+}
+
+/// The token index just past a `RETURNS` type that starts at `from`: it ends at the body, a `;`,
+/// or the next routine attribute at parenthesis depth zero.
+fn return_type_end(toks: &[crate::lex::Spanned], from: usize) -> usize {
+    use crate::lex::Tok;
+    let mut d = 0i32;
+    let mut end = from;
+    while let Some(n) = toks.get(end) {
+        match &n.tok {
+            Tok::Punct('(') => d += 1,
+            Tok::Punct(')') => d -= 1,
+            Tok::Punct(';') | Tok::Dollar { .. } | Tok::Str(_) if d == 0 => break,
+            Tok::Word(w)
+                if d == 0
+                    && end > from
+                    && ROUTINE_ATTRIBUTES.iter().any(|a| w.eq_ignore_ascii_case(a)) =>
+            {
+                break;
+            }
+            _ => {}
+        }
+        end += 1;
+    }
+    end
+}
+
 /// Read the routine header from tokens rather than raw text.
 ///
 /// The body is a single `Dollar` token, so nothing inside it can be mistaken for a clause — a
@@ -1299,28 +1353,7 @@ fn parse_signature(src: &str, toks: &[crate::lex::Spanned]) -> ProcSignature {
 
     // Arguments: split on top-level commas, so `numeric(10,2)` stays one argument.
     if matches!(toks.get(i).map(|t| &t.tok), Some(Tok::Punct('('))) {
-        let mut depth = 0i32;
-        let mut seg = toks[i].end;
-        for t in &toks[i..] {
-            match t.tok {
-                Tok::Punct('(') => depth += 1,
-                Tok::Punct(')') => {
-                    depth -= 1;
-                    if depth == 0 {
-                        arguments.push(src[seg..t.start].trim().to_string());
-                        i += 1;
-                        break;
-                    }
-                }
-                Tok::Punct(',') if depth == 1 => {
-                    arguments.push(src[seg..t.start].trim().to_string());
-                    seg = t.end;
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        arguments.retain(|a| !a.is_empty());
+        arguments = argument_list(src, toks, &mut i);
     }
 
     // The clauses after the argument list, at parenthesis depth zero.
@@ -1341,24 +1374,7 @@ fn parse_signature(src: &str, toks: &[crate::lex::Spanned]) -> ProcSignature {
                 && toks.get(k + 2).is_some_and(|n| is_word(&n.tok, "ON"));
             if !null_clause {
                 let from = k + 1;
-                let mut d = 0i32;
-                let mut end = from;
-                while let Some(n) = toks.get(end) {
-                    match &n.tok {
-                        Tok::Punct('(') => d += 1,
-                        Tok::Punct(')') => d -= 1,
-                        Tok::Punct(';') | Tok::Dollar { .. } | Tok::Str(_) if d == 0 => break,
-                        Tok::Word(w)
-                            if d == 0
-                                && end > from
-                                && ROUTINE_ATTRIBUTES.iter().any(|a| w.eq_ignore_ascii_case(a)) =>
-                        {
-                            break;
-                        }
-                        _ => {}
-                    }
-                    end += 1;
-                }
+                let end = return_type_end(toks, from);
                 if end > from {
                     let text = &src[toks[from].start..toks[end - 1].end];
                     returns = Some(text.split_whitespace().collect::<Vec<_>>().join(" "));

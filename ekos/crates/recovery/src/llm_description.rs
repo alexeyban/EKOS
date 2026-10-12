@@ -568,7 +568,7 @@ pub async fn describe_objects_with_progress(
                 .properties
                 .get("source_span")
                 .and_then(|s| s.get("start_line"))
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0) as u32;
             let location = SourceLocation::at(file_path, start_line);
             let fragment = format!(
@@ -666,7 +666,7 @@ pub async fn describe_project(
         std::cmp::Reverse(
             o.properties
                 .get("member_count")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0),
         )
     });

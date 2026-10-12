@@ -289,11 +289,14 @@ fn apply_stream_line(acc: &mut StreamAccumulator, line: &str, on_chunk: &mut dyn
         acc.content.push_str(text);
         on_chunk(text.to_string());
     }
-    if event.get("done").and_then(|d| d.as_bool()) == Some(true) {
-        if let Some(t) = event.get("prompt_eval_count").and_then(|v| v.as_u64()) {
+    if event.get("done").and_then(serde_json::Value::as_bool) == Some(true) {
+        if let Some(t) = event
+            .get("prompt_eval_count")
+            .and_then(serde_json::Value::as_u64)
+        {
             acc.input_tokens = t as u32;
         }
-        if let Some(t) = event.get("eval_count").and_then(|v| v.as_u64()) {
+        if let Some(t) = event.get("eval_count").and_then(serde_json::Value::as_u64) {
             acc.output_tokens = t as u32;
         }
     }

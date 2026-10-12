@@ -57,7 +57,7 @@ const MAX_TOKENS_FIELD: &str = "request_max_tokens";
 fn truncated_below(entry: &serde_json::Value, resp: &LlmResponse, wanted: u32) -> bool {
     entry
         .get(MAX_TOKENS_FIELD)
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .is_some_and(|limit| resp.output_tokens as u64 >= limit && (wanted as u64) > limit)
 }
 

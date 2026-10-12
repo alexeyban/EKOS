@@ -42,42 +42,9 @@ pub fn dollar_quote_tag_end(chars: &[char], start: usize) -> Option<usize> {
 /// progress and a malformed tail is treated as opaque instead of being scanned as code.
 pub fn skip_non_code(chars: &[char], i: usize) -> Option<usize> {
     match chars[i] {
-        '\'' => {
-            let mut j = i + 1;
-            while j < chars.len() {
-                if chars[j] == '\\' && j + 1 < chars.len() {
-                    j += 2;
-                    continue;
-                }
-                if chars[j] == '\'' {
-                    // A doubled '' is an escaped quote, not the end of the literal.
-                    if chars.get(j + 1) == Some(&'\'') {
-                        j += 2;
-                        continue;
-                    }
-                    return Some(j + 1);
-                }
-                j += 1;
-            }
-            Some(chars.len())
-        }
-        '"' => {
-            let mut j = i + 1;
-            while j < chars.len() {
-                if chars[j] == '"' {
-                    return Some(j + 1);
-                }
-                j += 1;
-            }
-            Some(chars.len())
-        }
-        '-' if chars.get(i + 1) == Some(&'-') => {
-            let mut j = i;
-            while j < chars.len() && chars[j] != '\n' {
-                j += 1;
-            }
-            Some(j)
-        }
+        '\'' => Some(string_literal_end(chars, i)),
+        '"' => Some(end_after(chars, i + 1, |j| chars[j] == '"', 1)),
+        '-' if chars.get(i + 1) == Some(&'-') => Some(end_after(chars, i, |j| chars[j] == '\n', 0)),
         '/' if chars.get(i + 1) == Some(&'*') => {
             let mut j = i + 2;
             while j + 1 < chars.len() && !(chars[j] == '*' && chars[j + 1] == '/') {
@@ -88,17 +55,41 @@ pub fn skip_non_code(chars: &[char], i: usize) -> Option<usize> {
         '$' => {
             let tag_end = dollar_quote_tag_end(chars, i)?;
             let tag = &chars[i..=tag_end];
-            let mut j = tag_end + 1;
-            while j < chars.len() {
-                if chars[j] == '$' && chars[j..].starts_with(tag) {
-                    return Some(j + tag.len());
-                }
-                j += 1;
-            }
-            Some(chars.len())
+            Some(end_after(
+                chars,
+                tag_end + 1,
+                |j| chars[j] == '$' && chars[j..].starts_with(tag),
+                tag.len(),
+            ))
         }
         _ => None,
     }
+}
+
+/// The first index at or after `from` where `stop` holds, plus `width`; the end of input when it
+/// never holds.
+fn end_after(chars: &[char], from: usize, stop: impl Fn(usize) -> bool, width: usize) -> usize {
+    (from..chars.len())
+        .find(|j| stop(*j))
+        .map_or(chars.len(), |j| j + width)
+}
+
+/// The index just past the single-quoted literal opening at `open`. A backslash escapes the next
+/// character, and a doubled `''` is an escaped quote, not the end of the literal.
+fn string_literal_end(chars: &[char], open: usize) -> usize {
+    let mut j = open + 1;
+    while j < chars.len() {
+        let escaped = (chars[j] == '\\' && j + 1 < chars.len())
+            || (chars[j] == '\'' && chars.get(j + 1) == Some(&'\''));
+        if escaped {
+            j += 2;
+        } else if chars[j] == '\'' {
+            return j + 1;
+        } else {
+            j += 1;
+        }
+    }
+    chars.len()
 }
 
 /// Byte-free `[start, end)` spans of each top-level statement in `chars`, each span running up to

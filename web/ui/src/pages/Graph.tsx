@@ -78,6 +78,314 @@ function pinPositions(nodes: GNode[], positions: Record<string, [number, number]
   });
 }
 
+/** The URL's view parameters for this time-travel position and selected object. */
+function withViewParams(prev: URLSearchParams, asOf: string | null, selectedId: string | null) {
+  const next = new URLSearchParams(prev);
+  if (asOf) next.set("as_of", asOf);
+  else next.delete("as_of");
+  if (selectedId) next.set("focus", selectedId);
+  else next.delete("focus");
+  return next;
+}
+
+/** The graph on screen: an isolated neighbourhood when one is active, else the exported graph. */
+function shownGraph(
+  isolated: boolean,
+  neighborhood: NeighborhoodOut | undefined,
+  exported: GraphOut | undefined,
+): { nodes: GNode[]; links: GLink[] } {
+  if (isolated) return neighborhood ? neighborhoodToGraph(neighborhood) : { nodes: [], links: [] };
+  return exported ? exportToGraph(exported) : { nodes: [], links: [] };
+}
+
+/** `excluded` with one relationship kind switched on or off. */
+function withRel(excluded: Set<string>, rk: string, on: boolean): Set<string> {
+  const next = new Set(excluded);
+  if (on) next.delete(rk);
+  else next.add(rk);
+  return next;
+}
+
+interface ToolbarProps {
+  isolated: boolean;
+  expanded: boolean;
+  tracing: boolean;
+  linkCopied: boolean;
+  fullscreen: boolean;
+  onBackToFull: () => void;
+  onOverview: () => void;
+  onClearImpact: () => void;
+  onCopyLink: () => void;
+  onPng: () => void;
+  onGltf: () => void;
+  onToggleFullscreen: () => void;
+}
+
+/** The way back up from the current level: out of an isolated neighbourhood, or to the overview. */
+function ToolbarBack(p: ToolbarProps) {
+  if (p.isolated) {
+    return (
+      <button className="pill" onClick={p.onBackToFull}>
+        ↑ back to full graph
+      </button>
+    );
+  }
+  if (p.expanded) {
+    return (
+      <button className="pill" onClick={p.onOverview}>
+        ↑ overview
+      </button>
+    );
+  }
+  return <span className="muted">click a bubble to drill in</span>;
+}
+
+function GraphToolbar(p: ToolbarProps) {
+  return (
+    <div className="graph-toolbar">
+      <span>
+        <ToolbarBack {...p} />
+        {p.tracing && (
+          <button className="pill" onClick={p.onClearImpact} style={{ marginLeft: "0.4rem" }}>
+            ✕ clear impact trace
+          </button>
+        )}
+      </span>
+      <span>
+        <button
+          className="pill"
+          onClick={p.onCopyLink}
+          title="copy a link to this exact view (time-travel position + selected object)"
+        >
+          {p.linkCopied ? "✓ copied" : "🔗 copy link"}
+        </button>
+        <button
+          className="pill"
+          onClick={p.onPng}
+          title="save the current view as a PNG"
+          style={{ marginLeft: "0.4rem" }}
+        >
+          ⬇ PNG
+        </button>
+        <button
+          className="pill"
+          onClick={p.onGltf}
+          title="save the current view as a glTF model"
+          style={{ marginLeft: "0.4rem" }}
+        >
+          ⬇ glTF
+        </button>
+        <button
+          className="pill"
+          onClick={p.onToggleFullscreen}
+          style={{ marginLeft: "0.4rem" }}
+        >
+          {p.fullscreen ? "✕ exit fullscreen" : "⛶ fullscreen"}
+        </button>
+      </span>
+    </div>
+  );
+}
+
+type Isolate = { id: string; depth: number } | null;
+type Impact = { id: string; direction: "dependents" | "dependencies" } | null;
+
+interface SidebarProps {
+  isolate: Isolate;
+  expanded: boolean;
+  focusKind: string | null;
+  impact: Impact;
+  needsServerLayout: boolean;
+  nodeCount: number;
+  layoutLoading: boolean;
+  graphData: GraphOut | undefined;
+  minDegree: number;
+  excludedRels: Set<string>;
+  q: string;
+  matches: { id: string; name: string }[];
+  overviewNodes: GraphOut["nodes"];
+  kinds: string[];
+  setIsolate: (v: Isolate) => void;
+  setMinDegree: (v: number) => void;
+  toggleRel: (rk: string, on: boolean) => void;
+  setQ: (v: string) => void;
+  gotoObject: (id: string) => void;
+  setFocusKind: (v: string | null) => void;
+}
+
+function sidebarTitle(p: SidebarProps): string {
+  if (p.isolate) return `Isolated neighbourhood (depth ${p.isolate.depth})`;
+  if (p.expanded) return `Objects · focus: ${p.focusKind}`;
+  return "Overview — by kind";
+}
+
+/** What the current view is and is not showing: impact trace, layout source, truncation. */
+function SidebarNotes(p: SidebarProps) {
+  const truncated = p.isolate ? undefined : p.graphData?.truncated;
+  return (
+    <>
+      {p.impact && (
+        <p className="muted">
+          impact trace: {p.impact.direction} of <code>{p.impact.id.slice(0, 8)}…</code>
+          {!p.expanded && !p.isolate && (
+            <> — switch to object-level view (or isolate this object) to see it highlighted</>
+          )}
+        </p>
+      )}
+      {p.needsServerLayout && (
+        <p className="muted">
+          {p.nodeCount} nodes — server-computed layout{" "}
+          {p.layoutLoading ? "(computing…)" : "(cached)"}
+        </p>
+      )}
+      {truncated?.nodes && (
+        <p className="warn-line">
+          showing the {truncated.node_limit} most-connected of{" "}
+          {p.graphData?.counts.objects_after_filter ?? "?"} — raise min-degree to thin it
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The depth slider of an isolated neighbourhood, or the degree and relationship filters. */
+function SidebarFilters(p: SidebarProps) {
+  if (p.isolate) {
+    const isolate = p.isolate;
+    return (
+      <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
+        neighbourhood depth: {isolate.depth}
+        <input
+          type="range"
+          min={1}
+          max={3}
+          value={isolate.depth}
+          onChange={(e) => p.setIsolate({ id: isolate.id, depth: Number(e.target.value) })}
+          style={{ width: "100%" }}
+        />
+      </label>
+    );
+  }
+  const relKinds = p.graphData?.rel_kind_index.length ? p.graphData.rel_kind_index : ALL_RELS;
+  return (
+    <>
+      {p.expanded && (
+        <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
+          min degree: {p.minDegree}
+          <input
+            type="range"
+            min={0}
+            max={15}
+            value={p.minDegree}
+            onChange={(e) => p.setMinDegree(Number(e.target.value))}
+            style={{ width: "100%" }}
+          />
+        </label>
+      )}
+      <p className="muted" style={{ marginTop: "0.75rem" }}>
+        relationship kinds
+      </p>
+      {relKinds.map((rk) => (
+        <label key={rk} className="flt">
+          <input
+            type="checkbox"
+            checked={!p.excludedRels.has(rk)}
+            onChange={(e) => p.toggleRel(rk, e.target.checked)}
+          />{" "}
+          {rk}
+        </label>
+      ))}
+    </>
+  );
+}
+
+/** The kinds to drill into (overview) or to focus (object level). Not shown when isolated. */
+function SidebarKinds(p: SidebarProps) {
+  if (p.isolate) return null;
+  return (
+    <>
+      <p className="muted" style={{ marginTop: "0.75rem" }}>
+        {p.expanded ? "focus a kind" : "click a bubble (or a name) to drill in"}
+      </p>
+      <ul className="kinds">
+        {p.overviewNodes.map((n) => (
+          <li key={n.id}>
+            <button
+              className="linkish"
+              onClick={() => p.setFocusKind(n.n ?? null)}
+              style={{ color: colorFor(n.k ?? 0) }}
+            >
+              {n.n}
+            </button>{" "}
+            <span className="muted">{n.count}</span>
+          </li>
+        ))}
+        {p.kinds.map((k) => (
+          <li key={k}>
+            <button
+              className="linkish"
+              onClick={() => p.setFocusKind(k)}
+              style={{ fontWeight: k === p.focusKind ? 700 : 400 }}
+            >
+              {k}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function GraphSidebar(p: SidebarProps) {
+  return (
+    <aside className="graph-side">
+      <strong>{sidebarTitle(p)}</strong>
+      <SidebarNotes {...p} />
+      <SidebarFilters {...p} />
+
+      <p className="muted" style={{ marginTop: "0.75rem" }}>
+        search
+      </p>
+      <input
+        value={p.q}
+        onChange={(e) => p.setQ(e.target.value)}
+        placeholder="2–3 keywords"
+        style={{ width: "100%" }}
+      />
+      <ul className="srch">
+        {p.matches.map((m) => (
+          <li key={m.id}>
+            <button className="linkish" onClick={() => p.gotoObject(m.id)}>
+              {m.name}
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <SidebarKinds {...p} />
+    </aside>
+  );
+}
+
+/** Load and error lines for whichever fetch feeds the canvas, and for the impact trace. */
+function GraphStatus(p: {
+  isolated: boolean;
+  feed: { isError: boolean; isLoading: boolean; error: unknown };
+  impactError: unknown;
+}) {
+  return (
+    <>
+      {p.feed.isError && <p className="err">{String(p.feed.error)}</p>}
+      {p.feed.isLoading && (
+        <p className="muted">{p.isolated ? "loading neighbourhood…" : "loading graph…"}</p>
+      )}
+      {p.impactError !== null && (
+        <p className="err">impact trace failed: {String(p.impactError)}</p>
+      )}
+    </>
+  );
+}
+
 export function Graph() {
   const { id = "" } = useParams();
   // RFC 0136 §7 (deep-linking) — `?as_of=&focus=` seed the initial view once on mount (a lazy
@@ -113,25 +421,15 @@ export function Graph() {
 
   useEffect(() => {
     setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (asOf) next.set("as_of", asOf);
-        else next.delete("as_of");
-        if (selectedId) next.set("focus", selectedId);
-        else next.delete("focus");
-        return next;
-      },
+      (prev) => withViewParams(prev, asOf, selectedId),
       { replace: true },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asOf, selectedId]);
   // RFC 0136 §2 — set replaces the normal graph fetch with just this object's BFS neighbourhood.
-  const [isolate, setIsolate] = useState<{ id: string; depth: number } | null>(null);
+  const [isolate, setIsolate] = useState<Isolate>(null);
   // RFC 0136 §3 — set overlays a hop-distance trace on whatever graph is currently on screen.
-  const [impact, setImpact] = useState<{
-    id: string;
-    direction: "dependents" | "dependencies";
-  } | null>(null);
+  const [impact, setImpact] = useState<Impact>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);
 
   const expanded = focusKind !== null;
@@ -190,14 +488,10 @@ export function Graph() {
     enabled: impact !== null,
   });
 
-  const { nodes, links } = useMemo(() => {
-    if (isolate) {
-      return neighborhood.data
-        ? neighborhoodToGraph(neighborhood.data)
-        : { nodes: [] as GNode[], links: [] as GLink[] };
-    }
-    return graph.data ? exportToGraph(graph.data) : { nodes: [] as GNode[], links: [] as GLink[] };
-  }, [graph.data, isolate, neighborhood.data]);
+  const { nodes, links } = useMemo(
+    () => shownGraph(isolate !== null, neighborhood.data, graph.data),
+    [graph.data, isolate, neighborhood.data],
+  );
 
   // RFC 0136 §4 — above the client-side simulation threshold, ask the console to precompute
   // ForceAtlas2 positions server-side rather than let the browser's own force simulation choke.
@@ -243,227 +537,75 @@ export function Graph() {
     setFocusId(oid);
   };
 
-  const toggleRel = (rk: string, on: boolean) =>
-    setExcludedRels((s) => {
-      const n = new Set(s);
-      if (on) n.delete(rk);
-      else n.add(rk);
-      return n;
-    });
+  const toggleRel = (rk: string, on: boolean) => setExcludedRels((s) => withRel(s, rk, on));
+
+  const copyLink = () => {
+    navigator.clipboard
+      ?.writeText(window.location.href)
+      .then(() => {
+        setLinkCopied(true);
+        window.setTimeout(() => setLinkCopied(false), 1500);
+      })
+      // Clipboard access can be denied (permissions, insecure context); the link is
+      // still in the address bar, so there is nothing to recover — just don't claim it.
+      .catch(() => setLinkCopied(false));
+  };
+
+  const kinds = useMemo(
+    () => (expanded ? [...new Set(nodes.map((n) => n.kind))].sort((a, b) => a.localeCompare(b)) : []),
+    [expanded, nodes],
+  );
 
   const overviewNodes = graph.data && !expanded ? [...graph.data.nodes] : [];
   overviewNodes.sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
 
   return (
     <div className={fullscreen ? "graph-page fs" : "graph-page"}>
-      <div className="graph-toolbar">
-        <span>
-          {isolate ? (
-            <button className="pill" onClick={() => setIsolate(null)}>
-              ↑ back to full graph
-            </button>
-          ) : expanded ? (
-            <button className="pill" onClick={() => setFocusKind(null)}>
-              ↑ overview
-            </button>
-          ) : (
-            <span className="muted">click a bubble to drill in</span>
-          )}
-          {impact && (
-            <button className="pill" onClick={() => setImpact(null)} style={{ marginLeft: "0.4rem" }}>
-              ✕ clear impact trace
-            </button>
-          )}
-        </span>
-        <span>
-          <button
-            className="pill"
-            onClick={() => {
-              navigator.clipboard
-                ?.writeText(window.location.href)
-                .then(() => {
-                  setLinkCopied(true);
-                  window.setTimeout(() => setLinkCopied(false), 1500);
-                })
-                // Clipboard access can be denied (permissions, insecure context); the link is
-                // still in the address bar, so there is nothing to recover — just don't claim it.
-                .catch(() => setLinkCopied(false));
-            }}
-            title="copy a link to this exact view (time-travel position + selected object)"
-          >
-            {linkCopied ? "✓ copied" : "🔗 copy link"}
-          </button>
-          <button
-            className="pill"
-            onClick={() => canvasRef.current?.exportPng()}
-            title="save the current view as a PNG"
-            style={{ marginLeft: "0.4rem" }}
-          >
-            ⬇ PNG
-          </button>
-          <button
-            className="pill"
-            onClick={() => canvasRef.current?.exportGltf()}
-            title="save the current view as a glTF model"
-            style={{ marginLeft: "0.4rem" }}
-          >
-            ⬇ glTF
-          </button>
-          <button
-            className="pill"
-            onClick={() => setFullscreen((f) => !f)}
-            style={{ marginLeft: "0.4rem" }}
-          >
-            {fullscreen ? "✕ exit fullscreen" : "⛶ fullscreen"}
-          </button>
-        </span>
-      </div>
+      <GraphToolbar
+        isolated={isolate !== null}
+        expanded={expanded}
+        tracing={impact !== null}
+        linkCopied={linkCopied}
+        fullscreen={fullscreen}
+        onBackToFull={() => setIsolate(null)}
+        onOverview={() => setFocusKind(null)}
+        onClearImpact={() => setImpact(null)}
+        onCopyLink={copyLink}
+        onPng={() => canvasRef.current?.exportPng()}
+        onGltf={() => canvasRef.current?.exportGltf()}
+        onToggleFullscreen={() => setFullscreen((f) => !f)}
+      />
 
       <div className="graph-layout">
-        <aside className="graph-side">
-          <strong>
-            {isolate
-              ? `Isolated neighbourhood (depth ${isolate.depth})`
-              : expanded
-                ? `Objects · focus: ${focusKind}`
-                : "Overview — by kind"}
-          </strong>
-          {impact && (
-            <p className="muted">
-              impact trace: {impact.direction} of <code>{impact.id.slice(0, 8)}…</code>
-              {!expanded && !isolate && (
-                <> — switch to object-level view (or isolate this object) to see it highlighted</>
-              )}
-            </p>
-          )}
-          {needsServerLayout && (
-            <p className="muted">
-              {nodes.length} nodes — server-computed layout{" "}
-              {layout.isLoading ? "(computing…)" : "(cached)"}
-            </p>
-          )}
-          {graph.data?.truncated?.nodes && !isolate && (
-            <p className="warn-line">
-              showing the {graph.data.truncated.node_limit} most-connected of{" "}
-              {graph.data.counts.objects_after_filter ?? "?"} — raise min-degree to thin it
-            </p>
-          )}
-
-          {isolate && (
-            <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
-              neighbourhood depth: {isolate.depth}
-              <input
-                type="range"
-                min={1}
-                max={3}
-                value={isolate.depth}
-                onChange={(e) => setIsolate({ id: isolate.id, depth: Number(e.target.value) })}
-                style={{ width: "100%" }}
-              />
-            </label>
-          )}
-
-          {expanded && !isolate && (
-            <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
-              min degree: {minDegree}
-              <input
-                type="range"
-                min={0}
-                max={15}
-                value={minDegree}
-                onChange={(e) => setMinDegree(Number(e.target.value))}
-                style={{ width: "100%" }}
-              />
-            </label>
-          )}
-
-          {!isolate && (
-            <>
-              <p className="muted" style={{ marginTop: "0.75rem" }}>
-                relationship kinds
-              </p>
-              {(graph.data && graph.data.rel_kind_index.length
-                ? graph.data.rel_kind_index
-                : ALL_RELS
-              ).map((rk) => (
-                <label key={rk} className="flt">
-                  <input
-                    type="checkbox"
-                    checked={!excludedRels.has(rk)}
-                    onChange={(e) => toggleRel(rk, e.target.checked)}
-                  />{" "}
-                  {rk}
-                </label>
-              ))}
-            </>
-          )}
-
-          <p className="muted" style={{ marginTop: "0.75rem" }}>
-            search
-          </p>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="2–3 keywords"
-            style={{ width: "100%" }}
-          />
-          <ul className="srch">
-            {search.data?.matches.map((m) => (
-              <li key={m.id}>
-                <button className="linkish" onClick={() => gotoObject(m.id)}>
-                  {m.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-
-          {!isolate && (
-            <>
-              <p className="muted" style={{ marginTop: "0.75rem" }}>
-                {expanded ? "focus a kind" : "click a bubble (or a name) to drill in"}
-              </p>
-              <ul className="kinds">
-                {overviewNodes.map((n) => (
-                  <li key={n.id}>
-                    <button
-                      className="linkish"
-                      onClick={() => setFocusKind(n.n ?? null)}
-                      style={{ color: colorFor(n.k ?? 0) }}
-                    >
-                      {n.n}
-                    </button>{" "}
-                    <span className="muted">{n.count}</span>
-                  </li>
-                ))}
-                {expanded &&
-                  [...new Set(nodes.map((n) => n.kind))]
-                    .sort((a, b) => a.localeCompare(b))
-                    .map((k) => (
-                    <li key={k}>
-                      <button
-                        className="linkish"
-                        onClick={() => setFocusKind(k)}
-                        style={{ fontWeight: k === focusKind ? 700 : 400 }}
-                      >
-                        {k}
-                      </button>
-                    </li>
-                  ))}
-              </ul>
-            </>
-          )}
-        </aside>
+        <GraphSidebar
+          isolate={isolate}
+          expanded={expanded}
+          focusKind={focusKind}
+          impact={impact}
+          needsServerLayout={needsServerLayout}
+          nodeCount={nodes.length}
+          layoutLoading={layout.isLoading}
+          graphData={graph.data}
+          minDegree={minDegree}
+          excludedRels={excludedRels}
+          q={q}
+          matches={search.data?.matches ?? []}
+          overviewNodes={overviewNodes}
+          kinds={kinds}
+          setIsolate={setIsolate}
+          setMinDegree={setMinDegree}
+          toggleRel={toggleRel}
+          setQ={setQ}
+          gotoObject={gotoObject}
+          setFocusKind={setFocusKind}
+        />
 
         <div className="graph-canvas">
-          {(isolate ? neighborhood.isError : graph.isError) && (
-            <p className="err">{String(isolate ? neighborhood.error : graph.error)}</p>
-          )}
-          {(isolate ? neighborhood.isLoading : graph.isLoading) && (
-            <p className="muted">{isolate ? "loading neighbourhood…" : "loading graph…"}</p>
-          )}
-          {impact?.id && impactQuery.isError && (
-            <p className="err">impact trace failed: {String(impactQuery.error)}</p>
-          )}
+          <GraphStatus
+            isolated={isolate !== null}
+            feed={isolate ? neighborhood : graph}
+            impactError={impact?.id && impactQuery.isError ? impactQuery.error : null}
+          />
           {nodes.length > 0 && (
             <Suspense fallback={<p className="muted">loading renderer…</p>}>
               <GraphCanvas
@@ -476,13 +618,7 @@ export function Graph() {
                 asOf={isolate ? null : asOf}
                 impactHops={impactHops}
                 disputed={disputed}
-                onNodeClick={(n) => {
-                  if (n.isAggregate) setFocusKind(n.label);
-                  else {
-                    setSelectedId(n.id);
-                    setFocusId(n.id);
-                  }
-                }}
+                onNodeClick={(n) => (n.isAggregate ? setFocusKind(n.label) : gotoObject(n.id))}
               />
             </Suspense>
           )}

@@ -130,6 +130,85 @@ struct YamlSourceTable {
     columns: Vec<serde_json::Value>,
 }
 
+/// Records what one dbt column test states onto `col`, and its name in `names`.
+fn apply_column_test(t: &serde_yaml::Value, col: &mut serde_json::Value, names: &mut Vec<String>) {
+    match t {
+        serde_yaml::Value::String(s) if s == "not_null" || s == "unique" => {
+            col[s.as_str()] = serde_json::json!(true);
+            names.push(s.clone());
+        }
+        serde_yaml::Value::Mapping(m) => {
+            for (k, v) in m {
+                // Arguments sit under `arguments:` in dbt ≥ 1.10, directly under the test before.
+                let args = v.get("arguments").unwrap_or(v);
+                apply_named_test(k.as_str().unwrap_or_default(), args, col, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// One test written as a mapping (`- accepted_values: {…}`).
+fn apply_named_test(
+    k: &str,
+    args: &serde_yaml::Value,
+    col: &mut serde_json::Value,
+    names: &mut Vec<String>,
+) {
+    match k {
+        "not_null" | "unique" => {
+            col[k] = serde_json::json!(true);
+            names.push(k.to_string());
+        }
+        "accepted_values" => {
+            let vals = accepted_values(args);
+            if !vals.is_empty() {
+                col["accepted_values"] = serde_json::json!(vals);
+                names.push("accepted_values".to_string());
+            }
+        }
+        "relationships" => {
+            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or_default();
+            let field = args
+                .get("field")
+                .and_then(|f| f.as_str())
+                .unwrap_or_default();
+            if let Some(table) = macro_target(to)
+                && !field.is_empty()
+            {
+                col["references"] =
+                    serde_json::json!({"table": table, "column": field.to_lowercase()});
+                names.push("relationships".to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The values an `accepted_values` test lists, as SQL literals, sorted and de-duplicated.
+fn accepted_values(args: &serde_yaml::Value) -> Vec<String> {
+    let quote = args
+        .get("quote")
+        .and_then(serde_yaml::Value::as_bool)
+        .unwrap_or(true);
+    let mut vals: Vec<String> = args
+        .get("values")
+        .and_then(|v| v.as_sequence())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| match v {
+            serde_yaml::Value::String(s) if quote => Some(format!("'{}'", s.replace('\'', "''"))),
+            serde_yaml::Value::String(s) => Some(s.clone()),
+            serde_yaml::Value::Number(n) => Some(n.to_string()),
+            serde_yaml::Value::Bool(b) => Some(b.to_string()),
+            _ => None,
+        })
+        .collect();
+    vals.sort();
+    vals.dedup();
+    vals
+}
+
 /// RFC 0170 Phase 3 — one documented column: its description, declared type and dbt tests
 /// (`tests:` or dbt ≥ 1.8's `data_tests:`) as the same column facts the SQL analyzer records
 /// (`not_null`, `unique`), plus `accepted_values` (a declared domain, as normalized literals) and
@@ -174,68 +253,7 @@ fn column_json(
         .unwrap_or_default();
     let mut names = Vec::new();
     for t in &tests {
-        match t {
-            serde_yaml::Value::String(s) if s == "not_null" => {
-                col["not_null"] = serde_json::json!(true);
-                names.push("not_null".to_string());
-            }
-            serde_yaml::Value::String(s) if s == "unique" => {
-                col["unique"] = serde_json::json!(true);
-                names.push("unique".to_string());
-            }
-            serde_yaml::Value::Mapping(m) => {
-                for (k, v) in m {
-                    let k = k.as_str().unwrap_or_default();
-                    // Arguments sit under `arguments:` in dbt ≥ 1.10, directly under the test before.
-                    let args = v.get("arguments").unwrap_or(v);
-                    match k {
-                        "not_null" | "unique" => {
-                            col[k] = serde_json::json!(true);
-                            names.push(k.to_string());
-                        }
-                        "accepted_values" => {
-                            let quote = args.get("quote").and_then(|q| q.as_bool()).unwrap_or(true);
-                            let mut vals: Vec<String> = args
-                                .get("values")
-                                .and_then(|v| v.as_sequence())
-                                .into_iter()
-                                .flatten()
-                                .filter_map(|v| match v {
-                                    serde_yaml::Value::String(s) if quote => {
-                                        Some(format!("'{}'", s.replace('\'', "''")))
-                                    }
-                                    serde_yaml::Value::String(s) => Some(s.clone()),
-                                    serde_yaml::Value::Number(n) => Some(n.to_string()),
-                                    serde_yaml::Value::Bool(b) => Some(b.to_string()),
-                                    _ => None,
-                                })
-                                .collect();
-                            vals.sort();
-                            vals.dedup();
-                            if !vals.is_empty() {
-                                col["accepted_values"] = serde_json::json!(vals);
-                                names.push("accepted_values".to_string());
-                            }
-                        }
-                        "relationships" => {
-                            let to = args.get("to").and_then(|t| t.as_str()).unwrap_or_default();
-                            let field = args
-                                .get("field")
-                                .and_then(|f| f.as_str())
-                                .unwrap_or_default();
-                            if let Some(table) = macro_target(to)
-                                && !field.is_empty()
-                            {
-                                col["references"] = serde_json::json!({"table": table, "column": field.to_lowercase()});
-                                names.push("relationships".to_string());
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
+        apply_column_test(t, &mut col, &mut names);
     }
     if !names.is_empty() {
         col["dbt_tests"] = serde_json::json!(names);

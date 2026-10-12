@@ -170,6 +170,89 @@ fn elements(schema: &Value, errors: &mut Vec<String>) -> BTreeMap<String, Elemen
     out
 }
 
+type Changes = BTreeMap<String, [Option<String>; 2]>;
+
+/// The edits to an element's own fields, as (before, after) pairs. `None` when the edit is one
+/// that cannot be made, which is reported in `errors`.
+fn field_changes(e: &Element, b: &Element, errors: &mut Vec<String>) -> Option<Changes> {
+    let mut changes = Changes::new();
+    let described = e.description != b.description;
+    match e.kind {
+        "concept" => {
+            if e.key != b.key {
+                changes.insert("name".into(), [Some(b.key.clone()), Some(e.key.clone())]);
+            }
+            if described {
+                changes.insert(
+                    "description".into(),
+                    [b.description.clone(), e.description.clone()],
+                );
+            }
+        }
+        "enum" if e.key != b.key => {
+            errors.push(format!(
+                "{}: a code is the stored value and cannot be renamed ({} → {}); change \
+                 its description to relabel it",
+                e.path, b.key, e.key
+            ));
+            return None;
+        }
+        "enum" if described => {
+            changes.insert(
+                "label".into(),
+                [b.description.clone(), e.description.clone()],
+            );
+        }
+        _ => {}
+    }
+    Some(changes)
+}
+
+/// The review decision an edited element amounts to, or `None` when there is none to record
+/// (nothing changed, or the change is refused and reported in `p`). A rejection drops the other
+/// edits.
+fn decide_action(
+    e: &Element,
+    b: &Element,
+    changes: &mut Changes,
+    p: &mut ImportPlan,
+) -> Option<&'static str> {
+    let note_changed = e.note != b.note;
+    let status_changed = e.status != b.status;
+    let wanted = e.status.as_deref().unwrap_or("hypothesis");
+    if status_changed && wanted == "rejected" {
+        if !changes.is_empty() {
+            p.warnings.push(format!(
+                "{}: rejected — the other edits to it are ignored",
+                e.path
+            ));
+        }
+        if e.note.as_deref().is_none_or(|n| n.trim().is_empty()) {
+            p.errors.push(format!(
+                "{}: a rejection needs a reason in `ekos_review_note`",
+                e.path
+            ));
+            return None;
+        }
+        changes.clear();
+        return Some("reject");
+    }
+    if !changes.is_empty() {
+        return Some("edit");
+    }
+    if status_changed && wanted == "confirmed" {
+        return Some("confirm");
+    }
+    if status_changed {
+        p.warnings.push(format!(
+            "{}: `ekos_status: {wanted}` cannot be set by hand — only confirmed or rejected",
+            e.path
+        ));
+        return None;
+    }
+    (note_changed && b.status.as_deref() == Some("confirmed")).then_some("confirm")
+}
+
 /// Compare an edited schema with the current export and plan the decisions. Pure.
 pub fn plan(baseline: &Value, edited: &Value) -> ImportPlan {
     let mut p = ImportPlan::default();
@@ -220,69 +303,11 @@ pub fn plan(baseline: &Value, edited: &Value) -> ImportPlan {
             ));
             continue;
         };
-        let mut changes: BTreeMap<String, [Option<String>; 2]> = BTreeMap::new();
-        match e.kind {
-            "concept" => {
-                if e.key != b.key {
-                    changes.insert("name".into(), [Some(b.key.clone()), Some(e.key.clone())]);
-                }
-                if e.description != b.description {
-                    changes.insert(
-                        "description".into(),
-                        [b.description.clone(), e.description.clone()],
-                    );
-                }
-            }
-            "enum" => {
-                if e.key != b.key {
-                    p.errors.push(format!(
-                        "{}: a code is the stored value and cannot be renamed ({} → {}); change \
-                         its description to relabel it",
-                        e.path, b.key, e.key
-                    ));
-                    continue;
-                }
-                if e.description != b.description {
-                    changes.insert(
-                        "label".into(),
-                        [b.description.clone(), e.description.clone()],
-                    );
-                }
-            }
-            _ => {}
-        }
-        let note_changed = e.note != b.note;
-        let status_changed = e.status != b.status;
-        let wanted = e.status.as_deref().unwrap_or("hypothesis");
-        let action = if status_changed && wanted == "rejected" {
-            if !changes.is_empty() {
-                p.warnings.push(format!(
-                    "{}: rejected — the other edits to it are ignored",
-                    e.path
-                ));
-            }
-            if e.note.as_deref().is_none_or(|n| n.trim().is_empty()) {
-                p.errors.push(format!(
-                    "{}: a rejection needs a reason in `ekos_review_note`",
-                    e.path
-                ));
-                continue;
-            }
-            changes.clear();
-            "reject"
-        } else if !changes.is_empty() {
-            "edit"
-        } else if status_changed && wanted == "confirmed" {
-            "confirm"
-        } else if status_changed {
-            p.warnings.push(format!(
-                "{}: `ekos_status: {wanted}` cannot be set by hand — only confirmed or rejected",
-                e.path
-            ));
+        let Some(mut changes) = field_changes(e, b, &mut p.errors) else {
             continue;
-        } else if note_changed && b.status.as_deref() == Some("confirmed") {
-            "confirm"
-        } else {
+        };
+        let status_changed = e.status != b.status;
+        let Some(action) = decide_action(e, b, &mut changes, &mut p) else {
             continue;
         };
         if status_changed {

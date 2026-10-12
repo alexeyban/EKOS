@@ -188,7 +188,10 @@ fn from_ast(stmt: &Statement) -> Option<Binding> {
         table: object_name(table_name),
         function: Some(object_name(&exec_body.func_desc.name)),
         timing: Some(period.to_string()),
-        events: events.iter().map(|e| e.to_string()).collect(),
+        events: events
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
         // PostgreSQL defaults to FOR EACH STATEMENT when no FOR EACH clause is given.
         level: Some(
             match (include_each, trigger_object) {
@@ -197,10 +200,39 @@ fn from_ast(stmt: &Statement) -> Option<Binding> {
             }
             .to_string(),
         ),
-        condition: condition.as_ref().map(|c| c.to_string()),
+        condition: condition.as_ref().map(std::string::ToString::to_string),
         constraint: *is_constraint,
         error: None,
     })
+}
+
+/// The events of a trigger from the tokens between its timing and `ON`:
+/// `INSERT OR UPDATE OF a, b` → `["INSERT", "UPDATE OF a, b"]`.
+fn trigger_events(toks: &[ekos_plpgsql::lex::Spanned]) -> Vec<String> {
+    let mut events = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    for t in toks {
+        match &t.tok {
+            Tok::Word(w) if w.eq_ignore_ascii_case("OR") => {
+                events.push(current.join(" "));
+                current.clear();
+            }
+            Tok::Word(w) if current.is_empty() || w.eq_ignore_ascii_case("OF") => {
+                current.push(w.to_ascii_uppercase());
+            }
+            Tok::Word(w) => current.push(w.clone()),
+            Tok::Punct(',') => {
+                if let Some(last) = current.last_mut() {
+                    last.push(',');
+                }
+            }
+            _ => {}
+        }
+    }
+    if !current.is_empty() {
+        events.push(current.join(" "));
+    }
+    events
 }
 
 /// The word after `TRIGGER` is the name, the dotted word after `ON` the table, the dotted word
@@ -242,33 +274,7 @@ fn from_tokens(text: &str, error: String) -> Option<Binding> {
         timing = Some("INSTEAD OF".to_string());
         i += 2;
     }
-    let mut current: Vec<String> = Vec::new();
-    while i < on {
-        match &toks[i].tok {
-            Tok::Word(w) if w.eq_ignore_ascii_case("OR") => {
-                events.push(current.join(" "));
-                current.clear();
-            }
-            Tok::Word(w) => {
-                let w = if current.is_empty() || w.eq_ignore_ascii_case("OF") {
-                    w.to_ascii_uppercase()
-                } else {
-                    w.clone()
-                };
-                current.push(w);
-            }
-            Tok::Punct(',') => {
-                if let Some(last) = current.last_mut() {
-                    last.push(',');
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    if !current.is_empty() {
-        events.push(current.join(" "));
-    }
+    events.extend(trigger_events(&toks[i.min(on)..on]));
     // `FOR [EACH] ROW`, else PostgreSQL's default.
     let row = (on..toks.len())
         .any(|i| is(i, "FOR") && (is(i + 1, "ROW") || (is(i + 1, "EACH") && is(i + 2, "ROW"))));

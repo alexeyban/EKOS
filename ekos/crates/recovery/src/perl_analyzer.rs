@@ -115,7 +115,11 @@ impl CompilerPass for PerlAnalyzerPass {
     }
 
     fn cache_inputs(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.artifact_ids.iter().map(|id| id.to_string()).collect();
+        let mut ids: Vec<String> = self
+            .artifact_ids
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         ids.sort();
         ids
     }
@@ -291,6 +295,70 @@ fn heading_name(text: &str) -> String {
         .collect()
 }
 
+/// The (directive, body) pairs of the POD block starting at `*i`, which is left just past the
+/// block's `=cut` (or at the end of input).
+fn pod_block(lines: &[&str], i: &mut usize) -> Vec<(String, String)> {
+    let mut headings: Vec<(String, String)> = Vec::new();
+    let mut current: Option<(String, Vec<&str>)> = None;
+    while *i < lines.len() {
+        let line = lines[*i];
+        *i += 1;
+        if line.starts_with("=cut") {
+            break;
+        }
+        if is_pod_start(line) {
+            if let Some((d, body)) = current.take() {
+                headings.push((d, join_pod_body(&body)));
+            }
+            current = Some((line.to_string(), Vec::new()));
+        } else if let Some((_, body)) = current.as_mut() {
+            body.push(line);
+        }
+    }
+    if let Some((d, body)) = current.take() {
+        headings.push((d, join_pod_body(&body)));
+    }
+    headings
+}
+
+/// Files one block's headings into `docs` (and the `NAME` summary into `name_doc`). Returns the
+/// body of the block's last documented member, which is what the code below the block is.
+fn record_pod_headings(
+    headings: &[(String, String)],
+    docs: &mut PodDocs,
+    name_doc: &mut Option<String>,
+) -> Option<String> {
+    let mut last_member: Option<String> = None;
+    for (directive, body) in headings {
+        let Some((tag, text)) = directive.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let text = text.trim();
+        match tag {
+            "=head1" if !body.is_empty() => match text.to_ascii_uppercase().as_str() {
+                "DESCRIPTION" => docs.package_doc = Some(body.clone()),
+                "NAME" => *name_doc = Some(body.clone()),
+                _ => {}
+            },
+            "=head2" | "=head3" | "=item" => {
+                let name = heading_name(text);
+                if name.is_empty() || body.is_empty() {
+                    last_member = None;
+                    continue;
+                }
+                // Second sighting of a name makes it ambiguous, permanently.
+                docs.by_name
+                    .entry(name.clone())
+                    .and_modify(|slot| *slot = None)
+                    .or_insert_with(|| Some(body.clone()));
+                last_member = Some(body.clone());
+            }
+            _ => {}
+        }
+    }
+    last_member
+}
+
 /// Real POD extraction, pre-scanned separately from the main structural loop because a POD block
 /// spans many lines and the main loop has no lookahead.
 ///
@@ -316,57 +384,8 @@ fn extract_pod(lines: &[&str]) -> PodDocs {
             i += 1;
             continue;
         }
-        // Collect this block's (directive, body) pairs until `=cut` or EOF.
-        let mut headings: Vec<(String, String)> = Vec::new();
-        let mut current: Option<(String, Vec<&str>)> = None;
-        while i < lines.len() {
-            let line = lines[i];
-            if line.starts_with("=cut") {
-                i += 1;
-                break;
-            }
-            if is_pod_start(line) {
-                if let Some((d, body)) = current.take() {
-                    headings.push((d, join_pod_body(&body)));
-                }
-                current = Some((line.to_string(), Vec::new()));
-            } else if let Some((_, body)) = current.as_mut() {
-                body.push(line);
-            }
-            i += 1;
-        }
-        if let Some((d, body)) = current.take() {
-            headings.push((d, join_pod_body(&body)));
-        }
-
-        let mut last_member: Option<String> = None;
-        for (directive, body) in &headings {
-            let Some((tag, text)) = directive.split_once(char::is_whitespace) else {
-                continue;
-            };
-            let text = text.trim();
-            match tag {
-                "=head1" if !body.is_empty() => match text.to_ascii_uppercase().as_str() {
-                    "DESCRIPTION" => docs.package_doc = Some(body.clone()),
-                    "NAME" => name_doc = Some(body.clone()),
-                    _ => {}
-                },
-                "=head2" | "=head3" | "=item" => {
-                    let name = heading_name(text);
-                    if name.is_empty() || body.is_empty() {
-                        last_member = None;
-                        continue;
-                    }
-                    // Second sighting of a name makes it ambiguous, permanently.
-                    docs.by_name
-                        .entry(name.clone())
-                        .and_modify(|slot| *slot = None)
-                        .or_insert_with(|| Some(body.clone()));
-                    last_member = Some(body.clone());
-                }
-                _ => {}
-            }
-        }
+        let headings = pod_block(lines, &mut i);
+        let last_member = record_pod_headings(&headings, &mut docs, &mut name_doc);
 
         // The first real code line below this block — what an interleaved `=head2 foo ... =cut`
         // is documenting.
@@ -634,37 +653,40 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
     result
 }
 
+/// A constant's value as a SQL literal: an integer, or a quoted string without its own quote.
+fn constant_literal(v: &str) -> Option<String> {
+    let v = v.trim().trim_end_matches([';', ',']).trim();
+    if !v.is_empty()
+        && v.chars()
+            .enumerate()
+            .all(|(i, c)| c.is_ascii_digit() || (i == 0 && c == '-'))
+    {
+        return Some(v.to_string());
+    }
+    for q in ['\'', '"'] {
+        if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
+            let inner = &v[1..v.len() - 1];
+            if !inner.contains(q) {
+                return Some(format!("'{}'", inner.replace('\'', "''")));
+            }
+        }
+    }
+    None
+}
+/// `NAME => literal`, as (name, literal).
+fn constant_pair(text: &str) -> Option<(String, String)> {
+    let (name, value) = text.split_once("=>")?;
+    let name = name.trim();
+    (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .then_some(())?;
+    Some((name.to_string(), constant_literal(value)?))
+}
+
 /// Every `use constant NAME => literal` — single-line, or inside a `use constant { … };` block —
 /// as `(name, normalized literal, 1-based line)`. Literals use the SQL normalization the predicate
 /// extractor uses (`2`, `'ap'`), so a constant and a compared code can be matched. Anything that
 /// is not a plain number or quoted string (an expression, a list) is skipped; POD is skipped.
 pub fn perl_constants(source: &str) -> Vec<(String, String, usize)> {
-    fn literal(v: &str) -> Option<String> {
-        let v = v.trim().trim_end_matches([';', ',']).trim();
-        if !v.is_empty()
-            && v.chars()
-                .enumerate()
-                .all(|(i, c)| c.is_ascii_digit() || (i == 0 && c == '-'))
-        {
-            return Some(v.to_string());
-        }
-        for q in ['\'', '"'] {
-            if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
-                let inner = &v[1..v.len() - 1];
-                if !inner.contains(q) {
-                    return Some(format!("'{}'", inner.replace('\'', "''")));
-                }
-            }
-        }
-        None
-    }
-    fn pair(text: &str) -> Option<(String, String)> {
-        let (name, value) = text.split_once("=>")?;
-        let name = name.trim();
-        (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-            .then_some(())?;
-        Some((name.to_string(), literal(value)?))
-    }
     let mut out = Vec::new();
     let mut in_block = false;
     let mut in_pod = false;
@@ -681,7 +703,7 @@ pub fn perl_constants(source: &str) -> Vec<(String, String, usize)> {
         if in_block {
             if line.starts_with('}') {
                 in_block = false;
-            } else if let Some((n, v)) = pair(line) {
+            } else if let Some((n, v)) = constant_pair(line) {
                 out.push((n, v, i + 1));
             }
             continue;
@@ -689,11 +711,11 @@ pub fn perl_constants(source: &str) -> Vec<(String, String, usize)> {
         if let Some(rest) = line.strip_prefix("use constant") {
             let rest = rest.trim();
             if let Some(after) = rest.strip_prefix('{') {
-                if let Some((n, v)) = pair(after) {
+                if let Some((n, v)) = constant_pair(after) {
                     out.push((n, v, i + 1));
                 }
                 in_block = !after.contains('}');
-            } else if let Some((n, v)) = pair(rest) {
+            } else if let Some((n, v)) = constant_pair(rest) {
                 out.push((n, v, i + 1));
             }
         }

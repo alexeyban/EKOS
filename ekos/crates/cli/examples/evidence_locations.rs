@@ -39,7 +39,7 @@ fn has_line(location: &str) -> bool {
     !tail.is_empty()
         && tail
             .split('-')
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+            .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))
 }
 
 #[derive(Default, Clone, Copy)]

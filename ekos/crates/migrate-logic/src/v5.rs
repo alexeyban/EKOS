@@ -358,6 +358,104 @@ fn not_run(why: impl Into<String>) -> V5Outcome {
     V5Outcome::NotRun { why: why.into() }
 }
 
+/// The fixture for one table the view reads: a column per fillable type, and rows that cross the
+/// compared columns' values.
+fn fixture_table(
+    table: &str,
+    spec: &TableSpec,
+    found: &BTreeSet<Comparison>,
+    named: &BTreeSet<String>,
+    wildcard: bool,
+) -> Result<FixtureTable, V5Outcome> {
+    let mut columns = Vec::new();
+    for (column, declared) in &spec.columns {
+        let column = column.to_lowercase();
+        match Family::of(declared) {
+            Some(family) => columns.push((column, family)),
+            None if wildcard || named.contains(&column) => {
+                return Err(not_run(format!(
+                    "{table}.{column} is {declared}: the fixture has no values for that type"
+                )));
+            }
+            None => {}
+        }
+    }
+    if columns.is_empty() {
+        return Err(not_run(format!(
+            "{table} has no column the fixture can fill"
+        )));
+    }
+    let pools: Vec<Vec<Lit>> = columns
+        .iter()
+        .map(|(column, family)| {
+            let mut pool: BTreeSet<Lit> = family.base().into_iter().collect();
+            for c in found.iter().filter(|c| c.column == *column) {
+                for lit in &c.literals {
+                    pool.extend(lit.boundary(*family));
+                }
+            }
+            // NULL first: every column takes it, whatever else the pool holds.
+            std::iter::once(Lit::Null).chain(pool).collect()
+        })
+        .collect();
+    // Columns the view compares against a literal are **crossed**: every combination of their
+    // values appears. Taking each comparison both ways is not enough when two of them are
+    // joined by AND — a boundary row that the other filter always removes shows nothing. The
+    // remaining columns walk their pools at their own stride, coprime with the pool's length
+    // so every value appears.
+    let compared: Vec<usize> = columns
+        .iter()
+        .enumerate()
+        .filter(|(_, (c, _))| found.iter().any(|f| f.column == *c))
+        .map(|(j, _)| j)
+        .collect();
+    let product: usize = compared
+        .iter()
+        .map(|j| pools[*j].len())
+        .try_fold(1usize, |acc, n| {
+            acc.checked_mul(n).filter(|p| *p <= MAX_ROWS)
+        })
+        .unwrap_or(0);
+    let crossed: &[usize] = if product > 0 { &compared } else { &[] };
+    let longest = pools.iter().map(Vec::len).max().unwrap_or(1);
+    let n = product
+        .max((longest * 3).clamp(MIN_ROWS, MAX_ROWS))
+        .min(MAX_ROWS);
+    let strides: Vec<usize> = pools
+        .iter()
+        .enumerate()
+        .map(|(j, pool)| {
+            (2 * j + 1..)
+                .find(|s| gcd(*s, pool.len()) == 1)
+                .unwrap_or(1)
+        })
+        .collect();
+    let rows = (0..n)
+        .map(|i| {
+            let mut radix = i;
+            pools
+                .iter()
+                .zip(&strides)
+                .enumerate()
+                .map(|(j, (pool, stride))| {
+                    if crossed.contains(&j) {
+                        let digit = radix % pool.len();
+                        radix /= pool.len();
+                        pool[digit].clone()
+                    } else {
+                        pool[(i * stride + j) % pool.len()].clone()
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    Ok(FixtureTable {
+        name: table.to_string(),
+        columns,
+        rows,
+    })
+}
+
 /// Build the fixture and both view statements, or say why V5 cannot run on this view.
 pub fn plan(
     source_definition: &str,
@@ -411,93 +509,7 @@ pub fn plan(
                  view, or a relation it has no columns for)"
             )));
         };
-        let mut columns = Vec::new();
-        for (column, declared) in &spec.columns {
-            let column = column.to_lowercase();
-            match Family::of(declared) {
-                Some(family) => columns.push((column, family)),
-                None if wildcard || named.contains(&column) => {
-                    return Err(not_run(format!(
-                        "{table}.{column} is {declared}: the fixture has no values for that type"
-                    )));
-                }
-                None => {}
-            }
-        }
-        if columns.is_empty() {
-            return Err(not_run(format!(
-                "{table} has no column the fixture can fill"
-            )));
-        }
-        let pools: Vec<Vec<Lit>> = columns
-            .iter()
-            .map(|(column, family)| {
-                let mut pool: BTreeSet<Lit> = family.base().into_iter().collect();
-                for c in found.iter().filter(|c| c.column == *column) {
-                    for lit in &c.literals {
-                        pool.extend(lit.boundary(*family));
-                    }
-                }
-                // NULL first: every column takes it, whatever else the pool holds.
-                std::iter::once(Lit::Null).chain(pool).collect()
-            })
-            .collect();
-        // Columns the view compares against a literal are **crossed**: every combination of their
-        // values appears. Taking each comparison both ways is not enough when two of them are
-        // joined by AND — a boundary row that the other filter always removes shows nothing. The
-        // remaining columns walk their pools at their own stride, coprime with the pool's length
-        // so every value appears.
-        let compared: Vec<usize> = columns
-            .iter()
-            .enumerate()
-            .filter(|(_, (c, _))| found.iter().any(|f| f.column == *c))
-            .map(|(j, _)| j)
-            .collect();
-        let product: usize = compared
-            .iter()
-            .map(|j| pools[*j].len())
-            .try_fold(1usize, |acc, n| {
-                acc.checked_mul(n).filter(|p| *p <= MAX_ROWS)
-            })
-            .unwrap_or(0);
-        let crossed: &[usize] = if product > 0 { &compared } else { &[] };
-        let longest = pools.iter().map(Vec::len).max().unwrap_or(1);
-        let n = product
-            .max((longest * 3).clamp(MIN_ROWS, MAX_ROWS))
-            .min(MAX_ROWS);
-        let strides: Vec<usize> = pools
-            .iter()
-            .enumerate()
-            .map(|(j, pool)| {
-                (2 * j + 1..)
-                    .find(|s| gcd(*s, pool.len()) == 1)
-                    .unwrap_or(1)
-            })
-            .collect();
-        let rows = (0..n)
-            .map(|i| {
-                let mut radix = i;
-                pools
-                    .iter()
-                    .zip(&strides)
-                    .enumerate()
-                    .map(|(j, (pool, stride))| {
-                        if crossed.contains(&j) {
-                            let digit = radix % pool.len();
-                            radix /= pool.len();
-                            pool[digit].clone()
-                        } else {
-                            pool[(i * stride + j) % pool.len()].clone()
-                        }
-                    })
-                    .collect()
-            })
-            .collect();
-        fixture.push(FixtureTable {
-            name: table.clone(),
-            columns,
-            rows,
-        });
+        fixture.push(fixture_table(table, spec, &found, &named, wildcard)?);
     }
     if fixture.is_empty() {
         return Err(not_run("the view reads no table"));
@@ -1031,7 +1043,7 @@ mod tests {
                 dialect,
                 rows: rows
                     .iter()
-                    .map(|r| r.iter().map(|s| s.to_string()).collect())
+                    .map(|r| r.iter().map(std::string::ToString::to_string).collect())
                     .collect(),
                 coverage: (3, 4),
                 fail: None,

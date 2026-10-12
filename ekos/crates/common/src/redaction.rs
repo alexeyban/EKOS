@@ -209,7 +209,7 @@ pub struct RedactionConfig {
 pub fn is_excluded_path(rel_path: &str, config: &RedactionConfig) -> bool {
     let file_name = std::path::Path::new(rel_path)
         .file_name()
-        .and_then(|s| s.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .unwrap_or(rel_path);
 
     BUILTIN_EXCLUDED_GLOBS

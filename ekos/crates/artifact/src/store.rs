@@ -89,8 +89,8 @@ impl ArtifactStore for FileSystemArtifactStore {
             }
             for file_entry in std::fs::read_dir(&prefix_dir)? {
                 let path = file_entry?.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("json")
-                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                if path.extension().and_then(std::ffi::OsStr::to_str) == Some("json")
+                    && let Some(stem) = path.file_stem().and_then(std::ffi::OsStr::to_str)
                 {
                     ids.push(ArtifactId(stem.to_string()));
                 }

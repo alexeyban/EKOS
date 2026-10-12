@@ -1048,12 +1048,12 @@ mod tests {
         let top: Vec<_> = p
             .iter()
             .filter(|s| s.top_level)
-            .map(|s| s.canonical())
+            .map(ekos_kir::predicates::PredicateSite::canonical)
             .collect();
         let nested: Vec<_> = p
             .iter()
             .filter(|s| !s.top_level)
-            .map(|s| s.canonical())
+            .map(ekos_kir::predicates::PredicateSite::canonical)
             .collect();
         assert_eq!(top, vec!["t.a IN (1)"]);
         assert_eq!(nested, vec!["t.b IN (2)", "t.c IS NULL"]);

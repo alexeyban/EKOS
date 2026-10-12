@@ -85,6 +85,61 @@ impl Layout {
     }
 }
 
+/// The evidence an object and its relationships cite, in citation order.
+fn evidence_for(
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    object: &KirObject,
+    relationships: &[KirRelationship],
+) -> Result<Vec<ekos_kir::KirEvidence>> {
+    let mut evidence = Vec::new();
+    for id in object
+        .evidence
+        .iter()
+        .chain(relationships.iter().flat_map(|r| r.evidence.iter()))
+    {
+        if let Some(ev) = ledger.get_evidence(id)? {
+            evidence.push(ev);
+        }
+    }
+    Ok(evidence)
+}
+
+/// Writes the whole-workspace ER diagram (and its SVG counterpart) when the workspace has tables
+/// joined by a foreign key. Returns the (title, file name) of each page written.
+fn write_er_diagrams(
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    table_objects: &[KirObject],
+    output: &Path,
+    format: Format,
+) -> Result<Vec<(String, String)>> {
+    let mut diagrams = Vec::new();
+    if table_objects.is_empty() {
+        return Ok(diagrams);
+    }
+    let all_relationships: Vec<KirRelationship> = ledger.all_relationships()?;
+    let has_foreign_key = all_relationships
+        .iter()
+        .any(|r| matches!(r.kind, RelationshipKind::ForeignKey));
+    if !has_foreign_key {
+        return Ok(diagrams);
+    }
+    let er_page = render_er_diagram_page(table_objects, &all_relationships, format);
+    write_page(output, &er_page)?;
+    diagrams.push(("Entity-Relationship Diagram".to_string(), er_page.file_name));
+
+    // RFC 0068 §61 follow-on: a standalone SVG counterpart, same reasoning as the
+    // per-object/per-relationship-kind SVGs above.
+    if let Some(svg_page) = ekos_docs_gen::render_er_diagram_svg(table_objects, &all_relationships)
+    {
+        write_page(output, &svg_page)?;
+        diagrams.push((
+            "Entity-Relationship Diagram (SVG)".to_string(),
+            svg_page.file_name,
+        ));
+    }
+    Ok(diagrams)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn generate(
     config: &EkosConfig,
@@ -163,16 +218,7 @@ pub async fn generate(
     for object in &documented {
         let relationships = ledger.relationships_for(&object.id)?;
 
-        let mut evidence = Vec::new();
-        for id in object
-            .evidence
-            .iter()
-            .chain(relationships.iter().flat_map(|r| r.evidence.iter()))
-        {
-            if let Some(ev) = ledger.get_evidence(id)? {
-                evidence.push(ev);
-            }
-        }
+        let evidence = evidence_for(&*ledger, object, &relationships)?;
 
         let mut model = ekos_docs_gen::build_object_page_model(
             object,
@@ -234,30 +280,7 @@ pub async fn generate(
         .filter(|o| o.kind == ObjectKind::Table)
         .cloned()
         .collect();
-    let mut diagrams = Vec::new();
-    if !table_objects.is_empty() {
-        let all_relationships: Vec<KirRelationship> = ledger.all_relationships()?;
-        let has_foreign_key = all_relationships
-            .iter()
-            .any(|r| matches!(r.kind, RelationshipKind::ForeignKey));
-        if has_foreign_key {
-            let er_page = render_er_diagram_page(&table_objects, &all_relationships, format);
-            write_page(output, &er_page)?;
-            diagrams.push(("Entity-Relationship Diagram".to_string(), er_page.file_name));
-
-            // RFC 0068 §61 follow-on: a standalone SVG counterpart, same reasoning as the
-            // per-object/per-relationship-kind SVGs above.
-            if let Some(svg_page) =
-                ekos_docs_gen::render_er_diagram_svg(&table_objects, &all_relationships)
-            {
-                write_page(output, &svg_page)?;
-                diagrams.push((
-                    "Entity-Relationship Diagram (SVG)".to_string(),
-                    svg_page.file_name,
-                ));
-            }
-        }
-    }
+    let diagrams = write_er_diagrams(&*ledger, &table_objects, output, format)?;
 
     let index = match format {
         Format::Markdown => ekos_docs_gen::render_index_page(&index_entries, &diagrams),

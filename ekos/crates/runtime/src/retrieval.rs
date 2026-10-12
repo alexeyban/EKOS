@@ -183,6 +183,47 @@ const QUESTION_VERBS: &[&str] = &[
 
 // ── mention extraction ─────────────────────────────────────────────────────
 
+/// The text between each pair of `quote` characters in `text`, in order.
+fn quoted_spans(text: &str, quote: char) -> Vec<&str> {
+    let mut spans = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find(quote) {
+        let after = &rest[i + quote.len_utf8()..];
+        let Some(j) = after.find(quote) else {
+            break;
+        };
+        spans.push(&after[..j]);
+        rest = &after[j + quote.len_utf8()..];
+    }
+    spans
+}
+
+/// Whether a token has the shape of an identifier worth resolving: a `::` path, a dotted path,
+/// CamelCase, or snake/kebab case.
+fn is_identifier_shaped(t: &str) -> bool {
+    let has_dot = t.contains('.') && t.split('.').all(|p| !p.is_empty());
+    // `ekos_common::redaction`, `AiRuntime::ask` — before this, the `:` failed every shape
+    // test below, the path was dropped, and only its keyword fragment `ekos` got resolved
+    // (to the `ekos` crate).
+    let is_path = t.contains("::")
+        && t.split("::")
+            .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_alphanumeric() || c == '_'));
+    let is_camel = {
+        let mut chars = t.chars();
+        let first_upper = chars.next().is_some_and(char::is_uppercase);
+        // A lowercase letter is required too: an acronym ("AI", "MCP", "SQL") is not an
+        // identifier, and "AI" once resolved exactly (conf 1.0) to a minified JS symbol `aI`.
+        first_upper
+            && t.chars().skip(1).any(char::is_uppercase)
+            && t.chars().any(char::is_lowercase)
+            && t.chars().all(char::is_alphanumeric)
+    };
+    let is_ident = (t.contains('_') || t.contains('-'))
+        && t.chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-');
+    is_path || (!t.contains(':') && (has_dot || is_camel || is_ident))
+}
+
 /// Candidate entity mentions in `text`, most-specific first, de-duplicated (case-insensitively).
 /// Heuristic, not NER: quoted / backticked spans, dotted paths, CamelCase, snake/kebab
 /// identifiers. A missed mention just falls back to keyword search downstream.
@@ -210,16 +251,9 @@ pub fn extract_mentions(text: &str) -> Vec<String> {
     }
 
     // 1. quoted / backticked spans
-    for (open, close) in [('\'', '\''), ('"', '"'), ('`', '`')] {
-        let mut rest = text;
-        while let Some(i) = rest.find(open) {
-            let after = &rest[i + open.len_utf8()..];
-            if let Some(j) = after.find(close) {
-                push(&after[..j]);
-                rest = &after[j + close.len_utf8()..];
-            } else {
-                break;
-            }
+    for quote in ['\'', '"', '`'] {
+        for span in quoted_spans(text, quote) {
+            push(span);
         }
     }
 
@@ -230,27 +264,7 @@ pub fn extract_mentions(text: &str) -> Vec<String> {
         if t.len() < 2 || !rfc_numbers(t).is_empty() {
             continue;
         }
-        let has_dot = t.contains('.') && t.split('.').all(|p| !p.is_empty());
-        // `ekos_common::redaction`, `AiRuntime::ask` — before this, the `:` failed every shape
-        // test below, the path was dropped, and only its keyword fragment `ekos` got resolved
-        // (to the `ekos` crate).
-        let is_path = t.contains("::")
-            && t.split("::")
-                .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_alphanumeric() || c == '_'));
-        let is_camel = {
-            let mut chars = t.chars();
-            let first_upper = chars.next().is_some_and(char::is_uppercase);
-            // A lowercase letter is required too: an acronym ("AI", "MCP", "SQL") is not an
-            // identifier, and "AI" once resolved exactly (conf 1.0) to a minified JS symbol `aI`.
-            first_upper
-                && t.chars().skip(1).any(char::is_uppercase)
-                && t.chars().any(char::is_lowercase)
-                && t.chars().all(char::is_alphanumeric)
-        };
-        let is_ident = (t.contains('_') || t.contains('-'))
-            && t.chars()
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '-');
-        if is_path || (!t.contains(':') && (has_dot || is_camel || is_ident)) {
+        if is_identifier_shaped(t) {
             push(t);
         }
     }
