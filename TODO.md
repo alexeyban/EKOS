@@ -6465,7 +6465,10 @@ LinkML; generation stays in LinkML.
 - [ ] `semantic::business_semantics::synthesize` is still over the limit (estimated 241 against
       30). It needs a designed decomposition: its phases share borrowed maps and its output order
       is tested
-- [ ] Run a SonarCloud scan to confirm devlog_256 (needs `SONAR_TOKEN`; none was available)
+- [x] SonarCloud scan confirms devlog_256: gate passed on `7d321e2`, 0 bugs, 5 smells (devlog_257)
+- [ ] Remaining Sonar smells (devlog_257): two functions in `web/ui/src/pages/line-diff.ts` over
+      the complexity limit; an undeclared 409 in `web/api/app/routes/semantics.py`; a missing
+      `ASC` in `migrate-logic/tests/clickhouse_semantics.sql`
 - [ ] `ledger/src/search.rs::query_scored_marked` adds the memory-path boost clause twice. Left
       as found; decide whether the doubled boost is intended
 - [ ] `ollama.rs::likely_truncated` is `prompt + num_predict >= num_ctx`, which is true on every
