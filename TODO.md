@@ -6448,8 +6448,19 @@ LinkML; generation stays in LinkML.
 - [ ] A dependents claim about an object without evidence (a `Crate`) shows no evidence id, so an
       answer built from such claims has nothing valid to cite (`dep-001`, AI002). Carry the
       relationship's own evidence, or the manifest's
-- [ ] `Premise not supported.` was used on one real question (`arch-015`), and two correct denials
-      used neither fixed opening (`adv-001`, `sec-003`). Tune the prompt against the local model
-      first; each cloud try is metered
+- [x] `Premise not supported.` was used on one real question (`arch-015`), and two correct denials
+      used neither fixed opening (`adv-001`, `sec-003`). Prompt v5 + ruler v7 (devlog_255):
+      refusal scenarios 20/20, suite 98/101 on `deepseek-v4.1-flash`
+- [ ] `arch-015` asks which ledger primitive the simulation crate stays separate from; the
+      sources say it is separate from the compiler pipeline and writes to the ledger. The model
+      rejects the premise. Reword the scenario (a dataset edit is a ruler version)
+- [ ] `lin-004` expects the word "location"; a correct answer said "span". Add the alternate
+- [ ] Full local `llama3` run on prompt v5 (stopped for memory on 2026-10-12; the 20 refusal
+      scenarios were 13 → 18 on the wording before the yes/no sentence)
+- [ ] `ekos eval run` writes its report only at the end, so a stopped run keeps nothing. Write
+      each scenario's result as it completes
+- [ ] `ollama.rs::likely_truncated` is `prompt + num_predict >= num_ctx`, which is true on every
+      call when `[ai] max-tokens` equals the context window. Warn only when the prompt itself
+      nears the window
 - [ ] A devlog that names an adversarial scenario's invented entity is not a verbatim question
       echo and stays searchable (`adv-001`)

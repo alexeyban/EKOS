@@ -93,6 +93,21 @@ pub fn score(scenario: &Scenario, answer: Option<&str>, evidence: &EvidenceCheck
     }
 }
 
+/// How far into an answer a refusal has to start for the answer to count as one when the scenario
+/// expects an answer. Wide enough for a model that repeats the question first.
+const REFUSAL_OPENING_CHARS: usize = 300;
+
+/// Whether `answer` begins as a refusal: one of [`DEFAULT_REFUSAL_PHRASES`] within its first
+/// [`REFUSAL_OPENING_CHARS`] characters.
+///
+/// Used where a scenario expects an answer. [`looks_like_a_refusal`] searches the whole text, and
+/// a complete, cited answer that says "the claims show no such allowlisting" in its third
+/// paragraph was scored as stating no fact at all (measured: `sec-010`, 2026-10-12).
+pub(crate) fn opens_with_a_refusal(answer: &str) -> bool {
+    let opening: String = answer.chars().take(REFUSAL_OPENING_CHARS).collect();
+    looks_like_a_refusal(&opening)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +121,35 @@ mod tests {
             .to_lowercase();
         assert!(prompt.contains("insufficient evidence."));
         assert!(prompt.contains(&format!("{PREMISE_REJECTION}.")));
+    }
+
+    /// Each opening is shown once, alone on its line. A second spelling of either would give the
+    /// model a choice, and the grader accepts one.
+    #[test]
+    fn the_reason_prompt_shows_each_opening_once_on_its_own_line() {
+        let prompt = ekos_runtime::AiRuntimeConfig::default().reason_system_prompt;
+        for opening in ["Insufficient evidence.", "Premise not supported."] {
+            let lines = prompt.lines().filter(|l| l.trim() == opening).count();
+            assert_eq!(lines, 1, "{opening}");
+            assert_eq!(prompt.matches(opening).count(), 1, "{opening}");
+        }
+    }
+
+    #[test]
+    fn a_refusal_phrase_deep_in_an_answer_does_not_make_it_open_as_a_refusal() {
+        let answer = format!(
+            "{} The claims show no such allowlisting.",
+            "The `[security]` section can only extend the baseline. ".repeat(8)
+        );
+        assert!(looks_like_a_refusal(&answer));
+        assert!(!opens_with_a_refusal(&answer));
+    }
+
+    #[test]
+    fn a_refusal_after_the_repeated_question_still_opens_as_one() {
+        assert!(opens_with_a_refusal(
+            "What does the FooBarNonexistentAnalyzer do?\n\nInsufficient evidence. I looked for it."
+        ));
     }
 
     #[test]

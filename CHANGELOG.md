@@ -2,7 +2,7 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-59 commits, RFCs 0154–0177, devlogs 204–254. Not yet tagged; build from source or wait for the
+59 commits, RFCs 0154–0177, devlogs 204–255. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
@@ -49,7 +49,7 @@ next release.
 - **`ekos ask` shows a symbol's source.** The lookup behind "full source text" found nothing on a real ledger; it now falls back to the source recorded with the symbol.
 - **"What depends on module M"** includes what depends on M's items.
 - **A file is found by its name** without directory or extension.
-- **A question built on a false premise** is answered `Premise not supported.` and a cited correction.
+- **A question built on a false premise** is answered `Premise not supported.` and a cited correction. A question whose answer is not in the evidence is answered `Insufficient evidence.`, followed by what the evidence does show.
 - **Rust struct and enum symbols record their fields** (after the next `ekos recover`).
 - **Evals:** `ekos eval run --evidence-only` measures retrieval without calling a model. A run with an errored scenario fails. Refusals are counted apart from uncited answers. Recall@10 counts an expected name as found when any object bearing it is ranked.
 

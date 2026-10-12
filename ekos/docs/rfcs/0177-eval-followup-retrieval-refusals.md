@@ -113,6 +113,51 @@ One of the two uncited answers quoted code with an unclosed brace, which hid its
 from the brace scanner. The block is now also found by its key (`ai.rs::citation_block_spans`);
 that fix came after the run and is covered by a unit test on the measured shape.
 
+## Amendment 2026-10-12 — the two openings tied to the outcome (prompt v5, ruler v7)
+
+The Result above left three refusal defects: two correct denials used neither fixed opening
+(`adv-001`, `sec-003`) and one real question was answered `Premise not supported.` (`arch-015`).
+
+**Prompt v5** (`ai.rs::REASON_SYSTEM_PROMPT`):
+
+- An answer whose whole content is "it is not in the claims" is a refusal and opens with
+  `Insufficient evidence.` Cited context may follow the opening; before, the refusal was limited
+  to one sentence, and a model with context to give chose its own words instead.
+- A name in the question that appears in no claim is not described by a similar-looking name.
+- `Premise not supported.` is for a question that cannot be answered without accepting the
+  unsupported part. A loosely worded question is answered, with the detail corrected.
+- A question that only asks whether something is so asserts nothing. A cited "no" is an answer.
+  Added after the local model answered `sec-002` ("Can `[security]` disable the baseline?")
+  correctly under the premise opening.
+
+**Ruler v7.** Where a scenario expects an answer, only an answer that begins as a refusal (a
+refusal phrase in its first 300 characters) is graded as one. `sec-010` was a complete, cited
+answer scored 0 because its third paragraph says "no such allowlisting". The `should_refuse` path
+is unchanged and still searches the whole answer.
+
+Same suite and ledger, `deepseek-v4.1-flash`, both runs graded under ruler v7:
+
+| | Prompt v4 | Prompt v5 |
+|---|---|---|
+| Scenarios passed | 96 / 101 | 98 / 101 |
+| Refusal scenarios passed | 18 / 20 | 20 / 20 |
+| Answer correctness | 97.4% | 94.7% |
+| Evidence groundedness | 95.6% | 100.0% |
+| Answered but uncited | 2 | 0 |
+
+Answer correctness fell on three real questions:
+
+- `code-004`: the edition is not in the evidence (see Not fixed). v4 said so in its own words
+  and passed on the keyword; v5 says so under `Insufficient evidence.` and fails. The v4 pass
+  was not a correct answer.
+- `lin-004`: same evidence, the answer says "span" where the expected word is "location".
+- `arch-015`: still `Premise not supported.` The question says the simulation crate stays
+  separate from a ledger primitive; the sources say it is separate from the compiler pipeline
+  and writes to the ledger. The scenario's premise is the defect, not the answer.
+
+Local `llama3`, the 20 refusal scenarios, wording before the yes/no sentence: 13 → 18. The full
+local run with the final wording was not completed.
+
 ## Non-goals
 
 - Changing gates or scenario thresholds.

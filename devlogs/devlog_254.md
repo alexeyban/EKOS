@@ -39,7 +39,7 @@ The local model (`llama3`, same ledger, earlier run re-graded under the current 
 | Failures attributed to retrieval | 10 | 2 |
 | Failures attributed to generation | 12 | 16 |
 
-Retrieval failures moved to generation failures: the fact is now shown and the small model does not use it, and it cites less often with the longer evidence. Every prompt of this run filled its 8,192-token window, as in the earlier run.
+Retrieval failures moved to generation failures: the fact is now shown and the small model does not use it, and it cites less often with the longer evidence. (Corrected 2026-10-12: an earlier version of this paragraph said every prompt filled the 8,192-token window. The Ollama warning it was read from fires when the prompt plus the answer budget reaches the window; most prompts were about 3,300 tokens and were not truncated. See devlog_255.)
 
 Both runs use the self-workspace ledger from 2026-09-23. It was not re-recovered: `recover` and `commit` call the configured model, which is metered here.
 

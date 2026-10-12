@@ -889,7 +889,8 @@ What search reads and how it ranks (RFC 0177):
 - A file is found by its name without directory or extension (`0043-secrets-and-pii-redaction`).
 - The excerpt shown with a hit is the passage that matched the query.
 - A question that asserts something the evidence does not support is answered
-  `Premise not supported.`, followed by what the evidence does show.
+  `Premise not supported.`, followed by what the evidence does show. A question whose answer is
+  not in the evidence is answered `Insufficient evidence.`, with what the evidence does show.
 
 ### The vector arm — semantic search (RFC 0125, opt-in)
 

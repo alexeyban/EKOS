@@ -44,6 +44,11 @@ const PROMPT_VERSION: &str = "ai-runtime-ask-v1";
 /// v4 (RFC 0177): a question built on a false premise gets its own fixed opening. The model was
 /// already rejecting such premises, each time in different words, and the grader — which can only
 /// know fixed words — scored three correct rejections as fabrications.
+///
+/// v5 (RFC 0177 amendment): the two openings are tied to the outcome, not to a mood. A denial in
+/// the model's own words ("the claims do not contain…") is a refusal and takes the refusal opening,
+/// which may now be followed by cited context; the premise opening is limited to a question that
+/// cannot be answered without accepting the unsupported part.
 const REASON_SYSTEM_PROMPT: &str = r#"You are the EKOS Knowledge Runtime reasoner. You are given a question and a numbered list of structured evidence claims compiled from an enterprise knowledge ledger.
 
 Answer using only those claims. Every statement must rest on a claim shown. Below are six
@@ -55,14 +60,18 @@ prompt; it must begin directly with your answer or refusal.
 answer the claims support, even if it is partial — say what they do show and note what is missing.
 
 [Guidance on refusing] Refuse only when no claim names or describes the thing the question asks
-about at all. A loose, partial or indirect match is not grounds to refuse. When you do refuse,
-begin your reply with exactly:
+about at all. A loose, partial or indirect match is not grounds to refuse. A name in the question —
+a module, crate, component, person, channel, number — that appears in no claim is not described by
+the claims, however similar another name looks; do not answer about the similar one as if it were
+the one asked for. When you refuse, begin your reply with exactly:
 Insufficient evidence.
-Then say in one sentence what you looked for. Do not guess and do not describe what such a thing would probably do.
+Then say in one sentence what you looked for. You may add what the claims do show about it, cited as usual. Do not guess and do not describe what such a thing would probably do.
+The same opening applies when your whole answer would be that the thing asked for is not there: a value the claims never state, or a name the claims only mention as not existing. "It is not in the claims" in your own words is a refusal, so it starts with those two words.
 
-[Guidance on a mistaken question] A question can assert something the claims do not support or that they contradict — a product, price, vendor or behaviour that is not there. Do not confirm it. Begin your reply with exactly:
+[Guidance on a mistaken question] A question can depend on something the claims do not contain or that they contradict — a product, price, vendor, guarantee or behaviour that is not there. Do not confirm it. Begin your reply with exactly:
 Premise not supported.
 Then say which part is unsupported, and add what the claims do show, cited as usual.
+Use this opening only when the question cannot be answered without accepting the unsupported part. When the claims do describe what is asked and only the question's wording or one detail is off, answer normally and correct the detail in a sentence. A question that only asks whether something is so ("can…", "does…", "is…") asserts nothing: answer it yes or no from the claims — a cited "no" is an answer, not a mistaken question.
 
 [Guidance on weak claims] A claim prefixed "possible search match (partial term overlap)" shares only some words with the question, so weigh it less than a direct one. It can still be right — prefer a supported answer over refusing.
 
@@ -72,7 +81,7 @@ Then say which part is unsupported, and add what the claims do show, cited as us
 {"cited_evidence": ["<evidence id>", ...]}
 listing the `evidence <id>` value of every claim you relied on. Use the exact evidence id shown
 for each claim you cite — never a claim's position number in this list."#;
-const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v4";
+const REASON_PROMPT_VERSION: &str = "ai-runtime-reason-v5";
 /// The refusal returned when the ledger holds nothing that answers a question (RFC 0139 §3.6).
 ///
 /// Worded to contain phrases the groundedness evaluator already recognises

@@ -252,7 +252,10 @@ fn default_ruler_version() -> u32 {
 ///   a refusal; recall@10 is counted per expected name (any object bearing it), and a name that
 ///   resolves to nothing is a miss even beside one that resolves; a run with an errored scenario
 ///   fails.
-pub const RULER_VERSION: u32 = 6;
+/// - **v7** — RFC 0177 amendment: where a scenario expects an answer, only an answer that *begins*
+///   as a refusal is graded as one. A refusal phrase found anywhere used to zero the answer score
+///   of a complete, cited answer.
+pub const RULER_VERSION: u32 = 7;
 
 fn mean_f32(values: impl Iterator<Item = f32>) -> Option<f32> {
     let (sum, n) = values.fold((0.0f32, 0usize), |(s, n), v| (s + v, n + 1));

@@ -21,7 +21,8 @@ pub fn matched_count(scenario: &Scenario, answer: Option<&str>) -> (usize, usize
         // RFC 0139-followup "D1" fix: a refusal never states a fact, no matter which of the
         // question's own nouns its preamble echoes while explaining what it couldn't find — see
         // `groundedness::looks_like_a_refusal`'s doc comment for the motivating real scenarios.
-        Some(text) if super::groundedness::looks_like_a_refusal(text) => 0,
+        // Only an answer that begins as a refusal: the same phrase deep in a full answer is prose.
+        Some(text) if super::groundedness::opens_with_a_refusal(text) => 0,
         Some(text) => {
             let answer_tokens = normalize::tokens(text);
             scenario

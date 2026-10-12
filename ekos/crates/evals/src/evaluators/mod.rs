@@ -225,7 +225,7 @@ pub fn evaluate(
     }
 
     let answer_text = run.answer.as_deref();
-    let refused = answer_text.is_some_and(groundedness::looks_like_a_refusal);
+    let refused = answer_text.is_some_and(groundedness::opens_with_a_refusal);
     let evidence_check = evidence::check(scenario, &run.evidence_refs, ledger);
 
     let answer_score = answer::score(scenario, answer_text);
