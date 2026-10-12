@@ -1546,463 +1546,539 @@ fn call_tool(
     let runtime = Runtime::over(ledger);
 
     match name {
-        "ekos_search" => {
-            let query = required_str(args, "query")?;
-            // RFC 0119: route through the retrieval seam. RFC 0125: `mode` vector/hybrid.
-            let limit = args
-                .get("limit")
-                .and_then(Value::as_u64)
-                .map(|n| n.clamp(1, 100) as usize)
-                .unwrap_or(20);
-            let mode = args
-                .get("mode")
-                .and_then(Value::as_str)
-                .unwrap_or("lexical");
-            let mut req = RetrievalRequest::lexical(query);
-            req.limit = limit;
-            match mode {
-                "lexical" => {}
-                "vector" | "hybrid" => {
-                    req.query_embedding = Some(super::commit::embed_query_blocking(
-                        config, workspace, query,
-                    )?);
-                    if mode == "vector" {
-                        req.arms.bm25 = false;
-                    }
-                }
-                other => anyhow::bail!("unknown mode {other:?} (want lexical/vector/hybrid)"),
-            }
-            let result = runtime.retrieve(&req)?;
-            Ok(json!({
-                "arms_run": { "bm25": result.arms_run.bm25, "vector": result.arms_run.vector },
-                // RFC 0126: per-arm wall-clock; `log_call` lifts this into the usage log.
-                "arm_timings": result.arm_timings.iter().map(|t| json!({
-                    "source": t.source,
-                    "elapsed_ms": t.elapsed_ms,
-                    "candidates": t.candidates,
-                })).collect::<Vec<_>>(),
-                "matches": result.hits
-                    .iter()
-                    .take(limit)
-                    .map(|hit| json!({ "id": hit.id.to_string(), "name": hit.name }))
-                    .collect::<Vec<_>>()
-            }))
-        }
+        "ekos_search" => tool_search(config, workspace, &runtime, args),
         // RFC 0124: the QUERY surface + REASON planner as read-only, no-LLM tools.
-        "ekos_query" => {
-            let question = required_str(args, "question")?;
-            let plan = plan_question(question, &runtime)?;
-            let mut evidence = execute(&plan, &runtime)?;
-            // RFC 0173 — a claim about an attribute sources disagree on says so.
-            if config.conflicts.enabled {
-                super::conflicts::flag_disputed(config, workspace, ledger, &mut evidence)?;
-            }
-            Ok(serde_json::to_value(&evidence)?)
-        }
-        "ekos_retrieve" => {
-            let question = required_str(args, "question")?;
-            let understanding = understand(question, &runtime)?;
-            let plan = plan_question(question, &runtime)?;
-            let mut evidence = execute(&plan, &runtime)?;
-            if config.conflicts.enabled {
-                super::conflicts::flag_disputed(config, workspace, ledger, &mut evidence)?;
-            }
-            // RFC 0126: also run the raw retrieval seam so "show your work" includes which arms
-            // fired and how long each took.
-            let retrieved = runtime.retrieve(&RetrievalRequest::lexical(question))?;
-            Ok(json!({
-                "plan": serde_json::to_value(&plan)?,
-                "evidence": serde_json::to_value(&evidence)?,
-                "arms_run": { "bm25": retrieved.arms_run.bm25, "vector": retrieved.arms_run.vector },
-                "arm_timings": retrieved.arm_timings.iter().map(|t| json!({
-                    "source": t.source,
-                    "elapsed_ms": t.elapsed_ms,
-                    "candidates": t.candidates,
-                })).collect::<Vec<_>>(),
-                "understanding": {
-                    "query_type": format!("{:?}", understanding.query_type),
-                    "keywords": understanding.keywords,
-                    "resolved_entities": understanding.resolved_entities.iter().map(|e| json!({
-                        "mention": e.mention,
-                        "id": e.id.to_string(),
-                        "name": e.name,
-                        "confidence": e.confidence,
-                    })).collect::<Vec<_>>(),
-                },
-            }))
-        }
-        "ekos_ekl" => {
-            let query = required_str(args, "query")?;
-            let ast = ekl_parse(query).map_err(|e| {
-                anyhow::anyhow!("EKL parse error at column {}: {}", e.position, e.message)
-            })?;
-            let interpreter = EklInterpreter::new(&runtime);
-            let result = interpreter
-                .execute(&ast)
-                .map_err(|e| anyhow::anyhow!("EKL error: {e}"))?;
-            Ok(json!({ "count": result.rows.len(), "rows": result.rows }))
-        }
-        "ekos_neighborhood" => {
-            let id = required_id(args)?;
-            let depth = bounded_arg(args, "depth", 1, 0, NEIGHBORHOOD_MAX_DEPTH)? as u32;
-            let max_objects = bounded_arg(
-                args,
-                "max_objects",
-                NEIGHBORHOOD_DEFAULT_OBJECTS,
-                1,
-                NEIGHBORHOOD_MAX_OBJECTS,
-            )? as usize;
-            let (graph, truncated) = runtime.load_neighborhood_bounded(&id, depth, max_objects)?;
-            let mut out = serde_json::to_value(&graph)?;
-            if let Value::Object(map) = &mut out {
-                map.insert("truncated".into(), json!(truncated));
-                map.insert("max_objects".into(), json!(max_objects));
-            }
-            Ok(out)
-        }
-        "ekos_audit" => {
-            let id = required_id(args)?;
-            let trail = ledger.audit_trail(&id)?;
-            Ok(serde_json::json!({ "id": id.to_string(), "writes": trail }))
-        }
-        "ekos_state" => {
-            let id = required_id(args)?;
-            let state = match args.get("at").and_then(Value::as_str) {
-                Some(at) => {
-                    let at: DateTime<Utc> = at.parse().map_err(|e| {
-                        anyhow::anyhow!("invalid `at` timestamp (want RFC 3339): {e}")
-                    })?;
-                    runtime.reconstruct_state_at(&id, at)?
-                }
-                None => runtime.reconstruct_state(&id)?,
-            };
-            let mut value = state
-                .map(|s| serde_json::to_value(&s))
-                .transpose()?
-                .ok_or_else(|| anyhow::anyhow!("object not found: {}", id))?;
-            // RFC 0172 — sources that disagree about this object, unresolved.
-            if config.conflicts.enabled
-                && let Some(obj) = value.as_object_mut()
-            {
-                let open = super::conflicts::open_for(config, workspace, ledger, &id)?;
-                if !open.is_empty() {
-                    obj.insert("open_conflicts".into(), json!(open));
-                }
-            }
-            Ok(value)
-        }
-        "ekos_dependents" => {
-            let id = required_id(args)?;
-            let target = runtime
-                .load_object(&id)?
-                .ok_or_else(|| anyhow::anyhow!("object not found: {id}"))?;
-
-            let mut dependents = Vec::new();
-            let mut dependencies = Vec::new();
-            for rel in runtime.relationships_for(&id)? {
-                // Same rationale as `ekos_impact`/`ekos_neighborhood`: an
-                // unreviewed RFC 0029 candidate is a hypothesis, not a fact.
-                if rel.is_pending_review() {
-                    continue;
-                }
-                let (other_id, bucket) = if rel.to == id {
-                    (rel.from, &mut dependents)
-                } else {
-                    (rel.to, &mut dependencies)
-                };
-                let other = runtime.load_object(&other_id)?;
-                bucket.push(json!({
-                    "id": other_id.to_string(),
-                    "name": other.as_ref().map(|o| o.name.clone()),
-                    "kind": other.as_ref().map(|o| o.kind.to_string()),
-                    "relationship": rel.kind.to_string(),
-                    "properties": rel.properties,
-                }));
-            }
-
-            Ok(json!({
-                "target": { "id": id.to_string(), "name": target.name, "kind": target.kind.to_string() },
-                "dependents": dependents,
-                "dependents_count": dependents.len(),
-                "dependencies": dependencies,
-                "dependencies_count": dependencies.len(),
-            }))
-        }
-        "ekos_impact" => {
-            let id = required_id(args)?;
-            runtime
-                .load_object(&id)?
-                .ok_or_else(|| anyhow::anyhow!("object not found: {id}"))?;
-
-            let direction = match args.get("direction").and_then(Value::as_str) {
-                Some("dependencies") => ImpactDirection::Dependencies,
-                Some("dependents") | None => ImpactDirection::Dependents,
-                Some(other) => {
-                    anyhow::bail!(
-                        "invalid `direction`: {other} (want \"dependents\" or \"dependencies\")"
-                    )
-                }
-            };
-            let kinds: Vec<RelationshipKind> = args
-                .get("kinds")
-                .and_then(Value::as_array)
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(Value::as_str)
-                        .map(|s| RelationshipKind::from_str(s).expect("infallible"))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let max_hops = bounded_arg(args, "max_hops", 5, 1, IMPACT_MAX_HOPS)? as u32;
-
-            let hops = runtime.trace_impact(&id, direction, &kinds, max_hops)?;
-            let by_hop: Vec<Value> = hops
-                .iter()
-                .map(|h| {
-                    json!({
-                        "hop": h.hop,
-                        "id": h.object.id.to_string(),
-                        "name": h.object.name,
-                        "kind": h.object.kind.to_string(),
-                        "via": h.via.kind.to_string(),
-                    })
-                })
-                .collect();
-
-            Ok(json!({
-                "target": { "id": id.to_string() },
-                "direction": match direction { ImpactDirection::Dependents => "dependents", ImpactDirection::Dependencies => "dependencies" },
-                "max_hops": max_hops,
-                "count": by_hop.len(),
-                "hops": by_hop,
-            }))
-        }
-        "ekos_graph_export" => {
-            let str_list = |key: &str| -> Vec<String> {
-                args.get(key)
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(Value::as_str)
-                            .map(str::to_string)
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-            let usize_arg = |key: &str, default: usize| {
-                args.get(key)
-                    .and_then(Value::as_u64)
-                    .map(|n| n as usize)
-                    .unwrap_or(default)
-            };
-
-            let level = match args.get("level").and_then(Value::as_str) {
-                Some("aggregate") => ExportLevel::Aggregate,
-                Some("object") | None => ExportLevel::Object,
-                Some(other) => {
-                    anyhow::bail!("invalid `level`: {other} (want \"object\" or \"aggregate\")")
-                }
-            };
-            let group_by = match args.get("group_by").and_then(Value::as_str) {
-                Some("path_prefix") => GroupBy::PathPrefix {
-                    depth: usize_arg("path_prefix_depth", 2).max(1),
-                },
-                Some("kind") | None => GroupBy::Kind,
-                Some(other) => {
-                    anyhow::bail!("invalid `group_by`: {other} (want \"kind\" or \"path_prefix\")")
-                }
-            };
-
-            let kinds = {
-                let v = str_list("kinds");
-                if v.is_empty() {
-                    None
-                } else {
-                    Some(
-                        v.iter()
-                            .map(|s| super::graph::parse_object_kind(s))
-                            .collect(),
-                    )
-                }
-            };
-            let rel_kinds = {
-                let v = str_list("rel_kinds");
-                if v.is_empty() {
-                    None
-                } else {
-                    Some(
-                        v.iter()
-                            .map(|s| RelationshipKind::from_str(s).expect("infallible"))
-                            .collect(),
-                    )
-                }
-            };
-            let exclude_rel_kinds = str_list("exclude_rel_kinds")
-                .iter()
-                .map(|s| RelationshipKind::from_str(s).expect("infallible"))
-                .collect();
-
-            let as_of = match args.get("as_of").and_then(Value::as_str) {
-                Some(raw) => Some(raw.parse::<DateTime<Utc>>().map_err(|e| {
-                    anyhow::anyhow!("invalid `as_of` timestamp (want RFC 3339): {e}")
-                })?),
-                None => None,
-            };
-            let opts = GraphExportOptions {
-                level,
-                workspace: workspace.to_path_buf(),
-                kinds,
-                rel_kinds,
-                exclude_rel_kinds,
-                group_by,
-                max_nodes: usize_arg("max_nodes", 5_000),
-                max_edges: usize_arg("max_edges", 20_000),
-                min_degree: usize_arg("min_degree", 0),
-                include_properties: str_list("include_properties"),
-                as_of,
-                include_first_seen: args
-                    .get("include_first_seen")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-            };
-            let graph = export_graph(ledger, &opts)?;
-            Ok(serde_json::to_value(graph)?)
-        }
-        "ekos_diff" => {
-            let from: DateTime<Utc> = required_str(args, "from")?
-                .parse()
-                .map_err(|e| anyhow::anyhow!("invalid `from` timestamp (want RFC 3339): {e}"))?;
-            let to: DateTime<Utc> = match args.get("to").and_then(Value::as_str) {
-                Some(raw) => raw
-                    .parse()
-                    .map_err(|e| anyhow::anyhow!("invalid `to` timestamp (want RFC 3339): {e}"))?,
-                None => Utc::now(),
-            };
-
-            let diff = ledger.diff(from, to)?;
-
-            // Resolve touched logical ids to something an agent can read;
-            // cap the listing so a full-rebuild window stays consumable.
-            const MAX_LISTED: usize = 200;
-            let mut changed = Vec::new();
-            for raw_id in diff.touched.iter().take(MAX_LISTED) {
-                let Ok(id) = KirId::from_str(raw_id) else {
-                    continue;
-                };
-                if let Some(obj) = runtime.load_object(&id)? {
-                    changed.push(json!({
-                        "entity": "Object", "id": raw_id, "name": obj.name, "kind": obj.kind.to_string()
-                    }));
-                } else if let Some(rel) = ledger.get_relationship(&id)? {
-                    changed.push(json!({
-                        "entity": "Relationship", "id": raw_id, "kind": rel.kind.to_string(),
-                        "from": rel.from.to_string(), "to": rel.to.to_string()
-                    }));
-                } else {
-                    changed.push(json!({ "entity": "Unknown", "id": raw_id }));
-                }
-            }
-
-            Ok(json!({
-                "from": from.to_rfc3339(),
-                "to": to.to_rfc3339(),
-                "changed_total": diff.touched.len(),
-                "changed": changed,
-                "changed_listed": changed.len(),
-                "unchanged": diff.unchanged,
-            }))
-        }
+        "ekos_query" => tool_query(config, workspace, ledger, &runtime, args),
+        "ekos_retrieve" => tool_retrieve(config, workspace, ledger, &runtime, args),
+        "ekos_ekl" => tool_ekl(&runtime, args),
+        "ekos_neighborhood" => tool_neighborhood(&runtime, args),
+        "ekos_audit" => tool_audit(ledger, args),
+        "ekos_state" => tool_state(config, workspace, ledger, &runtime, args),
+        "ekos_dependents" => tool_dependents(&runtime, args),
+        "ekos_impact" => tool_impact(&runtime, args),
+        "ekos_graph_export" => tool_graph_export(workspace, ledger, args),
+        "ekos_diff" => tool_diff(ledger, &runtime, args),
         "ekos_status" => Ok(json!({
             "entries": ledger.entry_count()?,
             "objects": ledger.object_count()?,
             "relationships": ledger.relationship_count()?,
             "ledger_path": super::store::store_display(config, workspace),
         })),
-        "ekos_architecture_evaluate" => {
-            let objects = ledger.all_objects()?;
-            let report = ekos_recovery::evaluate_architecture(&objects);
-            Ok(serde_json::to_value(report)?)
-        }
-        "ekos_architecture_drift" => {
-            let objects = ledger.all_objects()?;
-            let mut findings = Vec::new();
-            for c in objects
-                .iter()
-                .filter(|o| matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == "Crate"))
-            {
-                let Some(dir) = c.properties.get("path").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                let claim_id = ekos_recovery::role_claim_kir_id(dir);
-                let history = ledger.object_history(&claim_id)?;
-                if let Some(finding) = ekos_recovery::drift_from_history(&c.name, c.id, &history) {
-                    findings.push(finding);
-                }
-            }
-            Ok(json!({ "drift_count": findings.len(), "findings": findings }))
-        }
-        "ekos_architecture_diff" => {
-            let from: DateTime<Utc> = required_str(args, "from")?
-                .parse()
-                .map_err(|e| anyhow::anyhow!("invalid `from` timestamp (want RFC 3339): {e}"))?;
-            let to: DateTime<Utc> = match args.get("to").and_then(Value::as_str) {
-                Some(raw) => raw
-                    .parse()
-                    .map_err(|e| anyhow::anyhow!("invalid `to` timestamp (want RFC 3339): {e}"))?,
-                None => Utc::now(),
-            };
-            let before = ledger.all_objects_at(from)?;
-            let after = ledger.all_objects_at(to)?;
-            let diff = ekos_recovery::diff_architecture(&before, &after);
-            Ok(serde_json::to_value(diff)?)
-        }
-        "ekos_transformation_explain" => {
-            let id = required_id(args)?;
-            let max_hops = bounded_arg(args, "max_hops", 50, 1, TRANSFORMATION_MAX_HOPS)? as u32;
-            let chain = transformation_chain(&runtime, &id, max_hops)?;
-
-            let steps: Vec<Value> = chain
-                .iter()
-                .map(|obj| explain_node(ledger, obj))
-                .collect::<Result<_>>()?;
-
-            Ok(json!({
-                "target": { "id": id.to_string() },
-                "steps": steps,
-                "step_count": steps.len(),
-            }))
-        }
-        "ekos_transformation_diff" => {
-            let old_id = KirId::from_str(required_str(args, "old_id")?)
-                .map_err(|_| anyhow::anyhow!("invalid `old_id`"))?;
-            let new_id = KirId::from_str(required_str(args, "new_id")?)
-                .map_err(|_| anyhow::anyhow!("invalid `new_id`"))?;
-            let max_hops = bounded_arg(args, "max_hops", 50, 1, TRANSFORMATION_MAX_HOPS)? as u32;
-
-            let old_chain = transformation_chain(&runtime, &old_id, max_hops)?;
-            let new_chain = transformation_chain(&runtime, &new_id, max_hops)?;
-
-            Ok(json!({
-                "old": { "id": old_id.to_string(), "step_count": old_chain.len() },
-                "new": { "id": new_id.to_string(), "step_count": new_chain.len() },
-                "diff": diff_chains(&old_chain, &new_chain),
-            }))
-        }
-        "ekos_clickhouse_query" => {
-            // Defense-in-depth: re-check the gate even though an ungated server never lists
-            // this tool in `tools/list` — a client could still call it by name directly.
-            if !config.clickhouse.enable_mcp_query {
-                anyhow::bail!(
-                    "ekos_clickhouse_query is disabled — set [clickhouse].enable-mcp-query = true in ekos.toml to enable it"
-                );
-            }
-            let question = required_str(args, "question")?;
-            run_clickhouse_query_blocking(config, workspace, question)
-        }
+        "ekos_architecture_evaluate" => tool_architecture_evaluate(ledger),
+        "ekos_architecture_drift" => tool_architecture_drift(ledger),
+        "ekos_architecture_diff" => tool_architecture_diff(ledger, args),
+        "ekos_transformation_explain" => tool_transformation_explain(ledger, &runtime, args),
+        "ekos_transformation_diff" => tool_transformation_diff(&runtime, args),
+        "ekos_clickhouse_query" => tool_clickhouse_query(config, workspace, args),
         other => ext
             .call_mcp_tool(other, args, ledger)
             .unwrap_or_else(|| Err(anyhow::anyhow!("unknown tool: {other}"))),
     }
+}
+
+/// The `ekos_search` tool.
+fn tool_search(
+    config: &EkosConfig,
+    workspace: &Path,
+    runtime: &Runtime<'_>,
+    args: &Value,
+) -> Result<Value> {
+    let query = required_str(args, "query")?;
+    // RFC 0119: route through the retrieval seam. RFC 0125: `mode` vector/hybrid.
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n.clamp(1, 100) as usize)
+        .unwrap_or(20);
+    let mode = args
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("lexical");
+    let mut req = RetrievalRequest::lexical(query);
+    req.limit = limit;
+    match mode {
+        "lexical" => {}
+        "vector" | "hybrid" => {
+            req.query_embedding = Some(super::commit::embed_query_blocking(
+                config, workspace, query,
+            )?);
+            if mode == "vector" {
+                req.arms.bm25 = false;
+            }
+        }
+        other => anyhow::bail!("unknown mode {other:?} (want lexical/vector/hybrid)"),
+    }
+    let result = runtime.retrieve(&req)?;
+    Ok(json!({
+        "arms_run": { "bm25": result.arms_run.bm25, "vector": result.arms_run.vector },
+        // RFC 0126: per-arm wall-clock; `log_call` lifts this into the usage log.
+        "arm_timings": result.arm_timings.iter().map(|t| json!({
+            "source": t.source,
+            "elapsed_ms": t.elapsed_ms,
+            "candidates": t.candidates,
+        })).collect::<Vec<_>>(),
+        "matches": result.hits
+            .iter()
+            .take(limit)
+            .map(|hit| json!({ "id": hit.id.to_string(), "name": hit.name }))
+            .collect::<Vec<_>>()
+    }))
+}
+
+/// The `ekos_query` tool.
+fn tool_query(
+    config: &EkosConfig,
+    workspace: &Path,
+    ledger: &dyn KnowledgeStore,
+    runtime: &Runtime<'_>,
+    args: &Value,
+) -> Result<Value> {
+    let question = required_str(args, "question")?;
+    let plan = plan_question(question, runtime)?;
+    let mut evidence = execute(&plan, runtime)?;
+    // RFC 0173 — a claim about an attribute sources disagree on says so.
+    if config.conflicts.enabled {
+        super::conflicts::flag_disputed(config, workspace, ledger, &mut evidence)?;
+    }
+    Ok(serde_json::to_value(&evidence)?)
+}
+
+/// The `ekos_retrieve` tool.
+fn tool_retrieve(
+    config: &EkosConfig,
+    workspace: &Path,
+    ledger: &dyn KnowledgeStore,
+    runtime: &Runtime<'_>,
+    args: &Value,
+) -> Result<Value> {
+    let question = required_str(args, "question")?;
+    let understanding = understand(question, runtime)?;
+    let plan = plan_question(question, runtime)?;
+    let mut evidence = execute(&plan, runtime)?;
+    if config.conflicts.enabled {
+        super::conflicts::flag_disputed(config, workspace, ledger, &mut evidence)?;
+    }
+    // RFC 0126: also run the raw retrieval seam so "show your work" includes which arms
+    // fired and how long each took.
+    let retrieved = runtime.retrieve(&RetrievalRequest::lexical(question))?;
+    Ok(json!({
+        "plan": serde_json::to_value(&plan)?,
+        "evidence": serde_json::to_value(&evidence)?,
+        "arms_run": { "bm25": retrieved.arms_run.bm25, "vector": retrieved.arms_run.vector },
+        "arm_timings": retrieved.arm_timings.iter().map(|t| json!({
+            "source": t.source,
+            "elapsed_ms": t.elapsed_ms,
+            "candidates": t.candidates,
+        })).collect::<Vec<_>>(),
+        "understanding": {
+            "query_type": format!("{:?}", understanding.query_type),
+            "keywords": understanding.keywords,
+            "resolved_entities": understanding.resolved_entities.iter().map(|e| json!({
+                "mention": e.mention,
+                "id": e.id.to_string(),
+                "name": e.name,
+                "confidence": e.confidence,
+            })).collect::<Vec<_>>(),
+        },
+    }))
+}
+
+/// The `ekos_ekl` tool.
+fn tool_ekl(runtime: &Runtime<'_>, args: &Value) -> Result<Value> {
+    let query = required_str(args, "query")?;
+    let ast = ekl_parse(query)
+        .map_err(|e| anyhow::anyhow!("EKL parse error at column {}: {}", e.position, e.message))?;
+    let interpreter = EklInterpreter::new(runtime);
+    let result = interpreter
+        .execute(&ast)
+        .map_err(|e| anyhow::anyhow!("EKL error: {e}"))?;
+    Ok(json!({ "count": result.rows.len(), "rows": result.rows }))
+}
+
+/// The `ekos_neighborhood` tool.
+fn tool_neighborhood(runtime: &Runtime<'_>, args: &Value) -> Result<Value> {
+    let id = required_id(args)?;
+    let depth = bounded_arg(args, "depth", 1, 0, NEIGHBORHOOD_MAX_DEPTH)? as u32;
+    let max_objects = bounded_arg(
+        args,
+        "max_objects",
+        NEIGHBORHOOD_DEFAULT_OBJECTS,
+        1,
+        NEIGHBORHOOD_MAX_OBJECTS,
+    )? as usize;
+    let (graph, truncated) = runtime.load_neighborhood_bounded(&id, depth, max_objects)?;
+    let mut out = serde_json::to_value(&graph)?;
+    if let Value::Object(map) = &mut out {
+        map.insert("truncated".into(), json!(truncated));
+        map.insert("max_objects".into(), json!(max_objects));
+    }
+    Ok(out)
+}
+
+/// The `ekos_audit` tool.
+fn tool_audit(ledger: &dyn KnowledgeStore, args: &Value) -> Result<Value> {
+    let id = required_id(args)?;
+    let trail = ledger.audit_trail(&id)?;
+    Ok(serde_json::json!({ "id": id.to_string(), "writes": trail }))
+}
+
+/// The `ekos_state` tool.
+fn tool_state(
+    config: &EkosConfig,
+    workspace: &Path,
+    ledger: &dyn KnowledgeStore,
+    runtime: &Runtime<'_>,
+    args: &Value,
+) -> Result<Value> {
+    let id = required_id(args)?;
+    let state = match args.get("at").and_then(Value::as_str) {
+        Some(at) => {
+            let at: DateTime<Utc> = at
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid `at` timestamp (want RFC 3339): {e}"))?;
+            runtime.reconstruct_state_at(&id, at)?
+        }
+        None => runtime.reconstruct_state(&id)?,
+    };
+    let mut value = state
+        .map(|s| serde_json::to_value(&s))
+        .transpose()?
+        .ok_or_else(|| anyhow::anyhow!("object not found: {}", id))?;
+    // RFC 0172 — sources that disagree about this object, unresolved.
+    if config.conflicts.enabled
+        && let Some(obj) = value.as_object_mut()
+    {
+        let open = super::conflicts::open_for(config, workspace, ledger, &id)?;
+        if !open.is_empty() {
+            obj.insert("open_conflicts".into(), json!(open));
+        }
+    }
+    Ok(value)
+}
+
+/// The `ekos_dependents` tool.
+fn tool_dependents(runtime: &Runtime<'_>, args: &Value) -> Result<Value> {
+    let id = required_id(args)?;
+    let target = runtime
+        .load_object(&id)?
+        .ok_or_else(|| anyhow::anyhow!("object not found: {id}"))?;
+
+    let mut dependents = Vec::new();
+    let mut dependencies = Vec::new();
+    for rel in runtime.relationships_for(&id)? {
+        // Same rationale as `ekos_impact`/`ekos_neighborhood`: an
+        // unreviewed RFC 0029 candidate is a hypothesis, not a fact.
+        if rel.is_pending_review() {
+            continue;
+        }
+        let (other_id, bucket) = if rel.to == id {
+            (rel.from, &mut dependents)
+        } else {
+            (rel.to, &mut dependencies)
+        };
+        let other = runtime.load_object(&other_id)?;
+        bucket.push(json!({
+            "id": other_id.to_string(),
+            "name": other.as_ref().map(|o| o.name.clone()),
+            "kind": other.as_ref().map(|o| o.kind.to_string()),
+            "relationship": rel.kind.to_string(),
+            "properties": rel.properties,
+        }));
+    }
+
+    Ok(json!({
+        "target": { "id": id.to_string(), "name": target.name, "kind": target.kind.to_string() },
+        "dependents": dependents,
+        "dependents_count": dependents.len(),
+        "dependencies": dependencies,
+        "dependencies_count": dependencies.len(),
+    }))
+}
+
+/// The `ekos_impact` tool.
+fn tool_impact(runtime: &Runtime<'_>, args: &Value) -> Result<Value> {
+    let id = required_id(args)?;
+    runtime
+        .load_object(&id)?
+        .ok_or_else(|| anyhow::anyhow!("object not found: {id}"))?;
+
+    let direction = match args.get("direction").and_then(Value::as_str) {
+        Some("dependencies") => ImpactDirection::Dependencies,
+        Some("dependents") | None => ImpactDirection::Dependents,
+        Some(other) => {
+            anyhow::bail!("invalid `direction`: {other} (want \"dependents\" or \"dependencies\")")
+        }
+    };
+    let kinds: Vec<RelationshipKind> = args
+        .get("kinds")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(|s| RelationshipKind::from_str(s).expect("infallible"))
+                .collect()
+        })
+        .unwrap_or_default();
+    let max_hops = bounded_arg(args, "max_hops", 5, 1, IMPACT_MAX_HOPS)? as u32;
+
+    let hops = runtime.trace_impact(&id, direction, &kinds, max_hops)?;
+    let by_hop: Vec<Value> = hops
+        .iter()
+        .map(|h| {
+            json!({
+                "hop": h.hop,
+                "id": h.object.id.to_string(),
+                "name": h.object.name,
+                "kind": h.object.kind.to_string(),
+                "via": h.via.kind.to_string(),
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "target": { "id": id.to_string() },
+        "direction": match direction { ImpactDirection::Dependents => "dependents", ImpactDirection::Dependencies => "dependencies" },
+        "max_hops": max_hops,
+        "count": by_hop.len(),
+        "hops": by_hop,
+    }))
+}
+
+/// The `ekos_graph_export` tool.
+fn tool_graph_export(workspace: &Path, ledger: &dyn KnowledgeStore, args: &Value) -> Result<Value> {
+    let str_list = |key: &str| -> Vec<String> {
+        args.get(key)
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let usize_arg = |key: &str, default: usize| {
+        args.get(key)
+            .and_then(Value::as_u64)
+            .map(|n| n as usize)
+            .unwrap_or(default)
+    };
+
+    let level = match args.get("level").and_then(Value::as_str) {
+        Some("aggregate") => ExportLevel::Aggregate,
+        Some("object") | None => ExportLevel::Object,
+        Some(other) => {
+            anyhow::bail!("invalid `level`: {other} (want \"object\" or \"aggregate\")")
+        }
+    };
+    let group_by = match args.get("group_by").and_then(Value::as_str) {
+        Some("path_prefix") => GroupBy::PathPrefix {
+            depth: usize_arg("path_prefix_depth", 2).max(1),
+        },
+        Some("kind") | None => GroupBy::Kind,
+        Some(other) => {
+            anyhow::bail!("invalid `group_by`: {other} (want \"kind\" or \"path_prefix\")")
+        }
+    };
+
+    let kinds = {
+        let v = str_list("kinds");
+        if v.is_empty() {
+            None
+        } else {
+            Some(
+                v.iter()
+                    .map(|s| super::graph::parse_object_kind(s))
+                    .collect(),
+            )
+        }
+    };
+    let rel_kinds = {
+        let v = str_list("rel_kinds");
+        if v.is_empty() {
+            None
+        } else {
+            Some(
+                v.iter()
+                    .map(|s| RelationshipKind::from_str(s).expect("infallible"))
+                    .collect(),
+            )
+        }
+    };
+    let exclude_rel_kinds = str_list("exclude_rel_kinds")
+        .iter()
+        .map(|s| RelationshipKind::from_str(s).expect("infallible"))
+        .collect();
+
+    let as_of = match args.get("as_of").and_then(Value::as_str) {
+        Some(raw) => Some(
+            raw.parse::<DateTime<Utc>>()
+                .map_err(|e| anyhow::anyhow!("invalid `as_of` timestamp (want RFC 3339): {e}"))?,
+        ),
+        None => None,
+    };
+    let opts = GraphExportOptions {
+        level,
+        workspace: workspace.to_path_buf(),
+        kinds,
+        rel_kinds,
+        exclude_rel_kinds,
+        group_by,
+        max_nodes: usize_arg("max_nodes", 5_000),
+        max_edges: usize_arg("max_edges", 20_000),
+        min_degree: usize_arg("min_degree", 0),
+        include_properties: str_list("include_properties"),
+        as_of,
+        include_first_seen: args
+            .get("include_first_seen")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    };
+    let graph = export_graph(ledger, &opts)?;
+    Ok(serde_json::to_value(graph)?)
+}
+
+/// The `ekos_diff` tool.
+fn tool_diff(ledger: &dyn KnowledgeStore, runtime: &Runtime<'_>, args: &Value) -> Result<Value> {
+    let from: DateTime<Utc> = required_str(args, "from")?
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid `from` timestamp (want RFC 3339): {e}"))?;
+    let to: DateTime<Utc> = match args.get("to").and_then(Value::as_str) {
+        Some(raw) => raw
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid `to` timestamp (want RFC 3339): {e}"))?,
+        None => Utc::now(),
+    };
+
+    let diff = ledger.diff(from, to)?;
+
+    // Resolve touched logical ids to something an agent can read;
+    // cap the listing so a full-rebuild window stays consumable.
+    const MAX_LISTED: usize = 200;
+    let mut changed = Vec::new();
+    for raw_id in diff.touched.iter().take(MAX_LISTED) {
+        let Ok(id) = KirId::from_str(raw_id) else {
+            continue;
+        };
+        if let Some(obj) = runtime.load_object(&id)? {
+            changed.push(json!({
+                "entity": "Object", "id": raw_id, "name": obj.name, "kind": obj.kind.to_string()
+            }));
+        } else if let Some(rel) = ledger.get_relationship(&id)? {
+            changed.push(json!({
+                "entity": "Relationship", "id": raw_id, "kind": rel.kind.to_string(),
+                "from": rel.from.to_string(), "to": rel.to.to_string()
+            }));
+        } else {
+            changed.push(json!({ "entity": "Unknown", "id": raw_id }));
+        }
+    }
+
+    Ok(json!({
+        "from": from.to_rfc3339(),
+        "to": to.to_rfc3339(),
+        "changed_total": diff.touched.len(),
+        "changed": changed,
+        "changed_listed": changed.len(),
+        "unchanged": diff.unchanged,
+    }))
+}
+
+/// The `ekos_architecture_evaluate` tool.
+fn tool_architecture_evaluate(ledger: &dyn KnowledgeStore) -> Result<Value> {
+    let objects = ledger.all_objects()?;
+    let report = ekos_recovery::evaluate_architecture(&objects);
+    Ok(serde_json::to_value(report)?)
+}
+
+/// The `ekos_architecture_drift` tool.
+fn tool_architecture_drift(ledger: &dyn KnowledgeStore) -> Result<Value> {
+    let objects = ledger.all_objects()?;
+    let mut findings = Vec::new();
+    for c in objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == "Crate"))
+    {
+        let Some(dir) = c.properties.get("path").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let claim_id = ekos_recovery::role_claim_kir_id(dir);
+        let history = ledger.object_history(&claim_id)?;
+        if let Some(finding) = ekos_recovery::drift_from_history(&c.name, c.id, &history) {
+            findings.push(finding);
+        }
+    }
+    Ok(json!({ "drift_count": findings.len(), "findings": findings }))
+}
+
+/// The `ekos_architecture_diff` tool.
+fn tool_architecture_diff(ledger: &dyn KnowledgeStore, args: &Value) -> Result<Value> {
+    let from: DateTime<Utc> = required_str(args, "from")?
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid `from` timestamp (want RFC 3339): {e}"))?;
+    let to: DateTime<Utc> = match args.get("to").and_then(Value::as_str) {
+        Some(raw) => raw
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid `to` timestamp (want RFC 3339): {e}"))?,
+        None => Utc::now(),
+    };
+    let before = ledger.all_objects_at(from)?;
+    let after = ledger.all_objects_at(to)?;
+    let diff = ekos_recovery::diff_architecture(&before, &after);
+    Ok(serde_json::to_value(diff)?)
+}
+
+/// The `ekos_transformation_explain` tool.
+fn tool_transformation_explain(
+    ledger: &dyn KnowledgeStore,
+    runtime: &Runtime<'_>,
+    args: &Value,
+) -> Result<Value> {
+    let id = required_id(args)?;
+    let max_hops = bounded_arg(args, "max_hops", 50, 1, TRANSFORMATION_MAX_HOPS)? as u32;
+    let chain = transformation_chain(runtime, &id, max_hops)?;
+
+    let steps: Vec<Value> = chain
+        .iter()
+        .map(|obj| explain_node(ledger, obj))
+        .collect::<Result<_>>()?;
+
+    Ok(json!({
+        "target": { "id": id.to_string() },
+        "steps": steps,
+        "step_count": steps.len(),
+    }))
+}
+
+/// The `ekos_transformation_diff` tool.
+fn tool_transformation_diff(runtime: &Runtime<'_>, args: &Value) -> Result<Value> {
+    let old_id = KirId::from_str(required_str(args, "old_id")?)
+        .map_err(|_| anyhow::anyhow!("invalid `old_id`"))?;
+    let new_id = KirId::from_str(required_str(args, "new_id")?)
+        .map_err(|_| anyhow::anyhow!("invalid `new_id`"))?;
+    let max_hops = bounded_arg(args, "max_hops", 50, 1, TRANSFORMATION_MAX_HOPS)? as u32;
+
+    let old_chain = transformation_chain(runtime, &old_id, max_hops)?;
+    let new_chain = transformation_chain(runtime, &new_id, max_hops)?;
+
+    Ok(json!({
+        "old": { "id": old_id.to_string(), "step_count": old_chain.len() },
+        "new": { "id": new_id.to_string(), "step_count": new_chain.len() },
+        "diff": diff_chains(&old_chain, &new_chain),
+    }))
+}
+
+/// The `ekos_clickhouse_query` tool.
+fn tool_clickhouse_query(config: &EkosConfig, workspace: &Path, args: &Value) -> Result<Value> {
+    // Defense-in-depth: re-check the gate even though an ungated server never lists
+    // this tool in `tools/list` — a client could still call it by name directly.
+    if !config.clickhouse.enable_mcp_query {
+        anyhow::bail!(
+            "ekos_clickhouse_query is disabled — set [clickhouse].enable-mcp-query = true in ekos.toml to enable it"
+        );
+    }
+    let question = required_str(args, "question")?;
+    run_clickhouse_query_blocking(config, workspace, question)
 }
 
 /// The event recorded for a review decision. An identity merge is a `Merged` event; a payment

@@ -548,6 +548,105 @@ impl DbtAnalyzerPass {
     }
 }
 
+impl DbtAnalyzerPass {
+    /// Documentation to merge onto models, plus the full source-table list with the YAML file
+    /// each came from (sources have no `.sql` file of their own). A file that is not YAML is
+    /// skipped with a warning.
+    fn parse_yaml_files(
+        &self,
+    ) -> (
+        HashMap<String, YamlModelDoc>,
+        Vec<(YamlSourceTable, String)>,
+    ) {
+        let mut model_docs: HashMap<String, YamlModelDoc> = HashMap::new();
+        let mut source_tables: Vec<(YamlSourceTable, String)> = Vec::new(); // (table, yml rel_path)
+        for (rel_path, content) in &self.yml_files {
+            let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!("cannot parse {rel_path} as YAML: {e}");
+                    continue;
+                }
+            };
+            let (docs, sources) = parse_yaml_doc(&doc, rel_path, content);
+            for (name, doc) in docs {
+                model_docs.insert(name, doc);
+            }
+            for source in sources {
+                source_tables.push((source, rel_path.clone()));
+            }
+        }
+        (model_docs, source_tables)
+    }
+
+    /// One `Table` per declared source table that no model already names.
+    fn add_sources(
+        &self,
+        source_tables: &[(YamlSourceTable, String)],
+        known: &mut HashMap<String, KirId>,
+        graph: &mut KirGraph,
+    ) {
+        for (source, yml_rel_path) in source_tables {
+            if known.contains_key(&source.name) {
+                continue; // a source name collided with a model name — keep the model, honestly rare
+            }
+            let id = dbt_table_kir_id(&self.dbt_root, &source.name);
+            known.insert(source.name.clone(), id);
+
+            let ev = KirEvidence::new(
+                SourceLocation::file(yml_rel_path),
+                format!("dbt source {}.{}", source.source_name, source.name),
+            );
+            let mut obj = KirObject::new(&source.name, ObjectKind::Table)
+                .with_property("dbt_kind", serde_json::json!("source"))
+                .with_property("dbt_source", serde_json::json!(source.source_name))
+                .with_property("dbt_project", serde_json::json!(self.dbt_root))
+                .with_evidence(graph.add_evidence(ev));
+            obj.id = id;
+            if let Some(desc) = &source.description {
+                obj = obj.with_property("description", serde_json::json!(desc));
+            }
+            if !source.columns.is_empty() {
+                obj = obj.with_property("columns", serde_json::json!(source.columns));
+            }
+            graph.add_object(obj);
+        }
+    }
+
+    /// One `DependsOn` edge per distinct `ref()`/`source()` target a model's SQL names.
+    fn add_dependencies(&self, known: &HashMap<String, KirId>, graph: &mut KirGraph) {
+        for (rel_path, content) in &self.sql_files {
+            let name = model_name_from_path(rel_path);
+            let Some(&from_id) = known.get(&name) else {
+                continue;
+            };
+            let mut emitted: HashSet<KirId> = HashSet::new();
+            for macro_ref in find_macro_refs(content) {
+                let Some(&to_id) = known.get(&macro_ref.target_name) else {
+                    tracing::debug!(
+                        model = %name,
+                        target = %macro_ref.target_name,
+                        "dbt-analyzer: unresolved ref()/source() — likely a cross-package \
+                         reference (dbt_packages/, gitignored) — skipped, not fabricated"
+                    );
+                    continue;
+                };
+                if to_id == from_id || !emitted.insert(to_id) {
+                    continue;
+                }
+                let ev = KirEvidence::new(
+                    SourceLocation::at(rel_path, line_at(content, macro_ref.byte_offset)),
+                    macro_ref.fragment,
+                );
+                let mut rel = KirRelationship::new(RelationshipKind::DependsOn, from_id, to_id);
+                rel.id = dbt_depends_on_kir_id(from_id, to_id);
+                rel.evidence.push(graph.add_evidence(ev));
+                graph.add_relationship(rel);
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl CompilerPass for DbtAnalyzerPass {
     fn name(&self) -> &str {
@@ -579,24 +678,7 @@ impl CompilerPass for DbtAnalyzerPass {
 
         // ── Parse every YAML file up front — documentation to merge onto models, plus the full
         //    source-table list (sources have no `.sql` file of their own). ──────────────────────
-        let mut model_docs: HashMap<String, YamlModelDoc> = HashMap::new();
-        let mut source_tables: Vec<(YamlSourceTable, String)> = Vec::new(); // (table, yml rel_path)
-        for (rel_path, content) in &self.yml_files {
-            let doc: serde_yaml::Value = match serde_yaml::from_str(content) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!("cannot parse {rel_path} as YAML: {e}");
-                    continue;
-                }
-            };
-            let (docs, sources) = parse_yaml_doc(&doc, rel_path, content);
-            for (name, doc) in docs {
-                model_docs.insert(name, doc);
-            }
-            for source in sources {
-                source_tables.push((source, rel_path.clone()));
-            }
-        }
+        let (model_docs, source_tables) = self.parse_yaml_files();
 
         let vars = self
             .yml_files
@@ -674,64 +756,12 @@ impl CompilerPass for DbtAnalyzerPass {
 
         // ── Sources: one `Table` per declared `sources[].tables[]` entry — no `.sql` file backs
         //    these, so YAML is their only existence signal. ─────────────────────────────────────
-        for (source, yml_rel_path) in &source_tables {
-            if known.contains_key(&source.name) {
-                continue; // a source name collided with a model name — keep the model, honestly rare
-            }
-            let id = dbt_table_kir_id(&self.dbt_root, &source.name);
-            known.insert(source.name.clone(), id);
-
-            let ev = KirEvidence::new(
-                SourceLocation::file(yml_rel_path),
-                format!("dbt source {}.{}", source.source_name, source.name),
-            );
-            let mut obj = KirObject::new(&source.name, ObjectKind::Table)
-                .with_property("dbt_kind", serde_json::json!("source"))
-                .with_property("dbt_source", serde_json::json!(source.source_name))
-                .with_property("dbt_project", serde_json::json!(self.dbt_root))
-                .with_evidence(graph.add_evidence(ev));
-            obj.id = id;
-            if let Some(desc) = &source.description {
-                obj = obj.with_property("description", serde_json::json!(desc));
-            }
-            if !source.columns.is_empty() {
-                obj = obj.with_property("columns", serde_json::json!(source.columns));
-            }
-            graph.add_object(obj);
-        }
+        self.add_sources(&source_tables, &mut known, &mut graph);
 
         // ── Dependencies: regex-scan each model's raw SQL for `ref()`/`source()` macro calls,
         //    resolved against `known`. Unresolvable refs (cross-package `ref()` into
         //    `dbt_packages/`, itself gitignored) are honestly skipped, never fabricated. ─────────
-        for (rel_path, content) in &self.sql_files {
-            let name = model_name_from_path(rel_path);
-            let Some(&from_id) = known.get(&name) else {
-                continue;
-            };
-            let mut emitted: HashSet<KirId> = HashSet::new();
-            for macro_ref in find_macro_refs(content) {
-                let Some(&to_id) = known.get(&macro_ref.target_name) else {
-                    tracing::debug!(
-                        model = %name,
-                        target = %macro_ref.target_name,
-                        "dbt-analyzer: unresolved ref()/source() — likely a cross-package \
-                         reference (dbt_packages/, gitignored) — skipped, not fabricated"
-                    );
-                    continue;
-                };
-                if to_id == from_id || !emitted.insert(to_id) {
-                    continue;
-                }
-                let ev = KirEvidence::new(
-                    SourceLocation::at(rel_path, line_at(content, macro_ref.byte_offset)),
-                    macro_ref.fragment,
-                );
-                let mut rel = KirRelationship::new(RelationshipKind::DependsOn, from_id, to_id);
-                rel.id = dbt_depends_on_kir_id(from_id, to_id);
-                rel.evidence.push(graph.add_evidence(ev));
-                graph.add_relationship(rel);
-            }
-        }
+        self.add_dependencies(&known, &mut graph);
 
         if graph.objects.is_empty() {
             return Ok(());

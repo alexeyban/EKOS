@@ -161,6 +161,90 @@ pub struct SearchIndex {
     f_memory_path: Field,
 }
 
+/// A query's content terms as `(raw, lowercased, is_prefix)`. A trailing `*` marks a prefix
+/// term; a bareword `and` / `or` is connector noise and dropped.
+fn query_terms(query: &str) -> Vec<(String, String, bool)> {
+    query
+        .split(|c: char| !(c.is_alphanumeric() || c == '*'))
+        .filter(|t| !t.is_empty())
+        .map(|t| match t.strip_suffix('*') {
+            Some(stem) => (stem.to_string(), stem.to_lowercase(), true),
+            None => {
+                let t = t.trim_matches('*');
+                (t.to_string(), t.to_lowercase(), false)
+            }
+        })
+        .filter(|(_, t, _)| !t.is_empty() && t != "and" && t != "or")
+        .collect()
+}
+
+/// The lowercased subwords of an identifier-shaped token: camelCase, `XMLHttp` and letter/digit
+/// transitions each start one.
+fn subwords(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut prev: Option<char> = None;
+    for c in raw.chars() {
+        let boundary = match prev {
+            // camelCase / XMLHttp / letter->digit transitions all start a new subword.
+            Some(p) => {
+                (p.is_lowercase() && c.is_uppercase())
+                    || (p.is_alphabetic() && c.is_ascii_digit())
+                    || (p.is_ascii_digit() && c.is_alphabetic())
+            }
+            None => false,
+        };
+        if boundary && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+        cur.push(c.to_ascii_lowercase());
+        prev = Some(c);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    // Single-character fragments carry no signal and would loosen the clause for nothing.
+    out.retain(|w| w.len() > 1);
+    out
+}
+
+/// Appends the partial-match band to the strict hits, skipping ids already present, until
+/// `limit` is reached.
+fn append_relaxed_band(
+    out: &mut Vec<ScoredHit>,
+    relaxed: Vec<(Uuid, String, f32)>,
+    coverage: &std::collections::HashMap<Uuid, usize>,
+    limit: usize,
+    n_terms: usize,
+) {
+    let seen: std::collections::HashSet<Uuid> = out.iter().map(|h| h.id).collect();
+    // Anchor the appended band strictly below the weakest strict hit so the result list
+    // stays strictly decreasing (`retrieval::RankedResults` documents that invariant).
+    let floor = out.last().map(|h| h.score).unwrap_or(f32::MAX);
+    for (i, (id, name, _)) in relaxed.into_iter().enumerate() {
+        if out.len() >= limit {
+            break;
+        }
+        if seen.contains(&id) {
+            continue;
+        }
+        let score = if floor == f32::MAX {
+            // No strict hits at all — nothing to sit below, so keep a plain descending
+            // band rather than inventing a relationship to a score that doesn't exist.
+            1.0 / (i + 1) as f32
+        } else {
+            floor * (0.999 - (i as f32 * 1e-4)).max(0.0)
+        };
+        out.push(ScoredHit {
+            matched_terms: coverage.get(&id).copied().unwrap_or(1).min(n_terms),
+            total_terms: n_terms,
+            id,
+            name,
+            score,
+        });
+    }
+}
+
 impl SearchIndex {
     /// Open (or create) the index under `dir`, acquiring the writer lock.
     /// Returns the index and the last transaction it has seen (`TxId(0)`-
@@ -490,18 +574,7 @@ impl SearchIndex {
         // this codebase (`ai.rs::QUESTION_STOPWORDS`), so dropping them here brings both backends
         // into agreement on what the same query string means, rather than papering over the gap
         // in just the one caller that happened to trip over it.
-        let terms: Vec<(String, String, bool)> = query
-            .split(|c: char| !(c.is_alphanumeric() || c == '*'))
-            .filter(|t| !t.is_empty())
-            .map(|t| match t.strip_suffix('*') {
-                Some(stem) => (stem.to_string(), stem.to_lowercase(), true),
-                None => {
-                    let t = t.trim_matches('*');
-                    (t.to_string(), t.to_lowercase(), false)
-                }
-            })
-            .filter(|(_, t, _)| !t.is_empty() && t != "and" && t != "or")
-            .collect();
+        let terms = query_terms(query);
         if terms.is_empty() {
             return Ok(Vec::new());
         }
@@ -541,34 +614,6 @@ impl SearchIndex {
         // and term frequencies, shifting BM25 for every query and putting RFC 0126's CI gate at
         // risk with no monotonicity argument available. This has neither cost: no schema change,
         // no reindex, and a term can only match *more* documents than before.
-        fn subwords(raw: &str) -> Vec<String> {
-            let mut out: Vec<String> = Vec::new();
-            let mut cur = String::new();
-            let mut prev: Option<char> = None;
-            for c in raw.chars() {
-                let boundary = match prev {
-                    // camelCase / XMLHttp / letter->digit transitions all start a new subword.
-                    Some(p) => {
-                        (p.is_lowercase() && c.is_uppercase())
-                            || (p.is_alphabetic() && c.is_ascii_digit())
-                            || (p.is_ascii_digit() && c.is_alphabetic())
-                    }
-                    None => false,
-                };
-                if boundary && !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                }
-                cur.push(c.to_ascii_lowercase());
-                prev = Some(c);
-            }
-            if !cur.is_empty() {
-                out.push(cur);
-            }
-            // Single-character fragments carry no signal and would loosen the clause for nothing.
-            out.retain(|w| w.len() > 1);
-            out
-        }
-
         let mut term_clause = |term: &str, prefix: bool| -> Box<dyn Query> {
             let stemmed_term = stem(&mut stemmer, term);
             let mut fields: Vec<(Occur, Box<dyn Query>)> = Vec::new();
@@ -672,8 +717,6 @@ impl SearchIndex {
             let pool = limit.saturating_mul(RELAXED_POOL_FACTOR);
             let relaxed = self.run_query(&searcher, BooleanQuery::new(should), pool)?;
 
-            let seen: std::collections::HashSet<Uuid> = out.iter().map(|h| h.id).collect();
-
             // RFC 0139 §3.7 — how many terms each relaxed hit actually matched. One small BM25
             // lookup per term (~2ms each on this corpus, against a pipeline that spends seconds in
             // the LLM), which buys a graded signal instead of a binary "was relaxed" flag.
@@ -701,31 +744,7 @@ impl SearchIndex {
                 .filter_map(|rank| slots[rank].take())
                 .collect();
 
-            // Anchor the appended band strictly below the weakest strict hit so the result list
-            // stays strictly decreasing (`retrieval::RankedResults` documents that invariant).
-            let floor = out.last().map(|h| h.score).unwrap_or(f32::MAX);
-            for (i, (id, name, _)) in relaxed.into_iter().enumerate() {
-                if out.len() >= limit {
-                    break;
-                }
-                if seen.contains(&id) {
-                    continue;
-                }
-                let score = if floor == f32::MAX {
-                    // No strict hits at all — nothing to sit below, so keep a plain descending
-                    // band rather than inventing a relationship to a score that doesn't exist.
-                    1.0 / (i + 1) as f32
-                } else {
-                    floor * (0.999 - (i as f32 * 1e-4)).max(0.0)
-                };
-                out.push(ScoredHit {
-                    matched_terms: coverage.get(&id).copied().unwrap_or(1).min(n_terms),
-                    total_terms: n_terms,
-                    id,
-                    name,
-                    score,
-                });
-            }
+            append_relaxed_band(&mut out, relaxed, &coverage, limit, n_terms);
         }
         Ok(out)
     }

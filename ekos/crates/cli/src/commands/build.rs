@@ -124,20 +124,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     run_with(config, cwd, &Extensions::none()).await
 }
 
-/// [`run`] with RFC 0149 extensions: their observers run after the built-in ones, and their
-/// logic versions are folded into the fingerprint cache key.
-pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Result<()> {
-    let ledger = open_store(config, cwd)?;
-
-    let artifact_store = PackArtifactStore::open(config.artifact_dir(cwd))
-        .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
-
-    let observe_paths: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
-        vec![cwd.to_path_buf()]
-    } else {
-        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
-    };
-
+/// The observers this build runs: the local ones always, an extension's after them, and each
+/// remote connector whose environment variables are set.
+fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Observer>> {
     let mut observers: Vec<Box<dyn Observer>> = vec![
         Box::new(FileObserver::new()),
         Box::new(GitObserver::new()),
@@ -271,6 +260,176 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
             );
         }
     }
+    observers
+}
+
+/// RFC 0043/0079 — the one place every observer's artifacts pass before they are stored: excluded
+/// files are dropped, secrets redacted in place, the project key attached, and each id recomputed
+/// from the final content.
+fn redact_package(
+    package: &mut ekos_observation_sdk::ObservationPackage,
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    project_key: &str,
+) {
+    // RFC 0043: the single central choke point every observer's artifacts pass through
+    // before persistence — files matching a built-in/configured secret-file glob (`.env`,
+    // `*.pem`, …) are dropped entirely; every other artifact's content gets its matched
+    // secret spans redacted in place. This protects every current and future connector
+    // without relying on each one remembering to sanitize its own output.
+    package
+        .artifacts
+        .retain(|a| !ekos_common::redaction::is_excluded_path(&a.content.target, redaction_config));
+    for artifact in &mut package.artifacts {
+        ekos_common::redaction::redact_json(&mut artifact.content.data, redaction_config);
+        // RFC 0079: the same central choke point, for the same reason — every path-keyed
+        // recovery pass that derives a `KirId` from a raw path string embedded in this
+        // artifact's own `data` (not `content.target`, which these passes never read:
+        // `local_docs_analyzer.rs`/`rust_analyzer.rs`/`python_analyzer.rs`'s `data.path`,
+        // `git_analyzer.rs`'s per-commit `data.files_changed`) has no project context of
+        // its own — `project_key` only ever existed as this loop's own transient local
+        // (RFC 0044, `devlog_65`'s investigation confirmed this is a real, not
+        // per-file-tweakable gap). Riding a `"project"` field on `data` here, once, for
+        // every connector's artifacts, means those passes can read it straight back
+        // without this crate needing to know anything about their individual `data`
+        // shapes — see each pass's own `project_qualified_id` usage for the consuming
+        // half of this fix. Absent entirely (not an empty string) for the single-path
+        // case, matching the same "existing single-project ledgers keep byte-identical
+        // ids" principle `build.rs`'s own `File`-object fix already established.
+        if !project_key.is_empty()
+            && let Some(obj) = artifact.content.data.as_object_mut()
+        {
+            obj.insert(
+                "project".to_string(),
+                serde_json::Value::String(project_key.to_string()),
+            );
+        }
+
+        // Real bug, found live 2026-08-25 re-running `ekos build`/`recover` against
+        // EKOS's own repository: `observer.scan()` computes each `ObservationArtifact`'s
+        // content-addressed `id` from the *raw*, pre-redaction `data` (inside the
+        // observer's own `ObservationArtifact::new` call) — but `redact_json` above then
+        // mutates `data` in place, so the id on disk never matches what actually got
+        // written. `PackArtifactStore::write` is skip-if-exists (`if self.exists(id) {
+        // return Ok(false); }`, never an overwrite), so once a file's raw content is
+        // first observed, whatever `redact` happened to produce *that one time* is locked
+        // in under that id forever — every later fix to the redaction engine (this
+        // session shipped at least one real one, `devlog_100`) silently never applies to
+        // it again, since the same unchanged raw content always re-derives the same
+        // pre-redaction id and `write` sees "already have this" and skips. Confirmed live:
+        // `crates/clickhouse-query/src/client.rs`'s real `password: password.into()` field
+        // init was mangled by a since-fixed version of the `generic-assigned-secret`
+        // pattern into `[REDACTED:...].into()` — today's `redact()` no longer does this to
+        // fresh content, but the stale artifact from whenever this file was first observed
+        // kept serving the broken version, corrupting `rust_analyzer.rs`'s parse of it on
+        // every subsequent `recover` (RUST003) regardless of how many times `build`/
+        // `recover` reran. The fix: recompute the id from the *final*, already-redacted
+        // `content` right here, so a redaction-logic change that alters the output for
+        // unchanged raw source naturally becomes a new id — a real, fresh artifact `write`
+        // actually persists — instead of silently resolving to a stale one forever.
+        artifact.id = ArtifactId::compute(
+            &serde_json::to_value(&artifact.content).expect("content must serialize"),
+        );
+    }
+}
+
+/// Writes the `File` object and its evidence for one file observation. Returns whether the
+/// object was new to the ledger.
+fn write_file_object(
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    artifact: &ekos_artifact::ObservationArtifact,
+    project_key: &str,
+    run_id: &str,
+) -> Result<bool> {
+    let rel_str = &artifact.content.target;
+    // Project-qualify the id hash input only (never `rel_str` itself — that stays
+    // the plain within-project path for `content.target`/display/evidence below);
+    // see the `project_key` comment above the outer loop.
+    let id_key = if project_key.is_empty() {
+        rel_str.clone()
+    } else {
+        format!("{project_key}:{rel_str}")
+    };
+    let obj_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, id_key.as_bytes()));
+    let ev_id = KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("ev:{id_key}").as_bytes(),
+    ));
+
+    let size = artifact.content.data["size_bytes"].as_u64().unwrap_or(0);
+
+    // Real bug, found live rehearsing the RFC 0045 demo end-to-end: this used to
+    // build `SourceLocation::file` from `base.join(rel_str)` — an *absolute*
+    // filesystem path — which then surfaced verbatim in every `ekos ask` citation
+    // for a plain source file (nothing not also processed by `local_docs_analyzer`,
+    // which already used the correct relative `data.path`, masked this for
+    // Markdown/PDF/etc.). A citation showing `/tmp/scratch-.../src/error.rs`
+    // instead of `src/error.rs` leaks the local filesystem layout and looks
+    // unpolished for no reason — every other evidence-producing analyzer already
+    // used the plain within-project path.
+    let mut ev = KirEvidence::new(
+        SourceLocation::file(rel_str.as_str()),
+        format!("file: {rel_str} ({size} bytes)"),
+    );
+    ev.id = ev_id;
+
+    let mut obj = KirObject::new(rel_str, ObjectKind::File)
+        .with_property("path", serde_json::Value::String(rel_str.clone()))
+        .with_property("size_bytes", serde_json::json!(size))
+        .with_property(
+            "artifact_id",
+            serde_json::Value::String(artifact.id.to_string()),
+        )
+        .with_evidence(ev_id);
+    // RFC 0044 Phase 1: lets a future rollup/grouping pass (or any query) filter
+    // or group by originating project in a multi-project estate; absent entirely
+    // for the common single-path workspace, matching `project_key`'s emptiness.
+    if !project_key.is_empty() {
+        obj = obj.with_property(
+            "project",
+            serde_json::Value::String(project_key.to_string()),
+        );
+    }
+    // RFC 0014: the excerpt rides on the object so the ledger
+    // can index file *content*, not just names.
+    if let Some(excerpt) = artifact.content.data["excerpt"].as_str() {
+        obj = obj.with_property("excerpt", serde_json::Value::String(excerpt.to_string()));
+    }
+    // RFC 0019: harvested declaration-line symbols ride
+    // alongside the excerpt so FTS can find e.g.
+    // `fn authenticate_user` even deep in a large file.
+    if let Some(symbols) = artifact.content.data.get("symbols") {
+        obj = obj.with_property("symbols", symbols.clone());
+    }
+    obj.id = obj_id;
+
+    ledger.set_write_context(Some(ekos_ledger::provenance::WriteContext {
+        run_id: run_id.to_string(),
+        stage: "build".to_string(),
+        source_artifact_id: Some(artifact.id.to_string()),
+    }));
+    ledger.append_evidence(&ev)?;
+    let is_new = ledger.append_object(&obj)?;
+    if is_new {
+        tracing::debug!(path = %rel_str, "observed file");
+    }
+    Ok(is_new)
+}
+
+/// [`run`] with RFC 0149 extensions: their observers run after the built-in ones, and their
+/// logic versions are folded into the fingerprint cache key.
+pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Result<()> {
+    let ledger = open_store(config, cwd)?;
+
+    let artifact_store = PackArtifactStore::open(config.artifact_dir(cwd))
+        .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
+
+    let observe_paths: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
+        vec![cwd.to_path_buf()]
+    } else {
+        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
+    };
+
+    let observers = configured_observers(config, ext);
 
     let fingerprint_path = config.ekos_dir(cwd).join("fingerprints.json");
     let mut fingerprints = load_fingerprints(&fingerprint_path);
@@ -358,65 +517,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
                 }
             };
 
-            // RFC 0043: the single central choke point every observer's artifacts pass through
-            // before persistence — files matching a built-in/configured secret-file glob (`.env`,
-            // `*.pem`, …) are dropped entirely; every other artifact's content gets its matched
-            // secret spans redacted in place. This protects every current and future connector
-            // without relying on each one remembering to sanitize its own output.
-            package.artifacts.retain(|a| {
-                !ekos_common::redaction::is_excluded_path(&a.content.target, &redaction_config)
-            });
-            for artifact in &mut package.artifacts {
-                ekos_common::redaction::redact_json(&mut artifact.content.data, &redaction_config);
-                // RFC 0079: the same central choke point, for the same reason — every path-keyed
-                // recovery pass that derives a `KirId` from a raw path string embedded in this
-                // artifact's own `data` (not `content.target`, which these passes never read:
-                // `local_docs_analyzer.rs`/`rust_analyzer.rs`/`python_analyzer.rs`'s `data.path`,
-                // `git_analyzer.rs`'s per-commit `data.files_changed`) has no project context of
-                // its own — `project_key` only ever existed as this loop's own transient local
-                // (RFC 0044, `devlog_65`'s investigation confirmed this is a real, not
-                // per-file-tweakable gap). Riding a `"project"` field on `data` here, once, for
-                // every connector's artifacts, means those passes can read it straight back
-                // without this crate needing to know anything about their individual `data`
-                // shapes — see each pass's own `project_qualified_id` usage for the consuming
-                // half of this fix. Absent entirely (not an empty string) for the single-path
-                // case, matching the same "existing single-project ledgers keep byte-identical
-                // ids" principle `build.rs`'s own `File`-object fix already established.
-                if !project_key.is_empty()
-                    && let Some(obj) = artifact.content.data.as_object_mut()
-                {
-                    obj.insert(
-                        "project".to_string(),
-                        serde_json::Value::String(project_key.clone()),
-                    );
-                }
-
-                // Real bug, found live 2026-08-25 re-running `ekos build`/`recover` against
-                // EKOS's own repository: `observer.scan()` computes each `ObservationArtifact`'s
-                // content-addressed `id` from the *raw*, pre-redaction `data` (inside the
-                // observer's own `ObservationArtifact::new` call) — but `redact_json` above then
-                // mutates `data` in place, so the id on disk never matches what actually got
-                // written. `PackArtifactStore::write` is skip-if-exists (`if self.exists(id) {
-                // return Ok(false); }`, never an overwrite), so once a file's raw content is
-                // first observed, whatever `redact` happened to produce *that one time* is locked
-                // in under that id forever — every later fix to the redaction engine (this
-                // session shipped at least one real one, `devlog_100`) silently never applies to
-                // it again, since the same unchanged raw content always re-derives the same
-                // pre-redaction id and `write` sees "already have this" and skips. Confirmed live:
-                // `crates/clickhouse-query/src/client.rs`'s real `password: password.into()` field
-                // init was mangled by a since-fixed version of the `generic-assigned-secret`
-                // pattern into `[REDACTED:...].into()` — today's `redact()` no longer does this to
-                // fresh content, but the stale artifact from whenever this file was first observed
-                // kept serving the broken version, corrupting `rust_analyzer.rs`'s parse of it on
-                // every subsequent `recover` (RUST003) regardless of how many times `build`/
-                // `recover` reran. The fix: recompute the id from the *final*, already-redacted
-                // `content` right here, so a redaction-logic change that alters the output for
-                // unchanged raw source naturally becomes a new id — a real, fresh artifact `write`
-                // actually persists — instead of silently resolving to a stale one forever.
-                artifact.id = ArtifactId::compute(
-                    &serde_json::to_value(&artifact.content).expect("content must serialize"),
-                );
-            }
+            redact_package(&mut package, &redaction_config, &project_key);
 
             for artifact in &package.artifacts {
                 let artifact_json = serde_json::to_value(artifact)?;
@@ -429,81 +530,8 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
             // Git commits will be promoted to KirEvents in Phase 6 by GitAnalyzer.
             if observer.name() == "file" {
                 for artifact in &package.artifacts {
-                    let rel_str = &artifact.content.target;
-                    // Project-qualify the id hash input only (never `rel_str` itself — that stays
-                    // the plain within-project path for `content.target`/display/evidence below);
-                    // see the `project_key` comment above the outer loop.
-                    let id_key = if project_key.is_empty() {
-                        rel_str.clone()
-                    } else {
-                        format!("{project_key}:{rel_str}")
-                    };
-                    let obj_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, id_key.as_bytes()));
-                    let ev_id = KirId(Uuid::new_v5(
-                        &Uuid::NAMESPACE_URL,
-                        format!("ev:{id_key}").as_bytes(),
-                    ));
-
-                    let size = artifact.content.data["size_bytes"].as_u64().unwrap_or(0);
-
-                    // Real bug, found live rehearsing the RFC 0045 demo end-to-end: this used to
-                    // build `SourceLocation::file` from `base.join(rel_str)` — an *absolute*
-                    // filesystem path — which then surfaced verbatim in every `ekos ask` citation
-                    // for a plain source file (nothing not also processed by `local_docs_analyzer`,
-                    // which already used the correct relative `data.path`, masked this for
-                    // Markdown/PDF/etc.). A citation showing `/tmp/scratch-.../src/error.rs`
-                    // instead of `src/error.rs` leaks the local filesystem layout and looks
-                    // unpolished for no reason — every other evidence-producing analyzer already
-                    // used the plain within-project path.
-                    let mut ev = KirEvidence::new(
-                        SourceLocation::file(rel_str.as_str()),
-                        format!("file: {rel_str} ({size} bytes)"),
-                    );
-                    ev.id = ev_id;
-
-                    let mut obj = KirObject::new(rel_str, ObjectKind::File)
-                        .with_property("path", serde_json::Value::String(rel_str.clone()))
-                        .with_property("size_bytes", serde_json::json!(size))
-                        .with_property(
-                            "artifact_id",
-                            serde_json::Value::String(artifact.id.to_string()),
-                        )
-                        .with_evidence(ev_id);
-                    // RFC 0044 Phase 1: lets a future rollup/grouping pass (or any query) filter
-                    // or group by originating project in a multi-project estate; absent entirely
-                    // for the common single-path workspace, matching `project_key`'s emptiness.
-                    if !project_key.is_empty() {
-                        obj = obj.with_property(
-                            "project",
-                            serde_json::Value::String(project_key.clone()),
-                        );
-                    }
-                    // RFC 0014: the excerpt rides on the object so the ledger
-                    // can index file *content*, not just names.
-                    if let Some(excerpt) = artifact.content.data["excerpt"].as_str() {
-                        obj = obj.with_property(
-                            "excerpt",
-                            serde_json::Value::String(excerpt.to_string()),
-                        );
-                    }
-                    // RFC 0019: harvested declaration-line symbols ride
-                    // alongside the excerpt so FTS can find e.g.
-                    // `fn authenticate_user` even deep in a large file.
-                    if let Some(symbols) = artifact.content.data.get("symbols") {
-                        obj = obj.with_property("symbols", symbols.clone());
-                    }
-                    obj.id = obj_id;
-
-                    ledger.set_write_context(Some(ekos_ledger::provenance::WriteContext {
-                        run_id: run_id.clone(),
-                        stage: "build".to_string(),
-                        source_artifact_id: Some(artifact.id.to_string()),
-                    }));
-                    ledger.append_evidence(&ev)?;
-                    let is_new = ledger.append_object(&obj)?;
-                    if is_new {
+                    if write_file_object(&*ledger, artifact, &project_key, &run_id)? {
                         total_observed += 1;
-                        tracing::debug!(path = %rel_str, "observed file");
                     } else {
                         total_skipped += 1;
                     }

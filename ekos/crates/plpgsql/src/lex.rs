@@ -91,7 +91,7 @@ pub fn probe_dollar(src: &str, i: usize) -> Option<(String, usize)> {
 /// Tokenize PL/pgSQL source.
 pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
     let s = src.as_bytes();
-    let mut out = Vec::new();
+    let mut out: Vec<Spanned> = Vec::new();
     let mut i = 0usize;
 
     while i < s.len() {
@@ -104,195 +104,181 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
         }
 
         // Line comment.
-        if c == b'-' && i + 1 < s.len() && s[i + 1] == b'-' {
-            while i < s.len() && s[i] != b'\n' {
-                i += 1;
-            }
+        if c == b'-' && s.get(i + 1) == Some(&b'-') {
+            i = line_end(s, i);
             continue;
         }
 
         // Block comment. PostgreSQL's nest, unlike C's.
-        if c == b'/' && i + 1 < s.len() && s[i + 1] == b'*' {
-            let start = i;
-            let mut depth = 1;
-            i += 2;
-            while i < s.len() && depth > 0 {
-                if s[i] == b'/' && i + 1 < s.len() && s[i + 1] == b'*' {
-                    depth += 1;
-                    i += 2;
-                } else if s[i] == b'*' && i + 1 < s.len() && s[i + 1] == b'/' {
-                    depth -= 1;
-                    i += 2;
-                } else {
-                    i += 1;
-                }
+        if c == b'/' && s.get(i + 1) == Some(&b'*') {
+            let (end, closed) = block_comment_end(s, i);
+            if !closed {
+                return Err(LexError::UnterminatedComment { at: i });
             }
-            if depth > 0 {
-                return Err(LexError::UnterminatedComment { at: start });
-            }
+            i = end;
             continue;
         }
 
-        // String literal. `''` is an escaped quote, not a terminator followed by an opener.
-        if c == b'\'' {
-            let start = i;
-            // Bytes, not `s[i] as char`: that reads each byte of a multibyte character as its own
-            // Latin-1 character, so `é` came out as `Ã©`. Only ASCII quotes are dropped, so the
-            // result is still valid UTF-8.
-            // `E'it\'s'`: in an escape string a backslash escapes the next byte, quotes included.
-            // The escape is kept as written; only the terminator matters here.
-            let escapes = matches!(out.last(), Some(Spanned { tok: Tok::Word(w), end, .. })
-                if *end == i && w.eq_ignore_ascii_case("E"));
-            let mut value = Vec::new();
-            i += 1;
-            loop {
-                if i >= s.len() {
-                    return Err(LexError::UnterminatedString { at: start });
-                }
-                if escapes && s[i] == b'\\' && i + 1 < s.len() {
-                    value.extend_from_slice(&s[i..i + 2]);
-                    i += 2;
-                    continue;
-                }
-                if s[i] == b'\'' {
-                    if i + 1 < s.len() && s[i + 1] == b'\'' {
-                        value.push(b'\'');
-                        i += 2;
-                        continue;
-                    }
-                    i += 1;
-                    break;
-                }
-                value.push(s[i]);
-                i += 1;
-            }
-            out.push(Spanned {
-                tok: Tok::Str(String::from_utf8_lossy(&value).into_owned()),
-                start,
-                end: i,
-            });
-            continue;
-        }
-
-        // Dollar quote or parameter.
-        if c == b'$' {
-            let start = i;
-            if let Some((tag, body_start)) = dollar_tag(s, i) {
-                let close = format!("${tag}$");
-                let rest = &src[body_start..];
-                let Some(rel) = rest.find(&close) else {
-                    return Err(LexError::UnterminatedDollar { tag, at: start });
-                };
-                let body = rest[..rel].to_string();
-                i = body_start + rel + close.len();
-                out.push(Spanned {
-                    tok: Tok::Dollar { tag, body },
-                    start,
-                    end: i,
-                });
-                continue;
-            }
-            // `$1` — a parameter.
-            let mut j = i + 1;
-            while j < s.len() && s[j].is_ascii_digit() {
-                j += 1;
-            }
-            if j > i + 1 {
-                let n = src[i + 1..j].parse().unwrap_or(0);
-                out.push(Spanned {
-                    tok: Tok::Param(n),
+        let token = match c {
+            // String literal. `''` is an escaped quote, not a terminator followed by an opener.
+            b'\'' => {
+                // `E'it\'s'`: in an escape string a backslash escapes the next byte, quotes
+                // included. The escape is kept as written; only the terminator matters here.
+                let escapes = matches!(out.last(), Some(Spanned { tok: Tok::Word(w), end, .. })
+                    if *end == i && w.eq_ignore_ascii_case("E"));
+                let (value, end) = quoted_value(s, i, escapes)?;
+                Spanned {
+                    tok: Tok::Str(value),
                     start: i,
-                    end: j,
-                });
-                i = j;
-                continue;
-            }
-            out.push(Spanned {
-                tok: Tok::Punct('$'),
-                start: i,
-                end: i + 1,
-            });
-            i += 1;
-            continue;
-        }
-
-        // Quoted identifier — kept as a word, with the quotes stripped.
-        if c == b'"' {
-            let start = i;
-            let mut value = Vec::new();
-            i += 1;
-            loop {
-                if i >= s.len() {
-                    return Err(LexError::UnterminatedString { at: start });
+                    end,
                 }
-                if s[i] == b'"' {
-                    if i + 1 < s.len() && s[i + 1] == b'"' {
-                        value.push(b'"');
-                        i += 2;
-                        continue;
-                    }
-                    i += 1;
-                    break;
+            }
+            // Dollar quote or parameter.
+            b'$' => dollar_token(src, i)?,
+            // Quoted identifier — kept as a word, with the quotes stripped.
+            b'"' => {
+                let (value, end) = quoted_value(s, i, false)?;
+                Spanned {
+                    tok: Tok::Word(value),
+                    start: i,
+                    end,
                 }
-                value.push(s[i]);
-                i += 1;
             }
-            out.push(Spanned {
-                tok: Tok::Word(String::from_utf8_lossy(&value).into_owned()),
-                start,
-                end: i,
-            });
-            continue;
-        }
-
-        // Word.
-        if c.is_ascii_alphabetic() || c == b'_' {
-            let start = i;
-            while i < s.len() && (s[i].is_ascii_alphanumeric() || s[i] == b'_') {
-                i += 1;
-            }
-            out.push(Spanned {
-                tok: Tok::Word(src[start..i].to_string()),
-                start,
-                end: i,
-            });
-            continue;
-        }
-
-        // Number.
-        if c.is_ascii_digit() {
-            let start = i;
-            while i < s.len() && (s[i].is_ascii_digit() || s[i] == b'.') {
-                i += 1;
-            }
-            out.push(Spanned {
-                tok: Tok::Num(src[start..i].to_string()),
-                start,
-                end: i,
-            });
-            continue;
-        }
-
-        // Multi-character operators.
-        let two = if i + 1 < s.len() { &src[i..i + 2] } else { "" };
-        if matches!(two, ":=" | ".." | "||" | "<=" | ">=" | "<>" | "!=") {
-            out.push(Spanned {
-                tok: Tok::Op(two.to_string()),
-                start: i,
-                end: i + 2,
-            });
-            i += 2;
-            continue;
-        }
-
-        out.push(Spanned {
-            tok: Tok::Punct(c as char),
-            start: i,
-            end: i + 1,
-        });
-        i += 1;
+            _ => plain_token(src, i),
+        };
+        i = token.end;
+        out.push(token);
     }
     Ok(out)
+}
+
+/// The index of the newline ending the line `i` is on, or the end of input.
+fn line_end(s: &[u8], mut i: usize) -> usize {
+    while i < s.len() && s[i] != b'\n' {
+        i += 1;
+    }
+    i
+}
+
+/// The index just past the block comment opening at `start`, and whether it was closed. Nested
+/// comments are counted; an unclosed one runs to the end of input.
+fn block_comment_end(s: &[u8], start: usize) -> (usize, bool) {
+    let mut depth = 1;
+    let mut i = start + 2;
+    while i < s.len() && depth > 0 {
+        if s[i] == b'/' && s.get(i + 1) == Some(&b'*') {
+            depth += 1;
+            i += 2;
+        } else if s[i] == b'*' && s.get(i + 1) == Some(&b'/') {
+            depth -= 1;
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    (i, depth == 0)
+}
+
+/// The text of the literal or quoted identifier opening at `start`, and the index just past its
+/// closing quote. A doubled quote is one quote; with `escapes`, a backslash keeps the next byte.
+///
+/// Bytes, not `s[i] as char`: that reads each byte of a multibyte character as its own Latin-1
+/// character, so `é` came out as `Ã©`. Only ASCII quotes are dropped, so the result is still
+/// valid UTF-8.
+fn quoted_value(s: &[u8], start: usize, escapes: bool) -> Result<(String, usize), LexError> {
+    let quote = s[start];
+    let mut value = Vec::new();
+    let mut i = start + 1;
+    loop {
+        if i >= s.len() {
+            return Err(LexError::UnterminatedString { at: start });
+        }
+        if escapes && s[i] == b'\\' && i + 1 < s.len() {
+            value.extend_from_slice(&s[i..i + 2]);
+            i += 2;
+        } else if s[i] != quote {
+            value.push(s[i]);
+            i += 1;
+        } else if s.get(i + 1) == Some(&quote) {
+            value.push(quote);
+            i += 2;
+        } else {
+            return Ok((String::from_utf8_lossy(&value).into_owned(), i + 1));
+        }
+    }
+}
+
+/// The token at a `$`: a dollar-quoted block, a `$1` parameter, or the bare character.
+fn dollar_token(src: &str, i: usize) -> Result<Spanned, LexError> {
+    let s = src.as_bytes();
+    if let Some((tag, body_start)) = dollar_tag(s, i) {
+        let close = format!("${tag}$");
+        let rest = &src[body_start..];
+        let Some(rel) = rest.find(&close) else {
+            return Err(LexError::UnterminatedDollar { tag, at: i });
+        };
+        let body = rest[..rel].to_string();
+        return Ok(Spanned {
+            tok: Tok::Dollar { tag, body },
+            start: i,
+            end: body_start + rel + close.len(),
+        });
+    }
+    // `$1` — a parameter.
+    let mut j = i + 1;
+    while j < s.len() && s[j].is_ascii_digit() {
+        j += 1;
+    }
+    if j > i + 1 {
+        return Ok(Spanned {
+            tok: Tok::Param(src[i + 1..j].parse().unwrap_or(0)),
+            start: i,
+            end: j,
+        });
+    }
+    Ok(Spanned {
+        tok: Tok::Punct('$'),
+        start: i,
+        end: i + 1,
+    })
+}
+
+/// The token at `i` when it opens no quote, comment or dollar form: a word, a number, a
+/// two-character operator, or one punctuation character.
+fn plain_token(src: &str, i: usize) -> Spanned {
+    let s = src.as_bytes();
+    let c = s[i];
+    let run = |keep: fn(u8) -> bool| (i..s.len()).find(|j| !keep(s[*j])).unwrap_or(s.len());
+    if c.is_ascii_alphabetic() || c == b'_' {
+        let end = run(|b| b.is_ascii_alphanumeric() || b == b'_');
+        return Spanned {
+            tok: Tok::Word(src[i..end].to_string()),
+            start: i,
+            end,
+        };
+    }
+    if c.is_ascii_digit() {
+        let end = run(|b| b.is_ascii_digit() || b == b'.');
+        return Spanned {
+            tok: Tok::Num(src[i..end].to_string()),
+            start: i,
+            end,
+        };
+    }
+    // Multi-character operators.
+    let two = if i + 1 < s.len() { &src[i..i + 2] } else { "" };
+    if matches!(two, ":=" | ".." | "||" | "<=" | ">=" | "<>" | "!=") {
+        return Spanned {
+            tok: Tok::Op(two.to_string()),
+            start: i,
+            end: i + 2,
+        };
+    }
+    Spanned {
+        tok: Tok::Punct(c as char),
+        start: i,
+        end: i + 1,
+    }
 }
 
 /// Replace every comment with spaces of the same byte length, keeping newlines.
@@ -307,74 +293,32 @@ pub fn lex(src: &str) -> Result<Vec<Spanned>, LexError> {
 pub fn mask_comments(src: &str) -> String {
     let s = src.as_bytes();
     let mut out = s.to_vec();
-    let blank = |out: &mut Vec<u8>, from: usize, to: usize| {
-        for b in &mut out[from..to] {
-            if *b != b'\n' {
-                *b = b' ';
-            }
-        }
-    };
     let mut i = 0usize;
     while i < s.len() {
         let c = s[i];
         if c == b'\'' || c == b'"' {
-            // `E'…'` strings treat a backslash as an escape; standard strings do not.
-            let escapes = c == b'\''
-                && i > 0
-                && matches!(s[i - 1], b'E' | b'e')
-                && (i < 2 || !(s[i - 2].is_ascii_alphanumeric() || s[i - 2] == b'_'));
-            i += 1;
-            while i < s.len() {
-                if escapes && s[i] == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if s[i] == c {
-                    if i + 1 < s.len() && s[i + 1] == c {
-                        i += 2;
-                        continue;
-                    }
-                    break;
-                }
-                i += 1;
-            }
-            i += 1;
+            i = quoted_end_lenient(s, i);
             continue;
         }
         if c == b'$'
             && let Some((tag, after)) = dollar_tag(s, i)
         {
             let close = format!("${tag}$");
-            match src[after..].find(&close) {
-                Some(rel) => i = after + rel + close.len(),
-                None => i = s.len(),
-            }
+            i = src[after..]
+                .find(&close)
+                .map_or(s.len(), |rel| after + rel + close.len());
             continue;
         }
         if c == b'-' && s.get(i + 1) == Some(&b'-') {
-            let start = i;
-            while i < s.len() && s[i] != b'\n' {
-                i += 1;
-            }
-            blank(&mut out, start, i);
+            let end = line_end(s, i);
+            blank(&mut out, i, end);
+            i = end;
             continue;
         }
         if c == b'/' && s.get(i + 1) == Some(&b'*') {
-            let start = i;
-            let mut depth = 1;
-            i += 2;
-            while i < s.len() && depth > 0 {
-                if s[i] == b'/' && s.get(i + 1) == Some(&b'*') {
-                    depth += 1;
-                    i += 2;
-                } else if s[i] == b'*' && s.get(i + 1) == Some(&b'/') {
-                    depth -= 1;
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            blank(&mut out, start, i.min(s.len()));
+            let (end, _) = block_comment_end(s, i);
+            blank(&mut out, i, end.min(s.len()));
+            i = end;
             continue;
         }
         i += 1;
@@ -382,6 +326,39 @@ pub fn mask_comments(src: &str) -> String {
     // Only ASCII bytes were written, and only over whole comments, so this cannot fail; the lossy
     // conversion is a guard, never a path.
     String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+/// Overwrites `out[from..to]` with spaces, keeping line breaks.
+fn blank(out: &mut [u8], from: usize, to: usize) {
+    for b in &mut out[from..to] {
+        if *b != b'\n' {
+            *b = b' ';
+        }
+    }
+}
+
+/// The index just past the string or quoted identifier opening at `start`. An unterminated one
+/// runs past the end of input rather than failing.
+fn quoted_end_lenient(s: &[u8], start: usize) -> usize {
+    let c = s[start];
+    // `E'…'` strings treat a backslash as an escape; standard strings do not.
+    let escapes = c == b'\''
+        && start > 0
+        && matches!(s[start - 1], b'E' | b'e')
+        && (start < 2 || !(s[start - 2].is_ascii_alphanumeric() || s[start - 2] == b'_'));
+    let mut i = start + 1;
+    while i < s.len() {
+        if escapes && s[i] == b'\\' {
+            i += 2;
+        } else if s[i] != c {
+            i += 1;
+        } else if s.get(i + 1) == Some(&c) {
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    i + 1
 }
 
 /// Extract the body of `CREATE FUNCTION … AS $tag$ … $tag$`.

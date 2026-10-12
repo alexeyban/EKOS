@@ -55,6 +55,59 @@ pub fn split_statements(body: &str, origin: Origin) -> Vec<(String, Span)> {
         .collect()
 }
 
+/// Whether `kw` is at `i` as a whole word, compared by bytes and without regard to case.
+///
+/// Byte comparison throughout. Slicing a `&str` at an arbitrary index panics on a multibyte
+/// character, and a parser that panics on `¿` is not a parser that recovers locally.
+fn keyword_is_at(b: &[u8], i: usize, kw: &str) -> bool {
+    let n = kw.len();
+    i + n <= b.len()
+        && b[i..i + n].eq_ignore_ascii_case(kw.as_bytes())
+        && (i == 0 || !is_word_byte(b[i - 1]))
+        && (i + n == b.len() || !is_word_byte(b[i + n]))
+}
+
+/// The block keyword at `i`, with its length.
+fn block_keyword_at(b: &[u8], i: usize) -> Option<(&'static str, usize)> {
+    // **`DECLARE` is not an opener.** It introduces a declaration list; `BEGIN` opens the
+    // block and `END` closes it. Counting DECLARE as a level leaves the depth permanently one
+    // too high, so the closing `END` never brings it back to zero and the entire routine reads
+    // as one unterminated statement.
+    for kw in [
+        "BEGIN",
+        "CASE",
+        "LOOP",
+        "IF",
+        "END",
+        "EXCEPTION",
+        "ELSIF",
+        "ELSE",
+    ] {
+        if keyword_is_at(b, i, kw) {
+            return Some((kw, kw.len()));
+        }
+    }
+    None
+}
+
+/// The index just past the `--` or `/* */` comment opening at `i`; `None` when none opens there.
+fn comment_end(b: &[u8], mut i: usize) -> Option<usize> {
+    if b[i] == b'-' && b.get(i + 1) == Some(&b'-') {
+        while i < b.len() && b[i] != b'\n' {
+            i += 1;
+        }
+        return Some(i);
+    }
+    if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+        i += 2;
+        while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+            i += 1;
+        }
+        return Some((i + 2).min(b.len()));
+    }
+    None
+}
+
 /// [`split_statements`] as trimmed subslices of `body`.
 fn split_slices(body: &str) -> Vec<&str> {
     let b = body.as_bytes();
@@ -74,33 +127,6 @@ fn split_slices(body: &str) -> Vec<&str> {
     // Byte comparison throughout. Slicing a `&str` at an arbitrary index panics on a multibyte
     // character, and a parser that panics on `¿` is not a parser that recovers locally — the first
     // non-ASCII identifier or comment in a real routine would take the process down.
-    let keyword_at = |i: usize| -> Option<(&'static str, usize)> {
-        // **`DECLARE` is not an opener.** It introduces a declaration list; `BEGIN` opens the
-        // block and `END` closes it. Counting DECLARE as a level leaves the depth permanently one
-        // too high, so the closing `END` never brings it back to zero and the entire routine reads
-        // as one unterminated statement.
-        for kw in [
-            "BEGIN",
-            "CASE",
-            "LOOP",
-            "IF",
-            "END",
-            "EXCEPTION",
-            "ELSIF",
-            "ELSE",
-        ] {
-            let n = kw.len();
-            if i + n <= b.len()
-                && b[i..i + n].eq_ignore_ascii_case(kw.as_bytes())
-                && (i == 0 || !is_word_byte(b[i - 1]))
-                && (i + n == b.len() || !is_word_byte(b[i + n]))
-            {
-                return Some((kw, n));
-            }
-        }
-        None
-    };
-
     while i < b.len() {
         let c = b[i];
         // Skip anything a semicolon can hide inside.
@@ -108,37 +134,23 @@ fn split_slices(body: &str) -> Vec<&str> {
             i = next;
             continue;
         }
-        if c == b'-' && i + 1 < b.len() && b[i + 1] == b'-' {
-            while i < b.len() && b[i] != b'\n' {
-                i += 1;
-            }
+        if let Some(next) = comment_end(b, i) {
+            i = next;
             continue;
         }
-        if c == b'/' && i + 1 < b.len() && b[i + 1] == b'*' {
-            i += 2;
-            while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
-                i += 1;
-            }
-            i = (i + 2).min(b.len());
-            continue;
-        }
-        if c == b'(' {
-            parens += 1;
-        } else if c == b')' {
-            parens -= 1;
-        }
+        parens += match c {
+            b'(' => 1,
+            b')' => -1,
+            _ => 0,
+        };
 
-        if i + 7 <= b.len()
-            && b[i..i + 7].eq_ignore_ascii_case(b"DECLARE")
-            && (i == 0 || !is_word_byte(b[i - 1]))
-            && (i + 7 == b.len() || !is_word_byte(b[i + 7]))
-        {
+        if keyword_is_at(b, i, "DECLARE") {
             in_declare = true;
             i += 7;
             continue;
         }
 
-        if let Some((kw, n)) = keyword_at(i)
+        if let Some((kw, n)) = block_keyword_at(b, i)
             && (kw != "IF" || at_statement_start(b, i))
         {
             if kw == "BEGIN" {

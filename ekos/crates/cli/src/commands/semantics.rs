@@ -1328,44 +1328,35 @@ pub fn eval(config: &EkosConfig, cwd: &Path, gold_path: &Path, json_out: bool) -
     Ok(())
 }
 
-/// Score `items` against `gold`. `evidence_of` yields an item's `(path, line)` evidence; `cwd`
-/// is where those paths are checked for evidence validity.
-pub fn score(
-    gold: &GoldSet,
-    items: &[KirObject],
-    evidence_of: impl Fn(&KirObject) -> Vec<(String, Option<u32>)>,
-    cwd: &Path,
-) -> Value {
-    let concepts: Vec<&KirObject> = items
-        .iter()
-        .filter(|o| kind_of(o) == Some(CONCEPT))
-        .collect();
-    let enums: Vec<&KirObject> = items
-        .iter()
-        .filter(|o| kind_of(o) == Some(ENUM_MEANING))
-        .collect();
-    let gaps: Vec<&KirObject> = items.iter().filter(|o| kind_of(o) == Some(GAP)).collect();
-
-    // Concepts: a gold concept is found when a recovered definition has exactly its atoms.
-    let recovered_defs: Vec<BTreeSet<String>> = concepts
-        .iter()
-        .map(|c| predicate_atoms(&s(c, "definition")))
-        .collect();
-    let mut concept_hits = 0;
-    let mut concept_misses = Vec::new();
-    let mut matched_recovered: BTreeSet<usize> = BTreeSet::new();
-    for g in &gold.concepts {
-        let atoms = predicate_atoms(&g.predicate);
-        match recovered_defs.iter().position(|d| *d == atoms) {
-            Some(i) => {
-                concept_hits += 1;
-                matched_recovered.insert(i);
-            }
-            None => concept_misses.push(format!("{} — {}", g.name, g.predicate)),
+/// (ok, edited, rejected) among the reviewed items of one kind — RFC 0170 §5 metrics that need
+/// no gold set, only human reviews (Phase 2).
+fn reviewed(items: &[KirObject], kind: &str) -> (usize, usize, usize) {
+    let (mut ok, mut edited, mut rejected) = (0, 0, 0);
+    for o in items.iter().filter(|o| kind_of(o) == Some(kind)) {
+        match s(o, "status").as_str() {
+            "confirmed" if o.properties.keys().any(|k| k.starts_with("expert_")) => edited += 1,
+            "confirmed" => ok += 1,
+            "rejected" => rejected += 1,
+            _ => {}
         }
     }
+    (ok, edited, rejected)
+}
 
-    // Enum meanings: coverage = gold codes with any recovered label; accuracy = labels that agree.
+/// Where an item's evidence is: (path, line) per citation.
+type EvidenceOf<'a> = &'a dyn Fn(&KirObject) -> Vec<(String, Option<u32>)>;
+
+struct EnumScore {
+    gold_codes: usize,
+    covered: usize,
+    correct: usize,
+    misses: Vec<String>,
+    wrong: Vec<String>,
+}
+
+/// Enum meanings against the gold set: coverage = gold codes with any recovered label;
+/// accuracy = labels that agree.
+fn enum_score(gold: &GoldSet, enums: &[&KirObject]) -> EnumScore {
     let mut gold_codes = 0;
     let mut covered = 0;
     let mut correct = 0;
@@ -1396,49 +1387,52 @@ pub fn score(
             }
         }
     }
-
-    // Gaps: known unknowns reported as gaps.
-    let mut gap_hits = 0;
-    let mut gap_misses = Vec::new();
-    for g in &gold.known_unknowns {
-        let hit = gaps.iter().any(|x| {
-            s(x, "table").eq_ignore_ascii_case(&g.table)
-                && s(x, "column").eq_ignore_ascii_case(&g.column)
-                && same_value(&g.value, &s(x, "value"))
-        });
-        if hit {
-            gap_hits += 1;
-        } else {
-            gap_misses.push(format!("{}.{} = {}", g.table, g.column, g.value));
-        }
+    EnumScore {
+        gold_codes,
+        covered,
+        correct,
+        misses: enum_misses,
+        wrong,
     }
+}
 
-    // Evidence validity (no gold needed): does the cited line exist and mention the column or the
-    // view/table it is about?
+/// The words a cited line should mention for the citation to count.
+fn evidence_needles(o: &KirObject) -> Vec<String> {
+    match kind_of(o) {
+        Some(k) if k == CONCEPT => p(o, "predicates")
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str())
+                    .filter_map(|x| x.split_whitespace().next())
+                    .map(|t| t.rsplit('.').next().unwrap_or(t).to_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        // A meaning is cited where it is stated: the column's comment or the lookup table's
+        // seed row, which names the label, not necessarily the referencing column.
+        _ => [s(o, "column"), s(o, "label")]
+            .into_iter()
+            .filter(|n| !n.is_empty())
+            .map(|n| n.to_lowercase())
+            .collect(),
+    }
+}
+
+/// Evidence validity (no gold needed): does the cited line exist and mention the column or the
+/// view/table it is about? Returns (citations, valid ones, the first 25 invalid ones).
+fn evidence_validity(
+    concepts: &[&KirObject],
+    enums: &[&KirObject],
+    evidence_of: EvidenceOf<'_>,
+    cwd: &Path,
+) -> (usize, usize, Vec<String>) {
     let mut refs = 0;
     let mut valid = 0;
     let mut invalid: Vec<String> = Vec::new();
     let mut files: HashMap<String, Option<Vec<String>>> = HashMap::new();
     for o in concepts.iter().chain(enums.iter()) {
-        let needles: Vec<String> = match kind_of(o) {
-            Some(k) if k == CONCEPT => p(o, "predicates")
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str())
-                        .filter_map(|x| x.split_whitespace().next())
-                        .map(|t| t.rsplit('.').next().unwrap_or(t).to_lowercase())
-                        .collect()
-                })
-                .unwrap_or_default(),
-            // A meaning is cited where it is stated: the column's comment or the lookup table's
-            // seed row, which names the label, not necessarily the referencing column.
-            _ => [s(o, "column"), s(o, "label")]
-                .into_iter()
-                .filter(|n| !n.is_empty())
-                .map(|n| n.to_lowercase())
-                .collect(),
-        };
+        let needles = evidence_needles(o);
         // A multi-row `VALUES` list is cited at its `INSERT` line; its rows follow.
         let span = if kind_of(o) == Some(CONCEPT) { 4 } else { 12 };
         for (path, line) in evidence_of(o) {
@@ -1486,25 +1480,80 @@ pub fn score(
             }
         }
     }
+    (refs, valid, invalid)
+}
+
+/// Score `items` against `gold`. `evidence_of` yields an item's `(path, line)` evidence; `cwd`
+/// is where those paths are checked for evidence validity.
+pub fn score(
+    gold: &GoldSet,
+    items: &[KirObject],
+    evidence_of: impl Fn(&KirObject) -> Vec<(String, Option<u32>)>,
+    cwd: &Path,
+) -> Value {
+    let concepts: Vec<&KirObject> = items
+        .iter()
+        .filter(|o| kind_of(o) == Some(CONCEPT))
+        .collect();
+    let enums: Vec<&KirObject> = items
+        .iter()
+        .filter(|o| kind_of(o) == Some(ENUM_MEANING))
+        .collect();
+    let gaps: Vec<&KirObject> = items.iter().filter(|o| kind_of(o) == Some(GAP)).collect();
+
+    // Concepts: a gold concept is found when a recovered definition has exactly its atoms.
+    let recovered_defs: Vec<BTreeSet<String>> = concepts
+        .iter()
+        .map(|c| predicate_atoms(&s(c, "definition")))
+        .collect();
+    let mut concept_hits = 0;
+    let mut concept_misses = Vec::new();
+    let mut matched_recovered: BTreeSet<usize> = BTreeSet::new();
+    for g in &gold.concepts {
+        let atoms = predicate_atoms(&g.predicate);
+        match recovered_defs.iter().position(|d| *d == atoms) {
+            Some(i) => {
+                concept_hits += 1;
+                matched_recovered.insert(i);
+            }
+            None => concept_misses.push(format!("{} — {}", g.name, g.predicate)),
+        }
+    }
+
+    // Enum meanings: coverage = gold codes with any recovered label; accuracy = labels that agree.
+    let EnumScore {
+        gold_codes,
+        covered,
+        correct,
+        misses: enum_misses,
+        wrong,
+    } = enum_score(gold, &enums);
+
+    // Gaps: known unknowns reported as gaps.
+    let mut gap_hits = 0;
+    let mut gap_misses = Vec::new();
+    for g in &gold.known_unknowns {
+        let hit = gaps.iter().any(|x| {
+            s(x, "table").eq_ignore_ascii_case(&g.table)
+                && s(x, "column").eq_ignore_ascii_case(&g.column)
+                && same_value(&g.value, &s(x, "value"))
+        });
+        if hit {
+            gap_hits += 1;
+        } else {
+            gap_misses.push(format!("{}.{} = {}", g.table, g.column, g.value));
+        }
+    }
+
+    // Evidence validity (no gold needed): does the cited line exist and mention the column or the
+    // view/table it is about?
+    let (refs, valid, invalid) = evidence_validity(&concepts, &enums, &evidence_of, cwd);
 
     let explained = enums.iter().filter(|e| !s(e, "label").is_empty()).count();
 
     // RFC 0170 §5 metrics that need no gold set, only human reviews (Phase 2).
-    let reviewed = |kind: &str| -> (usize, usize, usize) {
-        let of_kind = items.iter().filter(|o| kind_of(o) == Some(kind));
-        let (mut ok, mut edited, mut rejected) = (0, 0, 0);
-        for o in of_kind {
-            match s(o, "status").as_str() {
-                "confirmed" if o.properties.keys().any(|k| k.starts_with("expert_")) => edited += 1,
-                "confirmed" => ok += 1,
-                "rejected" => rejected += 1,
-                _ => {}
-            }
-        }
-        (ok, edited, rejected)
-    };
-    let (c_ok, c_edit, c_rej) = reviewed(CONCEPT);
-    let (g_ok, g_edit, g_rej) = reviewed(GAP);
+    let (c_ok, c_edit, c_rej) = reviewed(items, CONCEPT);
+    let (g_ok, g_edit, g_rej) = reviewed(items, GAP);
     json!({
         "gold": {"concepts": gold.concepts.len(), "enum_codes": gold_codes, "known_unknowns": gold.known_unknowns.len()},
         "recovered": {"concepts": concepts.len(), "enum_values": enums.len(), "gaps": gaps.len()},

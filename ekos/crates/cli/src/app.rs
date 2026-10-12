@@ -1296,154 +1296,17 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             crate::commands::recover::run_with(&config, &cwd, parallel, &extensions).await
         }
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
-        Commands::Conflicts { subcommand } => match subcommand {
-            ConflictsCommands::List {
-                status,
-                conflict_type,
-                json,
-            } => crate::commands::conflicts::list(
-                &config,
-                &cwd,
-                status.as_deref(),
-                conflict_type.as_deref(),
-                json,
-            ),
-            ConflictsCommands::Show { target, json } => {
-                crate::commands::conflicts::show(&config, &cwd, &target, json)
-            }
-            ConflictsCommands::Resolve {
-                target,
-                pick,
-                both_valid,
-                by,
-                note,
-            } => {
-                let decision = match (pick, both_valid) {
-                    (Some(n), false) => ekos_semantic::conflicts::Resolution::Pick(n),
-                    _ => ekos_semantic::conflicts::Resolution::BothValid,
-                };
-                crate::commands::conflicts::resolve(&config, &cwd, &target, decision, by, note)
-            }
-        },
-        Commands::Semantics { subcommand } => match subcommand {
-            SemanticsCommands::List { kind, status, json } => crate::commands::semantics::list(
-                &config,
-                &cwd,
-                kind.as_deref(),
-                status.as_deref(),
-                json,
-            ),
-            SemanticsCommands::Confirm { targets, by, note } => {
-                crate::commands::semantics::review_many(
-                    &config,
-                    &cwd,
-                    &targets,
-                    ekos_semantic::semantics_review::Decision::Confirm,
-                    by,
-                    note,
-                )
-            }
-            SemanticsCommands::Reject { targets, by, note } => {
-                crate::commands::semantics::review_many(
-                    &config,
-                    &cwd,
-                    &targets,
-                    ekos_semantic::semantics_review::Decision::Reject,
-                    by,
-                    note,
-                )
-            }
-            SemanticsCommands::Edit {
-                target,
-                name,
-                description,
-                label,
-                by,
-                note,
-            } => crate::commands::semantics::review(
-                &config,
-                &cwd,
-                &target,
-                ekos_semantic::semantics_review::Decision::Edit {
-                    name,
-                    description,
-                    label,
-                },
-                by,
-                note,
-            ),
-            SemanticsCommands::Show { target, json } => {
-                crate::commands::semantics::show(&config, &cwd, &target, json)
-            }
-            SemanticsCommands::Gaps { json } => {
-                crate::commands::semantics::gaps(&config, &cwd, json)
-            }
-            SemanticsCommands::GoldTemplate { tables, out } => {
-                crate::commands::semantics::gold_template(&config, &cwd, &tables, out.as_deref())
-            }
-            SemanticsCommands::Eval { gold, json } => {
-                crate::commands::semantics::eval(&config, &cwd, &gold, json)
-            }
-        },
-        Commands::Export { subcommand } => match subcommand {
-            ExportCommands::Linkml {
-                status,
-                out,
-                name,
-                json,
-            } => crate::commands::export::linkml(
-                &config,
-                &cwd,
-                &crate::commands::export::LinkmlOptions {
-                    status,
-                    out,
-                    name,
-                    json,
-                },
-            ),
-        },
-        Commands::Import { subcommand } => match subcommand {
-            ImportCommands::Linkml {
-                file,
-                dry_run,
-                json,
-                by,
-            } => crate::commands::import::linkml(
-                &config,
-                &cwd,
-                &crate::commands::import::ImportOptions {
-                    file: &file,
-                    dry_run,
-                    json,
-                    by,
-                },
-            ),
-        },
-        Commands::Identity { subcommand } => match subcommand {
-            IdentityCommands::Scan => crate::commands::identity::scan(&config, &cwd),
-        },
-        Commands::Treasury { subcommand } => match subcommand {
-            TreasuryCommands::Scan => crate::commands::treasury::scan(&config, &cwd),
-        },
+        Commands::Conflicts { subcommand } => dispatch_conflicts(subcommand, &config, &cwd),
+        Commands::Semantics { subcommand } => dispatch_semantics(subcommand, &config, &cwd),
+        Commands::Export { subcommand } => dispatch_export(subcommand, &config, &cwd),
+        Commands::Import { subcommand } => dispatch_import(subcommand, &config, &cwd),
+        Commands::Identity { subcommand } => dispatch_identity(subcommand, &config, &cwd),
+        Commands::Treasury { subcommand } => dispatch_treasury(subcommand, &config, &cwd),
         Commands::Compile => crate::commands::compile::run(&config, &cwd).await,
         Commands::Commit { yes } => {
             crate::commands::commit::run_with(&config, &cwd, yes, &extensions).await
         }
-        Commands::Ledger { subcommand } => match subcommand {
-            LedgerCommands::Status { storage, json } => {
-                crate::commands::ledger::status(&config, &cwd, storage, json)
-            }
-            LedgerCommands::Migrate { v3 } => crate::commands::ledger::migrate(&config, &cwd, v3),
-            LedgerCommands::Repair => crate::commands::ledger::repair(&config, &cwd),
-            LedgerCommands::Timeline {
-                json: _,
-                bucket,
-                since,
-            } => crate::commands::ledger::timeline(&config, &cwd, &bucket, since.as_deref()),
-            LedgerCommands::Audit { id, json } => {
-                crate::commands::ledger::audit(&config, &cwd, &id, json)
-            }
-        },
+        Commands::Ledger { subcommand } => dispatch_ledger(subcommand, &config, &cwd),
         Commands::Clean => crate::commands::clean::run(&config, &cwd),
         Commands::Doctor { json } => {
             crate::commands::doctor::run(&config, &cwd, &config_path, json)
@@ -1460,19 +1323,7 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         Commands::Status { storage, json } => {
             crate::commands::ledger::status(&config, &cwd, storage, json)
         }
-        Commands::Query { subcommand } => match subcommand {
-            QueryCommands::Object { id, format } => {
-                crate::commands::query::object(&config, &cwd, &id, &format)
-            }
-            QueryCommands::Find {
-                query,
-                explain,
-                mode,
-            } => crate::commands::query::find(&config, &cwd, &query, explain, &mode),
-            QueryCommands::Neighbourhood { id, depth } => {
-                crate::commands::query::neighbourhood(&config, &cwd, &id, depth)
-            }
-        },
+        Commands::Query { subcommand } => dispatch_query(subcommand, &config, &cwd),
         Commands::Ask {
             question,
             json,
@@ -1495,23 +1346,12 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             )
             .await
         }
-        Commands::ClickHouse { subcommand } => match subcommand {
-            ClickHouseCommands::Ask { question, json } => {
-                crate::commands::clickhouse::ask(&config, &cwd, &question, json).await
-            }
-        },
+        Commands::ClickHouse { subcommand } => {
+            dispatch_click_house(subcommand, &config, &cwd).await
+        }
         Commands::Ekl { query, json } => crate::commands::ekl::run(&config, &cwd, &query, json),
         Commands::Diff { from, to } => crate::commands::diff::run(&config, &cwd, from, to),
-        Commands::Branch { subcommand } => match subcommand {
-            BranchCommands::Create { name } => {
-                crate::commands::branch::create(&config, &cwd, &name)
-            }
-            BranchCommands::List => crate::commands::branch::list(&config, &cwd),
-            BranchCommands::Merge { name } => crate::commands::branch::merge(&config, &cwd, &name),
-            BranchCommands::Delete { name } => {
-                crate::commands::branch::delete(&config, &cwd, &name)
-            }
-        },
+        Commands::Branch { subcommand } => dispatch_branch(subcommand, &config, &cwd),
         Commands::Mcp { subcommand } => match subcommand {
             McpCommands::Serve {
                 workspace,
@@ -1545,74 +1385,407 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 )
             }
         },
-        Commands::Artifact { subcommand } => match subcommand {
-            ArtifactCommands::Repack => crate::commands::artifact::repack(&config, &cwd),
-        },
-        Commands::Coordinator { subcommand } => match subcommand {
-            CoordinatorCommands::Serve {
-                listen,
-                state,
-                ttl_seconds,
-            } => {
-                crate::commands::cluster::serve_coordinator(&listen, state.as_deref(), ttl_seconds)
-                    .await
-            }
-            CoordinatorCommands::Status { coordinator } => {
-                crate::commands::cluster::status(&coordinator).await
-            }
-        },
-        Commands::CompileWorker { subcommand } => match subcommand {
-            CompileWorkerCommands::Run {
-                coordinator,
-                shard,
-                workspace,
+        Commands::Artifact { subcommand } => dispatch_artifact(subcommand, &config, &cwd),
+        Commands::Coordinator { subcommand } => dispatch_coordinator(subcommand).await,
+        Commands::CompileWorker { subcommand } => {
+            dispatch_compile_worker(subcommand, &extensions).await
+        }
+        Commands::QueryWorker { subcommand } => dispatch_query_worker(subcommand).await,
+        Commands::Marketing { subcommand } => dispatch_marketing(subcommand, &config, &cwd).await,
+        Commands::Docs { subcommand } => dispatch_docs(subcommand, &config, &cwd).await,
+        Commands::Graph { subcommand } => dispatch_graph(subcommand, &config, &cwd),
+        Commands::Dbt { subcommand } => dispatch_dbt(subcommand, &config, &cwd).await,
+        Commands::Architecture { subcommand } => {
+            dispatch_architecture(subcommand, &config, &cwd, &extensions).await
+        }
+        Commands::Simulate {
+            scenario,
+            rounds,
+            ledger,
+            seed,
+        } => crate::commands::simulate::run(&config, &cwd, &scenario, rounds, ledger, seed),
+        Commands::Replay {
+            scenario,
+            round,
+            ledger,
+        } => crate::commands::replay::run(&config, &cwd, &scenario, round, ledger),
+        Commands::Migrate { subcommand } => dispatch_migrate(subcommand, &config, &cwd).await,
+        Commands::Session { subcommand } => dispatch_session(subcommand, &config, &cwd),
+        Commands::Eval { subcommand } => dispatch_eval(subcommand, &config, &cwd).await,
+    }
+}
+
+/// `ekos conflicts …`
+fn dispatch_conflicts(
+    subcommand: ConflictsCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        ConflictsCommands::List {
+            status,
+            conflict_type,
+            json,
+        } => crate::commands::conflicts::list(
+            config,
+            cwd,
+            status.as_deref(),
+            conflict_type.as_deref(),
+            json,
+        ),
+        ConflictsCommands::Show { target, json } => {
+            crate::commands::conflicts::show(config, cwd, &target, json)
+        }
+        ConflictsCommands::Resolve {
+            target,
+            pick,
+            both_valid,
+            by,
+            note,
+        } => {
+            let decision = match (pick, both_valid) {
+                (Some(n), false) => ekos_semantic::conflicts::Resolution::Pick(n),
+                _ => ekos_semantic::conflicts::Resolution::BothValid,
+            };
+            crate::commands::conflicts::resolve(config, cwd, &target, decision, by, note)
+        }
+    }
+}
+
+/// `ekos semantics …`
+fn dispatch_semantics(
+    subcommand: SemanticsCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        SemanticsCommands::List { kind, status, json } => {
+            crate::commands::semantics::list(config, cwd, kind.as_deref(), status.as_deref(), json)
+        }
+        SemanticsCommands::Confirm { targets, by, note } => {
+            crate::commands::semantics::review_many(
+                config,
+                cwd,
+                &targets,
+                ekos_semantic::semantics_review::Decision::Confirm,
+                by,
+                note,
+            )
+        }
+        SemanticsCommands::Reject { targets, by, note } => crate::commands::semantics::review_many(
+            config,
+            cwd,
+            &targets,
+            ekos_semantic::semantics_review::Decision::Reject,
+            by,
+            note,
+        ),
+        SemanticsCommands::Edit {
+            target,
+            name,
+            description,
+            label,
+            by,
+            note,
+        } => crate::commands::semantics::review(
+            config,
+            cwd,
+            &target,
+            ekos_semantic::semantics_review::Decision::Edit {
+                name,
+                description,
+                label,
+            },
+            by,
+            note,
+        ),
+        SemanticsCommands::Show { target, json } => {
+            crate::commands::semantics::show(config, cwd, &target, json)
+        }
+        SemanticsCommands::Gaps { json } => crate::commands::semantics::gaps(config, cwd, json),
+        SemanticsCommands::GoldTemplate { tables, out } => {
+            crate::commands::semantics::gold_template(config, cwd, &tables, out.as_deref())
+        }
+        SemanticsCommands::Eval { gold, json } => {
+            crate::commands::semantics::eval(config, cwd, &gold, json)
+        }
+    }
+}
+
+/// `ekos export …`
+fn dispatch_export(
+    subcommand: ExportCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        ExportCommands::Linkml {
+            status,
+            out,
+            name,
+            json,
+        } => crate::commands::export::linkml(
+            config,
+            cwd,
+            &crate::commands::export::LinkmlOptions {
+                status,
+                out,
+                name,
+                json,
+            },
+        ),
+    }
+}
+
+/// `ekos import …`
+fn dispatch_import(
+    subcommand: ImportCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        ImportCommands::Linkml {
+            file,
+            dry_run,
+            json,
+            by,
+        } => crate::commands::import::linkml(
+            config,
+            cwd,
+            &crate::commands::import::ImportOptions {
+                file: &file,
+                dry_run,
+                json,
+                by,
+            },
+        ),
+    }
+}
+
+/// `ekos identity …`
+fn dispatch_identity(
+    subcommand: IdentityCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        IdentityCommands::Scan => crate::commands::identity::scan(config, cwd),
+    }
+}
+
+/// `ekos treasury …`
+fn dispatch_treasury(
+    subcommand: TreasuryCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        TreasuryCommands::Scan => crate::commands::treasury::scan(config, cwd),
+    }
+}
+
+/// `ekos ledger …`
+fn dispatch_ledger(
+    subcommand: LedgerCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        LedgerCommands::Status { storage, json } => {
+            crate::commands::ledger::status(config, cwd, storage, json)
+        }
+        LedgerCommands::Migrate { v3 } => crate::commands::ledger::migrate(config, cwd, v3),
+        LedgerCommands::Repair => crate::commands::ledger::repair(config, cwd),
+        LedgerCommands::Timeline {
+            json: _,
+            bucket,
+            since,
+        } => crate::commands::ledger::timeline(config, cwd, &bucket, since.as_deref()),
+        LedgerCommands::Audit { id, json } => {
+            crate::commands::ledger::audit(config, cwd, &id, json)
+        }
+    }
+}
+
+/// `ekos query …`
+fn dispatch_query(
+    subcommand: QueryCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        QueryCommands::Object { id, format } => {
+            crate::commands::query::object(config, cwd, &id, &format)
+        }
+        QueryCommands::Find {
+            query,
+            explain,
+            mode,
+        } => crate::commands::query::find(config, cwd, &query, explain, &mode),
+        QueryCommands::Neighbourhood { id, depth } => {
+            crate::commands::query::neighbourhood(config, cwd, &id, depth)
+        }
+    }
+}
+
+/// `ekos click-house …`
+async fn dispatch_click_house(
+    subcommand: ClickHouseCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        ClickHouseCommands::Ask { question, json } => {
+            crate::commands::clickhouse::ask(config, cwd, &question, json).await
+        }
+    }
+}
+
+/// `ekos branch …`
+fn dispatch_branch(
+    subcommand: BranchCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        BranchCommands::Create { name } => crate::commands::branch::create(config, cwd, &name),
+        BranchCommands::List => crate::commands::branch::list(config, cwd),
+        BranchCommands::Merge { name } => crate::commands::branch::merge(config, cwd, &name),
+        BranchCommands::Delete { name } => crate::commands::branch::delete(config, cwd, &name),
+    }
+}
+
+/// `ekos artifact …`
+fn dispatch_artifact(
+    subcommand: ArtifactCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        ArtifactCommands::Repack => crate::commands::artifact::repack(config, cwd),
+    }
+}
+
+/// `ekos coordinator …`
+async fn dispatch_coordinator(subcommand: CoordinatorCommands) -> Result<()> {
+    match subcommand {
+        CoordinatorCommands::Serve {
+            listen,
+            state,
+            ttl_seconds,
+        } => {
+            crate::commands::cluster::serve_coordinator(&listen, state.as_deref(), ttl_seconds)
+                .await
+        }
+        CoordinatorCommands::Status { coordinator } => {
+            crate::commands::cluster::status(&coordinator).await
+        }
+    }
+}
+
+/// `ekos compile-worker …`
+async fn dispatch_compile_worker(
+    subcommand: CompileWorkerCommands,
+    extensions: &Extensions,
+) -> Result<()> {
+    match subcommand {
+        CompileWorkerCommands::Run {
+            coordinator,
+            shard,
+            workspace,
+            parallel,
+            force,
+            retry_lease_seconds,
+        } => {
+            crate::commands::cluster::compile_worker_run_with(
+                &coordinator,
+                &shard,
+                &workspace,
                 parallel,
                 force,
                 retry_lease_seconds,
-            } => {
-                crate::commands::cluster::compile_worker_run_with(
-                    &coordinator,
-                    &shard,
-                    &workspace,
-                    parallel,
-                    force,
-                    retry_lease_seconds,
-                    &extensions,
-                )
-                .await
-            }
-        },
-        Commands::QueryWorker { subcommand } => match subcommand {
-            QueryWorkerCommands::Serve {
-                coordinator,
-                listen,
-                cache,
-            } => crate::commands::cluster::serve_query_worker(&coordinator, &listen, &cache).await,
-        },
-        Commands::Marketing { subcommand } => match subcommand {
-            MarketingCommands::Publish {
-                devlog,
-                yes,
-                dry_run,
-            } => crate::commands::marketing::publish(&config, &cwd, devlog, yes, dry_run).await,
-        },
-        Commands::Docs { subcommand } => match subcommand {
-            DocsCommands::Generate {
-                output,
-                format,
-                layout,
-                prose,
-                yes,
-            } => {
-                let output = crate::commands::docs::resolve_output_dir(&cwd, output);
-                let format = crate::commands::docs::Format::parse(&format)?;
-                let layout = crate::commands::docs::Layout::parse(&layout)?;
-                crate::commands::docs::generate(&config, &cwd, &output, format, layout, prose, yes)
-                    .await
-            }
-        },
-        Commands::Graph { subcommand } => match subcommand {
-            GraphCommands::Export {
+                extensions,
+            )
+            .await
+        }
+    }
+}
+
+/// `ekos query-worker …`
+async fn dispatch_query_worker(subcommand: QueryWorkerCommands) -> Result<()> {
+    match subcommand {
+        QueryWorkerCommands::Serve {
+            coordinator,
+            listen,
+            cache,
+        } => crate::commands::cluster::serve_query_worker(&coordinator, &listen, &cache).await,
+    }
+}
+
+/// `ekos marketing …`
+async fn dispatch_marketing(
+    subcommand: MarketingCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        MarketingCommands::Publish {
+            devlog,
+            yes,
+            dry_run,
+        } => crate::commands::marketing::publish(config, cwd, devlog, yes, dry_run).await,
+    }
+}
+
+/// `ekos docs …`
+async fn dispatch_docs(
+    subcommand: DocsCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        DocsCommands::Generate {
+            output,
+            format,
+            layout,
+            prose,
+            yes,
+        } => {
+            let output = crate::commands::docs::resolve_output_dir(cwd, output);
+            let format = crate::commands::docs::Format::parse(&format)?;
+            let layout = crate::commands::docs::Layout::parse(&layout)?;
+            crate::commands::docs::generate(config, cwd, &output, format, layout, prose, yes).await
+        }
+    }
+}
+
+/// `ekos graph …`
+fn dispatch_graph(
+    subcommand: GraphCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        GraphCommands::Export {
+            workspace,
+            level,
+            format,
+            kinds,
+            rel_kinds,
+            exclude_rel_kinds,
+            group_by,
+            path_prefix_depth,
+            max_nodes,
+            max_edges,
+            min_degree,
+            include_properties,
+            as_of,
+            first_seen,
+            output,
+        } => crate::commands::graph::export(
+            config,
+            cwd,
+            crate::commands::graph::ExportArgs {
                 workspace,
                 level,
                 format,
@@ -1628,306 +1801,305 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
                 as_of,
                 first_seen,
                 output,
-            } => crate::commands::graph::export(
-                &config,
-                &cwd,
-                crate::commands::graph::ExportArgs {
-                    workspace,
-                    level,
-                    format,
-                    kinds,
-                    rel_kinds,
-                    exclude_rel_kinds,
-                    group_by,
-                    path_prefix_depth,
-                    max_nodes,
-                    max_edges,
-                    min_degree,
-                    include_properties,
-                    as_of,
-                    first_seen,
-                    output,
-                },
-            ),
-        },
-        Commands::Dbt { subcommand } => match subcommand {
-            DbtCommands::Generate { output } => {
-                let output = crate::commands::dbt::resolve_output_dir(&cwd, output);
-                crate::commands::dbt::generate(&cwd, &output, &config).await
-            }
-        },
-        Commands::Architecture { subcommand } => match subcommand {
-            ArchitectureCommands::Investigate {
+            },
+        ),
+    }
+}
+
+/// `ekos dbt …`
+async fn dispatch_dbt(
+    subcommand: DbtCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        DbtCommands::Generate { output } => {
+            let output = crate::commands::dbt::resolve_output_dir(cwd, output);
+            crate::commands::dbt::generate(cwd, &output, config).await
+        }
+    }
+}
+
+/// `ekos architecture …`
+async fn dispatch_architecture(
+    subcommand: ArchitectureCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+    extensions: &Extensions,
+) -> Result<()> {
+    match subcommand {
+        ArchitectureCommands::Investigate {
+            max_iterations,
+            quality_threshold,
+            output,
+        } => {
+            let output = crate::commands::architecture::resolve_output_dir(cwd, output);
+            let opts = crate::commands::architecture::InvestigateOptions {
                 max_iterations,
                 quality_threshold,
                 output,
-            } => {
-                let output = crate::commands::architecture::resolve_output_dir(&cwd, output);
-                let opts = crate::commands::architecture::InvestigateOptions {
-                    max_iterations,
-                    quality_threshold,
-                    output,
-                    extensions: extensions.clone(),
-                };
-                crate::commands::architecture::investigate(&config, &cwd, opts).await
-            }
-            ArchitectureCommands::Diff { from, to } => {
-                crate::commands::architecture::diff(&config, &cwd, from, to)
-            }
-        },
-        Commands::Simulate {
-            scenario,
-            rounds,
-            ledger,
-            seed,
-        } => crate::commands::simulate::run(&config, &cwd, &scenario, rounds, ledger, seed),
-        Commands::Replay {
-            scenario,
-            round,
-            ledger,
-        } => crate::commands::replay::run(&config, &cwd, &scenario, round, ledger),
-        Commands::Migrate { subcommand } => match subcommand {
-            MigrateCommands::Init {
-                name,
-                source,
-                target,
-                source_secret_env,
-                target_secret_env,
-            } => crate::commands::migrate::init(
-                &config,
-                &cwd,
-                name,
-                source,
-                target,
-                source_secret_env,
-                target_secret_env,
-            ),
-            MigrateCommands::Discover { project, schemas } => {
-                crate::commands::migrate::discover(&config, &cwd, project, schemas)
-            }
-            MigrateCommands::Profile {
-                project,
-                tier,
-                unit,
-            } => crate::commands::migrate::profile(&config, &cwd, project, tier, unit),
-            MigrateCommands::Assess {
-                project,
-                unit,
-                no_measure,
-            } => crate::commands::migrate::assess(&config, &cwd, project, unit, !no_measure),
-            MigrateCommands::Map {
-                project,
-                unit,
-                emit,
-            } => crate::commands::migrate::map(&config, &cwd, project, unit, emit),
-            MigrateCommands::Load {
-                project,
-                unit,
-                env,
-                chunk_rows,
-                dry_run,
-            } => crate::commands::migrate::load(
-                &config, &cwd, project, unit, env, chunk_rows, dry_run,
-            ),
-            MigrateCommands::Validate {
-                project,
-                unit,
-                tier,
-            } => crate::commands::migrate::validate(&config, &cwd, project, unit, tier),
-            MigrateCommands::Review { project, unit, env } => {
-                crate::commands::migrate::review(&config, &cwd, project, unit, env)
-            }
-            MigrateCommands::Approve {
-                request,
-                project,
+                extensions: extensions.clone(),
+            };
+            crate::commands::architecture::investigate(config, cwd, opts).await
+        }
+        ArchitectureCommands::Diff { from, to } => {
+            crate::commands::architecture::diff(config, cwd, from, to)
+        }
+    }
+}
+
+/// `ekos migrate …`
+async fn dispatch_migrate(
+    subcommand: MigrateCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        MigrateCommands::Init {
+            name,
+            source,
+            target,
+            source_secret_env,
+            target_secret_env,
+        } => crate::commands::migrate::init(
+            config,
+            cwd,
+            name,
+            source,
+            target,
+            source_secret_env,
+            target_secret_env,
+        ),
+        MigrateCommands::Discover { project, schemas } => {
+            crate::commands::migrate::discover(config, cwd, project, schemas)
+        }
+        MigrateCommands::Profile {
+            project,
+            tier,
+            unit,
+        } => crate::commands::migrate::profile(config, cwd, project, tier, unit),
+        MigrateCommands::Assess {
+            project,
+            unit,
+            no_measure,
+        } => crate::commands::migrate::assess(config, cwd, project, unit, !no_measure),
+        MigrateCommands::Map {
+            project,
+            unit,
+            emit,
+        } => crate::commands::migrate::map(config, cwd, project, unit, emit),
+        MigrateCommands::Load {
+            project,
+            unit,
+            env,
+            chunk_rows,
+            dry_run,
+        } => crate::commands::migrate::load(config, cwd, project, unit, env, chunk_rows, dry_run),
+        MigrateCommands::Validate {
+            project,
+            unit,
+            tier,
+        } => crate::commands::migrate::validate(config, cwd, project, unit, tier),
+        MigrateCommands::Review { project, unit, env } => {
+            crate::commands::migrate::review(config, cwd, project, unit, env)
+        }
+        MigrateCommands::Approve {
+            request,
+            project,
+            subjects,
+            confirm,
+            show_evidence,
+        } => crate::commands::migrate::decide(
+            config,
+            cwd,
+            project,
+            crate::commands::migrate::Decision {
+                request_id: request,
                 subjects,
-                confirm,
-                show_evidence,
-            } => crate::commands::migrate::decide(
-                &config,
-                &cwd,
-                project,
-                crate::commands::migrate::Decision {
-                    request_id: request,
-                    subjects,
-                    reject_reason: None,
-                    typed_confirmation: confirm,
-                    evidence_shown: show_evidence,
-                },
-            ),
-            MigrateCommands::Reject {
-                request,
-                project,
+                reject_reason: None,
+                typed_confirmation: confirm,
+                evidence_shown: show_evidence,
+            },
+        ),
+        MigrateCommands::Reject {
+            request,
+            project,
+            subjects,
+            reason,
+        } => crate::commands::migrate::decide(
+            config,
+            cwd,
+            project,
+            crate::commands::migrate::Decision {
+                request_id: request,
                 subjects,
-                reason,
-            } => crate::commands::migrate::decide(
-                &config,
-                &cwd,
-                project,
-                crate::commands::migrate::Decision {
-                    request_id: request,
-                    subjects,
-                    reject_reason: Some(reason),
-                    typed_confirmation: None,
-                    evidence_shown: false,
-                },
-            ),
-            MigrateCommands::Report {
-                project,
-                threshold,
-                out,
-            } => crate::commands::migrate::report(&config, &cwd, project, threshold, out),
-            MigrateCommands::Lower {
-                database,
-                sql,
-                record,
-                json,
-            } => crate::commands::migrate_logic::lower(&config, &cwd, database, sql, record, json),
-            MigrateCommands::V5 {
-                source_sandbox,
-                target_sandbox,
-                record,
-                json,
-            } => crate::commands::migrate_logic::run_v5(
-                &config,
-                &cwd,
-                &source_sandbox,
-                &target_sandbox,
-                record,
-                json,
-            ),
-            MigrateCommands::Reconstruct {
-                source,
+                reject_reason: Some(reason),
+                typed_confirmation: None,
+                evidence_shown: false,
+            },
+        ),
+        MigrateCommands::Report {
+            project,
+            threshold,
+            out,
+        } => crate::commands::migrate::report(config, cwd, project, threshold, out),
+        MigrateCommands::Lower {
+            database,
+            sql,
+            record,
+            json,
+        } => crate::commands::migrate_logic::lower(config, cwd, database, sql, record, json),
+        MigrateCommands::V5 {
+            source_sandbox,
+            target_sandbox,
+            record,
+            json,
+        } => crate::commands::migrate_logic::run_v5(
+            config,
+            cwd,
+            &source_sandbox,
+            &target_sandbox,
+            record,
+            json,
+        ),
+        MigrateCommands::Reconstruct {
+            source,
+            allow_metered,
+            record,
+            json,
+        } => {
+            crate::commands::migrate_logic::run_reconstruct(
+                config,
+                cwd,
+                &source,
                 allow_metered,
                 record,
                 json,
-            } => {
-                crate::commands::migrate_logic::run_reconstruct(
-                    &config,
-                    &cwd,
-                    &source,
-                    allow_metered,
-                    record,
-                    json,
-                )
-                .await
-            }
-            MigrateCommands::CheckCandidate {
-                source,
-                candidate,
-                json,
-            } => crate::commands::migrate_logic::check(&config, &cwd, &source, &candidate, json),
-            MigrateCommands::Status { project } => {
-                crate::commands::migrate::status(&config, &cwd, project)
-            }
-        },
-        Commands::Session { subcommand } => match subcommand {
-            SessionCommands::Note {
-                text,
-                kind,
-                rationale,
-                anchors,
-                session,
-            } => crate::commands::session::note(
-                &config, &cwd, session, &kind, text, rationale, anchors,
-            ),
-            SessionCommands::Status { session } => {
-                crate::commands::session::status(&config, &cwd, session)
-            }
-            SessionCommands::Commit { session } => {
-                crate::commands::session::commit(&config, &cwd, session)
-            }
-            SessionCommands::Recall { query, limit, json } => {
-                crate::commands::session::recall(&config, &cwd, &query, limit, json)
-            }
-            SessionCommands::Brief {
-                scope,
-                scope_from_git,
-                budget,
-                format,
-            } => crate::commands::session::brief(
-                &config,
-                &cwd,
-                scope,
-                scope_from_git,
-                budget,
-                &format,
-            ),
-            SessionCommands::Review {
-                claim_id,
-                decision,
-                by,
-            } => crate::commands::session::review(&config, &cwd, &claim_id, &decision, by),
-            SessionCommands::Purge {
-                session,
-                older_than_days,
-            } => crate::commands::session::purge(&config, &cwd, session, older_than_days),
-            SessionCommands::Capture { session, file } => {
-                crate::commands::session::capture(&config, &cwd, &session, file)
-            }
-            SessionCommands::Extract { session } => {
-                crate::commands::session::extract(&config, &cwd, &session)
-            }
-            SessionCommands::Eval { runs } => crate::commands::session::eval(runs),
-            SessionCommands::FingerprintNoise => {
-                crate::commands::session::fingerprint_noise(&config, &cwd)
-            }
-        },
-        Commands::Eval { subcommand } => match subcommand {
-            EvalCommands::Run {
-                dataset,
+            )
+            .await
+        }
+        MigrateCommands::CheckCandidate {
+            source,
+            candidate,
+            json,
+        } => crate::commands::migrate_logic::check(config, cwd, &source, &candidate, json),
+        MigrateCommands::Status { project } => {
+            crate::commands::migrate::status(config, cwd, project)
+        }
+    }
+}
+
+/// `ekos session …`
+fn dispatch_session(
+    subcommand: SessionCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        SessionCommands::Note {
+            text,
+            kind,
+            rationale,
+            anchors,
+            session,
+        } => crate::commands::session::note(config, cwd, session, &kind, text, rationale, anchors),
+        SessionCommands::Status { session } => {
+            crate::commands::session::status(config, cwd, session)
+        }
+        SessionCommands::Commit { session } => {
+            crate::commands::session::commit(config, cwd, session)
+        }
+        SessionCommands::Recall { query, limit, json } => {
+            crate::commands::session::recall(config, cwd, &query, limit, json)
+        }
+        SessionCommands::Brief {
+            scope,
+            scope_from_git,
+            budget,
+            format,
+        } => crate::commands::session::brief(config, cwd, scope, scope_from_git, budget, &format),
+        SessionCommands::Review {
+            claim_id,
+            decision,
+            by,
+        } => crate::commands::session::review(config, cwd, &claim_id, &decision, by),
+        SessionCommands::Purge {
+            session,
+            older_than_days,
+        } => crate::commands::session::purge(config, cwd, session, older_than_days),
+        SessionCommands::Capture { session, file } => {
+            crate::commands::session::capture(config, cwd, &session, file)
+        }
+        SessionCommands::Extract { session } => {
+            crate::commands::session::extract(config, cwd, &session)
+        }
+        SessionCommands::Eval { runs } => crate::commands::session::eval(runs),
+        SessionCommands::FingerprintNoise => {
+            crate::commands::session::fingerprint_noise(config, cwd)
+        }
+    }
+}
+
+/// `ekos eval …`
+async fn dispatch_eval(
+    subcommand: EvalCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        EvalCommands::Run {
+            dataset,
+            datasets_dir,
+            category,
+            agent,
+            limit,
+            json,
+            output,
+            save_answers,
+            evidence_only,
+            keep_question_echoes,
+        } => {
+            let opts = crate::commands::eval::EvalRunOpts {
+                dataset: dataset.as_deref(),
                 datasets_dir,
-                category,
-                agent,
+                category: category.as_deref(),
+                agent: agent.as_deref(),
                 limit,
                 json,
                 output,
                 save_answers,
                 evidence_only,
                 keep_question_echoes,
-            } => {
-                let opts = crate::commands::eval::EvalRunOpts {
-                    dataset: dataset.as_deref(),
-                    datasets_dir,
-                    category: category.as_deref(),
-                    agent: agent.as_deref(),
-                    limit,
-                    json,
-                    output,
-                    save_answers,
-                    evidence_only,
-                    keep_question_echoes,
-                };
-                crate::commands::eval::run(&config, &cwd, opts).await
-            }
-            EvalCommands::Regrade {
+            };
+            crate::commands::eval::run(config, cwd, opts).await
+        }
+        EvalCommands::Regrade {
+            report,
+            datasets_dir,
+            json,
+            output,
+        } => crate::commands::eval::regrade(
+            cwd,
+            config,
+            crate::commands::eval::EvalRegradeOpts {
                 report,
                 datasets_dir,
                 json,
                 output,
-            } => crate::commands::eval::regrade(
-                &cwd,
-                &config,
-                crate::commands::eval::EvalRegradeOpts {
-                    report,
-                    datasets_dir,
-                    json,
-                    output,
-                },
-            ),
-            EvalCommands::History {
+            },
+        ),
+        EvalCommands::History {
+            reports_dir,
+            limit,
+            json,
+        } => {
+            let opts = crate::commands::eval::EvalHistoryOpts {
                 reports_dir,
                 limit,
                 json,
-            } => {
-                let opts = crate::commands::eval::EvalHistoryOpts {
-                    reports_dir,
-                    limit,
-                    json,
-                };
-                crate::commands::eval::history(&cwd, opts)
-            }
-        },
+            };
+            crate::commands::eval::history(cwd, opts)
+        }
     }
 }
 

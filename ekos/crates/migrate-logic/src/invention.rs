@@ -254,93 +254,102 @@ pub struct RoutineAtoms {
 /// The atoms of every statement and condition in a routine's procedural IR.
 pub fn routine_atoms(ir: &ProcedureIr) -> RoutineAtoms {
     let mut found = RoutineAtoms::default();
-    let dialect = PostgreSqlDialect {};
-    let statement = |sql: &str, found: &mut RoutineAtoms| match Parser::parse_sql(&dialect, sql) {
-        Ok(stmts) => statement_atoms(&stmts, &mut found.atoms),
-        Err(_) => found.unparsed += 1,
-    };
-    fn expression(text: &str, found: &mut RoutineAtoms) {
-        let parsed = Parser::new(&PostgreSqlDialect {})
-            .try_with_sql(text)
-            .and_then(|mut p| p.parse_expr());
-        match parsed {
-            Ok(e) => {
-                let _ = visit_expressions(&e, |x| {
-                    expr_atoms(x, &mut found.atoms);
-                    ControlFlow::<()>::Continue(())
-                });
-            }
-            Err(_) => found.unparsed += 1,
-        }
-    }
     for d in &ir.declarations {
         if let Some(default) = &d.default {
-            expression(default, &mut found);
+            expression_atoms(default, &mut found);
         }
     }
     for s in &ir.body {
-        s.walk(&mut |node| match node {
-            ProcStmt::Sql { sql, .. } | ProcStmt::Perform { sql, .. } => {
-                // `PERFORM f(x)` is `SELECT f(x)` with the result discarded.
-                if matches!(node, ProcStmt::Perform { .. })
-                    && !sql.trim_start().to_ascii_lowercase().starts_with("select")
-                {
-                    statement(&format!("SELECT {sql}"), &mut found);
-                } else {
-                    statement(sql, &mut found);
-                }
-            }
-            ProcStmt::Assign { expr, .. } => expression(expr, &mut found),
-            ProcStmt::If { branches, .. } => {
-                for (condition, _) in branches {
-                    expression(condition, &mut found);
-                }
-            }
-            ProcStmt::Case {
-                operand, branches, ..
-            } => {
-                if let Some(o) = operand {
-                    expression(o, &mut found);
-                }
-                for (when, _) in branches {
-                    expression(when, &mut found);
-                }
-            }
-            ProcStmt::Loop { kind, .. } => match kind {
-                LoopKind::While { condition } => expression(condition, &mut found),
-                LoopKind::ForRange { from, to, .. } => {
-                    expression(from, &mut found);
-                    expression(to, &mut found);
-                }
-                LoopKind::ForQuery { sql, .. } => statement(sql, &mut found),
-                LoopKind::ForEach { array, .. } => expression(array, &mut found),
-                LoopKind::Plain => {}
-            },
-            ProcStmt::Exit { when, .. } => {
-                if let Some(w) = when {
-                    expression(w, &mut found);
-                }
-            }
-            ProcStmt::Return { value, query, .. } => {
-                if let Some(v) = value {
-                    expression(v, &mut found);
-                }
-                if let Some(q) = query {
-                    statement(q, &mut found);
-                }
-            }
-            ProcStmt::Cursor { query, .. } => {
-                if let Some(q) = query {
-                    statement(q, &mut found);
-                }
-            }
-            ProcStmt::Raise { .. }
-            | ProcStmt::Block { .. }
-            | ProcStmt::DynamicExecute { .. }
-            | ProcStmt::Unrecovered { .. } => {}
-        });
+        s.walk(&mut |node| node_atoms(node, &mut found));
     }
     found
+}
+
+/// The atoms of one embedded SQL statement; text that does not parse is counted, not guessed at.
+fn sql_atoms_into(sql: &str, found: &mut RoutineAtoms) {
+    match Parser::parse_sql(&PostgreSqlDialect {}, sql) {
+        Ok(stmts) => statement_atoms(&stmts, &mut found.atoms),
+        Err(_) => found.unparsed += 1,
+    }
+}
+
+/// The atoms of one embedded expression.
+fn expression_atoms(text: &str, found: &mut RoutineAtoms) {
+    let parsed = Parser::new(&PostgreSqlDialect {})
+        .try_with_sql(text)
+        .and_then(|mut p| p.parse_expr());
+    match parsed {
+        Ok(e) => {
+            let _ = visit_expressions(&e, |x| {
+                expr_atoms(x, &mut found.atoms);
+                ControlFlow::<()>::Continue(())
+            });
+        }
+        Err(_) => found.unparsed += 1,
+    }
+}
+
+fn optional_expression(text: &Option<String>, found: &mut RoutineAtoms) {
+    if let Some(t) = text {
+        expression_atoms(t, found);
+    }
+}
+
+fn optional_sql(sql: &Option<String>, found: &mut RoutineAtoms) {
+    if let Some(q) = sql {
+        sql_atoms_into(q, found);
+    }
+}
+
+/// The atoms one procedural statement states in its own SQL and expressions (not its children).
+fn node_atoms(node: &ProcStmt, found: &mut RoutineAtoms) {
+    match node {
+        // `PERFORM f(x)` is `SELECT f(x)` with the result discarded.
+        ProcStmt::Perform { sql, .. }
+            if !sql.trim_start().to_ascii_lowercase().starts_with("select") =>
+        {
+            sql_atoms_into(&format!("SELECT {sql}"), found);
+        }
+        ProcStmt::Sql { sql, .. } | ProcStmt::Perform { sql, .. } => sql_atoms_into(sql, found),
+        ProcStmt::Assign { expr, .. } => expression_atoms(expr, found),
+        ProcStmt::If { branches, .. } => {
+            for (condition, _) in branches {
+                expression_atoms(condition, found);
+            }
+        }
+        ProcStmt::Case {
+            operand, branches, ..
+        } => {
+            optional_expression(operand, found);
+            for (when, _) in branches {
+                expression_atoms(when, found);
+            }
+        }
+        ProcStmt::Loop { kind, .. } => loop_atoms(kind, found),
+        ProcStmt::Exit { when, .. } => optional_expression(when, found),
+        ProcStmt::Return { value, query, .. } => {
+            optional_expression(value, found);
+            optional_sql(query, found);
+        }
+        ProcStmt::Cursor { query, .. } => optional_sql(query, found),
+        ProcStmt::Raise { .. }
+        | ProcStmt::Block { .. }
+        | ProcStmt::DynamicExecute { .. }
+        | ProcStmt::Unrecovered { .. } => {}
+    }
+}
+
+fn loop_atoms(kind: &LoopKind, found: &mut RoutineAtoms) {
+    match kind {
+        LoopKind::While { condition } => expression_atoms(condition, found),
+        LoopKind::ForRange { from, to, .. } => {
+            expression_atoms(from, found);
+            expression_atoms(to, found);
+        }
+        LoopKind::ForQuery { sql, .. } => sql_atoms_into(sql, found),
+        LoopKind::ForEach { array, .. } => expression_atoms(array, found),
+        LoopKind::Plain => {}
+    }
 }
 
 /// The verdict on one candidate.
