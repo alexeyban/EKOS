@@ -6459,6 +6459,15 @@ LinkML; generation stays in LinkML.
       scenarios were 13 → 18 on the wording before the yes/no sentence)
 - [ ] `ekos eval run` writes its report only at the end, so a stopped run keeps nothing. Write
       each scenario's result as it completes
+- [x] Sonar findings of the 2026-09-29 scan (devlog_256): 57 of 58 functions over the
+      cognitive-complexity limit refactored, redundant closures replaced, `Graph.tsx` split;
+      `scripts/cognitive-complexity.sh` checks the limit without a scan
+- [ ] `semantic::business_semantics::synthesize` is still over the limit (estimated 241 against
+      30). It needs a designed decomposition: its phases share borrowed maps and its output order
+      is tested
+- [ ] Run a SonarCloud scan to confirm devlog_256 (needs `SONAR_TOKEN`; none was available)
+- [ ] `ledger/src/search.rs::query_scored_marked` adds the memory-path boost clause twice. Left
+      as found; decide whether the doubled boost is intended
 - [ ] `ollama.rs::likely_truncated` is `prompt + num_predict >= num_ctx`, which is true on every
       call when `[ai] max-tokens` equals the context window. Warn only when the prompt itself
       nears the window

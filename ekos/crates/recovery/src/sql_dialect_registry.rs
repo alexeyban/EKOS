@@ -41,6 +41,9 @@ pub struct DialectRule {
     pub dialect: String,
 }
 
+/// Dialect name → its parser, as [`build_dialect_registry`] returns it.
+pub type DialectRegistry = HashMap<String, Box<dyn SqlDialectParser>>;
+
 /// Builds the compiled-in dialect registry. Registering a new dialect crate means adding one
 /// line here (plus the workspace member + dependency) — see this module's top-level doc.
 pub fn build_dialect_registry() -> HashMap<String, Box<dyn SqlDialectParser>> {

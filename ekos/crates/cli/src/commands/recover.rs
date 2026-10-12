@@ -29,71 +29,344 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
 
 /// [`run`] with RFC 0149 extensions: their passes run alongside the built-in analyzers and their
 /// report lines join the summary.
-pub async fn run_with(
+fn print_sql_transform_stats(handles: &[Arc<std::sync::Mutex<SqlTransformStats>>]) {
+    if handles.is_empty() {
+        return;
+    }
+    let mut nodes_total = 0usize;
+    let mut nodes_mapped = 0usize;
+    for handle in handles {
+        let s = handle.lock().unwrap();
+        nodes_total += s.nodes_total;
+        nodes_mapped += s.nodes_mapped;
+    }
+    let coverage = if nodes_total == 0 {
+        0.0
+    } else {
+        100.0 * nodes_mapped as f32 / nodes_total as f32
+    };
+    println!(
+        "  Transformation IR nodes (SQL): {nodes_total} total, {coverage:.0}% mapped (non-Unmapped)"
+    );
+}
+
+fn print_trigger_stats(handles: &[Arc<std::sync::Mutex<TriggerStats>>]) {
+    if handles.is_empty() {
+        return;
+    }
+    let (mut triggers, mut parsed) = (0usize, 0usize);
+    for handle in handles {
+        let s = handle.lock().unwrap();
+        triggers += s.triggers;
+        parsed += s.parsed;
+    }
+    if triggers > 0 {
+        println!(
+            "  Triggers: {triggers} ({parsed} parsed, {} read from tokens) — classified at compile",
+            triggers - parsed
+        );
+    }
+}
+
+fn print_view_stats(handles: &[Arc<std::sync::Mutex<ViewStats>>]) {
+    if handles.is_empty() {
+        return;
+    }
+    let (mut views, mut parsed) = (0usize, 0usize);
+    for handle in handles {
+        let s = handle.lock().unwrap();
+        views += s.views;
+        parsed += s.parsed;
+    }
+    if views > 0 {
+        println!(
+            "  Views: {views} ({parsed} parsed, {} unparsed — still recorded)",
+            views - parsed
+        );
+    }
+}
+
+fn print_plpgsql_stats(handles: &[Arc<std::sync::Mutex<PlPgSqlStats>>]) {
+    if handles.is_empty() {
+        return;
+    }
+    let mut total = PlPgSqlStats::default();
+    let mut unlexable = 0usize;
+    for handle in handles {
+        let s = handle.lock().unwrap();
+        total.routines += s.routines;
+        total.plpgsql += s.plpgsql;
+        total.complete += s.complete;
+        total.partial += s.partial;
+        total.statements += s.statements;
+        total.unrecovered += s.unrecovered;
+        unlexable += usize::from(s.lex_error.is_some());
+    }
+    if total.routines > 0 || unlexable > 0 {
+        println!(
+            "  PL/pgSQL routines: {} ({} plpgsql: {} complete, {} partial), {} statements, {} unrecovered{}",
+            total.routines,
+            total.plpgsql,
+            total.complete,
+            total.partial,
+            total.statements,
+            total.unrecovered,
+            if unlexable > 0 {
+                format!(", {unlexable} file(s) did not lex")
+            } else {
+                String::new()
+            }
+        );
+    }
+}
+
+/// How the run went: passes run and skipped, pass errors, and the diagnostics summary (RFC 0076,
+/// written to `.ekos/diagnostics/recover.log` when there is anything to say). Fails when a pass
+/// reported an error.
+fn print_run_outcome(
     config: &EkosConfig,
     cwd: &Path,
     parallel: bool,
-    ext: &Extensions,
+    report: &ekos_compiler_core::scheduler::ExecutionReport,
+    ctx: &PassContext,
 ) -> Result<()> {
-    let artifact_dir = config.artifact_dir(cwd);
-    // Shared with the pass context below — two pack stores over the same
-    // segments would go stale on each other's appends (RFC 0015).
-    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(
-        PackArtifactStore::open(&artifact_dir)
-            .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?,
-    );
+    let errors: Vec<_> = report.error_outcomes().collect();
+    println!("  Passes run: {}", report.passes_run());
+    if report.passes_skipped() > 0 {
+        println!("  Passes skipped (cached): {}", report.passes_skipped());
+    }
+    if parallel {
+        println!("  Mode: parallel");
+    }
+    if !errors.is_empty() {
+        println!("  Errors ({}):", errors.len());
+        for o in &errors {
+            if let Err(e) = &o.result {
+                println!("    {}: {e}", o.pass_name);
+            }
+        }
+    }
+    // RFC 0076: `recover` used to collect real per-pass warnings (SQL001-003, and others) into
+    // `ctx.diagnostics` without ever summarising or persisting them anywhere — worse than
+    // `compile`'s at-least-a-count-with-a-broken-pointer, this was pure silent loss. Same fix,
+    // same shared helper: a real, `.ekos/diagnostics/recover.log` file when there's anything to
+    // say, nothing left behind otherwise.
+    if ctx.diagnostics.lock().unwrap().has_warnings() {
+        let warning_count = ctx.diagnostics.lock().unwrap().warning_count();
+        match super::diagnostics_log::write_diagnostics_log(&config.ekos_dir(cwd), "recover", ctx) {
+            Ok(Some(path)) => {
+                println!("  Warnings: {warning_count} (see {})", path.display())
+            }
+            Ok(None) => println!("  Warnings: {warning_count}"),
+            Err(e) => println!("  Warnings: {warning_count} (could not write log: {e})"),
+        }
+    }
+    if ctx.diagnostics.lock().unwrap().has_errors() {
+        anyhow::bail!("recovery completed with errors");
+    }
+    Ok(())
+}
 
-    // ── LLM provider selection ────────────────────────────────────────────
-    let llm: Arc<dyn LlmProvider> = build_llm_provider(config, &artifact_dir);
+/// One `  label: n` line of the report, left out when there is nothing to count.
+fn count_line(label: &str, n: usize) {
+    if n > 0 {
+        println!("  {label}: {n}");
+    }
+}
 
-    // ── Build PassContext ─────────────────────────────────────────────────
-    let mut pass_manager = ekos_compiler_core::pass::PassManager::new();
+/// Everything `ekos recover` reports once its passes have run.
+struct RecoverSummary {
+    sql_count: usize,
+    sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>>,
+    plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>>,
+    view_stats_handles: Vec<Arc<std::sync::Mutex<ViewStats>>>,
+    trigger_stats_handles: Vec<Arc<std::sync::Mutex<TriggerStats>>>,
+    dep_file_count: usize,
+    git_count: usize,
+    crypto_batch_count: usize,
+    github_item_count: usize,
+    treasury_payment_count: usize,
+    governance_proposal_count: usize,
+    confluence_page_count: usize,
+    clickhouse_table_count: usize,
+    localdocs_count: usize,
+    docsem_stats: Option<Arc<std::sync::Mutex<DocumentSemanticsStats>>>,
+    pentaho_count: usize,
+    pentaho_stats: Option<Arc<std::sync::Mutex<PentahoStats>>>,
+    python_count: usize,
+    python_stats: Option<Arc<std::sync::Mutex<PythonStats>>>,
+    rust_count: usize,
+    rust_stats: Option<Arc<std::sync::Mutex<RustStats>>>,
+    elixir_count: usize,
+    elixir_stats: Option<Arc<std::sync::Mutex<ElixirStats>>>,
+    perl_count: usize,
+    perl_stats: Option<Arc<std::sync::Mutex<PerlStats>>>,
+    extension_reports: Vec<Box<dyn FnOnce() -> Vec<String> + Send>>,
+    javascript_count: usize,
+    javascript_stats: Option<Arc<std::sync::Mutex<JavaScriptStats>>>,
+    package_json_count: usize,
+    requirements_count: usize,
+    archreasoning_stats: Option<Arc<std::sync::Mutex<ArchitectureReasoningStats>>>,
+}
 
-    // ── SQL files ─────────────────────────────────────────────────────────
-    let observe_paths: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
-        vec![cwd.to_path_buf()]
-    } else {
-        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
-    };
+impl RecoverSummary {
+    /// Prints the report and the diagnostics summary. Fails when a pass reported an error.
+    fn print(
+        self,
+        config: &EkosConfig,
+        cwd: &Path,
+        parallel: bool,
+        report: &ekos_compiler_core::scheduler::ExecutionReport,
+        ctx: &PassContext,
+    ) -> Result<()> {
+        let RecoverSummary {
+            sql_count,
+            sql_transform_stats_handles,
+            plpgsql_stats_handles,
+            view_stats_handles,
+            trigger_stats_handles,
+            dep_file_count,
+            git_count,
+            crypto_batch_count,
+            github_item_count,
+            treasury_payment_count,
+            governance_proposal_count,
+            confluence_page_count,
+            clickhouse_table_count,
+            localdocs_count,
+            docsem_stats,
+            pentaho_count,
+            pentaho_stats,
+            python_count,
+            python_stats,
+            rust_count,
+            rust_stats,
+            elixir_count,
+            elixir_stats,
+            perl_count,
+            perl_stats,
+            extension_reports,
+            javascript_count,
+            javascript_stats,
+            package_json_count,
+            requirements_count,
+            archreasoning_stats,
+        } = self;
 
-    let ignore = &config.observe.ignore_patterns;
-    // RFC 0043: shared by every direct-file-read block below (SQL scan, dependency-scan,
-    // crate-topology, CI/CD) — these bypass `build.rs`'s artifact-store redaction pass entirely,
-    // so each needs its own exclusion check + redaction before content reaches an analyzer pass.
-    let redaction_config = config.redaction_config();
-    let mut sql_count = 0usize;
-    let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
-    let mut plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>> = Vec::new();
-    let mut view_stats_handles: Vec<Arc<std::sync::Mutex<ViewStats>>> = Vec::new();
-    let mut trigger_stats_handles: Vec<Arc<std::sync::Mutex<TriggerStats>>> = Vec::new();
+        println!("Recover complete.");
+        println!("  SQL files analysed: {sql_count}");
+        println!("  Git commits analysed: {git_count}");
+        count_line("Crypto batches analysed", crypto_batch_count);
+        count_line("Source files scanned for dependencies", dep_file_count);
+        count_line("GitHub issues/PRs analysed", github_item_count);
+        count_line("Treasury payments analysed", treasury_payment_count);
+        count_line("Governance proposals analysed", governance_proposal_count);
+        count_line("Confluence pages analysed", confluence_page_count);
+        count_line("ClickHouse tables analysed", clickhouse_table_count);
+        count_line("Local documents analysed", localdocs_count);
+        if let Some(stats) = &docsem_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Document concepts extracted: {} sections processed, {} concepts, {} relationships",
+                s.sections_processed, s.concepts, s.relationships
+            );
+        }
+        count_line("Pentaho jobs analysed", pentaho_count);
+        if let Some(stats) = &pentaho_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Transformation IR nodes (Pentaho): {} total, {:.0}% mapped (non-Unmapped)",
+                s.nodes_total,
+                s.coverage_percent()
+            );
+        }
+        count_line("Python files analysed", python_count);
+        if let Some(stats) = &python_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Transformation IR nodes (Python): {} total, {:.0}% mapped (non-Unmapped)",
+                s.nodes_total,
+                s.coverage_percent()
+            );
+        }
+        count_line("Rust files analysed", rust_count);
+        if let Some(stats) = &rust_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Rust symbols recovered: {} total, {} Calls edges",
+                s.symbols_total, s.calls_total
+            );
+        }
+        count_line("Elixir files analysed", elixir_count);
+        if let Some(stats) = &elixir_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Elixir modules/symbols recovered: {} modules, {} symbols",
+                s.modules_total, s.symbols_total
+            );
+        }
+        count_line("Perl files analysed", perl_count);
+        if let Some(stats) = &perl_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Perl packages/symbols recovered: {} packages, {} symbols",
+                s.packages_total, s.symbols_total
+            );
+        }
+        for report in extension_reports {
+            for line in report() {
+                println!("  {line}");
+            }
+        }
+        count_line("JavaScript/TypeScript files analysed", javascript_count);
+        if let Some(stats) = &javascript_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  JS/TS modules/symbols recovered: {} modules, {} symbols ({} failed to parse)",
+                s.modules_total, s.symbols_total, s.files_failed_to_parse
+            );
+        }
+        count_line("package.json manifests analysed", package_json_count);
+        count_line("requirements.txt manifests analysed", requirements_count);
+        if let Some(stats) = &archreasoning_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Architecture reasoning: {} crates considered, {} role(s) assigned, {} rejected",
+                s.crates_considered, s.roles_assigned, s.rejected_unknown_crate
+            );
+        }
+        print_sql_transform_stats(&sql_transform_stats_handles);
+        print_trigger_stats(&trigger_stats_handles);
+        print_view_stats(&view_stats_handles);
+        print_plpgsql_stats(&plpgsql_stats_handles);
+        print_run_outcome(config, cwd, parallel, report, ctx)
+    }
+}
 
-    // ── SQL dialect resolution (RFC 0031) ─────────────────────────────────
-    // Registry is compile-time (mirrors the Observer plugin pattern) — a new dialect means a
-    // new crate implementing `SqlDialectParser`, registered here, not a runtime plugin load.
-    let dialect_registry = build_dialect_registry();
-    let dialect_rules: Vec<DialectRule> = config
-        .recover
-        .sql
-        .dialect_rules
-        .iter()
-        .map(|r| DialectRule {
-            path_glob: r.path_glob.clone(),
-            dialect: r.dialect.clone(),
-        })
-        .collect();
-    let default_dialect = &config.recover.sql.default_dialect;
-
-    for base in &observe_paths {
+/// Registers the SQL analyzer passes for every `.sql` file under the observed paths.
+#[allow(clippy::too_many_arguments)]
+async fn register_sql_passes(
+    observe_paths: &[std::path::PathBuf],
+    config: &EkosConfig,
+    cwd: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    llm: &Arc<dyn LlmProvider>,
+    pass_manager: &mut ekos_compiler_core::pass::PassManager,
+    sql_count: &mut usize,
+    sql_transform_stats_handles: &mut Vec<Arc<std::sync::Mutex<SqlTransformStats>>>,
+    plpgsql_stats_handles: &mut Vec<Arc<std::sync::Mutex<PlPgSqlStats>>>,
+    view_stats_handles: &mut Vec<Arc<std::sync::Mutex<ViewStats>>>,
+    trigger_stats_handles: &mut Vec<Arc<std::sync::Mutex<TriggerStats>>>,
+    dialect_registry: &ekos_recovery::DialectRegistry,
+    dialect_rules: &[DialectRule],
+    default_dialect: &str,
+) -> Result<()> {
+    for base in observe_paths {
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    return !ignore.iter().any(|p| name == p.as_str());
-                }
-                true
-            })
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
         {
             let entry = entry?;
             if !entry.file_type().is_file() {
@@ -118,7 +391,7 @@ pub async fn run_with(
             // RFC 0043: never read a file matching the built-in/configured secret-file exclusion
             // list at all (bypasses the artifact store, so `build.rs`'s central redaction pass
             // never sees this content).
-            if ekos_common::redaction::is_excluded_path(&rel_str, &redaction_config) {
+            if ekos_common::redaction::is_excluded_path(&rel_str, redaction_config) {
                 tracing::debug!(path = %rel_str, "skipping: matched security exclusion pattern");
                 continue;
             }
@@ -130,12 +403,12 @@ pub async fn run_with(
                     continue;
                 }
             };
-            let sql = ekos_common::redaction::redact(&sql, &redaction_config);
+            let sql = ekos_common::redaction::redact(&sql, redaction_config);
 
             // Resolve which dialect this file parses with (RFC 0031): first matching
             // `[[recover.sql.dialect-rules]]` wins, else `default-dialect` ("generic" — the
             // ANSI baseline — if the whole `[recover.sql]` section is omitted).
-            let dialect_name = resolve_dialect_name(&dialect_rules, default_dialect, &rel_str);
+            let dialect_name = resolve_dialect_name(dialect_rules, default_dialect, &rel_str);
             let dialect_parser = match dialect_registry.get(dialect_name) {
                 Some(parser) => parser.as_ref(),
                 None => {
@@ -217,35 +490,38 @@ pub async fn run_with(
                 pass_manager.register(Box::new(plpgsql_pass));
             }
 
-            sql_count += 1;
+            *sql_count += 1;
         }
     }
+    Ok(())
+}
 
-    // ── Source files for dependency-fact extraction (RFC 0019) ───────────
-    // Pattern/regex-based only (no AST/call-graph) — one pass batching every
-    // matched file so technology objects dedup within the batch before
-    // append_object's content-addressed idempotency takes over across runs.
-    const DEP_SCAN_EXTENSIONS: &[&str] = &["py", "js", "ts", "java", "go", "rb"];
-    // (relative path — to `base`, not `cwd`, matching `build.rs`'s own `File`-object convention
-    // exactly — raw file content, RFC 0079 project qualifier). Found live, 2026-08-24: this used
-    // to be a bare 2-tuple with no project qualifier at all, so every `DependsOn` edge
-    // `dependency_analyzer.rs` emitted pointed at a `file_kir_id` that never matched the real,
-    // project-qualified `File` object id `build.rs` actually wrote — silently orphaned
-    // relationships (`SEM002: ... has unknown from-id`) and a `## Technology Inventory` that
-    // could detect a technology but never resolve which file used it.
-    let mut dep_files: Vec<(String, String, String)> = Vec::new();
-    for base in &observe_paths {
+/// Whether a walked entry is a directory named by one of the `[observe]` ignore patterns.
+fn is_ignored_dir(entry: &walkdir::DirEntry, ignore: &[String]) -> bool {
+    entry.file_type().is_dir() && {
+        let name = entry.file_name().to_str().unwrap_or("");
+        ignore.iter().any(|p| name == p.as_str())
+    }
+}
+
+/// The extensions the dependency scan reads (RFC 0019).
+const DEP_SCAN_EXTENSIONS: &[&str] = &["py", "js", "ts", "java", "go", "rb"];
+
+/// Source files for dependency-fact extraction (RFC 0019), redacted.
+#[allow(clippy::too_many_arguments)]
+async fn collect_dependency_files(
+    observe_paths: &[std::path::PathBuf],
+    cwd: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    dep_files: &mut Vec<(String, String, String)>,
+) -> Result<()> {
+    for base in observe_paths {
         let project_key = ekos_common::project::project_key_for_base(base, cwd);
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    return !ignore.iter().any(|p| name == p.as_str());
-                }
-                true
-            })
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
         {
             let entry = entry?;
             if !entry.file_type().is_file() {
@@ -265,7 +541,7 @@ pub async fn run_with(
                 continue;
             }
             let rel = path.strip_prefix(base).unwrap_or(path);
-            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), redaction_config) {
                 tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
                 continue;
             }
@@ -277,7 +553,7 @@ pub async fn run_with(
                     continue;
                 }
             };
-            let content = ekos_common::redaction::redact(&content, &redaction_config);
+            let content = ekos_common::redaction::redact(&content, redaction_config);
             dep_files.push((
                 rel.to_string_lossy().replace('\\', "/"),
                 content,
@@ -285,6 +561,502 @@ pub async fn run_with(
             ));
         }
     }
+    Ok(())
+}
+
+/// Every `Cargo.toml` under the observed paths (RFC 0042), redacted.
+#[allow(clippy::too_many_arguments)]
+async fn collect_cargo_manifests(
+    observe_paths: &[std::path::PathBuf],
+    cwd: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    cargo_manifests: &mut Vec<(String, String, String)>,
+) -> Result<()> {
+    for base in observe_paths {
+        let project_key = ekos_common::project::project_key_for_base(base, cwd);
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "Cargo.toml" {
+                continue;
+            }
+            let path = entry.path();
+            let rel = path.strip_prefix(base).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
+            let content = match tokio::fs::read_to_string(path).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let content = ekos_common::redaction::redact(&content, redaction_config);
+            cargo_manifests.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Every `package.json` under the observed paths (RFC 0082), redacted.
+#[allow(clippy::too_many_arguments)]
+async fn collect_package_json(
+    observe_paths: &[std::path::PathBuf],
+    cwd: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    package_json_manifests: &mut Vec<(String, String, Option<String>)>,
+) -> Result<()> {
+    for base in observe_paths {
+        let project_key = {
+            let key = ekos_common::project::project_key_for_base(base, cwd);
+            if key.is_empty() { None } else { Some(key) }
+        };
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "package.json" {
+                continue;
+            }
+            let path = entry.path();
+            let rel = path.strip_prefix(base).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
+            let content = match tokio::fs::read_to_string(path).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let content = ekos_common::redaction::redact(&content, redaction_config);
+            package_json_manifests.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Every `requirements.txt` under the observed paths, redacted.
+#[allow(clippy::too_many_arguments)]
+async fn collect_requirements(
+    observe_paths: &[std::path::PathBuf],
+    cwd: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    requirements_manifests: &mut Vec<(String, String, Option<String>)>,
+) -> Result<()> {
+    for base in observe_paths {
+        let project_key = {
+            let key = ekos_common::project::project_key_for_base(base, cwd);
+            if key.is_empty() { None } else { Some(key) }
+        };
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "requirements.txt" {
+                continue;
+            }
+            let path = entry.path();
+            let rel = path.strip_prefix(base).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
+            let content = match tokio::fs::read_to_string(path).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let content = ekos_common::redaction::redact(&content, redaction_config);
+            requirements_manifests.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Every GitHub Actions workflow under the observed paths (RFC 0042), redacted.
+#[allow(clippy::too_many_arguments)]
+async fn collect_cicd_workflows(
+    observe_paths: &[std::path::PathBuf],
+    cwd: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    cicd_workflows: &mut Vec<(String, String, String)>,
+) -> Result<()> {
+    for base in observe_paths {
+        let project_key = ekos_common::project::project_key_for_base(base, cwd);
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let is_yaml = path
+                .extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(|e| e.eq_ignore_ascii_case("yml") || e.eq_ignore_ascii_case("yaml"))
+                .unwrap_or(false);
+            let under_workflows = path
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|w| w[0] == ".github" && w[1] == "workflows");
+            if !is_yaml || !under_workflows {
+                continue;
+            }
+            let rel = path.strip_prefix(base).unwrap_or(path);
+            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), redaction_config) {
+                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
+                continue;
+            }
+            let content = match tokio::fs::read_to_string(path).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("cannot read {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let content = ekos_common::redaction::redact(&content, redaction_config);
+            cicd_workflows.push((
+                rel.to_string_lossy().replace('\\', "/"),
+                content,
+                project_key.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The YAML and SQL files under a dbt project's `models/`, redacted, each with its path
+/// relative to the project. Returned as (yml files, sql files).
+async fn read_dbt_models(
+    dbt_dir: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    let mut dbt_yml_files: Vec<(String, String)> = Vec::new();
+    let mut dbt_sql_files: Vec<(String, String)> = Vec::new();
+    for m_entry in WalkDir::new(dbt_dir.join("models"))
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !is_ignored_dir(e, ignore))
+    {
+        let Ok(m_entry) = m_entry else { continue };
+        if !m_entry.file_type().is_file() {
+            continue;
+        }
+        let path = m_entry.path();
+        let ext = path
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .map(str::to_ascii_lowercase);
+        let is_sql = ext.as_deref() == Some("sql");
+        let is_yaml = matches!(ext.as_deref(), Some("yml") | Some("yaml"));
+        if !is_sql && !is_yaml {
+            continue;
+        }
+        let rel = path.strip_prefix(dbt_dir).unwrap_or(path);
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if ekos_common::redaction::is_excluded_path(&rel_str, redaction_config) {
+            tracing::debug!(path = %rel_str, "skipping: matched security exclusion pattern");
+            continue;
+        }
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("cannot read {}: {e}", path.display());
+                continue;
+            }
+        };
+        let content = ekos_common::redaction::redact(&content, redaction_config);
+        if is_sql {
+            dbt_sql_files.push((rel_str, content));
+        } else {
+            dbt_yml_files.push((rel_str, content));
+        }
+    }
+    (dbt_yml_files, dbt_sql_files)
+}
+
+/// Registers one dbt analyzer pass per dbt project found under the observed paths (RFC 0117).
+#[allow(clippy::too_many_arguments)]
+async fn register_dbt_passes(
+    observe_paths: &[std::path::PathBuf],
+    cwd: &Path,
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    pass_manager: &mut ekos_compiler_core::pass::PassManager,
+) -> Result<()> {
+    for base in observe_paths {
+        let project = ekos_common::project::project_key_for_base(base, cwd);
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
+        {
+            let entry = entry?;
+            if !entry.file_type().is_file() || entry.file_name() != "dbt_project.yml" {
+                continue;
+            }
+            let Some(dbt_dir) = entry.path().parent().map(Path::to_path_buf) else {
+                continue;
+            };
+            let dbt_dir_rel = dbt_dir.strip_prefix(base).unwrap_or(&dbt_dir);
+            let dbt_root = ekos_common::project::project_qualify(
+                &dbt_dir_rel.to_string_lossy().replace('\\', "/"),
+                if project.is_empty() {
+                    None
+                } else {
+                    Some(project.as_str())
+                },
+            );
+
+            let (dbt_yml_files, dbt_sql_files) =
+                read_dbt_models(&dbt_dir, ignore, redaction_config).await;
+
+            if !dbt_sql_files.is_empty() || !dbt_yml_files.is_empty() {
+                pass_manager.register(Box::new(DbtAnalyzerPass::new(
+                    dbt_root,
+                    dbt_yml_files,
+                    dbt_sql_files,
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+type ExtensionReport = Box<dyn FnOnce() -> Vec<String> + Send>;
+
+/// Registers every out-of-tree recover pass (RFC 0149) and returns each one's report callback.
+fn register_extension_passes(
+    ext: &Extensions,
+    config: &EkosConfig,
+    cwd: &Path,
+    artifact_store: &dyn ArtifactStore,
+    pass_manager: &mut ekos_compiler_core::pass::PassManager,
+) -> Vec<ExtensionReport> {
+    let mut extension_reports: Vec<ExtensionReport> = Vec::new();
+    let ext_ctx = RecoverContext {
+        config,
+        cwd,
+        project: cwd
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        artifact_store,
+    };
+    for e in ext.iter() {
+        for contribution in e.recovery_passes(&ext_ctx) {
+            pass_manager.register(contribution.pass);
+            extension_reports.push(contribution.report);
+        }
+    }
+    extension_reports
+}
+
+/// Registers the local-document pass, and the document-semantics pass on top of it when that is
+/// enabled; returns the latter's stats handle.
+fn register_localdocs(
+    config: &EkosConfig,
+    cwd: &Path,
+    llm: &Arc<dyn LlmProvider>,
+    localdocs_artifact_ids: Vec<ArtifactId>,
+    pass_manager: &mut ekos_compiler_core::pass::PassManager,
+) -> Option<Arc<std::sync::Mutex<DocumentSemanticsStats>>> {
+    if localdocs_artifact_ids.is_empty() {
+        return None;
+    }
+    let localdocs_count = localdocs_artifact_ids.len();
+    let mut docsem_stats = None;
+    let localdocs_pass = LocalDocAnalyzerPass::new(
+        cwd.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .as_ref(),
+        localdocs_artifact_ids,
+    );
+
+    // ── LLM document-semantics extraction (RFC 0026) ─────────────────
+    // Opt-in: one LLM call per document section, so it stays off unless
+    // asked for. Reuses the provider already selected above.
+    if should_register_document_semantics(config, localdocs_count) {
+        let docsem_pass = DocumentSemanticsAnalyzerPass::new(localdocs_pass.name(), llm.clone())
+            .with_max_sections(config.document_semantics.max_sections);
+        docsem_stats = Some(docsem_pass.stats_handle());
+        pass_manager.register(Box::new(docsem_pass));
+    }
+
+    pass_manager.register(Box::new(localdocs_pass));
+    docsem_stats
+}
+
+/// Registers the crate-topology pass, and the architecture-reasoning pass on top of it when that
+/// is enabled; returns the latter's stats handle.
+fn register_crate_topology(
+    config: &EkosConfig,
+    cwd: &Path,
+    llm: &Arc<dyn LlmProvider>,
+    cargo_manifests: Vec<(String, String, String)>,
+    pass_manager: &mut ekos_compiler_core::pass::PassManager,
+) -> Option<Arc<std::sync::Mutex<ArchitectureReasoningStats>>> {
+    if cargo_manifests.is_empty() {
+        return None;
+    }
+    let mut archreasoning_stats = None;
+    let crate_count = cargo_manifests
+        .iter()
+        .filter(|(_, content, _)| content.contains("[package]"))
+        .count();
+    let crate_topology_pass = CrateTopologyAnalyzerPass::new(
+        cwd.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .as_ref(),
+        cargo_manifests,
+    );
+
+    // ── LLM architecture reasoning (RFC 0065 Phase 2) ─────────────────
+    // Opt-in: one batched LLM call per `recover` run, so it stays off unless asked for.
+    // Reuses the provider already selected above.
+    if should_register_architecture_reasoning(config, crate_count) {
+        let archreasoning_pass =
+            ArchitectureReasoningPass::new(crate_topology_pass.name(), llm.clone());
+        archreasoning_stats = Some(archreasoning_pass.stats_handle());
+        pass_manager.register(Box::new(archreasoning_pass));
+    }
+
+    pass_manager.register(Box::new(crate_topology_pass));
+    archreasoning_stats
+}
+
+pub async fn run_with(
+    config: &EkosConfig,
+    cwd: &Path,
+    parallel: bool,
+    ext: &Extensions,
+) -> Result<()> {
+    let artifact_dir = config.artifact_dir(cwd);
+    // Shared with the pass context below — two pack stores over the same
+    // segments would go stale on each other's appends (RFC 0015).
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(
+        PackArtifactStore::open(&artifact_dir)
+            .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?,
+    );
+
+    // ── LLM provider selection ────────────────────────────────────────────
+    let llm: Arc<dyn LlmProvider> = build_llm_provider(config, &artifact_dir);
+
+    // ── Build PassContext ─────────────────────────────────────────────────
+    let mut pass_manager = ekos_compiler_core::pass::PassManager::new();
+
+    // ── SQL files ─────────────────────────────────────────────────────────
+    let observe_paths: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
+        vec![cwd.to_path_buf()]
+    } else {
+        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
+    };
+
+    let ignore = &config.observe.ignore_patterns;
+    // RFC 0043: shared by every direct-file-read block below (SQL scan, dependency-scan,
+    // crate-topology, CI/CD) — these bypass `build.rs`'s artifact-store redaction pass entirely,
+    // so each needs its own exclusion check + redaction before content reaches an analyzer pass.
+    let redaction_config = config.redaction_config();
+    let mut sql_count = 0usize;
+    let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
+    let mut plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>> = Vec::new();
+    let mut view_stats_handles: Vec<Arc<std::sync::Mutex<ViewStats>>> = Vec::new();
+    let mut trigger_stats_handles: Vec<Arc<std::sync::Mutex<TriggerStats>>> = Vec::new();
+
+    // ── SQL dialect resolution (RFC 0031) ─────────────────────────────────
+    // Registry is compile-time (mirrors the Observer plugin pattern) — a new dialect means a
+    // new crate implementing `SqlDialectParser`, registered here, not a runtime plugin load.
+    let dialect_registry = build_dialect_registry();
+    let dialect_rules: Vec<DialectRule> = config
+        .recover
+        .sql
+        .dialect_rules
+        .iter()
+        .map(|r| DialectRule {
+            path_glob: r.path_glob.clone(),
+            dialect: r.dialect.clone(),
+        })
+        .collect();
+    let default_dialect = &config.recover.sql.default_dialect;
+
+    register_sql_passes(
+        &observe_paths,
+        config,
+        cwd,
+        ignore,
+        &redaction_config,
+        &llm,
+        &mut pass_manager,
+        &mut sql_count,
+        &mut sql_transform_stats_handles,
+        &mut plpgsql_stats_handles,
+        &mut view_stats_handles,
+        &mut trigger_stats_handles,
+        &dialect_registry,
+        &dialect_rules,
+        default_dialect,
+    )
+    .await?;
+
+    // ── Source files for dependency-fact extraction (RFC 0019) ───────────
+    // Pattern/regex-based only (no AST/call-graph) — one pass batching every
+    // matched file so technology objects dedup within the batch before
+    // append_object's content-addressed idempotency takes over across runs.
+    // (relative path — to `base`, not `cwd`, matching `build.rs`'s own `File`-object convention
+    // exactly — raw file content, RFC 0079 project qualifier). Found live, 2026-08-24: this used
+    // to be a bare 2-tuple with no project qualifier at all, so every `DependsOn` edge
+    // `dependency_analyzer.rs` emitted pointed at a `file_kir_id` that never matched the real,
+    // project-qualified `File` object id `build.rs` actually wrote — silently orphaned
+    // relationships (`SEM002: ... has unknown from-id`) and a `## Technology Inventory` that
+    // could detect a technology but never resolve which file used it.
+    let mut dep_files: Vec<(String, String, String)> = Vec::new();
+    collect_dependency_files(
+        &observe_paths,
+        cwd,
+        ignore,
+        &redaction_config,
+        &mut dep_files,
+    )
+    .await?;
     let dep_file_count = dep_files.len();
     if !dep_files.is_empty() {
         let dep_pass = DependencyAnalyzerPass::new(
@@ -395,29 +1167,8 @@ pub async fn run_with(
     // ── Local document artifacts (RFC 0023) ──────────────────────────────
     let localdocs_artifact_ids = collect_localdocs_artifact_ids(&*artifact_store);
     let localdocs_count = localdocs_artifact_ids.len();
-    let mut docsem_stats: Option<Arc<std::sync::Mutex<DocumentSemanticsStats>>> = None;
-    if !localdocs_artifact_ids.is_empty() {
-        let localdocs_pass = LocalDocAnalyzerPass::new(
-            cwd.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .as_ref(),
-            localdocs_artifact_ids,
-        );
-
-        // ── LLM document-semantics extraction (RFC 0026) ─────────────────
-        // Opt-in: one LLM call per document section, so it stays off unless
-        // asked for. Reuses the provider already selected above.
-        if should_register_document_semantics(config, localdocs_count) {
-            let docsem_pass =
-                DocumentSemanticsAnalyzerPass::new(localdocs_pass.name(), llm.clone())
-                    .with_max_sections(config.document_semantics.max_sections);
-            docsem_stats = Some(docsem_pass.stats_handle());
-            pass_manager.register(Box::new(docsem_pass));
-        }
-
-        pass_manager.register(Box::new(localdocs_pass));
-    }
+    let docsem_stats =
+        register_localdocs(config, cwd, &llm, localdocs_artifact_ids, &mut pass_manager);
 
     // ── Pentaho .ktr/.kjb artifacts (RFC 0027 Phase 3) ────────────────────
     let pentaho_artifact_ids = collect_pentaho_artifact_ids(&*artifact_store);
@@ -500,25 +1251,8 @@ pub async fn run_with(
     }
 
     // ── Out-of-tree passes (RFC 0149) ───────────────────────────────────────
-    let mut extension_reports: Vec<Box<dyn FnOnce() -> Vec<String> + Send>> = Vec::new();
-    {
-        let ext_ctx = RecoverContext {
-            config,
-            cwd,
-            project: cwd
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
-            artifact_store: &*artifact_store,
-        };
-        for e in ext.iter() {
-            for contribution in e.recovery_passes(&ext_ctx) {
-                pass_manager.register(contribution.pass);
-                extension_reports.push(contribution.report);
-            }
-        }
-    }
+    let extension_reports =
+        register_extension_passes(ext, config, cwd, &*artifact_store, &mut pass_manager);
 
     // ── JavaScript/TypeScript artifacts (RFC 0085) ──────────────────────────
     let javascript_artifact_ids = collect_javascript_artifact_ids(&*artifact_store);
@@ -546,44 +1280,14 @@ pub async fn run_with(
     // `[observe] paths` entries in practice, so every manifest within one project's own `run()`
     // call still resolves against a consistent, self-relative directory namespace.
     let mut cargo_manifests: Vec<(String, String, String)> = Vec::new();
-    for base in &observe_paths {
-        let project_key = ekos_common::project::project_key_for_base(base, cwd);
-        for entry in WalkDir::new(base)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    return !ignore.iter().any(|p| name == p.as_str());
-                }
-                true
-            })
-        {
-            let entry = entry?;
-            if !entry.file_type().is_file() || entry.file_name() != "Cargo.toml" {
-                continue;
-            }
-            let path = entry.path();
-            let rel = path.strip_prefix(base).unwrap_or(path);
-            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
-                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
-                continue;
-            }
-            let content = match tokio::fs::read_to_string(path).await {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!("cannot read {}: {e}", path.display());
-                    continue;
-                }
-            };
-            let content = ekos_common::redaction::redact(&content, &redaction_config);
-            cargo_manifests.push((
-                rel.to_string_lossy().replace('\\', "/"),
-                content,
-                project_key.clone(),
-            ));
-        }
-    }
+    collect_cargo_manifests(
+        &observe_paths,
+        cwd,
+        ignore,
+        &redaction_config,
+        &mut cargo_manifests,
+    )
+    .await?;
 
     // ── package.json dependency extraction (RFC 0082) ──────────────────────
     // RFC 0079's own qualification convention, computed fresh here — this collection loop reads
@@ -597,47 +1301,14 @@ pub async fn run_with(
     // paths` entry (this doc comment's own "matches build.rs exactly" claim was never actually
     // true for that real, common shape until both are fixed here).
     let mut package_json_manifests: Vec<(String, String, Option<String>)> = Vec::new();
-    for base in &observe_paths {
-        let project_key = {
-            let key = ekos_common::project::project_key_for_base(base, cwd);
-            if key.is_empty() { None } else { Some(key) }
-        };
-        for entry in WalkDir::new(base)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    return !ignore.iter().any(|p| name == p.as_str());
-                }
-                true
-            })
-        {
-            let entry = entry?;
-            if !entry.file_type().is_file() || entry.file_name() != "package.json" {
-                continue;
-            }
-            let path = entry.path();
-            let rel = path.strip_prefix(base).unwrap_or(path);
-            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
-                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
-                continue;
-            }
-            let content = match tokio::fs::read_to_string(path).await {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!("cannot read {}: {e}", path.display());
-                    continue;
-                }
-            };
-            let content = ekos_common::redaction::redact(&content, &redaction_config);
-            package_json_manifests.push((
-                rel.to_string_lossy().replace('\\', "/"),
-                content,
-                project_key.clone(),
-            ));
-        }
-    }
+    collect_package_json(
+        &observe_paths,
+        cwd,
+        ignore,
+        &redaction_config,
+        &mut package_json_manifests,
+    )
+    .await?;
     let package_json_count = package_json_manifests.len();
     if !package_json_manifests.is_empty() {
         let package_json_pass = PackageJsonAnalyzerPass::new(
@@ -656,47 +1327,14 @@ pub async fn run_with(
     // view was blind to all of a real FastAPI backend's declared pip dependencies, even though the
     // Python source itself was fully analyzed by `python_analyzer.rs`.
     let mut requirements_manifests: Vec<(String, String, Option<String>)> = Vec::new();
-    for base in &observe_paths {
-        let project_key = {
-            let key = ekos_common::project::project_key_for_base(base, cwd);
-            if key.is_empty() { None } else { Some(key) }
-        };
-        for entry in WalkDir::new(base)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    return !ignore.iter().any(|p| name == p.as_str());
-                }
-                true
-            })
-        {
-            let entry = entry?;
-            if !entry.file_type().is_file() || entry.file_name() != "requirements.txt" {
-                continue;
-            }
-            let path = entry.path();
-            let rel = path.strip_prefix(base).unwrap_or(path);
-            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
-                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
-                continue;
-            }
-            let content = match tokio::fs::read_to_string(path).await {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!("cannot read {}: {e}", path.display());
-                    continue;
-                }
-            };
-            let content = ekos_common::redaction::redact(&content, &redaction_config);
-            requirements_manifests.push((
-                rel.to_string_lossy().replace('\\', "/"),
-                content,
-                project_key.clone(),
-            ));
-        }
-    }
+    collect_requirements(
+        &observe_paths,
+        cwd,
+        ignore,
+        &redaction_config,
+        &mut requirements_manifests,
+    )
+    .await?;
     let requirements_count = requirements_manifests.len();
     if !requirements_manifests.is_empty() {
         let requirements_pass = RequirementsAnalyzerPass::new(
@@ -709,89 +1347,21 @@ pub async fn run_with(
         pass_manager.register(Box::new(requirements_pass));
     }
 
-    let mut archreasoning_stats: Option<Arc<std::sync::Mutex<ArchitectureReasoningStats>>> = None;
-    if !cargo_manifests.is_empty() {
-        let crate_count = cargo_manifests
-            .iter()
-            .filter(|(_, content, _)| content.contains("[package]"))
-            .count();
-        let crate_topology_pass = CrateTopologyAnalyzerPass::new(
-            cwd.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .as_ref(),
-            cargo_manifests,
-        );
-
-        // ── LLM architecture reasoning (RFC 0065 Phase 2) ─────────────────
-        // Opt-in: one batched LLM call per `recover` run, so it stays off unless asked for.
-        // Reuses the provider already selected above.
-        if should_register_architecture_reasoning(config, crate_count) {
-            let archreasoning_pass =
-                ArchitectureReasoningPass::new(crate_topology_pass.name(), llm.clone());
-            archreasoning_stats = Some(archreasoning_pass.stats_handle());
-            pass_manager.register(Box::new(archreasoning_pass));
-        }
-
-        pass_manager.register(Box::new(crate_topology_pass));
-    }
+    let archreasoning_stats =
+        register_crate_topology(config, cwd, &llm, cargo_manifests, &mut pass_manager);
 
     // ── GitHub Actions CI/CD workflows (RFC 0042) ─────────────────────────
     // Same fix as `cargo_manifests` above — base-relative path + RFC 0079 project qualifier,
     // previously a bare 2-tuple with no project awareness at all.
     let mut cicd_workflows: Vec<(String, String, String)> = Vec::new();
-    for base in &observe_paths {
-        let project_key = ekos_common::project::project_key_for_base(base, cwd);
-        for entry in WalkDir::new(base)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    return !ignore.iter().any(|p| name == p.as_str());
-                }
-                true
-            })
-        {
-            let entry = entry?;
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let path = entry.path();
-            let is_yaml = path
-                .extension()
-                .and_then(std::ffi::OsStr::to_str)
-                .map(|e| e.eq_ignore_ascii_case("yml") || e.eq_ignore_ascii_case("yaml"))
-                .unwrap_or(false);
-            let under_workflows = path
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .windows(2)
-                .any(|w| w[0] == ".github" && w[1] == "workflows");
-            if !is_yaml || !under_workflows {
-                continue;
-            }
-            let rel = path.strip_prefix(base).unwrap_or(path);
-            if ekos_common::redaction::is_excluded_path(&rel.to_string_lossy(), &redaction_config) {
-                tracing::debug!(path = %rel.display(), "skipping: matched security exclusion pattern");
-                continue;
-            }
-            let content = match tokio::fs::read_to_string(path).await {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!("cannot read {}: {e}", path.display());
-                    continue;
-                }
-            };
-            let content = ekos_common::redaction::redact(&content, &redaction_config);
-            cicd_workflows.push((
-                rel.to_string_lossy().replace('\\', "/"),
-                content,
-                project_key.clone(),
-            ));
-        }
-    }
+    collect_cicd_workflows(
+        &observe_paths,
+        cwd,
+        ignore,
+        &redaction_config,
+        &mut cicd_workflows,
+    )
+    .await?;
     if !cicd_workflows.is_empty() {
         let cicd_pass = CicdAnalyzerPass::new(
             cwd.file_name()
@@ -813,93 +1383,14 @@ pub async fn run_with(
     // (`Cargo.toml`) and `cicd_analyzer` (`.github/workflows/*.yml`) already use — one
     // `DbtAnalyzerPass` per discovered project, so a monorepo with more than one dbt project
     // never mixes their model namespaces.
-    for base in &observe_paths {
-        let project = ekos_common::project::project_key_for_base(base, cwd);
-        for entry in WalkDir::new(base)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    return !ignore.iter().any(|p| name == p.as_str());
-                }
-                true
-            })
-        {
-            let entry = entry?;
-            if !entry.file_type().is_file() || entry.file_name() != "dbt_project.yml" {
-                continue;
-            }
-            let Some(dbt_dir) = entry.path().parent().map(Path::to_path_buf) else {
-                continue;
-            };
-            let dbt_dir_rel = dbt_dir.strip_prefix(base).unwrap_or(&dbt_dir);
-            let dbt_root = ekos_common::project::project_qualify(
-                &dbt_dir_rel.to_string_lossy().replace('\\', "/"),
-                if project.is_empty() {
-                    None
-                } else {
-                    Some(project.as_str())
-                },
-            );
-
-            let mut dbt_yml_files: Vec<(String, String)> = Vec::new();
-            let mut dbt_sql_files: Vec<(String, String)> = Vec::new();
-            for m_entry in WalkDir::new(dbt_dir.join("models"))
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|e| {
-                    if e.file_type().is_dir() {
-                        let name = e.file_name().to_str().unwrap_or("");
-                        return !ignore.iter().any(|p| name == p.as_str());
-                    }
-                    true
-                })
-            {
-                let Ok(m_entry) = m_entry else { continue };
-                if !m_entry.file_type().is_file() {
-                    continue;
-                }
-                let path = m_entry.path();
-                let ext = path
-                    .extension()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .map(str::to_ascii_lowercase);
-                let is_sql = ext.as_deref() == Some("sql");
-                let is_yaml = matches!(ext.as_deref(), Some("yml") | Some("yaml"));
-                if !is_sql && !is_yaml {
-                    continue;
-                }
-                let rel = path.strip_prefix(&dbt_dir).unwrap_or(path);
-                let rel_str = rel.to_string_lossy().replace('\\', "/");
-                if ekos_common::redaction::is_excluded_path(&rel_str, &redaction_config) {
-                    tracing::debug!(path = %rel_str, "skipping: matched security exclusion pattern");
-                    continue;
-                }
-                let content = match tokio::fs::read_to_string(path).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!("cannot read {}: {e}", path.display());
-                        continue;
-                    }
-                };
-                let content = ekos_common::redaction::redact(&content, &redaction_config);
-                if is_sql {
-                    dbt_sql_files.push((rel_str, content));
-                } else {
-                    dbt_yml_files.push((rel_str, content));
-                }
-            }
-
-            if !dbt_sql_files.is_empty() || !dbt_yml_files.is_empty() {
-                pass_manager.register(Box::new(DbtAnalyzerPass::new(
-                    dbt_root,
-                    dbt_yml_files,
-                    dbt_sql_files,
-                )));
-            }
-        }
-    }
+    register_dbt_passes(
+        &observe_paths,
+        cwd,
+        ignore,
+        &redaction_config,
+        &mut pass_manager,
+    )
+    .await?;
 
     if pass_manager.is_empty() {
         println!(
@@ -923,232 +1414,40 @@ pub async fn run_with(
             .map_err(|e| anyhow::anyhow!("scheduler error: {e}"))?
     };
 
-    let errors: Vec<_> = report.error_outcomes().collect();
-
-    println!("Recover complete.");
-    println!("  SQL files analysed: {sql_count}");
-    println!("  Git commits analysed: {git_count}");
-    if crypto_batch_count > 0 {
-        println!("  Crypto batches analysed: {crypto_batch_count}");
-    }
-    if dep_file_count > 0 {
-        println!("  Source files scanned for dependencies: {dep_file_count}");
-    }
-    if github_item_count > 0 {
-        println!("  GitHub issues/PRs analysed: {github_item_count}");
-    }
-    if treasury_payment_count > 0 {
-        println!("  Treasury payments analysed: {treasury_payment_count}");
-    }
-    if governance_proposal_count > 0 {
-        println!("  Governance proposals analysed: {governance_proposal_count}");
-    }
-    if confluence_page_count > 0 {
-        println!("  Confluence pages analysed: {confluence_page_count}");
-    }
-    if clickhouse_table_count > 0 {
-        println!("  ClickHouse tables analysed: {clickhouse_table_count}");
-    }
-    if localdocs_count > 0 {
-        println!("  Local documents analysed: {localdocs_count}");
-    }
-    if let Some(stats) = &docsem_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  Document concepts extracted: {} sections processed, {} concepts, {} relationships",
-            s.sections_processed, s.concepts, s.relationships
-        );
-    }
-    if pentaho_count > 0 {
-        println!("  Pentaho jobs analysed: {pentaho_count}");
-    }
-    if let Some(stats) = &pentaho_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  Transformation IR nodes (Pentaho): {} total, {:.0}% mapped (non-Unmapped)",
-            s.nodes_total,
-            s.coverage_percent()
-        );
-    }
-    if python_count > 0 {
-        println!("  Python files analysed: {python_count}");
-    }
-    if let Some(stats) = &python_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  Transformation IR nodes (Python): {} total, {:.0}% mapped (non-Unmapped)",
-            s.nodes_total,
-            s.coverage_percent()
-        );
-    }
-    if rust_count > 0 {
-        println!("  Rust files analysed: {rust_count}");
-    }
-    if let Some(stats) = &rust_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  Rust symbols recovered: {} total, {} Calls edges",
-            s.symbols_total, s.calls_total
-        );
-    }
-    if elixir_count > 0 {
-        println!("  Elixir files analysed: {elixir_count}");
-    }
-    if let Some(stats) = &elixir_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  Elixir modules/symbols recovered: {} modules, {} symbols",
-            s.modules_total, s.symbols_total
-        );
-    }
-    if perl_count > 0 {
-        println!("  Perl files analysed: {perl_count}");
-    }
-    if let Some(stats) = &perl_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  Perl packages/symbols recovered: {} packages, {} symbols",
-            s.packages_total, s.symbols_total
-        );
-    }
-    for report in extension_reports {
-        for line in report() {
-            println!("  {line}");
-        }
-    }
-    if javascript_count > 0 {
-        println!("  JavaScript/TypeScript files analysed: {javascript_count}");
-    }
-    if let Some(stats) = &javascript_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  JS/TS modules/symbols recovered: {} modules, {} symbols ({} failed to parse)",
-            s.modules_total, s.symbols_total, s.files_failed_to_parse
-        );
-    }
-    if package_json_count > 0 {
-        println!("  package.json manifests analysed: {package_json_count}");
-    }
-    if requirements_count > 0 {
-        println!("  requirements.txt manifests analysed: {requirements_count}");
-    }
-    if let Some(stats) = &archreasoning_stats {
-        let s = *stats.lock().unwrap();
-        println!(
-            "  Architecture reasoning: {} crates considered, {} role(s) assigned, {} rejected",
-            s.crates_considered, s.roles_assigned, s.rejected_unknown_crate
-        );
-    }
-    if !sql_transform_stats_handles.is_empty() {
-        let mut nodes_total = 0usize;
-        let mut nodes_mapped = 0usize;
-        for handle in &sql_transform_stats_handles {
-            let s = handle.lock().unwrap();
-            nodes_total += s.nodes_total;
-            nodes_mapped += s.nodes_mapped;
-        }
-        let coverage = if nodes_total == 0 {
-            0.0
-        } else {
-            100.0 * nodes_mapped as f32 / nodes_total as f32
-        };
-        println!(
-            "  Transformation IR nodes (SQL): {nodes_total} total, {coverage:.0}% mapped (non-Unmapped)"
-        );
-    }
-    if !trigger_stats_handles.is_empty() {
-        let (mut triggers, mut parsed) = (0usize, 0usize);
-        for handle in &trigger_stats_handles {
-            let s = handle.lock().unwrap();
-            triggers += s.triggers;
-            parsed += s.parsed;
-        }
-        if triggers > 0 {
-            println!(
-                "  Triggers: {triggers} ({parsed} parsed, {} read from tokens) — classified at compile",
-                triggers - parsed
-            );
-        }
-    }
-    if !view_stats_handles.is_empty() {
-        let (mut views, mut parsed) = (0usize, 0usize);
-        for handle in &view_stats_handles {
-            let s = handle.lock().unwrap();
-            views += s.views;
-            parsed += s.parsed;
-        }
-        if views > 0 {
-            println!(
-                "  Views: {views} ({parsed} parsed, {} unparsed — still recorded)",
-                views - parsed
-            );
-        }
-    }
-    if !plpgsql_stats_handles.is_empty() {
-        let mut total = PlPgSqlStats::default();
-        let mut unlexable = 0usize;
-        for handle in &plpgsql_stats_handles {
-            let s = handle.lock().unwrap();
-            total.routines += s.routines;
-            total.plpgsql += s.plpgsql;
-            total.complete += s.complete;
-            total.partial += s.partial;
-            total.statements += s.statements;
-            total.unrecovered += s.unrecovered;
-            unlexable += usize::from(s.lex_error.is_some());
-        }
-        if total.routines > 0 || unlexable > 0 {
-            println!(
-                "  PL/pgSQL routines: {} ({} plpgsql: {} complete, {} partial), {} statements, {} unrecovered{}",
-                total.routines,
-                total.plpgsql,
-                total.complete,
-                total.partial,
-                total.statements,
-                total.unrecovered,
-                if unlexable > 0 {
-                    format!(", {unlexable} file(s) did not lex")
-                } else {
-                    String::new()
-                }
-            );
-        }
-    }
-    println!("  Passes run: {}", report.passes_run());
-    if report.passes_skipped() > 0 {
-        println!("  Passes skipped (cached): {}", report.passes_skipped());
-    }
-    if parallel {
-        println!("  Mode: parallel");
-    }
-    if !errors.is_empty() {
-        println!("  Errors ({}):", errors.len());
-        for o in &errors {
-            if let Err(e) = &o.result {
-                println!("    {}: {e}", o.pass_name);
-            }
-        }
-    }
-    // RFC 0076: `recover` used to collect real per-pass warnings (SQL001-003, and others) into
-    // `ctx.diagnostics` without ever summarising or persisting them anywhere — worse than
-    // `compile`'s at-least-a-count-with-a-broken-pointer, this was pure silent loss. Same fix,
-    // same shared helper: a real, `.ekos/diagnostics/recover.log` file when there's anything to
-    // say, nothing left behind otherwise.
-    if ctx.diagnostics.lock().unwrap().has_warnings() {
-        let warning_count = ctx.diagnostics.lock().unwrap().warning_count();
-        match super::diagnostics_log::write_diagnostics_log(&config.ekos_dir(cwd), "recover", &ctx)
-        {
-            Ok(Some(path)) => {
-                println!("  Warnings: {warning_count} (see {})", path.display())
-            }
-            Ok(None) => println!("  Warnings: {warning_count}"),
-            Err(e) => println!("  Warnings: {warning_count} (could not write log: {e})"),
-        }
-    }
-    if ctx.diagnostics.lock().unwrap().has_errors() {
-        anyhow::bail!("recovery completed with errors");
-    }
-    Ok(())
+    let summary = RecoverSummary {
+        sql_count,
+        sql_transform_stats_handles,
+        plpgsql_stats_handles,
+        view_stats_handles,
+        trigger_stats_handles,
+        dep_file_count,
+        git_count,
+        crypto_batch_count,
+        github_item_count,
+        treasury_payment_count,
+        governance_proposal_count,
+        confluence_page_count,
+        clickhouse_table_count,
+        localdocs_count,
+        docsem_stats,
+        pentaho_count,
+        pentaho_stats,
+        python_count,
+        python_stats,
+        rust_count,
+        rust_stats,
+        elixir_count,
+        elixir_stats,
+        perl_count,
+        perl_stats,
+        extension_reports,
+        javascript_count,
+        javascript_stats,
+        package_json_count,
+        requirements_count,
+        archreasoning_stats,
+    };
+    summary.print(config, cwd, parallel, &report, &ctx)
 }
 
 /// Every artifact for `connector_name` currently in the store, deduplicated by `target` — the

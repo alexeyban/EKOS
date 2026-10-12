@@ -99,7 +99,8 @@ pub use requirements_analyzer::RequirementsAnalyzerPass;
 pub use rust_analyzer::{RustAnalyzerPass, RustStats};
 pub use sql_analyzer::{SqlAnalyzerPass, parse_ddl_structural};
 pub use sql_dialect_registry::{
-    DialectRule, GenericDialectParser, build_dialect_registry, resolve_dialect_name,
+    DialectRegistry, DialectRule, GenericDialectParser, build_dialect_registry,
+    resolve_dialect_name,
 };
 pub use sql_transform_analyzer::{
     SqlTransformAnalyzerPass, SqlTransformStats, parse_sql_to_transform_graphs,

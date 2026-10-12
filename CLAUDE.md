@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_255.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_256.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -29,6 +29,7 @@ cargo test -p ekos-ledger                    # one crate, e.g. ekos-ledger, ekos
 cargo test -p ekos-ledger some_test_name     # one test
 cargo clippy --workspace -- -D warnings      # CI fails on any warning
 cargo fmt --check                            # CI checks formatting, doesn't fix it
+../scripts/cognitive-complexity.sh           # functions over Sonar's complexity limit (S3776), no scan needed
 ../scripts/audit.sh                          # RustSec advisories + stale-lockfile check, all 3
                                              # workspaces (CI: audit.yml, also weekly). Run it
                                              # locally too: `[skip ci]` commits bypass CI

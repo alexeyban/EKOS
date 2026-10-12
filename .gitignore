@@ -42,3 +42,6 @@ web/api/.coverage
 
 # RFC 0170 LedgerSMB → LinkML demo: clone, workspace, venv and outputs
 /demo/ledgersmb-linkml/work/
+
+# scripts/cogc — local cognitive-complexity checker (devlog_256)
+scripts/cogc/target/
