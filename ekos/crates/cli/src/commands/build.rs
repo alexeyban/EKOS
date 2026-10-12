@@ -415,6 +415,42 @@ fn write_file_object(
     Ok(is_new)
 }
 
+/// RFC 0171 — what this build observed; `ekos commit` promotes it once the ledger has it.
+fn record_source_manifest(
+    config: &EkosConfig,
+    cwd: &Path,
+    built_stamps: &[(std::path::PathBuf, Vec<ekos_observation_sdk::FileStamp>)],
+) {
+    let mut manifest = crate::freshness::manifest_from(config, cwd, built_stamps);
+    if config.freshness.content_hash {
+        crate::freshness::add_hashes(&mut manifest, config, cwd);
+    }
+    if let Err(e) = crate::freshness::record_build(config, cwd, &manifest) {
+        tracing::warn!("could not write the source manifest (RFC 0171): {e}");
+    }
+}
+
+/// The closing report: (new, cached, total) file objects, then (re-scanned, cached) connectors.
+fn print_summary(files: (usize, usize, usize), connectors: (usize, usize), build_id: &str) {
+    let (total_observed, total_skipped, total_objects) = files;
+    let (connectors_rescanned, connectors_skipped_cached) = connectors;
+    println!("Build complete.");
+    println!("  Files observed (new): {total_observed}");
+    if total_skipped > 0 {
+        println!("  Files skipped (cached): {total_skipped}");
+    }
+    println!("  Total objects in ledger: {total_objects}");
+    if connectors_rescanned == 0 {
+        println!("  0 connectors re-scanned");
+    } else {
+        println!("  Connectors re-scanned: {connectors_rescanned}");
+    }
+    if connectors_skipped_cached > 0 {
+        println!("  {connectors_skipped_cached} connector(s) skipped (cached)");
+    }
+    println!("  Snapshot: .ekos/snapshots/{build_id}.json.zst");
+}
+
 /// [`run`] with RFC 0149 extensions: their observers run after the built-in ones, and their
 /// logic versions are folded into the fingerprint cache key.
 pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Result<()> {
@@ -543,13 +579,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     save_fingerprints(&fingerprint_path, &fingerprints)?;
     // RFC 0171 — what this build observed; `ekos commit` promotes it once the ledger has it.
     if config.freshness.enabled {
-        let mut manifest = crate::freshness::manifest_from(config, cwd, &built_stamps);
-        if config.freshness.content_hash {
-            crate::freshness::add_hashes(&mut manifest, config, cwd);
-        }
-        if let Err(e) = crate::freshness::record_build(config, cwd, &manifest) {
-            tracing::warn!("could not write the source manifest (RFC 0171): {e}");
-        }
+        record_source_manifest(config, cwd, &built_stamps);
     }
 
     // ── Write build index (snapshot) ─────────────────────────────────────────
@@ -567,21 +597,11 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     prune_snapshots(&snapshot_dir, SNAPSHOT_KEEP);
 
     let total_objects = ledger.object_count()?;
-    println!("Build complete.");
-    println!("  Files observed (new): {total_observed}");
-    if total_skipped > 0 {
-        println!("  Files skipped (cached): {total_skipped}");
-    }
-    println!("  Total objects in ledger: {total_objects}");
-    if connectors_rescanned == 0 {
-        println!("  0 connectors re-scanned");
-    } else {
-        println!("  Connectors re-scanned: {connectors_rescanned}");
-    }
-    if connectors_skipped_cached > 0 {
-        println!("  {connectors_skipped_cached} connector(s) skipped (cached)");
-    }
-    println!("  Snapshot: .ekos/snapshots/{build_id}.json.zst");
+    print_summary(
+        (total_observed, total_skipped, total_objects),
+        (connectors_rescanned, connectors_skipped_cached),
+        &build_id,
+    );
     Ok(())
 }
 

@@ -185,6 +185,261 @@ impl LocalDocAnalyzerPass {
     }
 }
 
+type DocAttrs<'a> = [(&'a str, serde_json::Value)];
+
+/// One observed document: its `Document` object, then its tables and sections.
+fn add_document(data: &DocumentData, graph: &mut KirGraph) {
+    // RFC 0079: id hashing only — `data.path` (display name, evidence text, properties)
+    // stays the bare, human-readable path everywhere below.
+    let id_path = ekos_common::project::project_qualify(&data.path, data.project.as_deref());
+    let doc_id = document_kir_id(&id_path);
+    let mut obj = KirObject::new(
+        data.path.clone(),
+        ObjectKind::Custom("Document".to_string()),
+    );
+    obj.id = doc_id;
+    obj.properties
+        .insert("path".into(), serde_json::json!(data.path));
+    obj.properties
+        .insert("doc_format".into(), serde_json::json!(data.doc_format));
+    obj.properties
+        .insert("page_count".into(), serde_json::json!(data.page_count));
+    obj.properties
+        .insert("excerpt".into(), serde_json::json!(data.excerpt));
+    // RFC 0144: document classification + RFC header, shared onto every Section below.
+    let doc_type = doc_type_for(&data.path);
+    let rfc = if doc_type == "rfc" {
+        let head: String = data
+            .sections
+            .iter()
+            .take(2)
+            .map(|s| s.text.as_str())
+            .chain(std::iter::once(data.excerpt.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        parse_rfc_header(&head)
+    } else {
+        RfcHeader::default()
+    };
+    let mut doc_attrs: Vec<(&str, serde_json::Value)> =
+        vec![("doc_type", serde_json::json!(doc_type))];
+    if let Some(n) = &rfc.number {
+        doc_attrs.push(("rfc_number", serde_json::json!(n)));
+    }
+    if let Some(t) = &rfc.title {
+        doc_attrs.push(("rfc_title", serde_json::json!(t)));
+    }
+    if let Some(st) = &rfc.status {
+        doc_attrs.push(("rfc_status", serde_json::json!(st)));
+    }
+    for (k, v) in &doc_attrs {
+        obj.properties.insert((*k).into(), v.clone());
+    }
+    if let Some(artifact_id_str) = &data.artifact_id {
+        obj.properties
+            .insert("artifact_id".into(), serde_json::json!(artifact_id_str));
+    }
+    if let Some(ocr_text) = &data.ocr_text
+        && !ocr_text.is_empty()
+    {
+        obj.properties
+            .insert("ocr_text".into(), serde_json::json!(ocr_text));
+    }
+
+    let doc_ev = KirEvidence::new(
+        SourceLocation::file(data.path.clone()),
+        format!("local document: {} ({})", data.path, data.doc_format),
+    );
+    let doc_ev_id = graph.add_evidence(doc_ev);
+    obj.evidence.push(doc_ev_id);
+    graph.objects.push(obj);
+
+    add_tables(data, &id_path, doc_id, graph);
+    add_sections(data, &id_path, doc_id, &doc_attrs, graph);
+}
+
+/// One `Table` per table extracted from the document, each contained in it.
+fn add_tables(data: &DocumentData, id_path: &str, doc_id: KirId, graph: &mut KirGraph) {
+    for (index, table) in data.tables.iter().enumerate() {
+        let tbl_id = table_kir_id(id_path, index);
+        let mut tbl_obj = KirObject::new(
+            format!("{}: table {}", data.path, index + 1),
+            ObjectKind::Table,
+        );
+        tbl_obj.id = tbl_id;
+        tbl_obj
+            .properties
+            .insert("rows".into(), serde_json::json!(table.rows));
+        tbl_obj
+            .properties
+            .insert("page".into(), serde_json::json!(table.page));
+
+        let page_note = table
+            .page
+            .map(|p| format!(" (page {p})"))
+            .unwrap_or_default();
+        let tbl_ev = KirEvidence::new(
+            SourceLocation::file(data.path.clone()),
+            format!(
+                "table {}{page_note} extracted from {}",
+                index + 1,
+                data.path
+            ),
+        );
+        let tbl_ev_id = graph.add_evidence(tbl_ev);
+        tbl_obj.evidence.push(tbl_ev_id);
+        graph.objects.push(tbl_obj);
+
+        let mut rel =
+            KirRelationship::deterministic(RelationshipKind::Contains, doc_id, tbl_id, "");
+        rel.evidence.push(tbl_ev_id);
+        graph.relationships.push(rel);
+    }
+}
+
+/// One `Section` per section of the document, each contained in it and carrying the document's
+/// own classification.
+fn add_sections(
+    data: &DocumentData,
+    id_path: &str,
+    doc_id: KirId,
+    doc_attrs: &DocAttrs<'_>,
+    graph: &mut KirGraph,
+) {
+    let mut previous_path: Option<&[String]> = None;
+    let mut part = 0usize;
+    for section in &data.sections {
+        let sec_id = section_kir_id(id_path, section.index);
+        // RFC 0144: consecutive sub-chunks of one heading share its path; number them.
+        if !section.heading_path.is_empty()
+            && previous_path == Some(section.heading_path.as_slice())
+        {
+            part += 1;
+        } else {
+            part = 1;
+        }
+        previous_path = Some(section.heading_path.as_slice());
+        let name = section_name(&data.path, section, part);
+        let mut sec_obj = KirObject::new(name, ObjectKind::Custom("Section".to_string()));
+        sec_obj.id = sec_id;
+        let excerpt: String = section
+            .text
+            .chars()
+            .take(SECTION_EXCERPT_MAX_CHARS)
+            .collect();
+        sec_obj
+            .properties
+            .insert("excerpt".into(), serde_json::json!(excerpt));
+        sec_obj
+            .properties
+            .insert("page".into(), serde_json::json!(section.page));
+        sec_obj
+            .properties
+            .insert("section_index".into(), serde_json::json!(section.index));
+        for (k, v) in doc_attrs {
+            sec_obj.properties.insert((*k).into(), v.clone());
+        }
+        add_glossary(&mut sec_obj, &data.path, section);
+        // RFC 0172: sentences that name one column — candidates for a documentation
+        // claim `ekos migrate assess` can check against the data.
+        let mentions =
+            crate::column_mentions::parse_text(&section.text, section.line_start.unwrap_or(0));
+        if !mentions.is_empty() {
+            sec_obj.properties.insert(
+                crate::column_mentions::PROPERTY.into(),
+                serde_json::json!(mentions),
+            );
+            sec_obj
+                .properties
+                .insert("source_path".into(), serde_json::json!(data.path));
+        }
+        if let Some(heading) = &section.heading {
+            sec_obj
+                .properties
+                .insert("heading".into(), serde_json::json!(heading));
+            sec_obj.properties.insert(
+                "heading_path".into(),
+                serde_json::json!(section.heading_path),
+            );
+        }
+        let line_range = section.line_start.zip(section.line_end);
+        if let Some((start, end)) = line_range {
+            sec_obj
+                .properties
+                .insert("line_start".into(), serde_json::json!(start));
+            sec_obj
+                .properties
+                .insert("line_end".into(), serde_json::json!(end));
+        }
+
+        let page_note = section
+            .page
+            .map(|p| format!(" (page {p})"))
+            .unwrap_or_default();
+        // RFC 0144: a Markdown section's evidence points at its real line range.
+        let sec_ev = match line_range {
+            Some((start, end)) => KirEvidence::new(
+                SourceLocation::at(data.path.clone(), start),
+                format!(
+                    "section {} extracted from {}:{start}-{end}",
+                    section.index + 1,
+                    data.path
+                ),
+            ),
+            None => KirEvidence::new(
+                SourceLocation::file(data.path.clone()),
+                format!(
+                    "section {}{page_note} extracted from {}",
+                    section.index + 1,
+                    data.path
+                ),
+            ),
+        };
+        let sec_ev_id = graph.add_evidence(sec_ev);
+        sec_obj.evidence.push(sec_ev_id);
+        graph.objects.push(sec_obj);
+
+        let mut rel =
+            KirRelationship::deterministic(RelationshipKind::Contains, doc_id, sec_id, "");
+        rel.evidence.push(sec_ev_id);
+        graph.relationships.push(rel);
+    }
+}
+
+/// A section's display name: by page, by heading path (numbering consecutive sub-chunks of one
+/// heading), or by index.
+fn section_name(doc_path: &str, section: &SectionData, part: usize) -> String {
+    match section.page {
+        Some(p) => format!("{doc_path}: page {p}"),
+        None if !section.heading_path.is_empty() => {
+            let path = section.heading_path.join(" › ");
+            if part > 1 {
+                format!("{doc_path} § {path} (part {part})")
+            } else {
+                format!("{doc_path} § {path}")
+            }
+        }
+        None => format!("{doc_path}: section {}", section.index + 1),
+    }
+}
+
+/// RFC 0170: a glossary section's entries — meaning, written down.
+fn add_glossary(sec_obj: &mut KirObject, path: &str, section: &SectionData) {
+    let mut names: Vec<&str> = vec![path];
+    names.extend(section.heading_path.iter().map(String::as_str));
+    if crate::glossary::is_glossary(&names) {
+        let entries = crate::glossary::parse_text(&section.text, section.line_start.unwrap_or(0));
+        if !entries.is_empty() {
+            sec_obj
+                .properties
+                .insert("glossary".into(), serde_json::json!(entries));
+            sec_obj
+                .properties
+                .insert("source_path".into(), serde_json::json!(path));
+        }
+    }
+}
+
 #[async_trait]
 impl CompilerPass for LocalDocAnalyzerPass {
     fn name(&self) -> &str {
@@ -233,237 +488,7 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 }
             };
 
-            // RFC 0079: id hashing only — `data.path` (display name, evidence text, properties)
-            // stays the bare, human-readable path everywhere below.
-            let id_path =
-                ekos_common::project::project_qualify(&data.path, data.project.as_deref());
-            let doc_id = document_kir_id(&id_path);
-            let mut obj = KirObject::new(
-                data.path.clone(),
-                ObjectKind::Custom("Document".to_string()),
-            );
-            obj.id = doc_id;
-            obj.properties
-                .insert("path".into(), serde_json::json!(data.path));
-            obj.properties
-                .insert("doc_format".into(), serde_json::json!(data.doc_format));
-            obj.properties
-                .insert("page_count".into(), serde_json::json!(data.page_count));
-            obj.properties
-                .insert("excerpt".into(), serde_json::json!(data.excerpt));
-            // RFC 0144: document classification + RFC header, shared onto every Section below.
-            let doc_type = doc_type_for(&data.path);
-            let rfc = if doc_type == "rfc" {
-                let head: String = data
-                    .sections
-                    .iter()
-                    .take(2)
-                    .map(|s| s.text.as_str())
-                    .chain(std::iter::once(data.excerpt.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                parse_rfc_header(&head)
-            } else {
-                RfcHeader::default()
-            };
-            let mut doc_attrs: Vec<(&str, serde_json::Value)> =
-                vec![("doc_type", serde_json::json!(doc_type))];
-            if let Some(n) = &rfc.number {
-                doc_attrs.push(("rfc_number", serde_json::json!(n)));
-            }
-            if let Some(t) = &rfc.title {
-                doc_attrs.push(("rfc_title", serde_json::json!(t)));
-            }
-            if let Some(st) = &rfc.status {
-                doc_attrs.push(("rfc_status", serde_json::json!(st)));
-            }
-            for (k, v) in &doc_attrs {
-                obj.properties.insert((*k).into(), v.clone());
-            }
-            if let Some(artifact_id_str) = &data.artifact_id {
-                obj.properties
-                    .insert("artifact_id".into(), serde_json::json!(artifact_id_str));
-            }
-            if let Some(ocr_text) = &data.ocr_text
-                && !ocr_text.is_empty()
-            {
-                obj.properties
-                    .insert("ocr_text".into(), serde_json::json!(ocr_text));
-            }
-
-            let doc_ev = KirEvidence::new(
-                SourceLocation::file(data.path.clone()),
-                format!("local document: {} ({})", data.path, data.doc_format),
-            );
-            let doc_ev_id = graph.add_evidence(doc_ev);
-            obj.evidence.push(doc_ev_id);
-            graph.objects.push(obj);
-
-            for (index, table) in data.tables.iter().enumerate() {
-                let tbl_id = table_kir_id(&id_path, index);
-                let mut tbl_obj = KirObject::new(
-                    format!("{}: table {}", data.path, index + 1),
-                    ObjectKind::Table,
-                );
-                tbl_obj.id = tbl_id;
-                tbl_obj
-                    .properties
-                    .insert("rows".into(), serde_json::json!(table.rows));
-                tbl_obj
-                    .properties
-                    .insert("page".into(), serde_json::json!(table.page));
-
-                let page_note = table
-                    .page
-                    .map(|p| format!(" (page {p})"))
-                    .unwrap_or_default();
-                let tbl_ev = KirEvidence::new(
-                    SourceLocation::file(data.path.clone()),
-                    format!(
-                        "table {}{page_note} extracted from {}",
-                        index + 1,
-                        data.path
-                    ),
-                );
-                let tbl_ev_id = graph.add_evidence(tbl_ev);
-                tbl_obj.evidence.push(tbl_ev_id);
-                graph.objects.push(tbl_obj);
-
-                let mut rel =
-                    KirRelationship::deterministic(RelationshipKind::Contains, doc_id, tbl_id, "");
-                rel.evidence.push(tbl_ev_id);
-                graph.relationships.push(rel);
-            }
-
-            let mut previous_path: Option<&[String]> = None;
-            let mut part = 0usize;
-            for section in &data.sections {
-                let sec_id = section_kir_id(&id_path, section.index);
-                // RFC 0144: consecutive sub-chunks of one heading share its path; number them.
-                if !section.heading_path.is_empty()
-                    && previous_path == Some(section.heading_path.as_slice())
-                {
-                    part += 1;
-                } else {
-                    part = 1;
-                }
-                previous_path = Some(section.heading_path.as_slice());
-                let name = match section.page {
-                    Some(p) => format!("{}: page {p}", data.path),
-                    None if !section.heading_path.is_empty() => {
-                        let path = section.heading_path.join(" › ");
-                        if part > 1 {
-                            format!("{} § {path} (part {part})", data.path)
-                        } else {
-                            format!("{} § {path}", data.path)
-                        }
-                    }
-                    None => format!("{}: section {}", data.path, section.index + 1),
-                };
-                let mut sec_obj = KirObject::new(name, ObjectKind::Custom("Section".to_string()));
-                sec_obj.id = sec_id;
-                let excerpt: String = section
-                    .text
-                    .chars()
-                    .take(SECTION_EXCERPT_MAX_CHARS)
-                    .collect();
-                sec_obj
-                    .properties
-                    .insert("excerpt".into(), serde_json::json!(excerpt));
-                sec_obj
-                    .properties
-                    .insert("page".into(), serde_json::json!(section.page));
-                sec_obj
-                    .properties
-                    .insert("section_index".into(), serde_json::json!(section.index));
-                for (k, v) in &doc_attrs {
-                    sec_obj.properties.insert((*k).into(), v.clone());
-                }
-                // RFC 0170: a glossary section's entries — meaning, written down.
-                {
-                    let mut names: Vec<&str> = vec![data.path.as_str()];
-                    names.extend(section.heading_path.iter().map(String::as_str));
-                    if crate::glossary::is_glossary(&names) {
-                        let entries = crate::glossary::parse_text(
-                            &section.text,
-                            section.line_start.unwrap_or(0),
-                        );
-                        if !entries.is_empty() {
-                            sec_obj
-                                .properties
-                                .insert("glossary".into(), serde_json::json!(entries));
-                            sec_obj
-                                .properties
-                                .insert("source_path".into(), serde_json::json!(data.path));
-                        }
-                    }
-                }
-                // RFC 0172: sentences that name one column — candidates for a documentation
-                // claim `ekos migrate assess` can check against the data.
-                let mentions = crate::column_mentions::parse_text(
-                    &section.text,
-                    section.line_start.unwrap_or(0),
-                );
-                if !mentions.is_empty() {
-                    sec_obj.properties.insert(
-                        crate::column_mentions::PROPERTY.into(),
-                        serde_json::json!(mentions),
-                    );
-                    sec_obj
-                        .properties
-                        .insert("source_path".into(), serde_json::json!(data.path));
-                }
-                if let Some(heading) = &section.heading {
-                    sec_obj
-                        .properties
-                        .insert("heading".into(), serde_json::json!(heading));
-                    sec_obj.properties.insert(
-                        "heading_path".into(),
-                        serde_json::json!(section.heading_path),
-                    );
-                }
-                let line_range = section.line_start.zip(section.line_end);
-                if let Some((start, end)) = line_range {
-                    sec_obj
-                        .properties
-                        .insert("line_start".into(), serde_json::json!(start));
-                    sec_obj
-                        .properties
-                        .insert("line_end".into(), serde_json::json!(end));
-                }
-
-                let page_note = section
-                    .page
-                    .map(|p| format!(" (page {p})"))
-                    .unwrap_or_default();
-                // RFC 0144: a Markdown section's evidence points at its real line range.
-                let sec_ev = match line_range {
-                    Some((start, end)) => KirEvidence::new(
-                        SourceLocation::at(data.path.clone(), start),
-                        format!(
-                            "section {} extracted from {}:{start}-{end}",
-                            section.index + 1,
-                            data.path
-                        ),
-                    ),
-                    None => KirEvidence::new(
-                        SourceLocation::file(data.path.clone()),
-                        format!(
-                            "section {}{page_note} extracted from {}",
-                            section.index + 1,
-                            data.path
-                        ),
-                    ),
-                };
-                let sec_ev_id = graph.add_evidence(sec_ev);
-                sec_obj.evidence.push(sec_ev_id);
-                graph.objects.push(sec_obj);
-
-                let mut rel =
-                    KirRelationship::deterministic(RelationshipKind::Contains, doc_id, sec_id, "");
-                rel.evidence.push(sec_ev_id);
-                graph.relationships.push(rel);
-            }
+            add_document(&data, &mut graph);
         }
 
         if graph.objects.is_empty() {

@@ -195,48 +195,159 @@ impl CrateTopologyAnalyzerPass {
     }
 }
 
-#[async_trait]
-impl CompilerPass for CrateTopologyAnalyzerPass {
-    fn name(&self) -> &str {
-        &self.pass_id
-    }
+struct ParsedCrate {
+    dir: String,
+    /// RFC 0079 — empty means "no qualification needed". Applied only at the point a real
+    /// `KirId` is minted (`crate_kir_id`/`architecture_gap_kir_id`/the `Claim`'s own
+    /// subject dir below), never to `dir` itself — every internal directory comparison in
+    /// this pass (`workspace_deps` path resolution, `dir_to_id` lookups) stays on the raw,
+    /// unqualified directory, which is correct: a real Cargo path dependency only ever
+    /// resolves within its own workspace, never across a project boundary.
+    project: String,
+    name: String,
+    version: Option<String>,
+    description: String,
+    deps: toml::value::Table,
+}
 
-    fn cache_inputs(&self) -> Vec<String> {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        let mut paths: Vec<&str> = self.manifests.iter().map(|(p, _, _)| p.as_str()).collect();
-        paths.sort();
-        for path in paths {
-            let (_, content, _) = self.manifests.iter().find(|(p, _, _)| p == path).unwrap();
-            hasher.update(path.as_bytes());
-            hasher.update(content.as_bytes());
+/// RFC 0079: qualifies the *hash input* only — `c.dir` itself stays raw/unqualified everywhere
+/// it is used for internal directory matching or display (`path` property, evidence text).
+fn qualified_dir(c: &ParsedCrate) -> String {
+    ekos_common::project::project_qualify(
+        &c.dir,
+        if c.project.is_empty() {
+            None
+        } else {
+            Some(c.project.as_str())
+        },
+    )
+}
+
+/// One `[workspace.dependencies]` entry: a path (normalised against the manifest's directory)
+/// or a version.
+fn workspace_dep(value: &toml::Value, manifest_dir: &Path) -> WorkspaceDep {
+    match value {
+        toml::Value::Table(t) => match t.get("path").and_then(|v| v.as_str()) {
+            Some(path) => WorkspaceDep::Path(normalize_rel_path(manifest_dir, path)),
+            None => WorkspaceDep::Version(
+                t.get("version")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string),
+            ),
+        },
+        toml::Value::String(v) => WorkspaceDep::Version(Some(v.clone())),
+        _ => WorkspaceDep::Version(None),
+    }
+}
+
+/// What a `[dependencies]` entry resolves to: its own path (normalised against the crate's
+/// directory), else the workspace's entry for that name. `None` when neither says.
+fn resolve_dependency(
+    value: &toml::Value,
+    manifest_dir: &Path,
+    workspace: Option<&WorkspaceDep>,
+) -> Option<DepResolution> {
+    match resolve_dep_entry(value) {
+        DepResolution::Path(raw) => {
+            Some(DepResolution::Path(normalize_rel_path(manifest_dir, &raw)))
         }
-        vec![hex::encode(hasher.finalize())]
+        DepResolution::Unresolved => match workspace? {
+            WorkspaceDep::Path(p) => Some(DepResolution::Path(p.clone())),
+            WorkspaceDep::Version(v) => Some(DepResolution::Version(v.clone())),
+        },
+        other => Some(other),
     }
+}
 
-    async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
-        let mut graph = KirGraph::new();
+/// "`krate` depends on `dep` [`version`]".
+fn dependency_phrase(krate: &str, dep: &str, version: Option<&str>) -> String {
+    match version {
+        Some(v) => format!("{krate} depends on {dep} {v}"),
+        None => format!("{krate} depends on {dep}"),
+    }
+}
 
-        // Pass 1: parse every manifest, collect `[workspace.dependencies]` (root manifest only —
-        // there is exactly one per Cargo workspace, but any manifest may carry one if it happens
-        // to be a workspace root) and every `[package]` manifest's own directory, so path
-        // dependencies (declared relative to the *dependent* crate, or to the workspace root for
-        // `workspace = true` entries) can be resolved in pass 2.
+/// Adds the `Technology` object for an external dependency unless the graph already has it.
+fn ensure_technology(graph: &mut KirGraph, tech_id: KirId, name: &str) {
+    if graph.objects.iter().any(|o| o.id == tech_id) {
+        return;
+    }
+    let mut tech_obj = KirObject::new(name, ObjectKind::Custom("Technology".to_string()));
+    tech_obj.id = tech_id;
+    graph.add_object(tech_obj);
+}
+
+/// RFC 0065 Phase 1: a dependency that resolves to nothing is a knowledge gap, recorded as an
+/// evidence-backed `ArchitectureGap` instead of dropped.
+fn add_unresolved_gap(graph: &mut KirGraph, c: &ParsedCrate, dep_name: &str, manifest_path: &str) {
+    let gap_id = architecture_gap_kir_id(&qualified_dir(c), dep_name);
+    let ev = KirEvidence::new(
+        SourceLocation::file(manifest_path),
+        format!(
+            "{} declares a dependency on '{dep_name}' that could not be \
+             resolved (workspace = true with no matching \
+             [workspace.dependencies] entry, or a git/registry-index \
+             dependency shape not modeled in v1)",
+            c.name
+        ),
+    );
+    let ev_id = graph.add_evidence(ev);
+    let mut gap = KirObject::new(
+        format!("unresolved dependency '{dep_name}' for {}", c.name),
+        ObjectKind::Custom("ArchitectureGap".to_string()),
+    )
+    .with_property(
+        "question",
+        serde_json::json!(format!("What does '{dep_name}' resolve to for {}?", c.name)),
+    )
+    .with_property("affected_crate", serde_json::json!(c.name))
+    .with_property(
+        "reason",
+        serde_json::json!(
+            "workspace = true with no matching [workspace.dependencies] \
+             entry, or a dependency shape not modeled in v1"
+        ),
+    )
+    .with_evidence(ev_id);
+    gap.id = gap_id;
+    graph.add_object(gap);
+}
+
+/// A `DependsOn` edge from a crate to `target_id`, its evidence, and the matching Fact-type
+/// `Claim` (RFC 0065 Phase 1), which reuses that evidence.
+fn add_dependency(
+    graph: &mut KirGraph,
+    c: &ParsedCrate,
+    manifest_path: &str,
+    crate_id: KirId,
+    target_id: KirId,
+    target_name: &str,
+    fragment: String,
+) {
+    let ev_id = graph.add_evidence(KirEvidence::new(
+        SourceLocation::file(manifest_path),
+        fragment,
+    ));
+    let mut rel = KirRelationship::new(RelationshipKind::DependsOn, crate_id, target_id);
+    rel.id = depends_on_kir_id(crate_id, target_id);
+    rel.evidence.push(ev_id);
+    graph.add_relationship(rel);
+    add_depends_on_claim(
+        graph,
+        &qualified_dir(c),
+        crate_id,
+        &c.name,
+        target_id,
+        target_name,
+        ev_id,
+    );
+}
+
+impl CrateTopologyAnalyzerPass {
+    /// Pass 1: every manifest parsed — the `[workspace.dependencies]` of any workspace root, and
+    /// each `[package]` with its own directory, so path dependencies can be resolved in pass 2.
+    fn parse_manifests(&self) -> (HashMap<String, WorkspaceDep>, Vec<ParsedCrate>) {
         let mut workspace_deps: HashMap<String, WorkspaceDep> = HashMap::new();
-        struct ParsedCrate {
-            dir: String,
-            /// RFC 0079 — empty means "no qualification needed". Applied only at the point a real
-            /// `KirId` is minted (`crate_kir_id`/`architecture_gap_kir_id`/the `Claim`'s own
-            /// subject dir below), never to `dir` itself — every internal directory comparison in
-            /// this pass (`workspace_deps` path resolution, `dir_to_id` lookups) stays on the raw,
-            /// unqualified directory, which is correct: a real Cargo path dependency only ever
-            /// resolves within its own workspace, never across a project boundary.
-            project: String,
-            name: String,
-            version: Option<String>,
-            description: String,
-            deps: toml::value::Table,
-        }
         let mut crates: Vec<ParsedCrate> = Vec::new();
 
         for (rel_path, content, project) in &self.manifests {
@@ -256,20 +367,7 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                 .and_then(|v| v.as_table())
             {
                 for (name, value) in deps {
-                    let entry = match value {
-                        toml::Value::Table(t) => match t.get("path").and_then(|v| v.as_str()) {
-                            Some(path) => {
-                                WorkspaceDep::Path(normalize_rel_path(manifest_dir, path))
-                            }
-                            None => WorkspaceDep::Version(
-                                t.get("version")
-                                    .and_then(|v| v.as_str())
-                                    .map(std::string::ToString::to_string),
-                            ),
-                        },
-                        toml::Value::String(v) => WorkspaceDep::Version(Some(v.clone())),
-                        _ => WorkspaceDep::Version(None),
-                    };
+                    let entry = workspace_dep(value, manifest_dir);
                     workspace_deps.insert(name.clone(), entry);
                 }
             }
@@ -303,6 +401,38 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                 });
             }
         }
+        (workspace_deps, crates)
+    }
+}
+
+#[async_trait]
+impl CompilerPass for CrateTopologyAnalyzerPass {
+    fn name(&self) -> &str {
+        &self.pass_id
+    }
+
+    fn cache_inputs(&self) -> Vec<String> {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        let mut paths: Vec<&str> = self.manifests.iter().map(|(p, _, _)| p.as_str()).collect();
+        paths.sort();
+        for path in paths {
+            let (_, content, _) = self.manifests.iter().find(|(p, _, _)| p == path).unwrap();
+            hasher.update(path.as_bytes());
+            hasher.update(content.as_bytes());
+        }
+        vec![hex::encode(hasher.finalize())]
+    }
+
+    async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
+        let mut graph = KirGraph::new();
+
+        // Pass 1: parse every manifest, collect `[workspace.dependencies]` (root manifest only —
+        // there is exactly one per Cargo workspace, but any manifest may carry one if it happens
+        // to be a workspace root) and every `[package]` manifest's own directory, so path
+        // dependencies (declared relative to the *dependent* crate, or to the workspace root for
+        // `workspace = true` entries) can be resolved in pass 2.
+        let (workspace_deps, crates) = self.parse_manifests();
 
         if crates.is_empty() {
             return Ok(());
@@ -311,17 +441,6 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
         // RFC 0079: qualifies the *hash input* only — `c.dir` itself stays raw/unqualified
         // everywhere it's used for internal directory matching or display (`path` property,
         // evidence text), per that RFC's own stated principle.
-        let qualified_dir = |c: &ParsedCrate| {
-            ekos_common::project::project_qualify(
-                &c.dir,
-                if c.project.is_empty() {
-                    None
-                } else {
-                    Some(c.project.as_str())
-                },
-            )
-        };
-
         // RFC 0079 regression, found live 2026-08-25 verifying RFC 0095 against a real 2-crate
         // multi-`[observe]-path` scratch scope (`crates/kir` + `crates/common`, each its own
         // entry): keyed by the *bare* `c.dir` alone, this map silently collapsed both crates onto
@@ -404,57 +523,15 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                 // `workspace_deps` fallback was already normalized relative to the *root*
                 // manifest's directory back in pass 1 (`WorkspaceDep::Path` construction) and
                 // must not be re-joined against this crate's own directory a second time.
-                let resolution = match resolve_dep_entry(value) {
-                    DepResolution::Path(raw) => {
-                        DepResolution::Path(normalize_rel_path(manifest_dir, &raw))
-                    }
-                    DepResolution::Unresolved => {
-                        match workspace_deps.get(dep_name) {
-                            Some(WorkspaceDep::Path(p)) => DepResolution::Path(p.clone()),
-                            Some(WorkspaceDep::Version(v)) => DepResolution::Version(v.clone()),
-                            // RFC 0065 Phase 1: previously a silent `continue` — a `{ workspace = true
-                            // }` entry with no matching root `[workspace.dependencies]` key, or a
-                            // git/registry-index dependency shape not modeled in v1 (see
-                            // `DepResolution::Unresolved`'s doc comment), is a real knowledge gap, not
-                            // a non-event. Recorded as an evidence-backed `ArchitectureGap` instead of
-                            // dropped, matching this project's own "Unmapped is deliberate, not a gap
-                            // swept under the rug" philosophy (Transformation IR, RFC 0027).
-                            None => {
-                                let gap_id = architecture_gap_kir_id(&qualified_dir(c), dep_name);
-                                let ev = KirEvidence::new(
-                                    SourceLocation::file(&manifest_path),
-                                    format!(
-                                        "{} declares a dependency on '{dep_name}' that could not be \
-                                     resolved (workspace = true with no matching \
-                                     [workspace.dependencies] entry, or a git/registry-index \
-                                     dependency shape not modeled in v1)",
-                                        c.name
-                                    ),
-                                );
-                                let ev_id = graph.add_evidence(ev);
-                                let mut gap = KirObject::new(
-                                format!("unresolved dependency '{dep_name}' for {}", c.name),
-                                ObjectKind::Custom("ArchitectureGap".to_string()),
-                            )
-                            .with_property("question", serde_json::json!(format!(
-                                "What does '{dep_name}' resolve to for {}?", c.name
-                            )))
-                            .with_property("affected_crate", serde_json::json!(c.name))
-                            .with_property(
-                                "reason",
-                                serde_json::json!(
-                                    "workspace = true with no matching [workspace.dependencies] \
-                                     entry, or a dependency shape not modeled in v1"
-                                ),
-                            )
-                            .with_evidence(ev_id);
-                                gap.id = gap_id;
-                                graph.add_object(gap);
-                                continue;
-                            }
-                        }
-                    }
-                    other => other,
+                let Some(resolution) =
+                    resolve_dependency(value, manifest_dir, workspace_deps.get(dep_name))
+                else {
+                    // RFC 0065 Phase 1: previously a silent `continue` — a `{ workspace = true }`
+                    // entry with no matching root `[workspace.dependencies]` key, or a
+                    // git/registry-index dependency shape not modeled in v1, is a real knowledge
+                    // gap, not a non-event.
+                    add_unresolved_gap(&mut graph, c, dep_name, &manifest_path);
+                    continue;
                 };
 
                 match resolution {
@@ -469,31 +546,20 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                         if target_id == crate_id {
                             continue;
                         }
-                        let ev = KirEvidence::new(
-                            SourceLocation::file(&manifest_path),
-                            format!("{} depends on {} (path dependency)", c.name, dep_name),
-                        );
-                        let ev_id = graph.add_evidence(ev);
-                        let mut rel =
-                            KirRelationship::new(RelationshipKind::DependsOn, crate_id, target_id);
-                        rel.id = depends_on_kir_id(crate_id, target_id);
-                        rel.evidence.push(ev_id);
-                        graph.add_relationship(rel);
-
-                        // RFC 0065 Phase 1: "X depends_on Y" is a deterministic Fact-type Claim —
-                        // reuses the same evidence the relationship above already carries.
+                        let fragment =
+                            format!("{} depends on {} (path dependency)", c.name, dep_name);
                         let target_name = crate_name_by_id
                             .get(&target_id)
                             .map(String::as_str)
                             .unwrap_or(dep_name);
-                        add_depends_on_claim(
+                        add_dependency(
                             &mut graph,
-                            &qualified_dir(c),
+                            c,
+                            &manifest_path,
                             crate_id,
-                            &c.name,
                             target_id,
                             target_name,
-                            ev_id,
+                            fragment,
                         );
                     }
                     DepResolution::Version(version) => {
@@ -502,42 +568,23 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                         if let Some(&target_id) = name_to_crate_id.get(dep_name.as_str())
                             && target_id != crate_id
                         {
-                            let fragment = match &version {
-                                Some(v) => format!(
-                                    "{} depends on {dep_name} {v} (version-pinned dependency \
-                                     resolved to workspace-internal crate {dep_name})",
-                                    c.name
-                                ),
-                                None => format!(
-                                    "{} depends on {dep_name} (version-pinned dependency \
-                                     resolved to workspace-internal crate {dep_name})",
-                                    c.name
-                                ),
-                            };
-                            let ev =
-                                KirEvidence::new(SourceLocation::file(&manifest_path), fragment);
-                            let ev_id = graph.add_evidence(ev);
-                            let mut rel = KirRelationship::new(
-                                RelationshipKind::DependsOn,
-                                crate_id,
-                                target_id,
+                            let fragment = format!(
+                                "{} (version-pinned dependency resolved to workspace-internal \
+                                 crate {dep_name})",
+                                dependency_phrase(&c.name, dep_name, version.as_deref())
                             );
-                            rel.id = depends_on_kir_id(crate_id, target_id);
-                            rel.evidence.push(ev_id);
-                            graph.add_relationship(rel);
-
                             let target_name = crate_name_by_id
                                 .get(&target_id)
                                 .map(String::as_str)
                                 .unwrap_or(dep_name);
-                            add_depends_on_claim(
+                            add_dependency(
                                 &mut graph,
-                                &qualified_dir(c),
+                                c,
+                                &manifest_path,
                                 crate_id,
-                                &c.name,
                                 target_id,
                                 target_name,
-                                ev_id,
+                                fragment,
                             );
                             continue;
                         }
@@ -545,34 +592,16 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
                         let tech_id = *technology_ids
                             .entry(dep_name.clone())
                             .or_insert_with(|| technology_kir_id(dep_name));
-                        if !graph.objects.iter().any(|o| o.id == tech_id) {
-                            let mut tech_obj = KirObject::new(
-                                dep_name.clone(),
-                                ObjectKind::Custom("Technology".to_string()),
-                            );
-                            tech_obj.id = tech_id;
-                            graph.add_object(tech_obj);
-                        }
-                        let fragment = match &version {
-                            Some(v) => format!("{} depends on {dep_name} {v}", c.name),
-                            None => format!("{} depends on {dep_name}", c.name),
-                        };
-                        let ev = KirEvidence::new(SourceLocation::file(&manifest_path), fragment);
-                        let ev_id = graph.add_evidence(ev);
-                        let mut rel =
-                            KirRelationship::new(RelationshipKind::DependsOn, crate_id, tech_id);
-                        rel.id = depends_on_kir_id(crate_id, tech_id);
-                        rel.evidence.push(ev_id);
-                        graph.add_relationship(rel);
-
-                        add_depends_on_claim(
+                        ensure_technology(&mut graph, tech_id, dep_name);
+                        let fragment = dependency_phrase(&c.name, dep_name, version.as_deref());
+                        add_dependency(
                             &mut graph,
-                            &qualified_dir(c),
+                            c,
+                            &manifest_path,
                             crate_id,
-                            &c.name,
                             tech_id,
                             dep_name,
-                            ev_id,
+                            fragment,
                         );
                     }
                     // Unreachable: `resolution` is bound above only via `DepResolution::Path(_)`

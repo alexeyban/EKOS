@@ -446,6 +446,127 @@ fn current_package(stack: &[Block], statement_package: Option<KirId>) -> Option<
         .or(statement_package)
 }
 
+/// Records a package (declared or named by a `use`). Returns its id, and its index in
+/// `result.objects` when this is the first time the file names it.
+fn declare_package(
+    name: String,
+    project: Option<&str>,
+    result: &mut PerlFileResult,
+    seen: &mut HashSet<KirId>,
+) -> (KirId, Option<usize>) {
+    let qualified = ekos_common::project::project_qualify(&name, project);
+    let pkg_id = perl_package_kir_id(&qualified);
+    if !seen.insert(pkg_id) {
+        return (pkg_id, None);
+    }
+    let mut obj = KirObject::new(name, ObjectKind::Custom("PerlPackage".to_string()));
+    obj.id = pkg_id;
+    result.objects.push(obj);
+    (pkg_id, Some(result.objects.len() - 1))
+}
+
+/// Records a `sub` and its `Contains` edge from `owner`, and returns its id.
+fn declare_sub(
+    name: &str,
+    line: &str,
+    doc: Option<&String>,
+    owner: KirId,
+    project: Option<&str>,
+    result: &mut PerlFileResult,
+    seen: &mut HashSet<KirId>,
+) -> KirId {
+    let qualified = ekos_common::project::project_qualify(name, project);
+    let sym_id = perl_symbol_kir_id(owner, &qualified);
+    if seen.insert(sym_id) {
+        // Perl has no visibility keyword at all; a leading underscore is the language's real,
+        // near-universal "internal" convention and the only signal there is to read.
+        let visibility = if name.starts_with('_') {
+            "private"
+        } else {
+            "public"
+        };
+        let mut obj = KirObject::new(name, ObjectKind::Custom("PerlSymbol".to_string()))
+            .with_property("symbol_kind", serde_json::json!("sub"))
+            .with_property("visibility", serde_json::json!(visibility))
+            .with_property("signature", serde_json::json!(perl_signature(line)));
+        obj.id = sym_id;
+        if let Some(doc) = doc {
+            obj.properties
+                .insert("description".into(), serde_json::json!(doc));
+        }
+        result.objects.push(obj);
+        result.symbol_count += 1;
+    }
+    result.relationships.push(KirRelationship::deterministic(
+        RelationshipKind::Contains,
+        owner,
+        sym_id,
+        "",
+    ));
+    sym_id
+}
+
+/// RFC 0088: writes each resolved source span onto its symbol.
+fn apply_spans(objects: &mut [KirObject], spans: &HashMap<KirId, (usize, usize)>) {
+    for obj in objects {
+        if let Some(&(start, end)) = spans.get(&obj.id) {
+            obj.properties.insert(
+                "source_span".into(),
+                serde_json::json!({"start_line": start, "end_line": end}),
+            );
+        }
+    }
+}
+
+/// RFC 0170: SQL in string literals — each string's literal predicates on the innermost `sub`
+/// whose span holds it, else on the file's first package.
+fn attach_sql_predicates(
+    source: &str,
+    objects: &mut [KirObject],
+    symbol_spans: &HashMap<KirId, (usize, usize)>,
+    first_package_obj: Option<usize>,
+) {
+    let sites = crate::perl_sql::perl_sql_predicates(source);
+    let mut by_owner: HashMap<usize, Vec<crate::sql_predicates::PredicateSite>> = HashMap::new();
+    for site in sites {
+        let line = site.line as usize;
+        let owner = objects
+            .iter()
+            .enumerate()
+            .filter_map(|(i, o)| {
+                let (start, end) = *symbol_spans.get(&o.id)?;
+                (start <= line && line <= end).then_some((end - start, i))
+            })
+            .min()
+            .map(|(_, i)| i)
+            .or(first_package_obj);
+        if let Some(i) = owner {
+            by_owner.entry(i).or_default().push(site);
+        }
+    }
+    for (i, sites) in by_owner {
+        objects[i].properties.insert(
+            "predicates".into(),
+            crate::sql_predicates::predicates_json(&sites, 1),
+        );
+    }
+}
+
+/// RFC 0170: `use constant NAME => literal` — named codes (`EC_CUSTOMER => 2`) are a trace of
+/// what a code means. Recorded on the file's first package, with their lines.
+fn attach_constants(source: &str, package: &mut KirObject) {
+    let constants = perl_constants(source);
+    if !constants.is_empty() {
+        package.properties.insert(
+                "constants".into(),
+                serde_json::json!(constants
+                    .iter()
+                    .map(|(name, value, line)| serde_json::json!({"name": name, "value": value, "line": line}))
+                    .collect::<Vec<_>>()),
+            );
+    }
+}
+
 fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlFileResult {
     let lines: Vec<&str> = source.lines().collect();
     let pod = extract_pod(&lines);
@@ -491,17 +612,12 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
 
         if let Some(rest) = trimmed.strip_prefix("package ") {
             if let Some(name) = extract_package_name(rest) {
-                let qualified = ekos_common::project::project_qualify(&name, project);
-                let pkg_id = perl_package_kir_id(&qualified);
-                if seen.insert(pkg_id) {
-                    let mut obj =
-                        KirObject::new(name, ObjectKind::Custom("PerlPackage".to_string()));
-                    obj.id = pkg_id;
-                    if first_package_obj.is_none() {
-                        first_package_obj = Some(result.objects.len());
-                    }
-                    result.objects.push(obj);
+                let (pkg_id, created) = declare_package(name, project, &mut result, &mut seen);
+                if created.is_some() {
                     result.package_count += 1;
+                }
+                if first_package_obj.is_none() {
+                    first_package_obj = created;
                 }
                 result.relationships.push(KirRelationship::deterministic(
                     RelationshipKind::Contains,
@@ -520,56 +636,19 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
         } else if let Some(rest) = trimmed.strip_prefix("sub ") {
             if let Some(name) = extract_sub_name(rest) {
                 let owner = current_package(&stack, statement_package).unwrap_or(file_id);
-                let qualified = ekos_common::project::project_qualify(&name, project);
-                let sym_id = perl_symbol_kir_id(owner, &qualified);
-                if seen.insert(sym_id) {
-                    let mut obj =
-                        KirObject::new(name.clone(), ObjectKind::Custom("PerlSymbol".to_string()))
-                            .with_property("symbol_kind", serde_json::json!("sub"))
-                            .with_property(
-                                "visibility",
-                                // Perl has no visibility keyword at all; a leading underscore is the
-                                // language's real, near-universal "internal" convention and the only
-                                // signal there is to read.
-                                serde_json::json!(if name.starts_with('_') {
-                                    "private"
-                                } else {
-                                    "public"
-                                }),
-                            )
-                            .with_property("signature", serde_json::json!(perl_signature(trimmed)));
-                    obj.id = sym_id;
-                    if let Some(doc) = pod
-                        .adjacent
-                        .get(&line_idx)
-                        .or_else(|| pod.by_name.get(&name).and_then(|slot| slot.as_ref()))
-                    {
-                        obj.properties
-                            .insert("description".into(), serde_json::json!(doc));
-                    }
-                    result.objects.push(obj);
-                    result.symbol_count += 1;
-                }
-                result.relationships.push(KirRelationship::deterministic(
-                    RelationshipKind::Contains,
-                    owner,
-                    sym_id,
-                    "",
-                ));
+                let doc = pod
+                    .adjacent
+                    .get(&line_idx)
+                    .or_else(|| pod.by_name.get(&name).and_then(|slot| slot.as_ref()));
+                let sym_id =
+                    declare_sub(&name, trimmed, doc, owner, project, &mut result, &mut seen);
                 pending = Some(Block::Sub(sym_id));
                 pending_sub_start = line_idx + 1;
             }
         } else if let Some(targets) = extract_dependency_targets(trimmed) {
             let owner = current_package(&stack, statement_package).unwrap_or(file_id);
             for (name, kind) in targets {
-                let qualified = ekos_common::project::project_qualify(&name, project);
-                let target_id = perl_package_kir_id(&qualified);
-                if seen.insert(target_id) {
-                    let mut obj =
-                        KirObject::new(name, ObjectKind::Custom("PerlPackage".to_string()));
-                    obj.id = target_id;
-                    result.objects.push(obj);
-                }
+                let (target_id, _) = declare_package(name, project, &mut result, &mut seen);
                 result
                     .relationships
                     .push(KirRelationship::deterministic(kind, owner, target_id, ""));
@@ -589,57 +668,15 @@ fn parse_perl_file(source: &str, file_id: KirId, project: Option<&str>) -> PerlF
     // RFC 0088: apply the now-fully-resolved source spans onto their matching symbol objects —
     // deferred to the end (rather than written at push time) because a span's end line isn't
     // known until its closing brace is reached, many lines after the object was created.
-    for obj in &mut result.objects {
-        if let Some(&(start, end)) = symbol_spans.get(&obj.id) {
-            obj.properties.insert(
-                "source_span".into(),
-                serde_json::json!({"start_line": start, "end_line": end}),
-            );
-        }
-    }
-    // RFC 0170: SQL in string literals — each string's literal predicates on the innermost
-    // `sub` whose span holds it, else on the file's first package.
-    {
-        let sites = crate::perl_sql::perl_sql_predicates(source);
-        let mut by_owner: HashMap<usize, Vec<crate::sql_predicates::PredicateSite>> =
-            HashMap::new();
-        for site in sites {
-            let line = site.line as usize;
-            let owner = result
-                .objects
-                .iter()
-                .enumerate()
-                .filter_map(|(i, o)| {
-                    let (start, end) = *symbol_spans.get(&o.id)?;
-                    (start <= line && line <= end).then_some((end - start, i))
-                })
-                .min()
-                .map(|(_, i)| i)
-                .or(first_package_obj);
-            if let Some(i) = owner {
-                by_owner.entry(i).or_default().push(site);
-            }
-        }
-        for (i, sites) in by_owner {
-            result.objects[i].properties.insert(
-                "predicates".into(),
-                crate::sql_predicates::predicates_json(&sites, 1),
-            );
-        }
-    }
-    // RFC 0170: `use constant NAME => literal` — named codes (`EC_CUSTOMER => 2`) are a trace of
-    // what a code means. Recorded on the file's first package, with their lines.
+    apply_spans(&mut result.objects, &symbol_spans);
+    attach_sql_predicates(
+        source,
+        &mut result.objects,
+        &symbol_spans,
+        first_package_obj,
+    );
     if let Some(idx) = first_package_obj {
-        let constants = perl_constants(source);
-        if !constants.is_empty() {
-            result.objects[idx].properties.insert(
-                "constants".into(),
-                serde_json::json!(constants
-                    .iter()
-                    .map(|(name, value, line)| serde_json::json!({"name": name, "value": value, "line": line}))
-                    .collect::<Vec<_>>()),
-            );
-        }
+        attach_constants(source, &mut result.objects[idx]);
     }
     // A file-level `=head1 DESCRIPTION`/`NAME` describes the module the file declares — Perl's
     // universal one-package-per-`.pm` convention. Applied to the *first* package only: a file

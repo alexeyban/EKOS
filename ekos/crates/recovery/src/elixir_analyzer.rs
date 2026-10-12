@@ -356,6 +356,165 @@ fn extract_quoted(s: &str) -> Option<String> {
     Some(s[..end].to_string())
 }
 
+/// Records a module declared in this file. Returns its id, and its index in `result.objects`
+/// when this is the first time the file names it.
+fn declare_module(
+    name: String,
+    project: Option<&str>,
+    result: &mut ElixirFileResult,
+    seen: &mut HashSet<KirId>,
+) -> (KirId, Option<usize>) {
+    let qualified = ekos_common::project::project_qualify(&name, project);
+    let mod_id = elixir_module_kir_id(&qualified);
+    if !seen.insert(mod_id) {
+        return (mod_id, None);
+    }
+    let mut obj = KirObject::new(name, ObjectKind::Custom("ElixirModule".to_string()));
+    obj.id = mod_id;
+    result.objects.push(obj);
+    result.module_count += 1;
+    (mod_id, Some(result.objects.len() - 1))
+}
+
+/// RFC 0086: an Ecto Repo's `adapter:` is a real dependency of its module on that database.
+fn add_ecto_adapter(
+    adapter_raw: &str,
+    owner: KirId,
+    result: &mut ElixirFileResult,
+    seen: &mut HashSet<KirId>,
+) {
+    let tech_name = normalize_ecto_adapter(adapter_raw);
+    let tech_id = technology_kir_id(&tech_name);
+    if seen.insert(tech_id) {
+        let mut obj = KirObject::new(tech_name, ObjectKind::Custom("Technology".to_string()));
+        obj.id = tech_id;
+        obj.properties
+            .insert("ecosystem".into(), serde_json::json!("database"));
+        result.objects.push(obj);
+    }
+    result.relationships.push(KirRelationship::deterministic(
+        RelationshipKind::DependsOn,
+        owner,
+        tech_id,
+        "",
+    ));
+}
+
+/// One parsed `def` / `defp` line.
+struct DefLine<'a> {
+    text: &'a str,
+    kind: &'a str,
+    name: String,
+    arity: usize,
+    /// The `@doc` immediately above it, when there is one.
+    doc: Option<&'a String>,
+}
+
+/// Records a function and its `Contains` edge from `owner`. Returns the symbol's id when this
+/// is its first clause — the one whose body gives it a source span.
+fn declare_symbol(
+    def: DefLine<'_>,
+    owner: KirId,
+    project: Option<&str>,
+    result: &mut ElixirFileResult,
+    seen: &mut HashSet<KirId>,
+) -> Option<KirId> {
+    let qualified = ekos_common::project::project_qualify(&def.name, project);
+    let sym_id = elixir_symbol_kir_id(owner, &qualified, def.arity);
+    let first = seen.insert(sym_id);
+    if first {
+        let mut obj = KirObject::new(def.name, ObjectKind::Custom("ElixirSymbol".to_string()))
+            // "kind" matches `rust_analyzer.rs`/`python_analyzer.rs`'s own
+            // property convention (`docs-gen`'s `render_api` reads it for the
+            // displayed entity kind) — every symbol this analyzer recognizes is a
+            // function (`def`/`defp`), no other Elixir declaration shape yet.
+            .with_property("symbol_kind", serde_json::json!("function"))
+            .with_property("arity", serde_json::json!(def.arity))
+            .with_property(
+                "visibility",
+                serde_json::json!(if def.kind == "defp" {
+                    "private"
+                } else {
+                    "public"
+                }),
+            );
+        obj.id = sym_id;
+        // Real, only when this exact def/defp had a real `@doc` immediately above it
+        // — never fabricated. Multi-clause functions (RFC 0081's own collapse-to-one-
+        // symbol rule) only get a description from whichever clause happens to carry
+        // the real `@doc` — real Elixir convention already puts `@doc` once, above the
+        // first clause, so this matches how the language itself expects it to be read.
+        if let Some(doc) = def.doc {
+            obj.properties
+                .insert("description".into(), serde_json::json!(doc));
+        }
+        // RFC 0141 §1 — the real `def`/`defp` head (name, args, guard), the same
+        // first-clause-wins rule this block already applies to `arity`/`visibility`.
+        // Unlike `description`, present for every recognized function regardless of
+        // whether it carries a real `@doc`.
+        if let Some(sig) = elixir_signature(def.text) {
+            obj.properties
+                .insert("signature".into(), serde_json::json!(sig));
+        }
+        result.objects.push(obj);
+        result.symbol_count += 1;
+    }
+    result.relationships.push(KirRelationship::deterministic(
+        RelationshipKind::Contains,
+        owner,
+        sym_id,
+        "",
+    ));
+    first.then_some(sym_id)
+}
+
+/// Records `owner`'s dependency on the module an `alias` / `import` / `require` / `use` names.
+fn add_module_dependency(
+    raw_target: String,
+    owner: KirId,
+    project: Option<&str>,
+    result: &mut ElixirFileResult,
+    seen: &mut HashSet<KirId>,
+) {
+    let qualified = ekos_common::project::project_qualify(&raw_target, project);
+    let target_id = elixir_module_kir_id(&qualified);
+    if target_id == owner {
+        return;
+    }
+    if seen.insert(target_id) {
+        let mut obj = KirObject::new(raw_target, ObjectKind::Custom("ElixirModule".to_string()));
+        obj.id = target_id;
+        result.objects.push(obj);
+    }
+    result.relationships.push(KirRelationship::deterministic(
+        RelationshipKind::DependsOn,
+        owner,
+        target_id,
+        "",
+    ));
+}
+
+/// Writes a module's `@moduledoc` onto its object, when the module was declared in this file.
+fn set_description(objects: &mut [KirObject], idx: Option<&usize>, doc: &str) {
+    if let Some(&idx) = idx {
+        objects[idx]
+            .properties
+            .insert("description".into(), serde_json::json!(doc));
+    }
+}
+
+/// RFC 0088: writes each resolved source span onto its symbol.
+fn apply_source_spans(objects: &mut [KirObject], spans: &HashMap<KirId, (usize, usize)>) {
+    for obj in objects {
+        if let Some(&(start, end)) = spans.get(&obj.id) {
+            obj.properties.insert(
+                "source_span".into(),
+                serde_json::json!({"start_line": start, "end_line": end}),
+            );
+        }
+    }
+}
+
 fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> ElixirFileResult {
     let mut result = ElixirFileResult::default();
     let mut stack: Vec<Block> = Vec::new();
@@ -399,36 +558,26 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
 
         if let Some(rest) = trimmed.strip_prefix("defmodule ") {
             if let Some(name) = extract_module_name(rest) {
-                let qualified = ekos_common::project::project_qualify(&name, project);
-                let mod_id = elixir_module_kir_id(&qualified);
-                if seen.insert(mod_id) {
-                    let mut obj =
-                        KirObject::new(name, ObjectKind::Custom("ElixirModule".to_string()));
-                    obj.id = mod_id;
-                    module_obj_index.insert(mod_id, result.objects.len());
-                    result.objects.push(obj);
-                    result.module_count += 1;
+                let mod_id = declare_module(name, project, &mut result, &mut seen);
+                if let Some(idx) = mod_id.1 {
+                    module_obj_index.insert(mod_id.0, idx);
                 }
                 result.relationships.push(KirRelationship::deterministic(
                     RelationshipKind::Contains,
                     file_id,
-                    mod_id,
+                    mod_id.0,
                     "",
                 ));
-                stack.push(Block::Module(mod_id));
+                stack.push(Block::Module(mod_id.0));
             }
             // A `defmodule ... do` line's only structurally relevant token is the `do` already
             // accounted for above — skip the generic scan below so it isn't double-counted.
             continue;
         }
 
-        if let Some(doc) = doc_comments.moduledoc.get(&line_idx)
-            && let Some(owner) = current_module(&stack)
-            && let Some(&idx) = module_obj_index.get(&owner)
-        {
-            result.objects[idx]
-                .properties
-                .insert("description".into(), serde_json::json!(doc));
+        if let Some(doc) = doc_comments.moduledoc.get(&line_idx) {
+            let idx = current_module(&stack).and_then(|owner| module_obj_index.get(&owner));
+            set_description(&mut result.objects, idx, doc);
         }
 
         if trimmed.starts_with("use Ecto.Repo")
@@ -441,22 +590,7 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
             && let Some(owner) = current_module(&stack)
             && ecto_repo_modules.contains(&owner)
         {
-            let tech_name = normalize_ecto_adapter(adapter_raw);
-            let tech_id = technology_kir_id(&tech_name);
-            if seen.insert(tech_id) {
-                let mut obj =
-                    KirObject::new(tech_name, ObjectKind::Custom("Technology".to_string()));
-                obj.id = tech_id;
-                obj.properties
-                    .insert("ecosystem".into(), serde_json::json!("database"));
-                result.objects.push(obj);
-            }
-            result.relationships.push(KirRelationship::deterministic(
-                RelationshipKind::DependsOn,
-                owner,
-                tech_id,
-                "",
-            ));
+            add_ecto_adapter(adapter_raw, owner, &mut result, &mut seen);
         }
 
         if let Some(kind) = def_kind(trimmed) {
@@ -469,56 +603,19 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
             pending_symbol = None;
             if let Some((name, arity)) = parse_def_line(trimmed, kind) {
                 let owner = current_module(&stack).unwrap_or(file_id);
-                let qualified = ekos_common::project::project_qualify(&name, project);
-                let sym_id = elixir_symbol_kir_id(owner, &qualified, arity);
-                if seen.insert(sym_id) {
-                    let mut obj =
-                        KirObject::new(name, ObjectKind::Custom("ElixirSymbol".to_string()))
-                            // "kind" matches `rust_analyzer.rs`/`python_analyzer.rs`'s own
-                            // property convention (`docs-gen`'s `render_api` reads it for the
-                            // displayed entity kind) — every symbol this analyzer recognizes is a
-                            // function (`def`/`defp`), no other Elixir declaration shape yet.
-                            .with_property("symbol_kind", serde_json::json!("function"))
-                            .with_property("arity", serde_json::json!(arity))
-                            .with_property(
-                                "visibility",
-                                serde_json::json!(if kind == "defp" {
-                                    "private"
-                                } else {
-                                    "public"
-                                }),
-                            );
-                    obj.id = sym_id;
-                    // Real, only when this exact def/defp had a real `@doc` immediately above it
-                    // — never fabricated. Multi-clause functions (RFC 0081's own collapse-to-one-
-                    // symbol rule) only get a description from whichever clause happens to carry
-                    // the real `@doc` — real Elixir convention already puts `@doc` once, above the
-                    // first clause, so this matches how the language itself expects it to be read.
-                    if let Some(doc) = doc_comments.doc.get(&line_idx) {
-                        obj.properties
-                            .insert("description".into(), serde_json::json!(doc));
-                    }
-                    // RFC 0141 §1 — the real `def`/`defp` head (name, args, guard), the same
-                    // first-clause-wins rule this block already applies to `arity`/`visibility`.
-                    // Unlike `description`, present for every recognized function regardless of
-                    // whether it carries a real `@doc`.
-                    if let Some(sig) = elixir_signature(trimmed) {
-                        obj.properties
-                            .insert("signature".into(), serde_json::json!(sig));
-                    }
-                    result.objects.push(obj);
-                    result.symbol_count += 1;
+                let def = DefLine {
+                    text: trimmed,
+                    kind,
+                    name,
+                    arity,
+                    doc: doc_comments.doc.get(&line_idx),
+                };
+                if let Some(sym_id) = declare_symbol(def, owner, project, &mut result, &mut seen) {
                     // RFC 0088: arm the source-span tracker on this, the first (and only
                     // span-carrying) clause — the matching `do`/`end` pair is found generically
                     // below, possibly several real lines later (guard clause).
                     pending_symbol = Some((sym_id, line_idx + 1));
                 }
-                result.relationships.push(KirRelationship::deterministic(
-                    RelationshipKind::Contains,
-                    owner,
-                    sym_id,
-                    "",
-                ));
             }
             // Fall through to the generic scan: this line's own trailing `do` (if the signature
             // and guard fit on one line) or lack of one (guard continues to a later line, or a
@@ -535,24 +632,7 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
                 .cloned()
                 .unwrap_or_else(|| vec![target]);
             for raw_target in targets {
-                let qualified = ekos_common::project::project_qualify(&raw_target, project);
-                let target_id = elixir_module_kir_id(&qualified);
-                if target_id != owner {
-                    if seen.insert(target_id) {
-                        let mut obj = KirObject::new(
-                            raw_target,
-                            ObjectKind::Custom("ElixirModule".to_string()),
-                        );
-                        obj.id = target_id;
-                        result.objects.push(obj);
-                    }
-                    result.relationships.push(KirRelationship::deterministic(
-                        RelationshipKind::DependsOn,
-                        owner,
-                        target_id,
-                        "",
-                    ));
-                }
+                add_module_dependency(raw_target, owner, project, &mut result, &mut seen);
             }
         }
 
@@ -569,14 +649,7 @@ fn parse_elixir_file(source: &str, file_id: KirId, project: Option<&str>) -> Eli
     // objects — deferred to the end (rather than written at push time) because a span's own end
     // line isn't known until its closing `end` is reached, which can be many lines after the
     // object itself was created.
-    for obj in &mut result.objects {
-        if let Some(&(start, end)) = symbol_spans.get(&obj.id) {
-            obj.properties.insert(
-                "source_span".into(),
-                serde_json::json!({"start_line": start, "end_line": end}),
-            );
-        }
-    }
+    apply_source_spans(&mut result.objects, &symbol_spans);
 
     result
 }
