@@ -19,6 +19,9 @@ PUBLIC = {
     ("POST", "/api/auth/token-login"),
     ("GET", "/api/auth/login"),
     ("GET", "/api/auth/callback"),
+    # RFC 0182: MCP's "no stream / no session here", the same for every path.
+    ("GET", "/mcp/{tenant_id}/{project}"),
+    ("DELETE", "/mcp/{tenant_id}/{project}"),
 }
 
 # Routes whose action depends on the request (which command, which workspace in the body, which
@@ -39,6 +42,8 @@ DYNAMIC = {
     ("GET", "/api/workspaces"),
     ("POST", "/api/workspaces"),
     ("GET", "/api/tenants"),
+    # RFC 0182: the action depends on the tool each message calls.
+    ("POST", "/mcp/{tenant_id}/{project}"),
 }
 
 
@@ -62,11 +67,12 @@ def routes(
     # Each router's own routes: they carry the router-level dependencies and the router's
     # prefix. The app's route table is not walked, because how an included router is stored
     # there is a FastAPI internal that has already changed once.
-    for module in main.ROUTERS:
-        for route in module.router.routes:
-            assert isinstance(route, APIRoute), route
-            for method in route.methods - {"HEAD", "OPTIONS"}:
-                out[(method, main.API_PREFIX + route.path)] = _actions(route.dependant)
+    for prefix, routers in main.MOUNTS:
+        for module in routers:
+            for route in module.router.routes:
+                assert isinstance(route, APIRoute), route
+                for method in route.methods - {"HEAD", "OPTIONS"}:
+                    out[(method, prefix + route.path)] = _actions(route.dependant)
     return out
 
 
@@ -79,9 +85,14 @@ def test_the_walk_sees_the_api(routes: dict[tuple[str, str], set[str]]) -> None:
         (method.upper(), path)
         for path, item in create_app().openapi()["paths"].items()
         for method in item
-        if path.startswith("/api")
+        if path.startswith(("/api", "/mcp"))
     }
-    assert served == set(routes)
+    # The two 405 answers of the gateway are routes without a schema entry.
+    unlisted = {
+        ("GET", "/mcp/{tenant_id}/{project}"),
+        ("DELETE", "/mcp/{tenant_id}/{project}"),
+    }
+    assert served == set(routes) - unlisted
 
 
 def test_every_route_declares_an_action(routes: dict[tuple[str, str], set[str]]) -> None:
@@ -170,16 +181,17 @@ def test_only_the_listed_routes_are_open_to_a_restricted_reader(
     from app.deps import mcp_for_workspace
 
     scoped, uses_mcp = set(), set()
-    for module in main.ROUTERS:
-        for route in module.router.routes:
-            for method in route.methods - {"HEAD", "OPTIONS"}:
-                key = (method, main.API_PREFIX + route.path)
-                flags = _scoped_flags(route.dependant)
-                assert len(flags) <= 1, f"{key} is marked both scoped and not"
-                if flags == {True}:
-                    scoped.add(key)
-                if mcp_for_workspace in _calls(route.dependant):
-                    uses_mcp.add(key)
+    for prefix, routers in main.MOUNTS:
+        for module in routers:
+            for route in module.router.routes:
+                for method in route.methods - {"HEAD", "OPTIONS"}:
+                    key = (method, prefix + route.path)
+                    flags = _scoped_flags(route.dependant)
+                    assert len(flags) <= 1, f"{key} is marked both scoped and not"
+                    if flags == {True}:
+                        scoped.add(key)
+                    if mcp_for_workspace in _calls(route.dependant):
+                        uses_mcp.add(key)
     assert scoped == SCOPED
     # A scoped route reads through the scoped MCP client and nothing else. The layout route
     # computes positions from the ids in the request body and reads nothing.

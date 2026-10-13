@@ -430,8 +430,32 @@ session secret, static tokens stop working, and access comes only from granted r
 the earlier behaviour remains for the `default` tenant: the two static tokens work (the write
 token acts as a platform owner), and under OIDC every signed-in user can read `default`.
 
-Not built yet: an MCP endpoint that accepts an API token; an agent's token works against the
-console's HTTP API only. See [RFC 0180](ekos/docs/rfcs/0180-tenants-users-groups-roles.md).
+See [RFC 0180](ekos/docs/rfcs/0180-tenants-users-groups-roles.md).
+
+### MCP for agents, through the console (RFC 0182)
+
+An agent connects to a project through the console, with an API token:
+
+```json
+{"url": "https://ekos.example.com/mcp/default/shop",
+ "headers": {"Authorization": "Bearer ekos_…"}}
+```
+
+`/mcp/<tenant>/<project>` speaks MCP Streamable HTTP, the same as `ekos mcp serve --http`. The
+console sits in front of the project's own server and:
+
+- lists only the tools the token's role allows. The two review tools need a signed-in reviewer,
+  so no token ever sees them; `ekos_session_note` needs `operator`;
+- attaches the token's read scope (RFC 0181) to every call. A scope the client sends itself is
+  dropped;
+- answers `404` for a project the token has no role in, the same as one that does not exist;
+- records every call in the tenant's audit log: who, which tool, allowed or denied. Arguments
+  are not recorded.
+
+Projects' servers now start on first use. One unused for 15 minutes is stopped
+(`EKOS_CONSOLE_MCP_IDLE_SECONDS`), and at most 8 run at once (`EKOS_CONSOLE_MCP_MAX_SERVERS`);
+the first call after a stop waits for the server to start. Not built: OAuth for MCP clients and
+rate limits. See [RFC 0182](ekos/docs/rfcs/0182-mcp-gateway.md).
 
 ### Access inside a project (RFC 0181)
 

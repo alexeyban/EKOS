@@ -95,6 +95,11 @@ class Settings(BaseSettings):
 
     # Loopback port range the supervisor allocates per-workspace MCP servers from.
     mcp_port_base: int = 7400
+    # RFC 0182: a project's MCP server starts on first use. One unused for this long is stopped
+    # (0 keeps them), and at most `mcp_max_servers` run at once; starting another stops the one
+    # used longest ago. Each server holds its project's index in memory.
+    mcp_idle_seconds: int = 900
+    mcp_max_servers: int = 8
 
     # Job runner (RFC 0131): per-workspace queue depth, and where run logs land.
     run_queue_depth: int = 16

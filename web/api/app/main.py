@@ -23,6 +23,7 @@ from .routes import (
     conflicts,
     evals,
     graph,
+    mcp_gateway,
     meta,
     runs,
     schedules,
@@ -54,6 +55,9 @@ ROUTERS = (
     tenants,
 )
 API_PREFIX = "/api"
+# Every mount of routers. The MCP gateway (RFC 0182) is at `/mcp`, outside the API prefix,
+# because that is the URL an MCP client is configured with.
+MOUNTS = ((API_PREFIX, ROUTERS), ("", (mcp_gateway,)))
 
 _UI_DIST = Path(__file__).resolve().parents[2] / "ui" / "dist"
 
@@ -71,7 +75,7 @@ class _SpaFiles(StaticFiles):
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             last = path.rsplit("/", 1)[-1]
-            if exc.status_code != 404 or path.startswith("api") or "." in last:
+            if exc.status_code != 404 or path.startswith(("api", "mcp")) or "." in last:
                 raise
             return await super().get_response("index.html", scope)
 
@@ -125,7 +129,9 @@ async def _lifespan(app: FastAPI):
     _register_home_projects()
 
     app.state.supervisor = McpSupervisor(settings)
-    await app.state.supervisor.start(models.list_workspaces())
+    # RFC 0182: no server is started here. Each starts when a page or a gateway call first needs
+    # it, and stops again when idle.
+    await app.state.supervisor.start([])
 
     app.state.runner = JobRunner(settings)
     app.state.runner.start()
@@ -159,8 +165,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in ROUTERS:
-        app.include_router(r.router, prefix=API_PREFIX)
+    for prefix, routers in MOUNTS:
+        for r in routers:
+            app.include_router(r.router, prefix=prefix)
 
     # Serve the built UI when it exists (Compose / production); the Vite dev server handles it
     # otherwise.

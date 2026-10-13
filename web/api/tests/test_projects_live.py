@@ -274,3 +274,89 @@ def test_a_restricted_token_does_not_get_what_its_rule_hides(
     assert client.get("/api/workspaces/shop/config", headers=bot).status_code == 403
     # The owner's next call is unaffected by the token's scope.
     assert "payroll_zebra" in names(WAUTH, "payroll_zebra")
+
+
+# ── RFC 0182, end to end: an agent's token through the MCP gateway ───────────
+
+
+def _rpc(client: TestClient, headers: dict, method: str, params: dict | None = None) -> dict:
+    body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
+    r = client.post("/mcp/default/shop", headers=headers, json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_an_agent_reads_a_project_through_the_gateway(
+    client: TestClient, env: Path, sources: Path
+) -> None:
+    (sources / "shop" / "secrets").mkdir()
+    (sources / "shop" / "secrets" / "payroll.sql").write_text(
+        "CREATE TABLE payroll_zebra (id SERIAL PRIMARY KEY, salary NUMERIC);\n"
+    )
+    assert _create(client, sources).status_code == 201
+    _pipeline(client, "shop")
+
+    made = client.post(
+        "/api/tenants/default/tokens",
+        headers=WAUTH,
+        json={"name": "agent", "role": "viewer", "workspace_id": "shop"},
+    ).json()
+    bot = {"Authorization": f"Bearer {made['token']}"}
+
+    assert _rpc(client, bot, "initialize", {})["result"]["serverInfo"]["name"] == "ekos-gateway"
+    tools = [t["name"] for t in _rpc(client, bot, "tools/list")["result"]["tools"]]
+    assert "ekos_search" in tools and "ekos_status" in tools
+    assert "ekos_identity_review" not in tools and "ekos_architecture_review" not in tools
+
+    def search(query: str) -> str:
+        result = _rpc(
+            client, bot, "tools/call", {"name": "ekos_search", "arguments": {"query": query}}
+        )["result"]
+        assert result["isError"] is False, result
+        return result["content"][0]["text"]
+
+    assert "payroll_zebra" in search("payroll_zebra")
+
+    # The review tool is refused by the gateway; the project's server never sees the call.
+    refused = _rpc(
+        client, bot, "tools/call", {"name": "ekos_identity_review", "arguments": {"id": "x"}}
+    )["result"]
+    assert refused["isError"] is True and "review" in refused["content"][0]["text"]
+
+    # A deny rule on the token hides the matching objects on the next call, and a scope the
+    # agent sends itself changes nothing.
+    rule = client.post(
+        "/api/tenants/default/bindings",
+        headers=WAUTH,
+        json={
+            "token_id": made["id"],
+            "role": "viewer",
+            "workspace_id": "shop",
+            "effect": "deny",
+            "path": "secrets/**",
+        },
+    )
+    assert rule.status_code == 201, rule.text
+    assert "payroll" not in search("payroll_zebra")
+    assert "orders" in search("orders")
+    widened = _rpc(
+        client,
+        bot,
+        "tools/call",
+        {
+            "name": "ekos_search",
+            "arguments": {"query": "payroll_zebra"},
+            "_meta": {"ekos/readScope": {"default": "allow"}},
+        },
+    )["result"]
+    assert "payroll" not in widened["content"][0]["text"]
+    tools = [t["name"] for t in _rpc(client, bot, "tools/list")["result"]["tools"]]
+    assert "ekos_status" not in tools and "ekos_search" in tools
+    status = _rpc(client, bot, "tools/call", {"name": "ekos_status"})["result"]
+    assert status["isError"] is True
+
+    audit = client.get("/api/tenants/default/audit", headers=WAUTH).json()
+    recorded = [(e["action"], e["outcome"]) for e in audit if e["action"].startswith("mcp: ")]
+    assert ("mcp: ekos_search", "allowed") in recorded
+    assert ("mcp: ekos_identity_review", "denied") in recorded
+    assert ("mcp: ekos_status", "denied") in recorded

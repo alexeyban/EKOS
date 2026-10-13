@@ -1,8 +1,12 @@
 """Per-workspace MCP-server supervision (RFC 0129 §2).
 
-The console owns one `ekos mcp serve --tcp` process per registered workspace: it picks a loopback
+The console owns an `ekos mcp serve --tcp` process per workspace in use: it picks a loopback
 port, generates a fresh bearer token (RFC 0128 R4), spawns the server, waits for it to answer
 `tools/list`, and restarts it with exponential backoff if it crashes.
+
+RFC 0182: a server starts when something first needs it (`acquire`), is stopped after
+`mcp_idle_seconds` without use, and at most `mcp_max_servers` run at once. Each server holds its
+project's search index in memory, so one per registered project, forever, does not scale.
 
 This is deliberately **not** the Phase 3 job runner. MCP servers are long-lived, idle-cheap, and
 want restart-on-crash; pipeline jobs are bursty, heavy, queued, and cancellable. The only shared
@@ -15,6 +19,7 @@ import asyncio
 import contextlib
 import secrets
 import tempfile
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -46,6 +51,8 @@ class ServerHandle:
     retries: int = 0
     client: EkosMcpClient | None = None
     detail: str = ""
+    # Monotonic time of the last `acquire`; what idle shutdown and the cap go by.
+    last_used: float = 0.0
 
     def status(self) -> dict:
         return {
@@ -64,23 +71,85 @@ class McpSupervisor:
         self._lock = asyncio.Lock()
         self._next_port = settings.mcp_port_base
         self._tmpdir = Path(tempfile.mkdtemp(prefix="ekos-console-mcp-"))
+        self._reaper: asyncio.Task | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     async def start(self, workspaces: list[Workspace]) -> None:
+        """Start the idle reaper, and a server for each workspace given. The console passes
+        none: servers start on first use."""
         for ws in workspaces:
             await self.ensure(ws)
+        if self._settings.mcp_idle_seconds > 0 and self._reaper is None:
+            self._reaper = asyncio.create_task(self._reap_forever())
 
     async def ensure(self, ws: Workspace) -> ServerHandle:
         """Return a handle for `ws`, spawning the server if there isn't a live one."""
+        evicted: list[tuple[asyncio.Task | None, ServerHandle]] = []
         async with self._lock:
             existing = self._handles.get(ws.id)
             if existing is not None and existing.state is not ServerState.FAILED:
                 return existing
+            if existing is None:
+                evicted = self._make_room()
             handle = await self._spawn(ws)
+            handle.last_used = time.monotonic()
             self._handles[ws.id] = handle
             self._monitors[ws.id] = asyncio.create_task(self._monitor(ws, handle))
-            return handle
+        for monitor, old in evicted:
+            await self._retire(monitor, old)
+        return handle
+
+    async def acquire(self, ws: Workspace) -> EkosMcpClient:
+        """The client for `ws`'s server, starting the server if it is not running, and marking
+        it used. Raises `_NotReady` when it will not serve."""
+        if self._handles.get(ws.id) is None:
+            await self.ensure(ws)
+        handle = self._handles.get(ws.id)
+        if handle is not None:
+            handle.last_used = time.monotonic()
+        return self.client_for(ws.id)
+
+    def _make_room(self) -> list[tuple[asyncio.Task | None, ServerHandle]]:
+        """Called with the lock held, before one more server starts: take the least recently
+        used servers out of the table until there is room under the cap. The caller tears them
+        down after releasing the lock."""
+        cap = self._settings.mcp_max_servers
+        out: list[tuple[asyncio.Task | None, ServerHandle]] = []
+        while cap > 0 and len(self._handles) >= cap:
+            oldest = min(self._handles.values(), key=lambda h: h.last_used)
+            out.append(
+                (
+                    self._monitors.pop(oldest.workspace_id, None),
+                    self._handles.pop(oldest.workspace_id),
+                )
+            )
+        return out
+
+    async def _retire(self, monitor: asyncio.Task | None, handle: ServerHandle) -> None:
+        if monitor is not None:
+            monitor.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor
+        await self._teardown(handle)
+
+    async def reap_idle(self, now: float | None = None) -> list[str]:
+        """Stop every server unused for longer than `mcp_idle_seconds`. Returns their ids."""
+        idle = self._settings.mcp_idle_seconds
+        if idle <= 0:
+            return []
+        now = time.monotonic() if now is None else now
+        stale = [h.workspace_id for h in self._handles.values() if now - h.last_used > idle]
+        for workspace_id in stale:
+            await self.stop(workspace_id)
+        return stale
+
+    async def _reap_forever(self) -> None:
+        interval = max(1.0, min(30.0, self._settings.mcp_idle_seconds / 4))
+        while True:
+            await asyncio.sleep(interval)
+            with contextlib.suppress(Exception):
+                await self.reap_idle()
 
     async def stop(self, workspace_id: str) -> None:
         async with self._lock:
@@ -94,6 +163,11 @@ class McpSupervisor:
             await self._teardown(handle)
 
     async def aclose(self) -> None:
+        if self._reaper is not None:
+            self._reaper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._reaper
+            self._reaper = None
         for workspace_id in list(self._handles):
             await self.stop(workspace_id)
         with contextlib.suppress(OSError):
@@ -184,6 +258,9 @@ class McpSupervisor:
                 if self._handles.get(ws.id) is not handle:
                     return
                 replacement = await self._spawn(ws)
+                # A restart is not a use; without this the reaper would see a server last
+                # used at time zero.
+                replacement.last_used = handle.last_used
                 replacement.retries = (
                     0 if replacement.state is ServerState.READY else handle.retries
                 )

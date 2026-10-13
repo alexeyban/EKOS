@@ -6512,7 +6512,12 @@ LinkML; generation stays in LinkML.
       `docs generate`; `ekos_transformation_*` not yet checked against a scope (refused);
       rules by object kind; the leak suite has no edge between two sources (the pipeline
       links nothing across them in the fixture)
-- [ ] RFC 0182 — MCP gateway on the console, per-tenant and per-project, role-filtered tools
+- [x] RFC 0182 — MCP gateway on the console (`POST /mcp/<tenant>/<project>`): role-filtered
+      tools, caller's scope on every call, audit of every call; servers on demand with idle
+      shutdown and a cap (devlog_263)
+- [ ] RFC 0182 remainder: OAuth for MCP clients; rate limits per token; not yet exercised with
+      a real MCP client (VS Code, Claude Desktop) — tests speak the protocol over HTTP; a call
+      longer than the idle time on a server at the cap can be cut by eviction
 - [ ] RFC 0183 — backup / restore, per-tenant model credentials, deployment guide
 - [ ] Moving an in-place `./.ekos` workspace into the home is a manual copy; no command does it
 - [ ] The cluster compile worker ships a config between processes and loses `location`

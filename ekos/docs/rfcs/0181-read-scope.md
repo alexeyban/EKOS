@@ -157,8 +157,7 @@ The route walk of RFC 0180 gains a check: a workspace route is scoped only where
 - A restricted reader's dashboard, run history, semantics and conflicts.
 - `--read-scope` on `ekos ask`, `docs generate` and the other commands.
 - Rules by object kind.
-- The MCP gateway that turns an API token into a scope for an MCP client (RFC 0182). Until
-  then only the console's own calls carry one.
+- The MCP gateway that turns an API token into a scope for an MCP client: built in RFC 0182.
 
 ## Verification
 

@@ -36,6 +36,14 @@ class ScopedMcp:
     async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         return await self._client.call_tool(name, arguments, scope=self.scope)
 
+    async def call_tool_raw(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return await self._client.call_tool_raw(name, arguments, scope=self.scope)
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        return await self._client.list_tools()
+
 
 class EkosMcpClient:
     """One connection to one `ekos mcp serve --tcp`. Concurrent callers are serialised on an
@@ -112,10 +120,7 @@ class EkosMcpClient:
         "isError": bool}`` (``mcp.rs::tool_ok``). The text payload is itself a JSON document; it
         is parsed and returned. ``isError: true`` raises :class:`McpToolError`.
         """
-        params: dict[str, Any] = {"name": name, "arguments": arguments or {}}
-        if scope is not None:
-            params["_meta"] = {READ_SCOPE_META: scope}
-        result = await self._request_with_retry("tools/call", params)
+        result = await self.call_tool_raw(name, arguments, scope=scope)
         blocks = result.get("content") or []
         text = next((b.get("text", "") for b in blocks if b.get("type") == "text"), "")
         if result.get("isError"):
@@ -124,6 +129,21 @@ class EkosMcpClient:
             return json.loads(text)
         except json.JSONDecodeError:
             return text
+
+    async def call_tool_raw(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        scope: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """The tool's MCP result as the server sent it (`content`, `isError`), for the gateway
+        (RFC 0182) to pass on unchanged. The call is built here from the name and arguments
+        alone: nothing a remote caller put in `_meta` can reach the server."""
+        params: dict[str, Any] = {"name": name, "arguments": arguments or {}}
+        if scope is not None:
+            params["_meta"] = {READ_SCOPE_META: scope}
+        return await self._request_with_retry("tools/call", params)
 
     # ── transport ────────────────────────────────────────────────────────────
 

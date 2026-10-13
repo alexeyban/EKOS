@@ -604,6 +604,14 @@ function Tokens({ tenant }: { tenant: string }) {
         For agents and scripts: <code>Authorization: Bearer &lt;token&gt;</code>. A token can view
         or operate. It can never review or administer; those need a signed-in person.
       </p>
+      <p className="muted">
+        An MCP client connects to{" "}
+        <code>
+          {window.location.origin}/mcp/{tenant}/&lt;project&gt;
+        </code>{" "}
+        with that header. It gets the tools its role allows, limited to what its rules let it
+        see, and every call is in the audit log below.
+      </p>
       {created?.token && (
         <div className="admin-secret" role="status">
           <p>

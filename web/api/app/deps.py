@@ -32,7 +32,7 @@ async def mcp_for_workspace(  # NOSONAR(python:S7503)
     attaches the caller's read scope to every call. This is the only way a route gets an MCP
     client, so no route reaches the ledger without the scope."""
     try:
-        client = supervisor.client_for(ws.id)
+        client = await supervisor.acquire(ws)
     except _NotReady as exc:
         raise HTTPException(status_code=503, detail=f"mcp server not ready: {exc}") from exc
     return ScopedMcp(client, authz.scope_for(principal, ws))

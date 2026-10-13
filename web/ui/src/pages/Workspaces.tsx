@@ -83,7 +83,13 @@ export function Workspaces() {
 
 function ServerChip({ w }: { w: Workspace }) {
   const s = w.server;
-  if (!s) return <span className="chip">no server</span>;
+  // RFC 0182: a project's server starts when something first needs it and stops when idle.
+  if (!s)
+    return (
+      <span className="chip" title="its server starts when first needed">
+        idle
+      </span>
+    );
   const cls =
     s.state === "ready" ? "chip ok" : s.state === "failed" ? "chip bad" : "chip warn";
   const label =

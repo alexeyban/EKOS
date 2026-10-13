@@ -73,7 +73,7 @@ describe("Workspaces list", () => {
     expect(screen.getByText("ready")).toHaveClass("chip", "ok");
   });
 
-  it("shows a failed-with-retries chip and no-server chip appropriately", async () => {
+  it("shows a failed-with-retries chip and an idle chip appropriately", async () => {
     stubWorkspaces([
       {
         id: "w1",
@@ -86,7 +86,7 @@ describe("Workspaces list", () => {
     renderWorkspaces();
 
     expect(await screen.findByText("failed (3 retries)")).toHaveClass("chip", "bad");
-    expect(screen.getByText("no server")).toBeInTheDocument();
+    expect(screen.getByText("idle")).toHaveAttribute("title", "its server starts when first needed");
   });
 
   it("calls the delete endpoint when remove is clicked", async () => {
