@@ -6524,8 +6524,15 @@ LinkML; generation stays in LinkML.
 - [ ] RFC 0183 remainder: scheduled and encrypted backups; a write lock for SQLite-backed and
       partitioned stores during backup; per-tenant spending limits; restore across EKOS
       versions is untested
-- [ ] Across the plan, not verified: a real OIDC provider end to end; a real MCP client against
-      the gateway; the console pages in a browser; the container image rebuilt since RFC 0179;
-      the `image` job on GitHub
+- [x] End-to-end check of the plan (devlog_265): `deploy/e2e/run.sh` runs the image built from
+      the committed tree with a real OIDC provider (Dex), two tenants, roles, a limited viewer,
+      tokens, the gateway, backup and restore into a new volume: 108 checks. Fixed from it:
+      sign-in answered 500 when the provider was unreachable, the sign-in was cancelled or the
+      state was stale; the session cookie was never `Secure`; the guide's restore steps failed
+      on a new volume
+- [ ] Still not verified: a real MCP client program (VS Code, Claude Desktop) against the
+      gateway; the console pages in a browser; group membership from a provider's claim (the
+      console asks for `openid email profile`, and some providers send groups only for a
+      `groups` scope); the `image` job on GitHub; a provider other than Dex
 - [ ] Moving an in-place `./.ekos` workspace into the home is a manual copy; no command does it
 - [ ] The cluster compile worker ships a config between processes and loses `location`

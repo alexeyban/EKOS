@@ -111,3 +111,64 @@ def test_the_published_default_session_secret_cannot_forge_a_session(
         with TestClient(create_app()) as c:
             c.cookies.set("session", _forged_session_cookie(secret, "write"))
             assert c.get("/api/auth/me").status_code == 401, secret
+
+
+# ── OIDC sign-in failures answer with a reason, not a 500 ─────────────────────
+
+
+@pytest.fixture
+def oidc_client(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, reset_settings: None
+) -> Iterator[TestClient]:
+    from app import auth
+
+    # Nothing listens on port 1: the provider is unreachable.
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_ISSUER", "http://127.0.0.1:1/dex")
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_CLIENT_ID", "ekos")
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_CLIENT_SECRET", "x")
+    monkeypatch.setenv(
+        "EKOS_CONSOLE_OIDC_REDIRECT_URI", "https://ekos.example.com/api/auth/callback"
+    )
+    monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_DB", str(tmp_path / "c.db"))
+    monkeypatch.setenv("EKOS_CONSOLE_SESSION_SECRET", "s")
+    monkeypatch.setenv("EKOS_BIN", "/bin/true")
+    auth.reset_oauth()
+    with TestClient(create_app(), base_url="https://ekos.example.com") as c:
+        yield c
+    auth.reset_oauth()
+
+
+def test_login_with_an_unreachable_provider_is_502(oidc_client: TestClient) -> None:
+    r = oidc_client.get("/api/auth/login", follow_redirects=False)
+    assert r.status_code == 502
+    assert "identity provider" in r.json()["detail"]
+
+
+def test_a_cancelled_sign_in_is_400(oidc_client: TestClient) -> None:
+    r = oidc_client.get("/api/auth/callback?error=access_denied", follow_redirects=False)
+    assert r.status_code == 400
+    assert "access_denied" in r.json()["detail"]
+
+
+def test_a_callback_this_browser_did_not_start_is_400(oidc_client: TestClient) -> None:
+    r = oidc_client.get("/api/auth/callback?code=x&state=y", follow_redirects=False)
+    assert r.status_code == 400
+
+
+def test_the_session_cookie_is_secure_when_the_console_is_served_over_https(
+    oidc_client: TestClient,
+) -> None:
+    from app.main import cookie_is_https_only
+    from app.settings import get_settings
+
+    assert cookie_is_https_only(get_settings()) is True
+
+
+def test_the_session_cookie_is_not_secure_on_plain_http(client: TestClient) -> None:
+    from app.main import cookie_is_https_only
+    from app.settings import get_settings
+
+    # The default redirect URI is http://localhost: a Secure cookie would never be sent back.
+    assert cookie_is_https_only(get_settings()) is False
+    r = client.post("/api/auth/token-login", json={"token": "w-tok"})
+    assert "secure" not in r.headers["set-cookie"].lower()

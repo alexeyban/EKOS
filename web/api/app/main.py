@@ -146,6 +146,14 @@ async def _lifespan(app: FastAPI):
         await app.state.supervisor.aclose()
 
 
+def cookie_is_https_only(settings) -> bool:
+    """Whether the session cookie is marked `Secure`. It is when sign-in comes back to an
+    `https://` address, which is what a console behind a TLS proxy is configured with. On plain
+    HTTP (development, a first try on loopback) a `Secure` cookie would never be sent back and
+    nobody could sign in."""
+    return settings.oidc_enabled and settings.oidc_redirect_uri.lower().startswith("https://")
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="EKOS Console API", version="0.1.0", lifespan=_lifespan)
@@ -155,7 +163,7 @@ def create_app() -> FastAPI:
         SessionMiddleware,
         secret_key=settings.session_secret,
         same_site="lax",
-        https_only=False,
+        https_only=cookie_is_https_only(settings),
     )
     app.add_middleware(
         CORSMiddleware,

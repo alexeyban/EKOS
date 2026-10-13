@@ -56,6 +56,11 @@ signed-in user can read the `default` tenant.
 Put a reverse proxy with TLS in front of `127.0.0.1:8000`. Do not change the port binding to
 `0.0.0.0`.
 
+The container must be able to reach the identity provider at the issuer URL, and that URL must
+be the same one browsers use. If sign-in answers "the identity provider could not be reached",
+check that from inside the container. With an `https://` redirect URI the session cookie is
+marked `Secure`.
+
 **To try it without an identity provider**, leave the OIDC and production lines out and set
 `EKOS_CONSOLE_CONSOLE_TOKEN` and `EKOS_CONSOLE_CONSOLE_WRITE_TOKEN` instead. The write token acts
 as a platform owner. Do not expose such a console.
@@ -203,16 +208,20 @@ docker compose -f deploy/docker-compose.yml cp \
   not tokens). Protect it as you would the volume.
 - There is no schedule. Run it from the host's cron.
 
-To restore, into the same home or an empty one:
+To restore onto a new machine or a new volume, start the deployment first, then:
 
 ```bash
 docker compose -f deploy/docker-compose.yml cp /srv/backups/ekos-backup-….tar.zst ekos:/tmp/b.tar.zst
-docker compose -f deploy/docker-compose.yml exec ekos ekos home restore /tmp/b.tar.zst
+docker compose -f deploy/docker-compose.yml exec ekos ekos home restore /tmp/b.tar.zst --force
 docker compose -f deploy/docker-compose.yml restart
 ```
 
-- Nothing that exists is replaced. If any project in the archive is already there, the restore
-  stops and changes nothing.
+`--force` is needed even on a new volume: the console created its own empty database when it
+started, and a full backup holds a console database. The empty one is moved to `trash/`.
+Restart afterwards; until then the console is still using the database it started with.
+
+- Without `--force` nothing that exists is replaced. If any project in the archive, or the
+  console database, is already there, the restore stops and changes nothing.
 - `--force` replaces: each existing project, and the console database, is first moved to
   `trash/` in the volume. Nothing is deleted.
 - `--tenant acme` restores that tenant's projects only. Role bindings are in the console
@@ -258,3 +267,4 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | Backups | `/var/lib/ekos/backups/` |
 | Settings | `deploy/.env`; every one is described in `deploy/.env.example` |
 | Design | RFCs 0178–0183 in `ekos/docs/rfcs/` |
+| A check of a whole deployment | `deploy/e2e/run.sh`: the image, a test identity provider, two tenants, backup and restore |

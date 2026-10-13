@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import uuid
 
+import httpx
+from authlib.integrations.base_client import OAuthError
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -13,6 +15,19 @@ from .. import authz, models
 from ..auth import claim_values, oauth, resolve_principal, static_role
 from ..settings import Settings, get_settings
 from ._responses import BAD_REQUEST, UNAUTHORIZED
+
+BAD_GATEWAY = {"description": "The identity provider could not be reached"}
+
+
+def _unreachable(exc: Exception) -> HTTPException:
+    """The provider did not answer. Said as such: a bare 500 reads as a console fault, and the
+    cause is nearly always the issuer URL or the network between the two."""
+    return HTTPException(
+        status_code=502,
+        detail=f"the identity provider could not be reached ({type(exc).__name__}); "
+        "check EKOS_CONSOLE_OIDC_ISSUER and that the console can connect to it",
+    )
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -87,11 +102,14 @@ async def token_login(
     return {"role": role}
 
 
-@router.get("/login", responses={400: BAD_REQUEST})
+@router.get("/login", responses={400: BAD_REQUEST, 502: BAD_GATEWAY})
 async def login(request: Request, settings: Settings = Depends(get_settings)):
     if not settings.oidc_enabled:
         raise HTTPException(status_code=400, detail="OIDC is not configured")
-    return await oauth(settings).oidc.authorize_redirect(request, settings.oidc_redirect_uri)
+    try:
+        return await oauth(settings).oidc.authorize_redirect(request, settings.oidc_redirect_uri)
+    except httpx.HTTPError as exc:
+        raise _unreachable(exc) from exc
 
 
 def user_for_claims(claims: dict) -> models.User:
@@ -120,11 +138,21 @@ def user_for_claims(claims: dict) -> models.User:
     return user
 
 
-@router.get("/callback", responses={400: BAD_REQUEST})
+@router.get("/callback", responses={400: BAD_REQUEST, 502: BAD_GATEWAY})
 async def callback(request: Request, settings: Settings = Depends(get_settings)):
     if not settings.oidc_enabled:
         raise HTTPException(status_code=400, detail="OIDC is not configured")
-    token = await oauth(settings).oidc.authorize_access_token(request)
+    try:
+        token = await oauth(settings).oidc.authorize_access_token(request)
+    except OAuthError as exc:
+        # The person cancelled, the provider refused, or this browser did not start the
+        # sign-in it is finishing (an old tab, a replayed link).
+        authz.audit(None, "sign-in", "denied", detail=str(exc.error or "")[:100])
+        raise HTTPException(
+            status_code=400, detail=f"sign-in did not complete: {exc.error}; start again"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise _unreachable(exc) from exc
     claims = token.get("userinfo") or {}
     user = user_for_claims(claims)
     request.session["user"] = {
