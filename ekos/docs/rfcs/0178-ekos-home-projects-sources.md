@@ -1,6 +1,6 @@
 # RFC 0178 — EKOS home, projects and sources
 
-**Status:** Accepted — Part 1 implemented 2026-10-13 (devlog_258); Part 2 not started
+**Status:** Accepted — Part 1 implemented 2026-10-13 (devlog_258); Part 2 designed in outline, one point open, not started
 **Author:** EKOS team
 **Created:** 2026-10-13
 **Builds on:** RFC 0111 (`[storage]` containers, `EkosConfig::ekos_dir`), RFC 0152 (`init --detect`), RFC 0171 (freshness)
@@ -14,9 +14,11 @@ repository. It does not fit a shared installation:
 
 - a source tree mounted read-only cannot hold `.ekos/`;
 - nothing says which compiled workspaces exist on a machine;
-- a project made of several repositories, a document folder and a Confluence space has no
-  representation: `[observe] paths` lists directories under one root, and `GitObserver` looks for
-  `.git` only at that root, so two repositories listed there yield no commits and no error;
+- a project made of several repositories, a document folder and a Confluence space is only
+  half represented. `[observe] paths` may list several directories, each is scanned from its own
+  root, and RFC 0044/0079 keep their objects apart by a key derived from the path. But the key
+  is a path, not a name, it is recorded on some objects and not others, there is one
+  `[confluence]` and one `[github]` per workspace, and nothing can be asked "from which source";
 - there is no level above a workspace to hang a tenant on.
 
 ## Levels
@@ -128,13 +130,27 @@ kind = "confluence"
 space = "OPS"
 ```
 
-- Each source is observed from its own root, so a git source finds its own `.git`.
-- A path inside the ledger is `<source>/<path in source>`. Two repositories with a file of the
-  same name stay two objects.
-- Every observation artifact carries its source name. One step after recover stamps `source` on
-  every object from its evidence. An object merged from several sources lists all of them;
-  derived objects (rollups, risks, summaries, business concepts) list the sources of what they
-  were derived from.
+This builds on what `build` already does (found while implementing Part 1, and different from
+what this RFC first assumed): every `[observe] paths` entry is scanned from its own root, each
+artifact gets a `project` field (`ekos_common::project::project_key_for_base`, the entry's path
+relative to the workspace), and ids are hashed from `"<key>:<path>"` so two entries with a file of
+the same name stay two objects. Displayed names stay relative to the entry.
+
+- A source's **name** replaces the path-derived key. An absolute path outside the workspace
+  then has a stable, readable key instead of its full path.
+- The four places that turn `[observe] paths` into directories (`build.rs`, `recover.rs`,
+  `commands/config.rs`, `freshness.rs`) read one shared function that returns sources.
+- Every object gets a `source` property. Today the key reaches `File` objects and the analyzers
+  that read it back from their artifact, not every object. Open design point: a symbol's
+  knowledge artifact does not record which observation artifact it came from (the Rust analyzer
+  writes one for all files), so `source` cannot be derived generically from provenance and has to
+  be carried by each analyzer or by evidence. To be settled before code.
+- An object merged from several sources lists all of them; derived objects (rollups, risks,
+  summaries, business concepts) list the sources of what they were derived from.
+- The object property is called `source`. The existing `project` field keeps its name and its
+  role in id hashing, so no existing ledger's ids change; "project" in this RFC's sense is the
+  level above.
+- `[confluence]` and `[github]` become per-source settings.
 - A config with no `[[sources]]` is one unnamed source at the workspace root, as today.
 - `ekos source add|list|remove`, `ekos build --source <name>`. Recover, resolve, compile and
   commit run over the whole project: identity and links span sources.

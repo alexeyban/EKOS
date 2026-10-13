@@ -72,6 +72,7 @@ The request was a production setup: an installer or image, EKOS in its own folde
 - **A blanket rename inside one function reaches the file's tests.** Replacing `cli.command` after a split point also rewrote a test further down. Bound the replacement to the function.
 - **`if let Variant { field } = value` moves `value` for the rest of the function.** To handle one enum variant early and keep the rest, `let rest = match value { Variant { .. } => return …, other => other };`.
 - **The default home `~/.ekos` is also what `./.ekos` means when `ekos` is run in the home directory.** The names inside do not collide (`data/`, `trash/` against `artifacts/`, `ledger/`), but they would share a directory.
+- **Several source roots in one workspace already half-exist.** `build` scans each `[observe] paths` entry from its own root and keys its artifacts by the entry's path (`ekos_common::project`, RFC 0044/0079). The RFC's first draft said two repositories listed there yield no commits; that is wrong, it is true only of subdirectories of one repository. Part 2 is a name for that key, the key on every object, and per-source connector settings, not a new mechanism.
 - **The audit gate depends on the day.** A green audit says nothing about tomorrow; run it before every push.
 
 ---
