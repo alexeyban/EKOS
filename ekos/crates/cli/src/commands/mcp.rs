@@ -2147,7 +2147,7 @@ fn identity_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Resul
 /// `ekos_session_note` (RFC 0151): validates, redacts and appends to the inbox. Returns only
 /// `{entry_id, accepted, redactions_applied}`.
 fn session_note(config: &EkosConfig, workspace: &Path, args: &Value) -> Result<Value> {
-    use ekos_session::{DEFAULT_INBOX_DIR, Inbox, InboxLimits, NoteInput, NoteKind, NoteOutcome};
+    use ekos_session::{InboxLimits, NoteInput, NoteKind, NoteOutcome};
     let sm = &config.session_memory;
     if !sm.enabled {
         anyhow::bail!("session memory is disabled — set [session-memory] enabled = true");
@@ -2177,11 +2177,9 @@ fn session_note(config: &EkosConfig, workspace: &Path, args: &Value) -> Result<V
         .and_then(Value::as_str)
         .map(String::from)
         .unwrap_or_else(super::session::default_session_id);
-    let inbox = Inbox::open(
+    let inbox = super::session::inbox_at(
+        config,
         workspace,
-        &sm.inbox_dir
-            .clone()
-            .unwrap_or_else(|| DEFAULT_INBOX_DIR.into()),
         InboxLimits {
             max_note_chars: sm.max_note_chars,
             max_entries_per_session: sm.max_entries_per_session,
@@ -2258,7 +2256,7 @@ fn session_read(
     name: &str,
     args: &Value,
 ) -> Result<Value> {
-    use ekos_session::{DEFAULT_INBOX_DIR, Inbox, InboxLimits, read};
+    use ekos_session::{InboxLimits, read};
     if name == "ekos_session_recall" {
         let limit = args
             .get("limit")
@@ -2268,14 +2266,7 @@ fn session_read(
         let result = read::recall(ledger, Some(workspace), required_str(args, "query")?, limit)?;
         return Ok(json!({ "untrusted": true, "recall": result }));
     }
-    let sm = &config.session_memory;
-    let inbox = Inbox::open(
-        workspace,
-        &sm.inbox_dir
-            .clone()
-            .unwrap_or_else(|| DEFAULT_INBOX_DIR.into()),
-        InboxLimits::default(),
-    )?;
+    let inbox = super::session::inbox_at(config, workspace, InboxLimits::default())?;
     let mut pending = Vec::new();
     for id in inbox.sessions()? {
         pending.extend(inbox.pending(&id)?.0);

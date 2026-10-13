@@ -4,3 +4,4 @@ pub mod coverage;
 pub mod detect;
 pub mod extension;
 pub mod freshness;
+pub mod home;

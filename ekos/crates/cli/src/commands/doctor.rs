@@ -181,6 +181,20 @@ fn collect_checks(config: &EkosConfig, cwd: &Path, config_path: &Path) -> Vec<Ch
         ));
     }
 
+    // RFC 0178: which project in the EKOS home this is, and where its sources are.
+    if let Some(location) = &config.location {
+        checks.push(Check::ok(
+            "project",
+            format!(
+                "{}/{} in {} — sources {}",
+                location.tenant,
+                location.project,
+                location.home.display(),
+                cwd.display()
+            ),
+        ));
+    }
+
     // .ekos/ directory
     let ekos_dir = config.ekos_dir(cwd);
     if ekos_dir.exists() {

@@ -263,6 +263,40 @@ schema is written in, excludes third-party and generated directories that would 
 compiled as if they were your own code, and prints an inventory of what it found. See
 [RFC 0152](ekos/docs/rfcs/0152-first-run-self-verification.md).
 
+### Projects kept outside the sources (RFC 0178)
+
+By default `ekos.toml` and the `.ekos/` state directory sit in the repository. A project in the
+EKOS home keeps both elsewhere, so the sources are only read and one machine can hold many
+projects, each with its own ledger:
+
+```bash
+ekos project add shop --source /path/to/your/repo --detect
+ekos --project shop build && ekos --project shop recover && ekos --project shop resolve \
+  && ekos --project shop compile && ekos --project shop commit
+ekos --project shop ask "what does this system do?"
+ekos project list
+ekos mcp serve --project shop
+```
+
+```
+~/.ekos/                          $EKOS_HOME, or --home
+  data/<tenant>/<project>/
+      ekos.toml                   [workspace] root = "/path/to/your/repo"
+      state/                      what .ekos/ is for an in-place workspace
+```
+
+- `--project` works from any directory; `EKOS_PROJECT` and `EKOS_TENANT` do the same.
+- The tenant is `default` unless `--tenant` names one. Two tenants may each have a project
+  called `shop`; they share nothing.
+- Nothing is written into the sources. Generated docs and dbt models default to the project's
+  `out/` directory.
+- `ekos project remove shop` moves the project's data to `~/.ekos/trash/`; `--purge --yes`
+  deletes it.
+- `ekos init` and `--config` are refused together with `--project`.
+
+Users, groups, roles and a project made of several repositories are planned, not built. See
+[RFC 0178](ekos/docs/rfcs/0178-ekos-home-projects-sources.md).
+
 ### Is the ledger still current? (RFC 0171)
 
 The ledger describes the source as it was at the last `ekos commit`. `ekos build` records every

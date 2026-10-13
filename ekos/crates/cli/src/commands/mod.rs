@@ -29,6 +29,7 @@ pub mod marketing;
 pub mod mcp;
 pub mod migrate;
 pub mod migrate_logic;
+pub mod project;
 pub mod query;
 pub mod query_log;
 pub mod recover;

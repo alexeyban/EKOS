@@ -143,18 +143,32 @@ impl Inbox {
         inbox_dir: &Path,
         limits: InboxLimits,
     ) -> Result<Self, InboxError> {
+        Self::open_under(workspace, workspace, inbox_dir, limits)
+    }
+
+    /// RFC 0178: like [`Self::open`], for a workspace whose state lives outside its source tree.
+    /// `inbox_dir` is resolved against, and must stay inside, `root` (the state directory);
+    /// anchors are still checked against `workspace` (the sources).
+    pub fn open_under(
+        workspace: &Path,
+        root: &Path,
+        inbox_dir: &Path,
+        limits: InboxLimits,
+    ) -> Result<Self, InboxError> {
         let workspace = workspace.canonicalize()?;
+        create_private_dir(root)?;
+        let root = root.canonicalize()?;
         let joined = if inbox_dir.is_absolute() {
             inbox_dir.to_path_buf()
         } else {
-            workspace.join(inbox_dir)
+            root.join(inbox_dir)
         };
         if joined.components().any(|c| c == Component::ParentDir) {
             return Err(InboxError::OutsideWorkspace(joined.display().to_string()));
         }
         create_private_dir(&joined)?;
         let dir = joined.canonicalize()?;
-        if !dir.starts_with(&workspace) {
+        if !dir.starts_with(&root) {
             return Err(InboxError::OutsideWorkspace(dir.display().to_string()));
         }
         Ok(Self {

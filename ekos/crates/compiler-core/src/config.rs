@@ -46,6 +46,10 @@ pub struct EkosConfig {
     pub freshness: FreshnessConfig,
     #[serde(default)]
     pub conflicts: ConflictsConfig,
+    /// RFC 0178: set when the command selected a project in the EKOS home (`--project`). Never
+    /// read from or written to a file.
+    #[serde(skip)]
+    pub location: Option<ProjectLocation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -828,6 +832,38 @@ impl StorageConfig {
     }
 }
 
+/// RFC 0178: a project in the EKOS home, `<home>/data/<tenant>/<project>/`. Its config is
+/// `ekos.toml` there and its state — what `.ekos/` is for an in-tree workspace — is `state/`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectLocation {
+    pub home: PathBuf,
+    pub tenant: String,
+    pub project: String,
+}
+
+impl ProjectLocation {
+    /// `<home>/data/<tenant>/<project>`.
+    pub fn dir(&self) -> PathBuf {
+        self.home
+            .join("data")
+            .join(&self.tenant)
+            .join(&self.project)
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.dir().join("ekos.toml")
+    }
+
+    pub fn state_dir(&self) -> PathBuf {
+        self.dir().join("state")
+    }
+
+    /// Default destination of generated files (docs, dbt models, eval reports).
+    pub fn out_dir(&self) -> PathBuf {
+        self.dir().join("out")
+    }
+}
+
 #[allow(clippy::derivable_impls)]
 impl Default for EkosConfig {
     fn default() -> Self {
@@ -853,6 +889,7 @@ impl Default for EkosConfig {
             semantics: SemanticsConfig::default(),
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
+            location: None,
         }
     }
 }
@@ -887,10 +924,22 @@ impl EkosConfig {
     /// lives under the configured container folder. No `[storage]` section, or an unmatched
     /// `active-container`, behaves exactly as before this field existed.
     pub fn ekos_dir(&self, cwd: &Path) -> PathBuf {
+        if let Some(location) = &self.location {
+            return location.state_dir();
+        }
         if let Some(container) = self.storage.active_container() {
             return container.path.clone();
         }
         cwd.join(".ekos")
+    }
+
+    /// Where a command writes generated files when no `--output` is given: the working directory,
+    /// or with a project (RFC 0178) its `out/` directory, so nothing lands in a source tree.
+    pub fn output_base(&self, cwd: &Path) -> PathBuf {
+        match &self.location {
+            Some(location) => location.out_dir(),
+            None => cwd.to_path_buf(),
+        }
     }
 
     /// RFC 0043: the `[security]` config translated into the additive-only
@@ -1171,6 +1220,32 @@ path = "/tmp/ekos-containers/b"
     }
 
     /// The core RFC 0111 groundwork claim: naming an active container redirects the *entire*
+    /// RFC 0178: a selected project decides the state directory, ahead of the working directory
+    /// and of a `[storage]` container, and gives generated files a home outside the source tree.
+    #[test]
+    fn a_project_location_decides_the_state_and_output_directories() {
+        let mut cfg = EkosConfig::default();
+        let cwd = PathBuf::from("/src/repo");
+        assert_eq!(cfg.output_base(&cwd), cwd);
+        cfg.storage.active_container = Some("c".into());
+        cfg.storage.containers = vec![StorageContainerConfig {
+            name: "c".into(),
+            path: PathBuf::from("/containers/c"),
+        }];
+        cfg.location = Some(ProjectLocation {
+            home: PathBuf::from("/home/u/.ekos"),
+            tenant: "default".into(),
+            project: "shop".into(),
+        });
+        let dir = PathBuf::from("/home/u/.ekos/data/default/shop");
+        assert_eq!(cfg.ekos_dir(&cwd), dir.join("state"));
+        assert_eq!(cfg.artifact_dir(&cwd), dir.join("state/artifacts"));
+        assert_eq!(cfg.output_base(&cwd), dir.join("out"));
+        // The location is never serialized: a config written back to disk stays portable.
+        let text = toml::to_string(&cfg).unwrap();
+        assert!(!text.contains("location") && !text.contains("/home/u/.ekos"));
+    }
+
     /// `.ekos` tree to that container's folder, completely independent of `cwd` — this is the
     /// mechanism that lets two different folders stand in for two different storage containers.
     #[test]

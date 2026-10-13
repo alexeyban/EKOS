@@ -6476,3 +6476,22 @@ LinkML; generation stays in LinkML.
       nears the window
 - [ ] A devlog that names an adversarial scenario's invented entity is not a verbatim question
       echo and stays searchable (`adv-001`)
+
+## Production deployment (plan of 2026-10-13)
+
+- [x] RFC 0178 Part 1 — EKOS home and projects: `ekos project add|list|show|remove`, global
+      `--project` / `--tenant` / `--home`, state under `<home>/data/<tenant>/<project>/state`,
+      sources never written to (devlog_258)
+- [ ] RFC 0178 Part 2 — sources: `[[sources]]` (git / dir / confluence / github), each observed
+      from its own root, `<source>/<path>` in the ledger, `source` stamped on every object,
+      `ekos source add|list|remove`, `build --source`, a `source` filter on reads
+- [ ] RFC 0179 — installer into `$EKOS_HOME/bin`, production Docker image (binary + console API
+      + built UI), Compose file, image published from a release tag
+- [ ] RFC 0180 — console: tenants, users (OIDC), groups, roles (viewer / reviewer / operator /
+      admin), API tokens, audit log, one `authorize` function
+- [ ] RFC 0181 — read scope: allow / deny by source, path pattern or object, enforced in
+      `Runtime`; leak suite
+- [ ] RFC 0182 — MCP gateway on the console, per-tenant and per-project, role-filtered tools
+- [ ] RFC 0183 — backup / restore, per-tenant model credentials, deployment guide
+- [ ] Moving an in-place `./.ekos` workspace into the home is a manual copy; no command does it
+- [ ] The cluster compile worker ships a config between processes and loses `location`

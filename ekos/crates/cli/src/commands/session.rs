@@ -23,19 +23,40 @@ fn open_inbox(config: &EkosConfig, cwd: &Path) -> Result<Inbox> {
             "session memory is disabled. Enable it in ekos.toml:\n\n[session-memory]\nenabled = true"
         );
     }
-    let dir = sm
-        .inbox_dir
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_INBOX_DIR));
-    Ok(Inbox::open(
+    Ok(inbox_at(
+        config,
         cwd,
-        &dir,
         InboxLimits {
             max_note_chars: sm.max_note_chars,
             max_entries_per_session: sm.max_entries_per_session,
             max_bytes_per_session: sm.max_bytes_per_session,
         },
     )?)
+}
+
+/// The session inbox of this workspace. In-tree: `[session-memory] inbox-dir` (default
+/// `.ekos/session/inbox`) under the workspace. For a project in the EKOS home (RFC 0178) the
+/// inbox lives under the project's state directory instead, default `session/inbox`, so nothing
+/// is written into the source tree.
+pub(crate) fn inbox_at(
+    config: &EkosConfig,
+    cwd: &Path,
+    limits: InboxLimits,
+) -> std::result::Result<Inbox, InboxError> {
+    let configured = config.session_memory.inbox_dir.clone();
+    match &config.location {
+        Some(location) => Inbox::open_under(
+            cwd,
+            &location.state_dir(),
+            &configured.unwrap_or_else(|| PathBuf::from("session/inbox")),
+            limits,
+        ),
+        None => Inbox::open(
+            cwd,
+            &configured.unwrap_or_else(|| PathBuf::from(DEFAULT_INBOX_DIR)),
+            limits,
+        ),
+    }
 }
 
 pub fn note(
@@ -525,6 +546,41 @@ mod tests {
         assert_eq!(first["kind"], "decision");
         assert_eq!(first["anchors"][0], "orders");
         status(&cfg, d.path(), None).unwrap();
+    }
+
+    /// RFC 0178: for a project in the EKOS home the inbox is under the project's state, and a
+    /// configured inbox directory cannot climb out of it.
+    #[test]
+    fn a_project_keeps_its_inbox_out_of_the_source_tree() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let mut cfg = enabled();
+        let location = ekos_compiler_core::ProjectLocation {
+            home: d.path().join("home"),
+            tenant: "default".into(),
+            project: "shop".into(),
+        };
+        cfg.location = Some(location.clone());
+
+        let inbox = open_inbox(&cfg, &src).unwrap();
+        assert_eq!(
+            inbox.dir(),
+            location
+                .state_dir()
+                .join("session/inbox")
+                .canonicalize()
+                .unwrap()
+        );
+        assert_eq!(std::fs::read_dir(&src).unwrap().count(), 0);
+
+        cfg.session_memory.inbox_dir = Some(PathBuf::from("../../escape"));
+        assert!(open_inbox(&cfg, &src).is_err());
+        cfg.session_memory.inbox_dir = Some(src.join("inbox"));
+        assert!(
+            open_inbox(&cfg, &src).is_err(),
+            "an absolute inbox inside the sources is outside the state directory"
+        );
     }
 
     #[test]

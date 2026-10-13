@@ -80,7 +80,7 @@ pub fn run_with_options(config: &EkosConfig, cwd: &Path, opts: InitOptions) -> R
     Ok(())
 }
 
-fn print_detection(d: &Detection) {
+pub(crate) fn print_detection(d: &Detection) {
     println!("Detected workspace contents");
     println!("{}", "─".repeat(60));
 
@@ -136,7 +136,7 @@ fn print_detection(d: &Detection) {
     println!("{}", "─".repeat(60));
 }
 
-const DEFAULT_CONFIG: &str = r#"[workspace]
+pub(crate) const DEFAULT_CONFIG: &str = r#"[workspace]
 root = "."
 log-level = "info"
 log-format = "pretty"

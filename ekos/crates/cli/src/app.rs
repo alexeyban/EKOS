@@ -1,5 +1,5 @@
 use crate::extension::Extensions;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -15,6 +15,20 @@ struct Cli {
     /// Path to ekos.toml (default: ./ekos.toml)
     #[arg(long, global = true, value_name = "FILE")]
     config: Option<PathBuf>,
+
+    /// The EKOS home holding projects and their compiled data (default: $EKOS_HOME, then
+    /// ~/.ekos) — RFC 0178
+    #[arg(long, global = true, value_name = "DIR")]
+    home: Option<PathBuf>,
+
+    /// Run against a project in the EKOS home instead of the current directory: its config,
+    /// its sources, its own ledger (also $EKOS_PROJECT) — RFC 0178
+    #[arg(long, global = true, value_name = "NAME")]
+    project: Option<String>,
+
+    /// The tenant the project belongs to (default: `default`; also $EKOS_TENANT)
+    #[arg(long, global = true, value_name = "NAME")]
+    tenant: Option<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -35,6 +49,11 @@ enum Commands {
         /// Overwrite an existing ekos.toml
         #[arg(long)]
         force: bool,
+    },
+    /// Projects in the EKOS home: config and compiled data kept outside the sources (RFC 0178)
+    Project {
+        #[command(subcommand)]
+        subcommand: ProjectCommands,
     },
     /// Run observation passes and write knowledge to the ledger
     Build,
@@ -858,6 +877,42 @@ enum ArtifactCommands {
 }
 
 #[derive(Subcommand)]
+enum ProjectCommands {
+    /// Create a project for the sources in a directory
+    Add {
+        /// Project name: lowercase letters, digits, `-` and `_`
+        name: String,
+        /// The directory holding the project's sources; nothing is written into it
+        #[arg(long, value_name = "DIR")]
+        source: PathBuf,
+        /// Scan the sources and write a config that reflects what is in them (RFC 0152)
+        #[arg(long)]
+        detect: bool,
+    },
+    /// List every project in the home
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show where a project's sources, config and state are
+    Show {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a project. Its data is moved to the home's trash unless --purge is given
+    Remove {
+        name: String,
+        /// Delete the ledger and compiled artifacts instead of keeping them in the trash
+        #[arg(long)]
+        purge: bool,
+        /// Confirm --purge
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum McpCommands {
     /// Serve MCP over stdio (default), or over TCP (`--tcp`) or Streamable HTTP (`--http`)
     Serve {
@@ -1206,6 +1261,53 @@ fn resolve_config_path(
         .unwrap_or_else(|| PathBuf::from("ekos.toml"))
 }
 
+/// RFC 0178: what cannot be combined with `--project`. Each would point the command at a second
+/// config or workspace, or write a config into the source tree.
+fn refuse_with_project(
+    command: &Commands,
+    explicit_config: bool,
+    mcp_workspace: &Option<PathBuf>,
+) -> Result<()> {
+    if explicit_config {
+        bail!("--config cannot be combined with --project: a project has its own ekos.toml");
+    }
+    if mcp_workspace.is_some() {
+        bail!("--workspace cannot be combined with --project");
+    }
+    if matches!(command, Commands::Init { .. }) {
+        bail!(
+            "`ekos init` writes ekos.toml into the current directory. A project's config is \
+             created by `ekos project add <name> --source <dir>`"
+        );
+    }
+    Ok(())
+}
+
+fn dispatch_project(
+    subcommand: ProjectCommands,
+    home_dir: &std::path::Path,
+    tenant: Option<String>,
+) -> Result<()> {
+    use crate::commands::project;
+    let tenant = tenant
+        .or_else(|| std::env::var("EKOS_TENANT").ok())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| crate::home::DEFAULT_TENANT.to_string());
+    let at = |name: &str| crate::home::location(home_dir, &tenant, name);
+    match subcommand {
+        ProjectCommands::Add {
+            name,
+            source,
+            detect,
+        } => project::add(&at(&name)?, &source, detect),
+        ProjectCommands::List { json } => project::list(home_dir, json),
+        ProjectCommands::Show { name, json } => project::show(&at(&name)?, json),
+        ProjectCommands::Remove { name, purge, yes } => {
+            project::remove(&at(&name)?, purge, yes, chrono::Utc::now()).map(|_| ())
+        }
+    }
+}
+
 /// True for subcommands whose stdout is a single machine-readable document (JSON / NDJSON) that a
 /// program parses — their logs must go to stderr so nothing interleaves. Kept in sync with the
 /// `--json` flags on these subcommands and with `graph export` (always machine output).
@@ -1252,26 +1354,66 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         } => workspace.clone(),
         _ => None,
     };
-    let config_path = resolve_config_path(
-        cli.config,
-        std::env::var_os("EKOS_CONFIG").map(PathBuf::from),
-        matches!(cli.command, Commands::Mcp { .. }),
-        mcp_workspace_flag.as_deref(),
-        env_workspace.as_deref(),
+    // RFC 0178: the home, and the project a command selected in it, if any.
+    let home_dir = crate::home::resolve_home(
+        cli.home,
+        std::env::var_os("EKOS_HOME").map(PathBuf::from),
+        crate::home::user_home_from_env(),
     );
-    let config = ekos_compiler_core::EkosConfig::from_file_or_default(&config_path);
-    let cwd = std::env::current_dir()?;
+    let tenant_flag = cli.tenant;
+    let command = match cli.command {
+        Commands::Project { subcommand } => {
+            if cli.project.is_some() {
+                bail!("`ekos project` takes the project name as an argument, not --project");
+            }
+            crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
+            return dispatch_project(subcommand, &home_dir?, tenant_flag);
+        }
+        other => other,
+    };
+    let selected = match (cli.project, std::env::var("EKOS_PROJECT").ok()) {
+        (None, None) if tenant_flag.is_none() => None,
+        (project, env_project) => crate::home::select_project(
+            &home_dir?,
+            project,
+            env_project,
+            tenant_flag,
+            std::env::var("EKOS_TENANT").ok(),
+        )?,
+    };
+
+    let (config, cwd, config_path, env_workspace) = match selected {
+        Some(location) => {
+            refuse_with_project(&command, cli.config.is_some(), &mcp_workspace_flag)?;
+            let (config, root) = crate::home::load_project(&location)?;
+            // Every relative path a command or the config names resolves in the sources.
+            std::env::set_current_dir(&root)
+                .with_context(|| format!("entering {}", root.display()))?;
+            (config, root, location.config_path(), None)
+        }
+        None => {
+            let config_path = resolve_config_path(
+                cli.config,
+                std::env::var_os("EKOS_CONFIG").map(PathBuf::from),
+                matches!(command, Commands::Mcp { .. }),
+                mcp_workspace_flag.as_deref(),
+                env_workspace.as_deref(),
+            );
+            let config = ekos_compiler_core::EkosConfig::from_file_or_default(&config_path);
+            (config, std::env::current_dir()?, config_path, env_workspace)
+        }
+    };
 
     // The MCP server owns stdout for protocol frames; the machine-readable `--json` / graph-export
     // commands own stdout for the document a consumer parses. Both send logs to stderr so nothing
     // interleaves with what a program reads (RFC 0127 R1/R2, RFC 0129 R5/R6).
-    if matches!(cli.command, Commands::Mcp { .. }) || emits_machine_output(&cli.command) {
+    if matches!(command, Commands::Mcp { .. }) || emits_machine_output(&command) {
         crate::commands::init_logging_stderr(&config);
     } else {
         crate::commands::init_logging(&config);
     }
 
-    match cli.command {
+    match command {
         Commands::Init {
             detect,
             dry_run,
@@ -1412,6 +1554,7 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         Commands::Migrate { subcommand } => dispatch_migrate(subcommand, &config, &cwd).await,
         Commands::Session { subcommand } => dispatch_session(subcommand, &config, &cwd),
         Commands::Eval { subcommand } => dispatch_eval(subcommand, &config, &cwd).await,
+        Commands::Project { .. } => unreachable!("handled before a config is loaded"),
     }
 }
 
@@ -1751,7 +1894,8 @@ async fn dispatch_docs(
             prose,
             yes,
         } => {
-            let output = crate::commands::docs::resolve_output_dir(cwd, output);
+            let output =
+                crate::commands::docs::resolve_output_dir(&config.output_base(cwd), output);
             let format = crate::commands::docs::Format::parse(&format)?;
             let layout = crate::commands::docs::Layout::parse(&layout)?;
             crate::commands::docs::generate(config, cwd, &output, format, layout, prose, yes).await
@@ -1814,7 +1958,7 @@ async fn dispatch_dbt(
 ) -> Result<()> {
     match subcommand {
         DbtCommands::Generate { output } => {
-            let output = crate::commands::dbt::resolve_output_dir(cwd, output);
+            let output = crate::commands::dbt::resolve_output_dir(&config.output_base(cwd), output);
             crate::commands::dbt::generate(cwd, &output, config).await
         }
     }
@@ -1833,7 +1977,8 @@ async fn dispatch_architecture(
             quality_threshold,
             output,
         } => {
-            let output = crate::commands::architecture::resolve_output_dir(cwd, output);
+            let output =
+                crate::commands::architecture::resolve_output_dir(&config.output_base(cwd), output);
             let opts = crate::commands::architecture::InvestigateOptions {
                 max_iterations,
                 quality_threshold,
