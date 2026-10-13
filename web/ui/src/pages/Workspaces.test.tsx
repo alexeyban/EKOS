@@ -110,6 +110,7 @@ describe("RegisterForm", () => {
     renderWorkspaces();
     await screen.findByText("none registered yet");
 
+    await user.click(screen.getByLabelText("Existing workspace"));
     await user.type(screen.getByPlaceholderText("id"), "w1");
     await user.type(screen.getByPlaceholderText("name"), "Main");
     await user.type(screen.getByPlaceholderText("/abs/path/to/workspace"), "/repo");
@@ -117,6 +118,26 @@ describe("RegisterForm", () => {
 
     expect(postSpy).toHaveBeenCalledWith("/workspaces", { id: "w1", name: "Main", path: "/repo" });
     expect(await screen.findByPlaceholderText("id")).toHaveValue("");
+  });
+
+  it("creates a project from a source directory by default", async () => {
+    stubWorkspaces([]);
+    const postSpy = vi.spyOn(client, "apiPost").mockResolvedValue({});
+    const user = userEvent.setup();
+
+    renderWorkspaces();
+    await screen.findByText("none registered yet");
+
+    await user.type(screen.getByPlaceholderText("id"), "shop");
+    await user.type(screen.getByPlaceholderText("name"), "Shop");
+    await user.type(screen.getByPlaceholderText("/abs/path/to/sources"), "/sources/shop");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(postSpy).toHaveBeenCalledWith("/workspaces", {
+      id: "shop",
+      name: "Shop",
+      source: "/sources/shop",
+    });
   });
 
   it("shows the server's rejection (e.g. outside the configured workspaces root) on failure", async () => {
@@ -131,7 +152,7 @@ describe("RegisterForm", () => {
 
     await user.type(screen.getByPlaceholderText("id"), "x");
     await user.type(screen.getByPlaceholderText("name"), "X");
-    await user.type(screen.getByPlaceholderText("/abs/path/to/workspace"), "/etc");
+    await user.type(screen.getByPlaceholderText("/abs/path/to/sources"), "/etc");
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     expect(await screen.findByText(/outside the configured workspaces root/)).toBeInTheDocument();

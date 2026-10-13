@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from . import _afile, _proc, models
+from . import _afile, _proc, home, models
 from .commands import BY_NAME, Command
 from .models import Run
 from .settings import Settings
@@ -200,10 +200,12 @@ class JobRunner:
             if command.stages:
                 final = await self._run_chain(run_id, ws_path, command, log_path, register)
             else:
-                argv = [self._settings.ekos_bin, *command.render_argv(params)]
+                argv, cwd = home.command(
+                    self._settings.ekos_bin, ws_path, command.render_argv(params)
+                )
                 code = await _proc.run_streaming(
                     argv,
-                    cwd=ws_path,
+                    cwd=cwd,
                     log_path=log_path,
                     register=register,
                     timeout_s=command.timeout,
@@ -243,12 +245,13 @@ class JobRunner:
             await _afile.append_text(log_path, f"\n[console] === stage: {stage['name']} ===\n")
             stage["status"] = "running"
             models.update_run(run_id, stages=list(stages))
-            stage_argv = [self._settings.ekos_bin, stage["name"]]
+            stage_args = [stage["name"]]
             if stage["name"] == "commit":
-                stage_argv.append("--yes")
+                stage_args.append("--yes")
+            stage_argv, cwd = home.command(self._settings.ekos_bin, ws_path, stage_args)
             code = await _proc.run_streaming(
                 stage_argv,
-                cwd=ws_path,
+                cwd=cwd,
                 log_path=log_path,
                 register=register,
                 timeout_s=command.timeout,

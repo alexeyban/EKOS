@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import models
+from . import home, models
 from .routes import (
     auth,
     commands,
@@ -72,11 +72,31 @@ def _seed_registry_if_empty() -> None:
             log.warning("seed workspace %r skipped: %s has no ekos.toml", seed.id, root)
 
 
+def _register_home_projects() -> None:
+    """Register every project of the default tenant that the registry does not hold (RFC 0179
+    §2): a project exists because its directory does, so one created with the CLI in the same
+    home appears here, and an emptied registry is rebuilt."""
+    root = home.configured_home()
+    if root is None:
+        return
+    known = {ws.path for ws in models.list_workspaces()}
+    for project in home.projects_in(root):
+        if str(project.dir) in known:
+            continue
+        if models.get_workspace(project.name) is not None:
+            log.warning("project %r not registered: the id is taken", project.name)
+            continue
+        models.add_workspace(
+            models.Workspace(id=project.name, name=project.name, path=str(project.dir))
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     settings = get_settings()
     models.init_engine(settings.console_db)
     _seed_registry_if_empty()
+    _register_home_projects()
 
     app.state.supervisor = McpSupervisor(settings)
     await app.state.supervisor.start(models.list_workspaces())

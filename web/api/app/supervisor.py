@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from . import _proc
+from . import _proc, home
 from .mcp_client import EkosMcpClient
 from .models import Workspace
 from .settings import Settings
@@ -126,17 +126,11 @@ class McpSupervisor:
         token_file.write_text(token + "\n")
         token_file.chmod(0o600)
 
-        argv = [
+        argv = home.mcp_command(
             self._settings.ekos_bin,
-            "mcp",
-            "serve",
-            "--workspace",
             ws.path,
-            "--tcp",
-            f"127.0.0.1:{port}",
-            "--tcp-token-file",
-            str(token_file),
-        ]
+            ["--tcp", f"127.0.0.1:{port}", "--tcp-token-file", str(token_file)],
+        )
         handle = ServerHandle(workspace_id=ws.id, port=port, token=token, token_file=token_file)
         try:
             handle.proc = await _proc.spawn(argv)

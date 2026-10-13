@@ -83,9 +83,13 @@ function RegisterForm() {
   const [id, setId] = useState("");
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
+  // "source": create a project in the EKOS home for a source directory (RFC 0179).
+  // "path": register a directory that already holds a compiled workspace.
+  const [mode, setMode] = useState<"source" | "path">("source");
 
   const add = useMutation({
-    mutationFn: () => apiPost("/workspaces", { id, name, path }),
+    mutationFn: () =>
+      apiPost("/workspaces", mode === "source" ? { id, name, source: path } : { id, name, path }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["workspaces"] });
       setId("");
@@ -96,11 +100,39 @@ function RegisterForm() {
 
   return (
     <section className="card">
-      <strong>Register a workspace</strong>
-      <p className="muted">
-        An absolute path to a directory with <code>ekos.toml</code> and <code>.ekos/</code>. The
-        console spawns its MCP server.
-      </p>
+      <strong>Add a workspace</strong>
+      <div className="reg-mode">
+        <label>
+          <input
+            type="radio"
+            name="reg-mode"
+            checked={mode === "source"}
+            onChange={() => setMode("source")}
+          />
+          <span>New project from a source directory</span>
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="reg-mode"
+            checked={mode === "path"}
+            onChange={() => setMode("path")}
+          />
+          <span>Existing workspace</span>
+        </label>
+      </div>
+      {mode === "source" ? (
+        <p className="muted">
+          An absolute path to the sources. The project&apos;s config and compiled data are kept in
+          the EKOS home; nothing is written into the source directory. The id becomes the project
+          name: lowercase letters, digits, <code>-</code> and <code>_</code>.
+        </p>
+      ) : (
+        <p className="muted">
+          An absolute path to a directory with <code>ekos.toml</code> and <code>.ekos/</code>. The
+          console spawns its MCP server.
+        </p>
+      )}
       <form
         className="reg-form"
         onSubmit={(e) => {
@@ -116,7 +148,7 @@ function RegisterForm() {
           required
         />
         <input
-          placeholder="/abs/path/to/workspace"
+          placeholder={mode === "source" ? "/abs/path/to/sources" : "/abs/path/to/workspace"}
           value={path}
           onChange={(e) => setPath(e.target.value)}
           required

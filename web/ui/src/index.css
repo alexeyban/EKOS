@@ -181,6 +181,19 @@ input {
   color: var(--ink);
 }
 .token-row,
+.reg-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0.5rem 0 0;
+}
+
+.reg-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .reg-form {
   display: flex;
   gap: 0.5rem;

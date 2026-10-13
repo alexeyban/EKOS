@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from . import _proc
+from . import _proc, home
 
 _MAX_OUTPUT = 1 << 20  # 1 MiB
 _TIMEOUT = 20.0
@@ -84,7 +84,8 @@ async def read_text(
     root = Path(workspace_path).resolve()
     if not root.is_dir():
         raise ReadProcError(f"workspace path is not a directory: {root}")
-    proc = await _proc.spawn([ekos_bin, *argv], cwd=str(root))
+    cmd, cwd = home.command(ekos_bin, str(root), argv)
+    proc = await _proc.spawn(cmd, cwd=cwd)
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
     except TimeoutError:
@@ -115,7 +116,8 @@ async def read_json(
     if not root.is_dir():
         raise ReadProcError(f"workspace path is not a directory: {root}")
 
-    proc = await _proc.spawn([ekos_bin, *argv], cwd=str(root))
+    cmd, cwd = home.command(ekos_bin, str(root), argv)
+    proc = await _proc.spawn(cmd, cwd=cwd)
     try:
         stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
     except TimeoutError:

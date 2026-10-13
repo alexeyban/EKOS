@@ -6,6 +6,7 @@ name: Release
 #   git tag v1.0.0 && git push origin v1.0.0
 #
 # `workflow_dispatch` builds the artifacts without creating a release, for testing the matrix.
+# The same holds for the container image (RFC 0179): built on both, pushed to ghcr.io on a tag.
 
 on:
   push:
@@ -218,6 +219,57 @@ jobs:
               --title "${GITHUB_REF_NAME}" --generate-notes
           fi
 
+  # RFC 0179 — the production image: the binary, the console API and the built console UI. Built
+  # on every run of this workflow and started once, so a Dockerfile that no longer builds or
+  # serves fails here; pushed only for a tag.
+  image:
+    name: Build the image
+    runs-on: ubuntu-latest
+    # `packages: write` is what lets GITHUB_TOKEN push to ghcr.io. The push step itself is
+    # tag-only.
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner's own docker. No third-party action: this job holds a token that can publish
+      # a package.
+      - name: Build
+        run: docker build -t ekos:build .
+
+      - name: The container starts, serves, and holds the binary
+        run: |
+          set -euo pipefail
+          docker run -d --name ekos-smoke -p 127.0.0.1:8000:8000 ekos:build
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/api/health
+          # The UI is served from the same port.
+          curl -fsS http://127.0.0.1:8000/ | grep -qi '<div id="root"'
+          docker exec ekos-smoke ekos --version
+          # Not root.
+          [ "$(docker exec ekos-smoke id -u)" = "1000" ]
+          docker rm -f ekos-smoke
+
+      - name: Push
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # ghcr.io names are lowercase; the repository is not.
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${GITHUB_REF_NAME#v}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag ekos:build "$image:$version"
+          docker tag ekos:build "$image:latest"
+          docker push "$image:$version"
+          docker push "$image:latest"
+
   verify:
     name: Verify install.sh
     needs: release
@@ -242,14 +294,14 @@ jobs:
       - name: The binary runs and reports its version
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
+          export PATH="$HOME/.ekos/bin:$PATH"
           ekos --version
           ekos --version | grep -qv '0\.0\.0'
 
       - name: It works on a real workspace
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
+          export PATH="$HOME/.ekos/bin:$PATH"
           mkdir -p /tmp/ws/db && cd /tmp/ws
           printf 'CREATE TABLE t (id SERIAL PRIMARY KEY);\n' > db/schema.sql
           ekos init --detect --dry-run | grep -q 'default-dialect = "postgres"'

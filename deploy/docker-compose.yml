@@ -1,0 +1,40 @@
+# EKOS on one server (RFC 0179): one container with the `ekos` binary, the console API and the
+# console UI, one volume holding the EKOS home.
+#
+#   cp deploy/.env.example deploy/.env      # set the tokens and EKOS_SOURCES
+#   docker compose -f deploy/docker-compose.yml up -d
+#   open http://127.0.0.1:8000
+#
+# `image:` is the published release. To run what is in this checkout instead:
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# The port is bound to loopback and the container speaks plain HTTP. To reach it from other
+# machines put a reverse proxy with TLS in front; do not change the binding to 0.0.0.0.
+
+services:
+  ekos:
+    image: ghcr.io/alexeyban/ekos:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${EKOS_PORT:-8000}:8000"
+    # Credentials come from deploy/.env at `up` time and are never built into the image.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # The EKOS home: every project's config and compiled data, the console's database and
+      # run logs. Back this volume up; nothing else in the container is state.
+      - ekos-home:/var/lib/ekos
+      # The directory holding the repositories and document folders to compile, read-only.
+      # A project is created for a directory under /sources. EKOS never writes here.
+      - ${EKOS_SOURCES:?set EKOS_SOURCES in deploy/.env to the directory holding your sources}:/sources:ro
+    extra_hosts:
+      # So a model server on the host (Ollama) is reachable as http://host.docker.internal:11434.
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  ekos-home: {}

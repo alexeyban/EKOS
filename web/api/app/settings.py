@@ -73,15 +73,21 @@ class Settings(BaseSettings):
     # Path to a built `ekos` binary. `EKOS_BIN` (no prefix) matches the CI / test convention.
     ekos_bin: str = Field(default="ekos", validation_alias="EKOS_BIN")
 
-    # SQLite file for the console's own state (workspace registry today; runs / schedules later).
-    console_db: str = ".ekos-web/console.db"
+    # The EKOS home (RFC 0178) this console serves, from `EKOS_HOME`. Unset, the console has no
+    # home: every workspace is in place and nothing below moves (RFC 0179).
+    ekos_home: str = Field(default="", validation_alias="EKOS_HOME")
+
+    # SQLite file for the console's own state (workspace registry, runs, schedules). Empty means
+    # the default: `<home>/control/console.db` with a home, `.ekos-web/console.db` without.
+    console_db: str = ""
 
     # Loopback port range the supervisor allocates per-workspace MCP servers from.
     mcp_port_base: int = 7400
 
     # Job runner (RFC 0131): per-workspace queue depth, and where run logs land.
     run_queue_depth: int = 16
-    runs_dir: str = ".ekos-web/runs"
+    # Empty means the default: `<home>/control/runs` with a home, `.ekos-web/runs` without.
+    runs_dir: str = ""
 
     # JSON array of WorkspaceSeed, e.g.
     #   EKOS_CONSOLE_WORKSPACES_JSON='[{"id":"self","name":"EKOS","path":"/repo"}]'
@@ -96,6 +102,13 @@ class Settings(BaseSettings):
 
     # Origin the Vite dev server runs on, allowed through CORS.
     dev_origin: str = "http://localhost:5173"
+
+    @model_validator(mode="after")
+    def _state_under_the_home(self) -> Settings:
+        base = f"{self.ekos_home.rstrip('/')}/control" if self.ekos_home else ".ekos-web"
+        self.console_db = self.console_db or f"{base}/console.db"
+        self.runs_dir = self.runs_dir or f"{base}/runs"
+        return self
 
     @model_validator(mode="after")
     def _no_published_session_secret(self) -> Settings:

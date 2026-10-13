@@ -10,17 +10,34 @@
 #   less install.sh && sh install.sh
 #
 # It downloads one release asset, verifies it against the release's SHA256SUMS **before**
-# unpacking, and installs a single binary into $EKOS_INSTALL_DIR (default ~/.local/bin).
-# It never uses sudo and never writes outside that directory.
+# unpacking, and installs a single binary into the EKOS home: $EKOS_HOME/bin (default
+# ~/.ekos/bin). The home is also where projects keep their config and compiled data
+# ($EKOS_HOME/data, RFC 0178). It never uses sudo and never writes outside the home, or outside
+# $EKOS_INSTALL_DIR when that is set.
 #
 # Environment:
 #   EKOS_VERSION       tag to install (default: the latest release)
-#   EKOS_INSTALL_DIR   install destination (default: $HOME/.local/bin)
+#   EKOS_HOME          the EKOS home (default: $HOME/.ekos)
+#   EKOS_INSTALL_DIR   install the binary here instead of $EKOS_HOME/bin
+#   EKOS_BASE_URL      download the release files from here instead of GitHub (a mirror, or a
+#                      local directory as file:///...). The checksum check is the same.
 
 set -eu
 
 REPO="alexeyban/EKOS"
-INSTALL_DIR="${EKOS_INSTALL_DIR:-$HOME/.local/bin}"
+EKOS_HOME_DIR="${EKOS_HOME:-$HOME/.ekos}"
+
+# Where the binary goes (RFC 0179). An install made before the home existed is upgraded where it
+# is: a second copy in ~/.ekos/bin would leave the old one first on PATH.
+if [ -n "${EKOS_INSTALL_DIR:-}" ]; then
+    INSTALL_DIR="$EKOS_INSTALL_DIR"
+elif [ -z "${EKOS_HOME:-}" ] && [ -f "$HOME/.local/bin/ekos" ]; then
+    INSTALL_DIR="$HOME/.local/bin"
+    printf 'Found an earlier install in %s; upgrading it there.\n' "$INSTALL_DIR"
+    printf 'To install into the EKOS home instead: EKOS_HOME=%s sh install.sh\n\n' "$EKOS_HOME_DIR"
+else
+    INSTALL_DIR="$EKOS_HOME_DIR/bin"
+fi
 
 # POSIX sh has no `local`, so each function names its arguments with a function-prefixed
 # variable instead of reading "$1"/"$2" throughout.
@@ -94,16 +111,13 @@ check https://github.com/$REPO/releases"
 fi
 
 bare="${version#v}"
-asset="ekos-${bare}-${target}.tar.gz"
-base="https://github.com/$REPO/releases/download/$version"
+base="${EKOS_BASE_URL:-https://github.com/$REPO/releases/download/$version}"
 
 # ── Download, verify, unpack ──────────────────────────────────────────────────
 tmp="$(mktemp -d)"
 # `trap` on EXIT rather than a cleanup call at the end: a failed download must not leave the
 # archive lying in /tmp either.
 trap 'rm -rf "$tmp"' EXIT INT TERM
-
-base="https://github.com/$REPO/releases/download/$version"
 
 # Fetches one target's archive, verifies it against SHA256SUMS, unpacks it, and sets $binary.
 fetch_target() {
@@ -174,7 +188,12 @@ mkdir -p "$INSTALL_DIR"
 cp "$binary" "$INSTALL_DIR/ekos"
 chmod 755 "$INSTALL_DIR/ekos"
 
+# The home's data directory, so `ekos project add` has somewhere to put a project and the
+# layout is visible before the first one exists.
+mkdir -p "$EKOS_HOME_DIR/data"
+
 printf '\nInstalled ekos %s to %s/ekos\n' "$version" "$INSTALL_DIR"
+printf 'EKOS home: %s\n' "$EKOS_HOME_DIR"
 
 case ":${PATH}:" in
     *":$INSTALL_DIR:"*) ;;
@@ -184,6 +203,9 @@ case ":${PATH}:" in
         ;;
 esac
 
-printf '\nNext:\n'
+printf '\nNext, either keep a project in the EKOS home (nothing is written into the sources):\n'
+printf '    ekos project add <name> --source <dir> --detect\n'
+printf '    ekos --project <name> build\n'
+printf 'or work inside one repository:\n'
 printf '    ekos init --detect     # write an ekos.toml that matches this repository\n'
 printf '    ekos doctor            # check the environment\n'

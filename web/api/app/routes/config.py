@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .. import _afile, config_io, models, readproc
+from .. import _afile, config_io, home, models, readproc
 from ..auth import require_role
 from ..deps import require_workspace
 from ..settings import Settings, get_settings
@@ -145,6 +145,18 @@ async def put_config(
         config_io.parse(body.raw)
     except config_io.ConfigError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # A project's config names the directories the pipeline reads. They stay inside the root an
+    # operator allowed, or the limit on creating a project would be one edit away from useless.
+    if settings.workspaces_root and home.project_at(ws.path) is not None:
+        outside = await asyncio.to_thread(
+            config_io.roots_outside, body.raw, settings.workspaces_root
+        )
+        if outside:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{', '.join(outside)} is outside the allowed source root",
+            )
 
     # 2. semantics (via the CLI)
     try:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class Health(BaseModel):
@@ -32,9 +32,19 @@ class WorkspaceOut(BaseModel):
 
 
 class WorkspaceCreate(BaseModel):
+    """Exactly one of `path` (register a directory that already holds a workspace or a project)
+    and `source` (create a project in the EKOS home for the sources in that directory, RFC 0179)."""
+
     id: str
     name: str
-    path: str
+    path: str | None = None
+    source: str | None = None
+
+    @model_validator(mode="after")
+    def _one_of_path_and_source(self) -> WorkspaceCreate:
+        if (self.path is None) == (self.source is None):
+            raise ValueError("give exactly one of `path` and `source`")
+        return self
 
 
 class StatusOut(BaseModel):

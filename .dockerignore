@@ -1,0 +1,32 @@
+# Build context for the production image (Dockerfile, RFC 0179). Everything is excluded, then
+# the three trees the image is built from are let back in. A new top-level directory therefore
+# never reaches a build layer by accident, and neither does a workspace's compiled state.
+*
+
+!rust-toolchain.toml
+!LICENSE
+!ekos/
+!web/
+web/*
+!web/api/
+!web/ui/
+
+# Build output and dependencies: rebuilt inside the image.
+ekos/target/
+web/ui/node_modules/
+web/ui/dist/
+web/ui/coverage/
+web/api/.venv/
+web/api/tests/
+web/api/coverage.xml
+
+# Credentials and local state must never enter a layer.
+**/.env
+**/.env.*
+!**/.env.example
+**/.ekos/
+**/.ekos-web/
+**/*.db
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/

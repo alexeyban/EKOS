@@ -136,8 +136,10 @@ parsed from files (RFC 0031); live PostgreSQL / SQL Server database connectors a
 curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh
 ```
 
-Installs a single `ekos` binary into `~/.local/bin` (override with `EKOS_INSTALL_DIR`). No Rust
-toolchain, no compiler, nothing else to install. The script resolves the latest release, verifies
+Installs a single `ekos` binary into the EKOS home, `~/.ekos/bin` (RFC 0179), and creates
+`~/.ekos/data`, where projects keep their config and compiled data. `EKOS_HOME` moves the home;
+`EKOS_INSTALL_DIR` puts the binary somewhere else. An earlier install in `~/.local/bin` is
+upgraded where it is. No Rust toolchain, no compiler, nothing else to install. The script resolves the latest release, verifies
 the download against the release's `SHA256SUMS` **before** unpacking it, and never uses `sudo`.
 
 Piping a script into a shell is a real supply-chain decision, so the script is short enough to
@@ -149,7 +151,8 @@ less install.sh && sh install.sh
 ```
 
 The script also takes `EKOS_VERSION` to pin a release (`EKOS_VERSION=v1.0.3 sh install.sh`) and
-`EKOS_INSTALL_DIR` to change where it lands.
+`EKOS_INSTALL_DIR` to change where it lands. To run EKOS as a shared service with the web
+console, use the [container image](#container-image-rfc-0179) instead.
 
 ### Prebuilt binary, downloaded by hand
 
@@ -351,8 +354,40 @@ check.
 
 Re-running the install command replaces the binary in place with the latest release; there is no
 package database and nothing else to update. To remove it, delete the binary
-(`rm ~/.local/bin/ekos`) — EKOS keeps no files outside the `.ekos/` directory inside each
-workspace you compiled, which you can delete separately.
+(`rm ~/.ekos/bin/ekos`, or `~/.local/bin/ekos` for an install made before RFC 0179). EKOS keeps
+files in two places only: the `.ekos/` directory inside each workspace you compiled in place,
+and the EKOS home (`~/.ekos`) for projects. Delete either separately.
+
+### Container image (RFC 0179)
+
+One image holds the `ekos` binary, the console API and the built console UI, and serves both on
+port 8000. All state is in one volume, the EKOS home. Sources are mounted read-only.
+
+```bash
+cp deploy/.env.example deploy/.env       # set EKOS_SOURCES and the two tokens
+docker compose -f deploy/docker-compose.yml up -d --build
+open http://127.0.0.1:8000
+```
+
+- `EKOS_SOURCES` is the host directory holding your repositories and document folders. It
+  appears in the container as `/sources`.
+- In the console, **Add a workspace → New project from a source directory** with a path such as
+  `/sources/payments-api`. The project's config and compiled data go to the volume
+  (`/var/lib/ekos/data/default/<project>/`); nothing is written into the source directory.
+  Then run the pipeline from the project's Run tab.
+- A project may only read directories under `/sources`, both when it is created and when its
+  config is edited.
+- The CLI is in the container too: `docker compose -f deploy/docker-compose.yml exec ekos ekos project list`.
+  A project created that way appears in the console after a restart.
+- The container runs as a non-root user and listens on loopback over plain HTTP. For access from
+  other machines put a reverse proxy with TLS in front.
+- A model server on the host (Ollama) is reachable from a project's `ekos.toml` as
+  `http://host.docker.internal:11434`.
+
+Tagged releases publish the image as `ghcr.io/alexeyban/ekos:<version>`; until the next tag,
+build it from a checkout as above. Not built yet: users, groups and roles beyond the console's
+read and write tokens, and per-project access control. See
+[RFC 0179](ekos/docs/rfcs/0179-installer-and-image.md).
 
 ### From source
 

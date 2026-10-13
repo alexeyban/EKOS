@@ -8,11 +8,10 @@ tools only expose leaner payloads). `stats/kinds` goes through the already-runni
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from .. import models, readproc
+from .. import home, models, readproc
 from ..auth import require_role
 from ..deps import mcp_for_workspace, require_workspace
 from ..mcp_client import EkosMcpClient
@@ -98,7 +97,7 @@ async def queries(
     ws: models.Workspace = Depends(require_workspace),
     limit: int = Query(2000, ge=1, le=50_000),
 ) -> QueryStats:
-    log = Path(ws.path) / ".ekos" / "query-log.jsonl"
+    log = home.state_dir(ws.path) / "query-log.jsonl"
     if not log.is_file():
         return QueryStats(total=0, by_tool={}, cache_hit_rate=0.0, p50_ms=0.0, p95_ms=0.0)
 

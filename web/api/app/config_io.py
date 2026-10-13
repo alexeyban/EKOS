@@ -65,6 +65,33 @@ def parse(raw: str) -> tomlkit.TOMLDocument:
         raise ConfigError(f"invalid TOML: {exc}") from exc
 
 
+def read_roots(raw: str) -> list[str]:
+    """Every directory the pipeline would read under this config: `[workspace] root`, then each
+    `[[sources]] path`. A relative source path is relative to the root, as the CLI resolves it."""
+    doc = parse(raw)
+    workspace = doc.get("workspace", {}) or {}
+    root = str(workspace.get("root", "") or "")
+    roots = [root] if root else []
+    for source in doc.get("sources", []) or []:
+        path = str(source.get("path", "") or "")
+        if not path:
+            continue
+        roots.append(path if os.path.isabs(path) or not root else os.path.join(root, path))
+    return roots
+
+
+def roots_outside(raw: str, allowed: str) -> list[str]:
+    """The directories of `read_roots` that are not `allowed` or below it, after resolving `..`
+    and symlinks."""
+    limit = Path(allowed).expanduser().resolve()
+    outside = []
+    for root in read_roots(raw):
+        resolved = Path(root).expanduser().resolve()
+        if resolved != limit and limit not in resolved.parents:
+            outside.append(root)
+    return outside
+
+
 def config_path(workspace_path: str) -> Path:
     """Resolve to a real, canonical path and verify it still lands directly inside
     `workspace_path` (SonarCloud pythonsecurity:S2083 hardening). This also rejects a `ekos.toml`

@@ -6488,8 +6488,12 @@ LinkML; generation stays in LinkML.
 - [ ] RFC 0178 Part 2 remainder: `confluence` / `github` as source kinds; `source` on rollups,
       business-semantics items, label conflicts and LLM descriptions; `Person` attribution; a
       `--source` flag on `query find` / `ask` and a `source` argument on MCP tools
-- [ ] RFC 0179 — installer into `$EKOS_HOME/bin`, production Docker image (binary + console API
-      + built UI), Compose file, image published from a release tag
+- [x] RFC 0179 — installer into `$EKOS_HOME/bin`, production Docker image (binary + console API
+      + built UI), `deploy/docker-compose.yml`, console creates and runs home projects, console
+      state under `$EKOS_HOME/control`, `image` job in `release.yml` (devlog_260)
+- [ ] RFC 0179 remainder: `ekos eval run` writes reports under the source root (fails on a
+      read-only source; the console's Evals tab is empty for a project); arm64 image; the image
+      job has not run on GitHub yet (first run is the next tag or a manual dispatch)
 - [ ] RFC 0180 — console: tenants, users (OIDC), groups, roles (viewer / reviewer / operator /
       admin), API tokens, audit log, one `authorize` function
 - [ ] RFC 0181 — read scope: allow / deny by source, path pattern or object, enforced in

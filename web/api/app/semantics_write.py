@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
-from . import _proc
+from . import _proc, home
 from .auth import Principal
 
 Action = Literal["confirm", "reject", "edit"]
@@ -146,7 +146,8 @@ async def _run(ekos_bin: str, workspace_path: str, argv: list[str]) -> tuple[int
     root = Path(workspace_path).resolve()
     if not root.is_dir():
         raise ReviewError(f"workspace path is not a directory: {root}")
-    proc = await _proc.spawn([ekos_bin, *argv], cwd=str(root))
+    cmd, cwd = home.command(ekos_bin, str(root), argv)
+    proc = await _proc.spawn(cmd, cwd=cwd)
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
     except TimeoutError:
