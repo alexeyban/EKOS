@@ -10,6 +10,8 @@ export interface Me {
   // Set by this shell from the caller's roles on the open workspace (RFC 0180).
   canOperate?: boolean;
   canReview?: boolean;
+  // The caller sees only part of the open workspace (RFC 0181).
+  restricted?: boolean;
 }
 
 interface Workspace {
@@ -27,6 +29,9 @@ const RESTRICTED_TABS = new Set(["graph"]);
 // that sends no roles) the summary decides. These only hide controls; the API enforces.
 export const mayOperate = (me: Me) => me.canOperate ?? me.role === "write";
 export const mayReview = (me: Me) => me.canReview ?? me.role === "write";
+// False for someone who sees part of the workspace: a page then skips the requests the API
+// refuses them (statistics, conflicts) instead of making them and drawing nothing.
+export const seesAll = (me: Me | undefined) => me?.restricted !== true;
 
 const TABS = [
   { to: "", label: "Dashboard", end: true },
@@ -57,6 +62,7 @@ export function WorkspaceShell() {
         ...me,
         canOperate: roles.includes("operator") || roles.includes("admin"),
         canReview: roles.includes("reviewer") || roles.includes("admin"),
+        restricted,
       }
     : me;
 
@@ -80,7 +86,9 @@ export function WorkspaceShell() {
           ))}
         </span>
       </nav>
-      {restricted && !onScopedPage ? (
+      {/* Until the list says whether this caller is restricted, a page would ask for what
+          a restricted reader is refused. */}
+      {ws.isPending ? null : restricted && !onScopedPage ? (
         <section className="card">
           <strong>Restricted access</strong>
           <p className="muted">

@@ -94,6 +94,9 @@ sign-in with that address.
 - A **group** holds a role for its members. Give it a claim value and everyone whose sign-in
   carries that value in the provider's group claim (`EKOS_CONSOLE_OIDC_ROLE_CLAIM`, default
   `groups`) is a member without being listed.
+  Many providers (Dex, Keycloak, Okta) send that claim only when asked: set
+  `EKOS_CONSOLE_OIDC_SCOPES=openid email profile groups`. Without it such a group stays empty
+  and nothing says why.
 - A project or tenant you have no role in looks exactly like one that does not exist.
 
 Removing a role takes effect on that person's next request.
@@ -267,4 +270,4 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | Backups | `/var/lib/ekos/backups/` |
 | Settings | `deploy/.env`; every one is described in `deploy/.env.example` |
 | Design | RFCs 0178–0183 in `ekos/docs/rfcs/` |
-| A check of a whole deployment | `deploy/e2e/run.sh`: the image, a test identity provider, two tenants, backup and restore |
+| A check of a whole deployment | `deploy/e2e/run.sh`: the image, a test identity provider, two tenants, a group from a claim, an MCP client, the pages in a browser, backup and restore |

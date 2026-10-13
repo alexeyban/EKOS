@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -44,31 +45,38 @@ def summary() -> int:
     return 1 if bad else 0
 
 
-def sign_in(email: str) -> httpx.Client:
-    """A client holding the session cookie of `email`, obtained through the real OIDC flow."""
-    c = httpx.Client(base_url=BASE, timeout=120)
-    r = c.get("/api/auth/login")
-    hops = 0
-    while r.status_code in (301, 302, 303, 307) and hops < 10:
+def _follow(c: httpx.Client, r: httpx.Response, stop_at_console: bool = False) -> httpx.Response:
+    for _ in range(12):
+        if r.status_code not in (301, 302, 303, 307):
+            break
         loc = urljoin(str(r.url), r.headers["location"])
-        if loc.startswith(BASE):
+        if stop_at_console and loc.startswith(BASE):
             break
         r = c.get(loc)
-        hops += 1
-    if r.status_code in (301, 302, 303, 307):
-        raise RuntimeError(f"redirected back before a form: {r.headers['location']}")
-    # Dex's login form posts to its own URL.
-    m = re.search(r'<form[^>]*action="([^"]+)"', r.text)
-    action = urljoin(str(r.url), m.group(1).replace("&amp;", "&")) if m else str(r.url)
-    r = c.post(action, data={"login": email, "password": PASSWORD})
-    hops = 0
-    while r.status_code in (301, 302, 303, 307) and hops < 10:
-        loc = urljoin(str(r.url), r.headers["location"])
-        r = c.get(loc)
-        hops += 1
+    return r
+
+
+def sign_in(email: str | None = None, connector: str = "local") -> httpx.Client:
+    """A client holding a session cookie obtained through the real OIDC flow. `local` is Dex's
+    password form for `email`; `mock` is its mock connector, one fixed person with a group."""
+    c = httpx.Client(base_url=BASE, timeout=120)
+    r = _follow(c, c.get("/api/auth/login"), stop_at_console=True)
+    if 'name="password"' not in r.text:
+        # Several connectors: Dex shows a page of links, one per connector.
+        m = re.search(rf'href="([^"]*/auth/{connector}[?/][^"]*)"', r.text)
+        if m is None:
+            raise RuntimeError(f"no link for connector {connector!r} at {r.url}")
+        r = _follow(c, c.get(urljoin(str(r.url), html.unescape(m.group(1)))))
+    if connector == "local":
+        m = re.search(r'<form[^>]*action="([^"]+)"', r.text)
+        action = urljoin(str(r.url), html.unescape(m.group(1))) if m else str(r.url)
+        r = _follow(c, c.post(action, data={"login": email, "password": PASSWORD}))
     me = c.get("/api/auth/me")
     if me.status_code != 200:
-        raise RuntimeError(f"sign-in as {email} failed: {me.status_code} {me.text[:200]} (last {r.status_code} {r.url})")
+        raise RuntimeError(
+            f"sign-in as {email or connector} failed: {me.status_code} {me.text[:200]} "
+            f"(last {r.status_code} {r.url})"
+        )
     return c
 
 

@@ -67,15 +67,19 @@ class _SpaFiles(StaticFiles):
 
     Plain `StaticFiles(html=True)` answers a reload of `/w/<id>/semantics` with 404: there is no
     such file, the React router owns that path. An unknown non-API path gets the app instead; a
-    missing asset (anything with a file extension) and `/api/...` still 404.
+    missing file and `/api/...` still 404.
+
+    A file of the UI is under `assets/` or directly at the root (`logo.png`). A dot elsewhere
+    says nothing: the page of a workspace in a tenant is `/w/<tenant>.<project>`.
     """
 
     async def get_response(self, path: str, scope):  # type: ignore[override]
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
-            last = path.rsplit("/", 1)[-1]
-            if exc.status_code != 404 or path.startswith(("api", "mcp")) or "." in last:
+            first, _, rest = path.partition("/")
+            is_file = first == "assets" or (not rest and "." in first)
+            if exc.status_code != 404 or first in ("api", "mcp") or is_file:
                 raise
             return await super().get_response("index.html", scope)
 

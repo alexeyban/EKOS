@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { Conflict } from "../api/types";
 import { disputedIds } from "./conflicts-shared";
@@ -9,6 +9,7 @@ import { colorFor, SERVER_LAYOUT_THRESHOLD, type GLink, type GNode } from "./gra
 import { impactHopMap, neighborhoodToGraph, type ImpactOut, type NeighborhoodOut } from "./graph-v2";
 import { GraphTimeline, type TimelinePoint } from "./GraphTimeline";
 import { ObjectPanel } from "./ObjectPanel";
+import { type Me, seesAll } from "../WorkspaceShell";
 
 const GraphCanvas = lazy(() => import("./GraphCanvas").then((m) => ({ default: m.GraphCanvas })));
 
@@ -388,6 +389,8 @@ function GraphStatus(p: {
 
 export function Graph() {
   const { id = "" } = useParams();
+  // The timeline and the conflict rings read what a restricted reader is refused.
+  const whole = seesAll(useOutletContext<Me | undefined>());
   // RFC 0136 §7 (deep-linking) — `?as_of=&focus=` seed the initial view once on mount (a lazy
   // initializer, so this reads the URL exactly once, not on every render) and are kept in sync as
   // the corresponding state changes below. One-directional (state -> URL) rather than a full
@@ -446,7 +449,7 @@ export function Graph() {
     queryKey: ["graph-timeline", id],
     queryFn: () =>
       api<{ points: TimelinePoint[] }>(`/workspaces/${id}/stats/timeline?bucket=day`),
-    enabled: id !== "",
+    enabled: id !== "" && whole,
   });
 
   const search = useQuery({
@@ -473,7 +476,7 @@ export function Graph() {
   const openConflicts = useQuery({
     queryKey: ["conflicts", id, "open"],
     queryFn: () => api<Conflict[]>(`/workspaces/${id}/conflicts?status=open`),
-    enabled: id !== "",
+    enabled: id !== "" && whole,
     retry: false,
   });
   const disputed = useMemo(() => disputedIds(openConflicts.data), [openConflicts.data]);

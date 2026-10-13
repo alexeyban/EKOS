@@ -6530,9 +6530,15 @@ LinkML; generation stays in LinkML.
       sign-in answered 500 when the provider was unreachable, the sign-in was cancelled or the
       state was stale; the session cookie was never `Secure`; the guide's restore steps failed
       on a new volume
-- [ ] Still not verified: a real MCP client program (VS Code, Claude Desktop) against the
-      gateway; the console pages in a browser; group membership from a provider's claim (the
-      console asks for `openid email profile`, and some providers send groups only for a
-      `groups` scope); the `image` job on GitHub; a provider other than Dex
+- [x] Second pass (devlog_266), 143 checks: a group whose members come from the provider's
+      claim; the MCP project's Python client against the gateway (protocol 2025-11-25); every
+      console page in headless Chromium for an admin, a limited viewer and a stranger. Fixed
+      from it: `/w/<tenant>.<project>` was a 404 on a direct load; no way to ask a provider
+      for the `groups` scope (`EKOS_CONSOLE_OIDC_SCOPES`); a limited viewer's graph page made
+      requests it is refused
+- [ ] Still not verified: VS Code, Claude Desktop or ChatGPT as the MCP client (none can be
+      driven from here; ChatGPT also needs a public URL and OAuth, which is not built); a
+      provider other than Dex; the `image` job on GitHub; the pages by eye — the browser check
+      looks for text, script errors and failed requests, not layout
 - [ ] Moving an in-place `./.ekos` workspace into the home is a manual copy; no command does it
 - [ ] The cluster compile worker ships a config between processes and loses `location`

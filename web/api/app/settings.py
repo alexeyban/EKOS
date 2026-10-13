@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # ID-token claim inspected for the write role, and the values that grant it.
     oidc_role_claim: str = "groups"
     oidc_write_values: str = ""  # comma-separated; empty => every authenticated user is read-only
+    # What sign-in asks the provider for, space-separated. Dex, Keycloak and Okta put group
+    # membership in the token only when `groups` is asked for; Entra ID and Google need nothing
+    # more than the default.
+    oidc_scopes: str = "openid email profile"
     post_login_redirect: str = "/"
     # Signs the session cookie, which is trusted in *every* auth mode. Left at the placeholder, a
     # random per-process secret replaces it (see `_no_published_session_secret`): sessions then do
@@ -125,6 +129,14 @@ class Settings(BaseSettings):
         base = f"{self.ekos_home.rstrip('/')}/control" if self.ekos_home else ".ekos-web"
         self.console_db = self.console_db or f"{base}/console.db"
         self.runs_dir = self.runs_dir or f"{base}/runs"
+        return self
+
+    @model_validator(mode="after")
+    def _scopes_include_openid(self) -> Settings:
+        scopes = self.oidc_scopes.split()
+        if "openid" not in scopes:
+            raise ValueError("EKOS_CONSOLE_OIDC_SCOPES must include `openid`")
+        self.oidc_scopes = " ".join(scopes)
         return self
 
     @model_validator(mode="after")

@@ -7,6 +7,8 @@
 #
 # Needs Docker with Compose v2.24+, and `uv` (the scenario scripts use the console's own
 # Python environment for `httpx`). It makes no model call: the fixture's config names none.
+# Two stages fetch a Python package on first use (`mcp`, `playwright`). The browser stage uses
+# a Chromium installed for Playwright and prints SKIP when there is none.
 #
 # It runs its own Compose project (`ekos-e2e`), with its own volume and its own settings, on
 # loopback ports 8009 and 5556. It does not read `deploy/.env`. The project and its volume are
@@ -73,6 +75,9 @@ staticClients:
     name: EKOS
     redirectURIs: ["http://127.0.0.1:${EKOS_E2E_PORT}/api/auth/callback"]
 enablePasswordDB: true
+# One fixed person, kilgore@kilgore.trout, in the group "authors".
+connectors:
+  - {type: mockCallback, id: mock, name: Mock}
 staticPasswords:
 EOF
   n=0
@@ -93,6 +98,7 @@ services:
       EKOS_CONSOLE_OIDC_CLIENT_ID: ekos
       EKOS_CONSOLE_OIDC_CLIENT_SECRET: ekos-e2e-secret
       EKOS_CONSOLE_OIDC_REDIRECT_URI: http://127.0.0.1:${EKOS_E2E_PORT}/api/auth/callback
+      EKOS_CONSOLE_OIDC_SCOPES: "openid email profile groups"
       EKOS_CONSOLE_OWNERS: owner@example.com
       EKOS_CONSOLE_PRODUCTION: "true"
       ACME_MODEL_KEY: acme-key-value
@@ -146,7 +152,12 @@ step "3. a limited viewer, tokens, the gateway, the audit log"
 py s3_scope_gateway.py
 py s4_ids.py
 
-step "4. what each project's server was given"
+step "4. a group from the provider's claim; a real MCP client; the pages in a browser"
+py s6_groups.py
+(cd "$REPO/web/api" && PYTHONPATH="$HERE" uv run --quiet --with mcp python "$HERE/s7_mcp_client.py")
+(cd "$REPO/web/api" && PYTHONPATH="$HERE" uv run --quiet --with playwright python "$HERE/s8_browser.py")
+
+step "5. what each project's server was given"
 dc exec -T ekos sh -c '
   bad=0
   for p in /proc/[0-9]*; do
@@ -163,7 +174,7 @@ dc exec -T ekos sh -c '
   done
   exit $bad' && echo "PASS  each server holds its own tenant's variable and none of the console's"
 
-step "5. backup, a new volume, restore"
+step "6. backup, a new volume, restore"
 dc exec -T ekos ekos home backup | head -2
 name=$(dc exec -T ekos sh -c 'ls /var/lib/ekos/backups | head -1' | tr -d '\r')
 dc cp "ekos:/var/lib/ekos/backups/$name" "$WORK/backup.tar.zst" >/dev/null 2>&1

@@ -75,7 +75,7 @@ def oauth(settings: Settings):
             server_metadata_url=(
                 settings.oidc_issuer.rstrip("/") + "/.well-known/openid-configuration"
             ),
-            client_kwargs={"scope": "openid email profile"},
+            client_kwargs={"scope": settings.oidc_scopes},
         )
         _oauth = o
     return _oauth

@@ -172,3 +172,44 @@ def test_the_session_cookie_is_not_secure_on_plain_http(client: TestClient) -> N
     assert cookie_is_https_only(get_settings()) is False
     r = client.post("/api/auth/token-login", json={"token": "w-tok"})
     assert "secure" not in r.headers["set-cookie"].lower()
+
+
+# ── OIDC scopes ──────────────────────────────────────────────────────────────
+
+
+def _registered_scope() -> str:
+    from app import auth
+    from app.settings import get_settings
+
+    auth.reset_oauth()
+    try:
+        return auth.oauth(get_settings()).oidc.client_kwargs["scope"]
+    finally:
+        auth.reset_oauth()
+
+
+def test_sign_in_asks_for_identity_and_email_by_default(oidc_client: TestClient) -> None:
+    assert _registered_scope() == "openid email profile"
+
+
+def test_sign_in_asks_for_the_configured_scopes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, reset_settings: None
+) -> None:
+    # Dex, Keycloak and Okta put group membership in the token only when `groups` is asked for.
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_ISSUER", "http://127.0.0.1:1/dex")
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_SCOPES", "openid email profile groups")
+    assert _registered_scope() == "openid email profile groups"
+
+
+def test_sign_in_always_asks_for_openid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, reset_settings: None
+) -> None:
+    from pydantic import ValidationError
+
+    from app.settings import Settings
+
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_ISSUER", "http://127.0.0.1:1/dex")
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_SCOPES", "email groups")
+    with pytest.raises(ValidationError) as err:
+        Settings()
+    assert "openid" in str(err.value)
