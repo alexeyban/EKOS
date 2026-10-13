@@ -187,6 +187,7 @@ fs4      = { version = "0.8", features = ["sync"] }
 
 # Filesystem
 walkdir = "2"
+tar = "0.4"
 glob = "0.3"
 
 # Secret/PII pattern matching (RFC 0043)

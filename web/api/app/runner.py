@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from . import _afile, _proc, home, models
+from . import _afile, _proc, envs, home, models
 from .commands import BY_NAME, Command
 from .models import Run
 from .settings import Settings
@@ -206,6 +206,7 @@ class JobRunner:
                 code = await _proc.run_streaming(
                     argv,
                     cwd=cwd,
+                    env=envs.for_path(ws_path),
                     log_path=log_path,
                     register=register,
                     timeout_s=command.timeout,
@@ -252,6 +253,7 @@ class JobRunner:
             code = await _proc.run_streaming(
                 stage_argv,
                 cwd=cwd,
+                env=envs.for_path(ws_path),
                 log_path=log_path,
                 register=register,
                 timeout_s=command.timeout,

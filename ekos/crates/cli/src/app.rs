@@ -60,6 +60,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ProjectCommands,
     },
+    /// The EKOS home as a whole: back it up, restore it (RFC 0183)
+    Home {
+        #[command(subcommand)]
+        subcommand: HomeCommands,
+    },
     /// The named inputs of a project: repositories and directories compiled into one ledger
     /// (RFC 0178)
     Source {
@@ -951,6 +956,26 @@ enum ProjectCommands {
 }
 
 #[derive(Subcommand)]
+enum HomeCommands {
+    /// Write a backup of every project's config and compiled data, and the console's database.
+    /// With the global --tenant, that tenant's projects only
+    Backup {
+        /// Where to write it (default: <home>/backups/ekos-backup-<time>.tar.zst)
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Restore a backup into the home. Nothing that exists is replaced without --force
+    Restore {
+        /// The archive `ekos home backup` wrote
+        archive: PathBuf,
+        /// Replace projects (and the console database) that already exist; each is moved to
+        /// the home's trash first
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum McpCommands {
     /// Serve MCP over stdio (default), or over TCP (`--tcp`) or Streamable HTTP (`--http`)
     Serve {
@@ -1468,6 +1493,32 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
             return dispatch_project(subcommand, &home_dir?, tenant_flag);
         }
+        Commands::Home { subcommand } => {
+            if cli.project.is_some() {
+                bail!(
+                    "`ekos home` works on the whole home; --tenant narrows it, --project does not"
+                );
+            }
+            crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
+            let home = home_dir?;
+            let invoked_from = std::env::current_dir()?;
+            let tenant = tenant_flag.as_deref();
+            return match subcommand {
+                HomeCommands::Backup { out } => crate::commands::home_backup::run_backup(
+                    &home,
+                    tenant,
+                    out.map(|o| invoked_from.join(o)),
+                ),
+                HomeCommands::Restore { archive, force } => {
+                    crate::commands::home_backup::run_restore(
+                        &home,
+                        &invoked_from.join(archive),
+                        tenant,
+                        force,
+                    )
+                }
+            };
+        }
         other => other,
     };
     let selected = match (cli.project, std::env::var("EKOS_PROJECT").ok()) {
@@ -1670,7 +1721,9 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         Commands::Migrate { subcommand } => dispatch_migrate(subcommand, &config, &cwd).await,
         Commands::Session { subcommand } => dispatch_session(subcommand, &config, &cwd),
         Commands::Eval { subcommand } => dispatch_eval(subcommand, &config, &cwd).await,
-        Commands::Project { .. } => unreachable!("handled before a config is loaded"),
+        Commands::Project { .. } | Commands::Home { .. } => {
+            unreachable!("handled before a config is loaded")
+        }
     }
 }
 

@@ -361,6 +361,9 @@ and the EKOS home (`~/.ekos`) for projects. Delete either separately.
 
 ### Container image (RFC 0179)
 
+**Deploying for a team?** [docs/deployment.md](docs/deployment.md) is the step-by-step guide:
+sign-in, tenants, roles, agents, model credentials, backups and upgrades.
+
 One image holds the `ekos` binary, the console API and the built console UI, and serves both on
 port 8000. All state is in one volume, the EKOS home. Sources are mounted read-only.
 
@@ -456,6 +459,28 @@ Projects' servers now start on first use. One unused for 15 minutes is stopped
 (`EKOS_CONSOLE_MCP_IDLE_SECONDS`), and at most 8 run at once (`EKOS_CONSOLE_MCP_MAX_SERVERS`);
 the first call after a stop waits for the server to start. Not built: OAuth for MCP clients and
 rate limits. See [RFC 0182](ekos/docs/rfcs/0182-mcp-gateway.md).
+
+### Backup, restore and model credentials (RFC 0183)
+
+```bash
+ekos home backup                       # every project, and the console's database
+ekos --tenant acme home backup         # one tenant's projects
+ekos home restore ekos-backup-20261013T101500Z.tar.zst
+```
+
+- A backup is one zstd-compressed tar under `<home>/backups/`. It holds each project's config
+  and compiled data, not the sources (they are not in the home).
+- A project is copied under its ledger's write lock: a pipeline stage that is writing makes the
+  backup stop with that project's name, and no file is left. Readers are not affected.
+- Restore replaces nothing that exists, and changes nothing if anything would be replaced. With
+  `--force` each existing project is first moved to the home's trash. An archive with a path
+  that would leave the home, or with a link in it, is refused.
+
+In the console, a platform owner names for each tenant the environment variables holding its
+model keys and switches metered calls on. A tenant's pipeline and MCP server then receive those
+variables and no other tenant's, and none of the console's own settings. With the switch off
+they receive none; a local model server still works. See
+[RFC 0183](ekos/docs/rfcs/0183-operations.md).
 
 ### Access inside a project (RFC 0181)
 

@@ -21,6 +21,7 @@ pub mod eval;
 pub mod export;
 pub mod freshness;
 pub mod graph;
+pub mod home_backup;
 pub mod identity;
 pub mod import;
 pub mod init;

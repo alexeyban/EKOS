@@ -6518,6 +6518,14 @@ LinkML; generation stays in LinkML.
 - [ ] RFC 0182 remainder: OAuth for MCP clients; rate limits per token; not yet exercised with
       a real MCP client (VS Code, Claude Desktop) — tests speak the protocol over HTTP; a call
       longer than the idle time on a server at the cap can be cut by eviction
-- [ ] RFC 0183 — backup / restore, per-tenant model credentials, deployment guide
+- [x] RFC 0183 — `ekos home backup` / `restore`; per-tenant model credentials by variable name
+      and the metered switch; `docs/deployment.md` (devlog_264). **The production plan of
+      2026-10-13 (RFC 0178–0183) is complete.**
+- [ ] RFC 0183 remainder: scheduled and encrypted backups; a write lock for SQLite-backed and
+      partitioned stores during backup; per-tenant spending limits; restore across EKOS
+      versions is untested
+- [ ] Across the plan, not verified: a real OIDC provider end to end; a real MCP client against
+      the gateway; the console pages in a browser; the container image rebuilt since RFC 0179;
+      the `image` job on GitHub
 - [ ] Moving an in-place `./.ekos` workspace into the home is a manual copy; no command does it
 - [ ] The cluster compile worker ships a config between processes and loses `location`

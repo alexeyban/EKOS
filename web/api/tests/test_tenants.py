@@ -761,6 +761,22 @@ def test_a_database_from_rfc_0180_gains_the_rule_columns(tmp_path: Path) -> None
     assert (row.source, row.path, row.object_id) == (None, None, None)
 
 
+def test_a_database_from_rfc_0181_gains_the_model_columns(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    models.init_engine(str(db))
+    models.add(models.Tenant(id="acme", name="Acme"))
+    con = sqlite3.connect(db)
+    con.execute("ALTER TABLE tenant DROP COLUMN model_env")
+    con.execute("ALTER TABLE tenant DROP COLUMN allow_metered")
+    con.execute("UPDATE schemaversion SET version = 2")
+    con.commit()
+    con.close()
+
+    models.init_engine(str(db))
+    tenant = models.get_tenant("acme")
+    assert tenant is not None and tenant.allow_metered is False and not tenant.model_env
+
+
 def test_a_new_database_starts_at_the_latest_version(tmp_path: Path) -> None:
     db = tmp_path / "new.db"
     models.init_engine(str(db))

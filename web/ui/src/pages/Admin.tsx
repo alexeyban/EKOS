@@ -146,6 +146,25 @@ function Tenants({ tenant }: { tenant: TenantSummary | undefined }) {
       setName("");
     },
   });
+  // RFC 0183: which model-key variables this tenant's commands receive.
+  const [envNames, setEnvNames] = useState<string | null>(null);
+  const [metered, setMetered] = useState<boolean | null>(null);
+  const shownEnv = envNames ?? (tenant?.model_env ?? []).map((v) => v.name).join("\n");
+  const shownMetered = metered ?? tenant?.allow_metered ?? false;
+  const saveModels = useMutation({
+    mutationFn: () =>
+      apiPatch(`/tenants/${tenant?.id}`, {
+        model_env: lines(shownEnv),
+        allow_metered: shownMetered,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tenants"] });
+      setEnvNames(null);
+      setMetered(null);
+    },
+  });
+  const unset = (tenant?.model_env ?? []).filter((v) => !v.set).map((v) => v.name);
+
   const saveRoots = useMutation({
     mutationFn: () => apiPatch(`/tenants/${tenant?.id}`, { source_roots: lines(shownRoots) }),
     onSuccess: () => {
@@ -209,6 +228,42 @@ function Tenants({ tenant }: { tenant: TenantSummary | undefined }) {
             </button>
           </div>
           {saveRoots.isError && <p className="err">{String(saveRoots.error)}</p>}
+
+          <label htmlFor="tenant-env" className="admin-label">
+            Model credentials of {tenant.name}
+          </label>
+          <p className="muted">
+            Names of environment variables, one per line: the ones this tenant&apos;s projects
+            name in <code>ekos.toml</code> (for example <code>ANTHROPIC_API_KEY</code>). Never a
+            key itself. Its pipeline and MCP server receive these and no other tenant&apos;s.
+          </p>
+          <textarea
+            id="tenant-env"
+            className="admin-roots"
+            rows={2}
+            value={shownEnv}
+            onChange={(e) => setEnvNames(e.target.value)}
+          />
+          <label className="admin-check">
+            <input
+              type="checkbox"
+              checked={shownMetered}
+              onChange={(e) => setMetered(e.target.checked)}
+            />
+            <span>Allow metered model calls (pass these variables to its commands)</span>
+          </label>
+          {unset.length > 0 && (
+            <p className="err">Not set in the console&apos;s environment: {unset.join(", ")}</p>
+          )}
+          <div>
+            <button
+              onClick={() => saveModels.mutate()}
+              disabled={saveModels.isPending || (envNames === null && metered === null)}
+            >
+              Save model credentials
+            </button>
+          </div>
+          {saveModels.isError && <p className="err">{String(saveModels.error)}</p>}
         </>
       )}
     </section>

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import _proc, authz, home, models, roots
+from .. import _proc, authz, envs, home, models, roots
 from ..auth import Principal
 from ..deps import get_supervisor
 from ..schemas import ServerStatus, WorkspaceCreate, WorkspaceOut
@@ -72,10 +72,10 @@ def _existing_workspace(raw: str, tenant: models.Tenant, settings: Settings) -> 
     return root
 
 
-async def _ekos(settings: Settings, argv: list[str]) -> None:
+async def _ekos(settings: Settings, argv: list[str], tenant: models.Tenant | None) -> None:
     """Run one `ekos` management command; a failure is the caller's 400 with the CLI's reason."""
     try:
-        proc = await _proc.spawn([settings.ekos_bin, *argv])
+        proc = await _proc.spawn([settings.ekos_bin, *argv], env=envs.for_tenant(tenant))
     except OSError as exc:
         raise HTTPException(status_code=502, detail=f"could not run ekos: {exc}") from exc
     try:
@@ -106,7 +106,9 @@ async def _create_project(
     if project.config_path.exists():
         raise HTTPException(status_code=409, detail=f"project {name!r} already exists")
     selector = ["--home", str(root), "--tenant", tenant.id]
-    await _ekos(settings, [*selector, "project", "add", name, "--source", str(src), "--detect"])
+    await _ekos(
+        settings, [*selector, "project", "add", name, "--source", str(src), "--detect"], tenant
+    )
     return project.dir
 
 
@@ -181,5 +183,9 @@ async def deregister_workspace(
         # A project lives only in the home: deregistering it alone would bring it back at the
         # next start. `project remove` keeps the data, in the home's trash.
         selector = ["--home", str(project.home), "--tenant", project.tenant]
-        await _ekos(settings, [*selector, "project", "remove", project.name])
+        await _ekos(
+            settings,
+            [*selector, "project", "remove", project.name],
+            models.get_tenant(ws.tenant_id),
+        )
     models.delete_workspace(workspace_id)

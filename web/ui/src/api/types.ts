@@ -36,6 +36,10 @@ export interface TenantSummary {
   name: string;
   roles: RoleName[];
   source_roots?: string[];
+  // RFC 0183: names of the model-key variables this tenant's commands receive (never values),
+  // and whether they receive them.
+  model_env?: { name: string; set: boolean }[];
+  allow_metered?: boolean;
 }
 
 export interface StorageComponent {

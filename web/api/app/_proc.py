@@ -29,11 +29,15 @@ def strip_ansi(text: str) -> str:
     return _ANSI.sub("", text)
 
 
-async def spawn(argv: list[str], *, cwd: str | None = None) -> asyncio.subprocess.Process:
-    """`create_subprocess_exec(*argv)` with stdout/stderr piped, optionally in `cwd`."""
+async def spawn(
+    argv: list[str], *, cwd: str | None = None, env: dict[str, str] | None = None
+) -> asyncio.subprocess.Process:
+    """`create_subprocess_exec(*argv)` with stdout/stderr piped, optionally in `cwd`. `env` is
+    the whole environment of the child (RFC 0183: `envs.for_path`); `None` inherits ours."""
     return await asyncio.create_subprocess_exec(
         *argv,
         cwd=cwd,
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         limit=STREAM_LIMIT,
@@ -67,6 +71,7 @@ async def run_streaming(
     register: Callable[[asyncio.subprocess.Process], None],
     on_line: Callable[[str], Awaitable[None]] | None = None,
     timeout_s: float,
+    env: dict[str, str] | None = None,
 ) -> int:
     """Run `argv` in `cwd`, merging stdout+stderr, appending each ANSI-stripped line to `log_path`
     and (optionally) calling `on_line`. `register` is handed the live process so the caller can
@@ -76,6 +81,7 @@ async def run_streaming(
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=cwd,
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         limit=STREAM_LIMIT,

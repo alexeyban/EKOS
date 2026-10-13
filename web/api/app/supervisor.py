@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from . import _proc, home
+from . import _proc, envs, home
 from .mcp_client import EkosMcpClient
 from .models import Workspace
 from .settings import Settings
@@ -207,7 +207,9 @@ class McpSupervisor:
         )
         handle = ServerHandle(workspace_id=ws.id, port=port, token=token, token_file=token_file)
         try:
-            handle.proc = await _proc.spawn(argv)
+            # The tenant's environment: `ekos_search` in vector mode embeds the query through
+            # the project's provider, with that tenant's key and no other.
+            handle.proc = await _proc.spawn(argv, env=envs.for_path(ws.path))
         except OSError as exc:
             handle.state = ServerState.FAILED
             handle.detail = f"could not launch {self._settings.ekos_bin!r}: {exc}"

@@ -31,7 +31,7 @@ def _settings(tmp_path) -> Settings:
 def _slow_stream(hold: asyncio.Event | None = None):
     """A stand-in for `_proc.run_streaming` that blocks until cancelled."""
 
-    async def stream(argv, *, cwd, log_path, register, timeout_s, on_line=None):
+    async def stream(argv, *, cwd, log_path, register, timeout_s, on_line=None, env=None):
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.touch()
         if hold is not None:
@@ -134,7 +134,7 @@ async def test_a_bookkeeping_failure_does_not_kill_the_worker(_db, monkeypatch):
 
 
 def _ok_stream():
-    async def stream(argv, *, cwd, log_path, register, timeout_s, on_line=None):
+    async def stream(argv, *, cwd, log_path, register, timeout_s, on_line=None, env=None):
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.touch()
         return 0

@@ -286,6 +286,13 @@ fn acquire_write_lock(root: &Path) -> Result<std::fs::File, LedgerError> {
     )))
 }
 
+/// RFC 0183: hold the write lock of the fact ledger at `root` without opening it, for as long
+/// as the returned file lives. `ekos home backup` copies a project's files under it, so no
+/// writer can change them halfway; a writer already at work makes this fail instead.
+pub fn hold_write_lock(root: &Path) -> Result<std::fs::File, LedgerError> {
+    acquire_write_lock(root)
+}
+
 /// The fact-segment ledger — RFC 0016's replacement for the SQLite backend,
 /// behind the same API shape (`&self` methods, like `Ledger`).
 pub struct FactLedger {

@@ -192,6 +192,33 @@ describe("Admin", () => {
     expect(screen.queryByRole("button", { name: "Create tenant" })).not.toBeInTheDocument();
   });
 
+  it("lets an owner name a tenant's model variables and switch metered calls on", async () => {
+    stub([
+      {
+        ...ACME,
+        model_env: [{ name: "ACME_KEY", set: false }],
+        allow_metered: false,
+      },
+    ]);
+    const patch = vi.spyOn(client, "apiPatch").mockResolvedValue({});
+    const user = userEvent.setup();
+    renderAdmin({ owner: true });
+
+    const names = await screen.findByLabelText("Model credentials of Acme");
+    expect(names).toHaveValue("ACME_KEY");
+    // A named variable the console does not have is pointed out.
+    expect(screen.getByText(/Not set in the console/)).toHaveTextContent("ACME_KEY");
+    expect(screen.getByRole("button", { name: "Save model credentials" })).toBeDisabled();
+
+    await user.type(names, "\nANTHROPIC_API_KEY");
+    await user.click(screen.getByLabelText(/Allow metered model calls/));
+    await user.click(screen.getByRole("button", { name: "Save model credentials" }));
+    expect(patch).toHaveBeenCalledWith("/tenants/acme", {
+      model_env: ["ACME_KEY", "ANTHROPIC_API_KEY"],
+      allow_metered: true,
+    });
+  });
+
   it("lets an owner create a tenant and edit source roots", async () => {
     stub([ACME]);
     const post = vi.spyOn(client, "apiPost").mockResolvedValue({});

@@ -4,6 +4,7 @@ its source roots, which need a platform owner."""
 
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from datetime import timedelta
@@ -13,7 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 
-from .. import authz, home, models, roots
+from .. import authz, envs, home, models, roots
 from ..auth import Principal, new_token
 from ..settings import Settings, get_settings
 from ._responses import BAD_REQUEST, CONFLICT, NOT_FOUND
@@ -45,6 +46,10 @@ class TenantIn(BaseModel):
 class TenantPatch(BaseModel):
     name: str | None = None
     source_roots: list[str] | None = None
+    # RFC 0183: names of environment variables this tenant's commands receive, and whether
+    # they receive them (whether it may make metered model calls).
+    model_env: list[str] | None = None
+    allow_metered: bool | None = None
 
 
 def _tenant_out(tenant: models.Tenant, principal: Principal) -> dict[str, Any]:
@@ -53,6 +58,11 @@ def _tenant_out(tenant: models.Tenant, principal: Principal) -> dict[str, Any]:
     # Host paths are for whoever administers the tenant, not for every viewer of it.
     if principal.owner or "admin" in roles:
         out["source_roots"] = tenant.source_roots
+        # Names, and whether the console has each; never a value.
+        out["model_env"] = [
+            {"name": name, "set": name in os.environ} for name in tenant.model_env or []
+        ]
+        out["allow_metered"] = bool(tenant.allow_metered)
     return out
 
 
@@ -120,6 +130,19 @@ async def patch_tenant(
         fields["name"] = body.name
     if body.source_roots is not None:
         fields["source_roots"] = _checked_roots(body.source_roots, settings)
+    if body.model_env is not None:
+        names = sorted({n.strip() for n in body.model_env if n.strip()})
+        bad = [n for n in names if not envs.is_valid_name(n)]
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail=f"not a variable a tenant can be given: {', '.join(bad)}. Give the name "
+                "of an environment variable (not its value), other than the console's own "
+                "EKOS_CONSOLE_ settings",
+            )
+        fields["model_env"] = names
+    if body.allow_metered is not None:
+        fields["allow_metered"] = body.allow_metered
     tenant = models.update_tenant(tenant_id, **fields)
     if tenant is None:
         raise HTTPException(status_code=404, detail=f"unknown tenant {tenant_id!r}")

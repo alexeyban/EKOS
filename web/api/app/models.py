@@ -50,6 +50,10 @@ class Tenant(SQLModel, table=True):
     name: str
     # Directories a project of this tenant may read. Set by a platform owner only.
     source_roots: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    # RFC 0183: names of the environment variables (model keys) this tenant's commands receive,
+    # and whether they receive them at all. Names only; a value is never stored.
+    model_env: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    allow_metered: bool = False
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -193,7 +197,16 @@ def _migration_2(conn) -> None:
 
 # Ordered. Migration N brings a database at version N-1 to version N. Never edit one that has
 # shipped; add the next.
-MIGRATIONS = [_migration_1, _migration_2]
+def _migration_3(conn) -> None:
+    """RFC 0183: per-tenant model credentials by variable name, and the metered switch."""
+    columns = {c["name"] for c in inspect(conn).get_columns("tenant")}
+    if "model_env" not in columns:
+        conn.execute(text("ALTER TABLE tenant ADD COLUMN model_env JSON"))
+    if "allow_metered" not in columns:
+        conn.execute(text("ALTER TABLE tenant ADD COLUMN allow_metered BOOLEAN NOT NULL DEFAULT 0"))
+
+
+MIGRATIONS = [_migration_1, _migration_2, _migration_3]
 
 
 def _migrate(engine) -> None:
