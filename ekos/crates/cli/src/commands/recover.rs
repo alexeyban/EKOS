@@ -346,7 +346,7 @@ impl RecoverSummary {
 /// Registers the SQL analyzer passes for every `.sql` file under the observed paths.
 #[allow(clippy::too_many_arguments)]
 async fn register_sql_passes(
-    observe_paths: &[std::path::PathBuf],
+    observe_paths: &[ekos_compiler_core::ObserveBase],
     config: &EkosConfig,
     cwd: &Path,
     ignore: &[String],
@@ -362,7 +362,8 @@ async fn register_sql_passes(
     dialect_rules: &[DialectRule],
     default_dialect: &str,
 ) -> Result<()> {
-    for base in observe_paths {
+    for ob in observe_paths {
+        let base = &ob.path;
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -453,7 +454,7 @@ async fn register_sql_passes(
                     .unwrap_or(path)
                     .to_string_lossy()
                     .replace('\\', "/"),
-                Some(&ekos_common::project::project_key_for_base(base, cwd)),
+                Some(&ob.key),
             );
 
             // ── Views (RFC 0169) ──────────────────────────────────────────
@@ -510,14 +511,14 @@ const DEP_SCAN_EXTENSIONS: &[&str] = &["py", "js", "ts", "java", "go", "rb"];
 /// Source files for dependency-fact extraction (RFC 0019), redacted.
 #[allow(clippy::too_many_arguments)]
 async fn collect_dependency_files(
-    observe_paths: &[std::path::PathBuf],
-    cwd: &Path,
+    observe_paths: &[ekos_compiler_core::ObserveBase],
     ignore: &[String],
     redaction_config: &ekos_common::redaction::RedactionConfig,
     dep_files: &mut Vec<(String, String, String)>,
 ) -> Result<()> {
-    for base in observe_paths {
-        let project_key = ekos_common::project::project_key_for_base(base, cwd);
+    for ob in observe_paths {
+        let base = &ob.path;
+        let project_key = ob.key.clone();
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -567,14 +568,14 @@ async fn collect_dependency_files(
 /// Every `Cargo.toml` under the observed paths (RFC 0042), redacted.
 #[allow(clippy::too_many_arguments)]
 async fn collect_cargo_manifests(
-    observe_paths: &[std::path::PathBuf],
-    cwd: &Path,
+    observe_paths: &[ekos_compiler_core::ObserveBase],
     ignore: &[String],
     redaction_config: &ekos_common::redaction::RedactionConfig,
     cargo_manifests: &mut Vec<(String, String, String)>,
 ) -> Result<()> {
-    for base in observe_paths {
-        let project_key = ekos_common::project::project_key_for_base(base, cwd);
+    for ob in observe_paths {
+        let base = &ob.path;
+        let project_key = ob.key.clone();
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -611,15 +612,15 @@ async fn collect_cargo_manifests(
 /// Every `package.json` under the observed paths (RFC 0082), redacted.
 #[allow(clippy::too_many_arguments)]
 async fn collect_package_json(
-    observe_paths: &[std::path::PathBuf],
-    cwd: &Path,
+    observe_paths: &[ekos_compiler_core::ObserveBase],
     ignore: &[String],
     redaction_config: &ekos_common::redaction::RedactionConfig,
     package_json_manifests: &mut Vec<(String, String, Option<String>)>,
 ) -> Result<()> {
-    for base in observe_paths {
+    for ob in observe_paths {
+        let base = &ob.path;
         let project_key = {
-            let key = ekos_common::project::project_key_for_base(base, cwd);
+            let key = ob.key.clone();
             if key.is_empty() { None } else { Some(key) }
         };
         for entry in WalkDir::new(base)
@@ -658,15 +659,15 @@ async fn collect_package_json(
 /// Every `requirements.txt` under the observed paths, redacted.
 #[allow(clippy::too_many_arguments)]
 async fn collect_requirements(
-    observe_paths: &[std::path::PathBuf],
-    cwd: &Path,
+    observe_paths: &[ekos_compiler_core::ObserveBase],
     ignore: &[String],
     redaction_config: &ekos_common::redaction::RedactionConfig,
     requirements_manifests: &mut Vec<(String, String, Option<String>)>,
 ) -> Result<()> {
-    for base in observe_paths {
+    for ob in observe_paths {
+        let base = &ob.path;
         let project_key = {
-            let key = ekos_common::project::project_key_for_base(base, cwd);
+            let key = ob.key.clone();
             if key.is_empty() { None } else { Some(key) }
         };
         for entry in WalkDir::new(base)
@@ -705,14 +706,14 @@ async fn collect_requirements(
 /// Every GitHub Actions workflow under the observed paths (RFC 0042), redacted.
 #[allow(clippy::too_many_arguments)]
 async fn collect_cicd_workflows(
-    observe_paths: &[std::path::PathBuf],
-    cwd: &Path,
+    observe_paths: &[ekos_compiler_core::ObserveBase],
     ignore: &[String],
     redaction_config: &ekos_common::redaction::RedactionConfig,
     cicd_workflows: &mut Vec<(String, String, String)>,
 ) -> Result<()> {
-    for base in observe_paths {
-        let project_key = ekos_common::project::project_key_for_base(base, cwd);
+    for ob in observe_paths {
+        let base = &ob.path;
+        let project_key = ob.key.clone();
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -814,14 +815,14 @@ async fn read_dbt_models(
 /// Registers one dbt analyzer pass per dbt project found under the observed paths (RFC 0117).
 #[allow(clippy::too_many_arguments)]
 async fn register_dbt_passes(
-    observe_paths: &[std::path::PathBuf],
-    cwd: &Path,
+    observe_paths: &[ekos_compiler_core::ObserveBase],
     ignore: &[String],
     redaction_config: &ekos_common::redaction::RedactionConfig,
     pass_manager: &mut ekos_compiler_core::pass::PassManager,
 ) -> Result<()> {
-    for base in observe_paths {
-        let project = ekos_common::project::project_key_for_base(base, cwd);
+    for ob in observe_paths {
+        let base = &ob.path;
+        let project = ob.key.clone();
         for entry in WalkDir::new(base)
             .follow_links(false)
             .into_iter()
@@ -985,11 +986,7 @@ pub async fn run_with(
     let mut pass_manager = ekos_compiler_core::pass::PassManager::new();
 
     // ── SQL files ─────────────────────────────────────────────────────────
-    let observe_paths: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
-        vec![cwd.to_path_buf()]
-    } else {
-        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
-    };
+    let observe_paths = config.observe_bases(cwd);
 
     let ignore = &config.observe.ignore_patterns;
     // RFC 0043: shared by every direct-file-read block below (SQL scan, dependency-scan,
@@ -1049,14 +1046,7 @@ pub async fn run_with(
     // relationships (`SEM002: ... has unknown from-id`) and a `## Technology Inventory` that
     // could detect a technology but never resolve which file used it.
     let mut dep_files: Vec<(String, String, String)> = Vec::new();
-    collect_dependency_files(
-        &observe_paths,
-        cwd,
-        ignore,
-        &redaction_config,
-        &mut dep_files,
-    )
-    .await?;
+    collect_dependency_files(&observe_paths, ignore, &redaction_config, &mut dep_files).await?;
     let dep_file_count = dep_files.len();
     if !dep_files.is_empty() {
         let dep_pass = DependencyAnalyzerPass::new(
@@ -1282,7 +1272,6 @@ pub async fn run_with(
     let mut cargo_manifests: Vec<(String, String, String)> = Vec::new();
     collect_cargo_manifests(
         &observe_paths,
-        cwd,
         ignore,
         &redaction_config,
         &mut cargo_manifests,
@@ -1303,7 +1292,6 @@ pub async fn run_with(
     let mut package_json_manifests: Vec<(String, String, Option<String>)> = Vec::new();
     collect_package_json(
         &observe_paths,
-        cwd,
         ignore,
         &redaction_config,
         &mut package_json_manifests,
@@ -1329,7 +1317,6 @@ pub async fn run_with(
     let mut requirements_manifests: Vec<(String, String, Option<String>)> = Vec::new();
     collect_requirements(
         &observe_paths,
-        cwd,
         ignore,
         &redaction_config,
         &mut requirements_manifests,
@@ -1356,7 +1343,6 @@ pub async fn run_with(
     let mut cicd_workflows: Vec<(String, String, String)> = Vec::new();
     collect_cicd_workflows(
         &observe_paths,
-        cwd,
         ignore,
         &redaction_config,
         &mut cicd_workflows,
@@ -1383,14 +1369,7 @@ pub async fn run_with(
     // (`Cargo.toml`) and `cicd_analyzer` (`.github/workflows/*.yml`) already use — one
     // `DbtAnalyzerPass` per discovered project, so a monorepo with more than one dbt project
     // never mixes their model namespaces.
-    register_dbt_passes(
-        &observe_paths,
-        cwd,
-        ignore,
-        &redaction_config,
-        &mut pass_manager,
-    )
-    .await?;
+    register_dbt_passes(&observe_paths, ignore, &redaction_config, &mut pass_manager).await?;
 
     if pass_manager.is_empty() {
         println!(

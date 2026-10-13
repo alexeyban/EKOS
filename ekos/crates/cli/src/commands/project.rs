@@ -35,15 +35,36 @@ fn info(location: &ProjectLocation) -> ProjectInfo {
     }
 }
 
-/// Create a project for the sources in `source`. With `detect`, the config is the RFC 0152 scan
-/// of that directory; otherwise the default one. Refuses an existing project.
-pub fn add(location: &ProjectLocation, source: &Path, detect: bool) -> Result<()> {
-    let source = source
-        .canonicalize()
-        .with_context(|| format!("--source {}", source.display()))?;
-    if !source.is_dir() {
-        bail!("--source {} is not a directory", source.display());
+/// Create a project. `sources` is one unnamed directory (the project's root, observed as a
+/// whole), or one or more named ones (RFC 0178 Part 2), the first of which is also the root.
+/// With `detect`, the config is the RFC 0152 scan of the root; otherwise the default one.
+/// Refuses an existing project.
+pub fn add(
+    location: &ProjectLocation,
+    sources: &[(Option<String>, PathBuf)],
+    detect: bool,
+) -> Result<()> {
+    let named = sources.iter().filter(|(name, _)| name.is_some()).count();
+    if sources.is_empty() {
+        bail!("a project needs at least one --source");
     }
+    if named != 0 && named != sources.len() {
+        bail!("name every --source (<name>=<dir>) or none");
+    }
+    if named == 0 && sources.len() > 1 {
+        bail!("several sources need names: --source <name>=<dir> for each");
+    }
+    let mut dirs = Vec::new();
+    for (name, path) in sources {
+        let dir = path
+            .canonicalize()
+            .with_context(|| format!("--source {}", path.display()))?;
+        if !dir.is_dir() {
+            bail!("--source {} is not a directory", dir.display());
+        }
+        dirs.push((name.clone(), dir));
+    }
+    let source = dirs[0].1.clone();
     if location.dir().exists() {
         bail!(
             "project {:?} already exists in tenant {:?} ({})",
@@ -56,11 +77,29 @@ pub fn add(location: &ProjectLocation, source: &Path, detect: bool) -> Result<()
     let rendered = if detect {
         let detection = detect_workspace(&source, &EkosConfig::default())?;
         super::init::print_detection(&detection);
+        if dirs.len() > 1 {
+            println!(
+                "(--detect scanned the first source, {}; review the config for the others)",
+                source.display()
+            );
+        }
         render_config(&detection)
     } else {
         super::init::DEFAULT_CONFIG.to_string()
     };
-    let contents = with_source_root(&rendered, &source)?;
+    let mut contents = with_source_root(&rendered, &source)?;
+    for (name, dir) in &dirs {
+        if let Some(name) = name {
+            contents = super::source::with_source(
+                &contents,
+                &ekos_compiler_core::SourceConfig {
+                    name: name.clone(),
+                    kind: super::source::detect_kind(dir),
+                    path: dir.clone(),
+                },
+            )?;
+        }
+    }
 
     std::fs::create_dir_all(location.dir())
         .with_context(|| format!("creating {}", location.dir().display()))?;
@@ -79,7 +118,17 @@ pub fn add(location: &ProjectLocation, source: &Path, detect: bool) -> Result<()
         "Created project {} (tenant {})",
         location.project, location.tenant
     );
-    println!("  sources  {}", root.display());
+    if config.sources.is_empty() {
+        println!("  sources  {}", root.display());
+    }
+    for s in &config.sources {
+        println!(
+            "  source   {} ({}) {}",
+            s.name,
+            s.kind.as_str(),
+            s.path.display()
+        );
+    }
     println!("  config   {}", location.config_path().display());
     println!("  state    {}", location.state_dir().display());
     let select = format!(
@@ -239,7 +288,7 @@ mod tests {
         let (_tmp, home_dir, src) = fixture();
         let before = files_under(&src);
         let loc = home::location(&home_dir, "default", "shop").unwrap();
-        add(&loc, &src, false).unwrap();
+        add(&loc, &[(None, src.to_path_buf())], false).unwrap();
 
         let (config, root) = home::load_project(&loc).unwrap();
         assert_eq!(root, src);
@@ -249,14 +298,14 @@ mod tests {
         assert_eq!(files_under(&src), before, "the source tree was written to");
 
         // A second add never overwrites.
-        assert!(add(&loc, &src, false).is_err());
+        assert!(add(&loc, &[(None, src.to_path_buf())], false).is_err());
     }
 
     #[test]
     fn add_with_detect_scans_the_sources_and_still_names_them_absolutely() {
         let (_tmp, home_dir, src) = fixture();
         let loc = home::location(&home_dir, "acme", "shop").unwrap();
-        add(&loc, &src, true).unwrap();
+        add(&loc, &[(None, src.to_path_buf())], true).unwrap();
         let text = std::fs::read_to_string(loc.config_path()).unwrap();
         assert!(text.contains("Detected inputs"), "{text}");
         let (_, root) = home::load_project(&loc).unwrap();
@@ -268,9 +317,40 @@ mod tests {
     fn add_refuses_a_source_that_is_not_a_directory() {
         let (_tmp, home_dir, src) = fixture();
         let loc = home::location(&home_dir, "default", "shop").unwrap();
-        assert!(add(&loc, &src.join("schema.sql"), false).is_err());
-        assert!(add(&loc, &src.join("missing"), false).is_err());
+        assert!(add(&loc, &[(None, src.join("schema.sql"))], false).is_err());
+        assert!(add(&loc, &[(None, src.join("missing"))], false).is_err());
         assert!(!loc.dir().exists(), "a failed add left a project behind");
+    }
+
+    #[test]
+    fn named_sources_are_written_and_mixing_named_with_unnamed_is_refused() {
+        let (tmp, home_dir, src) = fixture();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir_all(docs.join(".git")).unwrap();
+        let docs = docs.canonicalize().unwrap();
+        let loc = home::location(&home_dir, "default", "shop").unwrap();
+        let named = |n: &str, p: &Path| (Some(n.to_string()), p.to_path_buf());
+
+        assert!(add(&loc, &[], false).is_err());
+        assert!(add(&loc, &[named("api", &src), (None, docs.clone())], false).is_err());
+        assert!(add(&loc, &[(None, src.clone()), (None, docs.clone())], false).is_err());
+        assert!(add(&loc, &[named("api", &src), named("api", &docs)], false).is_err());
+        assert!(!loc.config_path().exists());
+
+        // The failed attempts must not leave a half-made project that blocks the real one.
+        let _ = std::fs::remove_dir_all(loc.dir());
+        add(&loc, &[named("api", &src), named("docs", &docs)], false).unwrap();
+        let (config, root) = home::load_project(&loc).unwrap();
+        assert_eq!(root, src, "the first source is the root");
+        let got: Vec<_> = config
+            .sources
+            .iter()
+            .map(|s| (s.name.as_str(), s.kind.as_str(), s.path.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            [("api", "dir", src.clone()), ("docs", "git", docs.clone())]
+        );
     }
 
     #[test]
@@ -299,7 +379,7 @@ mod tests {
         assert!(remove(&loc, false, false, now).is_err());
         assert!(remove(&loc, true, true, now).is_err());
 
-        add(&loc, &src, false).unwrap();
+        add(&loc, &[(None, src.to_path_buf())], false).unwrap();
         std::fs::write(loc.state_dir().join("ledger/marker"), "x").unwrap();
         let dest = remove(&loc, false, false, now).unwrap().unwrap();
         assert_eq!(dest, home_dir.join("trash/default/shop-20261013T100000Z"));
@@ -307,7 +387,7 @@ mod tests {
         assert!(!loc.dir().exists());
         assert!(home::list_projects(&home_dir).unwrap().is_empty());
 
-        add(&loc, &src, false).unwrap();
+        add(&loc, &[(None, src.to_path_buf())], false).unwrap();
         assert!(
             remove(&loc, true, false, now).is_err(),
             "purge without --yes"

@@ -46,6 +46,10 @@ pub struct EkosConfig {
     pub freshness: FreshnessConfig,
     #[serde(default)]
     pub conflicts: ConflictsConfig,
+    /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
+    /// the directories of `[observe] paths`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<SourceConfig>,
     /// RFC 0178: set when the command selected a project in the EKOS home (`--project`). Never
     /// read from or written to a file.
     #[serde(skip)]
@@ -832,6 +836,61 @@ impl StorageConfig {
     }
 }
 
+/// RFC 0178 Part 2: one named input of a project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SourceConfig {
+    /// Unique in the project; `[a-z0-9][a-z0-9_-]{0,62}`. It keys the source's objects, so
+    /// renaming a source gives its objects new ids.
+    pub name: String,
+    #[serde(default)]
+    pub kind: SourceKind,
+    /// Absolute, or relative to the workspace root.
+    pub path: PathBuf,
+}
+
+/// What a source is declared to be. Both kinds are local directories; `git` additionally states
+/// that commit history is expected, so a missing `.git` can be reported instead of silently
+/// yielding no commits.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceKind {
+    #[default]
+    Dir,
+    Git,
+}
+
+impl SourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dir => "dir",
+            Self::Git => "git",
+        }
+    }
+}
+
+/// One directory `ekos build` observes, with the key its objects are told apart by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObserveBase {
+    pub path: PathBuf,
+    /// The qualifier hashed into ids and written as an artifact's `project` field (RFC 0044 /
+    /// 0079): a source's name, or for an unnamed `[observe] paths` entry its path relative to
+    /// the workspace. Empty for the workspace root itself.
+    pub key: String,
+    /// The `[[sources]]` name, when this base is a named source.
+    pub source: Option<String>,
+}
+
+/// A tenant, project or source name: `[a-z0-9][a-z0-9_-]{0,62}`.
+pub fn is_valid_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        && name.len() <= 63
+}
+
 /// RFC 0178: a project in the EKOS home, `<home>/data/<tenant>/<project>/`. Its config is
 /// `ekos.toml` there and its state — what `.ekos/` is for an in-tree workspace — is `state/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -889,6 +948,7 @@ impl Default for EkosConfig {
             semantics: SemanticsConfig::default(),
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
+            sources: Vec::new(),
             location: None,
         }
     }
@@ -900,6 +960,7 @@ impl EkosConfig {
             .map_err(|e| anyhow::anyhow!("cannot read {}: {}", path.display(), e))?;
         let config: Self =
             toml::from_str(&content).map_err(|e| anyhow::anyhow!("invalid ekos.toml: {}", e))?;
+        config.check_sources()?;
         Ok(config)
     }
 
@@ -931,6 +992,59 @@ impl EkosConfig {
             return container.path.clone();
         }
         cwd.join(".ekos")
+    }
+
+    /// `[[sources]]` names are valid and unique, and no two sources name the same directory.
+    pub fn check_sources(&self) -> anyhow::Result<()> {
+        let mut names = std::collections::BTreeSet::new();
+        let mut paths = std::collections::BTreeSet::new();
+        for s in &self.sources {
+            if !is_valid_name(&s.name) {
+                anyhow::bail!(
+                    "[[sources]] name {:?}: use lowercase letters, digits, `-` and `_`, starting \
+                     with a letter or digit, at most 63 characters",
+                    s.name
+                );
+            }
+            if !names.insert(s.name.as_str()) {
+                anyhow::bail!("[[sources]] name {:?} is used twice", s.name);
+            }
+            if !paths.insert(s.path.as_path()) {
+                anyhow::bail!("[[sources]] path {} is listed twice", s.path.display());
+            }
+        }
+        Ok(())
+    }
+
+    /// The directories `ekos build` observes. With `[[sources]]`, one per source, keyed by its
+    /// name; otherwise the `[observe] paths` entries (the workspace root when there are none),
+    /// keyed by their path relative to the workspace — the rule every stage must share.
+    pub fn observe_bases(&self, cwd: &Path) -> Vec<ObserveBase> {
+        if !self.sources.is_empty() {
+            return self
+                .sources
+                .iter()
+                .map(|s| ObserveBase {
+                    path: cwd.join(&s.path),
+                    key: s.name.clone(),
+                    source: Some(s.name.clone()),
+                })
+                .collect();
+        }
+        let unnamed = |path: PathBuf| ObserveBase {
+            key: ekos_common::project::project_key_for_base(&path, cwd),
+            path,
+            source: None,
+        };
+        if self.observe.paths.is_empty() {
+            vec![unnamed(cwd.to_path_buf())]
+        } else {
+            self.observe
+                .paths
+                .iter()
+                .map(|p| unnamed(cwd.join(p)))
+                .collect()
+        }
     }
 
     /// Where a command writes generated files when no `--output` is given: the working directory,
@@ -1220,6 +1334,64 @@ path = "/tmp/ekos-containers/b"
     }
 
     /// The core RFC 0111 groundwork claim: naming an active container redirects the *entire*
+    /// RFC 0178 Part 2: `[[sources]]` replaces `[observe] paths` and names each base.
+    #[test]
+    fn sources_become_named_observe_bases() {
+        let cwd = PathBuf::from("/ws");
+        let key = |b: &ObserveBase| (b.path.clone(), b.key.clone(), b.source.clone());
+
+        // Unchanged without sources: the root has an empty key, a sub-path its relative path.
+        let mut cfg = EkosConfig::default();
+        assert_eq!(
+            cfg.observe_bases(&cwd).iter().map(key).collect::<Vec<_>>(),
+            [(cwd.clone(), String::new(), None)]
+        );
+        cfg.observe.paths = vec![PathBuf::from("."), PathBuf::from("svc/a")];
+        let bases = cfg.observe_bases(&cwd);
+        assert_eq!(bases[1].key, "svc/a");
+        assert_eq!(bases[1].source, None);
+
+        let cfg: EkosConfig = toml::from_str(
+            "[[sources]]\nname = \"api\"\nkind = \"git\"\npath = \"/repos/api\"\n\n\
+             [[sources]]\nname = \"docs\"\npath = \"handbook\"\n",
+        )
+        .unwrap();
+        cfg.check_sources().unwrap();
+        assert_eq!(cfg.sources[1].kind, SourceKind::Dir);
+        assert_eq!(
+            cfg.observe_bases(&cwd).iter().map(key).collect::<Vec<_>>(),
+            [
+                (
+                    PathBuf::from("/repos/api"),
+                    "api".to_string(),
+                    Some("api".to_string())
+                ),
+                (
+                    PathBuf::from("/ws/handbook"),
+                    "docs".to_string(),
+                    Some("docs".to_string())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_duplicate_and_unknown_source_settings_are_refused() {
+        let parse = |text: &str| -> anyhow::Result<()> {
+            let cfg: EkosConfig = toml::from_str(text)?;
+            cfg.check_sources()
+        };
+        let src =
+            |name: &str, path: &str| format!("[[sources]]\nname = {name:?}\npath = {path:?}\n");
+        assert!(parse(&src("api", "/a")).is_ok());
+        assert!(parse(&src("../api", "/a")).is_err());
+        assert!(parse(&src("Api", "/a")).is_err());
+        assert!(parse(&format!("{}{}", src("api", "/a"), src("api", "/b"))).is_err());
+        assert!(parse(&format!("{}{}", src("a", "/same"), src("b", "/same"))).is_err());
+        assert!(parse("[[sources]]\nname = \"a\"\npath = \"/a\"\nurl = \"x\"\n").is_err());
+        assert!(parse("[[sources]]\nname = \"a\"\nkind = \"svn\"\npath = \"/a\"\n").is_err());
+    }
+
     /// RFC 0178: a selected project decides the state directory, ahead of the working directory
     /// and of a `[storage]` container, and gives generated files a home outside the source tree.
     #[test]

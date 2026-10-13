@@ -294,7 +294,26 @@ ekos mcp serve --project shop
   deletes it.
 - `ekos init` and `--config` are refused together with `--project`.
 
-Users, groups, roles and a project made of several repositories are planned, not built. See
+**Several repositories and folders in one project.** Name each input and they compile into one
+ledger, so knowledge links across them and every object says where it is from:
+
+```bash
+ekos project add shop \
+  --source api=/repos/payments-api --source web=/repos/storefront --source handbook=/srv/handbook
+ekos --project shop source list
+ekos --project shop build --source handbook      # re-observe one source only
+ekos --project shop ekl "FIND Object WHERE source = 'handbook'"
+```
+
+- A file of the same name in two sources is two objects. Each object carries `source` (and
+  `sources` when it was found in more than one).
+- `ekos source add <name> --path <dir>` and `ekos source remove <name>` edit the project's
+  `ekos.toml` and keep its comments. Removing a source does not remove compiled objects.
+- A project already compiled without source names cannot gain them; create a new project.
+- Sources are local directories and git repositories. Confluence and GitHub are still configured
+  once per project.
+
+Users, groups and roles are planned, not built. See
 [RFC 0178](ekos/docs/rfcs/0178-ekos-home-projects-sources.md).
 
 ### Is the ledger still current? (RFC 0171)

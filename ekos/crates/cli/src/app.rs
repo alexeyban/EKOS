@@ -55,8 +55,18 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ProjectCommands,
     },
+    /// The named inputs of a project: repositories and directories compiled into one ledger
+    /// (RFC 0178)
+    Source {
+        #[command(subcommand)]
+        subcommand: SourceCommands,
+    },
     /// Run observation passes and write knowledge to the ledger
-    Build,
+    Build {
+        /// Re-observe one named source only; the others keep what the last build recorded
+        #[arg(long, value_name = "NAME")]
+        source: Option<String>,
+    },
     /// Run knowledge-recovery compiler passes (SQL + Git analysis)
     Recover {
         /// Run DAG-independent passes concurrently instead of sequentially
@@ -877,14 +887,37 @@ enum ArtifactCommands {
 }
 
 #[derive(Subcommand)]
+enum SourceCommands {
+    /// Add a directory to the project under a name
+    Add {
+        /// Source name: lowercase letters, digits, `-` and `_`
+        name: String,
+        /// The directory; nothing is written into it
+        #[arg(long, value_name = "DIR")]
+        path: PathBuf,
+        /// `git` or `dir` (default: `git` when the directory is a repository)
+        #[arg(long, value_name = "KIND")]
+        kind: Option<String>,
+    },
+    /// List the project's sources
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a source from the project's config. Compiled objects and the directory stay
+    Remove { name: String },
+}
+
+#[derive(Subcommand)]
 enum ProjectCommands {
     /// Create a project for the sources in a directory
     Add {
         /// Project name: lowercase letters, digits, `-` and `_`
         name: String,
-        /// The directory holding the project's sources; nothing is written into it
-        #[arg(long, value_name = "DIR")]
-        source: PathBuf,
+        /// The directory holding the project's sources; nothing is written into it. For a
+        /// project of several inputs, repeat it as `<source name>=<dir>`
+        #[arg(long, value_name = "DIR | NAME=DIR", required = true)]
+        source: Vec<String>,
         /// Scan the sources and write a config that reflects what is in them (RFC 0152)
         #[arg(long)]
         detect: bool,
@@ -1283,6 +1316,27 @@ fn refuse_with_project(
     Ok(())
 }
 
+fn dispatch_source(
+    subcommand: SourceCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+    config_path: &std::path::Path,
+    invoked_from: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::source;
+    match subcommand {
+        SourceCommands::Add { name, path, kind } => {
+            let kind = kind.as_deref().map(source::parse_kind).transpose()?;
+            let objects =
+                crate::commands::store::open_store_read_only(config, cwd)?.object_count()?;
+            let path = invoked_from.join(path);
+            source::add(config_path, config, cwd, objects, &name, &path, kind)
+        }
+        SourceCommands::List { json } => source::list(config, cwd, json),
+        SourceCommands::Remove { name } => source::remove(config_path, &name),
+    }
+}
+
 fn dispatch_project(
     subcommand: ProjectCommands,
     home_dir: &std::path::Path,
@@ -1299,7 +1353,13 @@ fn dispatch_project(
             name,
             source,
             detect,
-        } => project::add(&at(&name)?, &source, detect),
+        } => {
+            let sources = source
+                .iter()
+                .map(|s| crate::commands::source::parse_spec(s))
+                .collect::<Result<Vec<_>>>()?;
+            project::add(&at(&name)?, &sources, detect)
+        }
         ProjectCommands::List { json } => project::list(home_dir, json),
         ProjectCommands::Show { name, json } => project::show(&at(&name)?, json),
         ProjectCommands::Remove { name, purge, yes } => {
@@ -1382,6 +1442,9 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         )?,
     };
 
+    // Where the command was typed: a path argument is relative to this, even after a project
+    // moves the process into its sources.
+    let invoked_from = std::env::current_dir()?;
     let (config, cwd, config_path, env_workspace) = match selected {
         Some(location) => {
             refuse_with_project(&command, cli.config.is_some(), &mcp_workspace_flag)?;
@@ -1433,7 +1496,13 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         Commands::Freshness { json, limit } => {
             crate::commands::freshness::run(&config, &cwd, json, limit)
         }
-        Commands::Build => crate::commands::build::run_with(&config, &cwd, &extensions).await,
+        Commands::Build { source } => {
+            crate::commands::build::run_selected(&config, &cwd, &extensions, source.as_deref())
+                .await
+        }
+        Commands::Source { subcommand } => {
+            dispatch_source(subcommand, &config, &cwd, &config_path, &invoked_from)
+        }
         Commands::Recover { parallel } => {
             crate::commands::recover::run_with(&config, &cwd, parallel, &extensions).await
         }

@@ -338,6 +338,7 @@ fn write_file_object(
     ledger: &dyn ekos_ledger::KnowledgeStore,
     artifact: &ekos_artifact::ObservationArtifact,
     project_key: &str,
+    source: Option<&str>,
     run_id: &str,
 ) -> Result<bool> {
     let rel_str = &artifact.content.target;
@@ -389,6 +390,14 @@ fn write_file_object(
             serde_json::Value::String(project_key.to_string()),
         );
     }
+    // RFC 0178 Part 2: a named source is recorded the way `ekos commit` records it on every
+    // other object.
+    if let Some(name) = source {
+        ekos_semantic::sources::stamp(
+            &mut obj.properties,
+            &std::collections::BTreeSet::from([name.to_string()]),
+        );
+    }
     // RFC 0014: the excerpt rides on the object so the ledger
     // can index file *content*, not just names.
     if let Some(excerpt) = artifact.content.data["excerpt"].as_str() {
@@ -415,13 +424,46 @@ fn write_file_object(
     Ok(is_new)
 }
 
+/// A source declared `kind = "git"` whose directory has no `.git` yields no commits. Say so:
+/// the git observer itself reports nothing for a directory that is not a repository.
+fn warn_about_git_sources(config: &EkosConfig, cwd: &Path) {
+    for s in &config.sources {
+        if s.kind == ekos_compiler_core::SourceKind::Git && !cwd.join(&s.path).join(".git").exists()
+        {
+            eprintln!(
+                "warning: source {:?} is declared kind = \"git\" but {} has no .git — no commit \
+                 history will be observed for it",
+                s.name,
+                cwd.join(&s.path).display()
+            );
+        }
+    }
+}
+
 /// RFC 0171 — what this build observed; `ekos commit` promotes it once the ledger has it.
 fn record_source_manifest(
     config: &EkosConfig,
     cwd: &Path,
-    built_stamps: &[(std::path::PathBuf, Vec<ekos_observation_sdk::FileStamp>)],
+    built_stamps: &[(
+        ekos_compiler_core::ObserveBase,
+        Vec<ekos_observation_sdk::FileStamp>,
+    )],
+    kept_sources: &[String],
 ) {
     let mut manifest = crate::freshness::manifest_from(config, cwd, built_stamps);
+    // `--source`: a source this build did not observe keeps the entries of the build that did.
+    if !kept_sources.is_empty()
+        && let Some(previous) = crate::freshness::built_manifest(config, cwd)
+    {
+        for (path, stamp) in previous.files {
+            if path
+                .split_once('/')
+                .is_some_and(|(name, _)| kept_sources.iter().any(|k| k == name))
+            {
+                manifest.files.entry(path).or_insert(stamp);
+            }
+        }
+    }
     if config.freshness.content_hash {
         crate::freshness::add_hashes(&mut manifest, config, cwd);
     }
@@ -454,16 +496,37 @@ fn print_summary(files: (usize, usize, usize), connectors: (usize, usize), build
 /// [`run`] with RFC 0149 extensions: their observers run after the built-in ones, and their
 /// logic versions are folded into the fingerprint cache key.
 pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Result<()> {
+    run_selected(config, cwd, ext, None).await
+}
+
+/// `ekos build`, or with `only` (RFC 0178 Part 2, `--source <name>`) a build that re-observes
+/// one named source and leaves what is recorded for the others as it was.
+pub async fn run_selected(
+    config: &EkosConfig,
+    cwd: &Path,
+    ext: &Extensions,
+    only: Option<&str>,
+) -> Result<()> {
+    if let Some(name) = only
+        && !config.sources.iter().any(|s| s.name == name)
+    {
+        let known: Vec<&str> = config.sources.iter().map(|s| s.name.as_str()).collect();
+        anyhow::bail!(
+            "--source {name:?} is not a source of this project (sources: {})",
+            if known.is_empty() {
+                "none".to_string()
+            } else {
+                known.join(", ")
+            }
+        );
+    }
+    warn_about_git_sources(config, cwd);
     let ledger = open_store(config, cwd)?;
 
     let artifact_store = PackArtifactStore::open(config.artifact_dir(cwd))
         .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
 
-    let observe_paths: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
-        vec![cwd.to_path_buf()]
-    } else {
-        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
-    };
+    let observe_paths = config.observe_bases(cwd);
 
     let observers = configured_observers(config, ext);
 
@@ -501,9 +564,19 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     let logic_version =
         ekos_common::PIPELINE_LOGIC_VERSION.wrapping_add(ext.logic_version().wrapping_mul(1_000));
 
-    let mut built_stamps: Vec<(std::path::PathBuf, Vec<ekos_observation_sdk::FileStamp>)> =
-        Vec::new();
-    for base in &observe_paths {
+    let mut built_stamps: Vec<(
+        ekos_compiler_core::ObserveBase,
+        Vec<ekos_observation_sdk::FileStamp>,
+    )> = Vec::new();
+    let mut kept_sources: Vec<String> = Vec::new();
+    for ob in &observe_paths {
+        let base = &ob.path;
+        if let (Some(only), Some(name)) = (only, &ob.source)
+            && only != name
+        {
+            kept_sources.push(name.clone());
+            continue;
+        }
         // RFC 0044 Phase 1: distinguishes objects from different projects when `[observe] paths`
         // lists more than one entry — empty for the overwhelmingly common `paths = ["."]` case,
         // so existing single-project ledgers keep byte-identical ids (no migration needed there).
@@ -526,7 +599,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
         // live, 2026-08-24: `recover.rs`'s several raw-content collection loops each duplicated
         // this exact logic with the *old*, unfixed condition, silently diverging from this
         // function's own real `File`-object ids the moment this fix landed here alone.
-        let project_key = ekos_common::project::project_key_for_base(base, cwd);
+        let project_key = ob.key.clone();
 
         let ctx =
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
@@ -535,7 +608,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
         // manifest the freshness check compares against later.
         let stamps = source_manifest(&ctx);
         let fp = fingerprint_of(&stamps);
-        built_stamps.push((base.clone(), stamps));
+        built_stamps.push((ob.clone(), stamps));
         let fp_key = fingerprint_cache_key(base, logic_version, &redaction_config);
         if !ledger_is_empty && fingerprints.get(&fp_key) == Some(&fp.0) {
             connectors_skipped_cached += observers.len();
@@ -566,7 +639,13 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
             // Git commits will be promoted to KirEvents in Phase 6 by GitAnalyzer.
             if observer.name() == "file" {
                 for artifact in &package.artifacts {
-                    if write_file_object(&*ledger, artifact, &project_key, &run_id)? {
+                    if write_file_object(
+                        &*ledger,
+                        artifact,
+                        &project_key,
+                        ob.source.as_deref(),
+                        &run_id,
+                    )? {
                         total_observed += 1;
                     } else {
                         total_skipped += 1;
@@ -579,7 +658,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     save_fingerprints(&fingerprint_path, &fingerprints)?;
     // RFC 0171 — what this build observed; `ekos commit` promotes it once the ledger has it.
     if config.freshness.enabled {
-        record_source_manifest(config, cwd, &built_stamps);
+        record_source_manifest(config, cwd, &built_stamps, &kept_sources);
     }
 
     // ── Write build index (snapshot) ─────────────────────────────────────────

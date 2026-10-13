@@ -6482,11 +6482,12 @@ LinkML; generation stays in LinkML.
 - [x] RFC 0178 Part 1 — EKOS home and projects: `ekos project add|list|show|remove`, global
       `--project` / `--tenant` / `--home`, state under `<home>/data/<tenant>/<project>/state`,
       sources never written to (devlog_258)
-- [ ] RFC 0178 Part 2 — sources: `[[sources]]` (git / dir / confluence / github) naming the
-      per-path key `build` already writes (`ekos_common::project`), `source` on every object,
-      per-source `[confluence]` / `[github]`, `ekos source add|list|remove`, `build --source`, a
-      `source` filter on reads. Open: how `source` reaches objects whose knowledge artifact
-      records no input artifact (Rust symbols)
+- [x] RFC 0178 Part 2 — named sources for local directories and repositories: `[[sources]]`,
+      `source` / `sources` on `File` and compiled objects, `ekos source add|list|remove`,
+      `project add --source <name>=<dir>`, `build --source` (devlog_259)
+- [ ] RFC 0178 Part 2 remainder: `confluence` / `github` as source kinds; `source` on rollups,
+      business-semantics items, label conflicts and LLM descriptions; `Person` attribution; a
+      `--source` flag on `query find` / `ask` and a `source` argument on MCP tools
 - [ ] RFC 0179 — installer into `$EKOS_HOME/bin`, production Docker image (binary + console API
       + built UI), Compose file, image published from a release tag
 - [ ] RFC 0180 — console: tenants, users (OIDC), groups, roles (viewer / reviewer / operator /

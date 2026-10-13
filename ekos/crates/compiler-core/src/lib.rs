@@ -7,7 +7,10 @@ pub mod scheduler;
 
 pub use cache::{config_hash, record_manifest, should_recompute};
 pub use compiler::{Compiler, CompilerError};
-pub use config::{EkosConfig, MigrateConnection, ProjectLocation};
+pub use config::{
+    EkosConfig, MigrateConnection, ObserveBase, ProjectLocation, SourceConfig, SourceKind,
+    is_valid_name,
+};
 pub use diagnostics::{Diagnostic, DiagnosticSink, Severity, SourceLocation as DiagnosticLocation};
 pub use pass::{CompilerPass, PassContext, PassError, PassManager, SchedulerError};
 pub use scheduler::{ExecutionReport, FailureMode, PassOutcome, Scheduler};

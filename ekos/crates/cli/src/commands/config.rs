@@ -152,11 +152,11 @@ pub struct IgnoreHit {
 pub fn build_preview_scan(config: &EkosConfig, cwd: &Path, max_files: usize) -> PreviewScan {
     let started = Instant::now();
 
-    let roots: Vec<std::path::PathBuf> = if config.observe.paths.is_empty() {
-        vec![cwd.to_path_buf()]
-    } else {
-        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
-    };
+    let roots: Vec<std::path::PathBuf> = config
+        .observe_bases(cwd)
+        .into_iter()
+        .map(|b| b.path)
+        .collect();
 
     let mut total_files = 0usize;
     let mut total_bytes = 0u64;

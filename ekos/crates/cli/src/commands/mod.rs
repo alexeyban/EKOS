@@ -38,6 +38,7 @@ pub mod resolve;
 pub mod semantics;
 pub mod session;
 pub mod simulate;
+pub mod source;
 pub mod store;
 pub mod treasury;
 

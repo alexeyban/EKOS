@@ -12,6 +12,7 @@ pub mod ontology;
 pub mod procedure_lineage;
 pub mod rollup;
 pub mod semantics_review;
+pub mod sources;
 pub mod transform_ir;
 pub mod triggers;
 

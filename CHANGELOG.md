@@ -2,11 +2,12 @@
 
 ## Unreleased (on `main` since v1.0.3)
 
-RFCs 0154–0178, devlogs 204–258. Not yet tagged; build from source or wait for the
+RFCs 0154–0178, devlogs 204–259. Not yet tagged; build from source or wait for the
 next release.
 
 **New capabilities**
 - **Projects in an EKOS home** (RFC 0178): `ekos project add <name> --source <dir>` creates a project whose config and compiled data live under `~/.ekos/data/<tenant>/<project>/` (`EKOS_HOME`, `--home`), and `--project <name>` runs any command against it from any directory. The sources are never written to. Each project has its own ledger; `--tenant` separates tenants. A workspace used in place is unchanged.
+- **Named sources** (RFC 0178): a project can be several repositories and directories (`--source <name>=<dir>`, `ekos source add|list|remove`), compiled into one ledger. Every object records its `source`; EKL filters on it; `ekos build --source <name>` re-observes one. A source declared `git` with no `.git` is reported instead of silently yielding no commits.
 - **EKOS Migrate** (RFC 0154–0162, opt-in `[migrate]`): PostgreSQL → ClickHouse.
   - **Assess:** live catalog and profiling (PII suppressed, read-only sessions), drift against the repository's DDL, data-quality and compatibility rules that measure affected rows, inferred foreign keys from real code joins and `pg_stat_statements`.
   - **Load:** type mapping with lossiness, a ClickHouse design and generated DDL, a statement classifier with guarded execution, human-only approvals pinned to evidence.

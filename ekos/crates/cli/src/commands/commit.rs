@@ -23,14 +23,30 @@ fn write_objects(
     ledger: &dyn KnowledgeStore,
     model: &CkModel,
     per_source_ctx: SourceContext<'_>,
-) -> Result<(usize, usize, Vec<ekos_kir::KirId>)> {
+    sources: &ekos_semantic::sources::SourceIndex,
+) -> Result<(
+    usize,
+    usize,
+    Vec<ekos_kir::KirId>,
+    ekos_semantic::sources::SourceStats,
+)> {
     let (mut written, mut skipped) = (0usize, 0usize);
+    let mut source_stats = ekos_semantic::sources::SourceStats::default();
     let obj_total = model.objects.len();
     let obj_progress = ProgressLine::for_phase("writing objects");
     let mut compiled_conflicts: Vec<ekos_kir::KirId> = Vec::new();
     for ckm_obj in &model.objects {
         ledger.set_write_context(Some(per_source_ctx(&ckm_obj.source_artifact_ids)));
         let mut kir_obj = ckm_object_to_kir(ckm_obj);
+        if !sources.is_empty() {
+            // RFC 0178 Part 2: which of the project's sources this object was observed in.
+            let found = sources.attribute(
+                kir_obj.properties.get("project").and_then(|v| v.as_str()),
+                ckm_obj.evidence.iter().map(|e| e.source.as_str()),
+            );
+            ekos_semantic::sources::stamp(&mut kir_obj.properties, &found);
+            source_stats.record(&kir_obj.kind.to_string(), &found);
+        }
         preserve_claim_review_status(ledger, &mut kir_obj)?;
         if ekos_semantic::conflicts::is_conflict(&kir_obj) {
             crate::commands::conflicts::carry_review(ledger, &mut kir_obj)?;
@@ -44,7 +60,7 @@ fn write_objects(
         obj_progress.tick(written + skipped, obj_total);
     }
     obj_progress.finish();
-    Ok((written, skipped, compiled_conflicts))
+    Ok((written, skipped, compiled_conflicts, source_stats))
 }
 
 /// Writes the canonical relationships and returns how many were new.
@@ -71,6 +87,42 @@ fn write_relationships(
 }
 
 /// RFC 0171 — the ledger now reflects what `ekos build` observed.
+/// RFC 0178 Part 2: the files each `[[sources]]` entry held at the last build. Empty when the
+/// project names no sources, and then nothing is attributed.
+fn source_index(config: &EkosConfig, cwd: &Path) -> ekos_semantic::sources::SourceIndex {
+    if config.sources.is_empty() {
+        return Default::default();
+    }
+    let manifest = crate::freshness::built_manifest(config, cwd);
+    ekos_semantic::sources::SourceIndex::new(
+        config.sources.iter().map(|s| s.name.as_str()),
+        manifest
+            .iter()
+            .flat_map(|m| m.files.keys().map(String::as_str)),
+    )
+}
+
+/// One line per commit when the project names sources; kinds nothing could be attributed to are
+/// listed so a gap is seen, not assumed away.
+fn print_source_stats(stats: &ekos_semantic::sources::SourceStats) {
+    if stats.attributed == 0 && stats.unattributed.is_empty() {
+        return;
+    }
+    println!("  Objects with a source: {}", stats.attributed);
+    if !stats.unattributed.is_empty() {
+        let kinds: Vec<String> = stats
+            .unattributed
+            .iter()
+            .map(|(kind, n)| format!("{kind} {n}"))
+            .collect();
+        println!(
+            "  Objects with none:     {} ({})",
+            stats.unattributed_total(),
+            kinds.join(", ")
+        );
+    }
+}
+
 fn promote_source_manifest(config: &EkosConfig, cwd: &Path) {
     match crate::freshness::promote_after_commit(config, cwd) {
         Ok(true) => {}
@@ -151,8 +203,9 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     ev_progress.finish();
 
     // Write canonical objects.
-    let (objects_written, objects_skipped, compiled_conflicts) =
-        write_objects(&*ledger, &model, &per_source_ctx)?;
+    let source_index = source_index(config, cwd);
+    let (objects_written, objects_skipped, compiled_conflicts, source_stats) =
+        write_objects(&*ledger, &model, &per_source_ctx, &source_index)?;
 
     // Write canonical relationships.
     let rels_written = write_relationships(&*ledger, &model, &per_source_ctx)?;
@@ -258,6 +311,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
 
     println!("Commit complete.");
     println!("  Objects written:       {objects_written}");
+    print_source_stats(&source_stats);
     println!("  Objects skipped:       {objects_skipped} (already in ledger)");
     println!("  Relationships written: {rels_written}");
     println!("  Evidence records:      {evidence_written}");

@@ -864,6 +864,7 @@ dependencies = [
  "serde_yaml",
  "tokio",
  "toml",
+ "toml_edit",
  "tracing",
  "tracing-subscriber",
  "uuid",

@@ -1,6 +1,6 @@
 # RFC 0178 — EKOS home, projects and sources
 
-**Status:** Accepted — Part 1 implemented 2026-10-13 (devlog_258); Part 2 designed in outline, one point open, not started
+**Status:** Accepted — Part 1 implemented 2026-10-13 (devlog_258); Part 2 implemented 2026-10-13 for local directories and repositories (devlog_259)
 **Author:** EKOS team
 **Created:** 2026-10-13
 **Builds on:** RFC 0111 (`[storage]` containers, `EkosConfig::ekos_dir`), RFC 0152 (`init --detect`), RFC 0171 (freshness)
@@ -116,47 +116,71 @@ ekos project remove <name> [--tenant <t>] [--purge --yes]
 - The cluster compile worker, which ships a config between processes and loses the runtime
   location.
 
-## Part 2 — Sources (designed, not built)
+## Part 2 — Sources
 
 ```toml
 [[sources]]
 name = "payments-api"      # unique in the project, same name rule as a project
-kind = "git"               # git | dir | confluence | github
+kind = "git"               # git | dir
 path = "/sources/payments-api"
 
 [[sources]]
-name = "runbooks"
-kind = "confluence"
-space = "OPS"
+name = "handbook"
+kind = "dir"
+path = "/sources/handbook"
 ```
 
-This builds on what `build` already does (found while implementing Part 1, and different from
-what this RFC first assumed): every `[observe] paths` entry is scanned from its own root, each
-artifact gets a `project` field (`ekos_common::project::project_key_for_base`, the entry's path
-relative to the workspace), and ids are hashed from `"<key>:<path>"` so two entries with a file of
-the same name stay two objects. Displayed names stay relative to the entry.
+### What was already there
 
-- A source's **name** replaces the path-derived key. An absolute path outside the workspace
-  then has a stable, readable key instead of its full path.
-- The four places that turn `[observe] paths` into directories (`build.rs`, `recover.rs`,
-  `commands/config.rs`, `freshness.rs`) read one shared function that returns sources.
-- Every object gets a `source` property. Today the key reaches `File` objects and the analyzers
-  that read it back from their artifact, not every object. Open design point: a symbol's
-  knowledge artifact does not record which observation artifact it came from (the Rust analyzer
-  writes one for all files), so `source` cannot be derived generically from provenance and has to
-  be carried by each analyzer or by evidence. To be settled before code.
-- An object merged from several sources lists all of them; derived objects (rollups, risks,
-  summaries, business concepts) list the sources of what they were derived from.
-- The object property is called `source`. The existing `project` field keeps its name and its
-  role in id hashing, so no existing ledger's ids change; "project" in this RFC's sense is the
-  level above.
-- `[confluence]` and `[github]` become per-source settings.
-- A config with no `[[sources]]` is one unnamed source at the workspace root, as today.
-- `ekos source add|list|remove`, `ekos build --source <name>`. Recover, resolve, compile and
-  commit run over the whole project: identity and links span sources.
-- Read commands and MCP tools take a `source` filter; EKL reads `source` like any property
-  (RFC 0175).
-- A guard test fails when an object reaches the ledger with no `source`.
+`build` scans every `[observe] paths` entry from its own root, writes a `project` field on each
+artifact (`ekos_common::project::project_key_for_base`: the entry's path relative to the
+workspace) and hashes ids from `"<key>:<path>"`, so two entries with a file of the same name stay
+two objects (RFC 0044 / 0079). This RFC first assumed otherwise. Part 2 names that key, records
+it on objects, and lets a source live anywhere.
+
+### Built
+
+- **`[[sources]]` replaces `[observe] paths`** when present. `EkosConfig::observe_bases` is the
+  one function that turns either into directories with keys; `build`, `recover`, the config
+  preview and the freshness check all read it. A source's key is its name.
+- **`kind`** is `dir` or `git`. Both are local directories. `git` states that commit history is
+  expected: `build` warns when such a source has no `.git`, where before the git observer
+  silently observed nothing.
+- **Every object says where it is from.** `source` (one name) and `sources` (sorted list) are
+  written on each `File` object at build and on each compiled object at commit, by this rule:
+  1. the object's `project` property, when an analyzer recorded the key — exact;
+  2. otherwise the sources holding a file one of its evidence records names. A path present in
+     two sources attributes the object to both: the list may be too long, never too short;
+  3. otherwise, in a project with one source, that source.
+  An object none of these reach has neither property. `commit` prints how many, by kind.
+- **Freshness** keys a named source's files by `<source>/<path>` and maps them back to disk
+  through the source's directory, which need not be under the workspace.
+- **Commands.** `ekos project add <name> --source <source>=<dir>` (repeatable; the first is the
+  root), `ekos source add|list|remove`, `ekos build --source <name>` (re-observes one source and
+  keeps the others' recorded files).
+- **Queries.** `source` is an ordinary property, so EKL reads it (RFC 0175):
+  `FIND Object WHERE source = 'handbook'`.
+
+### Rules
+
+- **A compiled project without source names cannot gain them.** Its ids were hashed without a
+  key and the ledger is append-only; naming sources afterwards would leave every object beside a
+  renamed copy. `ekos source add` refuses and says to create a new project.
+- **Renaming a source is removing one and adding another.** Its objects get new ids.
+- **Removing a source edits the config only.** Compiled objects stay in the ledger.
+- Recover, resolve, compile and commit always run over the whole project: identity and links
+  span sources.
+
+### Not built
+
+- `confluence` and `github` as source kinds. There is still one `[confluence]` and one
+  `[github]` per project.
+- `source` on objects written by the steps after the main commit loop: rollups, business
+  semantics, label conflicts, LLM descriptions.
+- A commit author (`Person`) has no source: its evidence is a commit, not a file.
+- A `--source` flag on `ekos query find` / `ekos ask` and a `source` argument on MCP tools.
+
+RFC 0181 must treat an object without `sources` as not visible to a reader restricted by source.
 
 One ledger per source was considered and rejected: no identity resolution or links across
 sources, which is the reason to put them in one project.
@@ -170,3 +194,7 @@ sources, which is the reason to put them in one project.
   return the other's objects.
 - `project remove` moves to `trash/`; `--purge` needs `--yes`.
 - Every existing test passes unchanged (no `--project`).
+- Part 2, end to end: a project of two git repositories and a document folder. A file of the
+  same name in both repositories is two objects with different `source`; each source has
+  objects; commits from both repositories are found; one source rebuilt alone keeps the others'
+  manifest entries; the kinds left without a source are pinned.

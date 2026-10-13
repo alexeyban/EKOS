@@ -11,7 +11,7 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use ekos_compiler_core::EkosConfig;
+use ekos_compiler_core::{EkosConfig, ObserveBase};
 use ekos_ledger::KnowledgeStore;
 use ekos_observation_sdk::{FileStamp, ScanContext, source_manifest};
 use serde::{Deserialize, Serialize};
@@ -145,13 +145,23 @@ pub fn diff_with(
     d
 }
 
-/// The directories `ekos build` observes — the same rule `commands/build.rs` applies.
-pub fn observe_bases(config: &EkosConfig, cwd: &Path) -> Vec<PathBuf> {
-    if config.observe.paths.is_empty() {
-        vec![cwd.to_path_buf()]
-    } else {
-        config.observe.paths.iter().map(|p| cwd.join(p)).collect()
+/// The manifest prefix of one observed directory: a named source's name (RFC 0178 — its
+/// directory may be anywhere), otherwise the directory relative to the workspace.
+fn manifest_prefix(base: &ObserveBase, cwd: &Path) -> String {
+    match &base.source {
+        Some(name) => name.clone(),
+        None => prefix_for(&base.path, cwd),
     }
+}
+
+/// The file a manifest path names. With `[[sources]]` the first component is a source's name.
+fn disk_path(config: &EkosConfig, cwd: &Path, manifest_path: &str) -> PathBuf {
+    if let Some((name, rest)) = manifest_path.split_once('/')
+        && let Some(source) = config.sources.iter().find(|s| s.name == name)
+    {
+        return cwd.join(&source.path).join(rest);
+    }
+    cwd.join(manifest_path)
 }
 
 /// `base` relative to `cwd` as a `/`-joined string; empty for the workspace root (`"."`).
@@ -189,11 +199,11 @@ fn without_own_state(mut m: SourceManifest, config: &EkosConfig, cwd: &Path) -> 
 pub fn manifest_from(
     config: &EkosConfig,
     cwd: &Path,
-    per_base: &[(PathBuf, Vec<FileStamp>)],
+    per_base: &[(ObserveBase, Vec<FileStamp>)],
 ) -> SourceManifest {
     let mut m = SourceManifest::new(git_head(cwd));
     for (base, stamps) in per_base {
-        m.add(&prefix_for(base, cwd), stamps);
+        m.add(&manifest_prefix(base, cwd), stamps);
     }
     without_own_state(m, config, cwd)
 }
@@ -205,22 +215,28 @@ pub fn add_hashes(m: &mut SourceManifest, config: &EkosConfig, cwd: &Path) {
     let redaction = config.redaction_config();
     for (path, stamp) in &mut m.files {
         if !ekos_common::redaction::is_excluded_path(path, &redaction) {
-            stamp.hash = hash_file(&cwd.join(path));
+            stamp.hash = hash_file(&disk_path(config, cwd, path));
         }
     }
 }
 
 /// `then` → the source now, reading a touched file's bytes only when `then` recorded its hash.
-fn diff_now(then: &SourceManifest, now: &SourceManifest, cwd: &Path) -> ManifestDiff {
-    diff_with(then, now, |path| hash_file(&cwd.join(path)))
+fn diff_now(
+    then: &SourceManifest,
+    now: &SourceManifest,
+    config: &EkosConfig,
+    cwd: &Path,
+) -> ManifestDiff {
+    diff_with(then, now, |path| hash_file(&disk_path(config, cwd, path)))
 }
 
 /// Walk every observe path now (metadata only) — what the source looks like at this moment.
 pub fn scan(config: &EkosConfig, cwd: &Path) -> SourceManifest {
-    let per_base: Vec<(PathBuf, Vec<FileStamp>)> = observe_bases(config, cwd)
+    let per_base: Vec<(ObserveBase, Vec<FileStamp>)> = config
+        .observe_bases(cwd)
         .into_iter()
         .map(|base| {
-            let ctx = ScanContext::new(&base)
+            let ctx = ScanContext::new(&base.path)
                 .with_ignore_patterns(config.observe.ignore_patterns.clone());
             let stamps = source_manifest(&ctx);
             (base, stamps)
@@ -246,6 +262,11 @@ pub fn git_head(cwd: &Path) -> Option<String> {
 
 fn manifest_path(config: &EkosConfig, cwd: &Path, name: &str) -> PathBuf {
     config.ekos_dir(cwd).join(name)
+}
+
+/// The manifest the last `ekos build` recorded, if any.
+pub fn built_manifest(config: &EkosConfig, cwd: &Path) -> Option<SourceManifest> {
+    read_manifest(&manifest_path(config, cwd, SOURCE_MANIFEST))
 }
 
 pub fn read_manifest(path: &Path) -> Option<SourceManifest> {
@@ -284,7 +305,7 @@ pub fn changed_since_build(config: &EkosConfig, cwd: &Path) -> Option<String> {
         return None;
     }
     let built = read_manifest(&manifest_path(config, cwd, SOURCE_MANIFEST))?;
-    let d = diff_now(&built, &scan(config, cwd), cwd);
+    let d = diff_now(&built, &scan(config, cwd), config, cwd);
     (!d.is_empty()).then(|| {
         format!(
             "FRESH001 {} file(s) changed since `ekos build` ({} changed, {} added, {} removed{}) \
@@ -415,7 +436,7 @@ pub fn check(config: &EkosConfig, cwd: &Path, limit: usize) -> Freshness {
         );
     };
     let now = scan(config, cwd);
-    let d = diff_now(&committed, &now, cwd);
+    let d = diff_now(&committed, &now, config, cwd);
     let hashed = committed.files.values().any(|s| s.hash.is_some());
     let cap = |v: &Vec<String>| v.iter().take(limit).cloned().collect::<Vec<_>>();
     Freshness {
