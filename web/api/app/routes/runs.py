@@ -47,7 +47,8 @@ def _run_for(principal: Principal, run_id: str) -> models.Run:
         raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
     ws = models.get_workspace(run.workspace_id)
     # A run whose workspace was removed has nobody to belong to but a platform owner.
-    visible = authz.sees_workspace(principal, ws) if ws is not None else principal.owner
+    # A run's log names the files it read, so it is for someone who sees all of the workspace.
+    visible = authz.sees_all_of(principal, ws) if ws is not None else principal.owner
     if not visible:
         raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
     return run
@@ -60,7 +61,7 @@ async def list_runs(
     limit: int = Query(100, ge=1, le=500),
     principal: Principal = Depends(authz.authenticated),
 ) -> list[dict]:
-    visible = {ws.id for ws in models.list_workspaces() if authz.sees_workspace(principal, ws)}
+    visible = {ws.id for ws in models.list_workspaces() if authz.sees_all_of(principal, ws)}
     runs = models.list_runs(workspace, status, limit)
     return [_dump(r) for r in runs if r.workspace_id in visible]
 

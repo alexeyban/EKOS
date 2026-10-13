@@ -97,7 +97,7 @@ async def list_schedules(
     workspace: str | None = Query(None),
     principal: Principal = Depends(authz.authenticated),
 ) -> list[dict]:
-    visible = {ws.id for ws in models.list_workspaces() if authz.sees_workspace(principal, ws)}
+    visible = {ws.id for ws in models.list_workspaces() if authz.sees_all_of(principal, ws)}
     return [_dump(s) for s in models.list_schedules(workspace) if s.workspace_id in visible]
 
 

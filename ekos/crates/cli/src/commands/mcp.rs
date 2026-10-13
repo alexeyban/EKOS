@@ -39,6 +39,7 @@ use chrono::{DateTime, Utc};
 use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
+use ekos_ledger::scope::{ReadScope, ScopedStore};
 use ekos_ledger::{KnowledgeStore, RefreshOutcome};
 use ekos_runtime::reason::{execute, plan_question};
 use ekos_runtime::retrieval::understand;
@@ -75,7 +76,11 @@ use std::time::SystemTime;
 /// recorded when the cached handle was opened, and only reopens when the two
 /// disagree.
 pub struct StoreCache {
-    store: Option<Box<dyn KnowledgeStore>>,
+    /// Always behind a [`ScopedStore`] (RFC 0181), unrestricted unless the current call carries
+    /// a scope. The process's own `--read-scope` is applied underneath, by `open_store_read_only`.
+    store: Option<ScopedStore>,
+    /// The scope of the call being served; `None` between calls and for an unscoped call.
+    request_scope: Option<ReadScope>,
     fingerprint: Option<SystemTime>,
     /// RFC 0114 — process-local cache of `Expensive`-classified tool results, keyed by
     /// `(tool, canonicalized-args-json)`. Cleared whenever `store` is reopened (the same
@@ -87,6 +92,90 @@ pub struct StoreCache {
     freshness: Option<(std::time::Instant, crate::freshness::Freshness)>,
 }
 
+/// RFC 0181 — where a `tools/call` carries the caller's read scope: `params._meta[...]`.
+pub const READ_SCOPE_META: &str = "ekos/readScope";
+
+/// RFC 0181 — the tools a reader with a restricted scope may call: those that read knowledge
+/// only through the store, which the scope filters.
+///
+/// Every other tool is refused for such a reader ([`SCOPE_REFUSED_TOOLS`] says why, tool by
+/// tool). A tool in neither list fails `every_tool_has_a_read_scope_decision`, and until someone
+/// decides it is refused: the check in `tools_call` is "in this list, or no".
+pub const SCOPED_TOOLS: &[&str] = &[
+    "ekos_search",
+    "ekos_query",
+    "ekos_retrieve",
+    "ekos_ekl",
+    "ekos_neighborhood",
+    "ekos_state",
+    "ekos_dependents",
+    "ekos_impact",
+    "ekos_diff",
+    "ekos_graph_export",
+];
+
+/// Tools a restricted reader does not get, each with the reason.
+pub const SCOPE_REFUSED_TOOLS: &[(&str, &str)] = &[
+    (
+        "ekos_status",
+        "reports the store's location and, with freshness, changed file paths",
+    ),
+    (
+        "ekos_audit",
+        "write provenance names runs and artifacts of every source",
+    ),
+    (
+        "ekos_conflicts",
+        "conflicts carry no source; counts come from a file beside the ledger",
+    ),
+    (
+        "ekos_semantics_lookup",
+        "business-semantics items carry no source",
+    ),
+    (
+        "ekos_semantics_gaps",
+        "business-semantics items carry no source",
+    ),
+    ("ekos_session_note", "writes"),
+    (
+        "ekos_session_recall",
+        "session memory is not attributed to a source",
+    ),
+    (
+        "ekos_session_brief",
+        "session memory is not attributed to a source",
+    ),
+    (
+        "ekos_identity_review",
+        "writes; review is for a person who sees the whole project",
+    ),
+    (
+        "ekos_architecture_review",
+        "writes; review is for a person who sees the whole project",
+    ),
+    ("ekos_architecture_evaluate", "scores the whole project"),
+    (
+        "ekos_architecture_drift",
+        "compares the whole project against its history",
+    ),
+    (
+        "ekos_architecture_diff",
+        "compares the whole project against its history",
+    ),
+    (
+        "ekos_transformation_explain",
+        "not yet checked against a scope",
+    ),
+    (
+        "ekos_transformation_diff",
+        "not yet checked against a scope",
+    ),
+    (
+        "ekos_clickhouse_query",
+        "queries a live database, which no scope covers",
+    ),
+];
+
 /// Paths per category in `ekos_status`'s freshness block; `ekos freshness` has the full list.
 const MCP_FRESHNESS_PATHS: usize = 10;
 
@@ -94,9 +183,43 @@ impl StoreCache {
     pub fn new() -> Self {
         Self {
             store: None,
+            request_scope: None,
             fingerprint: None,
             result_cache: std::collections::HashMap::new(),
             freshness: None,
+        }
+    }
+
+    /// RFC 0181: the scope for the call about to be served. It stays until the next call sets
+    /// its own, and every call does, so one caller's scope never serves another's request.
+    fn set_request_scope(&mut self, scope: Option<ReadScope>) -> Result<()> {
+        self.request_scope = scope;
+        self.apply_scope()
+    }
+
+    fn apply_scope(&self) -> Result<()> {
+        if let Some(store) = &self.store {
+            let scopes: Vec<ReadScope> = self.request_scope.iter().cloned().collect();
+            // Unchanged scopes keep the store's memo of decisions already made.
+            let same = match &self.request_scope {
+                Some(s) if !s.is_unrestricted() => {
+                    store.scope_fingerprint().trim_end() == s.fingerprint()
+                }
+                _ => !store.is_restricted(),
+            };
+            if !same {
+                store.set_scopes(&scopes)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Part of the result-cache key: empty for an unrestricted caller, otherwise distinct per
+    /// scope. Without it one reader's cached answer would be served to another.
+    fn scope_key(&self) -> String {
+        match &self.request_scope {
+            Some(s) if !s.is_unrestricted() => s.fingerprint(),
+            _ => String::new(),
         }
     }
 
@@ -127,7 +250,7 @@ impl StoreCache {
     /// `self.store` stays `None` until one succeeds).
     fn get(&mut self, config: &EkosConfig, workspace: &Path) -> Result<&dyn KnowledgeStore> {
         self.refresh(config, workspace)?;
-        Ok(self.store.as_deref().expect("just set above"))
+        Ok(self.store.as_ref().expect("just set above"))
     }
 
     /// Reopens the store (and clears the RFC 0114 result cache) if the on-disk fingerprint has
@@ -141,7 +264,7 @@ impl StoreCache {
         // nothing changed, only the appended tail decoded when the active segment grew, and a cold
         // rebuild only when a seal/merge/format change moved more than the tail. No `walkdir`, no
         // whole-store reopen for an ordinary one-batch change, and no lock taken on either side.
-        if let Some(store) = self.store.as_deref() {
+        if let Some(store) = self.store.as_ref() {
             match store.refresh_snapshot() {
                 Ok(RefreshOutcome::Unchanged) => return Ok(()),
                 Ok(RefreshOutcome::Incremental { .. } | RefreshOutcome::Reopened) => {
@@ -159,23 +282,34 @@ impl StoreCache {
         let root = store_root(config, workspace);
         let current = store_fingerprint(&root);
         if self.store.is_none() || current != self.fingerprint {
-            self.store = Some(open_store_read_only(config, workspace)?);
+            self.store = Some(ScopedStore::new(open_store_read_only(config, workspace)?));
             self.fingerprint = store_fingerprint(&root);
             self.result_cache.clear();
+            // A reopened store starts unrestricted; the call in progress keeps its scope.
+            self.apply_scope()?;
         }
         Ok(())
     }
 
     /// RFC 0114: a previously-cached result for this exact `(tool, args)` pair, if the store
     /// hasn't changed underneath it since.
+    /// The result-cache key. The current call's scope is part of it (RFC 0181): two readers
+    /// with different scopes asking the same question get different answers, and one's must
+    /// never be served to the other.
+    fn result_key(&self, tool: &str, args_key: &str) -> (String, String) {
+        (
+            tool.to_string(),
+            format!("{}\u{1f}{args_key}", self.scope_key()),
+        )
+    }
+
     fn cached_result(&self, tool: &str, args_key: &str) -> Option<&Value> {
-        self.result_cache
-            .get(&(tool.to_string(), args_key.to_string()))
+        self.result_cache.get(&self.result_key(tool, args_key))
     }
 
     fn cache_result(&mut self, tool: &str, args_key: &str, result: Value) {
-        self.result_cache
-            .insert((tool.to_string(), args_key.to_string()), result);
+        let key = self.result_key(tool, args_key);
+        self.result_cache.insert(key, result);
     }
 }
 
@@ -1404,6 +1538,33 @@ fn tools_call(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
+    // RFC 0181 — before anything else, including the write tools below: who is this call for?
+    // A scope that does not parse fails the call. Treating it as "no scope" would hand a
+    // restricted caller everything.
+    let request_scope = match params.get("_meta").and_then(|m| m.get(READ_SCOPE_META)) {
+        Some(value) => match ReadScope::from_value(value) {
+            Ok(scope) => Some(scope),
+            Err(e) => return tool_err(&anyhow::anyhow!("{READ_SCOPE_META}: {e}")),
+        },
+        None => None,
+    };
+    let process_scope = match super::store::process_scope(config) {
+        Ok(scope) => scope,
+        Err(e) => return tool_err(&e),
+    };
+    let restricted = [&request_scope, &process_scope]
+        .into_iter()
+        .flatten()
+        .any(|s| !s.is_unrestricted());
+    if let Err(e) = cache.set_request_scope(request_scope) {
+        return tool_err(&e);
+    }
+    if restricted && !SCOPED_TOOLS.contains(&name) {
+        return tool_err(&anyhow::anyhow!(
+            "{name} is not available to a reader with restricted access to this project"
+        ));
+    }
+
     // The write-capable tools already record their own ledger Event and bypass `StoreCache`
     // entirely — no usage-log entry (this log is scoped to reads, for materialized-view
     // candidate-scoping) and no result cache (a write's result isn't a re-servable read).
@@ -1444,6 +1605,9 @@ fn tools_call(
         log_call(
             config, workspace, name, cost_class, &reason, true, 0, &result,
         );
+        if restricted {
+            return tool_ok(&result);
+        }
         let fresh = cache.freshness(config, workspace);
         return tool_ok_with_freshness(&result, fresh.as_ref());
     }
@@ -1465,6 +1629,11 @@ fn tools_call(
                 duration_ms,
                 &result,
             );
+            if restricted {
+                // The freshness note counts changed files across every source, including the
+                // ones this reader may not see.
+                return tool_ok(&result);
+            }
             let fresh = cache.freshness(config, workspace);
             if name == "ekos_status" {
                 // The block lives in the result itself; no separate note needed.
@@ -2941,6 +3110,68 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(resp["error"]["code"], -32601);
+    }
+
+    /// RFC 0181: a tool is either one a restricted reader may call (it reads only through the
+    /// store, which the scope filters) or one that is refused for them, with a reason. A tool
+    /// in neither list is refused at run time; this makes adding one a decision somebody took.
+    #[test]
+    fn every_tool_has_a_read_scope_decision() {
+        let mut config = EkosConfig::default();
+        config.semantics.enabled = true;
+        config.session_memory.enabled = true;
+        config.conflicts.enabled = true;
+        let tmp = tempfile::tempdir().unwrap();
+        let resp = parse(
+            &handle_message(
+                &config,
+                tmp.path(),
+                &req(3, "tools/list", json!({})),
+                &mut StoreCache::new(),
+            )
+            .unwrap(),
+        );
+        let mut listed: Vec<String> = resp["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        // Off unless `[clickhouse-query]` is configured; it is decided all the same.
+        listed.push("ekos_clickhouse_query".to_string());
+        listed.sort();
+        listed.dedup();
+        assert!(listed.len() >= 26, "the tool list was not read: {listed:?}");
+
+        let refused: Vec<&str> = SCOPE_REFUSED_TOOLS.iter().map(|(name, _)| *name).collect();
+        let undecided: Vec<&String> = listed
+            .iter()
+            .filter(|t| !SCOPED_TOOLS.contains(&t.as_str()) && !refused.contains(&t.as_str()))
+            .collect();
+        assert!(
+            undecided.is_empty(),
+            "MCP tool(s) {undecided:?} have no read-scope decision (RFC 0181): add each to \
+             SCOPED_TOOLS if it reads knowledge only through the store, else to \
+             SCOPE_REFUSED_TOOLS with the reason"
+        );
+        let both: Vec<&&str> = SCOPED_TOOLS
+            .iter()
+            .filter(|t| refused.contains(t))
+            .collect();
+        assert!(both.is_empty(), "{both:?} are in both lists");
+        for (name, reason) in SCOPE_REFUSED_TOOLS {
+            assert!(
+                !reason.is_empty(),
+                "{name} is refused without a stated reason"
+            );
+        }
+        // Nothing stale: every name in either list is a tool that exists.
+        for name in SCOPED_TOOLS.iter().chain(refused.iter()) {
+            assert!(
+                listed.iter().any(|t| t == name),
+                "{name} is not a tool any more"
+            );
+        }
     }
 
     #[test]

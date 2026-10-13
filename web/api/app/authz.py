@@ -36,6 +36,8 @@ TOKEN_ACTIONS = frozenset({"read", "operate"})
 TENANT_ONLY_ROLES = frozenset({"admin"})
 
 ACTION_ATTR = "__ekos_action__"
+# Set on an `allow(...)` dependency: whether the route is safe for a restricted reader.
+SCOPED_ATTR = "__ekos_scoped__"
 
 
 # ── the decision ─────────────────────────────────────────────────────────────
@@ -59,22 +61,101 @@ def _compat_roles(principal: Principal, tenant_id: str) -> set[str]:
     return {"viewer", "operator", "reviewer"} if principal.compat == "write" else {"viewer"}
 
 
+def has_rule(b: models.RoleBinding) -> bool:
+    """True for a binding narrower than its workspace (RFC 0181)."""
+    return bool(b.source or b.path or b.object_id)
+
+
+def _applies(b: models.RoleBinding, tenant_id: str, workspace_id: str | None) -> bool:
+    if b.tenant_id != tenant_id or b.role not in ROLE_ACTIONS:
+        return False
+    return b.workspace_id is None or b.workspace_id == workspace_id
+
+
+def _plain_roles(principal: Principal, tenant_id: str, workspace_id: str | None) -> set[str]:
+    """Roles held outright: the compatibility mapping and bindings that carry no rule."""
+    roles = _compat_roles(principal, tenant_id)
+    for b in _bindings(principal):
+        if _applies(b, tenant_id, workspace_id) and b.effect != "deny" and not has_rule(b):
+            roles.add(b.role)
+    return roles & TOKEN_ROLES if principal.kind == "token" else roles
+
+
 def roles_in(principal: Principal, tenant_id: str, workspace_id: str | None = None) -> set[str]:
-    """The roles `principal` holds on the tenant, or on one workspace of it."""
+    """The roles `principal` holds on the tenant, or on one workspace of it. A binding that
+    allows part of a workspace (RFC 0181) makes its holder a viewer of it; what they then see
+    is `scope_for`'s business. A deny binding grants nothing."""
     if principal.kind == "token":
         if principal.tenant_id != tenant_id:
             return set()
     elif principal.owner:
         return set(ROLES)
 
-    roles = _compat_roles(principal, tenant_id)
+    roles = _plain_roles(principal, tenant_id, workspace_id)
     for b in _bindings(principal):
-        if b.tenant_id != tenant_id or b.role not in ROLE_ACTIONS:
-            continue
-        if b.workspace_id is not None and b.workspace_id != workspace_id:
-            continue
-        roles.add(b.role)
-    return roles & TOKEN_ROLES if principal.kind == "token" else roles
+        if (
+            _applies(b, tenant_id, workspace_id)
+            and has_rule(b)
+            and b.effect == "allow"
+            and b.workspace_id == workspace_id
+            and b.role == "viewer"
+        ):
+            roles.add("viewer")
+    return roles
+
+
+def _rule(b: models.RoleBinding) -> dict[str, str]:
+    rule = {"effect": "deny" if b.effect == "deny" else "allow"}
+    if b.object_id:
+        rule["object"] = b.object_id
+        return rule
+    if b.source:
+        rule["source"] = b.source
+    if b.path:
+        rule["path"] = b.path
+    return rule
+
+
+# Roles whose work shows every source anyway: running the pipeline prints file names, and its
+# logs are theirs to read. A rule on such a principal would promise what it cannot deliver.
+UNRESTRICTABLE_ROLES = frozenset({"operator", "admin"})
+
+
+def scope_for(principal: Principal, ws: models.Workspace) -> dict | None:
+    """The read scope (RFC 0181) for this principal on this workspace, in the form the `ekos`
+    MCP server takes; `None` when they see all of it.
+
+    * An owner, an operator or an admin is never restricted.
+    * Someone with a plain role and deny bindings sees everything but what those hide.
+    * Someone whose only access is rule-carrying allow bindings sees only what those match.
+    """
+    if principal.kind != "token" and principal.owner:
+        return None
+    plain = _plain_roles(principal, ws.tenant_id, ws.id)
+    if plain & UNRESTRICTABLE_ROLES:
+        return None
+    rules = [
+        b
+        for b in _bindings(principal)
+        if _applies(b, ws.tenant_id, ws.id) and has_rule(b) and b.workspace_id == ws.id
+    ]
+    denies = [_rule(b) for b in rules if b.effect == "deny"]
+    allows = [_rule(b) for b in rules if b.effect != "deny" and b.role == "viewer"]
+    if plain:
+        return {"default": "allow", "rules": denies} if denies else None
+    # No plain role: only what the allow rules name. With none, nothing (and `sees_workspace`
+    # is already false for such a principal).
+    return {"default": "deny", "rules": allows + denies}
+
+
+def is_restricted(principal: Principal, ws: models.Workspace) -> bool:
+    return scope_for(principal, ws) is not None
+
+
+def sees_all_of(principal: Principal, ws: models.Workspace) -> bool:
+    """Visible and unrestricted: the test for anything that shows more than the ledger (run
+    logs, the config, command output)."""
+    return sees_workspace(principal, ws) and not is_restricted(principal, ws)
 
 
 def authorize(
@@ -91,7 +172,7 @@ def sees_tenant(principal: Principal, tenant_id: str) -> bool:
     """True when the principal has any role in the tenant, on it or on one of its workspaces."""
     if roles_in(principal, tenant_id):
         return True
-    return any(b.tenant_id == tenant_id for b in _bindings(principal)) and (
+    return any(b.tenant_id == tenant_id and b.effect != "deny" for b in _bindings(principal)) and (
         principal.kind != "token" or principal.tenant_id == tenant_id
     )
 
@@ -207,8 +288,23 @@ async def require_workspace(  # NOSONAR(python:S7503)
     return workspace_for(principal, workspace_id)
 
 
-def allow(action: Action):
-    """A workspace route (`{workspace_id}` in the path): the caller may do `action` there."""
+RESTRICTED_DETAIL = "not available with restricted access to this project"
+
+
+def require_all_of(principal: Principal, ws: models.Workspace) -> None:
+    """403 for a principal who sees only part of the workspace (RFC 0181)."""
+    if is_restricted(principal, ws):
+        raise HTTPException(status_code=403, detail=RESTRICTED_DETAIL)
+
+
+def allow(action: Action, *, scoped: bool = False):
+    """A workspace route (`{workspace_id}` in the path): the caller may do `action` there.
+
+    `scoped=True` marks a route that reads knowledge only through the workspace's MCP server
+    with the caller's scope attached (`deps.mcp_for_workspace`), so it is safe for someone who
+    sees part of the workspace. Every other route refuses such a caller: it runs a command or
+    reads a file that shows more than the ledger, and nothing there would apply the scope.
+    """
 
     @_declares(action)
     async def dependency(  # NOSONAR(python:S7503)
@@ -217,8 +313,11 @@ def allow(action: Action):
         ws: models.Workspace = Depends(require_workspace),
     ) -> Principal:
         require(principal, action, ws.tenant_id, ws.id, request=request)
+        if not scoped:
+            require_all_of(principal, ws)
         return principal
 
+    setattr(dependency, SCOPED_ATTR, scoped)
     return dependency
 
 

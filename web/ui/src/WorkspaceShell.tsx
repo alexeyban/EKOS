@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { NavLink, Outlet, useOutletContext, useParams } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
 import { api } from "./api/client";
 
 export interface Me {
@@ -16,7 +16,12 @@ interface Workspace {
   id: string;
   name: string;
   roles?: string[];
+  restricted?: boolean;
 }
+
+// What someone who sees only part of a workspace can open (RFC 0181): the pages that read
+// through their scope. The API refuses the others for them.
+const RESTRICTED_TABS = new Set(["graph"]);
 
 // What the caller may do in the open workspace. Outside a workspace shell (or against an API
 // that sends no roles) the summary decides. These only hide controls; the API enforces.
@@ -44,6 +49,9 @@ export function WorkspaceShell() {
   const current = ws.data?.find((w) => w.id === id);
   const name = current?.name ?? id;
   const roles = current?.roles;
+  const restricted = current?.restricted === true;
+  const { pathname } = useLocation();
+  const onScopedPage = pathname.replace(/\/$/, "").endsWith("/graph");
   const scoped: Me = roles
     ? {
         ...me,
@@ -60,7 +68,7 @@ export function WorkspaceShell() {
         </NavLink>
         <span className="ws-nav-name">{name}</span>
         <span className="ws-nav-tabs">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !restricted || RESTRICTED_TABS.has(t.to)).map((t) => (
             <NavLink
               key={t.to}
               to={t.to ? `/w/${id}/${t.to}` : `/w/${id}`}
@@ -72,7 +80,19 @@ export function WorkspaceShell() {
           ))}
         </span>
       </nav>
-      <Outlet context={scoped} />
+      {restricted && !onScopedPage ? (
+        <section className="card">
+          <strong>Restricted access</strong>
+          <p className="muted">
+            You can see part of this project. The graph and its search show what you have access
+            to; the dashboard, run history, configuration, semantics and conflicts are for people
+            who see all of it.
+          </p>
+          <NavLink to={`/w/${id}/graph`}>Open the graph</NavLink>
+        </section>
+      ) : (
+        <Outlet context={scoped} />
+      )}
     </>
   );
 }

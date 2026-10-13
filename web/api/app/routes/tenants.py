@@ -4,6 +4,7 @@ its source roots, which need a platform owner."""
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -137,12 +138,22 @@ class BindingIn(BaseModel):
     token_id: str | None = None
     # Omitted: the whole tenant.
     workspace_id: str | None = None
+    # RFC 0181: a rule narrower than the workspace. `allow` with a rule shows only what it
+    # matches; `deny` hides what it matches from someone who otherwise sees the workspace.
+    effect: Literal["allow", "deny"] = "allow"
+    source: str | None = None
+    path: str | None = None
+    object: str | None = None
 
     @model_validator(mode="after")
     def _one_principal(self) -> BindingIn:
         if sum(v is not None for v in (self.email, self.group_id, self.token_id)) != 1:
             raise ValueError("give exactly one of `email`, `group_id` and `token_id`")
         return self
+
+    @property
+    def has_rule(self) -> bool:
+        return bool(self.source or self.path or self.object)
 
 
 def _user_for_email(email: str) -> models.User:
@@ -175,9 +186,73 @@ def _binding_out(b: models.RoleBinding) -> dict[str, Any]:
         "principal": label,
         "role": b.role,
         "workspace_id": b.workspace_id,
+        "effect": b.effect,
+        "source": b.source,
+        "path": b.path,
+        "object": b.object_id,
         "created_by": b.created_by,
         "created_at": _iso(b.created_at),
     }
+
+
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _check_rule(body: BindingIn) -> None:
+    """A rule (RFC 0181) is for one workspace and the `viewer` role; the `ekos` MCP server
+    parses it again and refuses the call if it is malformed, so this is for a clear message."""
+    if not body.has_rule:
+        if body.effect == "deny":
+            raise HTTPException(
+                status_code=400,
+                detail="a deny binding names what it hides: a source, a path or an object",
+            )
+        return
+    if body.workspace_id is None:
+        raise HTTPException(status_code=400, detail="a rule applies to one workspace")
+    if body.role != "viewer":
+        raise HTTPException(
+            status_code=400,
+            detail="a rule goes with the viewer role: reviewing, operating and administering "
+            "need the whole project",
+        )
+    if body.object is not None:
+        if body.source or body.path:
+            raise HTTPException(
+                status_code=400, detail="a rule names an object, or a source and path, not both"
+            )
+        if _UUID.fullmatch(body.object) is None:
+            raise HTTPException(status_code=400, detail="`object` is an object id (a UUID)")
+    if body.source is not None and not home.is_valid_name(body.source):
+        raise HTTPException(status_code=400, detail="`source` is a source name")
+    if body.path is not None and (
+        not body.path.strip() or len(body.path) > 500 or "\x00" in body.path
+    ):
+        raise HTTPException(status_code=400, detail="`path` is a pattern such as `secrets/**`")
+
+
+def _unrestrictable_note(kind: str, principal_id: str, body: BindingIn) -> str | None:
+    """Said when a rule is given to someone it cannot bind: an operator or admin of the same
+    workspace sees every source through the pipeline's own output."""
+    if not body.has_rule or body.workspace_id is None:
+        return None
+    ws = models.get_workspace(body.workspace_id)
+    if ws is None:
+        return None
+    held = {
+        b.role
+        for b in models.bindings_for([(kind, principal_id)])
+        if b.tenant_id == ws.tenant_id
+        and b.workspace_id in (None, ws.id)
+        and b.effect != "deny"
+        and not authz.has_rule(b)
+    }
+    if held & authz.UNRESTRICTABLE_ROLES:
+        return (
+            "this principal is an operator or admin of the workspace, and those roles see every "
+            "source; the rule has no effect while they hold one"
+        )
+    return None
 
 
 def _check_scope(tenant_id: str, role: str, workspace_id: str | None) -> None:
@@ -200,6 +275,7 @@ async def create_binding(
     tenant_id: str, body: BindingIn, principal: Principal = Depends(_ADMIN)
 ) -> dict:
     _check_scope(tenant_id, body.role, body.workspace_id)
+    _check_rule(body)
     if body.email is not None:
         kind, pid = "user", _user_for_email(body.email).id
     elif body.group_id is not None:
@@ -225,10 +301,18 @@ async def create_binding(
         principal_id=pid,
         role=body.role,
         workspace_id=body.workspace_id,
+        effect=body.effect,
+        source=body.source,
+        path=body.path.strip() if body.path else None,
+        object_id=body.object,
         created_by=principal.label,
     )
     models.add(row)
-    return _binding_out(row)
+    out = _binding_out(row)
+    note = _unrestrictable_note(kind, pid, body)
+    if note:
+        out["warning"] = note
+    return out
 
 
 @router.delete(

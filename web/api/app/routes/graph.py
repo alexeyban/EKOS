@@ -9,16 +9,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..authz import allow
 from ..deps import mcp_for_workspace
 from ..layout import compute_layout
-from ..mcp_client import EkosMcpClient, McpToolError
+from ..mcp_client import McpToolError, ScopedMcp
 from ..schemas import GraphOut, LayoutIn, LayoutOut
 from ._responses import NOT_FOUND
 
-router = APIRouter(prefix="/workspaces", tags=["graph"], dependencies=[Depends(allow("read"))])
+router = APIRouter(
+    prefix="/workspaces", tags=["graph"], dependencies=[Depends(allow("read", scoped=True))]
+)
 
 
 @router.get("/{workspace_id}/graph", response_model=GraphOut)
 async def graph_export(
-    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+    mcp: ScopedMcp = Depends(mcp_for_workspace),
     level: str = Query("object", pattern="^(object|aggregate)$"),
     group_by: str = Query("kind", pattern="^(kind|path_prefix)$"),
     kind: list[str] = Query(default=[]),
@@ -51,7 +53,7 @@ async def graph_export(
 @router.get("/{workspace_id}/objects/{object_id}", responses={404: NOT_FOUND})
 async def object_state(
     object_id: str,
-    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+    mcp: ScopedMcp = Depends(mcp_for_workspace),
     as_of: str | None = Query(None, description="RFC 3339 — reconstruct state as of then"),
 ) -> Any:
     """`ekos_state` — the object, its relationships, and the resolved evidence behind every
@@ -67,7 +69,7 @@ async def object_state(
 
 @router.get("/{workspace_id}/search")
 async def search(
-    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+    mcp: ScopedMcp = Depends(mcp_for_workspace),
     q: str = Query(min_length=1),
     limit: int = Query(20, ge=1, le=100),
 ) -> Any:
@@ -77,7 +79,7 @@ async def search(
 @router.get("/{workspace_id}/neighborhood/{object_id}")
 async def neighborhood(
     object_id: str,
-    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+    mcp: ScopedMcp = Depends(mcp_for_workspace),
     depth: int = Query(1, ge=1, le=3),
 ) -> Any:
     """`ekos_neighborhood` (RFC 0136 §2) — a real sub-graph (objects *and* relationships), not
@@ -89,7 +91,7 @@ async def neighborhood(
 @router.get("/{workspace_id}/impact/{object_id}", responses={404: NOT_FOUND})
 async def impact(
     object_id: str,
-    mcp: EkosMcpClient = Depends(mcp_for_workspace),
+    mcp: ScopedMcp = Depends(mcp_for_workspace),
     direction: str = Query("dependents", pattern="^(dependents|dependencies)$"),
     # 20 = `ekos_impact`'s own bound (mcp.rs IMPACT_MAX_HOPS, devlog_222): refuse here with a
     # 422 rather than forward a value the tool will reject.

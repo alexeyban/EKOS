@@ -26,6 +26,8 @@ export interface Workspace {
   tenant_id?: string;
   // The signed-in caller's roles on this workspace.
   roles?: RoleName[];
+  // RFC 0181: the caller sees only part of this workspace.
+  restricted?: boolean;
   server: ServerStatus | null;
 }
 

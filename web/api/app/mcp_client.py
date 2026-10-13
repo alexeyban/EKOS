@@ -20,6 +20,23 @@ class McpToolError(RuntimeError):
     """A `tools/call` succeeded at the protocol level but the tool reported `isError: true`."""
 
 
+# The key `ekos mcp serve` reads a call's scope from (`commands/mcp.rs::READ_SCOPE_META`).
+READ_SCOPE_META = "ekos/readScope"
+
+
+class ScopedMcp:
+    """An MCP client bound to one caller's read scope (RFC 0181): every call it makes carries
+    the scope, so a route cannot forget to pass it. `scope` is `None` for a caller who sees the
+    whole workspace."""
+
+    def __init__(self, client: EkosMcpClient, scope: dict[str, Any] | None) -> None:
+        self._client = client
+        self.scope = scope
+
+    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        return await self._client.call_tool(name, arguments, scope=self.scope)
+
+
 class EkosMcpClient:
     """One connection to one `ekos mcp serve --tcp`. Concurrent callers are serialised on an
     internal `asyncio.Lock` (one request/response on the wire at a time). The
@@ -79,16 +96,26 @@ class EkosMcpClient:
         result = await self._request_with_retry("tools/list", {})
         return list(result.get("tools", []))
 
-    async def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        scope: dict[str, Any] | None = None,
+    ) -> Any:
         """Call an MCP tool and return its parsed result.
+
+        `scope` is the caller's read scope (RFC 0181). It travels in `_meta`, where the server
+        reads it before it runs anything; the server shows only what the scope allows.
 
         This server returns tool output as ``{"content": [{"type": "text", "text": "<json>"}],
         "isError": bool}`` (``mcp.rs::tool_ok``). The text payload is itself a JSON document; it
         is parsed and returned. ``isError: true`` raises :class:`McpToolError`.
         """
-        result = await self._request_with_retry(
-            "tools/call", {"name": name, "arguments": arguments or {}}
-        )
+        params: dict[str, Any] = {"name": name, "arguments": arguments or {}}
+        if scope is not None:
+            params["_meta"] = {READ_SCOPE_META: scope}
+        result = await self._request_with_retry("tools/call", params)
         blocks = result.get("content") or []
         text = next((b.get("text", "") for b in blocks if b.get("type") == "text"), "")
         if result.get("isError"):

@@ -88,6 +88,12 @@ class RoleBinding(SQLModel, table=True):
     principal_id: str = Field(index=True)
     role: str  # "viewer" | "reviewer" | "operator" | "admin"
     workspace_id: str | None = None
+    # RFC 0181: a rule narrower than the workspace. With any of `source`, `path`, `object_id`
+    # set, an `allow` binding shows only what the rule matches and a `deny` binding hides it.
+    effect: str = "allow"  # "allow" | "deny"
+    source: str | None = None
+    path: str | None = None
+    object_id: str | None = None
     created_by: str = ""
     created_at: datetime = Field(default_factory=_now)
 
@@ -172,9 +178,22 @@ def _migration_1(conn) -> None:
         )
 
 
+def _migration_2(conn) -> None:
+    """RFC 0181: a role binding may carry a rule (effect, source, path, object)."""
+    columns = {c["name"] for c in inspect(conn).get_columns("rolebinding")}
+    for name, ddl in [
+        ("effect", "VARCHAR NOT NULL DEFAULT 'allow'"),
+        ("source", "VARCHAR"),
+        ("path", "VARCHAR"),
+        ("object_id", "VARCHAR"),
+    ]:
+        if name not in columns:
+            conn.execute(text(f"ALTER TABLE rolebinding ADD COLUMN {name} {ddl}"))
+
+
 # Ordered. Migration N brings a database at version N-1 to version N. Never edit one that has
 # shipped; add the next.
-MIGRATIONS = [_migration_1]
+MIGRATIONS = [_migration_1, _migration_2]
 
 
 def _migrate(engine) -> None:

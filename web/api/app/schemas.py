@@ -31,6 +31,8 @@ class WorkspaceOut(BaseModel):
     tenant_id: str = "default"
     # The caller's roles on this workspace (RFC 0180), so the UI can hide what they cannot do.
     roles: list[str] = []
+    # RFC 0181: the caller sees only part of this workspace; most of its pages are refused.
+    restricted: bool = False
     server: ServerStatus | None = None
 
 

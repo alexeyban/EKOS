@@ -11,6 +11,7 @@
 
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
+use ekos_ledger::scope::{ReadScope, ScopedStore};
 use ekos_ledger::{
     FactLedger, KnowledgeStore, Ledger, PartitionDimension, PartitionKey, PartitionedLedger,
     TimeBucket,
@@ -166,6 +167,32 @@ fn with_segment_backend_url(_ledger: PartitionedLedger, url: String) -> Result<P
 
 /// Open the workspace's knowledge store with backend auto-detection.
 pub fn open_store(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    scoped(config, open_store_unscoped(config, cwd)?)
+}
+
+/// RFC 0181: the scope the process was started with, parsed. `None` when there is none.
+pub fn process_scope(config: &EkosConfig) -> Result<Option<ReadScope>> {
+    match &config.read_scope {
+        Some(json) => Ok(Some(
+            ReadScope::from_json(json).map_err(|e| anyhow::anyhow!("--read-scope: {e}"))?,
+        )),
+        None => Ok(None),
+    }
+}
+
+/// Wrap `store` in the process's read scope, when there is one. Every store the CLI opens goes
+/// through here, so a command given `--read-scope` cannot read around it.
+fn scoped(config: &EkosConfig, store: Box<dyn KnowledgeStore>) -> Result<Box<dyn KnowledgeStore>> {
+    match process_scope(config)? {
+        Some(scope) => Ok(Box::new(
+            ScopedStore::with_scopes(store, &[scope])
+                .map_err(|e| anyhow::anyhow!("--read-scope: {e}"))?,
+        )),
+        None => Ok(store),
+    }
+}
+
+fn open_store_unscoped(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
     if uses_distributed(config) {
         return Ok(Box::new(build_distributed(config)?));
     }
@@ -221,6 +248,13 @@ pub fn open_store(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeSt
 /// `open_store` on a truly fresh workspace at the same moment already had
 /// this exact narrow bootstrap race before this RFC.
 pub fn open_store_read_only(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
+    scoped(config, open_store_read_only_unscoped(config, cwd)?)
+}
+
+fn open_store_read_only_unscoped(
+    config: &EkosConfig,
+    cwd: &Path,
+) -> Result<Box<dyn KnowledgeStore>> {
     if uses_distributed(config) {
         return Ok(Box::new(build_distributed(config)?));
     }

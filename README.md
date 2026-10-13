@@ -430,9 +430,50 @@ session secret, static tokens stop working, and access comes only from granted r
 the earlier behaviour remains for the `default` tenant: the two static tokens work (the write
 token acts as a platform owner), and under OIDC every signed-in user can read `default`.
 
-Not built yet: access rules narrower than a project (a source, a path, an object), and an MCP
-endpoint that accepts an API token; an agent's token works against the console's HTTP API only.
-See [RFC 0180](ekos/docs/rfcs/0180-tenants-users-groups-roles.md).
+Not built yet: an MCP endpoint that accepts an API token; an agent's token works against the
+console's HTTP API only. See [RFC 0180](ekos/docs/rfcs/0180-tenants-users-groups-roles.md).
+
+### Access inside a project (RFC 0181)
+
+A project is one ledger over several sources, so limits inside a project are applied when the
+ledger is read. A viewer can be limited to part of one project, or have part of it hidden:
+
+- **only** a source, or a path pattern in a source (`src/**`), or one object;
+- **all except** a source, a path pattern (`secrets/**`), or an object.
+
+In the Admin page, grant `viewer` on one workspace and choose "only…" or "all except…".
+
+What a limited person gets:
+
+- The graph, search, object pages, neighbourhoods and impact, filtered. A hidden object is not
+  found, the same as one that does not exist. A relationship shows only when both its ends do.
+  Counts cover only what is visible.
+- Nothing else in that project: the dashboard, run history and logs, the configuration,
+  semantics and conflicts answer 403. Those show more than the ledger (file names in a log, a
+  freshness report), and nothing there could apply the limit.
+- Anything the compiler could not attribute to a source is hidden from them: commit authors,
+  crates, rollups, business-semantics items, conflicts.
+
+Operators, admins and platform owners cannot be limited: running the pipeline shows every
+source. A rule hides objects; it does not rewrite the text of a visible document that mentions
+a hidden one.
+
+The same filter is available from the command line, for `ekos mcp serve`, `ekos ekl` and
+`ekos query`:
+
+```bash
+cat > scope.json <<'JSON'
+{"default": "allow", "rules": [{"effect": "deny", "source": "payments-api", "path": "secrets/**"}]}
+JSON
+ekos --project shop --read-scope scope.json mcp serve
+ekos --project shop --read-scope scope.json ekl "FIND Object WHERE kind = 'Table'"
+```
+
+Under a restricting scope the MCP server offers the tools that read only through the ledger
+(`ekos_search`, `ekos_query`, `ekos_retrieve`, `ekos_ekl`, `ekos_neighborhood`, `ekos_state`,
+`ekos_dependents`, `ekos_impact`, `ekos_diff`, `ekos_graph_export`) and refuses the rest. Any
+other command refuses `--read-scope`. A local `ekos` run without a scope is unrestricted: that
+user already has the files. See [RFC 0181](ekos/docs/rfcs/0181-read-scope.md).
 
 ### From source
 

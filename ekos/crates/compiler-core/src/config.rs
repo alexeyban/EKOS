@@ -54,6 +54,11 @@ pub struct EkosConfig {
     /// read from or written to a file.
     #[serde(skip)]
     pub location: Option<ProjectLocation>,
+    /// RFC 0181: the read scope this process was started with (`--read-scope`), as JSON. Every
+    /// store the CLI opens is wrapped in it. Never read from or written to a file: a scope is
+    /// given by whoever starts the process, not by the project.
+    #[serde(skip)]
+    pub read_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -950,6 +955,7 @@ impl Default for EkosConfig {
             conflicts: ConflictsConfig::default(),
             sources: Vec::new(),
             location: None,
+            read_scope: None,
         }
     }
 }

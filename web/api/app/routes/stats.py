@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from .. import home, models, readproc
 from ..authz import allow
 from ..deps import mcp_for_workspace, require_workspace
-from ..mcp_client import EkosMcpClient
+from ..mcp_client import ScopedMcp
 from ..schemas import (
     DoctorOut,
     KindCount,
@@ -25,14 +25,25 @@ from ..schemas import (
 from ..settings import Settings, get_settings
 from ._responses import BAD_GATEWAY
 
-router = APIRouter(prefix="/workspaces", tags=["stats"], dependencies=[Depends(allow("read"))])
+router = APIRouter(prefix="/workspaces", tags=["stats"])
+
+# Per route, not on the router: only `kinds` goes through the scoped MCP client (RFC 0181). The
+# others run `ekos status` / `doctor` / `ledger timeline` or read the query log, which show the
+# whole project.
+_READ = allow("read")
+_READ_SCOPED = allow("read", scoped=True)
 
 
 def _bin(settings: Settings) -> str:
     return settings.ekos_bin
 
 
-@router.get("/{workspace_id}/stats", response_model=StatusOut, responses={502: BAD_GATEWAY})
+@router.get(
+    "/{workspace_id}/stats",
+    response_model=StatusOut,
+    dependencies=[Depends(_READ)],
+    responses={502: BAD_GATEWAY},
+)
 async def stats(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -44,7 +55,12 @@ async def stats(
     return StatusOut.model_validate(payload)
 
 
-@router.get("/{workspace_id}/health", response_model=DoctorOut, responses={502: BAD_GATEWAY})
+@router.get(
+    "/{workspace_id}/health",
+    response_model=DoctorOut,
+    dependencies=[Depends(_READ)],
+    responses={502: BAD_GATEWAY},
+)
 async def health(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -57,7 +73,10 @@ async def health(
 
 
 @router.get(
-    "/{workspace_id}/stats/timeline", response_model=TimelineOut, responses={502: BAD_GATEWAY}
+    "/{workspace_id}/stats/timeline",
+    response_model=TimelineOut,
+    dependencies=[Depends(_READ)],
+    responses={502: BAD_GATEWAY},
 )
 async def timeline(
     ws: models.Workspace = Depends(require_workspace),
@@ -75,8 +94,12 @@ async def timeline(
     return TimelineOut.model_validate(payload)
 
 
-@router.get("/{workspace_id}/stats/kinds", response_model=list[KindCount])
-async def kinds(mcp: EkosMcpClient = Depends(mcp_for_workspace)) -> list[KindCount]:
+@router.get(
+    "/{workspace_id}/stats/kinds",
+    response_model=list[KindCount],
+    dependencies=[Depends(_READ_SCOPED)],
+)
+async def kinds(mcp: ScopedMcp = Depends(mcp_for_workspace)) -> list[KindCount]:
     result = await mcp.call_tool("ekos_ekl", {"query": "FIND Object COUNT GROUP BY kind"})
     rows = result.get("rows", []) if isinstance(result, dict) else []
     out: list[KindCount] = []
@@ -90,7 +113,9 @@ async def kinds(mcp: EkosMcpClient = Depends(mcp_for_workspace)) -> list[KindCou
     return out
 
 
-@router.get("/{workspace_id}/stats/queries", response_model=QueryStats)
+@router.get(
+    "/{workspace_id}/stats/queries", response_model=QueryStats, dependencies=[Depends(_READ)]
+)
 async def queries(
     ws: models.Workspace = Depends(require_workspace),
     limit: int = Query(2000, ge=1, le=50_000),

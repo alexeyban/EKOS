@@ -32,3 +32,4 @@ sha2.workspace = true
 tantivy.workspace = true
 memmap2.workspace = true
 fs4.workspace = true
+glob.workspace = true

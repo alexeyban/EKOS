@@ -6502,8 +6502,16 @@ LinkML; generation stays in LinkML.
       tenant (platform actions, sign-ins); token rate limiting; the image has not been rebuilt
       and run with RFC 0180; a real OIDC provider has not been exercised end to end (tests sign
       the session cookie themselves)
-- [ ] RFC 0181 — read scope: allow / deny by source, path pattern or object, enforced in
-      `Runtime`; leak suite
+- [x] RFC 0181 — read scope: allow / deny by source, path pattern or object, enforced in a
+      store wrapper (`ekos_ledger::scope::ScopedStore`); `--read-scope`; per-call scope over
+      MCP; scoped / refused tool lists; console rule bindings and scoped routes; leak suite
+      with mutation checks (devlog_262)
+- [ ] RFC 0181 remainder: `source` on derived objects (rollups, semantics, conflicts) so a
+      restricted reader can see the ones derived only from what they see; a restricted
+      reader's dashboard, semantics and conflicts; `--read-scope` on `ekos ask` and
+      `docs generate`; `ekos_transformation_*` not yet checked against a scope (refused);
+      rules by object kind; the leak suite has no edge between two sources (the pipeline
+      links nothing across them in the fixture)
 - [ ] RFC 0182 — MCP gateway on the console, per-tenant and per-project, role-filtered tools
 - [ ] RFC 0183 — backup / restore, per-tenant model credentials, deployment guide
 - [ ] Moving an in-place `./.ekos` workspace into the home is a manual copy; no command does it

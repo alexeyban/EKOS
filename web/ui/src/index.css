@@ -1069,3 +1069,8 @@ textarea.lm-yaml {
   max-height: 24rem;
   overflow: auto;
 }
+
+.admin-rule {
+  display: block;
+  font-size: 0.8rem;
+}

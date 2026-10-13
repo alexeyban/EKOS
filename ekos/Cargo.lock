@@ -1169,6 +1169,7 @@ dependencies = [
  "ekos-kir",
  "ekos-segment-backend",
  "fs4",
+ "glob",
  "hex",
  "memmap2",
  "rusqlite",

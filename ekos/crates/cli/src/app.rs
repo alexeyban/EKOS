@@ -30,6 +30,11 @@ struct Cli {
     #[arg(long, global = true, value_name = "NAME")]
     tenant: Option<String>,
 
+    /// Show only what this read scope allows: a JSON file of allow / deny rules by source, path
+    /// or object (also $EKOS_READ_SCOPE). For `mcp serve`, `ekl` and `query` — RFC 0181
+    #[arg(long, global = true, value_name = "FILE")]
+    read_scope: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -1294,6 +1299,40 @@ fn resolve_config_path(
         .unwrap_or_else(|| PathBuf::from("ekos.toml"))
 }
 
+/// RFC 0181: load the read scope the process was started with into the config, from where every
+/// store the command opens picks it up.
+///
+/// Only commands that read knowledge solely through the store accept one. Any other command also
+/// reads files beside the ledger (the freshness report, conflict counts, the source tree itself)
+/// which no store wrapper filters, so a scope there would be a promise the command cannot keep.
+fn with_read_scope(
+    mut config: ekos_compiler_core::EkosConfig,
+    command: &Commands,
+    file: Option<PathBuf>,
+    invoked_from: &std::path::Path,
+) -> Result<ekos_compiler_core::EkosConfig> {
+    let Some(file) = file else {
+        return Ok(config);
+    };
+    if !matches!(
+        command,
+        Commands::Mcp { .. } | Commands::Ekl { .. } | Commands::Query { .. }
+    ) {
+        bail!(
+            "--read-scope applies to `ekos mcp serve`, `ekos ekl` and `ekos query` only: other \
+             commands read more than the ledger, and a scope could not be enforced on them"
+        );
+    }
+    let path = invoked_from.join(file);
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading the read scope {}", path.display()))?;
+    // Parsed here so a bad scope stops the command before anything is read.
+    ekos_ledger::scope::ReadScope::from_json(&text)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+    config.read_scope = Some(text);
+    Ok(config)
+}
+
 /// RFC 0178: what cannot be combined with `--project`. Each would point the command at a second
 /// config or workspace, or write a config into the source tree.
 fn refuse_with_project(
@@ -1466,6 +1505,14 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             (config, std::env::current_dir()?, config_path, env_workspace)
         }
     };
+
+    let config = with_read_scope(
+        config,
+        &command,
+        cli.read_scope
+            .or_else(|| std::env::var_os("EKOS_READ_SCOPE").map(PathBuf::from)),
+        &invoked_from,
+    )?;
 
     // The MCP server owns stdout for protocol frames; the machine-readable `--json` / graph-export
     // commands own stdout for the document a consumer parses. Both send logs to stderr so nothing

@@ -19,6 +19,23 @@ interface Binding {
   principal: string;
   role: RoleName;
   workspace_id: string | null;
+  // RFC 0181: a rule narrower than the workspace.
+  effect?: "allow" | "deny";
+  source?: string | null;
+  path?: string | null;
+  object?: string | null;
+  warning?: string;
+}
+
+// How a rule reads in the table: "only source payments, path src/**" or "except path secrets/**".
+function describeRule(b: Binding): string | null {
+  const parts = [
+    b.source ? `source ${b.source}` : null,
+    b.path ? `path ${b.path}` : null,
+    b.object ? `object ${b.object}` : null,
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  return `${b.effect === "deny" ? "except" : "only"} ${parts.join(", ")}`;
 }
 
 interface Group {
@@ -236,17 +253,28 @@ function Bindings({ tenant }: { tenant: string }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<RoleName>("viewer");
   const [workspace, setWorkspace] = useState("");
+  // RFC 0181: limit a viewer to part of one workspace, or hide part of it from them.
+  const [limit, setLimit] = useState<"" | "allow" | "deny">("");
+  const [source, setSource] = useState("");
+  const [path, setPath] = useState("");
+  const canLimit = role === "viewer" && workspace !== "";
+  const rule = canLimit && limit && (source || path);
 
   const add = useMutation({
     mutationFn: () =>
-      apiPost(`/tenants/${tenant}/bindings`, {
+      apiPost<Binding>(`/tenants/${tenant}/bindings`, {
         email,
         role,
         ...(workspace ? { workspace_id: workspace } : {}),
+        ...(rule
+          ? { effect: limit, ...(source ? { source } : {}), ...(path ? { path } : {}) }
+          : {}),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: key });
       setEmail("");
+      setSource("");
+      setPath("");
     },
   });
   const remove = useMutation({
@@ -279,7 +307,10 @@ function Bindings({ tenant }: { tenant: string }) {
                   )}
                 </td>
                 <td>{b.role}</td>
-                <td>{b.workspace_id ?? "whole tenant"}</td>
+                <td>
+                  {b.workspace_id ?? "whole tenant"}
+                  {describeRule(b) && <span className="muted admin-rule">{describeRule(b)}</span>}
+                </td>
                 <td>
                   <button
                     className="linkish danger"
@@ -320,10 +351,47 @@ function Bindings({ tenant }: { tenant: string }) {
         {role !== "admin" && (
           <WorkspaceSelect tenant={tenant} value={workspace} onChange={setWorkspace} />
         )}
-        <button type="submit" disabled={add.isPending}>
+        {canLimit && (
+          <>
+            <select
+              aria-label="limit"
+              value={limit}
+              onChange={(e) => setLimit(e.target.value as "" | "allow" | "deny")}
+            >
+              <option value="">all of it</option>
+              <option value="allow">only…</option>
+              <option value="deny">all except…</option>
+            </select>
+            {limit && (
+              <>
+                <input
+                  placeholder="source name"
+                  aria-label="source"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                />
+                <input
+                  placeholder="path, e.g. secrets/**"
+                  aria-label="path"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                />
+              </>
+            )}
+          </>
+        )}
+        <button type="submit" disabled={add.isPending || (canLimit && limit !== "" && !rule)}>
           Grant
         </button>
       </form>
+      {canLimit && limit && (
+        <p className="muted">
+          Someone limited this way sees the graph and search only, filtered to what the rule
+          leaves. Operators and admins cannot be limited: running the pipeline shows every
+          source.
+        </p>
+      )}
+      {add.data?.warning && <p className="err">{add.data.warning}</p>}
       <p className="muted">
         {role}: {ROLE_HELP[role]}. A person who has not signed in yet gets the role at their first
         sign-in with this address.

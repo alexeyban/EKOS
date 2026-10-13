@@ -511,6 +511,199 @@ def test_the_audit_log_records_allowed_and_denied_changes(world: dict[str, As]) 
     assert world["vic"].get("/api/tenants/acme/audit").status_code == 403
 
 
+# ── RFC 0181: a restricted viewer ────────────────────────────────────────────
+
+
+class RecordingMcp:
+    """Stands in for the workspace's MCP connection and records the scope each call carried."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict | None]] = []
+
+    async def call_tool(self, name: str, arguments=None, *, scope=None):
+        self.calls.append((name, scope))
+        if name == "ekos_ekl":
+            return {"rows": []}
+        if name == "ekos_search":
+            return []
+        return {
+            "schema_version": 1,
+            "level": "object",
+            "as_of": None,
+            "counts": {},
+            "truncated": {},
+            "nodes": [],
+            "edges": [],
+            "kind_index": [],
+            "rel_kind_index": [],
+        }
+
+
+@pytest.fixture
+def recorder(client: TestClient) -> RecordingMcp:
+    rec = RecordingMcp()
+    client.app.state.supervisor.client_for = lambda _workspace_id: rec
+    return rec
+
+
+def _grant_rule(world: dict[str, As], email: str, **rule) -> dict:
+    body = {"email": email, "role": "viewer", "workspace_id": "acme.api", **rule}
+    r = world["ann"].post("/api/tenants/acme/bindings", body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_a_restricted_viewer_reads_through_the_scope_and_nothing_else(
+    world: dict[str, As], client: TestClient, recorder: RecordingMcp
+) -> None:
+    _grant_rule(world, "pia@partner.io", source="payments")
+    _grant_rule(world, "pia@partner.io", effect="deny", source="payments", path="secrets/**")
+    pia = _person(client, "pia@partner.io")
+
+    listed = pia.get("/api/workspaces").json()
+    assert [(w["id"], w["roles"], w["restricted"]) for w in listed] == [
+        ("acme.api", ["viewer"], True)
+    ]
+
+    # The scoped routes answer, and every call carried her scope.
+    expected = {
+        "default": "deny",
+        "rules": [
+            {"effect": "allow", "source": "payments"},
+            {"effect": "deny", "source": "payments", "path": "secrets/**"},
+        ],
+    }
+    for url in [
+        "/api/workspaces/acme.api/graph",
+        "/api/workspaces/acme.api/search?q=orders",
+        "/api/workspaces/acme.api/stats/kinds",
+    ]:
+        assert pia.get(url).status_code == 200, url
+    assert [scope for _tool, scope in recorder.calls] == [expected, expected, expected]
+
+    # Everything that shows more than the ledger refuses her.
+    for method, url in [
+        ("GET", "/api/workspaces/acme.api/stats"),
+        ("GET", "/api/workspaces/acme.api/health"),
+        ("GET", "/api/workspaces/acme.api/stats/timeline"),
+        ("GET", "/api/workspaces/acme.api/stats/queries"),
+        ("GET", "/api/workspaces/acme.api/config"),
+        ("POST", "/api/workspaces/acme.api/config/preview-scan"),
+        ("GET", "/api/workspaces/acme.api/evals/reports"),
+        ("GET", "/api/workspaces/acme.api/semantics/items"),
+        ("GET", "/api/workspaces/acme.api/semantics/linkml/yaml"),
+        ("GET", "/api/workspaces/acme.api/conflicts"),
+        ("POST", "/api/workspaces/acme.api/commands/status"),
+    ]:
+        r = pia.request(method, url)
+        assert r.status_code == 403, (method, url, r.text)
+        assert "restricted access" in r.json()["detail"]
+
+    # Runs and their logs name the files a run read.
+    run_id = world["olga"].post("/api/workspaces/acme.api/commands/build").json()["run_id"]
+    assert pia.get("/api/runs").json() == []
+    assert pia.get(f"/api/runs/{run_id}").status_code == 404
+    assert pia.get(f"/api/runs/{run_id}/logs").status_code == 404
+    assert pia.get("/api/schedules").json() == []
+
+
+def test_an_unrestricted_viewer_sends_no_scope(
+    world: dict[str, As], recorder: RecordingMcp
+) -> None:
+    assert world["vic"].get("/api/workspaces/acme.api/graph").status_code == 200
+    assert recorder.calls == [("ekos_graph_export", None)]
+    assert world["vic"].get("/api/workspaces").json()[0]["restricted"] is False
+
+
+def test_a_deny_on_a_plain_viewer_restricts_them(
+    world: dict[str, As], recorder: RecordingMcp
+) -> None:
+    vic = world["vic"]
+    assert vic.get("/api/workspaces/acme.api/config").status_code == 200
+    _grant_rule(world, "vic@acme.io", effect="deny", path="secrets/**")
+    assert vic.get("/api/workspaces/acme.api/config").status_code == 403
+    assert vic.get("/api/workspaces/acme.api/graph").status_code == 200
+    assert recorder.calls[-1][1] == {
+        "default": "allow",
+        "rules": [{"effect": "deny", "path": "secrets/**"}],
+    }
+
+
+def test_a_restricted_reviewer_cannot_review(world: dict[str, As]) -> None:
+    _grant_rule(world, "rita@acme.io", effect="deny", source="payments")
+    url = "/api/workspaces/acme.api/semantics/review-bulk"
+    r = world["rita"].post(url, {"action": "confirm", "ids": []})
+    assert r.status_code == 403 and "restricted access" in r.json()["detail"]
+
+
+def test_a_rule_does_not_bind_an_operator_and_the_api_says_so(
+    world: dict[str, As], recorder: RecordingMcp
+) -> None:
+    made = _grant_rule(world, "olga@acme.io", effect="deny", source="payments")
+    assert "no effect" in made["warning"]
+    assert world["olga"].get("/api/workspaces/acme.api/config").status_code == 200
+    world["olga"].get("/api/workspaces/acme.api/graph")
+    assert recorder.calls[-1][1] is None
+    # No warning for someone it does bind.
+    assert "warning" not in _grant_rule(world, "vic@acme.io", effect="deny", source="payments")
+
+
+def test_rule_bindings_are_validated(world: dict[str, As]) -> None:
+    ann = world["ann"]
+
+    def post(**body):
+        return ann.post("/api/tenants/acme/bindings", {"email": "x@acme.io", **body})
+
+    base = {"role": "viewer", "workspace_id": "acme.api"}
+    assert post(**base, effect="deny").status_code == 400  # hides nothing in particular
+    assert post(role="viewer", source="payments").status_code == 400  # no workspace
+    assert post(**{**base, "role": "operator"}, source="payments").status_code == 400
+    assert post(**{**base, "role": "reviewer"}, source="payments").status_code == 400
+    assert post(**base, source="Not A Name").status_code == 400
+    assert post(**base, object="not-a-uuid").status_code == 400
+    oid = "692f6b3a-52d1-58fc-ad6a-ed624ef3d86f"
+    assert post(**base, object=oid, source="payments").status_code == 400
+    assert post(**base, path="   ").status_code == 400
+    assert post(**base, effect="maybe", source="payments").status_code == 422
+
+    ok = post(**base, source="payments", path="src/**")
+    assert ok.status_code == 201
+    assert (ok.json()["effect"], ok.json()["source"], ok.json()["path"]) == (
+        "allow",
+        "payments",
+        "src/**",
+    )
+    assert post(**base, object=oid).status_code == 201
+
+
+def test_a_token_can_be_restricted_too(
+    world: dict[str, As], client: TestClient, recorder: RecordingMcp
+) -> None:
+    ann = world["ann"]
+    made = ann.post(
+        "/api/tenants/acme/tokens",
+        {"name": "partner", "role": "viewer", "workspace_id": "acme.api"},
+    ).json()
+    r = ann.post(
+        "/api/tenants/acme/bindings",
+        {
+            "token_id": made["id"],
+            "role": "viewer",
+            "workspace_id": "acme.api",
+            "effect": "deny",
+            "source": "payments",
+        },
+    )
+    assert r.status_code == 201, r.text
+    bot = As(client, bearer=made["token"])
+    assert bot.get("/api/workspaces/acme.api/config").status_code == 403
+    assert bot.get("/api/workspaces/acme.api/graph").status_code == 200
+    assert recorder.calls[-1][1] == {
+        "default": "allow",
+        "rules": [{"effect": "deny", "source": "payments"}],
+    }
+
+
 # ── migration and production mode ────────────────────────────────────────────
 
 
@@ -544,6 +737,28 @@ def test_a_database_from_before_this_rfc_is_upgraded(tmp_path: Path) -> None:
     assert [w.id for w in models.list_workspaces()] == ["self"]
     version = sqlite3.connect(db).execute("SELECT version FROM schemaversion").fetchone()[0]
     assert version == len(models.MIGRATIONS)
+
+
+def test_a_database_from_rfc_0180_gains_the_rule_columns(tmp_path: Path) -> None:
+    db = tmp_path / "v1.db"
+    models.init_engine(str(db))
+    con = sqlite3.connect(db)
+    # Back to how RFC 0180 left it: no rule columns, version 1, one binding.
+    for column in ("effect", "source", "path", "object_id"):
+        con.execute(f"ALTER TABLE rolebinding DROP COLUMN {column}")
+    con.execute("UPDATE schemaversion SET version = 1")
+    con.execute(
+        "INSERT INTO rolebinding (id, tenant_id, principal_kind, principal_id, role, "
+        "workspace_id, created_by, created_at) "
+        "VALUES ('b1', 'default', 'user', 'u1', 'viewer', NULL, '', '2026-10-13 10:00:00')"
+    )
+    con.commit()
+    con.close()
+
+    models.init_engine(str(db))
+    row = models.get_binding("b1")
+    assert row is not None and row.effect == "allow"
+    assert (row.source, row.path, row.object_id) == (None, None, None)
 
 
 def test_a_new_database_starts_at_the_latest_version(tmp_path: Path) -> None:

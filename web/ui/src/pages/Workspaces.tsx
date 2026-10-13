@@ -51,6 +51,11 @@ export function Workspaces() {
                   {w.tenant_id}
                 </span>
               )}
+              {w.restricted && (
+                <span className="chip warn" title="you see part of this project">
+                  restricted
+                </span>
+              )}
               {w.roles && w.roles.length > 0 && (
                 <span className="muted ws-roles" title="your roles here">
                   {w.roles.join(", ")}

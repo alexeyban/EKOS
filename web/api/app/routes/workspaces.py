@@ -35,6 +35,7 @@ def _out(ws: models.Workspace, supervisor: McpSupervisor, principal: Principal) 
         path=ws.path,
         tenant_id=ws.tenant_id,
         roles=sorted(authz.roles_in(principal, ws.tenant_id, ws.id)),
+        restricted=authz.is_restricted(principal, ws),
         server=server,
     )
 

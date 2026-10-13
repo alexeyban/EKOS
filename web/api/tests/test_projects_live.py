@@ -192,3 +192,85 @@ def test_a_config_save_pointing_outside_the_root_is_refused(
     # An unrelated edit still saves.
     ok = client.put("/api/workspaces/shop/config", headers=WAUTH, json={"raw": raw + "\n# note\n"})
     assert ok.status_code == 200, ok.text
+
+
+# ── RFC 0181, end to end: console → MCP server → store filter ────────────────
+
+
+def _pipeline(client: TestClient, workspace_id: str) -> None:
+    run = client.post(f"/api/workspaces/{workspace_id}/commands/pipeline", headers=WAUTH, json={})
+    assert run.status_code == 200, run.text
+    run_id = run.json()["run_id"]
+    deadline = time.time() + 180
+    state = ""
+    while time.time() < deadline:
+        state = client.get(f"/api/runs/{run_id}", headers=AUTH).json()["status"]
+        if state not in ("queued", "running"):
+            break
+        time.sleep(0.3)
+    assert state == "succeeded", state
+
+
+def test_a_restricted_token_does_not_get_what_its_rule_hides(
+    client: TestClient, env: Path, sources: Path
+) -> None:
+    (sources / "shop" / "secrets").mkdir()
+    (sources / "shop" / "secrets" / "payroll.sql").write_text(
+        "CREATE TABLE payroll_zebra (id SERIAL PRIMARY KEY, salary NUMERIC);\n"
+    )
+    assert _create(client, sources).status_code == 201
+    _pipeline(client, "shop")
+    _wait_ready(client, "shop")
+
+    def names(headers: dict, query: str) -> str:
+        r = client.get(f"/api/workspaces/shop/search?q={query}", headers=headers)
+        assert r.status_code == 200, r.text
+        return r.text
+
+    # The owner sees both tables.
+    assert "payroll_zebra" in names(WAUTH, "payroll_zebra")
+    assert "orders" in names(WAUTH, "orders")
+
+    made = client.post(
+        "/api/tenants/default/tokens",
+        headers=WAUTH,
+        json={"name": "partner", "role": "viewer", "workspace_id": "shop"},
+    )
+    assert made.status_code == 201, made.text
+    bot = {"Authorization": f"Bearer {made.json()['token']}"}
+    # Before the rule the token sees everything a viewer does.
+    assert "payroll_zebra" in names(bot, "payroll_zebra")
+
+    rule = client.post(
+        "/api/tenants/default/bindings",
+        headers=WAUTH,
+        json={
+            "token_id": made.json()["id"],
+            "role": "viewer",
+            "workspace_id": "shop",
+            "effect": "deny",
+            "path": "secrets/**",
+        },
+    )
+    assert rule.status_code == 201, rule.text
+
+    # The rule takes effect on the next request, through the real MCP server.
+    hidden = names(bot, "payroll_zebra")
+    assert "payroll" not in hidden and "secrets/" not in hidden, hidden
+    assert "orders" in names(bot, "orders")
+
+    graph = client.get("/api/workspaces/shop/graph", headers=bot)
+    assert graph.status_code == 200, graph.text
+    assert "payroll" not in graph.text and "orders" in graph.text
+    assert "payroll" in client.get("/api/workspaces/shop/graph", headers=WAUTH).text
+
+    kinds = client.get("/api/workspaces/shop/stats/kinds", headers=bot).json()
+    all_kinds = client.get("/api/workspaces/shop/stats/kinds", headers=WAUTH).json()
+    count = lambda rows: sum(r["count"] for r in rows)  # noqa: E731
+    assert 0 < count(kinds) < count(all_kinds)
+
+    # And the pages that show more than the ledger are closed to it.
+    assert client.get("/api/workspaces/shop/stats", headers=bot).status_code == 403
+    assert client.get("/api/workspaces/shop/config", headers=bot).status_code == 403
+    # The owner's next call is unaffected by the token's scope.
+    assert "payroll_zebra" in names(WAUTH, "payroll_zebra")

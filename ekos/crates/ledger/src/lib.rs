@@ -4,6 +4,7 @@ pub mod index;
 pub mod partitioned;
 pub mod provenance;
 pub mod retrieval;
+pub mod scope;
 pub mod search;
 pub mod segment;
 pub mod vector;
@@ -70,6 +71,9 @@ pub enum LedgerError {
     /// silently discarding one.
     #[error("cannot write: ledger opened read-only at {0}")]
     ReadOnly(String),
+    /// RFC 0181: asked of a store that is showing a restricted reader part of the ledger.
+    #[error("not available under a read scope: {0}")]
+    ReadScope(String),
     /// RFC 0104 Phase 1: another writable process already holds
     /// `FactLedger`'s real, designed cross-process `write.lock` — a fast,
     /// clear failure at open time, rather than an eventual `LockBusy`

@@ -29,15 +29,23 @@ def user(uid: str = "u1", **kw) -> Principal:
     return Principal(kind="user", id=uid, subject=f"sub-{uid}", email=f"{uid}@x.io", **kw)
 
 
-def bind(kind: str, pid: str, role: str, tenant: str = "acme", workspace: str | None = None):
+def bind(
+    kind: str,
+    pid: str,
+    role: str,
+    tenant: str = "acme",
+    workspace: str | None = None,
+    **rule,
+):
     models.add(
         models.RoleBinding(
-            id=f"b-{kind}-{pid}-{role}-{workspace}",
+            id=f"b-{kind}-{pid}-{role}-{workspace}-{sorted(rule.items())}",
             tenant_id=tenant,
             principal_kind=kind,
             principal_id=pid,
             role=role,
             workspace_id=workspace,
+            **rule,
         )
     )
 
@@ -189,3 +197,136 @@ def test_an_unknown_role_in_a_binding_grants_nothing() -> None:
     p = user()
     bind("user", "u1", "superuser")
     assert can(p, "acme", "acme.api") == set()
+
+
+# ── RFC 0181: read scope from bindings ───────────────────────────────────────
+
+
+def ws(workspace_id: str = "acme.api") -> models.Workspace:
+    return models.get_workspace(workspace_id)
+
+
+def test_a_plain_role_is_unrestricted() -> None:
+    p = user()
+    bind("user", "u1", "viewer")
+    assert authz.scope_for(p, ws()) is None
+    assert not authz.is_restricted(p, ws())
+
+
+def test_only_rule_bindings_make_a_restricted_viewer() -> None:
+    p = user()
+    bind("user", "u1", "viewer", workspace="acme.api", source="payments")
+    bind("user", "u1", "viewer", workspace="acme.api", source="docs", path="public/**")
+    assert authz.roles_in(p, "acme", "acme.api") == {"viewer"}
+    assert authz.sees_workspace(p, ws())
+    assert authz.scope_for(p, ws()) == {
+        "default": "deny",
+        "rules": [
+            {"effect": "allow", "source": "payments"},
+            {"effect": "allow", "source": "docs", "path": "public/**"},
+        ],
+    }
+    # The rule is for that workspace only.
+    assert not authz.sees_workspace(p, ws("acme.web"))
+    assert authz.roles_in(p, "acme") == set()
+
+
+def test_a_plain_viewer_with_a_deny_keeps_everything_else() -> None:
+    p = user()
+    bind("user", "u1", "viewer")
+    bind(
+        "user",
+        "u1",
+        "viewer",
+        workspace="acme.api",
+        effect="deny",
+        source="payments",
+        path="secrets/**",
+    )
+    assert authz.scope_for(p, ws()) == {
+        "default": "allow",
+        "rules": [{"effect": "deny", "source": "payments", "path": "secrets/**"}],
+    }
+    # The deny is on one workspace; the other is whole.
+    assert authz.scope_for(p, ws("acme.web")) is None
+
+
+def test_allow_and_deny_rules_combine() -> None:
+    p = user()
+    bind("user", "u1", "viewer", workspace="acme.api", source="payments")
+    bind("user", "u1", "viewer", workspace="acme.api", effect="deny", path="secrets/**")
+    assert authz.scope_for(p, ws()) == {
+        "default": "deny",
+        "rules": [
+            {"effect": "allow", "source": "payments"},
+            {"effect": "deny", "path": "secrets/**"},
+        ],
+    }
+
+
+def test_an_object_rule() -> None:
+    p = user()
+    oid = "692f6b3a-52d1-58fc-ad6a-ed624ef3d86f"
+    bind("user", "u1", "viewer", workspace="acme.api", object_id=oid)
+    assert authz.scope_for(p, ws())["rules"] == [{"effect": "allow", "object": oid}]
+
+
+def test_a_deny_alone_grants_nothing() -> None:
+    p = user()
+    bind("user", "u1", "viewer", workspace="acme.api", effect="deny", source="payments")
+    assert authz.roles_in(p, "acme", "acme.api") == set()
+    assert not authz.sees_workspace(p, ws())
+    assert not authz.sees_tenant(p, "acme")
+    assert can(p, "acme", "acme.api") == set()
+
+
+@pytest.mark.parametrize("role", ["operator", "admin"])
+def test_operators_and_admins_are_never_restricted(role: str) -> None:
+    p = user()
+    bind("user", "u1", role)
+    bind("user", "u1", "viewer", workspace="acme.api", effect="deny", source="payments")
+    assert authz.scope_for(p, ws()) is None
+
+
+def test_an_owner_is_never_restricted() -> None:
+    p = user(owner=True)
+    bind("user", "u1", "viewer", workspace="acme.api", effect="deny", source="payments")
+    assert authz.scope_for(p, ws()) is None
+
+
+def test_a_reviewer_with_a_deny_is_restricted() -> None:
+    p = user()
+    bind("user", "u1", "reviewer")
+    bind("user", "u1", "viewer", workspace="acme.api", effect="deny", source="payments")
+    assert authz.is_restricted(p, ws())
+
+
+def test_rules_reach_a_person_through_a_group_and_a_token_directly() -> None:
+    p = user()
+    models.add(models.Group(id="g1", tenant_id="acme", name="partners"))
+    models.set_group_member("g1", "u1", True)
+    bind("group", "g1", "viewer", workspace="acme.api", source="docs")
+    assert authz.scope_for(p, ws())["rules"] == [{"effect": "allow", "source": "docs"}]
+
+    bind("token", "t1", "viewer", workspace="acme.api", source="payments")
+    assert authz.scope_for(token(), ws()) == {
+        "default": "deny",
+        "rules": [{"effect": "allow", "source": "payments"}],
+    }
+
+
+def test_a_rule_on_a_role_other_than_viewer_grants_nothing() -> None:
+    # Not creatable through the API; a row like it must not widen anything.
+    p = user()
+    bind("user", "u1", "operator", workspace="acme.api", source="payments")
+    assert authz.roles_in(p, "acme", "acme.api") == set()
+    assert can(p, "acme", "acme.api") == set()
+
+
+def test_someone_restricted_does_not_see_all_of_a_workspace() -> None:
+    p = user()
+    bind("user", "u1", "viewer", workspace="acme.api", source="payments")
+    assert authz.sees_workspace(p, ws()) and not authz.sees_all_of(p, ws())
+    q = user("u2")
+    bind("user", "u2", "viewer")
+    assert authz.sees_all_of(q, ws())

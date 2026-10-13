@@ -128,3 +128,62 @@ def test_review_and_tenant_routes_use_the_expected_actions(
     for (method, path), actions in routes.items():
         if path.startswith("/api/tenants/{tenant_id}/"):
             assert "tenant:admin" in actions, (method, path)
+
+
+# ── RFC 0181: which routes a restricted reader may reach ─────────────────────
+
+# Routes that read knowledge only through the workspace's MCP server, with the caller's scope
+# attached. Everything else under a workspace refuses someone who sees part of it.
+SCOPED = {
+    ("GET", "/api/workspaces/{workspace_id}/graph"),
+    ("GET", "/api/workspaces/{workspace_id}/objects/{object_id}"),
+    ("GET", "/api/workspaces/{workspace_id}/search"),
+    ("GET", "/api/workspaces/{workspace_id}/neighborhood/{object_id}"),
+    ("GET", "/api/workspaces/{workspace_id}/impact/{object_id}"),
+    ("POST", "/api/workspaces/{workspace_id}/graph/layout"),
+    ("GET", "/api/workspaces/{workspace_id}/stats/kinds"),
+}
+
+
+def _scoped_flags(dependant) -> set[bool]:
+    found = set()
+    flag = getattr(dependant.call, authz.SCOPED_ATTR, None)
+    if flag is not None:
+        found.add(flag)
+    for sub in dependant.dependencies:
+        found |= _scoped_flags(sub)
+    return found
+
+
+def _calls(dependant) -> set:
+    found = {dependant.call}
+    for sub in dependant.dependencies:
+        found |= _calls(sub)
+    return found
+
+
+def test_only_the_listed_routes_are_open_to_a_restricted_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reset_settings: None
+) -> None:
+    monkeypatch.setenv("EKOS_CONSOLE_CONSOLE_DB", str(tmp_path / "c.db"))
+    monkeypatch.setenv("EKOS_CONSOLE_SESSION_SECRET", "s")
+    from app.deps import mcp_for_workspace
+
+    scoped, uses_mcp = set(), set()
+    for module in main.ROUTERS:
+        for route in module.router.routes:
+            for method in route.methods - {"HEAD", "OPTIONS"}:
+                key = (method, main.API_PREFIX + route.path)
+                flags = _scoped_flags(route.dependant)
+                assert len(flags) <= 1, f"{key} is marked both scoped and not"
+                if flags == {True}:
+                    scoped.add(key)
+                if mcp_for_workspace in _calls(route.dependant):
+                    uses_mcp.add(key)
+    assert scoped == SCOPED
+    # A scoped route reads through the scoped MCP client and nothing else. The layout route
+    # computes positions from the ids in the request body and reads nothing.
+    assert scoped - uses_mcp == {("POST", "/api/workspaces/{workspace_id}/graph/layout")}
+    # And no route uses the MCP client without being marked: its result would be right, and the
+    # route beside it would not be.
+    assert uses_mcp <= scoped

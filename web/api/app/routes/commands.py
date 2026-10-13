@@ -48,6 +48,8 @@ async def run_command(
         ws.id,
         request=request,
     )
+    # Any command prints what it read; none of them takes a read scope (RFC 0181).
+    authz.require_all_of(principal, ws)
 
     try:
         run_id = await _runner(request).submit(ws.id, ws.path, command, body or {})

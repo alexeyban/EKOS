@@ -86,6 +86,51 @@ describe("Admin", () => {
     });
   });
 
+  it("limits a viewer to part of one workspace", async () => {
+    stub([ACME]);
+    const post = vi.spyOn(client, "apiPost").mockResolvedValue({});
+    const user = userEvent.setup();
+    renderAdmin({});
+
+    await user.type(await screen.findByLabelText("e-mail"), "pia@partner.io");
+    // No limit is offered until the grant is a viewer of one workspace.
+    expect(screen.queryByLabelText("limit")).not.toBeInTheDocument();
+    const scope = screen.getAllByLabelText("scope")[0];
+    await within(scope).findByText("API");
+    await user.selectOptions(scope, "acme.api");
+    await user.selectOptions(screen.getByLabelText("limit"), "deny");
+    // A limit that names nothing cannot be granted.
+    expect(screen.getByRole("button", { name: "Grant" })).toBeDisabled();
+    await user.type(screen.getByLabelText("source"), "payments");
+    await user.type(screen.getByLabelText("path"), "secrets/**");
+    await user.click(screen.getByRole("button", { name: "Grant" }));
+
+    expect(post).toHaveBeenCalledWith("/tenants/acme/bindings", {
+      email: "pia@partner.io",
+      role: "viewer",
+      workspace_id: "acme.api",
+      effect: "deny",
+      source: "payments",
+      path: "secrets/**",
+    });
+  });
+
+  it("shows a binding's rule in words", async () => {
+    stub([ACME], {
+      "/tenants/acme/bindings": [
+        { id: "b3", principal_kind: "user", principal: "pia@partner.io", role: "viewer",
+          workspace_id: "acme.api", effect: "deny", source: "payments", path: "secrets/**" },
+        { id: "b4", principal_kind: "user", principal: "sam@partner.io", role: "viewer",
+          workspace_id: "acme.api", effect: "allow", source: "docs", path: null },
+      ],
+    });
+    renderAdmin({});
+    expect(
+      await screen.findByText("except source payments, path secrets/**"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("only source docs")).toBeInTheDocument();
+  });
+
   it("offers no workspace scope for admin, which is a tenant role", async () => {
     stub([ACME]);
     const user = userEvent.setup();
