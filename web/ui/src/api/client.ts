@@ -40,6 +40,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = <T>(path: string) => request<T>("GET", path);
 export const apiPost = <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {});
 export const apiPut = <T>(path: string, body: unknown) => request<T>("PUT", path, body);
+export const apiPatch = <T>(path: string, body: unknown) => request<T>("PATCH", path, body);
 export const apiDelete = (path: string) => request<void>("DELETE", path);
 
 export const tokenLogin = (token: string) => apiPost<{ role: string }>("/auth/token-login", { token });

@@ -9,6 +9,13 @@ built UI in one container. With `EKOS_HOME` set, the console keeps its database 
 (`POST /api/workspaces` with `source` in place of `path`). The files below are the development
 setup.
 
+**Access control (RFC 0180).** Tenants, users, groups, four roles (`viewer`, `reviewer`,
+`operator`, `admin`), API tokens and an audit log. `app/auth.py` says who is asking;
+`app/authz.py` is the only place that decides what they may do, and every route declares its
+action through it (`tests/test_authz_routes.py` fails on one that does not). The two static
+tokens below are development credentials: the read token is a `viewer` of the `default` tenant,
+the write token a platform owner. `EKOS_CONSOLE_PRODUCTION=true` turns them off.
+
 **Status: Phases 0–6 shipped, Phase 7 (hardening) in progress.** A persisted workspace registry
 with an auto-restarting MCP supervisor per workspace; a statistics dashboard; an `ekos.toml`
 config editor with validation and a preview-scan; a command/job runner with SSE log streaming and

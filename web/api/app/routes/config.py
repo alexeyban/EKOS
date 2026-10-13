@@ -16,15 +16,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .. import _afile, config_io, home, models, readproc
-from ..auth import require_role
+from .. import _afile, config_io, home, models, readproc, roots
+from ..authz import allow
 from ..deps import require_workspace
 from ..settings import Settings, get_settings
 from ._responses import BAD_GATEWAY, UNPROCESSABLE
 
-router = APIRouter(
-    prefix="/workspaces", tags=["config"], dependencies=[Depends(require_role("read"))]
-)
+router = APIRouter(prefix="/workspaces", tags=["config"], dependencies=[Depends(allow("read"))])
 
 
 class ConfigOut(BaseModel):
@@ -132,7 +130,7 @@ async def preview_scan(
 @router.put(
     "/{workspace_id}/config",
     response_model=WriteOut,
-    dependencies=[Depends(require_role("write"))],
+    dependencies=[Depends(allow("operate"))],
     responses={422: UNPROCESSABLE, 502: BAD_GATEWAY},
 )
 async def put_config(
@@ -148,10 +146,10 @@ async def put_config(
 
     # A project's config names the directories the pipeline reads. They stay inside the root an
     # operator allowed, or the limit on creating a project would be one edit away from useless.
-    if settings.workspaces_root and home.project_at(ws.path) is not None:
-        outside = await asyncio.to_thread(
-            config_io.roots_outside, body.raw, settings.workspaces_root
-        )
+    tenant = models.get_tenant(ws.tenant_id)
+    limits = roots.allowed_roots(tenant, settings) if tenant is not None else []
+    if limits is not None and home.project_at(ws.path) is not None:
+        outside = await asyncio.to_thread(config_io.roots_outside, body.raw, limits)
         if outside:
             raise HTTPException(
                 status_code=422,

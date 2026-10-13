@@ -7,7 +7,14 @@ interface Me {
   mode: "oidc" | "token";
   email: string | null;
   role: "read" | "write";
+  // RFC 0180. Optional so an older API still type-checks.
+  owner?: boolean;
+  tenants?: { id: string; name: string; roles: string[] }[];
 }
+
+// The Admin page is for a platform owner or an admin of at least one tenant.
+const administers = (me: Me) =>
+  me.owner === true || (me.tenants ?? []).some((t) => t.roles.includes("admin"));
 
 export function Layout() {
   const me = useQuery({
@@ -34,6 +41,11 @@ export function Layout() {
         {identity?.role === "write" && (
           <Link to="/schedules" className="hdr-link">
             Schedules
+          </Link>
+        )}
+        {identity && administers(identity) && (
+          <Link to="/admin" className="hdr-link">
+            Admin
           </Link>
         )}
         <span style={{ flex: 1 }} />

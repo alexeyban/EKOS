@@ -29,6 +29,10 @@ const router = createBrowserRouter([
         lazy: () => import("./pages/Schedules").then((m) => ({ Component: m.Schedules })),
       },
       {
+        path: "admin",
+        lazy: () => import("./pages/Admin").then((m) => ({ Component: m.Admin })),
+      },
+      {
         path: "runs/:runId",
         lazy: () => import("./pages/RunDetail").then((m) => ({ Component: m.RunDetail })),
       },

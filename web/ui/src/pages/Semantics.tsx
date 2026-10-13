@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { ReviewStatus, SemanticsItem, SemanticsKind } from "../api/types";
-import type { Me } from "../WorkspaceShell";
+import { type Me, mayReview } from "../WorkspaceShell";
 import { Linkml } from "./Linkml";
 import { SemanticsItemPanel } from "./SemanticsItemPanel";
 import {
@@ -79,7 +79,7 @@ function Review({ me }: { me: Me }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [bulkDone, setBulkDone] = useState("");
   const items = useItems(id, kind, statusFilter);
-  const canWrite = me.role === "write";
+  const canWrite = mayReview(me);
 
   const needle = text.trim().toLowerCase();
   const shown = reviewOrder(items.data ?? []).filter(

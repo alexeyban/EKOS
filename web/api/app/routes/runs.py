@@ -9,8 +9,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from .. import models
-from ..auth import require_role
+from .. import authz, models
+from ..auth import Principal
 from ..models import TERMINAL
 from ._responses import NOT_FOUND
 
@@ -40,41 +40,56 @@ def _dump(run: models.Run, *, tail: int = 0) -> dict[str, Any]:
     return body
 
 
-@router.get("", dependencies=[Depends(require_role("read"))])
+def _run_for(principal: Principal, run_id: str) -> models.Run:
+    """The run, or 404 when it does not exist or belongs to a workspace the caller cannot see."""
+    run = models.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
+    ws = models.get_workspace(run.workspace_id)
+    # A run whose workspace was removed has nobody to belong to but a platform owner.
+    visible = authz.sees_workspace(principal, ws) if ws is not None else principal.owner
+    if not visible:
+        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
+    return run
+
+
+@router.get("")
 async def list_runs(
     workspace: str | None = Query(None),
     status: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
+    principal: Principal = Depends(authz.authenticated),
 ) -> list[dict]:
-    return [_dump(r) for r in models.list_runs(workspace, status, limit)]
+    visible = {ws.id for ws in models.list_workspaces() if authz.sees_workspace(principal, ws)}
+    runs = models.list_runs(workspace, status, limit)
+    return [_dump(r) for r in runs if r.workspace_id in visible]
 
 
-@router.get("/{run_id}", dependencies=[Depends(require_role("read"))], responses={404: NOT_FOUND})
-async def get_run(run_id: str) -> dict:
-    run = models.get_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
-    return _dump(run, tail=500)
+@router.get("/{run_id}", responses={404: NOT_FOUND})
+async def get_run(run_id: str, principal: Principal = Depends(authz.authenticated)) -> dict:
+    return _dump(_run_for(principal, run_id), tail=500)
 
 
-@router.post(
-    "/{run_id}/cancel", dependencies=[Depends(require_role("write"))], responses={404: NOT_FOUND}
-)
-async def cancel_run(run_id: str, request: Request) -> dict:
-    run = models.get_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
+@router.post("/{run_id}/cancel", responses={404: NOT_FOUND})
+async def cancel_run(
+    run_id: str, request: Request, principal: Principal = Depends(authz.authenticated)
+) -> dict:
+    # The role is checked before the run is looked up, so a caller who may not operate anything
+    # learns nothing about which run ids exist.
+    authz.require_anywhere(principal, "operate")
+    run = _run_for(principal, run_id)
+    ws = models.get_workspace(run.workspace_id)
+    if ws is not None:
+        authz.require(principal, "operate", ws.tenant_id, ws.id, request=request)
     ok = await request.app.state.runner.cancel(run_id)
     return {"cancelled": ok}
 
 
-@router.get(
-    "/{run_id}/logs", dependencies=[Depends(require_role("read"))], responses={404: NOT_FOUND}
-)
-async def stream_logs(run_id: str) -> StreamingResponse:
-    run = models.get_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail=NO_SUCH_RUN)
+@router.get("/{run_id}/logs", responses={404: NOT_FOUND})
+async def stream_logs(
+    run_id: str, principal: Principal = Depends(authz.authenticated)
+) -> StreamingResponse:
+    run = _run_for(principal, run_id)
     return StreamingResponse(
         _log_events(run_id, Path(run.log_path)), media_type="text/event-stream"
     )

@@ -12,7 +12,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import home, models, readproc
-from ..auth import require_role
+from ..authz import allow
 from ..deps import mcp_for_workspace, require_workspace
 from ..mcp_client import EkosMcpClient
 from ..schemas import (
@@ -25,9 +25,7 @@ from ..schemas import (
 from ..settings import Settings, get_settings
 from ._responses import BAD_GATEWAY
 
-router = APIRouter(
-    prefix="/workspaces", tags=["stats"], dependencies=[Depends(require_role("read"))]
-)
+router = APIRouter(prefix="/workspaces", tags=["stats"], dependencies=[Depends(allow("read"))])
 
 
 def _bin(settings: Settings) -> str:

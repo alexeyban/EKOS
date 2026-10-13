@@ -28,6 +28,9 @@ class WorkspaceOut(BaseModel):
     id: str
     name: str
     path: str
+    tenant_id: str = "default"
+    # The caller's roles on this workspace (RFC 0180), so the UI can hide what they cannot do.
+    roles: list[str] = []
     server: ServerStatus | None = None
 
 
@@ -39,6 +42,8 @@ class WorkspaceCreate(BaseModel):
     name: str
     path: str | None = None
     source: str | None = None
+    # RFC 0180. For a tenant other than `default` the workspace id becomes `<tenant>.<id>`.
+    tenant: str = "default"
 
     @model_validator(mode="after")
     def _one_of_path_and_source(self) -> WorkspaceCreate:

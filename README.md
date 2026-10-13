@@ -316,7 +316,8 @@ ekos --project shop ekl "FIND Object WHERE source = 'handbook'"
 - Sources are local directories and git repositories. Confluence and GitHub are still configured
   once per project.
 
-Users, groups and roles are planned, not built. See
+Users, groups and roles are in the web console
+([below](#tenants-users-and-roles-rfc-0180)). See
 [RFC 0178](ekos/docs/rfcs/0178-ekos-home-projects-sources.md).
 
 ### Is the ledger still current? (RFC 0171)
@@ -385,9 +386,53 @@ open http://127.0.0.1:8000
   `http://host.docker.internal:11434`.
 
 Tagged releases publish the image as `ghcr.io/alexeyban/ekos:<version>`; until the next tag,
-build it from a checkout as above. Not built yet: users, groups and roles beyond the console's
-read and write tokens, and per-project access control. See
-[RFC 0179](ekos/docs/rfcs/0179-installer-and-image.md).
+build it from a checkout as above. See [RFC 0179](ekos/docs/rfcs/0179-installer-and-image.md).
+
+### Tenants, users and roles (RFC 0180)
+
+The console decides who may see and do what. The CLI is not affected: someone with a shell on
+the machine already has the files.
+
+- **Tenants.** Each tenant has its own projects and its own members. A project or tenant you
+  have no role in answers 404, the same as one that does not exist.
+- **Roles**, granted per tenant or per project in the console's **Admin** page:
+
+  | Role | May |
+  |---|---|
+  | `viewer` | read everything in a project, including runs and logs |
+  | `reviewer` | also decide business semantics and conflicts |
+  | `operator` | also run commands, manage schedules, edit the project config |
+  | `admin` | everything in the tenant: projects, members, groups, API tokens, audit log |
+
+  A platform owner (named in `EKOS_CONSOLE_OWNERS`) can do everything, creates tenants, and sets
+  which host directories each tenant's projects may read.
+- **Sign-in** is OIDC. A role can be granted to an e-mail address before that person first signs
+  in. A group can hold a role for its members, and can name a value of the provider's group
+  claim so membership follows the provider.
+- **API tokens** for agents and scripts (`Authorization: Bearer ekos_…`), created in the Admin
+  page and shown once. A token can be `viewer` or `operator`. It can never review or administer:
+  those need a signed-in person.
+- **Audit log** per tenant: every request that changes something, and every refusal, with who
+  and when.
+
+```bash
+# deploy/.env
+EKOS_CONSOLE_OIDC_ISSUER=https://id.example.com/realms/main
+EKOS_CONSOLE_OIDC_CLIENT_ID=ekos
+EKOS_CONSOLE_OIDC_CLIENT_SECRET=...
+EKOS_CONSOLE_OWNERS=you@example.com
+EKOS_CONSOLE_SESSION_SECRET=...
+EKOS_CONSOLE_PRODUCTION=true
+```
+
+With `EKOS_CONSOLE_PRODUCTION=true` the console refuses to start without OIDC, an owner and a
+session secret, static tokens stop working, and access comes only from granted roles. Without it
+the earlier behaviour remains for the `default` tenant: the two static tokens work (the write
+token acts as a platform owner), and under OIDC every signed-in user can read `default`.
+
+Not built yet: access rules narrower than a project (a source, a path, an object), and an MCP
+endpoint that accepts an API token; an agent's token works against the console's HTTP API only.
+See [RFC 0180](ekos/docs/rfcs/0180-tenants-users-groups-roles.md).
 
 ### From source
 

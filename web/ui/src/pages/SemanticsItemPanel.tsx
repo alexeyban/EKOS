@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, apiPost } from "../api/client";
 import type { SemanticsDetail } from "../api/types";
-import type { Me } from "../WorkspaceShell";
+import { type Me, mayReview } from "../WorkspaceShell";
 import {
   KIND_LABEL,
   REVIEWABLE,
@@ -98,7 +98,7 @@ export function SemanticsItemPanel({
 
   const d = detail.data;
   const reviewable = d ? REVIEWABLE.includes(d.kind) : false;
-  const canWrite = me.role === "write";
+  const canWrite = mayReview(me);
   const needsName = me.mode === "token" && !reviewer.trim();
 
   const startEdit = () => {

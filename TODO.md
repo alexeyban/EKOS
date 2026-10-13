@@ -6494,8 +6494,14 @@ LinkML; generation stays in LinkML.
 - [ ] RFC 0179 remainder: `ekos eval run` writes reports under the source root (fails on a
       read-only source; the console's Evals tab is empty for a project); arm64 image; the image
       job has not run on GitHub yet (first run is the next tag or a manual dispatch)
-- [ ] RFC 0180 — console: tenants, users (OIDC), groups, roles (viewer / reviewer / operator /
-      admin), API tokens, audit log, one `authorize` function
+- [x] RFC 0180 — console: tenants, users (OIDC), groups, roles (viewer / reviewer / operator /
+      admin) per tenant or project, API tokens (viewer / operator only), per-tenant audit log
+      and source roots, one `authorize` function + route-walk test, versioned schema migration,
+      production mode, Admin page (devlog_261)
+- [ ] RFC 0180 remainder: deleting a tenant or a user; an endpoint for audit records with no
+      tenant (platform actions, sign-ins); token rate limiting; the image has not been rebuilt
+      and run with RFC 0180; a real OIDC provider has not been exercised end to end (tests sign
+      the session cookie themselves)
 - [ ] RFC 0181 — read scope: allow / deny by source, path pattern or object, enforced in
       `Runtime`; leak suite
 - [ ] RFC 0182 — MCP gateway on the console, per-tenant and per-project, role-filtered tools

@@ -58,6 +58,18 @@ class Settings(BaseSettings):
     console_token: str = DEFAULT_CONSOLE_TOKEN
     console_write_token: str = ""  # unset => write is never granted in token mode
 
+    # ── RFC 0180 ────────────────────────────────────────────────────────────
+    # Platform owners: e-mail addresses or OIDC subjects, comma-separated. Named here and not in
+    # the database so the last owner cannot be removed through the console.
+    owners: str = ""
+    # Production mode: the console refuses to start on development credentials (see
+    # `_production_needs_real_sign_in`), static tokens are not accepted, and RFC 0131's
+    # everyone-can-read mapping is off, so access comes from role bindings only.
+    production: bool = False
+
+    def owner_set(self) -> set[str]:
+        return {v.strip().lower() for v in self.owners.split(",") if v.strip()}
+
     @property
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_issuer)
@@ -108,6 +120,21 @@ class Settings(BaseSettings):
         base = f"{self.ekos_home.rstrip('/')}/control" if self.ekos_home else ".ekos-web"
         self.console_db = self.console_db or f"{base}/console.db"
         self.runs_dir = self.runs_dir or f"{base}/runs"
+        return self
+
+    @model_validator(mode="after")
+    def _production_needs_real_sign_in(self) -> Settings:
+        if not self.production:
+            return self
+        missing = []
+        if not self.oidc_enabled:
+            missing.append("EKOS_CONSOLE_OIDC_ISSUER (static tokens are for development)")
+        if not self.owner_set():
+            missing.append("EKOS_CONSOLE_OWNERS (nobody could administer the console)")
+        if self.session_secret in _PLACEHOLDER_SESSION_SECRETS:
+            missing.append("EKOS_CONSOLE_SESSION_SECRET")
+        if missing:
+            raise ValueError("EKOS_CONSOLE_PRODUCTION is set; also set " + "; ".join(missing))
         return self
 
     @model_validator(mode="after")

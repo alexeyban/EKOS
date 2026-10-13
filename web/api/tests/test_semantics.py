@@ -120,13 +120,13 @@ def test_review_argv_keeps_every_value_inside_its_flag() -> None:
 
 
 def test_token_mode_records_a_marked_claim_and_oidc_an_identity() -> None:
-    p = Principal(subject="token", role="write")
+    p = Principal(kind="static", id="write", subject="token")
     assert reviewer_for(p, False, "Ann Smith") == "token:Ann Smith"
     with pytest.raises(ReviewError):
         reviewer_for(p, False, None)
     with pytest.raises(ReviewError):
         reviewer_for(p, False, "x; rm -rf /")
-    o = Principal(subject="sub-1", email="ann@x.io", role="write")
+    o = Principal(kind="user", id="u1", subject="sub-1", email="ann@x.io")
     assert reviewer_for(o, True, "ignored") == "ann@x.io"
 
 

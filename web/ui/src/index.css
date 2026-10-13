@@ -1000,3 +1000,72 @@ textarea.lm-yaml {
   gap: 0.25rem;
   padding: 0.5rem 0;
 }
+
+/* ── Admin (RFC 0180) ─────────────────────────────────────────────────────── */
+.ws-roles {
+  font-size: 0.8rem;
+}
+
+.admin-label {
+  display: block;
+  margin-top: 1rem;
+  font-weight: 600;
+}
+
+.admin-roots {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, monospace;
+  margin-bottom: 0.5rem;
+}
+
+.admin-kind {
+  margin-left: 0.4rem;
+}
+
+.admin-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+
+.admin-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.admin-members {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  flex: 1;
+}
+
+.admin-inline {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.admin-secret {
+  border: 1px solid var(--accent-a);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.6rem 0;
+}
+
+.admin-secret code {
+  display: block;
+  overflow-wrap: anywhere;
+  user-select: all;
+  margin: 0.4rem 0;
+}
+
+.admin-scroll {
+  max-height: 24rem;
+  overflow: auto;
+}

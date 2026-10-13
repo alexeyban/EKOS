@@ -6,16 +6,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..auth import require_role
+from ..authz import allow
 from ..deps import mcp_for_workspace
 from ..layout import compute_layout
 from ..mcp_client import EkosMcpClient, McpToolError
 from ..schemas import GraphOut, LayoutIn, LayoutOut
 from ._responses import NOT_FOUND
 
-router = APIRouter(
-    prefix="/workspaces", tags=["graph"], dependencies=[Depends(require_role("read"))]
-)
+router = APIRouter(prefix="/workspaces", tags=["graph"], dependencies=[Depends(allow("read"))])
 
 
 @router.get("/{workspace_id}/graph", response_model=GraphOut)

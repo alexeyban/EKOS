@@ -8,7 +8,7 @@ import { useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { Conflict } from "../api/types";
-import type { Me } from "../WorkspaceShell";
+import { type Me, mayReview } from "../WorkspaceShell";
 import {
   TYPE_LABEL,
   claimValue,
@@ -110,7 +110,7 @@ function ConflictPanel({
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [reviewer, setReviewer] = useState(loadReviewer());
-  const canWrite = me.role === "write";
+  const canWrite = mayReview(me);
   const claims = c.claims ?? [];
   const decide = useMutation({
     mutationFn: (decision: { pick: number } | { both_valid: true }) =>

@@ -28,12 +28,32 @@ from .routes import (
     schedules,
     semantics,
     stats,
+    tenants,
     workspaces,
 )
 from .runner import JobRunner
 from .scheduler import ConsoleScheduler
 from .settings import get_settings
 from .supervisor import McpSupervisor
+
+# Every API router. `tests/test_authz_routes.py` walks this list, so a router mounted any other
+# way would escape the check that each route declares the action it enforces (RFC 0180).
+ROUTERS = (
+    meta,
+    auth,
+    commands,
+    runs,
+    schedules,
+    workspaces,
+    stats,
+    config,
+    graph,
+    evals,
+    semantics,
+    conflicts,
+    tenants,
+)
+API_PREFIX = "/api"
 
 _UI_DIST = Path(__file__).resolve().parents[2] / "ui" / "dist"
 
@@ -73,22 +93,28 @@ def _seed_registry_if_empty() -> None:
 
 
 def _register_home_projects() -> None:
-    """Register every project of the default tenant that the registry does not hold (RFC 0179
+    """Register every project of a known tenant that the registry does not hold (RFC 0179
     §2): a project exists because its directory does, so one created with the CLI in the same
     home appears here, and an emptied registry is rebuilt."""
     root = home.configured_home()
     if root is None:
         return
     known = {ws.path for ws in models.list_workspaces()}
-    for project in home.projects_in(root):
-        if str(project.dir) in known:
-            continue
-        if models.get_workspace(project.name) is not None:
-            log.warning("project %r not registered: the id is taken", project.name)
-            continue
-        models.add_workspace(
-            models.Workspace(id=project.name, name=project.name, path=str(project.dir))
-        )
+    # Only tenants the console has a row for: a directory under data/ is not a tenant until a
+    # platform owner creates it (RFC 0180).
+    for tenant in models.list_tenants():
+        for project in home.projects_in(root, tenant.id):
+            if str(project.dir) in known:
+                continue
+            workspace_id = workspaces.workspace_id_for(tenant.id, project.name)
+            if models.get_workspace(workspace_id) is not None:
+                log.warning("project %r not registered: the id is taken", workspace_id)
+                continue
+            models.add_workspace(
+                models.Workspace(
+                    id=workspace_id, name=project.name, path=str(project.dir), tenant_id=tenant.id
+                )
+            )
 
 
 @asynccontextmanager
@@ -133,21 +159,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for r in (
-        meta,
-        auth,
-        commands,
-        runs,
-        schedules,
-        workspaces,
-        stats,
-        config,
-        graph,
-        evals,
-        semantics,
-        conflicts,
-    ):
-        app.include_router(r.router, prefix="/api")
+    for r in ROUTERS:
+        app.include_router(r.router, prefix=API_PREFIX)
 
     # Serve the built UI when it exists (Compose / production); the Vite dev server handles it
     # otherwise.

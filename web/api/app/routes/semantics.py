@@ -15,15 +15,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .. import models, readproc, semantics_write
-from ..auth import Principal, require_role
+from ..auth import Principal
+from ..authz import allow
 from ..deps import require_workspace
 from ..settings import Settings, get_settings
 from ._responses import BAD_GATEWAY, BAD_REQUEST, CONFLICT, NOT_FOUND
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/semantics", tags=["semantics"])
 
-# Module-level so the dependency is built once (and ruff's B008 is satisfied).
-_WRITER = require_role("write")
+# Module-level so the dependency is built once (and ruff's B008 is satisfied). Review decisions
+# need the `reviewer` role, which no API token can hold (RFC 0180).
+_WRITER = allow("review")
 
 _BIG = 32 << 20  # a large workspace's item list or schema
 
@@ -39,7 +41,7 @@ Kind = Literal["concept", "enum", "constraint", "gap", "conflict", "rationale"]
 Status = Literal["hypothesis", "confirmed", "rejected", "needs_review"]
 
 
-@router.get("/items", dependencies=[Depends(require_role("read"))], responses={502: BAD_GATEWAY})
+@router.get("/items", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
 async def items(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -57,7 +59,7 @@ async def items(
 
 @router.get(
     "/items/{item_id}",
-    dependencies=[Depends(require_role("read"))],
+    dependencies=[Depends(allow("read"))],
     responses={400: BAD_REQUEST, 502: BAD_GATEWAY},
 )
 async def item(
@@ -71,7 +73,7 @@ async def item(
     return await _read(settings, ws, ["semantics", "show", "--json", item_id])
 
 
-@router.get("/gaps", dependencies=[Depends(require_role("read"))], responses={502: BAD_GATEWAY})
+@router.get("/gaps", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
 async def gaps(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -80,7 +82,7 @@ async def gaps(
     return await _read(settings, ws, ["semantics", "gaps", "--json"])
 
 
-@router.get("/linkml", dependencies=[Depends(require_role("read"))], responses={502: BAD_GATEWAY})
+@router.get("/linkml", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
 async def linkml(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -102,9 +104,7 @@ async def linkml(
     return {"empty": False, "schema": schema}
 
 
-@router.get(
-    "/linkml/yaml", dependencies=[Depends(require_role("read"))], responses={502: BAD_GATEWAY}
-)
+@router.get("/linkml/yaml", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
 async def linkml_yaml(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
@@ -233,7 +233,7 @@ async def _import(
 
 @router.post(
     "/linkml/validate",
-    dependencies=[Depends(require_role("read"))],
+    dependencies=[Depends(allow("read"))],
     responses={400: BAD_REQUEST, 502: BAD_GATEWAY},
 )
 async def validate_linkml(

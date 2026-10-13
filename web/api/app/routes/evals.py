@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import models
-from ..auth import require_role
+from ..authz import allow
 from ..deps import require_workspace
 from ._responses import BAD_REQUEST, NOT_FOUND, SERVER_ERROR
 
@@ -70,7 +70,7 @@ def _summary(filename: str, data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@router.get("/reports", dependencies=[Depends(require_role("read"))])
+@router.get("/reports", dependencies=[Depends(allow("read"))])
 async def list_reports(ws: models.Workspace = Depends(require_workspace)) -> list[dict]:
     """Every saved report, oldest first (a trend line reads top-to-bottom) — the same ordering
     `ekos eval history` prints. A `.json` file that fails to parse is skipped, not a 500: one
@@ -91,7 +91,7 @@ async def list_reports(ws: models.Workspace = Depends(require_workspace)) -> lis
 
 @router.get(
     "/reports/{filename}",
-    dependencies=[Depends(require_role("read"))],
+    dependencies=[Depends(allow("read"))],
     responses={400: BAD_REQUEST, 404: NOT_FOUND, 500: SERVER_ERROR},
 )
 async def get_report(filename: str, ws: models.Workspace = Depends(require_workspace)) -> dict:

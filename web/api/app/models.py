@@ -12,9 +12,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Column
+from sqlalchemy import Column, inspect, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+DEFAULT_TENANT = "default"
 
 
 def _now() -> datetime:
@@ -28,7 +30,93 @@ class Workspace(SQLModel, table=True):
     id: str = Field(primary_key=True)
     name: str
     path: str
+    # RFC 0180. Rows written before it belong to `default` (migration 1).
+    tenant_id: str = Field(default=DEFAULT_TENANT, index=True)
     created_at: datetime = Field(default_factory=_now)
+
+
+# ── RFC 0180: tenants, users, groups, roles, tokens, audit ───────────────────
+
+
+class SchemaVersion(SQLModel, table=True):
+    """One row: the number of the last migration applied."""
+
+    id: int = Field(default=1, primary_key=True)
+    version: int = 0
+
+
+class Tenant(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    name: str
+    # Directories a project of this tenant may read. Set by a platform owner only.
+    source_roots: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+
+
+class User(SQLModel, table=True):
+    """A person. `subject` is the OIDC `sub`; it is empty for someone given a role by e-mail who
+    has not signed in yet, and the first sign-in with that e-mail fills it."""
+
+    id: str = Field(primary_key=True)
+    subject: str = Field(default="", index=True)
+    email: str = Field(default="", index=True)
+    created_at: datetime = Field(default_factory=_now)
+    last_login_at: datetime | None = None
+
+
+class Group(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    tenant_id: str = Field(index=True)
+    name: str
+    # When set, every user whose sign-in carries this value in the role claim is a member.
+    oidc_value: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class GroupMember(SQLModel, table=True):
+    group_id: str = Field(primary_key=True)
+    user_id: str = Field(primary_key=True)
+
+
+class RoleBinding(SQLModel, table=True):
+    """`role` for one principal on a tenant, or on one workspace of it when `workspace_id` is
+    set."""
+
+    id: str = Field(primary_key=True)
+    tenant_id: str = Field(index=True)
+    principal_kind: str  # "user" | "group" | "token"
+    principal_id: str = Field(index=True)
+    role: str  # "viewer" | "reviewer" | "operator" | "admin"
+    workspace_id: str | None = None
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ApiToken(SQLModel, table=True):
+    """An agent's credential. Only the hash of the token is stored."""
+
+    id: str = Field(primary_key=True)
+    tenant_id: str = Field(index=True)
+    name: str
+    token_hash: str = Field(index=True, unique=True)
+    prefix: str  # the first characters, shown in lists so a token can be recognised
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    expires_at: datetime | None = None
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class AuditLog(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    at: datetime = Field(default_factory=_now, index=True)
+    actor: str
+    actor_kind: str  # "user" | "token" | "static" | "anonymous"
+    action: str
+    tenant_id: str = Field(default="", index=True)
+    workspace_id: str = ""
+    outcome: str  # "allowed" | "denied" | "ok" | "failed"
+    detail: str = ""
 
 
 TERMINAL = {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
@@ -71,13 +159,58 @@ class Schedule(SQLModel, table=True):
 _engine = None
 
 
+def _migration_1(conn) -> None:
+    """RFC 0180: every workspace belongs to a tenant. `create_all` adds new tables and never
+    alters an existing one, so the column is added here."""
+    columns = {c["name"] for c in inspect(conn).get_columns("workspace")}
+    if "tenant_id" not in columns:
+        conn.execute(
+            text("ALTER TABLE workspace ADD COLUMN tenant_id VARCHAR NOT NULL DEFAULT 'default'")
+        )
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_workspace_tenant_id ON workspace (tenant_id)")
+        )
+
+
+# Ordered. Migration N brings a database at version N-1 to version N. Never edit one that has
+# shipped; add the next.
+MIGRATIONS = [_migration_1]
+
+
+def _migrate(engine) -> None:
+    """Bring the database to the current schema. A database from before versioning has the
+    `workspace` table and no version row: that is version 0. A new one starts at the latest."""
+    existed = "workspace" in inspect(engine).get_table_names()
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as conn:
+        row = conn.execute(text("SELECT version FROM schemaversion WHERE id = 1")).first()
+        if row is None:
+            version = 0 if existed else len(MIGRATIONS)
+            conn.execute(
+                text("INSERT INTO schemaversion (id, version) VALUES (1, :v)"), {"v": version}
+            )
+        else:
+            version = row[0]
+        for number, migration in enumerate(MIGRATIONS, start=1):
+            if number > version:
+                migration(conn)
+                conn.execute(
+                    text("UPDATE schemaversion SET version = :v WHERE id = 1"), {"v": number}
+                )
+
+
 def init_engine(db_path: str) -> None:
-    """Create the SQLite file (and its parent dir) and every table. Idempotent."""
+    """Create the SQLite file (and its parent dir), bring its schema up to date, and make sure
+    the `default` tenant exists. Idempotent."""
     global _engine
     p = Path(db_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     _engine = create_engine(f"sqlite:///{p}", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(_engine)
+    _migrate(_engine)
+    with session() as s:
+        if s.get(Tenant, DEFAULT_TENANT) is None:
+            s.add(Tenant(id=DEFAULT_TENANT, name="Default"))
+            s.commit()
 
 
 def session() -> Session:
@@ -207,3 +340,195 @@ def delete_schedule(schedule_id: str) -> bool:
         s.delete(row)
         s.commit()
         return True
+
+
+# ── RFC 0180 ─────────────────────────────────────────────────────────────────
+
+
+def add(row: SQLModel) -> None:
+    with session() as s:
+        s.add(row)
+        s.commit()
+
+
+def get_tenant(tenant_id: str) -> Tenant | None:
+    with session() as s:
+        return s.get(Tenant, tenant_id)
+
+
+def list_tenants() -> list[Tenant]:
+    with session() as s:
+        return list(s.exec(select(Tenant).order_by(Tenant.id)))
+
+
+def update_tenant(tenant_id: str, **fields: Any) -> Tenant | None:
+    with session() as s:
+        row = s.get(Tenant, tenant_id)
+        if row is None:
+            return None
+        for k, v in fields.items():
+            setattr(row, k, v)
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        return row
+
+
+def get_user(user_id: str) -> User | None:
+    with session() as s:
+        return s.get(User, user_id)
+
+
+def user_by_subject(subject: str) -> User | None:
+    with session() as s:
+        return s.exec(select(User).where(User.subject == subject)).first()
+
+
+def user_by_email(email: str) -> User | None:
+    with session() as s:
+        return s.exec(select(User).where(User.email == email.lower())).first()
+
+
+def touch_user(user_id: str, **fields: Any) -> None:
+    with session() as s:
+        row = s.get(User, user_id)
+        if row is None:
+            return
+        for k, v in fields.items():
+            setattr(row, k, v)
+        s.add(row)
+        s.commit()
+
+
+def list_groups(tenant_id: str) -> list[Group]:
+    with session() as s:
+        return list(s.exec(select(Group).where(Group.tenant_id == tenant_id).order_by(Group.name)))
+
+
+def get_group(group_id: str) -> Group | None:
+    with session() as s:
+        return s.get(Group, group_id)
+
+
+def delete_group(group_id: str) -> None:
+    """The group, its memberships and its bindings."""
+    with session() as s:
+        for m in s.exec(select(GroupMember).where(GroupMember.group_id == group_id)):
+            s.delete(m)
+        for b in s.exec(
+            select(RoleBinding).where(
+                RoleBinding.principal_kind == "group", RoleBinding.principal_id == group_id
+            )
+        ):
+            s.delete(b)
+        row = s.get(Group, group_id)
+        if row is not None:
+            s.delete(row)
+        s.commit()
+
+
+def group_members(group_id: str) -> list[str]:
+    with session() as s:
+        return [
+            m.user_id for m in s.exec(select(GroupMember).where(GroupMember.group_id == group_id))
+        ]
+
+
+def set_group_member(group_id: str, user_id: str, present: bool) -> None:
+    with session() as s:
+        row = s.get(GroupMember, (group_id, user_id))
+        if present and row is None:
+            s.add(GroupMember(group_id=group_id, user_id=user_id))
+        elif not present and row is not None:
+            s.delete(row)
+        s.commit()
+
+
+def groups_of(user_id: str, claim_values: set[str]) -> list[str]:
+    """Ids of every group the user is in: by a membership row, or by a claim value the group
+    names."""
+    with session() as s:
+        ids = {
+            m.group_id for m in s.exec(select(GroupMember).where(GroupMember.user_id == user_id))
+        }
+        if claim_values:
+            for g in s.exec(select(Group).where(Group.oidc_value.in_(claim_values))):
+                if g.oidc_value:
+                    ids.add(g.id)
+        return sorted(ids)
+
+
+def list_bindings(tenant_id: str | None = None) -> list[RoleBinding]:
+    with session() as s:
+        q = select(RoleBinding).order_by(RoleBinding.created_at)
+        if tenant_id is not None:
+            q = q.where(RoleBinding.tenant_id == tenant_id)
+        return list(s.exec(q))
+
+
+def bindings_for(principals: list[tuple[str, str]]) -> list[RoleBinding]:
+    """Every binding held by any of `(kind, id)`."""
+    out: list[RoleBinding] = []
+    with session() as s:
+        for kind, pid in principals:
+            out.extend(
+                s.exec(
+                    select(RoleBinding).where(
+                        RoleBinding.principal_kind == kind, RoleBinding.principal_id == pid
+                    )
+                )
+            )
+    return out
+
+
+def get_binding(binding_id: str) -> RoleBinding | None:
+    with session() as s:
+        return s.get(RoleBinding, binding_id)
+
+
+def delete_binding(binding_id: str) -> None:
+    with session() as s:
+        row = s.get(RoleBinding, binding_id)
+        if row is not None:
+            s.delete(row)
+            s.commit()
+
+
+def token_by_hash(token_hash: str) -> ApiToken | None:
+    with session() as s:
+        return s.exec(select(ApiToken).where(ApiToken.token_hash == token_hash)).first()
+
+
+def get_token(token_id: str) -> ApiToken | None:
+    with session() as s:
+        return s.get(ApiToken, token_id)
+
+
+def list_tokens(tenant_id: str) -> list[ApiToken]:
+    with session() as s:
+        return list(
+            s.exec(
+                select(ApiToken)
+                .where(ApiToken.tenant_id == tenant_id)
+                .order_by(ApiToken.created_at)
+            )
+        )
+
+
+def update_token(token_id: str, **fields: Any) -> None:
+    with session() as s:
+        row = s.get(ApiToken, token_id)
+        if row is None:
+            return
+        for k, v in fields.items():
+            setattr(row, k, v)
+        s.add(row)
+        s.commit()
+
+
+def list_audit(tenant_id: str | None, limit: int = 200) -> list[AuditLog]:
+    with session() as s:
+        q = select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)
+        if tenant_id is not None:
+            q = q.where(AuditLog.tenant_id == tenant_id)
+        return list(s.exec(q))

@@ -80,14 +80,18 @@ def read_roots(raw: str) -> list[str]:
     return roots
 
 
-def roots_outside(raw: str, allowed: str) -> list[str]:
-    """The directories of `read_roots` that are not `allowed` or below it, after resolving `..`
-    and symlinks."""
-    limit = Path(allowed).expanduser().resolve()
+def roots_outside(raw: str, allowed: str | list[Path]) -> list[str]:
+    """The directories of `read_roots` that are not in or below one of `allowed`, after
+    resolving `..` and symlinks."""
+    limits = (
+        [Path(allowed).expanduser().resolve()]
+        if isinstance(allowed, str)
+        else [Path(a).expanduser().resolve() for a in allowed]
+    )
     outside = []
     for root in read_roots(raw):
         resolved = Path(root).expanduser().resolve()
-        if resolved != limit and limit not in resolved.parents:
+        if not any(resolved == limit or limit in resolved.parents for limit in limits):
             outside.append(root)
     return outside
 

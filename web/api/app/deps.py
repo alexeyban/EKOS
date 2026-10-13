@@ -1,6 +1,7 @@
 """Shared FastAPI dependencies: workspace lookup + per-workspace MCP client resolution.
 
-Auth (`require_role`) lives in `app.auth`.
+Authorization lives in `app.authz`; `require_workspace` is re-exported from there because it
+answers 404 for a workspace the caller may not see.
 """
 
 from __future__ import annotations
@@ -8,19 +9,15 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request
 
 from . import models
+from .authz import require_workspace
 from .mcp_client import EkosMcpClient
 from .supervisor import McpSupervisor, _NotReady
+
+__all__ = ["get_supervisor", "mcp_for_workspace", "require_workspace"]
 
 
 def get_supervisor(request: Request) -> McpSupervisor:
     return request.app.state.supervisor
-
-
-def require_workspace(workspace_id: str) -> models.Workspace:
-    ws = models.get_workspace(workspace_id)
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"unknown workspace {workspace_id!r}")
-    return ws
 
 
 # Async on purpose: FastAPI runs an async dependency on the event loop, which owns the supervisor's

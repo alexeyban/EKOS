@@ -11,7 +11,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.deps import mcp_for_workspace
+from app import models
+from app.deps import mcp_for_workspace, require_workspace
 from app.main import create_app
 
 AUTH = {"Authorization": "Bearer gtok"}
@@ -59,6 +60,11 @@ def rec(
     app = create_app()
     recorder = RecordingMcp()
     app.dependency_overrides[mcp_for_workspace] = lambda: recorder
+    # RFC 0180: every workspace route resolves the workspace to check the caller's role on it,
+    # so the workspace these tests name has to exist for that check too.
+    app.dependency_overrides[require_workspace] = lambda: models.Workspace(
+        id="any", name="any", path="/"
+    )
     with TestClient(app) as c:
         yield c, recorder
 

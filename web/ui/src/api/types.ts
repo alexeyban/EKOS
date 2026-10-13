@@ -16,11 +16,24 @@ export interface ServerStatus {
   detail: string;
 }
 
+export type RoleName = "viewer" | "reviewer" | "operator" | "admin";
+
 export interface Workspace {
   id: string;
   name: string;
   path: string;
+  // RFC 0180. Optional so a response from an older API still type-checks.
+  tenant_id?: string;
+  // The signed-in caller's roles on this workspace.
+  roles?: RoleName[];
   server: ServerStatus | null;
+}
+
+export interface TenantSummary {
+  id: string;
+  name: string;
+  roles: RoleName[];
+  source_roots?: string[];
 }
 
 export interface StorageComponent {

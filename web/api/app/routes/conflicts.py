@@ -13,21 +13,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .. import conflicts_write, models, readproc, semantics_write
-from ..auth import Principal, require_role
+from ..auth import Principal
+from ..authz import allow
 from ..deps import require_workspace
 from ..settings import Settings, get_settings
 from ._responses import BAD_GATEWAY, BAD_REQUEST, CONFLICT
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/conflicts", tags=["conflicts"])
 
-_WRITER = require_role("write")
+_WRITER = allow("review")
 _BIG = 32 << 20
 
 Status = Literal["open", "resolved", "dismissed"]
 Type = Literal["duplicate_definition", "merge_loss", "label_mismatch", "doc_vs_data"]
 
 
-@router.get("", dependencies=[Depends(require_role("read"))], responses={502: BAD_GATEWAY})
+@router.get("", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
 async def conflicts(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),

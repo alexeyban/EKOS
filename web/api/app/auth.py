@@ -1,34 +1,59 @@
-"""Authentication + the read/write role split (RFC 0131 §1).
+"""Who is asking (RFC 0131 §1, RFC 0180).
 
-Two modes, chosen by whether `OIDC_ISSUER` is set:
+A request carries one of three credentials:
 
-* **OIDC** — Authorization Code + PKCE against an external provider (`authlib`). A configurable
-  ID-token claim maps to the `write` role; everyone else authenticated is `read`.
-* **token** — two static bearer tokens: `CONSOLE_TOKEN` → `read`, `CONSOLE_WRITE_TOKEN` → `write`.
-  The fallback for CI / compose / local dev where there is no IdP.
+* a **session cookie** set by the OIDC sign-in — a person, a row in `User`;
+* an **API token**, `Authorization: Bearer ekos_…` — an agent, a row in `ApiToken`;
+* a **static console token** (cookie or bearer) — development only, refused in production mode.
 
-In **both** modes the browser ends up with a signed session cookie (so `EventSource`, which can't
-set headers, works for the SSE log stream). `Authorization: Bearer` is additionally accepted in
-token mode for curl / tests.
+This module turns a request into a `Principal` and nothing else. What that principal may do is
+decided in `authz`, and only there.
 """
 
 from __future__ import annotations
 
+import hashlib
 import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Request
 from pydantic import BaseModel
 
-from .settings import Settings, get_settings
+from . import models
+from .settings import Settings
 
-Role = Literal["read", "write"]
+TOKEN_PREFIX = "ekos_"
+# `last_used_at` is refreshed at most this often, so reading with a token is not one database
+# write per request.
+_LAST_USED_GRANULARITY = timedelta(minutes=1)
 
 
 class Principal(BaseModel):
-    subject: str
+    kind: Literal["user", "token", "static"]
+    # `User.id`, `ApiToken.id`, or "read" / "write" for a static token.
+    id: str
+    subject: str = ""
     email: str | None = None
-    role: Role
+    # A platform owner (RFC 0180): named in EKOS_CONSOLE_OWNERS, or the static write token.
+    owner: bool = False
+    # Values of the OIDC role claim at sign-in; a group may name one of them.
+    claims: list[str] = []
+    # RFC 0131's mapping, kept outside production mode: what this principal may do in the
+    # `default` tenant without any binding.
+    compat: Literal["read", "write"] | None = None
+    # The tenant an API token belongs to. It has no roles anywhere else.
+    tenant_id: str | None = None
+
+    @property
+    def label(self) -> str:
+        """How the audit log names this principal."""
+        if self.kind == "token":
+            # The name an admin gave it, and enough of the id to tell two same-named ones apart.
+            return f"token:{self.subject}#{self.id[:6]}"
+        if self.kind == "static":
+            return f"static:{self.id}"
+        return self.email or self.subject or self.id
 
 
 # ── OIDC client (lazy) ───────────────────────────────────────────────────────
@@ -62,70 +87,129 @@ def reset_oauth() -> None:
     _oauth = None
 
 
-# ── role mapping ─────────────────────────────────────────────────────────────
+# ── claims ───────────────────────────────────────────────────────────────────
 
 
-def role_for_claims(claims: dict, role_claim: str, write_values: set[str]) -> Role:
+def claim_values(claims: dict, role_claim: str) -> list[str]:
+    """The role claim as a sorted list of strings, whatever shape the provider sent."""
+    raw = claims.get(role_claim) or []
+    values = [raw] if isinstance(raw, str) else list(raw)
+    return sorted({str(v) for v in values})
+
+
+def role_for_claims(
+    claims: dict, role_claim: str, write_values: set[str]
+) -> Literal["read", "write"]:
     """`write` iff the ID token's `role_claim` shares a value with `write_values`. An empty
-    `write_values` means the deployment is read-only for everyone."""
+    `write_values` means nobody gets write this way."""
     if not write_values:
         return "read"
-    raw = claims.get(role_claim) or []
-    values = {raw} if isinstance(raw, str) else set(raw)
-    return "write" if write_values & values else "read"
+    return "write" if write_values & set(claim_values(claims, role_claim)) else "read"
+
+
+# ── API tokens ───────────────────────────────────────────────────────────────
+
+
+def new_token() -> tuple[str, str, str]:
+    """A fresh token: `(token, sha256 hex, display prefix)`. The token itself is returned to its
+    creator once and never stored."""
+    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    return token, hash_token(token), token[: len(TOKEN_PREFIX) + 6]
+
+
+def hash_token(token: str) -> str:
+    # A token is 256 random bits, so a plain digest is enough: there is nothing to brute-force
+    # that a slow hash would protect.
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _from_api_token(supplied: str) -> Principal | None:
+    row = models.token_by_hash(hash_token(supplied))
+    if row is None or row.revoked_at is not None:
+        return None
+    now = datetime.now(UTC)
+    if row.expires_at is not None and _aware(row.expires_at) <= now:
+        return None
+    if row.last_used_at is None or now - _aware(row.last_used_at) > _LAST_USED_GRANULARITY:
+        models.update_token(row.id, last_used_at=now)
+    return Principal(kind="token", id=row.id, subject=row.name, tenant_id=row.tenant_id)
+
+
+def _aware(moment: datetime) -> datetime:
+    """SQLite returns naive datetimes; they were written as UTC."""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 # ── request → principal ──────────────────────────────────────────────────────
 
 
-def _from_session(request: Request) -> Principal | None:
-    user = request.session.get("user") if "session" in request.scope else None
-    return Principal(**user) if user else None
+def _static(role: str) -> Principal:
+    return Principal(
+        kind="static",
+        id=role,
+        subject="token",
+        owner=role == "write",
+        compat="write" if role == "write" else "read",
+    )
 
 
-def _from_bearer(authorization: str, settings: Settings) -> Principal | None:
-    if settings.oidc_enabled:
-        return None  # bearer tokens are not a thing in OIDC mode
-    prefix = "Bearer "
-    supplied = authorization[len(prefix) :] if authorization.startswith(prefix) else ""
-    if not supplied:
+def static_role(supplied: str, settings: Settings) -> str | None:
+    """Which static console token `supplied` is, if static tokens are accepted at all."""
+    if settings.oidc_enabled or settings.production or not supplied:
         return None
     if settings.console_write_token and secrets.compare_digest(
         supplied, settings.console_write_token
     ):
-        return Principal(subject="token", role="write")
+        return "write"
     if secrets.compare_digest(supplied, settings.console_token):
-        return Principal(subject="token", role="read")
+        return "read"
+    return None
+
+
+def user_principal(user: models.User, claims: list[str], settings: Settings) -> Principal:
+    owners = settings.owner_set()
+    owner = bool(owners) and (
+        (user.email or "").lower() in owners or (user.subject or "").lower() in owners
+    )
+    compat = None
+    if not settings.production:
+        compat = "write" if settings.oidc_write_value_set() & set(claims) else "read"
+    return Principal(
+        kind="user",
+        id=user.id,
+        subject=user.subject,
+        email=user.email or None,
+        owner=owner,
+        claims=claims,
+        compat=compat,
+    )
+
+
+def _from_session(request: Request, settings: Settings) -> Principal | None:
+    data = request.session.get("user") if "session" in request.scope else None
+    if not isinstance(data, dict):
+        return None
+    kind = data.get("kind")
+    if kind == "static":
+        if settings.oidc_enabled or settings.production or data.get("id") not in ("read", "write"):
+            return None
+        return _static(data["id"])
+    if kind == "user" and settings.oidc_enabled:
+        user = models.get_user(str(data.get("id", "")))
+        if user is None:
+            return None
+        return user_principal(user, [str(c) for c in data.get("claims", [])], settings)
     return None
 
 
 def resolve_principal(request: Request, authorization: str, settings: Settings) -> Principal | None:
-    return _from_session(request) or _from_bearer(authorization, settings)
-
-
-def check_role(
-    request: Request, authorization: str, settings: Settings, minimum: Role
-) -> Principal:
-    """Resolve the principal and enforce `minimum`. 401 = not authenticated, 403 = wrong role.
-    Framework-independent so both the dependency and manual call sites can use it."""
-    principal = resolve_principal(request, authorization, settings)
-    if principal is None:
-        raise HTTPException(status_code=401, detail="not authenticated")
-    if minimum == "write" and principal.role != "write":
-        raise HTTPException(status_code=403, detail="write role required")
-    return principal
-
-
-def require_role(minimum: Role):
-    """Dependency factory. `require_role("read")` accepts read or write; `require_role("write")`
-    needs write."""
-
-    # Async on purpose: runs on the event loop instead of a thread-pool hop per request.
-    async def dependency(  # NOSONAR(python:S7503)
-        request: Request,
-        authorization: str = Header(default=""),
-        settings: Settings = Depends(get_settings),
-    ) -> Principal:
-        return check_role(request, authorization, settings, minimum)
-
-    return dependency
+    prefix = "Bearer "
+    supplied = authorization[len(prefix) :] if authorization.startswith(prefix) else ""
+    # An explicit API token is a deliberate choice of identity; it is not overridden by a cookie.
+    if supplied.startswith(TOKEN_PREFIX):
+        return _from_api_token(supplied)
+    from_session = _from_session(request, settings)
+    if from_session is not None:
+        return from_session
+    role = static_role(supplied, settings)
+    return _static(role) if role is not None else None

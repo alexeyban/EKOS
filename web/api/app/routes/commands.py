@@ -6,18 +6,17 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from .. import authz, models
 from .. import commands as cmds
-from .. import models
-from ..auth import check_role, require_role
+from ..auth import Principal
 from ..deps import require_workspace
 from ..runner import JobRunner, QueueFull
-from ..settings import get_settings
 from ._responses import NOT_FOUND, TOO_MANY, UNPROCESSABLE
 
 router = APIRouter(tags=["commands"])
 
 
-@router.get("/commands", dependencies=[Depends(require_role("read"))])
+@router.get("/commands", dependencies=[Depends(authz.authenticated)])
 async def list_commands() -> list[dict]:
     return cmds.catalogue()
 
@@ -35,17 +34,19 @@ async def run_command(
     request: Request,
     body: dict[str, Any] | None = None,
     ws: models.Workspace = Depends(require_workspace),
+    principal: Principal = Depends(authz.authenticated),
 ) -> dict:
     command = cmds.BY_NAME.get(name)
     if command is None:
         raise HTTPException(status_code=404, detail=f"no such command {name!r}")
 
-    # role gate: is_write commands need the write role, the rest need read.
-    check_role(
-        request,
-        request.headers.get("authorization", ""),
-        get_settings(),
-        "write" if command.is_write else "read",
+    # The action depends on the command: one that writes needs `operate`, the rest `read`.
+    authz.require(
+        principal,
+        "operate" if command.is_write else "read",
+        ws.tenant_id,
+        ws.id,
+        request=request,
     )
 
     try:

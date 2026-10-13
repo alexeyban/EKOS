@@ -5,6 +5,7 @@ import { api, apiPost } from "../api/client";
 
 interface Me {
   role: "read" | "write";
+  canOperate?: boolean;
 }
 interface CommandDef {
   name: string;
@@ -25,7 +26,7 @@ export function Run() {
   return (
     <div className="grid2">
       {commands.data?.map((c) => (
-        <CommandCard key={c.name} workspace={id} command={c} role={me.role} />
+        <CommandCard key={c.name} workspace={id} command={c} role={(me.canOperate ?? me.role === "write") ? "write" : "read"} />
       ))}
     </div>
   );

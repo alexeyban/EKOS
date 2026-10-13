@@ -13,6 +13,8 @@ web/*
 
 # Build output and dependencies: rebuilt inside the image.
 ekos/target/
+# Not compiled in. Left in the context, an edited RFC would rebuild the whole binary.
+ekos/docs/
 web/ui/node_modules/
 web/ui/dist/
 web/ui/coverage/
