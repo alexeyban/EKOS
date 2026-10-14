@@ -30,6 +30,14 @@ class FakeMcpServer:
             await self._server.wait_closed()
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        # Close the connection however the exchange ends: from Python 3.12, `Server.wait_closed`
+        # waits for every connection, so one left open hangs `stop()` (CI runs 3.12).
+        try:
+            await self._exchange(reader, writer)
+        finally:
+            writer.close()
+
+    async def _exchange(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         authed = self.require_token is None
         while True:
             line = await reader.readline()

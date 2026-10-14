@@ -4,6 +4,7 @@ written into the home, loopback only."""
 from __future__ import annotations
 
 import os
+import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -14,6 +15,12 @@ from fastapi.testclient import TestClient
 from app import local_signin
 from app.main import create_app
 from app.settings import Settings
+
+
+# Windows cannot run this test's assumption (see the reason); the job on Windows is informational.
+def _not_on_windows(reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
+
 
 LOOPBACK = ("127.0.0.1", 50000)
 BASE = "http://127.0.0.1:8000"
@@ -153,6 +160,7 @@ def test_uninstall_needs_an_install_by_setup(client: TestClient, home: Path) -> 
     assert client.post("/api/platform/uninstall").status_code == 409
 
 
+@_not_on_windows("the fake ekos is a shell script")
 def test_uninstall_starts_the_page_and_returns_its_link(
     home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -177,6 +185,7 @@ def test_uninstall_starts_the_page_and_returns_its_link(
     ]
 
 
+@_not_on_windows("the fake ekos is a shell script")
 def test_uninstall_refuses_a_link_off_this_machine(
     home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -188,6 +197,7 @@ def test_uninstall_refuses_a_link_off_this_machine(
         assert client.post("/api/platform/uninstall").status_code == 502
 
 
+@_not_on_windows("the fake ekos is a shell script")
 def test_uninstall_answers_while_the_page_holds_the_pipe(
     home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

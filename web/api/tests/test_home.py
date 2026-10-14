@@ -3,11 +3,17 @@ one. No subprocess, no binary."""
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from app import config_io, home
+
+
+# Windows cannot run this test's assumption (see the reason); the job on Windows is informational.
+def _not_on_windows(reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
 
 
 @pytest.fixture
@@ -32,7 +38,10 @@ def test_a_directory_under_data_tenant_project_is_a_project(ekos_home: Path) -> 
     [
         "data/default",  # a tenant, not a project
         "data/default/shop/state",  # inside a project
-        "data/Default/shop",  # not a valid tenant name
+        pytest.param(
+            "data/Default/shop",  # not a valid tenant name
+            marks=_not_on_windows("a case-insensitive file system resolves it to `default`"),
+        ),
         "data/default/..",
         "trash/default/shop",
     ],
@@ -140,8 +149,8 @@ def test_console_state_defaults_are_unchanged_without_a_home(
 
     monkeypatch.delenv("EKOS_HOME", raising=False)
     s = get_settings()
-    assert s.console_db == ".ekos-web/console.db"
-    assert s.runs_dir == ".ekos-web/runs"
+    assert Path(s.console_db) == Path(".ekos-web/console.db")
+    assert Path(s.runs_dir) == Path(".ekos-web/runs")
 
 
 def test_an_explicit_console_db_wins_over_the_home(
@@ -156,6 +165,7 @@ def test_an_explicit_console_db_wins_over_the_home(
 # ── §2: a project's config may not point outside the allowed root ────────────
 
 
+@_not_on_windows("POSIX absolute paths in the config")
 def test_directories_a_config_reads(tmp_path: Path) -> None:
     raw = (
         '[workspace]\nroot = "/sources/a"\n\n'
@@ -165,6 +175,7 @@ def test_directories_a_config_reads(tmp_path: Path) -> None:
     assert config_io.read_roots(raw) == ["/sources/a", "/sources/b", "/sources/a/docs"]
 
 
+@_not_on_windows("POSIX absolute paths in the config")
 def test_roots_outside_the_allowed_directory(tmp_path: Path) -> None:
     allowed = tmp_path / "sources"
     (allowed / "a").mkdir(parents=True)

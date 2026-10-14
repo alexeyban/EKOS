@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,6 +14,12 @@ from fastapi.testclient import TestClient
 from app import envs, models
 from app.main import create_app
 from app.settings import Settings
+
+
+# Windows cannot run this test's assumption (see the reason); the job on Windows is informational.
+def _not_on_windows(reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
+
 
 ENVIRON = {
     "PATH": "/usr/bin",
@@ -203,6 +210,7 @@ def _run_and_dump(client: TestClient, workspace_id: str, path: Path) -> dict[str
     return dict(line.split("=", 1) for line in lines if "=" in line)
 
 
+@_not_on_windows("the fake ekos is a shell script")
 def test_a_tenants_pipeline_sees_its_own_key_and_not_another_tenants(
     client: TestClient, tmp_path: Path
 ) -> None:

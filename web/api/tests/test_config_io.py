@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from app import config_io
+
+
+# Windows cannot run this test's assumption (see the reason); the job on Windows is informational.
+def _not_on_windows(reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
+
 
 SAMPLE = """\
 # top comment
@@ -143,6 +150,7 @@ def test_write_config_keeps_the_resolved_target_inside_the_workspace(tmp_path):
     assert not (tmp_path / "victim.toml").exists()
 
 
+@_not_on_windows("POSIX permission bits")
 def test_written_config_and_backup_are_owner_only(tmp_path):
     config_io.write_config(str(tmp_path), "[observe]\npaths = ['.']\n")
     config_io.write_config(str(tmp_path), "[observe]\npaths = ['src']\n")

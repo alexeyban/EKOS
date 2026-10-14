@@ -3,6 +3,7 @@ keychain."""
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -12,6 +13,12 @@ from fastapi.testclient import TestClient
 from app import envs, keychain, models
 from app.main import create_app
 from app.settings import Settings
+
+
+# Windows cannot run this test's assumption (see the reason); the job on Windows is informational.
+def _not_on_windows(reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
+
 
 OWNER = {"Authorization": "Bearer w-tok"}
 READER = {"Authorization": "Bearer r-tok"}
@@ -294,6 +301,7 @@ def test_nothing_is_filled_with_the_keychain_off(
 # ── a session survives a restart ─────────────────────────────────────────────
 
 
+@_not_on_windows("POSIX permission bits")
 def test_without_a_secret_the_home_keeps_one(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Found by the package check: with a random secret per start, the restart button on the
     Settings page signed the person out."""

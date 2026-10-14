@@ -94,6 +94,15 @@ broken by an empty build argument, and no Intel-macOS wheels for `cryptography`.
   a child out of its parent's unit; `systemd-run --user` does.
 - **`[skip ci]` hid the formatting slip and the macOS path for six commits.** `ci.yml` now has
   `workflow_dispatch` so the matrix can be run on demand after landing local work.
+- **The CI hang was Python 3.12's `Server.wait_closed()`**, which waits for every connection
+  to close: a test's fake MCP server returned from its handler without `writer.close()`, so
+  `stop()` waited forever. This machine runs 3.13 and the macOS runner 3.14, where it returns.
+  Found only once `-v -o faulthandler_timeout=300` named the test. Reproduce a CI-only hang with
+  `uv run --python 3.12 --isolated --with-requirements <(uv export --frozen) --with-editable .`.
+- **Windows runs the console tests for the first time**: 13 failures were test assumptions —
+  POSIX permission bits, fake `ekos` scripts run by their `#!` line, `/sources/...` absolute
+  paths, a case-insensitive file system. Those tests are skipped on Windows with the reason;
+  a path comparison became a `Path` comparison.
 - `cryptography` dropped x86_64 macOS wheels at 50.0; any `--only-binary` bundle for Intel Macs
   needs an older pin or a source build.
 

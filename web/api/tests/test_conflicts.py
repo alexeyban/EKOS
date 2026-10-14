@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import stat
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -18,6 +19,12 @@ from app.conflicts_write import resolve_argv
 from app.main import create_app
 from app.readproc import ReadProcError, _check_allowed
 from app.semantics_write import ReviewError
+
+
+# Windows cannot run this test's assumption (see the reason); the job on Windows is informational.
+def _not_on_windows(reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
+
 
 R = {"Authorization": "Bearer r"}
 W = {"Authorization": "Bearer w"}
@@ -123,6 +130,7 @@ def test_resolve_argv_is_one_decision_named_by_id() -> None:
 # ── routes ───────────────────────────────────────────────────────────────────────────────────
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_the_list_needs_only_the_read_role(setup) -> None:
     c, log = setup
     r = c.get("/api/workspaces/w/conflicts?status=open&type=duplicate_definition", headers=R)
@@ -134,6 +142,7 @@ def test_the_list_needs_only_the_read_role(setup) -> None:
     assert c.get("/api/workspaces/w/conflicts").status_code == 401
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_a_decision_needs_the_write_role_and_a_reviewer(setup) -> None:
     c, log = setup
     url = f"/api/workspaces/w/conflicts/{ID}/resolve"
@@ -148,6 +157,7 @@ def test_a_decision_needs_the_write_role_and_a_reviewer(setup) -> None:
     ]
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_bad_decisions_and_cli_refusals_are_400_and_a_held_lock_is_409(
     setup, monkeypatch: pytest.MonkeyPatch
 ) -> None:
