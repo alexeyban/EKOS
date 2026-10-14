@@ -3,6 +3,8 @@
 ## Unreleased (on `main` since v1.1.0)
 
 - **Fixed:** a chained run's stages (pipeline, Init & compile) had the 30-minute limit of a single command, so a large project's commit was killed (exit 124). They now take `run_stage_timeout_seconds` (default 6 hours, Settings → Runs).
+- **Fixed:** Python import / contains / extends edges and git ownership / co-change edges now carry evidence (file and line, or the commits). `ekos coverage` reported "Python: 0 relationships" and "Git history: 0 relationships" for projects with thousands of edges, and none could be cited. Takes effect at the next `ekos recover` (analyzer versions bumped).
+- **Fixed:** LLM descriptions use `[llm] max-tokens` (default 4096) instead of a hard-coded 1024; a reasoning model ran out of tokens before finishing its answer.
 - **Fixed:** `install.sh` replaces a running `ekos` (it failed with "Text file busy" while a pipeline stage or an MCP server ran); `install.ps1` no longer deletes half the program when EKOS is running.
 
 ## v1.1.0 — 2026-10-14

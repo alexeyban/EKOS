@@ -37,6 +37,22 @@ use std::path::Path;
 
 const PROMPT_VERSION: &str = "llm-description-v1";
 
+/// Output-token ceiling for a description call when `[llm] max-tokens` is unset.
+///
+/// It was a hardcoded 1024 (512 for the project summary), sized for the few sentences of JSON
+/// the prompts ask for. A reasoning model spends hidden reasoning tokens against the same limit:
+/// found live 2026-10-13 with `deepseek-v4.1-flash`, 110 of 1,447 objects failed on every run,
+/// either cut off mid-JSON or empty, and `[ai] max-tokens = 8192` in the same `ekos.toml` never
+/// reached this step. A model that doesn't reason stops at the end of its answer either way, so
+/// the higher ceiling costs it nothing.
+const DEFAULT_MAX_TOKENS: u32 = 4096;
+
+/// The ceiling a description call runs under: `[llm] max-tokens` when set (RFC 0146 Phase 3,
+/// the knob for compiler-pass LLM calls), else [`DEFAULT_MAX_TOKENS`].
+fn token_budget(configured: Option<u32>) -> u32 {
+    configured.unwrap_or(DEFAULT_MAX_TOKENS)
+}
+
 /// A bounded, single-line excerpt of an LLM response for an error message.
 ///
 /// Bounded because a failing model can return a wall of text, and this ends up in a `tracing::warn`
@@ -325,8 +341,10 @@ fn build_symbol_prompt(
     Some((user, hash, real_path))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn call_and_apply(
     llm: &dyn LlmProvider,
+    max_tokens: u32,
     user_message: &str,
     evidence_hash_value: &str,
     mut obj: KirObject,
@@ -338,7 +356,7 @@ async fn call_and_apply(
         system: SYSTEM_PROMPT,
         user: user_message,
         prompt_version: PROMPT_VERSION,
-        max_tokens: 1024,
+        max_tokens,
         history: &[],
     };
     let resp = llm.complete(&req).await.map_err(|e| e.to_string())?;
@@ -424,7 +442,8 @@ pub async fn describe_objects(
     workspace_root: &Path,
     redaction: &RedactionConfig,
 ) -> Result<DescriptionStats, String> {
-    describe_objects_with_progress(store, llm, scope, workspace_root, redaction, &|_| {}).await
+    describe_objects_with_progress(store, llm, None, scope, workspace_root, redaction, &|_| {})
+        .await
 }
 
 /// One object finished, reported to the caller's progress callback (RFC 0142).
@@ -451,9 +470,12 @@ pub struct DescriptionProgress<'a> {
 ///
 /// The callback is deliberately the whole seam — this crate stays free of terminals, cursors and
 /// TTY detection, which belong to the CLI (the MCP server and tests link this code too).
+///
+/// `max_tokens` is `[llm] max-tokens`; `None` means [`DEFAULT_MAX_TOKENS`].
 pub async fn describe_objects_with_progress(
     store: &dyn KnowledgeStore,
     llm: &dyn LlmProvider,
+    max_tokens: Option<u32>,
     scope: DescriptionScope,
     workspace_root: &Path,
     redaction: &RedactionConfig,
@@ -464,6 +486,7 @@ pub async fn describe_objects_with_progress(
     let neighbors = build_neighbors(&relationships);
     let by_id: HashMap<KirId, KirObject> = objects.iter().map(|o| (o.id, o.clone())).collect();
 
+    let max_tokens = token_budget(max_tokens);
     let mut stats = DescriptionStats::default();
     let mut done = 0usize;
 
@@ -522,6 +545,7 @@ pub async fn describe_objects_with_progress(
             );
             match call_and_apply(
                 llm,
+                max_tokens,
                 &user_message,
                 &hash,
                 obj.clone(),
@@ -577,6 +601,7 @@ pub async fn describe_objects_with_progress(
             );
             match call_and_apply(
                 llm,
+                max_tokens,
                 &user_message,
                 &hash,
                 obj.clone(),
@@ -636,6 +661,7 @@ fn is_real_readme_name(name: &str) -> bool {
 pub async fn describe_project(
     store: &dyn KnowledgeStore,
     llm: &dyn LlmProvider,
+    max_tokens: Option<u32>,
     workspace_name: &str,
 ) -> Result<bool, String> {
     let objects = store.all_objects().map_err(|e| e.to_string())?;
@@ -705,7 +731,7 @@ pub async fn describe_project(
         system: system_prompt,
         user: &user_message,
         prompt_version: PROMPT_VERSION,
-        max_tokens: 512,
+        max_tokens: token_budget(max_tokens),
         history: &[],
     };
     let resp = llm.complete(&req).await.map_err(|e| e.to_string())?;
@@ -766,6 +792,7 @@ mod tests {
         response: String,
         calls: AtomicUsize,
         requests: Mutex<Vec<String>>,
+        max_tokens: Mutex<Vec<u32>>,
     }
 
     impl RecordingLlmProvider {
@@ -774,6 +801,7 @@ mod tests {
                 response: response.into(),
                 calls: AtomicUsize::new(0),
                 requests: Mutex::new(Vec::new()),
+                max_tokens: Mutex::new(Vec::new()),
             }
         }
     }
@@ -786,6 +814,7 @@ mod tests {
         async fn complete(&self, req: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.requests.lock().unwrap().push(req.user.to_string());
+            self.max_tokens.lock().unwrap().push(req.max_tokens);
             Ok(LlmResponse {
                 content: self.response.clone(),
                 model: self.model_name().to_string(),
@@ -909,6 +938,32 @@ mod tests {
         assert!(snippet(&long).chars().count() <= 161, "must be bounded");
     }
 
+    /// Regression (2026-10-13): the limit was a hardcoded 1024, which a reasoning model used up
+    /// before finishing (or starting) its answer, and no `ekos.toml` setting could raise it.
+    #[tokio::test]
+    async fn the_token_ceiling_comes_from_config_and_defaults_above_a_reasoning_budget() {
+        let body = r#"{"overview": "o", "usage": "u", "comment_check": null}"#;
+        for (configured, expected) in [(None, DEFAULT_MAX_TOKENS), (Some(8192), 8192)] {
+            let (store, _dir) = temp_store();
+            let (_file, _module, _symbol, graph) = module_with_symbol();
+            seed(&store, graph);
+            let workspace = tempdir().unwrap();
+            let llm = RecordingLlmProvider::new(body);
+            describe_objects_with_progress(
+                &store,
+                &llm,
+                configured,
+                DescriptionScope::Modules,
+                workspace.path(),
+                &RedactionConfig::default(),
+                &|_| {},
+            )
+            .await
+            .unwrap();
+            assert_eq!(*llm.max_tokens.lock().unwrap(), vec![expected]);
+        }
+    }
+
     /// RFC 0142 — the callback must fire once per object *visited*, not once per LLM call.
     ///
     /// The cache-skip path is the one that matters. A run over an already-described workspace
@@ -929,6 +984,7 @@ mod tests {
         describe_objects_with_progress(
             &store,
             &llm,
+            None,
             DescriptionScope::Modules,
             workspace.path(),
             &RedactionConfig::default(),
@@ -954,6 +1010,7 @@ mod tests {
         let stats = describe_objects_with_progress(
             &store,
             &llm2,
+            None,
             DescriptionScope::Modules,
             workspace.path(),
             &RedactionConfig::default(),
@@ -1508,7 +1565,9 @@ CREATE VIEW open_ap AS SELECT * FROM ap WHERE NOT paid;\n";
         let llm = RecordingLlmProvider::new(
             r#"{"purpose": "A privacy-friendly web analytics platform.", "architecture_style": "modular monolith"}"#,
         );
-        let wrote = describe_project(&store, &llm, "analytics").await.unwrap();
+        let wrote = describe_project(&store, &llm, None, "analytics")
+            .await
+            .unwrap();
         assert!(wrote);
 
         let summary = store.get_object(&project_summary_id()).unwrap().unwrap();
@@ -1562,7 +1621,9 @@ CREATE VIEW open_ap AS SELECT * FROM ap WHERE NOT paid;\n";
         store.append_object(&real_readme).unwrap();
 
         let llm = RecordingLlmProvider::new(r#"{"purpose": "x", "architecture_style": "y"}"#);
-        describe_project(&store, &llm, "analytics").await.unwrap();
+        describe_project(&store, &llm, None, "analytics")
+            .await
+            .unwrap();
 
         let sent = llm.requests.lock().unwrap();
         assert!(
@@ -1599,7 +1660,9 @@ CREATE VIEW open_ap AS SELECT * FROM ap WHERE NOT paid;\n";
         store.append_object(&root).unwrap();
 
         let llm = RecordingLlmProvider::new(r#"{"purpose": "x", "architecture_style": "y"}"#);
-        describe_project(&store, &llm, "pdf-reader").await.unwrap();
+        describe_project(&store, &llm, None, "pdf-reader")
+            .await
+            .unwrap();
 
         let sent = llm.requests.lock().unwrap();
         assert!(
@@ -1614,7 +1677,7 @@ CREATE VIEW open_ap AS SELECT * FROM ap WHERE NOT paid;\n";
     async fn describe_project_writes_nothing_on_an_empty_workspace() {
         let (store, _dir) = temp_store();
         let llm = RecordingLlmProvider::new(r#"{"purpose": "x", "architecture_style": "y"}"#);
-        let wrote = describe_project(&store, &llm, "empty-workspace")
+        let wrote = describe_project(&store, &llm, None, "empty-workspace")
             .await
             .unwrap();
         assert!(!wrote);
@@ -1629,7 +1692,7 @@ CREATE VIEW open_ap AS SELECT * FROM ap WHERE NOT paid;\n";
             .with_property("member_count", serde_json::json!(1));
         store.append_object(&rollup).unwrap();
         let llm = RecordingLlmProvider::new(r#"{"purpose": null, "architecture_style": null}"#);
-        let wrote = describe_project(&store, &llm, "lib").await.unwrap();
+        let wrote = describe_project(&store, &llm, None, "lib").await.unwrap();
         assert!(!wrote);
         assert!(store.get_object(&project_summary_id()).unwrap().is_none());
     }

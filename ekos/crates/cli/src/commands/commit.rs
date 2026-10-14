@@ -724,6 +724,7 @@ async fn run_llm_description(
     let stats = ekos_recovery::describe_objects_with_progress(
         ledger,
         &*llm,
+        config.llm.max_tokens,
         scope,
         cwd,
         &redaction,
@@ -750,7 +751,9 @@ async fn run_llm_description(
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "workspace".to_string());
-    if let Err(e) = ekos_recovery::describe_project(ledger, &*llm, &workspace_name).await {
+    if let Err(e) =
+        ekos_recovery::describe_project(ledger, &*llm, config.llm.max_tokens, &workspace_name).await
+    {
         eprintln!("warning: project-level LLM summary failed (skipped): {e}");
     }
 
