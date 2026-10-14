@@ -28,6 +28,9 @@ const DEFAULT_MIN_COUPLING: usize = 2;
 /// pairs. First hit for real scanning a 44-project workspace (devlog 14).
 const DEFAULT_MAX_COUPLING_COMMIT_FILES: usize = 50;
 
+/// How many commit SHAs a `CoupledWith` edge's evidence names as examples.
+const COUPLING_EVIDENCE_SHAS: usize = 3;
+
 pub struct GitAnalyzerPass {
     pass_id: String,
     /// Git commit ObservationArtifact IDs to process.
@@ -73,8 +76,9 @@ impl CompilerPass for GitAnalyzerPass {
 
     // v2: bulk commits excluded from coupling analysis — bumping the version
     // invalidates cached v1 outputs so the fix actually re-runs.
+    // v3: evidence on the `OwnedBy` and `CoupledWith` edges.
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -123,7 +127,9 @@ impl CompilerPass for GitAnalyzerPass {
         }
 
         // ── Process each commit artifact → KirEvent ──────────────────────────
-        let mut file_co_changes: HashMap<(String, String), usize> = HashMap::new();
+        // Per file pair: how many commits changed both, and the first few of their SHAs (what
+        // the `CoupledWith` edge's evidence cites).
+        let mut file_co_changes: HashMap<(String, String), (usize, Vec<String>)> = HashMap::new();
 
         for artifact_id in &self.commit_artifact_ids {
             let json = match ctx.artifact_store.read(artifact_id) {
@@ -219,7 +225,11 @@ impl CompilerPass for GitAnalyzerPass {
                 for i in 0..sorted_files.len() {
                     for j in (i + 1)..sorted_files.len() {
                         let pair = (sorted_files[i].clone(), sorted_files[j].clone());
-                        *file_co_changes.entry(pair).or_insert(0) += 1;
+                        let (count, shas) = file_co_changes.entry(pair).or_default();
+                        *count += 1;
+                        if shas.len() < COUPLING_EVIDENCE_SHAS {
+                            shas.push(sha.clone());
+                        }
                     }
                 }
             } else {
@@ -232,27 +242,39 @@ impl CompilerPass for GitAnalyzerPass {
 
             // Authorship relationship: contributor → commit event.
             if let Some(&contrib_id) = contributor_ids.get(&author) {
-                let rel = KirRelationship::deterministic(
+                let mut rel = KirRelationship::deterministic(
                     RelationshipKind::OwnedBy,
                     subject_id,
                     contrib_id,
                     "",
                 );
+                // The commit itself is what says who authored it.
+                rel.evidence.push(ev_id);
                 graph.add_relationship(rel);
             }
         }
 
         // ── Emit CoupledWith relationships ────────────────────────────────────
-        for ((file_a, file_b), count) in &file_co_changes {
+        for ((file_a, file_b), (count, shas)) in &file_co_changes {
             if *count < self.min_coupling {
                 continue;
             }
+            // Without evidence `ekos coverage` attributed these edges to no source kind and
+            // reported Git history as "0 relationships" (found live 2026-10-13).
+            let ev_id = graph.add_evidence(KirEvidence::new(
+                SourceLocation::file("git:co-changes"),
+                format!(
+                    "{file_a} and {file_b} changed together in {count} commit(s), e.g. {}",
+                    shas.join(", ")
+                ),
+            ));
             let id_a = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, file_a.as_bytes()));
             let id_b = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, file_b.as_bytes()));
             let mut rel =
                 KirRelationship::deterministic(RelationshipKind::CoupledWith, id_a, id_b, "");
             rel.properties
                 .insert("co_change_count".into(), serde_json::json!(count));
+            rel.evidence.push(ev_id);
             graph.add_relationship(rel);
         }
 
@@ -494,6 +516,62 @@ mod tests {
         );
         assert_eq!(graph.relationships[0].kind, RelationshipKind::CoupledWith);
         assert_eq!(graph.relationships[0].properties["co_change_count"], 3);
+    }
+
+    /// Regression (2026-10-13): both edge kinds were emitted with no evidence, so `ekos coverage`
+    /// counted Git history as "0 relationships" and neither edge could be cited.
+    #[tokio::test]
+    async fn ownership_and_coupling_edges_carry_git_evidence() {
+        let dir = TempDir::new().unwrap();
+        let store = FileSystemArtifactStore::new(dir.path().join(".ekos/artifacts"));
+        std::fs::create_dir_all(dir.path().join(".ekos/artifacts")).unwrap();
+
+        let repo_id = seed_artifact(&store, &make_repo_artifact(&[("Alice", 2)]));
+        let mut ids = vec![];
+        for i in 0u32..2 {
+            let a = make_commit_artifact(&format!("sha{i}"), "Alice", &["a.rs", "b.rs"]);
+            ids.push(seed_artifact(&store, &a));
+        }
+
+        let mut pass = GitAnalyzerPass::new("repo", ids, Some(repo_id)).with_min_coupling(2);
+        let mut ctx = make_ctx_with_store(&dir);
+        pass.run(&mut ctx).await.unwrap();
+
+        let graph = read_knowledge_graph(ctx.artifact_store.as_ref());
+        let evidence_of = |rel: &KirRelationship| {
+            assert_eq!(rel.evidence.len(), 1, "{:?} edge has no evidence", rel.kind);
+            graph
+                .evidence
+                .iter()
+                .find(|e| e.id == rel.evidence[0])
+                .expect("the edge's evidence is on the graph")
+        };
+
+        let owned: Vec<&KirRelationship> = graph
+            .relationships
+            .iter()
+            .filter(|r| r.kind == RelationshipKind::OwnedBy)
+            .collect();
+        assert_eq!(owned.len(), 2);
+        for rel in owned {
+            assert!(
+                evidence_of(rel).location.path.starts_with("git:commit:sha"),
+                "authorship is proven by the commit"
+            );
+        }
+
+        let coupled = graph
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::CoupledWith)
+            .expect("a.rs and b.rs co-changed twice");
+        let ev = evidence_of(coupled);
+        assert_eq!(ev.location.path, "git:co-changes");
+        assert!(
+            ev.fragment
+                .contains("a.rs and b.rs changed together in 2 commit(s)")
+        );
+        assert!(ev.fragment.contains("sha0") && ev.fragment.contains("sha1"));
     }
 
     #[test]

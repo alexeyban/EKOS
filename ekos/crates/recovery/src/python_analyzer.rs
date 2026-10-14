@@ -98,8 +98,9 @@ impl CompilerPass for PythonAnalyzerPass {
     /// `v3` = RFC 0141 §4 (`properties.kind` renamed to `symbol_kind`).
     /// `v4` = RFC 0141 §1 (`signature` on function symbols).
     /// `v5` = RFC 0170 (`constants` on `Enum` class symbols).
+    /// `v6` = evidence on the `DependsOn` / `Contains` / `Extends` edges.
     fn version(&self) -> &str {
-        "v5"
+        "v6"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -176,21 +177,13 @@ impl CompilerPass for PythonAnalyzerPass {
                     .count();
                 merge_graphs(&mut combined, lower_to_kir(graph));
             }
-            for mut obj in result.objects {
-                // RFC 0140 §1 — a symbol's span is useless without the file it belongs to.
-                crate::source_evidence::attach(&mut obj, &data.source, &data.path, &mut combined);
-                if seen_modules.insert(obj.id)
-                    || !matches!(obj.kind, ObjectKind::Custom(ref k) if k == "PythonModule")
-                {
-                    combined.add_object(obj);
-                }
-            }
-            for rel in result.relationships {
-                combined.add_relationship(rel);
-            }
-            for ev in result.evidence {
-                combined.add_evidence(ev);
-            }
+            merge_file_result(
+                result,
+                &data.source,
+                &data.path,
+                &mut combined,
+                &mut seen_modules,
+            );
         }
 
         *self.stats.lock().unwrap() = stats;
@@ -218,6 +211,67 @@ impl CompilerPass for PythonAnalyzerPass {
     }
 }
 
+/// Move one parsed file's objects, relationships and evidence into the pass's combined graph.
+///
+/// Every edge leaves here with evidence naming the file and line it was read from. Found live
+/// 2026-10-13 on a 129-file Python project: `add_import` and `add_symbol` emitted their edges
+/// with no evidence at all, so `ekos coverage` (which attributes a relationship to a source kind
+/// by its own evidence) reported "Python: 1023 object(s), 0 relationships" for 2,312 real edges,
+/// and none of them could be cited.
+/// - `Contains` (file → symbol) shares the evidence `source_evidence::attach` gives the symbol:
+///   the same lines are what prove the file defines it.
+/// - `DependsOn` and `Extends` get the `import` statement / `class` line from `edge_spans`.
+fn merge_file_result(
+    result: PythonFileResult,
+    source: &str,
+    display_path: &str,
+    combined: &mut KirGraph,
+    seen_modules: &mut HashSet<KirId>,
+) {
+    let mut symbol_evidence: HashMap<KirId, KirId> = HashMap::new();
+    for mut obj in result.objects {
+        // RFC 0140 §1 — a symbol's span is useless without the file it belongs to.
+        crate::source_evidence::attach(&mut obj, source, display_path, combined);
+        if let Some(&ev_id) = obj.evidence.first() {
+            symbol_evidence.entry(obj.id).or_insert(ev_id);
+        }
+        if seen_modules.insert(obj.id)
+            || !matches!(obj.kind, ObjectKind::Custom(ref k) if k == "PythonModule")
+        {
+            combined.add_object(obj);
+        }
+    }
+    // One evidence record per distinct edge: a module imported twice in a file is one fact.
+    let mut edge_evidence: HashMap<KirId, KirId> = HashMap::new();
+    for mut rel in result.relationships {
+        if rel.evidence.is_empty() {
+            let ev_id = if rel.kind == RelationshipKind::Contains {
+                symbol_evidence.get(&rel.to).copied()
+            } else if let Some(&ev_id) = edge_evidence.get(&rel.id) {
+                Some(ev_id)
+            } else {
+                result.edge_spans.get(&rel.id).map(|&(start, end)| {
+                    let ev_id = combined.add_evidence(KirEvidence::new(
+                        SourceLocation::at(display_path, start),
+                        crate::source_evidence::slice_lines(
+                            source,
+                            u64::from(start),
+                            u64::from(end),
+                        ),
+                    ));
+                    edge_evidence.insert(rel.id, ev_id);
+                    ev_id
+                })
+            };
+            rel.evidence.extend(ev_id);
+        }
+        combined.add_relationship(rel);
+    }
+    for ev in result.evidence {
+        combined.add_evidence(ev);
+    }
+}
+
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
 struct PythonFileResult {
@@ -225,6 +279,9 @@ struct PythonFileResult {
     objects: Vec<KirObject>,
     relationships: Vec<KirRelationship>,
     evidence: Vec<KirEvidence>,
+    /// The 1-indexed `(start, end)` lines of the statement behind a `DependsOn` / `Extends` edge,
+    /// by relationship id — what `merge_file_result` turns into that edge's evidence.
+    edge_spans: HashMap<KirId, (u32, u32)>,
 }
 
 fn parse_python_file(
@@ -238,6 +295,7 @@ fn parse_python_file(
         objects: Vec::new(),
         relationships: Vec::new(),
         evidence: Vec::new(),
+        edge_spans: HashMap::new(),
     };
     let mut graph_index = 0usize;
 
@@ -293,17 +351,14 @@ fn python_module_kir_id(module: &str) -> KirId {
     ))
 }
 
-fn add_import(module: &str, file_id: KirId, result: &mut PythonFileResult) {
+fn add_import(module: &str, file_id: KirId, span: (u32, u32), result: &mut PythonFileResult) {
     let target_id = python_module_kir_id(module);
     let mut obj = KirObject::new(module, ObjectKind::Custom("PythonModule".to_string()));
     obj.id = target_id;
     result.objects.push(obj);
-    result.relationships.push(KirRelationship::deterministic(
-        RelationshipKind::DependsOn,
-        file_id,
-        target_id,
-        "",
-    ));
+    let rel = KirRelationship::deterministic(RelationshipKind::DependsOn, file_id, target_id, "");
+    result.edge_spans.entry(rel.id).or_insert(span);
+    result.relationships.push(rel);
 }
 
 /// Deterministic id for a `Custom("PythonSymbol")` object — shared by `add_symbol` (which mints
@@ -723,11 +778,13 @@ fn walk_top_level_statement(
 ) {
     match stmt {
         ast::Stmt::Import(imp) => {
+            let span = item_span(imp, source);
             for alias in &imp.names {
-                add_import(alias.name.as_str(), file_id, result);
+                add_import(alias.name.as_str(), file_id, span, result);
             }
         }
         ast::Stmt::ImportFrom(imp) => {
+            let span = item_span(imp, source);
             if let Some(module) = &imp.module {
                 // `from pkg import name` binds each real, distinct `name` — resolving every one
                 // to the bare `pkg` collapsed `from app.services import ai_service` and
@@ -740,9 +797,9 @@ fn walk_top_level_statement(
                 for alias in &imp.names {
                     let name = alias.name.as_str();
                     if name == "*" {
-                        add_import(module.as_str(), file_id, result);
+                        add_import(module.as_str(), file_id, span, result);
                     } else {
-                        add_import(&format!("{module}.{name}"), file_id, result);
+                        add_import(&format!("{module}.{name}"), file_id, span, result);
                     }
                 }
             }
@@ -820,6 +877,8 @@ fn walk_top_level_statement(
                     let mut rel =
                         KirRelationship::new(RelationshipKind::Extends, class_id, base_id);
                     rel.id = extends_kir_id(class_id, base_id);
+                    // The `class Child(Base):` line itself, not the whole body.
+                    result.edge_spans.insert(rel.id, (span.0, span.0));
                     result.relationships.push(rel);
                 }
             }
@@ -1139,6 +1198,83 @@ mod tests {
 
     fn parse(source: &str) -> PythonFileResult {
         parse_python_file("test.py", source, KirId(Uuid::new_v4())).unwrap()
+    }
+
+    /// `parse` plus the merge `run` does for each file, into a fresh graph.
+    fn parse_and_merge(source: &str) -> KirGraph {
+        let mut graph = KirGraph::new();
+        merge_file_result(
+            parse(source),
+            source,
+            "pkg/test.py",
+            &mut graph,
+            &mut HashSet::new(),
+        );
+        graph
+    }
+
+    fn evidence_of<'a>(graph: &'a KirGraph, rel: &KirRelationship) -> &'a KirEvidence {
+        assert_eq!(rel.evidence.len(), 1, "{:?} edge has no evidence", rel.kind);
+        graph
+            .evidence
+            .iter()
+            .find(|e| e.id == rel.evidence[0])
+            .expect("the edge's evidence is on the graph")
+    }
+
+    /// Regression (2026-10-13): these edges had no evidence, so `ekos coverage` reported
+    /// "Python: 1023 object(s), 0 relationships" on a project with 2,312 of them.
+    #[test]
+    fn an_import_edge_cites_the_import_statement() {
+        let graph = parse_and_merge("import os\n\nfrom a.b import (\n    c,\n    d,\n)\n");
+        assert_eq!(graph.relationships.len(), 3);
+        let fragments: Vec<(Option<u32>, &str)> = graph
+            .relationships
+            .iter()
+            .map(|r| {
+                let ev = evidence_of(&graph, r);
+                assert_eq!(ev.location.path, "pkg/test.py");
+                (ev.location.line, ev.fragment.as_str())
+            })
+            .collect();
+        assert_eq!(fragments[0], (Some(1), "import os"));
+        let multi_line = "from a.b import (\n    c,\n    d,\n)";
+        assert_eq!(fragments[1], (Some(3), multi_line));
+        assert_eq!(fragments[2], (Some(3), multi_line));
+    }
+
+    #[test]
+    fn a_module_imported_twice_in_a_file_gets_one_evidence_record() {
+        let graph = parse_and_merge("import os\nimport os\n");
+        assert_eq!(graph.evidence.len(), 1);
+        for rel in &graph.relationships {
+            assert_eq!(evidence_of(&graph, rel).location.line, Some(1));
+        }
+    }
+
+    #[test]
+    fn a_contains_edge_shares_the_evidence_of_the_symbol_it_points_at() {
+        let graph = parse_and_merge("x = 1\n\ndef f():\n    return 1\n");
+        let rel = &graph.relationships[0];
+        assert_eq!(rel.kind, RelationshipKind::Contains);
+        let symbol = graph.get_object(&rel.to).unwrap();
+        assert_eq!(rel.evidence, symbol.evidence);
+        let ev = evidence_of(&graph, rel);
+        assert_eq!(ev.location.line, Some(3));
+        assert_eq!(ev.fragment, "def f():\n    return 1");
+    }
+
+    #[test]
+    fn an_extends_edge_cites_the_class_line() {
+        let graph = parse_and_merge("class Base:\n    pass\n\nclass Child(Base):\n    pass\n");
+        let rel = graph
+            .relationships
+            .iter()
+            .find(|r| r.kind == RelationshipKind::Extends)
+            .unwrap();
+        let ev = evidence_of(&graph, rel);
+        assert_eq!(ev.location.line, Some(4));
+        assert_eq!(ev.fragment, "class Child(Base):");
     }
 
     #[test]
