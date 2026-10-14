@@ -32,7 +32,7 @@ cleanup() {
 }
 trap cleanup EXIT
 # Every console and wizard in this check listens on this machine's loopback, over plain HTTP.
-LOCAL="http://127.0.0.1"  # NOSONAR(shell:S5332) loopback only, never a remote host
+LOCAL="http://127.0.0.1"  # NOSONAR
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 
 echo "== 1. assemble"
@@ -103,7 +103,8 @@ WPORT="$(free_port)"
 "$PKG/bin/ekos" --home "$WORK/home2" setup --no-browser --port "$WPORT" > "$WORK/wizard.txt" 2>&1 &
 WIZARD_PID=$!
 for _ in $(seq 1 50); do grep -q "$LOCAL" "$WORK/wizard.txt" && break; sleep 0.2; done
-wlink="$(grep -o "$LOCAL[^ ]*" "$WORK/wizard.txt" | head -1)"
+# The wizard's own link: loopback, plain HTTP (see LOCAL).
+wlink="$(grep -o "$LOCAL[^ ]*" "$WORK/wizard.txt" | head -1)"  # NOSONAR
 P2="$(free_port)"
 rc=0
 (cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_WIZARD="$wlink" E2E_HOME2="$WORK/home2" \

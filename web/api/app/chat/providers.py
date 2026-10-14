@@ -254,7 +254,8 @@ class Ollama(_Base):
     def request(self, system, messages, tools):
         url = self.base_url or os.environ.get("OLLAMA_HOST") or OLLAMA_DEFAULT
         if not url.startswith("http"):
-            url = "http://" + url  # NOSONAR(python:S5332) OLLAMA_HOST may be given as host:port
+            # OLLAMA_HOST may be given as host:port, which Ollama itself serves over plain HTTP.
+            url = "http://" + url  # NOSONAR
         body = {
             "model": self.model,
             "stream": False,
