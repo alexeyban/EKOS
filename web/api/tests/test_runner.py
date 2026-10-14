@@ -140,3 +140,33 @@ def _ok_stream():
         return 0
 
     return stream
+
+
+async def test_a_compile_chain_uses_the_stage_timeout_setting(_db, monkeypatch, tmp_path):
+    """A large project's commit takes longer than the 30 minutes a single command gets; the
+    chain was killed with exit 124 on a 95k-object project. Its stages take the console's
+    `run_stage_timeout_seconds` instead."""
+    seen: list[tuple[str, float]] = []
+
+    async def stream(argv, *, cwd, log_path, register, timeout_s, on_line=None, env=None):
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.touch()
+        seen.append((argv[-1] if argv[-1] != "--yes" else argv[-2], timeout_s))
+        return 0
+
+    monkeypatch.setattr(_proc, "run_streaming", stream)
+    settings = _settings(tmp_path).model_copy(update={"run_stage_timeout_seconds": 7200})
+    runner = JobRunner(settings)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    for name in ("pipeline", "build"):
+        run_id = await runner.submit("w", str(ws), BY_NAME[name], {})
+        for _ in range(100):
+            if models.get_run(run_id).status in models.TERMINAL:
+                break
+            await asyncio.sleep(0.02)
+    await runner.aclose()
+    by_stage = dict(seen)
+    assert by_stage["commit"] == 7200 and by_stage["recover"] == 7200
+    # A single command keeps its own limit.
+    assert [t for s, t in seen if s == "build"][-1] == BY_NAME["build"].timeout

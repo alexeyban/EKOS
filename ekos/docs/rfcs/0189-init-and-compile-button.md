@@ -45,3 +45,11 @@ Stages and argv for an in-place workspace and for a home project; `resolve --for
 `commit --yes` only where declared (the pipeline is unchanged); a viewer is refused; a run of
 the command against a real fixture with `EKOS_BIN` produces objects; the button is hidden for
 a viewer and opens the run after confirming.
+
+## Amendment (2026-10-14): a stage's time limit
+
+A chained run's stages used the 30-minute limit of a single command. On a real project of
+95 000 objects the commit stage took longer and was killed (exit 124, run `timed_out`). Each
+stage of a chained run (`pipeline`, `init-and-compile`) now takes the console setting
+`run_stage_timeout_seconds` (default 6 hours, minimum 60, on the Settings page under Runs);
+single commands keep their own limits.

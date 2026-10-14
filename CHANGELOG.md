@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (on `main` since v1.1.0)
+
+- **Fixed:** a chained run's stages (pipeline, Init & compile) had the 30-minute limit of a single command, so a large project's commit was killed (exit 124). They now take `run_stage_timeout_seconds` (default 6 hours, Settings → Runs).
+- **Fixed:** `install.sh` replaces a running `ekos` (it failed with "Text file busy" while a pipeline stage or an MCP server ran); `install.ps1` no longer deletes half the program when EKOS is running.
+
 ## v1.1.0 — 2026-10-14
 
 RFCs 0154–0189, devlogs 204–272. The first release with **full packages**: the `ekos` command,

@@ -154,6 +154,9 @@ class Settings(BaseSettings):
 
     # Job runner (RFC 0131): per-workspace queue depth, and where run logs land.
     run_queue_depth: int = 16
+    # Each stage of a chained compile run (pipeline, Init & compile). A single command keeps its
+    # own limit (30 min); a large project's commit takes longer than that (RFC 0189 amendment).
+    run_stage_timeout_seconds: int = Field(default=6 * 3600, ge=60)
     # Empty means the default: `<home>/control/runs` with a home, `.ekos-web/runs` without.
     runs_dir: str = ""
 

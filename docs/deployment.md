@@ -174,7 +174,9 @@ Removing a role takes effect on that person's next request.
 A tenant admin adds a project in **Add a workspace → New project from a source directory**,
 with a path such as `/sources/payments-api`. Then an operator presses **Init & compile** in the project's
 bar (RFC 0189: build, recover, resolve, compile, commit and a coverage report as one run; identity
-conflicts are reported in the log and left for review), or runs single stages from the **Run** tab.
+conflicts are reported in the log and left for review), or runs single stages from the **Run** tab. Each stage of a chained run may take up to six
+hours (`run_stage_timeout_seconds` on the Settings page); a single command keeps a 30-minute
+limit.
 
 A project of several repositories and folders is created from the command line:
 

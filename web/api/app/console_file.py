@@ -107,6 +107,11 @@ FIELDS: dict[str, Field] = {
     "chat_max_tool_calls": Field("Chat", "Most EKOS tool calls the model may make per question"),
     "chat_max_tokens": Field("Chat", "Most tokens in one answer"),
     "run_queue_depth": Field("Runs", "Commands queued per workspace before new ones are refused"),
+    "run_stage_timeout_seconds": Field(
+        "Runs",
+        "Longest one stage of the pipeline or Init & compile may run (a large project's commit "
+        "can take hours)",
+    ),
     "ekos_bin": Field("Locations", "The `ekos` binary", editable=False),
     "ekos_home": Field("Locations", "The EKOS home", editable=False),
     "console_db": Field("Locations", "The console's database", editable=False),

@@ -259,7 +259,7 @@ class JobRunner:
                 env=envs.for_path(ws_path),
                 log_path=log_path,
                 register=register,
-                timeout_s=command.timeout,
+                timeout_s=self._settings.run_stage_timeout_seconds,
             )
             stage["exit_code"] = code
             stage["status"] = "succeeded" if code == 0 else "failed"
