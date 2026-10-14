@@ -130,7 +130,41 @@ parsed from files (RFC 0031); live PostgreSQL / SQL Server database connectors a
 
 ## Installation
 
-### Prebuilt binary (recommended)
+### With the web console: the setup wizard (Linux, Windows 11, macOS — RFC 0185)
+
+The full package holds the `ekos` command, the web console and the Python that runs it; nothing
+else is needed. Installing it opens a setup page in your browser:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh        # Linux, macOS
+```
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/alexeyban/EKOS/main/install.ps1 | iex"   # Windows
+```
+
+Or download `ekos-<version>-<target>-full` from the releases page, unpack it and start
+`setup.sh` (Linux), `setup.command` (macOS: right-click → Open the first time) or `setup.cmd`
+(Windows: **More info → Run anyway** the first time; the program is not code-signed).
+
+The wizard asks where EKOS goes, whether the console is for you alone (local mode: this machine
+only, signed in with a one-time code) or for a team (OIDC), which port, a first project and its
+source directories, which agents to register it with (Claude Code, Claude Desktop, VS Code —
+their config files are backed up and other entries kept), and whether to start the console at
+login. It shows the exact list of steps before doing anything. Afterwards:
+
+```bash
+ekos console open | status | stop | start | restart | logs
+ekos setup                  # change any of it later
+ekos uninstall              # the program, login entry, PATH line, agent entries; keeps projects
+```
+
+`ekos setup --answers answers.toml` applies the same answers without a browser (servers,
+scripts); `--dry-run` lists the steps. The release workflow builds the full package for Linux
+x86_64 and aarch64, macOS and Windows; `scripts/package-full.sh` assembles one, and
+`scripts/package-release.sh --full` builds an offline set for Linux x86_64. Until the next
+tagged release, `install.sh` finds no full package and installs the command only.
+
+### Prebuilt binary, command only
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh

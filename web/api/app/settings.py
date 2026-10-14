@@ -206,7 +206,8 @@ class Settings(BaseSettings):
             missing.append("EKOS_CONSOLE_OIDC_ISSUER (static tokens are for development)")
         if not self.owner_set():
             missing.append("EKOS_CONSOLE_OWNERS (nobody could administer the console)")
-        if self.session_secret in _PLACEHOLDER_SESSION_SECRETS:
+        # With a home, a generated key is kept in it (`_home_session_key`), as good as a set one.
+        if self.session_secret in _PLACEHOLDER_SESSION_SECRETS and not self.ekos_home:
             missing.append("EKOS_CONSOLE_SESSION_SECRET")
         if missing:
             raise ValueError("EKOS_CONSOLE_PRODUCTION is set; also set " + "; ".join(missing))
@@ -218,11 +219,16 @@ class Settings(BaseSettings):
         `{"user": {"role": "write"}}` with the repo's placeholder and hold write access — including
         in token mode with no write token configured, because the session is checked first."""
         if self.session_secret in _PLACEHOLDER_SESSION_SECRETS:
-            log.warning(
-                "EKOS_CONSOLE_SESSION_SECRET is unset or the published placeholder; using a random "
-                "per-process secret. Sessions will not survive a restart — set it to keep them."
-            )
-            self.session_secret = secrets.token_urlsafe(32)
+            kept = _home_session_key(self.ekos_home) if self.ekos_home else None
+            if kept is not None:
+                self.session_secret = kept
+            else:
+                log.warning(
+                    "EKOS_CONSOLE_SESSION_SECRET is unset or the published placeholder; using a "
+                    "random per-process secret. Sessions will not survive a restart — set it to "
+                    "keep them."
+                )
+                self.session_secret = secrets.token_urlsafe(32)
         if not self.oidc_enabled and not self.local and self.console_token == DEFAULT_CONSOLE_TOKEN:
             log.warning(
                 "EKOS_CONSOLE_CONSOLE_TOKEN is the published default %r: anyone who can reach this "
@@ -234,6 +240,29 @@ class Settings(BaseSettings):
     def workspace_seeds(self) -> list[WorkspaceSeed]:
         raw = json.loads(self.workspaces_json or "[]")
         return [WorkspaceSeed(**w) for w in raw]
+
+
+def _home_session_key(ekos_home: str) -> str | None:
+    """RFC 0185: with no session secret set, a console with a home keeps a generated one in
+    `control/session.key`, readable by its owner only. Without it every restart (the Settings
+    page's own button included) signed everyone out. It sits beside the console's database,
+    which an attacker with that directory has anyway."""
+    path = Path(ekos_home) / "control" / "session.key"
+    try:
+        if path.is_file():
+            kept = path.read_text(encoding="utf-8").strip()
+            if len(kept) >= 32:
+                return kept
+        path.parent.mkdir(parents=True, exist_ok=True)
+        key = secrets.token_urlsafe(32)
+        tmp = path.with_name("session.key.tmp")
+        tmp.write_text(key, encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(path)
+        return key
+    except OSError as exc:
+        log.warning("cannot keep a session key in %s: %s", path, exc)
+        return None
 
 
 _settings: Settings | None = None

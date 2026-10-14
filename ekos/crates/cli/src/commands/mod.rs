@@ -10,6 +10,7 @@ pub mod commit;
 pub mod compile;
 pub mod config;
 pub mod conflicts;
+pub mod console;
 pub mod coverage;
 pub mod dbt;
 pub mod diagnostics_log;
@@ -38,6 +39,10 @@ pub mod replay;
 pub mod resolve;
 pub mod semantics;
 pub mod session;
+pub mod setup;
+pub mod setup_server;
+#[cfg(test)]
+mod setup_tests;
 pub mod simulate;
 pub mod source;
 pub mod store;

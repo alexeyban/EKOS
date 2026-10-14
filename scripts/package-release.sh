@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds an offline install package for Linux x86_64 from the committed tree:
 #
-#   scripts/package-release.sh [--no-musl] [--out DIR]
+#   scripts/package-release.sh [--no-musl] [--full] [--out DIR]
 #
 # → DIR/ekos-<version>-release.tar.gz (default DIR: dist/), holding the glibc and the static
 # musl binaries packed the way release.yml packs them, one SHA256SUMS, install.sh and
@@ -14,15 +14,20 @@
 # The glibc build runs on this machine; the musl build runs in the Rust image of the pinned
 # toolchain (it needs musl-gcc, which most hosts lack). Needs Docker for that; --no-musl skips
 # it. Build directories are kept in ${EKOS_PACKAGE_CACHE:-~/.cache/ekos-package} between runs.
+# --full also assembles the full package for x86_64 Linux (RFC 0185: the console and its
+# Python; scripts/package-full.sh), which `install.sh` then prefers and which opens the setup
+# wizard. Needs uv and npm.
 # CARGO_BUILD_JOBS limits both builds (the container gets it too): on a 16 GB machine use 4.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="$repo/dist"
 musl=1
+full=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-musl) musl=0 ;;
+    --full) full=1 ;;
     --out) out="$2"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -83,6 +88,12 @@ for t in "${targets[@]}"; do
   tar -C "$stage" -czf "$stage/$d.tar.gz" "$d"
   rm -r "${stage:?}/$d"
 done
+if [ "$full" = 1 ]; then
+  echo "== assembling the full package for x86_64-unknown-linux-gnu"
+  "$repo/scripts/package-full.sh" x86_64-unknown-linux-gnu \
+    "$cache/target/x86_64-unknown-linux-gnu/release/ekos" "$stage" "$version" >/dev/null
+  rm -rf "$stage/ekos-${version}-x86_64-unknown-linux-gnu-full"
+fi
 (cd "$stage" && sha256sum -- *.tar.gz > SHA256SUMS)
 cp "$src/install.sh" "$stage/"
 sed -e "s/@VERSION@/$version/g" -e "s/@COMMIT@/$commit/g" -e "s/@CARGO_VERSION@/$cargo_version/g" \
@@ -92,7 +103,7 @@ sed -e "s/@VERSION@/$version/g" -e "s/@COMMIT@/$commit/g" -e "s/@CARGO_VERSION@/
 # The package must install: run it into a throwaway home.
 check="$(mktemp -d)"
 trap 'rm -rf "$check"' EXIT
-(cd "$stage" && env -i PATH="$PATH" HOME="$check" EKOS_VERSION="v$version" \
+(cd "$stage" && env -i PATH="$PATH" HOME="$check" EKOS_NO_SETUP=1 EKOS_VERSION="v$version" \
   EKOS_BASE_URL="file://$stage" sh install.sh >/dev/null)
 "$check/.ekos/bin/ekos" --version >/dev/null
 echo "== installs and runs: $("$check/.ekos/bin/ekos" --version)"

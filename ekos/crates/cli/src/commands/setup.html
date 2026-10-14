@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS setup</title>
+<style>
+:root { --bg:#f6f7f9; --card:#fff; --ink:#1d232c; --soft:#5b6573; --rule:#dde1e7; --accent:#2f6fed; --ok:#1f8a4c; --err:#c0392b; }
+@media (prefers-color-scheme: dark) { :root { --bg:#12151a; --card:#1b2028; --ink:#e6e9ee; --soft:#9aa4b2; --rule:#2c333e; --accent:#6c9cff; --ok:#4cc38a; --err:#ff7b6b; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+h2 { font-size: 1.1rem; margin: 0 0 12px; }
+.lede { color: var(--soft); margin: 0 0 20px; }
+nav { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+nav span { padding:4px 10px; border-radius:999px; border:1px solid var(--rule); color:var(--soft); font-size:.85rem; }
+nav span.on { border-color: var(--accent); color: var(--accent); }
+section.card { background:var(--card); border:1px solid var(--rule); border-radius:10px; padding:20px; }
+label { display:block; font-weight:600; margin:14px 0 4px; }
+label.check { font-weight:400; display:flex; gap:8px; align-items:flex-start; }
+.help { color:var(--soft); font-size:.85rem; margin:2px 0 0; }
+input[type=text], input[type=number], input[type=password], select, textarea { width:100%; padding:8px 10px; border:1px solid var(--rule); border-radius:6px; background:var(--bg); color:var(--ink); font:inherit; }
+textarea { min-height: 70px; font-family: ui-monospace, monospace; font-size:.9rem; }
+.row { display:flex; gap:12px; } .row > div { flex:1; }
+.buttons { display:flex; justify-content:space-between; margin-top:20px; gap:8px; }
+button { font:inherit; padding:8px 16px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+button.ghost { background:transparent; color:var(--accent); }
+button:disabled { opacity:.5; cursor:default; }
+.ok { color:var(--ok); } .err { color:var(--err); }
+.note { font-size:.85rem; margin-top:4px; }
+ol.plan li, ul.steps li { margin: 4px 0; }
+code { font-family: ui-monospace, monospace; font-size:.9em; }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Set up EKOS</h1>
+  <p class="lede">Where it goes, how its web console runs, and which agents can use it. Nothing changes until you confirm on the last page.</p>
+  <nav id="nav"></nav>
+
+  <section class="card" data-step="Location">
+    <h2>Location</h2>
+    <label for="home">EKOS home</label>
+    <input type="text" id="home" data-path>
+    <p class="help">Projects, their compiled knowledge and the console's database live here. Back up this directory.</p>
+    <p class="note" id="home-check"></p>
+    <label for="program_dir">Program directory</label>
+    <input type="text" id="program_dir" data-path placeholder="the home">
+    <p class="help">Where <code>bin/</code> and the console go. Empty: inside the home.</p>
+    <p class="note" id="program_dir-check"></p>
+    <label class="check"><input type="checkbox" id="add_to_path"> <span>Put <code>ekos</code> on my PATH<span class="help" id="path-help"></span></span></label>
+  </section>
+
+  <section class="card" data-step="Console">
+    <h2>Web console</h2>
+    <label for="mode">Who uses it</label>
+    <select id="mode">
+      <option value="local">Only me, on this machine (no sign-in provider)</option>
+      <option value="team">A team (sign-in through your identity provider)</option>
+    </select>
+    <div class="row">
+      <div><label for="host">Address</label><input type="text" id="host"></div>
+      <div><label for="port">Port</label><input type="number" id="port" min="1" max="65535"></div>
+    </div>
+    <p class="help" id="mode-help"></p>
+    <div id="team">
+      <label for="oidc_issuer">OIDC issuer URL</label>
+      <div class="row"><div><input type="text" id="oidc_issuer" placeholder="https://id.example.com/realms/main"></div><div style="flex:0"><button class="ghost" id="test-issuer" type="button">Test</button></div></div>
+      <p class="note" id="issuer-check"></p>
+      <div class="row">
+        <div><label for="oidc_client_id">Client id</label><input type="text" id="oidc_client_id"></div>
+        <div><label for="oidc_client_secret">Client secret</label><input type="password" id="oidc_client_secret" placeholder="kept in the OS keychain"></div>
+      </div>
+      <label for="oidc_redirect_uri">Redirect URI</label>
+      <input type="text" id="oidc_redirect_uri" placeholder="https://ekos.example.com/api/auth/callback">
+      <label for="owners">Platform owners</label>
+      <input type="text" id="owners" placeholder="you@example.com, other@example.com">
+      <label class="check"><input type="checkbox" id="production"> <span>Production mode<span class="help"> — refuse development credentials; access only through roles.</span></span></label>
+    </div>
+    <h2 style="margin-top:20px">MCP servers</h2>
+    <div class="row">
+      <div><label for="mcp_idle_seconds">Stop a project's server after (seconds idle)</label><input type="number" id="mcp_idle_seconds" min="0"></div>
+      <div><label for="mcp_max_servers">At most this many running</label><input type="number" id="mcp_max_servers" min="1"></div>
+    </div>
+    <p class="help">Each project's MCP server holds its index in memory.</p>
+  </section>
+
+  <section class="card" data-step="Project">
+    <h2>First project <span class="help">(optional)</span></h2>
+    <label class="check"><input type="checkbox" id="want-project"> <span>Create a project now</span></label>
+    <div id="project">
+      <label for="project_name">Name</label>
+      <input type="text" id="project_name" placeholder="shop">
+      <label for="project_sources">Sources, one per line</label>
+      <textarea id="project_sources" placeholder="api=/home/me/repos/payments-api&#10;handbook=/home/me/docs/handbook"></textarea>
+      <p class="help"><code>name=directory</code>, or just the directory for a single source. EKOS only reads them.</p>
+      <label class="check"><input type="checkbox" id="project_detect" checked> <span>Detect the SQL dialect and exclusions</span></label>
+    </div>
+  </section>
+
+  <section class="card" data-step="Agents">
+    <h2>Agents</h2>
+    <p class="lede">Register an EKOS MCP server for one project with the agents on this machine. Each config file is backed up first; other entries are kept.</p>
+    <label for="agent_project">Project</label>
+    <select id="agent_project"></select>
+    <label class="check"><input type="checkbox" id="claude_code"> <span>Claude Code <span class="help" id="claude_code-help"></span></span></label>
+    <label class="check"><input type="checkbox" id="claude_desktop"> <span>Claude Desktop <span class="help" id="claude_desktop-help"></span></span></label>
+    <label class="check"><input type="checkbox" id="vscode"> <span>VS Code <span class="help" id="vscode-help"></span></span></label>
+  </section>
+
+  <section class="card" data-step="Start">
+    <h2>Start</h2>
+    <label class="check"><input type="checkbox" id="at_login"> <span>Start the console when I log in</span></label>
+    <label class="check"><input type="checkbox" id="now" checked> <span>Start it now</span></label>
+    <label class="check"><input type="checkbox" id="open" checked> <span>Open it in the browser</span></label>
+    <p class="note err" id="no-runtime"></p>
+  </section>
+
+  <section class="card" data-step="Review">
+    <h2>Review</h2>
+    <p class="lede">This is what will happen, in order.</p>
+    <ol class="plan" id="plan"></ol>
+    <p class="err" id="plan-error"></p>
+  </section>
+
+  <section class="card" data-step="Done">
+    <h2 id="done-title">Installing…</h2>
+    <ul class="steps" id="steps"></ul>
+    <p id="done-next"></p>
+  </section>
+
+  <div class="buttons">
+    <button class="ghost" id="back" type="button">Back</button>
+    <button id="next" type="button">Next</button>
+  </div>
+</main>
+<script>
+const token = new URLSearchParams(location.search).get("t") || "";
+const H = { "x-setup-token": token, "content-type": "application/json" };
+const $ = (id) => document.getElementById(id);
+const steps = [...document.querySelectorAll("section[data-step]")];
+let at = 0, state = null;
+
+async function call(path, body) {
+  const r = await fetch(path, body === undefined ? { headers: H } : { method: "POST", headers: H, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+function show() {
+  steps.forEach((s, i) => s.classList.toggle("hidden", i !== at));
+  $("nav").innerHTML = steps.map((s, i) => `<span class="${i === at ? "on" : ""}">${s.dataset.step}</span>`).join("");
+  $("back").classList.toggle("hidden", at === 0 || at === steps.length - 1);
+  const review = steps[at].dataset.step === "Review";
+  $("next").textContent = review ? "Install" : at === steps.length - 1 ? "Close" : "Next";
+  $("team").classList.toggle("hidden", $("mode").value !== "team");
+  $("project").classList.toggle("hidden", !$("want-project").checked);
+  $("mode-help").textContent = $("mode").value === "local"
+    ? "Listens on this machine only. Sign in with `ekos console open`."
+    : "Put a reverse proxy with TLS in front if others reach it over the network.";
+}
+
+function answers() {
+  const sources = $("project_sources").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  const project = $("want-project").checked ? { name: $("project_name").value.trim(), sources, detect: $("project_detect").checked } : null;
+  return {
+    home: $("home").value.trim(),
+    program_dir: $("program_dir").value.trim(),
+    add_to_path: $("add_to_path").checked,
+    console: {
+      mode: $("mode").value, host: $("host").value.trim(), port: Number($("port").value),
+      oidc_issuer: $("oidc_issuer").value.trim(), oidc_client_id: $("oidc_client_id").value.trim(),
+      oidc_client_secret: $("oidc_client_secret").value, oidc_redirect_uri: $("oidc_redirect_uri").value.trim(),
+      owners: $("owners").value.trim(), production: $("production").checked,
+      mcp_idle_seconds: Number($("mcp_idle_seconds").value), mcp_max_servers: Number($("mcp_max_servers").value),
+    },
+    project,
+    agents: { project: $("agent_project").value, claude_code: $("claude_code").checked, claude_desktop: $("claude_desktop").checked, vscode: $("vscode").checked },
+    start: { at_login: $("at_login").checked, now: $("now").checked, open: $("open").checked },
+  };
+}
+
+function refreshProjects() {
+  const names = new Set(state.projects);
+  const p = $("project_name").value.trim();
+  if ($("want-project").checked && p) names.add(p);
+  const keep = $("agent_project").value;
+  $("agent_project").innerHTML = [...names].map((n) => `<option>${n}</option>`).join("") || `<option value="">no project yet</option>`;
+  if (names.has(keep)) $("agent_project").value = keep;
+  for (const a of ["claude_code", "claude_desktop", "vscode"]) $(a).disabled = names.size === 0;
+}
+
+async function checkPath(id) {
+  const v = $(id).value.trim();
+  if (!v) { $(id + "-check").textContent = ""; return; }
+  const c = await call("/api/check-path", { path: v });
+  const gb = c.free_bytes != null ? ` · ${(c.free_bytes / 1e9).toFixed(1)} GB free` : "";
+  $(id + "-check").className = "note " + (c.writable && c.absolute ? "ok" : "err");
+  $(id + "-check").textContent = !c.absolute ? "use a full path" : !c.writable ? "not writable" : (c.exists ? "exists" : "will be created") + gb;
+}
+
+async function load() {
+  state = await call("/api/state");
+  const a = state.answers, c = a.console;
+  $("home").value = a.home; $("program_dir").value = a.program_dir; $("add_to_path").checked = a.add_to_path;
+  for (const k of ["mode", "host", "port", "oidc_issuer", "oidc_client_id", "oidc_redirect_uri", "owners", "mcp_idle_seconds", "mcp_max_servers"]) $(k).value = c[k];
+  $("production").checked = c.production;
+  $("path-help").textContent = state.os === "windows" ? " — your user Path" : " — a line in your shell profile";
+  const ag = state.agents;
+  $("claude_code-help").textContent = ag.claude_code ? "— `claude mcp add`" : "— the `claude` command was not found";
+  $("claude_desktop-help").textContent = (ag.claude_desktop ? "— " : "— not found; would create ") + state.paths.claude_desktop;
+  $("vscode-help").textContent = (ag.vscode ? "— " : "— not found; would create ") + state.paths.vscode;
+  $("claude_code").checked = false;
+  if (!state.console_runtime) {
+    $("no-runtime").textContent = "This package has no web console (it is the command-line package). Starting it will fail; use the full package or the container image.";
+  }
+  if (state.installed) document.querySelector(".lede").textContent = "EKOS is installed here. Change what you need; the rest stays as it is.";
+  refreshProjects();
+  checkPath("home"); checkPath("program_dir");
+  show();
+}
+
+$("mode").onchange = () => { if ($("mode").value === "local") $("host").value = "127.0.0.1"; show(); };
+$("want-project").onchange = () => { refreshProjects(); show(); };
+$("project_name").oninput = refreshProjects;
+for (const id of ["home", "program_dir"]) $(id).onchange = () => checkPath(id);
+$("test-issuer").onclick = async () => {
+  $("issuer-check").textContent = "checking…";
+  const r = await call("/api/check-issuer", { url: $("oidc_issuer").value });
+  $("issuer-check").className = "note " + (r.ok ? "ok" : "err");
+  $("issuer-check").textContent = r.message;
+};
+$("back").onclick = () => { at = Math.max(0, at - 1); show(); };
+$("next").onclick = async () => {
+  const name = steps[at].dataset.step;
+  if (name === "Done") { await call("/api/finish", {}).catch(() => {}); window.close(); $("done-next").textContent = "You can close this tab."; return; }
+  if (name === "Review") { await install(); return; }
+  if (steps[at + 1].dataset.step === "Review") {
+    $("plan-error").textContent = ""; $("plan").innerHTML = "";
+    try {
+      const p = await call("/api/plan", answers());
+      $("plan").innerHTML = p.actions.map((x) => `<li>${x.replace(/</g, "&lt;")}</li>`).join("");
+      $("next").disabled = false;
+    } catch (e) { $("plan-error").textContent = e.message; at++; show(); $("next").disabled = true; return; }
+  }
+  at++; show();
+};
+$("back").addEventListener("click", () => { $("next").disabled = false; });
+
+async function install() {
+  at = steps.length - 1; show(); $("next").disabled = true;
+  try {
+    const r = await call("/api/apply", answers());
+    $("steps").innerHTML = r.steps.map((s) => `<li class="${s.ok ? "ok" : "err"}">${s.ok ? "✓" : "✗"} ${s.action.replace(/</g, "&lt;")}${s.message ? ` — <span class="help">${s.message.replace(/</g, "&lt;")}</span>` : ""}</li>`).join("");
+    const failed = r.steps.some((s) => !s.ok);
+    $("done-title").textContent = failed ? "Stopped at a step that failed" : "EKOS is set up";
+    $("done-next").innerHTML = failed ? "Fix what it says and run <code>ekos setup</code> again; finished steps are not repeated twice." :
+      `The console: <a href="${r.console_url}">${r.console_url}</a>. Later: <code>ekos console open</code>, <code>ekos console status</code>.`;
+  } catch (e) {
+    $("done-title").textContent = "Setup failed"; $("steps").innerHTML = `<li class="err">${e.message}</li>`;
+  }
+  $("next").disabled = false;
+}
+
+load().catch((e) => { document.querySelector("main").innerHTML = `<h1>EKOS setup</h1><p class="err">${e.message}</p>`; });
+</script>
+</body>
+</html>

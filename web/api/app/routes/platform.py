@@ -8,14 +8,13 @@ restart, which this router can trigger when a launcher restarts the console.
 from __future__ import annotations
 
 import logging
-import signal
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
-from .. import authz, console_file, envs, keychain
+from .. import authz, console_file, envs, keychain, lifecycle
 from ..auth import Principal
 from ..settings import Settings
 from ._responses import BAD_REQUEST
@@ -25,7 +24,6 @@ log = logging.getLogger("ekos.console")
 router = APIRouter(prefix="/platform", tags=["platform"])
 
 CONFLICT = {"description": "Not possible here (no keychain, no home, no supervisor)"}
-RESTART_MARKER = "restart-requested"
 
 
 class SettingsChange(BaseModel):
@@ -145,15 +143,10 @@ async def put_settings(body: SettingsChange, _: Principal = Depends(authz.allow_
     return {"ok": True, "restart_required": True, "file": str(path) if path else None}
 
 
-def _exit_for_restart() -> None:
-    """Shut down as on Ctrl-C; the launcher sees the marker and starts the console again."""
-    signal.raise_signal(signal.SIGTERM)
-
-
 @router.post("/restart", status_code=202, responses={409: CONFLICT})
-async def restart(
-    request: Request, tasks: BackgroundTasks, _: Principal = Depends(authz.allow_platform)
-) -> dict:
+async def restart(request: Request, _: Principal = Depends(authz.allow_platform)) -> dict:
+    """Ask the launcher for a restart (RFC 0185 §2): the console's watcher sees the file, shuts
+    down cleanly, and the launcher starts it again."""
     settings: Settings = request.app.state.settings
     if not settings.supervised:
         raise HTTPException(
@@ -161,10 +154,9 @@ async def restart(
             detail="nothing would start the console again; restart it yourself "
             "(it was not started by `ekos console` or a container with a restart policy)",
         )
-    marker = settings.control_dir / RESTART_MARKER
+    marker = settings.control_dir / lifecycle.RESTART
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
-    tasks.add_task(_exit_for_restart)
     return {"ok": True}
 
 

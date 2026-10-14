@@ -104,6 +104,38 @@ if env -i PATH="$PATH" HOME="$home6" EKOS_VERSION="$version" EKOS_BASE_URL="file
     fail "an unlisted archive was accepted"
 fi
 
+# 8. RFC 0185: a release with a full package installs it (program and console, not the data)
+#    and, with EKOS_NO_SETUP=1, does not start the wizard. EKOS_CLI_ONLY=1 takes the binary.
+full_rel="$work/full"; mkdir -p "$full_rel"
+cp "$release/$stage.tar.gz" "$full_rel/"
+full="ekos-9.9.9-${arch_part}-${os_part}-full"
+mkdir -p "$full_rel/$full/bin" "$full_rel/$full/console/app"
+printf '#!/bin/sh\necho "ekos 9.9.9"\n' > "$full_rel/$full/bin/ekos"
+chmod 755 "$full_rel/$full/bin/ekos"
+: > "$full_rel/$full/console/app/main.py"
+tar -C "$full_rel" -czf "$full_rel/$full.tar.gz" "$full"
+rm -rf "${full_rel:?}/$full"
+if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$full_rel" && sha256sum "$stage.tar.gz" "$full.tar.gz" > SHA256SUMS)
+else
+    (cd "$full_rel" && shasum -a 256 "$stage.tar.gz" "$full.tar.gz" > SHA256SUMS)
+fi
+home8="$work/h8"; mkdir -p "$home8/.ekos/data/default/keep" "$home8/.ekos/console/stale"
+env -i PATH="$PATH" HOME="$home8" EKOS_VERSION="$version" EKOS_BASE_URL="file://$full_rel" \
+    EKOS_NO_SETUP=1 sh "$repo/install.sh" > "$work/out.log" 2>&1 \
+    || fail "full install exited non-zero: $(cat "$work/out.log")"
+[ -x "$home8/.ekos/bin/ekos" ] || fail "full install did not put the binary in ~/.ekos/bin"
+[ -f "$home8/.ekos/console/app/main.py" ] || fail "full install did not install the console"
+[ ! -e "$home8/.ekos/console/stale" ] || fail "full install kept an old console beside the new one"
+[ -d "$home8/.ekos/data/default/keep" ] || fail "full install touched the data"
+grep -q 'ekos setup' "$work/out.log" || fail "full install did not say how to run setup"
+home9="$work/h9"; mkdir -p "$home9"
+env -i PATH="$PATH" HOME="$home9" EKOS_VERSION="$version" EKOS_BASE_URL="file://$full_rel" \
+    EKOS_CLI_ONLY=1 sh "$repo/install.sh" > "$work/out.log" 2>&1 \
+    || fail "cli-only install exited non-zero"
+[ -x "$home9/.ekos/bin/ekos" ] && [ ! -e "$home9/.ekos/console" ] \
+    || fail "EKOS_CLI_ONLY=1 still installed the console"
+
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2
     exit 1

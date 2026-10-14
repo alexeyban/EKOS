@@ -151,9 +151,75 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  # RFC 0185 — the full package per target: the binary from `build`, a pinned standalone Python,
+  # the console's wheels for that platform, the console and its built UI, the setup starters.
+  # Every target is assembled here on Linux; only the binary had to be built on its own OS.
+  package:
+    name: Full package ${{ matrix.target }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download this target's binary
+        uses: actions/download-artifact@v7
+        with:
+          name: ekos-${{ matrix.target }}
+          path: bare
+
+      - name: Assemble
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" = "tag" ] || version="dev"
+          cd bare
+          if [ -f "ekos-${version}-${{ matrix.target }}.zip" ]; then
+            python3 -m zipfile -e "ekos-${version}-${{ matrix.target }}.zip" .
+            bin="$PWD/ekos-${version}-${{ matrix.target }}/ekos.exe"
+          else
+            tar -xzf "ekos-${version}-${{ matrix.target }}.tar.gz"
+            bin="$PWD/ekos-${version}-${{ matrix.target }}/ekos"
+          fi
+          cd ..
+          mkdir -p dist
+          archive="$(scripts/package-full.sh "${{ matrix.target }}" "$bin" dist "$version" | tail -1)"
+          (cd dist && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
+          rm -rf "dist/ekos-${version}-${{ matrix.target }}-full"
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ekos-full-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
   release:
     name: Publish release
-    needs: build
+    needs: [build, package]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     # The only job in this workflow that writes anything: `gh release create` creates the release
@@ -289,7 +355,18 @@ jobs:
         # exposed a credential to a downloaded-and-executed script for no reason.
         env:
           EKOS_VERSION: ${{ github.ref_name }}
+          # RFC 0185: the full package would open the setup wizard and wait for a person.
+          EKOS_NO_SETUP: "1"
         run: sh ./install.sh
+
+      - name: The console of the full package starts and serves
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.ekos/bin:$PATH"
+          ekos console start
+          curl -fsS http://127.0.0.1:8000/api/health
+          curl -fsS http://127.0.0.1:8000/ | grep -qi '<div id="root"'
+          ekos console stop
 
       - name: The binary runs and reports its version
         run: |

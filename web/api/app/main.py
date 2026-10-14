@@ -5,6 +5,8 @@ uvicorn --factory app.main:create_app
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import ipaddress
 import logging
 from contextlib import asynccontextmanager
@@ -17,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
-from . import home, models
+from . import home, lifecycle, models
 from .routes import (
     auth,
     commands,
@@ -184,9 +186,18 @@ async def _lifespan(app: FastAPI):
 
     app.state.scheduler = ConsoleScheduler(app.state.runner)
     app.state.scheduler.start()
+
+    # RFC 0185: under `ekos console`, stop and restart arrive as files in the control directory.
+    watcher = (
+        asyncio.create_task(lifecycle.watch(settings.control_dir)) if settings.supervised else None
+    )
     try:
         yield
     finally:
+        if watcher is not None:
+            watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
         await app.state.scheduler.aclose()
         await app.state.runner.aclose()
         await app.state.supervisor.aclose()

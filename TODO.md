@@ -6497,8 +6497,13 @@ LinkML; generation stays in LinkML.
       and capabilities page (devlog_267)
 - [x] RFC 0184 — console settings in `console.toml` editable by an owner, secrets in the OS
       keychain, local single-user mode, Windows environment for child processes (devlog_268)
-- [ ] RFC 0185 — installer: `ekos setup` browser wizard, `ekos console` launcher, packages
-      with a bundled Python for Linux, Windows 11 and macOS
+- [x] RFC 0185 — installer: `ekos setup` browser wizard and `--answers`, `ekos console`
+      launcher, `ekos uninstall`, full packages with a bundled Python, `install.ps1`, release
+      `package` job (devlog_269)
+- [ ] RFC 0185 remainder: Windows 11 and macOS packages not run on those systems (the release
+      `package` job and `web-os` CI rows have never run; `install.ps1` not even parsed here — no
+      pwsh); login services activated only by tests' fakes (systemd/launchd/schtasks never
+      enabled for real); no code signing; the chat model step waits for RFC 0187
 - [ ] RFC 0186 — every setting and every command from the web (command catalogue from the
       binary, structured config forms from a schema)
 - [ ] RFC 0187 — chat with a configured model using the EKOS MCP tools

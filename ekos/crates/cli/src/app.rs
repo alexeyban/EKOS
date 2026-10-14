@@ -65,6 +65,37 @@ enum Commands {
         #[command(subcommand)]
         subcommand: HomeCommands,
     },
+    /// Install or reconfigure EKOS: where it goes, the web console, agents, start at login
+    /// (RFC 0185). Opens a wizard in the browser, or applies `--answers` without one
+    Setup {
+        /// Apply these answers (TOML) instead of opening the wizard
+        #[arg(long, value_name = "FILE")]
+        answers: Option<PathBuf>,
+        /// With --answers: print what would be done, do nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the wizard's address instead of opening a browser
+        #[arg(long)]
+        no_browser: bool,
+        /// Port for the wizard (default: any free one)
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+    },
+    /// Remove what `ekos setup` installed. The home (projects, the console's database) stays
+    /// unless --purge
+    Uninstall {
+        /// Also delete the EKOS home: every project and its compiled knowledge
+        #[arg(long)]
+        purge: bool,
+        /// Confirm --purge
+        #[arg(long)]
+        yes: bool,
+    },
+    /// The web console of this home: start, stop, open it (RFC 0185)
+    Console {
+        #[command(subcommand)]
+        subcommand: ConsoleCommands,
+    },
     /// The named inputs of a project: repositories and directories compiled into one ledger
     /// (RFC 0178)
     Source {
@@ -976,6 +1007,32 @@ enum HomeCommands {
 }
 
 #[derive(Subcommand)]
+enum ConsoleCommands {
+    /// Run the console in the foreground and start it again when it asks to be (what a login
+    /// service runs)
+    Run,
+    /// Start the console in the background and wait until it answers
+    Start,
+    /// Stop the console
+    Stop,
+    /// Restart the console, e.g. after changing its settings
+    Restart,
+    /// Whether the console runs, where, and its process ids
+    Status,
+    /// Open the console in the browser; in local mode, signed in with a one-time code
+    Open {
+        /// Print the address (and code) instead of opening a browser
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// The end of the console's log
+    Logs {
+        #[arg(long, default_value_t = 100)]
+        lines: usize,
+    },
+}
+
+#[derive(Subcommand)]
 enum McpCommands {
     /// Serve MCP over stdio (default), or over TCP (`--tcp`) or Streamable HTTP (`--http`)
     Serve {
@@ -1493,6 +1550,45 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
             return dispatch_project(subcommand, &home_dir?, tenant_flag);
         }
+        Commands::Setup {
+            answers,
+            dry_run,
+            no_browser,
+            port,
+        } => {
+            return run_setup(home_dir?, answers, dry_run, no_browser, port).await;
+        }
+        Commands::Uninstall { purge, yes } => {
+            if purge && !yes {
+                bail!("--purge deletes every project in the home; add --yes to confirm");
+            }
+            let home = home_dir?;
+            let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
+            let steps = crate::commands::setup::uninstall(
+                &home,
+                purge,
+                &machine,
+                &crate::commands::setup::RealEffects,
+            )?;
+            print_steps(&steps);
+            return Ok(());
+        }
+        Commands::Console { subcommand } => {
+            if cli.project.is_some() {
+                bail!("`ekos console` serves the whole home; --project does not apply");
+            }
+            let home = home_dir?;
+            use crate::commands::console;
+            return match subcommand {
+                ConsoleCommands::Run => console::run(&home),
+                ConsoleCommands::Start => console::start(&home),
+                ConsoleCommands::Stop => console::stop(&home),
+                ConsoleCommands::Restart => console::restart(&home),
+                ConsoleCommands::Status => console::status(&home),
+                ConsoleCommands::Open { no_browser } => console::open(&home, no_browser),
+                ConsoleCommands::Logs { lines } => console::logs(&home, lines),
+            };
+        }
         Commands::Home { subcommand } => {
             if cli.project.is_some() {
                 bail!(
@@ -1721,10 +1817,64 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         Commands::Migrate { subcommand } => dispatch_migrate(subcommand, &config, &cwd).await,
         Commands::Session { subcommand } => dispatch_session(subcommand, &config, &cwd),
         Commands::Eval { subcommand } => dispatch_eval(subcommand, &config, &cwd).await,
-        Commands::Project { .. } | Commands::Home { .. } => {
+        Commands::Project { .. }
+        | Commands::Home { .. }
+        | Commands::Console { .. }
+        | Commands::Setup { .. }
+        | Commands::Uninstall { .. } => {
             unreachable!("handled before a config is loaded")
         }
     }
+}
+
+fn print_steps(steps: &[crate::commands::setup::Step]) {
+    for s in steps {
+        let mark = if s.ok { "ok  " } else { "FAIL" };
+        if s.message.is_empty() {
+            println!("{mark}  {}", s.action);
+        } else {
+            println!("{mark}  {} — {}", s.action, s.message);
+        }
+    }
+}
+
+/// `ekos setup`: the wizard, or `--answers` applied without one (RFC 0185 §3).
+async fn run_setup(
+    home: std::path::PathBuf,
+    answers: Option<std::path::PathBuf>,
+    dry_run: bool,
+    no_browser: bool,
+    port: u16,
+) -> Result<()> {
+    use crate::commands::{setup, setup_server};
+    let machine = setup::Machine::detect(&std::env::current_exe()?)?;
+    let Some(file) = answers else {
+        let wizard = setup_server::Wizard::new(setup_server::new_token(), machine, home);
+        return setup_server::serve(wizard, port, !no_browser).await;
+    };
+    let text =
+        std::fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+    let mut a: setup::Answers =
+        toml::from_str(&text).with_context(|| format!("reading {}", file.display()))?;
+    if a.home.trim().is_empty() {
+        a.home = home.display().to_string();
+    }
+    let actions = setup::plan(&a, &machine)?;
+    if dry_run {
+        for action in &actions {
+            println!("{}", action.describe());
+        }
+        return Ok(());
+    }
+    let steps = tokio::task::spawn_blocking(move || {
+        setup::apply(&actions, &a, &machine, &setup::RealEffects)
+    })
+    .await??;
+    print_steps(&steps);
+    if steps.iter().any(|s| !s.ok) {
+        bail!("setup stopped at a step that failed");
+    }
+    Ok(())
 }
 
 /// `ekos conflicts …`

@@ -1,0 +1,11 @@
+# The Python the full package carries (RFC 0185 §1): python-build-standalone, install_only
+# builds. scripts/package-full.sh downloads the file for a target and refuses it unless its
+# SHA-256 matches the line here. To move to a newer build, change RELEASE and every line, from
+# https://github.com/astral-sh/python-build-standalone/releases/<release> (each asset's digest).
+RELEASE 20261013
+VERSION 3.12.15
+x86_64-unknown-linux-gnu  5d546fc004fc2435fa142eb8f42ed8de5eb4725963dc22f7e6671014a80eb560
+aarch64-unknown-linux-gnu 34a43010cc05982d8b5debbad7d09f7b1200117ebf018f7acfd656895e408205
+x86_64-apple-darwin       9686ddd8639b855905447ea4a16eb54a804a9ef12afbe7c9ecb1412d9c1fbc98
+aarch64-apple-darwin      ba32036ad8f4c434d97a1ee7feef8b7edc0fac16777639b97e39c74a108e4440
+x86_64-pc-windows-msvc    bbc902d4d187ac4914915bf538196a064b49109a33a104965b5164ced5b80a1e

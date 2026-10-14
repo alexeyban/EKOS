@@ -21,6 +21,12 @@
 #   EKOS_INSTALL_DIR   install the binary here instead of $EKOS_HOME/bin
 #   EKOS_BASE_URL      download the release files from here instead of GitHub (a mirror, or a
 #                      local directory as file:///...). The checksum check is the same.
+#   EKOS_CLI_ONLY=1    install the command only, even when the release has a full package
+#   EKOS_NO_SETUP=1    install the full package without starting the setup wizard
+#
+# When the release has a full package for this machine (RFC 0185: the command, the web console
+# and the Python that runs it), that is installed into the home and the setup wizard opens in
+# the browser. Otherwise, and with EKOS_CLI_ONLY=1, the single binary is installed as before.
 
 set -eu
 
@@ -161,6 +167,43 @@ Refusing to install. Report this at https://github.com/$REPO/issues"
     [ -f "$binary" ] || die "the archive did not contain the expected binary at ekos/"
     chmod 755 "$binary"
 }
+
+# ── The full package (RFC 0185) ───────────────────────────────────────────────
+full="ekos-${bare}-${target}-full"
+if [ "${EKOS_CLI_ONLY:-}" != 1 ] && [ -z "${EKOS_INSTALL_DIR:-}" ] \
+    && fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS" 2>/dev/null \
+    && grep -q "[ *]${full}\.tar\.gz\$" "$tmp/SHA256SUMS"; then
+    printf 'Downloading %s.tar.gz (%s)...\n' "$full" "$version"
+    fetch "$base/$full.tar.gz" "$tmp/$full.tar.gz" || die "could not download $base/$full.tar.gz"
+    full_re="$(printf '%s' "$full.tar.gz" | sed 's/[].[^$*\\/]/\\&/g')"
+    full_expected="$(sed -n "s/^\([0-9a-f]\{64\}\)[ *][ *]*${full_re}\$/\1/p" "$tmp/SHA256SUMS" | head -n 1)"
+    if command -v sha256sum >/dev/null 2>&1; then
+        full_actual="$(sha256sum "$tmp/$full.tar.gz" | cut -d' ' -f1)"
+    else
+        full_actual="$(shasum -a 256 "$tmp/$full.tar.gz" | cut -d' ' -f1)"
+    fi
+    [ "$full_actual" = "$full_expected" ] || die "checksum mismatch for $full.tar.gz — refusing to install"
+    printf 'Checksum verified.\n'
+    tar -C "$tmp" -xzf "$tmp/$full.tar.gz"
+    if "$tmp/$full/bin/ekos" --version >/dev/null 2>&1; then
+        mkdir -p "$EKOS_HOME_DIR/data"
+        # Replace the program, never the data: only bin/ and console/ are touched.
+        rm -rf "$EKOS_HOME_DIR/console"
+        mkdir -p "$EKOS_HOME_DIR/bin"
+        cp -R "$tmp/$full/console" "$EKOS_HOME_DIR/console"
+        cp "$tmp/$full/bin/ekos" "$EKOS_HOME_DIR/bin/ekos"
+        chmod 755 "$EKOS_HOME_DIR/bin/ekos"
+        printf '\nInstalled EKOS %s with its web console to %s\n' "$version" "$EKOS_HOME_DIR"
+        if [ "${EKOS_NO_SETUP:-}" = 1 ]; then
+            printf 'Next: %s/bin/ekos setup\n' "$EKOS_HOME_DIR"
+        else
+            printf 'Opening the setup page in your browser...\n'
+            "$EKOS_HOME_DIR/bin/ekos" --home "$EKOS_HOME_DIR" setup
+        fi
+        exit 0
+    fi
+    printf '\nThe full package does not run on this system; installing the command only.\n\n'
+fi
 
 fetch_target "$target"
 

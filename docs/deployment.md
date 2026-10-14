@@ -67,6 +67,35 @@ docker compose -f deploy/docker-compose.yml up -d                   # no --build
 Compose uses the loaded image because one with that name exists locally; it pulls only when
 none does. The identity provider must still be reachable from the server.
 
+### A server without Docker
+
+The full package (RFC 0185) runs the same console from its own bundled Python. On the server,
+as the user that will own the home:
+
+```bash
+cat > answers.toml <<'EOF'
+[console]
+mode = "team"
+host = "127.0.0.1"
+port = 8000
+oidc_issuer = "https://id.example.com/realms/main"
+oidc_client_id = "ekos"
+oidc_redirect_uri = "https://ekos.example.com/api/auth/callback"
+owners = "you@example.com"
+production = true
+[start]
+at_login = true      # a systemd user unit; `loginctl enable-linger <user>` keeps it running
+open = false
+EOF
+bin/ekos setup --answers answers.toml
+```
+
+The OIDC client secret goes in the keychain where the server has one (`oidc_client_secret` in
+the answers), otherwise in the user unit's environment (`EKOS_CONSOLE_OIDC_CLIENT_SECRET`).
+Without a session secret the console keeps a generated one in `control/session.key`, readable by
+its owner only, so sessions survive a restart. Settings changed later on the console's Settings page
+apply after **Restart now**, which works here because `ekos console run` starts it again.
+
 People who want the `ekos` command on their own machine (for a project of their own, or for
 `ekos mcp serve` beside an editor) do not need the image: `scripts/package-release.sh` builds an
 offline install package for Linux x86_64 with the installer and an `INSTALL.md`; see the

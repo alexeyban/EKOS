@@ -220,16 +220,16 @@ def test_restart_needs_a_supervisor(client: TestClient) -> None:
 
 
 def test_restart_when_supervised(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.routes import platform
+    from app import lifecycle
 
     monkeypatch.setenv("EKOS_CONSOLE_SUPERVISED", "1")
-    asked: list[int] = []
-    monkeypatch.setattr(platform, "_exit_for_restart", lambda: asked.append(1))
+    stopped: list[int] = []
+    monkeypatch.setattr(lifecycle, "shut_down", lambda: stopped.append(1))
     with TestClient(create_app()) as c:
         assert c.post("/api/platform/restart", headers=READER).status_code == 403
         r = c.post("/api/platform/restart", headers=OWNER)
         assert r.status_code == 202
-    assert asked == [1]
+        assert (home / "control" / lifecycle.RESTART).exists()
 
 
 # ── keychain values for projects ─────────────────────────────────────────────
@@ -289,3 +289,39 @@ def test_nothing_is_filled_with_the_keychain_off(
     acme = _tenant("acme", ["ACME_KEY"], True)
     monkeypatch.setenv("EKOS_CONSOLE_KEYCHAIN", "off")
     assert "ACME_KEY" not in envs.for_tenant(acme, environ={})
+
+
+# ── a session survives a restart ─────────────────────────────────────────────
+
+
+def test_without_a_secret_the_home_keeps_one(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Found by the package check: with a random secret per start, the restart button on the
+    Settings page signed the person out."""
+    monkeypatch.delenv("EKOS_CONSOLE_SESSION_SECRET")
+    monkeypatch.chdir(home)
+    first = Settings().session_secret
+    assert first == Settings().session_secret
+    key = home / "control" / "session.key"
+    assert key.read_text().strip() == first
+    assert key.stat().st_mode & 0o077 == 0
+    assert "session" not in (_file(home).read_text() if _file(home).exists() else "")
+
+
+def test_without_a_home_the_secret_is_per_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reset_settings: None
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("EKOS_CONSOLE_SESSION_SECRET", raising=False)
+    assert Settings().session_secret != Settings().session_secret
+
+
+def test_production_with_a_home_needs_no_set_session_secret(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(home)
+    monkeypatch.delenv("EKOS_CONSOLE_SESSION_SECRET")
+    monkeypatch.setenv("EKOS_CONSOLE_PRODUCTION", "true")
+    monkeypatch.setenv("EKOS_CONSOLE_OIDC_ISSUER", "https://id.example.com")
+    monkeypatch.setenv("EKOS_CONSOLE_OWNERS", "a@b.c")
+    s = Settings()
+    assert s.session_secret == (home / "control" / "session.key").read_text().strip()
