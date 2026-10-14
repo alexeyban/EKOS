@@ -141,3 +141,25 @@ async def test_stale_running_rows_are_swept_on_startup(runner_client) -> None:
     app2 = create_app()
     async with app2.router.lifespan_context(app2):
         assert models.get_run("stale").status == "interrupted"
+
+
+async def test_init_and_compile_makes_a_project_queryable(runner_client) -> None:
+    client, ws = runner_client
+    (ws / "schema.sql").write_text("CREATE TABLE customers (id INT PRIMARY KEY, name TEXT);\n")
+    r = await client.post("/api/workspaces/w/commands/init-and-compile")
+    assert r.status_code == 200, r.text
+    body = await _wait_terminal(client, r.json()["run_id"], budget_s=600)
+    assert [s["name"] for s in body["stages"]] == [
+        "init",
+        "build",
+        "recover",
+        "resolve",
+        "compile",
+        "commit",
+        "coverage",
+    ]
+    assert body["status"] == "succeeded", body["log_tail"]
+    # `coverage`, the last stage, reports what each input kind produced.
+    log = "\n".join(body["log_tail"])
+    assert "=== stage: coverage ===" in log, log
+    assert "every input kind produced objects" in log, log

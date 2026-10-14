@@ -3,6 +3,7 @@ registry validates paths and persists to SQLite."""
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -10,6 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+
+# A program that exits 1 at once; `/bin/false` is `/usr/bin/false` on macOS.
+FALSE = shutil.which("false") or "/bin/false"
 
 AUTH = {"Authorization": "Bearer secret-console"}  # read role
 WAUTH = {"Authorization": "Bearer secret-write"}  # write role
@@ -25,7 +29,7 @@ def client(
     monkeypatch.setenv("EKOS_CONSOLE_SESSION_SECRET", "test-secret")
     # A binary that exits immediately: the supervisor can "spawn" it but the server never readies,
     # which is all these registry-level tests need.
-    monkeypatch.setenv("EKOS_BIN", "/bin/false")
+    monkeypatch.setenv("EKOS_BIN", FALSE)
     monkeypatch.setenv("EKOS_CONSOLE_WORKSPACES_JSON", "[]")
     with TestClient(create_app()) as c:
         yield c

@@ -128,3 +128,81 @@ def test_local_mode_refuses_a_provider_or_production(
         monkeypatch.setenv(k, v)
     with pytest.raises(ValueError, match="local"):
         Settings()
+
+
+# ── uninstall from the console (RFC 0188) ────────────────────────────────────
+
+
+def _fake_ekos(tmp: Path, *, prints: str) -> tuple[Path, Path]:
+    """An `ekos` that records its arguments and prints what `uninstall --ui --detach` prints."""
+    args = tmp / "args"
+    script = tmp / "fake-ekos"
+    script.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{args}"\nprintf "{prints}\\n"\n')
+    script.chmod(0o755)
+    return script, args
+
+
+def _signed_in(client: TestClient, home: Path) -> None:
+    client.post("/api/auth/local", json={"code": local_signin.issue(_control(home))})
+
+
+def test_uninstall_needs_an_install_by_setup(client: TestClient, home: Path) -> None:
+    _signed_in(client, home)
+    body = client.get("/api/platform/uninstall").json()
+    assert body["available"] is False and "ekos setup" in body["reason"]
+    assert client.post("/api/platform/uninstall").status_code == 409
+
+
+def test_uninstall_starts_the_page_and_returns_its_link(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (home / "control" / "install.json").write_text("{}")
+    link = "http://127.0.0.1:45678/?t=abc"
+    script, args = _fake_ekos(tmp_path, prints=f"EKOS uninstall: {link}")
+    monkeypatch.setenv("EKOS_BIN", str(script))
+    with TestClient(create_app(), base_url=BASE, client=LOOPBACK) as client:
+        assert client.post("/api/platform/uninstall").status_code == 401
+        _signed_in(client, home)
+        assert client.get("/api/platform/uninstall").json() == {"available": True, "reason": None}
+        r = client.post("/api/platform/uninstall")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"url": link}
+    assert args.read_text().split("\n")[:6] == [
+        "--home",
+        str(home),
+        "uninstall",
+        "--ui",
+        "--detach",
+        "",
+    ]
+
+
+def test_uninstall_refuses_a_link_off_this_machine(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (home / "control" / "install.json").write_text("{}")
+    script, _ = _fake_ekos(tmp_path, prints="EKOS uninstall: http://evil.example/?t=x")
+    monkeypatch.setenv("EKOS_BIN", str(script))
+    with TestClient(create_app(), base_url=BASE, client=LOOPBACK) as client:
+        _signed_in(client, home)
+        assert client.post("/api/platform/uninstall").status_code == 502
+
+
+def test_uninstall_answers_while_the_page_holds_the_pipe(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The page keeps running after `--detach` returns, and may have inherited the console's
+    pipe: the link is read line by line, never to end of file (found by the package check)."""
+    (home / "control" / "install.json").write_text("{}")
+    script = tmp_path / "fake-ekos"
+    script.write_text(
+        "#!/bin/sh\nprintf 'EKOS uninstall: http://127.0.0.1:45678/?t=abc\\n'\nsleep 30 &\n"
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("EKOS_BIN", str(script))
+    with TestClient(create_app(), base_url=BASE, client=LOOPBACK) as client:
+        _signed_in(client, home)
+        started = time.monotonic()
+        r = client.post("/api/platform/uninstall")
+        assert r.status_code == 200, r.text
+        assert time.monotonic() - started < 10

@@ -6511,6 +6511,15 @@ LinkML; generation stays in LinkML.
 - [x] RFC 0187 — chat with a configured model using the project's EKOS tools (Chat tab,
       providers over HTTP, read-only tools under the person's scope, metered switch, setup step)
       (devlog_271)
+- [x] RFC 0188 — uninstall in the browser: `ekos uninstall --ui` (page served by the binary,
+      plan + projects + typed confirmation), Settings → Uninstall EKOS in local mode
+      (`--detach`, `systemd-run --user` under the login service) (devlog_272)
+- [x] RFC 0189 — Init & compile button: one chained run init → … → commit → coverage, stage
+      arguments as data on the command (devlog_272)
+- [ ] RFC 0188 remainder: the Windows path (delayed removal of `bin\` while the page runs) and
+      the macOS launchd path not run on those systems; no uninstall from a team server's console
+- [ ] Intel macOS full package: `cryptography` 50+ has no x86_64 macOS wheels, so the release
+      builds the command only for Intel Macs. Revisit if wheels return, or pin per platform
 - [ ] RFC 0187 remainder: answers arrive whole per step (no token streaming); Anthropic and
       OpenAI providers checked only against recorded request/response shapes — no paid call was
       made; per-tenant chat models

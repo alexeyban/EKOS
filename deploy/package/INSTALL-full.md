@@ -45,7 +45,8 @@ ekos console stop | start | restart | logs
 ekos setup             # change any of the above later
 ```
 
-Compile a project from the console (its **Run** page), or from a terminal:
+Compile a project from the console — the **Init & compile** button in the project's bar runs
+every step — or from a terminal:
 
 ```
 ekos --project shop build && ekos --project shop recover && ekos --project shop resolve
@@ -61,6 +62,10 @@ Every setting of the console is on its **Settings** page (signed in as an owner)
 ekos uninstall               # the program, the login entry, the PATH line, agent entries
 ekos uninstall --purge --yes # also every project and the console's database
 ```
+
+Or in the browser: the console's **Settings → Uninstall EKOS**, or `ekos uninstall --ui`. The
+page lists what will be removed and your projects with their size; you choose whether to keep
+the projects and type a word to confirm. Nothing is removed before that.
 
 ## Without the setup page
 

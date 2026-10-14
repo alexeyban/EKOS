@@ -93,7 +93,7 @@ check "the console stage passed" '[ $rc -eq 0 ]'
 link2="$(grep -o 'http://[^ ]*code=[0-9a-f]*' "$WORK/open2.txt")"
 rc=0
 (cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link2" E2E_BASE="http://127.0.0.1:$PORT" \
-  uv run --quiet --with playwright python "$HERE/package_browser.py") || rc=$?
+  PYTHONPATH="$HERE" uv run --quiet --with playwright python "$HERE/package_browser.py") || rc=$?
 check "the browser stage passed" '[ $rc -eq 0 ]'
 
 echo "== 4. the browser wizard"
@@ -112,9 +112,13 @@ check "the wizard installed and started a second console" \
   '"$WORK/home2/bin/ekos" --home "$WORK/home2" console status | grep -q running'
 wait "$WIZARD_PID" 2>/dev/null || true; WIZARD_PID=""
 
-echo "== 5. uninstall"
-"$E" --home "$HOME/.ekos" uninstall | tee "$WORK/uninstall.txt"
-check "uninstall reports every step ok" '! grep -q "^FAIL" "$WORK/uninstall.txt"'
+echo "== 5. uninstall, from the console's Settings page (RFC 0188)"
+"$E" console open --no-browser > "$WORK/open3.txt"
+link3="$(grep -o 'http://[^ ]*code=[0-9a-f]*' "$WORK/open3.txt")"
+rc=0
+(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link3" E2E_BASE="http://127.0.0.1:$PORT" \
+  PYTHONPATH="$HERE" uv run --quiet --with playwright python "$HERE/package_uninstall.py") || rc=$?
+check "the uninstall stage passed" '[ $rc -eq 0 ]'
 check "the program is gone, the projects stay" '[ ! -e "$HOME/.ekos/bin" ] && [ ! -e "$HOME/.ekos/console" ] && [ -f "$HOME/.ekos/data/default/shop/ekos.toml" ]'
 check "the PATH line and agent entries are gone" \
   '! grep -q "added by ekos setup" "$HOME/.profile" && ! grep -q ekos-shop "$HOME/.config/Claude/claude_desktop_config.json"'

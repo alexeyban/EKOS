@@ -96,6 +96,10 @@ Without a session secret the console keeps a generated one in `control/session.k
 its owner only, so sessions survive a restart. Settings changed later on the console's Settings page
 apply after **Restart now**, which works here because `ekos console run` starts it again.
 
+To remove a server installed this way, run `bin/ekos uninstall` on it (`--purge --yes` also
+deletes the home). The console's **Settings → Uninstall EKOS** page is offered in local mode
+only: it opens a page on the console's own machine, which a team's owner reaches from elsewhere.
+
 People who want the `ekos` command on their own machine (for a project of their own, or for
 `ekos mcp serve` beside an editor) do not need the image: `scripts/package-release.sh` builds an
 offline install package for Linux x86_64 with the installer and an `INSTALL.md`; see the
@@ -168,8 +172,9 @@ Removing a role takes effect on that person's next request.
 ## 4. Projects
 
 A tenant admin adds a project in **Add a workspace → New project from a source directory**,
-with a path such as `/sources/payments-api`. Then an operator runs the pipeline from the
-project's **Run** tab.
+with a path such as `/sources/payments-api`. Then an operator presses **Init & compile** in the project's
+bar (RFC 0189: build, recover, resolve, compile, commit and a coverage report as one run; identity
+conflicts are reported in the log and left for review), or runs single stages from the **Run** tab.
 
 A project of several repositories and folders is created from the command line:
 

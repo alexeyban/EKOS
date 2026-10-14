@@ -2,8 +2,8 @@ pub mod architecture;
 pub mod artifact;
 pub mod ask;
 pub mod branch;
-pub mod catalogue;
 pub mod build;
+pub mod catalogue;
 pub mod clean;
 pub mod clickhouse;
 pub mod cluster;
@@ -48,6 +48,7 @@ pub mod simulate;
 pub mod source;
 pub mod store;
 pub mod treasury;
+pub mod uninstall_server;
 
 use ekos_compiler_core::EkosConfig;
 

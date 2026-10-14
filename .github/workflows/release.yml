@@ -167,7 +167,9 @@ jobs:
           - x86_64-unknown-linux-gnu
           - aarch64-unknown-linux-gnu
           - aarch64-apple-darwin
-          - x86_64-apple-darwin
+          # No x86_64-apple-darwin: cryptography (50+, which the console needs) publishes no
+          # wheels for Intel macOS, and the package is built with --only-binary. Intel Macs get
+          # the command-only archive; install.sh falls back to it on its own.
           - x86_64-pc-windows-msvc
 
     steps:

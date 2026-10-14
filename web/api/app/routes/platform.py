@@ -7,6 +7,8 @@ restart, which this router can trigger when a launcher restarts the console.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
-from .. import authz, console_file, envs, keychain, lifecycle
+from .. import _proc, authz, console_file, envs, keychain, lifecycle
 from ..auth import Principal
 from ..settings import Settings
 from ._responses import BAD_REQUEST
@@ -158,6 +160,78 @@ async def restart(request: Request, _: Principal = Depends(authz.allow_platform)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
     return {"ok": True}
+
+
+# ── uninstall (RFC 0188) ─────────────────────────────────────────────────────
+
+BAD_GATEWAY = {"description": "The uninstall page did not start"}
+# What `ekos uninstall --ui --detach` prints before the page's link.
+_UNINSTALL_PREFIX = "EKOS uninstall: "
+
+
+def _uninstall_refusal(settings: Settings) -> str | None:
+    """Why the console cannot offer the uninstall page here, or None."""
+    if settings.mode != "local":
+        return (
+            "only in local mode: the uninstall page opens on the machine the console runs on. "
+            "On a server, run `ekos uninstall` there"
+        )
+    if not settings.ekos_home:
+        return "this console has no EKOS home"
+    if not (Path(settings.ekos_home) / "control" / "install.json").is_file():
+        return (
+            "EKOS was not installed by `ekos setup` here (no control/install.json); "
+            "remove it the way it was installed"
+        )
+    return None
+
+
+@router.get("/uninstall")
+async def get_uninstall(request: Request, _: Principal = Depends(authz.allow_platform)) -> dict:
+    reason = _uninstall_refusal(request.app.state.settings)
+    return {"available": reason is None, "reason": reason}
+
+
+@router.post("/uninstall", responses={409: CONFLICT, 502: BAD_GATEWAY})
+async def start_uninstall(request: Request, _: Principal = Depends(authz.allow_platform)) -> dict:
+    """Start the uninstall page in its own process and return its link. Nothing is removed
+    until the person confirms on that page."""
+    settings: Settings = request.app.state.settings
+    reason = _uninstall_refusal(settings)
+    if reason:
+        raise HTTPException(status_code=409, detail=reason)
+    argv = [settings.ekos_bin, "--home", settings.ekos_home, "uninstall", "--ui", "--detach"]
+    proc = await _proc.spawn(argv, env=envs.for_tenant(None))
+    # Read lines until the link, never to end of file: the page runs on in its own process and
+    # may hold the pipe (uvloop does not mark it close-on-exec), so EOF would come only when the
+    # page stops.
+    url, seen = "", []
+    try:
+        async with asyncio.timeout(40):
+            while line := await proc.stdout.readline():
+                text = _proc.strip_ansi(line.decode(errors="replace")).strip()
+                if text.startswith(_UNINSTALL_PREFIX):
+                    url = text[len(_UNINSTALL_PREFIX) :].strip()
+                    break
+                seen.append(text)
+            else:
+                # End of output without a link: the command failed; let it finish. (Not after
+                # a link: asyncio's wait() also waits for the pipes the page may hold.)
+                await proc.wait()
+    except TimeoutError:
+        await _proc.terminate(proc)
+    # The link must be the page on this machine; anything else is not followed.
+    if not url.startswith("http://127.0.0.1:"):
+        err = b""
+        if proc.returncode is not None:
+            with contextlib.suppress(TimeoutError):
+                err = await asyncio.wait_for(proc.stderr.read(4096), 2)
+        detail = (_proc.strip_ansi(err.decode(errors="replace")).strip() or " ".join(seen))[-500:]
+        log.warning("uninstall page did not start: %s", detail)
+        raise HTTPException(
+            status_code=502, detail=f"the uninstall page did not start: {detail or 'no link'}"
+        )
+    return {"url": url}
 
 
 # ── values for environment variables ─────────────────────────────────────────

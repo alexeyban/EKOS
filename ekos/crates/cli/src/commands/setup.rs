@@ -1141,6 +1141,101 @@ fn install_service(os: Os, path: Option<&Path>, content: &str, fx: &dyn Effects)
 
 // ── uninstall ────────────────────────────────────────────────────────────────
 
+/// One project in the home and the space it takes.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectSize {
+    pub tenant: String,
+    pub name: String,
+    pub bytes: u64,
+}
+
+/// What `uninstall` would do, before it does it (RFC 0188). `steps` are the names `uninstall`
+/// gives its steps, in its order — a test holds the two together.
+#[derive(Debug, Clone, Serialize)]
+pub struct UninstallPlan {
+    pub home: PathBuf,
+    pub program_dir: PathBuf,
+    /// `ekos setup` installed this (there is an `install.json`).
+    pub installed: bool,
+    pub steps: Vec<String>,
+    pub projects: Vec<ProjectSize>,
+}
+
+fn program_dir_of(home: &Path, manifest: &Manifest) -> PathBuf {
+    if manifest.program_dir.as_os_str().is_empty() {
+        home.to_path_buf()
+    } else {
+        manifest.program_dir.clone()
+    }
+}
+
+fn dir_size(dir: &Path) -> u64 {
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
+}
+
+/// The projects under `<home>/data/<tenant>/<project>`.
+pub fn home_projects(home: &Path) -> Vec<ProjectSize> {
+    let mut out = Vec::new();
+    let Ok(tenants) = std::fs::read_dir(home.join("data")) else {
+        return out;
+    };
+    for tenant in tenants.flatten().filter(|e| e.path().is_dir()) {
+        let Ok(projects) = std::fs::read_dir(tenant.path()) else {
+            continue;
+        };
+        for project in projects.flatten().filter(|e| e.path().is_dir()) {
+            out.push(ProjectSize {
+                tenant: tenant.file_name().to_string_lossy().into_owned(),
+                name: project.file_name().to_string_lossy().into_owned(),
+                bytes: dir_size(&project.path()),
+            });
+        }
+    }
+    out.sort_by(|a, b| (&a.tenant, &a.name).cmp(&(&b.tenant, &b.name)));
+    out
+}
+
+pub fn uninstall_plan(home: &Path, purge: bool) -> UninstallPlan {
+    let manifest = read_manifest(home);
+    let mut steps = vec!["stop the console".to_string()];
+    if manifest.service.is_some() {
+        steps.push("remove the login entry".into());
+    }
+    steps.push("remove the PATH lines".into());
+    if manifest.windows_path.is_some() {
+        steps.push("remove EKOS from the user Path".into());
+    }
+    for (path, _, name) in &manifest.agent_configs {
+        steps.push(format!("remove {name} from {}", path.display()));
+    }
+    for name in &manifest.claude_code {
+        steps.push(format!("remove {name} from Claude Code"));
+    }
+    let program = program_dir_of(home, &manifest);
+    for part in ["console", "bin"] {
+        let dir = program.join(part);
+        if dir.is_dir() {
+            steps.push(format!("remove {}", dir.display()));
+        }
+    }
+    if purge {
+        steps.push(format!("remove the home {}", home.display()));
+    }
+    UninstallPlan {
+        home: home.to_path_buf(),
+        program_dir: program,
+        installed: manifest_path(home).is_file(),
+        steps,
+        projects: home_projects(home),
+    }
+}
+
 pub fn uninstall(home: &Path, purge: bool, m: &Machine, fx: &dyn Effects) -> Result<Vec<Step>> {
     let manifest = read_manifest(home);
     let mut steps = Vec::new();
@@ -1240,11 +1335,7 @@ pub fn uninstall(home: &Path, purge: bool, m: &Machine, fx: &dyn Effects) -> Res
             .map(|_| ()),
         );
     }
-    let program = if manifest.program_dir.as_os_str().is_empty() {
-        home.to_path_buf()
-    } else {
-        manifest.program_dir.clone()
-    };
+    let program = program_dir_of(home, &manifest);
     for part in ["console", "bin"] {
         let dir = program.join(part);
         if dir.is_dir() {

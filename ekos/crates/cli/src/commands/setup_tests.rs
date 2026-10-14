@@ -432,6 +432,46 @@ fn uninstall_undoes_what_setup_did_and_keeps_the_home() {
 }
 
 #[test]
+fn the_uninstall_plan_lists_exactly_what_uninstall_does() {
+    for purge in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), Os::Linux);
+        let answers = local_answers();
+        let home = m.user_home.join(".ekos");
+        apply(&plan(&answers, &m).unwrap(), &answers, &m, &Fake::default()).unwrap();
+        std::fs::create_dir_all(home.join("data/default/shop/state")).unwrap();
+        std::fs::write(home.join("data/default/shop/state/x"), "12345").unwrap();
+
+        let planned = uninstall_plan(&home, purge);
+        assert!(planned.installed);
+        assert_eq!(planned.projects.len(), 1);
+        assert_eq!(planned.projects[0].name, "shop");
+        assert_eq!(planned.projects[0].tenant, "default");
+        assert!(planned.projects[0].bytes >= 5);
+        assert!(planned.steps.len() >= 4, "{:#?}", planned.steps);
+        assert_eq!(
+            planned.steps.last().unwrap().contains("remove the home"),
+            purge
+        );
+
+        let done: Vec<String> = uninstall(&home, purge, &m, &Fake::default())
+            .unwrap()
+            .into_iter()
+            .map(|s| s.action)
+            .collect();
+        assert_eq!(planned.steps, done, "purge={purge}");
+    }
+}
+
+#[test]
+fn an_uninstall_plan_without_setup_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let planned = uninstall_plan(dir.path(), false);
+    assert!(!planned.installed);
+    assert!(planned.projects.is_empty());
+}
+
+#[test]
 fn answers_read_from_toml() {
     let text = r#"
 home = "/srv/ekos"

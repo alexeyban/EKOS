@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
 from app.readproc import ReadProcError, _check_allowed, read_json
+
+# A program that exits 1 at once; `/bin/false` is `/usr/bin/false` on macOS.
+FALSE = shutil.which("false") or "/bin/false"
 
 
 def test_allowlist_accepts_exactly_the_allowed_shapes() -> None:
@@ -43,4 +48,4 @@ async def test_read_json_rejects_a_non_directory_workspace(tmp_path) -> None:
 
 async def test_read_json_surfaces_a_nonzero_exit(tmp_path) -> None:
     with pytest.raises(ReadProcError):
-        await read_json("/bin/false", str(tmp_path), ["status", "--json"])
+        await read_json(FALSE, str(tmp_path), ["status", "--json"])

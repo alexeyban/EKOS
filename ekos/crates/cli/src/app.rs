@@ -90,11 +90,24 @@ enum Commands {
     /// unless --purge
     Uninstall {
         /// Also delete the EKOS home: every project and its compiled knowledge
-        #[arg(long)]
+        #[arg(long, conflicts_with = "ui")]
         purge: bool,
         /// Confirm --purge
-        #[arg(long)]
+        #[arg(long, conflicts_with = "ui")]
         yes: bool,
+        /// Show what will be removed on a page in the browser and confirm there (RFC 0188)
+        #[arg(long)]
+        ui: bool,
+        /// With --ui: print the page's address instead of opening a browser
+        #[arg(long, requires = "ui")]
+        no_browser: bool,
+        /// With --ui: port for the page (default: any free one)
+        #[arg(long, default_value_t = 0, requires = "ui")]
+        port: u16,
+        /// With --ui: serve the page from a new background process, print its address and
+        /// return (what the web console uses)
+        #[arg(long, requires = "ui")]
+        detach: bool,
     },
     /// Every command, its arguments and what kind of command it is, as JSON: what the web
     /// console builds its run forms from (RFC 0186)
@@ -1596,7 +1609,28 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         } => {
             return run_setup(home_dir?, answers, dry_run, no_browser, port).await;
         }
-        Commands::Uninstall { purge, yes } => {
+        Commands::Uninstall {
+            purge,
+            yes,
+            ui,
+            no_browser,
+            port,
+            detach,
+        } => {
+            if ui {
+                let home = home_dir?;
+                if detach {
+                    return crate::commands::console::detach_uninstall_page(&home, port);
+                }
+                let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
+                let page = crate::commands::uninstall_server::UninstallPage::new(
+                    crate::commands::setup_server::new_token(),
+                    home,
+                    machine,
+                    std::sync::Arc::new(crate::commands::setup::RealEffects),
+                );
+                return crate::commands::uninstall_server::serve(page, port, !no_browser).await;
+            }
             if purge && !yes {
                 bail!("--purge deletes every project in the home; add --yes to confirm");
             }

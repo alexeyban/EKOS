@@ -463,6 +463,90 @@ pub fn start(home: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `ekos uninstall --ui --detach` (RFC 0188): the uninstall page in a new background process,
+/// so it outlives the console that asked for it. Prints the page's address once it answers.
+///
+/// Under the console's systemd user unit, a child — however detached — is in the unit's
+/// cgroup and is ended when the unit stops, which uninstalling does. `systemd-run --user`
+/// starts the page in a unit of its own.
+pub fn detach_uninstall_page(home: &Path, port: u16) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    // Not in the home: a purge removes it.
+    let log_path = std::env::temp_dir().join(format!("ekos-uninstall-{}.log", std::process::id()));
+    let page_args: Vec<std::ffi::OsString> = vec![
+        exe.clone().into(),
+        "--home".into(),
+        home.into(),
+        "uninstall".into(),
+        "--ui".into(),
+        "--no-browser".into(),
+        "--port".into(),
+        port.to_string().into(),
+    ];
+    let under_systemd = cfg!(target_os = "linux")
+        && super::setup::read_manifest(home).service.as_deref() == Some("linux")
+        && Command::new("systemd-run")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+    let mut child = None;
+    if under_systemd {
+        let status = Command::new("systemd-run")
+            .args(["--user", "--collect", "--quiet"])
+            .arg(format!("--unit=ekos-uninstall-{}", std::process::id()))
+            .arg(format!(
+                "--property=StandardOutput=file:{}",
+                log_path.display()
+            ))
+            .arg("--property=StandardError=inherit")
+            .args(&page_args)
+            .stdin(Stdio::null())
+            .status()
+            .context("starting the uninstall page with systemd-run")?;
+        if !status.success() {
+            bail!("systemd-run could not start the uninstall page ({status})");
+        }
+    } else {
+        let log = std::fs::File::create(&log_path)
+            .with_context(|| format!("creating {}", log_path.display()))?;
+        let mut cmd = Command::new(&page_args[0]);
+        cmd.args(&page_args[1..])
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        detach(&mut cmd);
+        child = Some(cmd.spawn().context("starting the uninstall page")?);
+    }
+    let prefix = super::uninstall_server::URL_PREFIX;
+    let mut line = None;
+    wait_until(Duration::from_secs(20), || {
+        line = std::fs::read_to_string(&log_path).ok().and_then(|t| {
+            t.lines()
+                .find(|l| l.starts_with(prefix))
+                .map(str::to_string)
+        });
+        // A page that already exited will never print its link.
+        let exited = child
+            .as_mut()
+            .is_some_and(|c| c.try_wait().ok().flatten().is_some());
+        line.is_some() || exited
+    });
+    match line {
+        Some(l) => {
+            println!("{l}");
+            Ok(())
+        }
+        None => bail!(
+            "the uninstall page did not start: {}",
+            std::fs::read_to_string(&log_path)
+                .unwrap_or_default()
+                .trim()
+        ),
+    }
+}
+
 #[cfg(unix)]
 fn detach(cmd: &mut Command) {
     use std::os::unix::process::CommandExt;

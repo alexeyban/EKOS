@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { grouped, parseInput, type SettingField } from "./Settings";
+import { grouped, parseInput, type SettingField, uninstallTarget } from "./Settings";
 
 const field = (name: string, type: string, group = "G"): SettingField => ({
   name,
@@ -29,5 +29,12 @@ describe("settings page", () => {
     expect(parseInput(field("production", "bool"), "true")).toBe(true);
     expect(parseInput(field("production", "bool"), "false")).toBe(false);
     expect(parseInput(field("owners", "str"), "a@b.c")).toBe("a@b.c");
+  });
+
+  it("follows the uninstall page only to this machine", () => {
+    expect(uninstallTarget("http://127.0.0.1:41234/?t=abc")).toBe("http://127.0.0.1:41234/?t=abc");
+    expect(uninstallTarget("http://evil.example/?t=abc")).toBeNull();
+    expect(uninstallTarget("http://127.0.0.1.evil.example:80/")).toBeNull();
+    expect(uninstallTarget(undefined)).toBeNull();
   });
 });

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import home
+
 
 @dataclass(frozen=True)
 class Param:
@@ -32,7 +34,19 @@ class Command:
     params: dict[str, Param] = field(default_factory=dict)
     # For chained runs: the ordered sub-commands. Empty = a single subprocess of `base_argv`.
     stages: tuple[str, ...] = ()
+    # A stage's argv when it is not the stage's bare name (RFC 0189).
+    stage_args: dict[str, tuple[str, ...]] = field(default_factory=dict)
     summary: str = ""
+
+    def stage_argv(self, stage: str) -> list[str]:
+        return list(self.stage_args.get(stage, (stage,)))
+
+    def stages_for(self, ws_path: str) -> tuple[str, ...]:
+        """The stages a run in this workspace takes. A home project skips `init`: `ekos project
+        add` initialised it, and `ekos init` refuses to run for a project (RFC 0189)."""
+        if "init" in self.stages and home.project_at(ws_path) is not None:
+            return tuple(s for s in self.stages if s != "init")
+        return self.stages
 
     def render_argv(self, params: dict) -> list[str]:
         """`base_argv` + the validated params as argv elements. `ValueError` on a bad param."""
@@ -96,7 +110,23 @@ COMMAND_ALLOWLIST: list[Command] = [
         (),
         is_write=True,
         stages=_PIPELINE_STAGES,
+        stage_args={"commit": ("commit", "--yes")},
         summary="build → recover → resolve → compile → commit",
+    ),
+    Command(
+        "init-and-compile",
+        (),
+        is_write=True,
+        stages=("init", *_PIPELINE_STAGES, "coverage"),
+        stage_args={
+            "init": ("init", "--detect"),
+            # Identity conflicts are listed in the log and stay open for review; they do not
+            # stop the one-button run.
+            "resolve": ("resolve", "--force"),
+            "commit": ("commit", "--yes"),
+        },
+        summary="Make the project queryable: init → build → recover → resolve (conflicts "
+        "reported) → compile → commit → coverage",
     ),
     Command("clean", ("clean",), is_write=True, summary="Clear the artifact cache"),
     Command("ledger-repair", ("ledger", "repair"), is_write=True, summary="Verify sealed segments"),

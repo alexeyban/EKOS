@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uninstall EKOS</title>
+<style>
+:root { --bg:#f6f7f9; --card:#fff; --ink:#1d232c; --soft:#5b6573; --rule:#dde1e7; --accent:#2f6fed; --ok:#1f8a4c; --err:#c0392b; }
+@media (prefers-color-scheme: dark) { :root { --bg:#12151a; --card:#1b2028; --ink:#e6e9ee; --soft:#9aa4b2; --rule:#2c333e; --accent:#6c9cff; --ok:#4cc38a; --err:#ff7b6b; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+h2 { font-size: 1.1rem; margin: 0 0 12px; }
+.lede { color: var(--soft); margin: 0 0 20px; }
+section.card { background:var(--card); border:1px solid var(--rule); border-radius:10px; padding:20px; margin-bottom:16px; }
+label { display:block; font-weight:600; margin:14px 0 4px; }
+label.check { font-weight:400; display:flex; gap:8px; align-items:flex-start; }
+.help { color:var(--soft); font-size:.85rem; margin:2px 0 0; }
+input[type=text] { width:100%; padding:8px 10px; border:1px solid var(--rule); border-radius:6px; background:var(--bg); color:var(--ink); font:inherit; }
+button { font:inherit; padding:8px 16px; border-radius:6px; border:1px solid var(--err); background:var(--err); color:#fff; cursor:pointer; margin-top:16px; }
+button:disabled { opacity:.5; cursor:default; }
+.ok { color:var(--ok); } .err { color:var(--err); }
+ol li, ul li { margin: 4px 0; overflow-wrap:anywhere; }
+code { font-family: ui-monospace, monospace; font-size:.9em; overflow-wrap:anywhere; }
+table { border-collapse: collapse; width:100%; font-size:.9rem; }
+td, th { text-align:left; padding:4px 8px; border-bottom:1px solid var(--rule); }
+td.num { text-align:right; font-variant-numeric: tabular-nums; }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Uninstall EKOS</h1>
+  <p class="lede">See what will be removed, then confirm. Nothing changes before that.</p>
+
+  <section class="card" id="loading"><p>Reading what is installed…</p></section>
+
+  <section class="card hidden" id="plan">
+    <h2>What will be removed</h2>
+    <p class="help" id="where"></p>
+    <p class="err hidden" id="not-installed">This home was not installed by <code>ekos setup</code>: only the console and program directories found are removed, and no login entry or agent configuration is known.</p>
+    <ol id="steps"></ol>
+
+    <h2 style="margin-top:20px">Your projects</h2>
+    <p class="help" id="no-projects">There are no projects in this home.</p>
+    <table id="projects" class="hidden"><thead><tr><th>Tenant</th><th>Project</th><th style="text-align:right">Size</th></tr></thead><tbody></tbody></table>
+    <label class="check"><input type="checkbox" id="purge"> <span>Also delete the home <code id="home"></code>: every project, its compiled knowledge, the console's database and backups kept there. This cannot be undone.</span></label>
+
+    <label for="confirm">Type <code id="word">uninstall</code> to confirm</label>
+    <input type="text" id="confirm" autocomplete="off" spellcheck="false">
+    <button id="go" disabled>Uninstall EKOS</button>
+    <p class="err" id="error"></p>
+  </section>
+
+  <section class="card hidden" id="done">
+    <h2 id="done-title">EKOS was removed</h2>
+    <ul id="results"></ul>
+    <p class="help" id="kept"></p>
+    <p class="help">You can close this page.</p>
+  </section>
+</main>
+<script>
+const token = new URLSearchParams(location.search).get("t") || "";
+const $ = (id) => document.getElementById(id);
+let plan = null;
+
+function call(path, body) {
+  const init = { headers: { "x-setup-token": token } };
+  if (body !== undefined) {
+    init.method = "POST";
+    init.headers["content-type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  return fetch(path, init).then(async (r) => {
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    return data;
+  });
+}
+
+function size(bytes) {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+  return (i ? bytes.toFixed(1) : bytes) + " " + units[i];
+}
+
+function word() { return $("purge").checked ? "delete everything" : "uninstall"; }
+
+function render() {
+  const steps = $("purge").checked ? plan.purge_steps : plan.steps;
+  $("steps").replaceChildren(...steps.map((s) => {
+    const li = document.createElement("li");
+    li.textContent = s;
+    return li;
+  }));
+  $("word").textContent = word();
+  $("go").disabled = $("confirm").value.trim() !== word();
+}
+
+call("/api/plan").then((p) => {
+  plan = p;
+  $("loading").classList.add("hidden");
+  $("plan").classList.remove("hidden");
+  $("where").textContent = `Program: ${p.program_dir} · Home: ${p.home}`;
+  $("home").textContent = p.home;
+  $("not-installed").classList.toggle("hidden", p.installed);
+  if (p.projects.length) {
+    $("no-projects").classList.add("hidden");
+    $("projects").classList.remove("hidden");
+    $("projects").tBodies[0].replaceChildren(...p.projects.map((x) => {
+      const tr = document.createElement("tr");
+      for (const [v, cls] of [[x.tenant, ""], [x.name, ""], [size(x.bytes), "num"]]) {
+        const td = document.createElement("td");
+        td.textContent = v;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      }
+      return tr;
+    }));
+  }
+  render();
+}).catch((e) => {
+  $("loading").innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "err";
+  p.textContent = "This uninstall link is not valid any more (" + e.message + "). Run ekos uninstall --ui again.";
+  $("loading").appendChild(p);
+});
+
+$("purge").addEventListener("change", () => { $("confirm").value = ""; render(); });
+$("confirm").addEventListener("input", render);
+$("go").addEventListener("click", () => {
+  $("go").disabled = true;
+  $("error").textContent = "";
+  const purge = $("purge").checked;
+  call("/api/uninstall", { purge, confirm: $("confirm").value.trim() }).then((r) => {
+    $("plan").classList.add("hidden");
+    $("done").classList.remove("hidden");
+    const failed = r.steps.filter((s) => !s.ok).length;
+    if (failed) $("done-title").textContent = `EKOS was removed, with ${failed} step(s) failing`;
+    $("results").replaceChildren(...r.steps.map((s) => {
+      const li = document.createElement("li");
+      li.className = s.ok ? "ok" : "err";
+      li.textContent = (s.ok ? "✓ " : "✗ ") + s.action + (s.message ? " — " + s.message : "");
+      return li;
+    }));
+    $("kept").textContent = purge ? "" : `Your projects are kept in ${plan.home}. Delete that directory yourself when you no longer need them.`;
+  }).catch((e) => {
+    $("error").textContent = e.message;
+    render();
+  });
+});
+</script>
+</body>
+</html>

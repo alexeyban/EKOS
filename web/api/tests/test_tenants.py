@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
 import sqlite3
 from collections.abc import Iterator
 from datetime import timedelta
@@ -19,6 +20,9 @@ from pydantic import ValidationError
 from app import models
 from app.main import create_app
 from app.routes.auth import user_for_claims
+
+# A program that exits 1 at once; `/bin/false` is `/usr/bin/false` on macOS.
+FALSE = shutil.which("false") or "/bin/false"
 
 SECRET = "test-session-secret"
 
@@ -79,7 +83,7 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reset_settings: None) -
     # Access comes from bindings only, as in production mode, so the tests see the real rules
     # and not the RFC 0131 mapping.
     monkeypatch.setenv("EKOS_CONSOLE_PRODUCTION", "true")
-    monkeypatch.setenv("EKOS_BIN", "/bin/false")
+    monkeypatch.setenv("EKOS_BIN", FALSE)
     monkeypatch.delenv("EKOS_HOME", raising=False)
     (tmp_path / "src" / "acme").mkdir(parents=True)
     (tmp_path / "src" / "globex").mkdir(parents=True)

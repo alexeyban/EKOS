@@ -169,7 +169,50 @@ export function Settings() {
       </section>
 
       <Keychain />
+      <Uninstall />
     </>
+  );
+}
+
+// RFC 0188: the uninstall page is followed only to this machine's loopback, whatever the
+// server answers.
+export function uninstallTarget(url: string | undefined): string | null {
+  return url && /^http:\/\/127\.0\.0\.1:\d+\//.test(url) ? url : null;
+}
+
+function Uninstall() {
+  const view = useQuery({
+    queryKey: ["uninstall"],
+    queryFn: () => api<{ available: boolean; reason: string | null }>("/platform/uninstall"),
+  });
+  const start = useMutation({
+    mutationFn: () => apiPost<{ url: string }>("/platform/uninstall"),
+    onSuccess: (r) => {
+      const target = uninstallTarget(r.url);
+      if (target) window.location.assign(target);
+    },
+  });
+  if (!view.data) return null;
+  return (
+    <section className="card">
+      <strong>Uninstall EKOS</strong>
+      <p className="muted">
+        Opens a page that lists what will be removed — the program, the console, its login entry, the
+        PATH line and the agent entries setup added — and your projects with their size. You choose
+        there whether to keep the projects, and confirm. Nothing is removed before that.
+      </p>
+      {view.data.available ? (
+        <button onClick={() => start.mutate()} disabled={start.isPending}>
+          {start.isPending ? "Opening…" : "Uninstall EKOS…"}
+        </button>
+      ) : (
+        <p className="muted">{view.data.reason}</p>
+      )}
+      {start.isError && <p className="err">{String(start.error)}</p>}
+      {start.isSuccess && !uninstallTarget(start.data.url) && (
+        <p className="err">The uninstall page answered with an address off this machine; not opened.</p>
+      )}
+    </section>
   );
 }
 

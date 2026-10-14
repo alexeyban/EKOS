@@ -65,6 +65,9 @@ header {
   font-weight: 650;
   margin-right: 0.4rem;
 }
+.ws-nav-action {
+  margin-left: auto;
+}
 .ws-nav-tabs {
   display: flex;
   gap: 0.25rem;

@@ -68,3 +68,51 @@ def test_read_command_needs_only_read(client: TestClient) -> None:
 def test_missing_required_param_is_422(client: TestClient) -> None:
     assert BY_NAME["ekl"].params["query"].required
     assert client.post("/api/workspaces/w/commands/ekl", headers=R, json={}).status_code == 422
+
+
+# ── init-and-compile (RFC 0189) ──────────────────────────────────────────────
+
+
+def test_init_and_compile_stages_and_arguments(tmp_path) -> None:
+    c = BY_NAME["init-and-compile"]
+    assert c.is_write
+    in_place = tmp_path / "ws"
+    in_place.mkdir()
+    assert c.stages_for(str(in_place)) == (
+        "init",
+        "build",
+        "recover",
+        "resolve",
+        "compile",
+        "commit",
+        "coverage",
+    )
+    assert c.stage_argv("init") == ["init", "--detect"]
+    assert c.stage_argv("resolve") == ["resolve", "--force"]
+    assert c.stage_argv("commit") == ["commit", "--yes"]
+    assert c.stage_argv("build") == ["build"]
+    # The plain pipeline keeps its own arguments.
+    p = BY_NAME["pipeline"]
+    assert p.stage_argv("resolve") == ["resolve"]
+    assert p.stage_argv("commit") == ["commit", "--yes"]
+    assert p.stages_for(str(in_place)) == p.stages
+
+
+def test_a_home_project_skips_init(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, reset_settings: None
+) -> None:
+    home = tmp_path / "home"
+    project = home / "data" / "default" / "shop"
+    (project / "state").mkdir(parents=True)
+    (project / "ekos.toml").write_text("[workspace]\n")
+    monkeypatch.setenv("EKOS_HOME", str(home))
+    stages = BY_NAME["init-and-compile"].stages_for(str(project))
+    assert "init" not in stages and stages[0] == "build" and stages[-1] == "coverage"
+
+
+def test_init_and_compile_needs_operate(client: TestClient) -> None:
+    assert client.post("/api/workspaces/w/commands/init-and-compile", headers=R).status_code == 403
+    r = client.post("/api/workspaces/w/commands/init-and-compile", headers=W)
+    assert r.status_code == 200, r.text
+    run = client.get(f"/api/runs/{r.json()['run_id']}", headers=R).json()
+    assert [s["name"] for s in run["stages"]][:2] == ["init", "build"]

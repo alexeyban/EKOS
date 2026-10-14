@@ -325,3 +325,14 @@ def test_production_with_a_home_needs_no_set_session_secret(
     monkeypatch.setenv("EKOS_CONSOLE_OWNERS", "a@b.c")
     s = Settings()
     assert s.session_secret == (home / "control" / "session.key").read_text().strip()
+
+
+# ── uninstall (RFC 0188) ─────────────────────────────────────────────────────
+
+
+def test_uninstall_is_for_local_mode_only(client: TestClient, home: Path) -> None:
+    (home / "control" / "install.json").write_text("{}")
+    assert client.get("/api/platform/uninstall", headers=READER).status_code == 403
+    body = client.get("/api/platform/uninstall", headers=OWNER).json()
+    assert body["available"] is False and "local mode" in body["reason"]
+    assert client.post("/api/platform/uninstall", headers=OWNER).status_code == 409

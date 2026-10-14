@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
 import { api } from "./api/client";
+import { InitAndCompile } from "./InitAndCompile";
 
 export interface Me {
   mode: "oidc" | "token";
@@ -87,6 +88,7 @@ export function WorkspaceShell() {
             </NavLink>
           ))}
         </span>
+        {!restricted && mayOperate(scoped) && <InitAndCompile workspace={id} name={name} />}
       </nav>
       {/* Until the list says whether this caller is restricted, a page would ask for what
           a restricted reader is refused. */}

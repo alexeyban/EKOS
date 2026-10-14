@@ -97,6 +97,9 @@ jobs:
   web:
     name: Web console
     runs-on: ubuntu-latest
+    # A hung test once held this job for an hour with no output (pytest's progress is buffered on
+    # a pipe). Stop well before GitHub's six hours.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v7
@@ -138,7 +141,9 @@ jobs:
 
       - name: Pytest (unit + live MCP)
         working-directory: web/api
-        run: uv run --no-sync --no-build pytest -q
+        # -v names each test as it runs; faulthandler prints every thread's stack when one test
+        # takes over 5 minutes, so a hang shows where it is.
+        run: uv run --no-sync --no-build pytest -v -o faulthandler_timeout=300
         env:
           EKOS_BIN: ${{ github.workspace }}/ekos/target/release/ekos
 
@@ -173,6 +178,7 @@ jobs:
     name: Web console API (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     continue-on-error: true
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -213,7 +219,7 @@ jobs:
         run: |
           bin="$GITHUB_WORKSPACE/ekos/target/release/ekos"
           [ -f "$bin.exe" ] && bin="$bin.exe"
-          EKOS_BIN="$bin" uv run --no-sync --no-build pytest -q
+          EKOS_BIN="$bin" uv run --no-sync --no-build pytest -v -o faulthandler_timeout=300
 
   benchmark:
     name: Benchmark

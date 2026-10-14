@@ -80,7 +80,10 @@ class JobRunner:
             self._on_done[run_id] = on_done
         log_path = str(Path(self._settings.runs_dir) / f"{run_id}.log")
         stages = (
-            [{"name": s, "status": "pending", "exit_code": None} for s in command.stages]
+            [
+                {"name": s, "status": "pending", "exit_code": None}
+                for s in command.stages_for(ws_path)
+            ]
             if command.stages
             else []
         )
@@ -248,9 +251,7 @@ class JobRunner:
             await _afile.append_text(log_path, f"\n[console] === stage: {stage['name']} ===\n")
             stage["status"] = "running"
             models.update_run(run_id, stages=list(stages))
-            stage_args = [stage["name"]]
-            if stage["name"] == "commit":
-                stage_args.append("--yes")
+            stage_args = command.stage_argv(stage["name"])
             stage_argv, cwd = home.command(self._settings.ekos_bin, ws_path, stage_args)
             code = await _proc.run_streaming(
                 stage_argv,

@@ -37,7 +37,11 @@ ARG CARGO_BUILD_JOBS=""
 # without the buildx component (Ubuntu's `docker.io` does), and `RUN --mount` then fails the
 # build outright. This file builds with the classic builder and with BuildKit alike. The price
 # is a full compile whenever anything under ekos/ changes.
+#
+# A build arg is also an environment variable inside RUN, and cargo reads CARGO_BUILD_JOBS itself:
+# an empty one fails with "could not parse ``", so it is unset when not given.
 RUN cd ekos \
+    && if [ -z "$CARGO_BUILD_JOBS" ]; then unset CARGO_BUILD_JOBS; fi \
     && cargo build --release --locked -p ekos ${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"} \
     && cp target/release/ekos /ekos-bin
 

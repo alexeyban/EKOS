@@ -1,11 +1,16 @@
 # Changelog
 
-## Unreleased (on `main` since v1.0.3)
+## v1.1.0 — 2026-10-14
 
-RFCs 0154–0183, devlogs 204–266. Not yet tagged; build from source or wait for the
-next release.
+RFCs 0154–0189, devlogs 204–272. The first release with **full packages**: the `ekos` command,
+the web console and a pinned Python for Linux (x86_64, aarch64), macOS on Apple silicon and
+Windows 11 (Intel Macs get the command only: `cryptography` has no Intel macOS wheels), installed by `install.sh` / `install.ps1` with a setup wizard in the browser
+(`ekos-<version>-<target>-full`). The command-only archives are published as before, and the
+console image as `ghcr.io/alexeyban/ekos`. Programs are checksummed, not code-signed.
 
 **New capabilities**
+- **Uninstall in the browser** (RFC 0188): `ekos uninstall --ui` serves a page (loopback, one-time token) listing each step and the projects in the home with their size; the person chooses whether to keep the projects and types `uninstall` (or `delete everything`) to confirm. The console's Settings page has **Uninstall EKOS** in local mode for an install made by `ekos setup`; it starts the page in its own process (`--detach`, through `systemd-run --user` under the login service), so the page outlives the console it removes.
+- **Init & compile** (RFC 0189): one button in a project's bar runs init (in-place workspaces), build, recover, resolve (identity conflicts reported, not stopping), compile, commit and coverage as one run. Chained commands now carry their stage arguments (`stage_args`).
 - **Chat with a project** (RFC 0187): a Chat tab answering with a configured model (Ollama, OpenAI-compatible, Anthropic) that uses the project's reading EKOS tools with the person's rights and read scope, every call shown and audited; a hosted model only in a tenant with metered calls on; conversations per person; a Chat step in `ekos setup` that checks a model without a paid call. New console settings `chat_*`.
 - **Every command and setting from the console** (RFC 0186): `ekos commands --json` (every command, its arguments and a class deciding who may run it from the web) and `ekos config schema --json` (the JSON schema of `ekos.toml`). The console's new Commands tab runs any command but servers and the installer, as a validated argv; the config page gets a Settings form for every section that keeps the file's comments.
 - **Setup wizard, console launcher, full packages** (RFC 0185): `ekos setup` (a wizard in the browser, or `--answers` without one), `ekos console start|stop|restart|status|open|logs`, `ekos uninstall`; full packages with the console and a pinned Python for Linux, Windows 11 and macOS (`scripts/package-full.sh`, a `package` job in the release workflow); `install.sh` installs the full package when a release has one and opens the wizard, `install.ps1` does so on Windows. **Changed:** with no session secret set, a console with a home keeps a generated one in `control/session.key`, so a restart no longer signs everyone out (production mode accepts it).

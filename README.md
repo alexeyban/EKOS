@@ -157,13 +157,18 @@ login. It shows the exact list of steps before doing anything. Afterwards:
 ekos console open | status | stop | start | restart | logs
 ekos setup                  # change any of it later
 ekos uninstall              # the program, login entry, PATH line, agent entries; keeps projects
+ekos uninstall --ui         # the same on a page in the browser: what goes, your projects, confirm
 ```
+
+The console has the same: **Settings → Uninstall EKOS** (local mode, an install made by setup)
+opens that page, which keeps working while it removes the console itself (RFC 0188). A project's
+top bar has **Init & compile**: init (in-place workspaces), build, recover, resolve (conflicts
+reported, not stopping), compile, commit and coverage as one run (RFC 0189).
 
 `ekos setup --answers answers.toml` applies the same answers without a browser (servers,
 scripts); `--dry-run` lists the steps. The release workflow builds the full package for Linux
-x86_64 and aarch64, macOS and Windows; `scripts/package-full.sh` assembles one, and
-`scripts/package-release.sh --full` builds an offline set for Linux x86_64. Until the next
-tagged release, `install.sh` finds no full package and installs the command only.
+x86_64 and aarch64, macOS on Apple silicon and Windows (Intel Macs: the command only); `scripts/package-full.sh` assembles one, and
+`scripts/package-release.sh --full` builds an offline set for Linux x86_64. Releases from v1.1.0 on carry the full packages.
 
 ### Prebuilt binary, command only
 
@@ -185,7 +190,7 @@ curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh -o i
 less install.sh && sh install.sh
 ```
 
-The script also takes `EKOS_VERSION` to pin a release (`EKOS_VERSION=v1.0.3 sh install.sh`) and
+The script also takes `EKOS_VERSION` to pin a release (`EKOS_VERSION=v1.1.0 sh install.sh`) and
 `EKOS_INSTALL_DIR` to change where it lands. To run EKOS as a shared service with the web
 console, use the [container image](#container-image-rfc-0179) instead.
 
@@ -214,7 +219,7 @@ nothing. (`install.sh` does this fallback automatically.)
 #### Linux and macOS
 
 ```bash
-VERSION=v1.0.3
+VERSION=v1.1.0
 TARGET=x86_64-unknown-linux-gnu          # from the table above
 ASSET="ekos-${VERSION#v}-$TARGET.tar.gz"
 BASE="https://github.com/alexeyban/EKOS/releases/download/$VERSION"
@@ -257,7 +262,7 @@ step only applies if you clicked the link in a browser.
 #### Windows
 
 ```powershell
-$Version = "v1.0.3"
+$Version = "v1.1.0"
 $Asset   = "ekos-$($Version -replace '^v','')-x86_64-pc-windows-msvc.zip"
 $Base    = "https://github.com/alexeyban/EKOS/releases/download/$Version"
 
@@ -2179,9 +2184,9 @@ RFC 0030). The project site is [ekos.dev](https://ekos.dev).
 | v0.7 | AI Layer |
 | v1.0 | Enterprise Knowledge Compiler |
 
-The latest release is `v1.0.3` (2026-09-24); 1.0.0 (2026-09-23) is the `v1.0` row above. `main` is
-ahead of it — RFCs up to 0174 and 251 devlogs so far — and [CHANGELOG.md](CHANGELOG.md)'s
-"Unreleased" section lists what landed since. The phase-by-phase record is [TODO.md](TODO.md) and
+The latest release is `v1.1.0` (2026-10-14: RFCs up to 0187, the setup wizard and full packages);
+1.0.0 (2026-09-23) is the `v1.0` row above. [CHANGELOG.md](CHANGELOG.md) lists what each release
+added. The phase-by-phase record is [TODO.md](TODO.md) and
 the devlogs, not this table.
 
 ## Team

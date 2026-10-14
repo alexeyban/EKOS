@@ -45,20 +45,26 @@ impl Wizard {
 
     fn allowed(&self, headers: &HeaderMap, query: Option<&str>) -> bool {
         *self.last_seen.lock().unwrap() = Instant::now();
-        let given = headers
-            .get("x-setup-token")
-            .and_then(|v| v.to_str().ok())
-            .or(query)
-            .unwrap_or("");
-        // Constant time is not needed against a 256-bit random token over loopback, but it
-        // costs nothing.
-        given.len() == self.token.len()
-            && given
-                .bytes()
-                .zip(self.token.bytes())
-                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-                == 0
+        token_matches(&self.token, headers, query)
     }
+}
+
+/// The page's token from `x-setup-token` or `?t=`, compared with the expected one. Shared with
+/// the uninstall page (RFC 0188).
+pub(crate) fn token_matches(expected: &str, headers: &HeaderMap, query: Option<&str>) -> bool {
+    let given = headers
+        .get("x-setup-token")
+        .and_then(|v| v.to_str().ok())
+        .or(query)
+        .unwrap_or("");
+    // Constant time is not needed against a 256-bit random token over loopback, but it
+    // costs nothing.
+    given.len() == expected.len()
+        && given
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
 }
 
 fn refused() -> Response {
