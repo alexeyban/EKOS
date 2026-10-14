@@ -91,6 +91,21 @@ FIELDS: dict[str, Field] = {
     "mcp_port_base": Field("MCP", "First loopback port for project MCP servers"),
     "mcp_idle_seconds": Field("MCP", "Stop a project's MCP server unused this long (0: never)"),
     "mcp_max_servers": Field("MCP", "Most project MCP servers running at once"),
+    "chat_provider": Field(
+        "Chat", "anthropic, openai (any OpenAI-compatible host), ollama, or empty for no chat"
+    ),
+    "chat_model": Field("Chat", "The model, e.g. claude-sonnet-5-5, qwen2.5:7b"),
+    "chat_base_url": Field(
+        "Chat",
+        "The provider's address; empty for its default. A server "
+        "on this machine is not paid per call",
+    ),
+    "chat_api_key_env": Field(
+        "Chat",
+        "Name of the variable holding the key (its value: the environment, or the keychain below)",
+    ),
+    "chat_max_tool_calls": Field("Chat", "Most EKOS tool calls the model may make per question"),
+    "chat_max_tokens": Field("Chat", "Most tokens in one answer"),
     "run_queue_depth": Field("Runs", "Commands queued per workspace before new ones are refused"),
     "ekos_bin": Field("Locations", "The `ekos` binary", editable=False),
     "ekos_home": Field("Locations", "The EKOS home", editable=False),

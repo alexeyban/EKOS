@@ -456,3 +456,48 @@ now = false
     );
     let _ = PathBuf::new();
 }
+
+#[test]
+fn the_chat_model_is_set_and_its_key_goes_to_the_keychain() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = machine(dir.path(), Os::Linux);
+    let py = m.package.join("console").join("python").join("bin");
+    std::fs::create_dir_all(&py).unwrap();
+    std::fs::write(py.join("python3"), "").unwrap();
+    let answers = Answers {
+        program_dir: m.package.display().to_string(),
+        chat: ChatAnswers {
+            provider: "anthropic".into(),
+            model: "claude-sonnet-5-5".into(),
+            base_url: String::new(),
+            api_key_env: "ANTHROPIC_API_KEY".into(),
+            api_key: "KEY-VALUE-9".into(),
+        },
+        start: StartAnswers {
+            now: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let fake = Fake::default();
+    let steps = apply(&plan(&answers, &m).unwrap(), &answers, &m, &fake).unwrap();
+    assert!(steps.iter().all(|s| s.ok), "{steps:#?}");
+    let toml = std::fs::read_to_string(m.user_home.join(".ekos/control/console.toml")).unwrap();
+    assert!(toml.contains("chat_provider = \"anthropic\""));
+    assert!(toml.contains("chat_api_key_env = \"ANTHROPIC_API_KEY\""));
+    assert!(!toml.contains("KEY-VALUE-9"));
+    let ran = fake.ran.borrow();
+    let r = ran.iter().find(|r| r.0 == "python3").unwrap();
+    assert_eq!(
+        r.1.join(" "),
+        "-m app.keychain_cli put env ANTHROPIC_API_KEY"
+    );
+    assert_eq!(r.3.as_deref(), Some("KEY-VALUE-9"));
+
+    // A key needs a name to be kept under; a console variable is not one.
+    let mut bad = answers.clone();
+    bad.chat.api_key_env = "EKOS_CONSOLE_SESSION_SECRET".into();
+    assert!(check(&bad).is_err());
+    bad.chat.provider = "gemini".into();
+    assert!(check(&bad).unwrap_err().to_string().contains("anthropic"));
+}

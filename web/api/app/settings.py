@@ -141,6 +141,17 @@ class Settings(BaseSettings):
     mcp_idle_seconds: int = 900
     mcp_max_servers: int = 8
 
+    # ── Chat (RFC 0187) ─────────────────────────────────────────────────────
+    # `anthropic`, `openai` (any OpenAI-compatible host), `ollama`, or empty for no chat.
+    chat_provider: str = ""
+    chat_model: str = ""
+    chat_base_url: str = ""
+    # The NAME of the variable holding the key; the value comes from the environment or the
+    # keychain entry of that name (RFC 0184), never from a file.
+    chat_api_key_env: str = ""
+    chat_max_tool_calls: int = 12
+    chat_max_tokens: int = 2048
+
     # Job runner (RFC 0131): per-workspace queue depth, and where run logs land.
     run_queue_depth: int = 16
     # Empty means the default: `<home>/control/runs` with a home, `.ekos-web/runs` without.

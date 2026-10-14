@@ -66,6 +66,25 @@ with sync_playwright() as p:
     page.click("button.save")
     page.wait_for_selector("text=saved", timeout=30_000)
     check(True, "and is validated and saved")
+
+    # RFC 0187: the Chat page with the local model.
+    try:
+        import httpx
+
+        ollama_up = httpx.get("http://127.0.0.1:11434/api/tags", timeout=3).status_code == 200
+    except Exception:  # noqa: BLE001
+        ollama_up = False
+    if ollama_up:
+        page.goto(f"{BASE}/w/{WID}/chat")
+        page.wait_for_selector("textarea[aria-label=message]")
+        check("not paid per call" in page.inner_text("section.chat-main"), "the page says the model is local")
+        page.fill("textarea[aria-label=message]", "Use the search tool to find PACKAGEMARKER.")
+        page.click("button:has-text('Send')")
+        page.wait_for_selector(".chat-answer", timeout=180_000)
+        check(page.locator(".chat-tool").count() >= 1, "the page shows the tool calls")
+        check(len(page.inner_text(".chat-answer").strip()) > 0, "and the answer")
+    else:
+        print("SKIP  chat page: Ollama does not answer")
     browser.close()
 
 check(not errors, "no script errors", "; ".join(errors)[:300])

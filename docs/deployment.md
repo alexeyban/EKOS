@@ -246,6 +246,16 @@ Calls to a hosted model are billed by that provider. EKOS does not track or cap 
 Outside production mode the `default` tenant keeps the console's whole environment (minus the
 console's own settings and other tenants' named variables), as before this existed.
 
+### The chat model
+
+The console's Chat tab (RFC 0187) uses one model, set by an owner in **Settings → Chat**:
+`chat_provider` (`ollama`, `openai`, `anthropic`), `chat_model`, `chat_base_url` and
+`chat_api_key_env`, the name of the variable holding the key. In a container put the key itself
+in `deploy/.env` under that name. A hosted model is paid per call: a tenant's people can chat
+with it only while that tenant's metered calls are on (**Admin → Tenants**), the same switch as
+for its projects' model calls. A model on the server itself (Ollama, a local OpenAI-compatible
+server) always may.
+
 ## 8. Backup and restore
 
 Everything is in the volume. A backup is one file.

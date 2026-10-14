@@ -129,6 +129,25 @@ class AuditLog(SQLModel, table=True):
     detail: str = ""
 
 
+class Conversation(SQLModel, table=True):
+    """RFC 0187: a chat in one workspace, owned by the person who started it."""
+
+    id: str = Field(primary_key=True)
+    workspace_id: str = Field(index=True)
+    owner: str = Field(index=True)  # `Principal.kind:Principal.id`
+    title: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class ChatMessage(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    conversation_id: str = Field(index=True)
+    # The internal message shape of `app/chat/providers.py`, as JSON.
+    body: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+
+
 TERMINAL = {"succeeded", "failed", "cancelled", "timed_out", "interrupted"}
 
 
@@ -564,3 +583,54 @@ def list_audit(tenant_id: str | None, limit: int = 200) -> list[AuditLog]:
         if tenant_id is not None:
             q = q.where(AuditLog.tenant_id == tenant_id)
         return list(s.exec(q))
+
+
+# ── chat (RFC 0187) ──────────────────────────────────────────────────────────
+
+
+def list_conversations(workspace_id: str, owner: str) -> list[Conversation]:
+    with session() as s:
+        stmt = (
+            select(Conversation)
+            .where(Conversation.workspace_id == workspace_id, Conversation.owner == owner)
+            .order_by(Conversation.updated_at.desc())  # type: ignore[attr-defined]
+        )
+        return list(s.exec(stmt).all())
+
+
+def get_conversation(conversation_id: str) -> Conversation | None:
+    with session() as s:
+        return s.get(Conversation, conversation_id)
+
+
+def chat_messages(conversation_id: str) -> list[dict]:
+    with session() as s:
+        stmt = (
+            select(ChatMessage)
+            .where(ChatMessage.conversation_id == conversation_id)
+            .order_by(ChatMessage.id)  # type: ignore[arg-type]
+        )
+        return [m.body for m in s.exec(stmt).all()]
+
+
+def add_chat_messages(conversation_id: str, bodies: list[dict]) -> None:
+    with session() as s:
+        for b in bodies:
+            s.add(ChatMessage(conversation_id=conversation_id, body=b))
+        conv = s.get(Conversation, conversation_id)
+        if conv is not None:
+            conv.updated_at = _now()
+            s.add(conv)
+        s.commit()
+
+
+def delete_conversation(conversation_id: str) -> None:
+    with session() as s:
+        for m in s.exec(
+            select(ChatMessage).where(ChatMessage.conversation_id == conversation_id)
+        ).all():
+            s.delete(m)
+        conv = s.get(Conversation, conversation_id)
+        if conv is not None:
+            s.delete(conv)
+        s.commit()

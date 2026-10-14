@@ -22,6 +22,7 @@ from starlette.responses import JSONResponse
 from . import home, lifecycle, models
 from .routes import (
     auth,
+    chat,
     cli,
     commands,
     config,
@@ -61,6 +62,7 @@ ROUTERS = (
     tenants,
     platform,
     cli,
+    chat,
 )
 API_PREFIX = "/api"
 # Every mount of routers. The MCP gateway (RFC 0182) is at `/mcp`, outside the API prefix,

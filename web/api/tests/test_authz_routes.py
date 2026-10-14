@@ -36,6 +36,7 @@ DYNAMIC = {
     # RFC 0186: the action follows the class of the command chosen.
     ("GET", "/api/workspaces/{workspace_id}/cli"),
     ("GET", "/api/config-schema"),  # a static description, like /api/commands
+    ("GET", "/api/chat/model"),  # which chat model is set; no workspace
     ("POST", "/api/workspaces/{workspace_id}/cli"),
     ("GET", "/api/runs"),
     ("GET", "/api/runs/{run_id}"),
@@ -160,6 +161,11 @@ SCOPED = {
     ("GET", "/api/workspaces/{workspace_id}/impact/{object_id}"),
     ("POST", "/api/workspaces/{workspace_id}/graph/layout"),
     ("GET", "/api/workspaces/{workspace_id}/stats/kinds"),
+    # RFC 0187: the chat's tools are called with the person's read scope, scoped tools only.
+    ("GET", "/api/workspaces/{workspace_id}/chat"),
+    ("POST", "/api/workspaces/{workspace_id}/chat"),
+    ("GET", "/api/workspaces/{workspace_id}/chat/{cid}"),
+    ("DELETE", "/api/workspaces/{workspace_id}/chat/{cid}"),
 }
 
 
@@ -202,7 +208,13 @@ def test_only_the_listed_routes_are_open_to_a_restricted_reader(
     assert scoped == SCOPED
     # A scoped route reads through the scoped MCP client and nothing else. The layout route
     # computes positions from the ids in the request body and reads nothing.
-    assert scoped - uses_mcp == {("POST", "/api/workspaces/{workspace_id}/graph/layout")}
+    # The chat's history routes read the person's own stored conversations (RFC 0187).
+    assert scoped - uses_mcp == {
+        ("POST", "/api/workspaces/{workspace_id}/graph/layout"),
+        ("GET", "/api/workspaces/{workspace_id}/chat"),
+        ("GET", "/api/workspaces/{workspace_id}/chat/{cid}"),
+        ("DELETE", "/api/workspaces/{workspace_id}/chat/{cid}"),
+    }
     # And no route uses the MCP client without being marked: its result would be right, and the
     # route beside it would not be.
     assert uses_mcp <= scoped

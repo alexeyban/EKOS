@@ -80,6 +80,10 @@ const router = createBrowserRouter([
             lazy: () => import("./pages/Config").then((m) => ({ Component: m.Config })),
           },
           {
+            path: "chat",
+            lazy: () => import("./pages/Chat").then((m) => ({ Component: m.Chat })),
+          },
+          {
             path: "commands",
             lazy: () => import("./pages/Commands").then((m) => ({ Component: m.Commands })),
           },

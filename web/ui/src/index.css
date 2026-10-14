@@ -1174,3 +1174,54 @@ details.cfg-sub {
 .chip.small {
   font-size: 0.7rem;
 }
+
+/* RFC 0187: chat */
+.chat-page {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .chat-page {
+    grid-template-columns: 1fr;
+  }
+}
+.chat-list ul {
+  list-style: none;
+  padding: 0;
+}
+.chat-list button.on {
+  font-weight: 700;
+}
+.chat-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 200px;
+}
+.chat-user {
+  align-self: flex-end;
+  max-width: 80%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+.chat-answer {
+  white-space: pre-wrap;
+}
+.chat-tool pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+}
+.chat-input {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.chat-input textarea {
+  flex: 1;
+  min-height: 3rem;
+}

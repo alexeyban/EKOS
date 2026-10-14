@@ -28,7 +28,11 @@ Setup opens a page in your browser. Nothing changes until you confirm on its las
    EKOS never writes into them.
 4. **Agents** — register the project's MCP server with Claude Code, Claude Desktop or VS Code.
    Each config file is backed up before it is changed, and other entries are kept.
-5. **Start** — start the console when you log in, start it now, open it.
+5. **Chat** (optional) — a model that answers questions about a project with its EKOS tools: a
+   local Ollama model (not paid per call; the installed ones are listed), Anthropic, or any
+   OpenAI-compatible server. A key you type goes to the system keychain. "Check the model" reads
+   the provider's model list and calls no model.
+6. **Start** — start the console when you log in, start it now, open it.
 
 The page then lists every step with its result.
 

@@ -110,6 +110,36 @@ code { font-family: ui-monospace, monospace; font-size:.9em; }
     <label class="check"><input type="checkbox" id="vscode"> <span>VS Code <span class="help" id="vscode-help"></span></span></label>
   </section>
 
+  <section class="card" data-step="Chat">
+    <h2>Chat <span class="help">(optional)</span></h2>
+    <p class="lede">A model that answers questions about a project in the console, using its EKOS tools.</p>
+    <label for="chat_provider">Model provider</label>
+    <select id="chat_provider">
+      <option value="">No chat</option>
+      <option value="ollama">Ollama on this machine (not paid per call)</option>
+      <option value="anthropic">Anthropic (paid per call)</option>
+      <option value="openai">OpenAI or a compatible server</option>
+    </select>
+    <div id="chat">
+      <label for="chat_model">Model</label>
+      <input type="text" id="chat_model" list="ollama-models" placeholder="qwen2.5:7b, claude-sonnet-5-5, gpt-…">
+      <datalist id="ollama-models"></datalist>
+      <p class="help" id="ollama-help"></p>
+      <label for="chat_base_url">Address <span class="help">(empty: the provider's default; a server on this machine is not paid per call)</span></label>
+      <input type="text" id="chat_base_url">
+      <div id="chat-key">
+        <div class="row">
+          <div><label for="chat_api_key_env">Key variable name</label><input type="text" id="chat_api_key_env" placeholder="ANTHROPIC_API_KEY"></div>
+          <div><label for="chat_api_key">Key</label><input type="password" id="chat_api_key" placeholder="kept in the OS keychain"></div>
+        </div>
+        <p class="help">A paid model runs only while metered calls are on for the tenant (console → Admin).</p>
+      </div>
+      <button class="ghost" id="test-model" type="button" style="margin-top:10px">Check the model</button>
+      <p class="note" id="model-check"></p>
+      <p class="help">The check reads the provider's list of models; it does not call a model.</p>
+    </div>
+  </section>
+
   <section class="card" data-step="Start">
     <h2>Start</h2>
     <label class="check"><input type="checkbox" id="at_login"> <span>Start the console when I log in</span></label>
@@ -158,6 +188,8 @@ function show() {
   $("next").textContent = review ? "Install" : at === steps.length - 1 ? "Close" : "Next";
   $("team").classList.toggle("hidden", $("mode").value !== "team");
   $("project").classList.toggle("hidden", !$("want-project").checked);
+  $("chat").classList.toggle("hidden", $("chat_provider").value === "");
+  $("chat-key").classList.toggle("hidden", $("chat_provider").value === "ollama");
   $("mode-help").textContent = $("mode").value === "local"
     ? "Listens on this machine only. Sign in with `ekos console open`."
     : "Put a reverse proxy with TLS in front if others reach it over the network.";
@@ -178,6 +210,11 @@ function answers() {
       mcp_idle_seconds: Number($("mcp_idle_seconds").value), mcp_max_servers: Number($("mcp_max_servers").value),
     },
     project,
+    chat: {
+      provider: $("chat_provider").value, model: $("chat_model").value.trim(), base_url: $("chat_base_url").value.trim(),
+      api_key_env: $("chat_provider").value === "ollama" ? "" : $("chat_api_key_env").value.trim(),
+      api_key: $("chat_provider").value === "ollama" ? "" : $("chat_api_key").value,
+    },
     agents: { project: $("agent_project").value, claude_code: $("claude_code").checked, claude_desktop: $("claude_desktop").checked, vscode: $("vscode").checked },
     start: { at_login: $("at_login").checked, now: $("now").checked, open: $("open").checked },
   };
@@ -220,11 +257,27 @@ async function load() {
   if (state.installed) document.querySelector(".lede").textContent = "EKOS is installed here. Change what you need; the rest stays as it is.";
   refreshProjects();
   checkPath("home"); checkPath("program_dir");
+  call("/api/ollama-models").then((r) => {
+    $("ollama-models").innerHTML = r.models.map((m) => `<option value="${m}">`).join("");
+    $("ollama-help").textContent = r.models.length ? `Installed in Ollama: ${r.models.join(", ")}` : "";
+  }).catch(() => {});
   show();
 }
 
 $("mode").onchange = () => { if ($("mode").value === "local") $("host").value = "127.0.0.1"; show(); };
 $("want-project").onchange = () => { refreshProjects(); show(); };
+$("chat_provider").onchange = () => {
+  const p = $("chat_provider").value;
+  if (p === "anthropic" && !$("chat_api_key_env").value) $("chat_api_key_env").value = "ANTHROPIC_API_KEY";
+  if (p === "openai" && !$("chat_api_key_env").value) $("chat_api_key_env").value = "OPENAI_API_KEY";
+  show();
+};
+$("test-model").onclick = async () => {
+  $("model-check").textContent = "checking…";
+  const r = await call("/api/check-model", { provider: $("chat_provider").value, model: $("chat_model").value.trim(), base_url: $("chat_base_url").value.trim(), api_key: $("chat_api_key").value });
+  $("model-check").className = "note " + (r.ok ? "ok" : "err");
+  $("model-check").textContent = r.message;
+};
 $("project_name").oninput = refreshProjects;
 for (const id of ["home", "program_dir"]) $(id).onchange = () => checkPath(id);
 $("test-issuer").onclick = async () => {

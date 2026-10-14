@@ -84,6 +84,8 @@ pub fn router(w: Wizard) -> Router {
         .route("/api/state", get(state))
         .route("/api/check-path", post(check_path))
         .route("/api/check-issuer", post(check_issuer))
+        .route("/api/ollama-models", get(ollama_models))
+        .route("/api/check-model", post(check_model))
         .route("/api/plan", post(plan))
         .route("/api/apply", post(apply))
         .route("/api/finish", post(finish))
@@ -282,6 +284,154 @@ async fn check_issuer(
     .into_response()
 }
 
+fn ollama_base(base: &str) -> String {
+    let b = if base.trim().is_empty() {
+        std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".into())
+    } else {
+        base.trim().to_string()
+    };
+    let b = if b.starts_with("http") {
+        b
+    } else {
+        format!("http://{b}")
+    };
+    b.trim_end_matches('/').to_string()
+}
+
+async fn fetch_json(url: &str, headers: &[(&str, String)]) -> anyhow::Result<serde_json::Value> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    let mut req = client.get(url);
+    for (k, v) in headers {
+        req = req.header(*k, v);
+    }
+    Ok(req.send().await?.error_for_status()?.json().await?)
+}
+
+/// The models a local Ollama server has: what the wizard offers for a chat that costs nothing.
+async fn ollama_models(State(w): State<Wizard>, headers: HeaderMap) -> Response {
+    if !w.allowed(&headers, None) {
+        return refused();
+    }
+    let url = format!("{}/api/tags", ollama_base(""));
+    let names: Vec<String> = match fetch_json(&url, &[]).await {
+        Ok(v) => v["models"]
+            .as_array()
+            .map(|ms| {
+                ms.iter()
+                    .filter_map(|m| m["name"].as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    Json(serde_json::json!({"models": names})).into_response()
+}
+
+#[derive(Deserialize)]
+struct ModelCheck {
+    provider: String,
+    model: String,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    api_key: String,
+}
+
+/// RFC 0187: whether the chat model can be reached, **without a paid call**: each provider's
+/// list of models (free), and whether the chosen one is in it.
+pub async fn model_check(c: &ModelCheckInput<'_>) -> (bool, String) {
+    let (url, headers): (String, Vec<(&str, String)>) = match c.provider {
+        "ollama" => (format!("{}/api/tags", ollama_base(c.base_url)), vec![]),
+        "anthropic" => (
+            format!(
+                "{}/v1/models",
+                if c.base_url.trim().is_empty() {
+                    "https://api.anthropic.com"
+                } else {
+                    c.base_url.trim().trim_end_matches('/')
+                }
+            ),
+            vec![
+                ("x-api-key", c.api_key.to_string()),
+                ("anthropic-version", "2023-06-01".to_string()),
+            ],
+        ),
+        "openai" => (
+            format!(
+                "{}/models",
+                if c.base_url.trim().is_empty() {
+                    "https://api.openai.com/v1"
+                } else {
+                    c.base_url.trim().trim_end_matches('/')
+                }
+            ),
+            if c.api_key.is_empty() {
+                vec![]
+            } else {
+                vec![("authorization", format!("Bearer {}", c.api_key))]
+            },
+        ),
+        other => return (false, format!("unknown provider {other:?}")),
+    };
+    match fetch_json(&url, &headers).await {
+        Ok(v) => {
+            let list = v["models"].as_array().or_else(|| v["data"].as_array());
+            let names: Vec<&str> = list
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|m| m["name"].as_str().or_else(|| m["id"].as_str()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if names.contains(&c.model) {
+                (true, format!("{} answers and has {}", c.provider, c.model))
+            } else {
+                (
+                    false,
+                    format!(
+                        "{} answers but has no model {:?}{}",
+                        c.provider,
+                        c.model,
+                        if names.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (it has: {})", names.join(", "))
+                        }
+                    ),
+                )
+            }
+        }
+        Err(e) => (false, format!("{url}: {e}")),
+    }
+}
+
+pub struct ModelCheckInput<'a> {
+    pub provider: &'a str,
+    pub model: &'a str,
+    pub base_url: &'a str,
+    pub api_key: &'a str,
+}
+
+async fn check_model(
+    State(w): State<Wizard>,
+    headers: HeaderMap,
+    Json(body): Json<ModelCheck>,
+) -> Response {
+    if !w.allowed(&headers, None) {
+        return refused();
+    }
+    let (ok, message) = model_check(&ModelCheckInput {
+        provider: &body.provider,
+        model: &body.model,
+        base_url: &body.base_url,
+        api_key: &body.api_key,
+    })
+    .await;
+    Json(serde_json::json!({"ok": ok, "message": message})).into_response()
+}
+
 async fn plan(State(w): State<Wizard>, headers: HeaderMap, Json(a): Json<Answers>) -> Response {
     if !w.allowed(&headers, None) {
         return refused();
@@ -455,6 +605,42 @@ mod tests {
         assert_eq!(a.console.owners, "a@b.c");
         assert!(a.console.production);
         assert!(a.console.oidc_client_secret.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_model_check_reads_the_model_list_and_calls_nothing_paid() {
+        // A stand-in for Ollama's /api/tags.
+        let app = Router::new().route(
+            "/api/tags",
+            get(|| async { Json(serde_json::json!({"models": [{"name": "qwen2.5:1.5b"}]})) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let check = |model: &'static str| ModelCheckInput {
+            provider: "ollama",
+            model,
+            base_url: "",
+            api_key: "",
+        };
+        let (ok, msg) = model_check(&ModelCheckInput {
+            base_url: &base,
+            ..check("qwen2.5:1.5b")
+        })
+        .await;
+        assert!(ok, "{msg}");
+        let (ok, msg) = model_check(&ModelCheckInput {
+            base_url: &base,
+            ..check("llama9")
+        })
+        .await;
+        assert!(!ok && msg.contains("qwen2.5:1.5b"), "{msg}");
+        let (ok, _) = model_check(&ModelCheckInput {
+            provider: "nope",
+            ..check("x")
+        })
+        .await;
+        assert!(!ok);
     }
 
     #[test]

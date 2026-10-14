@@ -36,6 +36,7 @@ export const seesAll = (me: Me | undefined) => me?.restricted !== true;
 const TABS = [
   { to: "", label: "Dashboard", end: true },
   { to: "graph", label: "Graph" },
+  { to: "chat", label: "Chat" },
   { to: "run", label: "Run" },
   { to: "commands", label: "Commands" },
   { to: "runs", label: "History" },

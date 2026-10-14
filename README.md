@@ -576,6 +576,19 @@ the schema of the running binary (`ekos config schema --json`): types, defaults 
 documentation of each setting. Changes are applied to the file's text with its comments kept,
 then validated and saved as before.
 
+### Chat with a project (RFC 0187)
+
+A project's **Chat** tab answers questions with a model that uses the project's EKOS tools: each
+tool call is shown with its arguments and result, and the answer says which objects it rests
+on. The model is set once by an owner (Settings → Chat, or in `ekos setup`): a local Ollama model,
+any OpenAI-compatible server, or Anthropic. Its key is named by a variable whose value comes from
+the environment or the OS keychain. A hosted model is paid per call, so it answers only in a
+tenant whose metered calls an owner has turned on; a model on this machine always may.
+
+The model is offered only tools that read, called with the person's own rights and read scope,
+and every call is in the audit log. It never sees a review tool: review decisions stay with
+people. Conversations are private to the person who started them.
+
 ### Access inside a project (RFC 0181)
 
 A project is one ledger over several sources, so limits inside a project are applied when the

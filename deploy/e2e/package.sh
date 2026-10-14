@@ -6,6 +6,8 @@
 #
 #   deploy/e2e/package.sh [<ekos binary>]     (default: ekos/target/release/ekos)
 #
+# The chat stage uses a local Ollama model (default qwen2.5:1.5b) — never a paid one — and is
+# skipped when Ollama does not answer.
 # HOME points at a scratch directory throughout, so no shell profile, agent config or service
 # of the person running it is touched. Nothing is started at login and no browser is opened;
 # the keychain is off. No model is called.
@@ -58,6 +60,9 @@ detect = true
 [agents]
 claude_desktop = true
 vscode = true
+[chat]
+provider = "${EKOS_E2E_CHAT_PROVIDER:-ollama}"
+model = "${EKOS_E2E_CHAT_MODEL:-qwen2.5:1.5b}"
 [start]
 at_login = false
 now = true

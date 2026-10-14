@@ -31,7 +31,22 @@ pub struct Answers {
     pub console: ConsoleAnswers,
     pub project: Option<ProjectAnswers>,
     pub agents: AgentAnswers,
+    /// RFC 0187: the chat model.
+    pub chat: ChatAnswers,
     pub start: StartAnswers,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ChatAnswers {
+    /// `anthropic`, `openai`, `ollama`, or empty for no chat.
+    pub provider: String,
+    pub model: String,
+    pub base_url: String,
+    /// The name of the variable holding the key.
+    pub api_key_env: String,
+    /// Goes to the keychain under `api_key_env`, never to a file.
+    pub api_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -222,6 +237,9 @@ pub enum Action {
     StoreSecret {
         field: String,
     },
+    StoreKey {
+        name: String,
+    },
     AddToPath {
         bin: PathBuf,
         files: Vec<PathBuf>,
@@ -268,6 +286,7 @@ impl Action {
                 values.keys().cloned().collect::<Vec<_>>().join(", ")
             ),
             Action::StoreSecret { field } => format!("store {field} in the keychain"),
+            Action::StoreKey { name } => format!("store the chat key as {name} in the keychain"),
             Action::AddToPath { bin, files } => format!(
                 "put {} on PATH in {}",
                 bin.display(),
@@ -344,6 +363,21 @@ pub fn check(answers: &Answers) -> Result<()> {
     if c.port == 0 {
         bail!("the console needs a port");
     }
+    let chat = &answers.chat;
+    if !chat.provider.is_empty() {
+        if !["anthropic", "openai", "ollama"].contains(&chat.provider.as_str()) {
+            bail!(
+                "the chat provider is anthropic, openai or ollama, not {:?}",
+                chat.provider
+            );
+        }
+        if chat.model.trim().is_empty() {
+            bail!("choose the chat model");
+        }
+        if !chat.api_key.is_empty() && !valid_variable(&chat.api_key_env) {
+            bail!("name the variable the chat key is kept under, e.g. ANTHROPIC_API_KEY");
+        }
+    }
     if let Some(p) = &answers.project {
         crate::home::validate_name("project", &p.name)?;
         if p.sources.is_empty() {
@@ -357,6 +391,15 @@ pub fn check(answers: &Answers) -> Result<()> {
     Ok(())
 }
 
+/// An environment variable a project or the chat may name (the console's own are refused).
+pub fn valid_variable(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && name.len() <= 128
+        && !name.to_ascii_uppercase().starts_with("EKOS_CONSOLE_")
+}
+
 fn agent_project(answers: &Answers) -> Option<String> {
     let named = answers.agents.project.trim();
     if !named.is_empty() {
@@ -365,9 +408,19 @@ fn agent_project(answers: &Answers) -> Option<String> {
     answers.project.as_ref().map(|p| p.name.clone())
 }
 
-fn console_values(c: &ConsoleAnswers) -> BTreeMap<String, toml::Value> {
+fn console_values(c: &ConsoleAnswers, chat: &ChatAnswers) -> BTreeMap<String, toml::Value> {
     use toml::Value;
     let mut v = BTreeMap::new();
+    if !chat.provider.is_empty() {
+        for (k, val) in [
+            ("chat_provider", &chat.provider),
+            ("chat_model", &chat.model),
+            ("chat_base_url", &chat.base_url),
+            ("chat_api_key_env", &chat.api_key_env),
+        ] {
+            v.insert(k.into(), Value::String(val.trim().to_string()));
+        }
+    }
     v.insert("mode".into(), Value::String(c.mode.clone()));
     v.insert("host".into(), Value::String(c.host.clone()));
     v.insert("port".into(), Value::Integer(c.port.into()));
@@ -488,8 +541,13 @@ pub fn plan(answers: &Answers, m: &Machine) -> Result<Vec<Action>> {
     }
     actions.push(Action::WriteConsoleConfig {
         path: layout.home.join("control").join("console.toml"),
-        values: console_values(&answers.console),
+        values: console_values(&answers.console, &answers.chat),
     });
+    if !answers.chat.provider.is_empty() && !answers.chat.api_key.is_empty() {
+        actions.push(Action::StoreKey {
+            name: answers.chat.api_key_env.trim().to_string(),
+        });
+    }
     if answers.console.mode == "team" && !answers.console.oidc_client_secret.is_empty() {
         actions.push(Action::StoreSecret {
             field: "oidc_client_secret".into(),
@@ -858,6 +916,15 @@ pub fn apply(
                     Some(&answers.console.oidc_client_secret),
                 )
                 .map(|_| String::new())
+            }
+            Action::StoreKey { name } => {
+                let (python, env) = keychain_command(&layout, os)?;
+                let args: Vec<String> = ["-m", "app.keychain_cli", "put", "env", name]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                fx.run_env(&python, &args, &env, Some(&answers.chat.api_key))
+                    .map(|_| String::new())
             }
             Action::AddToPath { bin, files } => {
                 let changed = add_path_lines(bin, files)?;

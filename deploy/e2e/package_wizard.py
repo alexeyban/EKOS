@@ -44,6 +44,7 @@ with sync_playwright() as p:
     page.fill("#project_name", "wiz")
     page.fill("#project_sources", SOURCE)
     page.click("#next")  # → Agents
+    page.click("#next")  # → Chat
     page.click("#next")  # → Start
     page.uncheck("#at_login")
     page.uncheck("#open")

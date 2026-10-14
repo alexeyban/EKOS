@@ -6503,12 +6503,17 @@ LinkML; generation stays in LinkML.
 - [ ] RFC 0185 remainder: Windows 11 and macOS packages not run on those systems (the release
       `package` job and `web-os` CI rows have never run; `install.ps1` not even parsed here — no
       pwsh); login services activated only by tests' fakes (systemd/launchd/schtasks never
-      enabled for real); no code signing; the chat model step waits for RFC 0187
+      enabled for real); no code signing
 - [x] RFC 0186 — every command from the web (`ekos commands --json`, classes, Commands tab,
       validated argv) and every setting (`ekos config schema --json`, Settings form) (devlog_270)
 - [ ] RFC 0186 remainder: lists of tables (`[[sources]]`, `[migrate.connections.*]`) stay in the
       text editor; extension-build commands are not in the catalogue
-- [ ] RFC 0187 — chat with a configured model using the EKOS MCP tools
+- [x] RFC 0187 — chat with a configured model using the project's EKOS tools (Chat tab,
+      providers over HTTP, read-only tools under the person's scope, metered switch, setup step)
+      (devlog_271)
+- [ ] RFC 0187 remainder: answers arrive whole per step (no token streaming); Anthropic and
+      OpenAI providers checked only against recorded request/response shapes — no paid call was
+      made; per-tenant chat models
 - [ ] RFC 0184 remainder: the console has not run on Windows or macOS yet (`web-os` CI job,
       informational until its first green run); the real keychain was only detected here, not
       written to
