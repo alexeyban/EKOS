@@ -123,8 +123,7 @@ pub fn export(config: &EkosConfig, cwd: &Path, args: ExportArgs) -> Result<()> {
         Some(p) => p.clone(),
         None => cwd.to_path_buf(),
     };
-    let workspace = workspace
-        .canonicalize()
+    let workspace = crate::home::canonical_dir(&workspace)
         .with_context(|| format!("workspace path does not exist: {}", workspace.display()))?;
 
     let level = parse_level(&args.level)?;

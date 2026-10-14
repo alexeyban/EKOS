@@ -158,8 +158,7 @@ pub struct StorageComponent {
 
 /// Builds [`StatusJson`] without touching stdout — the testable core of `status --json`.
 pub fn build_status_json(config: &EkosConfig, cwd: &Path) -> Result<StatusJson> {
-    let workspace = cwd
-        .canonicalize()
+    let workspace = crate::home::canonical_dir(cwd)
         .unwrap_or_else(|_| cwd.to_path_buf())
         .display()
         .to_string();
