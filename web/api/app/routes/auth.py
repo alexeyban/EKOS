@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from .. import authz, models
+from .. import authz, local_signin, models
 from ..auth import claim_values, oauth, resolve_principal, static_role
 from ..settings import Settings, get_settings
 from ._responses import BAD_REQUEST, UNAUTHORIZED
@@ -36,7 +36,13 @@ class TokenLogin(BaseModel):
     token: str
 
 
+class LocalCode(BaseModel):
+    code: str
+
+
 def _mode(settings: Settings) -> str:
+    if settings.local:
+        return "local"
     return "oidc" if settings.oidc_enabled else "token"
 
 
@@ -94,12 +100,42 @@ async def token_login(
         raise HTTPException(status_code=400, detail="OIDC is configured; use /api/auth/login")
     if settings.production:
         raise HTTPException(status_code=400, detail="static tokens are off in production mode")
+    if settings.local:
+        raise HTTPException(status_code=400, detail="local mode: sign in with `ekos console open`")
     role = static_role(body.token, settings)
     if role is None:
         authz.audit(None, "sign-in", "denied", detail="static token")
         raise HTTPException(status_code=401, detail="invalid token")
     request.session["user"] = {"kind": "static", "id": role}
     return {"role": role}
+
+
+def _redeem(request: Request, settings: Settings, code: str) -> None:
+    """RFC 0184 §3: a one-time code from the home's control directory starts a local session."""
+    if not settings.local:
+        raise HTTPException(status_code=400, detail="the console is not in local mode")
+    if not local_signin.redeem(settings.control_dir, code):
+        authz.audit(None, "sign-in", "denied", detail="local code")
+        raise HTTPException(
+            status_code=401,
+            detail="this sign-in code is wrong, used or expired; run `ekos console open` again",
+        )
+    request.session["user"] = {"kind": "local"}
+    authz.audit(None, "sign-in", "ok", detail="local")
+
+
+@router.get("/local", responses={400: BAD_REQUEST, 401: UNAUTHORIZED})
+async def local_link(code: str, request: Request, settings: Settings = Depends(get_settings)):
+    _redeem(request, settings, code)
+    return RedirectResponse(settings.post_login_redirect, status_code=303)
+
+
+@router.post("/local", responses={400: BAD_REQUEST, 401: UNAUTHORIZED})
+async def local_code(
+    body: LocalCode, request: Request, settings: Settings = Depends(get_settings)
+) -> dict:
+    _redeem(request, settings, body.code)
+    return {"ok": True}
 
 
 @router.get("/login", responses={400: BAD_REQUEST, 502: BAD_GATEWAY})

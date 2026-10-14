@@ -254,3 +254,16 @@ def test_names_are_validated_and_only_an_owner_sets_them(
         "/api/tenants/acme", headers=AUTH, json={"model_env": ["NOT_IN_THE_ENVIRONMENT"]}
     )
     assert r.json()["model_env"] == [{"name": "NOT_IN_THE_ENVIRONMENT", "set": False}]
+
+
+def test_a_windows_process_gets_what_it_needs_to_start() -> None:
+    """RFC 0184 §4: without SYSTEMROOT a child process on Windows fails before `main`."""
+    environ = {
+        "SYSTEMROOT": r"C:\Windows",
+        "PATHEXT": ".EXE;.BAT",
+        "USERPROFILE": r"C:\Users\a",
+        "LOCALAPPDATA": r"C:\Users\a\AppData\Local",
+        "OPENAI_API_KEY": "not-for-you",
+    }
+    env = envs.for_tenant(None, environ=environ)
+    assert env == {k: v for k, v in environ.items() if k != "OPENAI_API_KEY"}

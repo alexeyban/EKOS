@@ -5,6 +5,7 @@ uvicorn --factory app.main:create_app
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import JSONResponse
 
 from . import home, models
 from .routes import (
@@ -25,6 +27,7 @@ from .routes import (
     graph,
     mcp_gateway,
     meta,
+    platform,
     runs,
     schedules,
     semantics,
@@ -53,6 +56,7 @@ ROUTERS = (
     semantics,
     conflicts,
     tenants,
+    platform,
 )
 API_PREFIX = "/api"
 # Every mount of routers. The MCP gateway (RFC 0182) is at `/mcp`, outside the API prefix,
@@ -85,6 +89,44 @@ class _SpaFiles(StaticFiles):
 
 
 log = logging.getLogger("ekos.console")
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
+
+
+def _host_name(header: str) -> str:
+    """The name in a `Host` header, without its port: `[::1]:8000` → `::1`."""
+    if header.startswith("["):
+        return header[1:].split("]", 1)[0]
+    return header.rsplit(":", 1)[0] if header.count(":") == 1 else header
+
+
+class LoopbackOnly:
+    """RFC 0184 §3, local mode: only this machine may talk to the console. The client must be a
+    loopback address, and the `Host` header must name one, so a page on another site that has
+    pointed its own name at 127.0.0.1 (DNS rebinding) is refused."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            client = (scope.get("client") or ("", 0))[0]
+            headers = dict(scope.get("headers") or [])
+            host = _host_name(headers.get(b"host", b"").decode("latin-1"))
+            if not (_is_loopback(client) and _is_loopback(host)):
+                if scope["type"] == "http":
+                    response = JSONResponse(
+                        {"detail": "this console is in local mode: this machine only"},
+                        status_code=403,
+                    )
+                    await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _seed_registry_if_empty() -> None:
@@ -177,13 +219,18 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Outermost, so nothing answers a request from elsewhere, not even a 404.
+    if settings.local:
+        app.add_middleware(LoopbackOnly)
+
     for prefix, routers in MOUNTS:
         for r in routers:
             app.include_router(r.router, prefix=prefix)
 
-    # Serve the built UI when it exists (Compose / production); the Vite dev server handles it
-    # otherwise.
-    if _UI_DIST.is_dir():
-        app.mount("/", _SpaFiles(directory=_UI_DIST, html=True), name="ui")
+    # Serve the built UI when it exists (Compose / production / a package); the Vite dev server
+    # handles it otherwise.
+    ui = Path(settings.ui_dir) if settings.ui_dir else _UI_DIST
+    if ui.is_dir():
+        app.mount("/", _SpaFiles(directory=ui, html=True), name="ui")
 
     return app

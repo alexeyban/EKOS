@@ -6495,6 +6495,16 @@ LinkML; generation stays in LinkML.
       musl from the committed tree, `SHA256SUMS`, `install.sh`, `INSTALL.md`, a test install);
       install instructions in README, deployment guide (image offline via `docker save`/`load`)
       and capabilities page (devlog_267)
+- [x] RFC 0184 — console settings in `console.toml` editable by an owner, secrets in the OS
+      keychain, local single-user mode, Windows environment for child processes (devlog_268)
+- [ ] RFC 0185 — installer: `ekos setup` browser wizard, `ekos console` launcher, packages
+      with a bundled Python for Linux, Windows 11 and macOS
+- [ ] RFC 0186 — every setting and every command from the web (command catalogue from the
+      binary, structured config forms from a schema)
+- [ ] RFC 0187 — chat with a configured model using the EKOS MCP tools
+- [ ] RFC 0184 remainder: the console has not run on Windows or macOS yet (`web-os` CI job,
+      informational until its first green run); the real keychain was only detected here, not
+      written to
 - [ ] Install package remainder: aarch64 Linux and macOS packages (the script builds on Linux
       x86_64 only); the image is not in the package
 - [ ] RFC 0179 remainder: `ekos eval run` writes reports under the source root (fails on a

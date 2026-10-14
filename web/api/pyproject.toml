@@ -16,6 +16,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "networkx>=3.6.1",
     "fa2-modified>=0.4",
+    "keyring>=25",
 ]
 
 [dependency-groups]

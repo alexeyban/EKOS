@@ -1081,3 +1081,23 @@ textarea.lm-yaml {
   gap: 0.4rem;
   margin: 0.25rem 0 0.5rem;
 }
+
+/* RFC 0184: console settings page */
+table.settings {
+  width: 100%;
+  border-collapse: collapse;
+}
+table.settings td {
+  padding: 0.35rem 0.5rem;
+  vertical-align: top;
+  border-top: 1px solid var(--rule);
+}
+table.settings td:first-child {
+  width: 45%;
+}
+.small {
+  font-size: 0.8rem;
+}
+.ok-msg {
+  color: var(--accent-b);
+}

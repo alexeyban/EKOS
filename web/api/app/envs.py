@@ -14,7 +14,7 @@ import os
 import re
 from pathlib import Path
 
-from . import home, models
+from . import home, keychain, models
 from .settings import Settings, get_settings
 
 # What any `ekos` process needs to run and to reach the network, and nothing that is a secret.
@@ -44,6 +44,19 @@ BASE = frozenset(
         "OLLAMA_HOST",
         "EKOS_HOME",
         "RUST_BACKTRACE",
+        # Windows (RFC 0184 §4): without SYSTEMROOT a child process fails before `main`; the
+        # rest is where a program finds its user's files and how it resolves a command name.
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "USERPROFILE",
+        "USERNAME",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "HOMEDRIVE",
+        "HOMEPATH",
     }
 )
 _BASE_PREFIXES = ("LC_",)
@@ -66,6 +79,16 @@ def _granted(tenant: models.Tenant) -> set[str]:
     return {name for name in tenant.model_env or [] if is_valid_name(name)}
 
 
+def _with_keychain(env: dict[str, str], tenant: models.Tenant) -> dict[str, str]:
+    """RFC 0184 §2: a granted variable the environment lacks is filled from the keychain."""
+    for name in _granted(tenant):
+        if name not in env:
+            value = keychain.get_env(name)
+            if value:
+                env[name] = value
+    return env
+
+
 def for_tenant(
     tenant: models.Tenant | None,
     settings: Settings | None = None,
@@ -78,6 +101,7 @@ def for_tenant(
       (an existing single-tenant install keeps working), minus the console's own variables and
       every variable named for another tenant.
     * An unknown tenant gets the base only.
+    * A granted variable the environment lacks comes from the keychain (RFC 0184).
     """
     settings = settings or get_settings()
     environ = dict(os.environ) if environ is None else environ
@@ -94,14 +118,16 @@ def for_tenant(
         for other in models.list_tenants():
             if other.id != tenant.id:
                 others |= set(other.model_env or [])
-        return {
+        env = {
             k: v
             for k, v in environ.items()
             if not k.upper().startswith(CONSOLE_PREFIX) and (k not in others or in_base(k))
         }
+        return _with_keychain(env, tenant)
 
     granted = _granted(tenant)
-    return {k: v for k, v in environ.items() if in_base(k) or k in granted}
+    env = {k: v for k, v in environ.items() if in_base(k) or k in granted}
+    return _with_keychain(env, tenant)
 
 
 def for_path(path: str) -> dict[str, str]:

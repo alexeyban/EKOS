@@ -16,6 +16,41 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+@pytest.fixture(autouse=True)
+def memory_keyring(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[tuple[str, str], str]]:
+    """An in-memory keychain (RFC 0184), for every test: a test must never read or write the
+    developer's real keychain. Yields the store, keyed (service, entry)."""
+    import keyring
+    from keyring.backend import KeyringBackend
+    from keyring.errors import PasswordDeleteError
+
+    store: dict[tuple[str, str], str] = {}
+
+    class _Backend(KeyringBackend):
+        priority = 1  # type: ignore[assignment]
+
+        def get_password(self, service, username):
+            return store.get((service, username))
+
+        def set_password(self, service, username, password):
+            store[(service, username)] = password
+
+        def delete_password(self, service, username):
+            if (service, username) not in store:
+                raise PasswordDeleteError(username)
+            del store[(service, username)]
+
+    previous = keyring.get_keyring()
+    keyring.set_keyring(_Backend())
+    monkeypatch.delenv("EKOS_CONSOLE_KEYCHAIN", raising=False)
+    # A developer's own console settings must not leak into a test either.
+    monkeypatch.delenv("EKOS_CONSOLE_CONFIG_FILE", raising=False)
+    monkeypatch.delenv("EKOS_HOME", raising=False)
+    monkeypatch.delenv("EKOS_CONSOLE_MODE", raising=False)
+    yield store
+    keyring.set_keyring(previous)
+
+
 @pytest.fixture
 def reset_settings() -> Iterator[None]:
     """Clear the module-level settings singleton so a test's monkeypatched env is picked up."""

@@ -506,6 +506,27 @@ variables and no other tenant's, and none of the console's own settings. With th
 they receive none; a local model server still works. See
 [RFC 0183](ekos/docs/rfcs/0183-operations.md).
 
+### Console settings, local mode and the keychain (RFC 0184)
+
+A platform owner changes the console's own settings on its **Settings** page: sign-in, owners,
+MCP limits, ports. They are kept in `<EKOS_HOME>/control/console.toml`. An environment variable
+wins over the file and shows on the page as read-only, so a container configured by
+`deploy/.env` behaves as before. Changes apply at the next start (**Restart now** when a launcher
+or a restart policy starts the console again).
+
+Secrets typed on that page, and model keys for projects, go to the operating system's keychain
+(Windows Credential Manager, macOS Keychain, Secret Service on Linux), never to a file or a
+response. A key stored under a variable name (`ANTHROPIC_API_KEY`) reaches the commands of a
+tenant granted that name while its metered calls are on, as an environment variable would. A
+container has no keychain (`EKOS_CONSOLE_KEYCHAIN=off` in the image); keep secrets in its
+environment.
+
+**Local mode** (`mode = "local"`) is for one person on their own machine: no identity provider,
+loopback only (a request from elsewhere, or naming another host, is refused), and the person who
+can write the home's control directory signs in with a one-time code. That person is a platform
+owner. The installer of RFC 0185 sets it up; see
+[RFC 0184](ekos/docs/rfcs/0184-console-settings-local-mode-keychain.md).
+
 ### Access inside a project (RFC 0181)
 
 A project is one ledger over several sources, so limits inside a project are applied when the

@@ -164,6 +164,55 @@ jobs:
           npm run typecheck
           npm run build
 
+  # RFC 0184 §4: the console ships to Windows and macOS (RFC 0185). Its API tests on both, with
+  # a real `ekos` binary. Informational until the first green run: nothing has run the console
+  # on either system before, so the first results are expected to find faults, not gate merges.
+  web-os:
+    name: Web console API (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build ekos
+        working-directory: ekos
+        run: cargo build --release -p ekos --locked
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+
+      - name: Sync API deps
+        working-directory: web/api
+        run: uv sync --frozen
+
+      - name: Pytest
+        working-directory: web/api
+        shell: bash
+        run: |
+          bin="$GITHUB_WORKSPACE/ekos/target/release/ekos"
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          EKOS_BIN="$bin" uv run --no-sync --no-build pytest -q
+
   benchmark:
     name: Benchmark
     runs-on: ubuntu-latest

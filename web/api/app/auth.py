@@ -4,7 +4,9 @@ A request carries one of three credentials:
 
 * a **session cookie** set by the OIDC sign-in — a person, a row in `User`;
 * an **API token**, `Authorization: Bearer ekos_…` — an agent, a row in `ApiToken`;
-* a **static console token** (cookie or bearer) — development only, refused in production mode.
+* a **static console token** (cookie or bearer) — development only, refused in production mode;
+* in local mode (RFC 0184), a session started with a one-time code — the person who owns the
+  install, a platform owner.
 
 This module turns a request into a `Principal` and nothing else. What that principal may do is
 decided in `authz`, and only there.
@@ -30,7 +32,7 @@ _LAST_USED_GRANULARITY = timedelta(minutes=1)
 
 
 class Principal(BaseModel):
-    kind: Literal["user", "token", "static"]
+    kind: Literal["user", "token", "static", "local"]
     # `User.id`, `ApiToken.id`, or "read" / "write" for a static token.
     id: str
     subject: str = ""
@@ -53,6 +55,8 @@ class Principal(BaseModel):
             return f"token:{self.subject}#{self.id[:6]}"
         if self.kind == "static":
             return f"static:{self.id}"
+        if self.kind == "local":
+            return "local"
         return self.email or self.subject or self.id
 
 
@@ -155,7 +159,7 @@ def _static(role: str) -> Principal:
 
 def static_role(supplied: str, settings: Settings) -> str | None:
     """Which static console token `supplied` is, if static tokens are accepted at all."""
-    if settings.oidc_enabled or settings.production or not supplied:
+    if settings.oidc_enabled or settings.production or settings.local or not supplied:
         return None
     if settings.console_write_token and secrets.compare_digest(
         supplied, settings.console_write_token
@@ -185,11 +189,19 @@ def user_principal(user: models.User, claims: list[str], settings: Settings) -> 
     )
 
 
+LOCAL = Principal(kind="local", id="local", subject="local", owner=True)
+
+
 def _from_session(request: Request, settings: Settings) -> Principal | None:
     data = request.session.get("user") if "session" in request.scope else None
     if not isinstance(data, dict):
         return None
     kind = data.get("kind")
+    if settings.local:
+        # RFC 0184: in local mode the one-time code is the only way in.
+        return LOCAL if kind == "local" else None
+    if kind == "local":
+        return None
     if kind == "static":
         if settings.oidc_enabled or settings.production or data.get("id") not in ("read", "write"):
             return None

@@ -11,9 +11,13 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+from . import console_file
 
 log = logging.getLogger("ekos.console")
 
@@ -37,6 +41,38 @@ class WorkspaceSeed(BaseModel):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EKOS_CONSOLE_", env_file=".env", extra="ignore")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """RFC 0184: environment, then console secrets in the keychain, then `console.toml`."""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            console_file.KeychainSource(settings_cls),
+            console_file.FileSource(settings_cls),
+            file_secret_settings,
+        )
+
+    # ── Server (RFC 0184) ───────────────────────────────────────────────────
+    # `local`: one person on their own machine, signed in by a one-time code written into the
+    # home, loopback only. `team`: OIDC, tenants and roles (RFC 0180).
+    mode: Literal["team", "local"] = "team"
+    # What `ekos console` (RFC 0185) binds. The console itself does not read them.
+    host: str = "127.0.0.1"
+    port: int = 8000
+    # The built UI. Empty: `web/ui/dist` beside this package, as in a checkout.
+    ui_dir: str = ""
+    # Set by a launcher that starts the console again when it exits (`ekos console`, a container
+    # with a restart policy): `POST /api/platform/restart` then works.
+    supervised: bool = False
 
     # ── Auth (RFC 0131) ─────────────────────────────────────────────────────
     # OIDC is the real path; the two static tokens below are the fallback used when OIDC_ISSUER
@@ -126,10 +162,32 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _state_under_the_home(self) -> Settings:
-        base = f"{self.ekos_home.rstrip('/')}/control" if self.ekos_home else ".ekos-web"
-        self.console_db = self.console_db or f"{base}/console.db"
-        self.runs_dir = self.runs_dir or f"{base}/runs"
+        base = Path(self.ekos_home) / "control" if self.ekos_home else Path(".ekos-web")
+        self.console_db = self.console_db or str(base / "console.db")
+        self.runs_dir = self.runs_dir or str(base / "runs")
         return self
+
+    @model_validator(mode="after")
+    def _local_mode_is_alone(self) -> Settings:
+        if self.mode != "local":
+            return self
+        if self.oidc_enabled:
+            raise ValueError(
+                "local mode signs in without a provider; unset EKOS_CONSOLE_OIDC_ISSUER or use "
+                "mode = team"
+            )
+        if self.production:
+            raise ValueError("local mode is for one person on one machine; production is team mode")
+        return self
+
+    @property
+    def local(self) -> bool:
+        return self.mode == "local"
+
+    @property
+    def control_dir(self) -> Path:
+        """Where the console keeps its state: beside its database."""
+        return Path(self.console_db).parent
 
     @model_validator(mode="after")
     def _scopes_include_openid(self) -> Settings:
@@ -165,7 +223,7 @@ class Settings(BaseSettings):
                 "per-process secret. Sessions will not survive a restart — set it to keep them."
             )
             self.session_secret = secrets.token_urlsafe(32)
-        if not self.oidc_enabled and self.console_token == DEFAULT_CONSOLE_TOKEN:
+        if not self.oidc_enabled and not self.local and self.console_token == DEFAULT_CONSOLE_TOKEN:
             log.warning(
                 "EKOS_CONSOLE_CONSOLE_TOKEN is the published default %r: anyone who can reach this "
                 "console can read every workspace. Set it in api/.env for anything but local use.",

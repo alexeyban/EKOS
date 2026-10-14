@@ -85,7 +85,12 @@ ENV PATH="/opt/ekos/api/.venv/bin:$PATH" \
     EKOS_HOME=/var/lib/ekos \
     EKOS_BIN=/usr/local/bin/ekos \
     # Projects may only be created for sources mounted here.
-    EKOS_CONSOLE_WORKSPACES_ROOT=/sources
+    EKOS_CONSOLE_WORKSPACES_ROOT=/sources \
+    # RFC 0184: a container has no OS keychain; secrets come from the environment.
+    EKOS_CONSOLE_KEYCHAIN=off \
+    # The Compose restart policy starts the console again, so it may restart itself after a
+    # settings change. Without a restart policy, the restart button stops the container.
+    EKOS_CONSOLE_SUPERVISED=true
 
 # Links the package on ghcr.io to the repository.
 LABEL org.opencontainers.image.source="https://github.com/alexeyban/EKOS" \

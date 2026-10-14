@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, Outlet } from "react-router-dom";
-import { ApiError, api, logout, tokenLogin } from "./api/client";
+import { ApiError, api, localLogin, logout, tokenLogin } from "./api/client";
 
 interface Me {
-  mode: "oidc" | "token";
+  mode: "oidc" | "token" | "local";
+  kind?: string;
   email: string | null;
   role: "read" | "write";
   // RFC 0180. Optional so an older API still type-checks.
@@ -48,6 +49,11 @@ export function Layout() {
             Admin
           </Link>
         )}
+        {identity?.owner === true && (
+          <Link to="/settings" className="hdr-link">
+            Settings
+          </Link>
+        )}
         <span style={{ flex: 1 }} />
         {identity && <Identity me={identity} />}
       </header>
@@ -60,7 +66,7 @@ function Identity({ me }: { me: Me }) {
   const qc = useQueryClient();
   return (
     <span className="muted" style={{ fontSize: "0.82rem" }}>
-      {me.email ?? "token"} · <span className={`chip ${me.role === "write" ? "ok" : ""}`}>{me.role}</span>{" "}
+      {me.email ?? (me.kind === "local" ? "this machine" : "token")} · <span className={`chip ${me.role === "write" ? "ok" : ""}`}>{me.role}</span>{" "}
       <button
         className="linkish"
         onClick={async () => {
@@ -85,14 +91,41 @@ function SignIn({ error }: { error: unknown }) {
       : undefined;
   const [token, setToken] = useState("");
   const login = useMutation({
-    mutationFn: () => tokenLogin(token.trim()),
+    mutationFn: async (): Promise<unknown> =>
+      mode === "local" ? localLogin(token.trim()) : tokenLogin(token.trim()),
     onSuccess: () => qc.invalidateQueries(),
   });
 
   return (
     <section className="card" style={{ maxWidth: 420, margin: "3rem auto" }}>
       <strong>Sign in</strong>
-      {mode === "oidc" ? (
+      {mode === "local" ? (
+        <>
+          <p className="muted">
+            This console is for this machine only. Run <code>ekos console open</code> in a terminal
+            here: it opens a signed-in page, or prints a one-time code to paste below. A code works
+            once, for two minutes.
+          </p>
+          <form
+            className="token-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              login.mutate();
+            }}
+          >
+            <input
+              value={token}
+              placeholder="one-time code"
+              onChange={(e) => setToken(e.target.value)}
+              aria-label="one-time code"
+            />
+            <button type="submit" disabled={login.isPending}>
+              Sign in
+            </button>
+          </form>
+          {login.isError && <p className="err">{String(login.error)}</p>}
+        </>
+      ) : mode === "oidc" ? (
         <>
           <p className="muted">Authenticate with your identity provider.</p>
           <button onClick={() => (window.location.href = "/api/auth/login")}>

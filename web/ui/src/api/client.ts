@@ -44,4 +44,5 @@ export const apiPatch = <T>(path: string, body: unknown) => request<T>("PATCH", 
 export const apiDelete = (path: string) => request<void>("DELETE", path);
 
 export const tokenLogin = (token: string) => apiPost<{ role: string }>("/auth/token-login", { token });
+export const localLogin = (code: string) => apiPost<{ ok: boolean }>("/auth/local", { code });
 export const logout = () => apiPost("/auth/logout");

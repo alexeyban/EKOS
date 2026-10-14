@@ -19,6 +19,9 @@ PUBLIC = {
     ("POST", "/api/auth/token-login"),
     ("GET", "/api/auth/login"),
     ("GET", "/api/auth/callback"),
+    # RFC 0184: local mode; the one-time code is the credential (400 outside local mode).
+    ("GET", "/api/auth/local"),
+    ("POST", "/api/auth/local"),
     # RFC 0182: MCP's "no stream / no session here", the same for every path.
     ("GET", "/mcp/{tenant_id}/{project}"),
     ("DELETE", "/mcp/{tenant_id}/{project}"),

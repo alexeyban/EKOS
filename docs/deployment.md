@@ -89,6 +89,17 @@ marked `Secure`.
 `EKOS_CONSOLE_CONSOLE_TOKEN` and `EKOS_CONSOLE_CONSOLE_WRITE_TOKEN` instead. The write token acts
 as a platform owner. Do not expose such a console.
 
+### Changing settings later
+
+A platform owner can change the console's settings on its **Settings** page: sign-in, owners,
+MCP limits and the rest. They are saved in `/var/lib/ekos/control/console.toml`, in the volume.
+A variable set in `deploy/.env` wins over the page and is shown there read-only, so the
+deployment file stays the authority for what it sets. Settings apply when the console starts
+again; the page's **Restart now** works because the Compose restart policy starts it again.
+
+Secrets (the OIDC client secret, the session secret) cannot be typed on that page in a
+container: they go to an OS keychain, and a container has none. Keep them in `deploy/.env`.
+
 ## 2. Tenants
 
 Sign in as an owner and open **Admin**.
