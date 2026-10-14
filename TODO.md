@@ -6491,6 +6491,12 @@ LinkML; generation stays in LinkML.
 - [x] RFC 0179 — installer into `$EKOS_HOME/bin`, production Docker image (binary + console API
       + built UI), `deploy/docker-compose.yml`, console creates and runs home projects, console
       state under `$EKOS_HOME/control`, `image` job in `release.yml` (devlog_260)
+- [x] Offline install package for Linux x86_64 (`scripts/package-release.sh`: glibc + static
+      musl from the committed tree, `SHA256SUMS`, `install.sh`, `INSTALL.md`, a test install);
+      install instructions in README, deployment guide (image offline via `docker save`/`load`)
+      and capabilities page (devlog_267)
+- [ ] Install package remainder: aarch64 Linux and macOS packages (the script builds on Linux
+      x86_64 only); the image is not in the package
 - [ ] RFC 0179 remainder: `ekos eval run` writes reports under the source root (fails on a
       read-only source; the console's Evals tab is empty for a project); arm64 image; the image
       job has not run on GitHub yet (first run is the next tag or a manual dispatch)

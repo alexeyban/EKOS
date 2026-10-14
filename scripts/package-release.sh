@@ -14,6 +14,7 @@
 # The glibc build runs on this machine; the musl build runs in the Rust image of the pinned
 # toolchain (it needs musl-gcc, which most hosts lack). Needs Docker for that; --no-musl skips
 # it. Build directories are kept in ${EKOS_PACKAGE_CACHE:-~/.cache/ekos-package} between runs.
+# CARGO_BUILD_JOBS limits both builds (the container gets it too): on a 16 GB machine use 4.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,7 +60,7 @@ if [ "$musl" = 1 ]; then
   # lands in this user's ~/.cargo; the output is handed back to this user at the end.
   # `rustup target add` runs in the source directory: rust-toolchain.toml selects the toolchain
   # there, and a target added anywhere else goes to the image's default one (see release.yml).
-  docker run --rm -v "$src:/src:ro" -v "$cache/target-musl:/target" \
+  docker run --rm -e CARGO_BUILD_JOBS -v "$src:/src:ro" -v "$cache/target-musl:/target" \
     -v "$cache/registry-musl:/usr/local/cargo/registry" \
     "rust:${toolchain%.0}-slim-bookworm" sh -c "
       set -e
